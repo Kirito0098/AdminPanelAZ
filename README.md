@@ -18,7 +18,32 @@
 
 ## Установка
 
-**Единственный поддерживаемый способ установки** — интерактивный мастер:
+**Единственный поддерживаемый способ установки** — интерактивный мастер `install.sh` (клонирование репозитория, зависимости, мастер, systemd/nginx — всё в одном скрипте).
+
+### Быстрая установка (one-liner)
+
+Стандартный каталог установки — **`/opt/AdminPanelAZ`** (переопределяется через `INSTALL_TARGET`).
+
+На чистом **Ubuntu 24.04+** или **Debian 13+** с `root`/`sudo`, `git` и доступом в интернет:
+
+```bash
+sudo bash <(wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh)
+```
+
+Альтернатива через `curl`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | sudo bash
+```
+
+Скрипт клонирует репозиторий в `/opt/AdminPanelAZ` (или в `INSTALL_TARGET`) и запускает интерактивный мастер. Другой форк или каталог:
+
+```bash
+sudo INSTALL_FROM_GIT=https://github.com/you/AdminPanelAZ.git INSTALL_TARGET=/opt/my-panel \
+  bash <(wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh)
+```
+
+### Установка из уже клонированного репозитория
 
 ```bash
 cd /opt/AdminPanelAZ
@@ -34,21 +59,23 @@ sudo ./install.sh
 | ОС | **Ubuntu 24.04+** или **Debian 13+** (другие дистрибутивы — на свой риск) |
 | Права | `root` или `sudo` |
 | Сеть | Доступ в интернет для apt, npm, pip, Let's Encrypt |
-| Репозиторий | Клонирование проекта на сервер |
+| Репозиторий | Клонирование в `/opt/AdminPanelAZ` (one-liner делает это автоматически) |
 | AntiZapret (VPN) | Устанавливается **отдельно** на VPN-сервере в каталог **`/root/antizapret`** ([AntiZapret-VPN](https://github.com/GubernievS/AntiZapret-VPN)). AdminPanelAZ не ставит AntiZapret — только проверяет наличие `client.sh` и пишет `ANTIZAPRET_PATH=/root/antizapret` в конфиг. |
 
 ```bash
 # Пример: сначала AntiZapret на VPN-сервере (если нужен локальный VPN)
 # curl -s ... | bash   # см. инструкции AntiZapret-VPN
 
-# Затем панель или node agent
-sudo apt update && sudo apt install -y git
-sudo git clone https://github.com/Kirito0098/AdminPanelAZ.git /opt/AdminPanelAZ
-cd /opt/AdminPanelAZ
-sudo ./install.sh
+# Затем панель (one-liner — рекомендуется)
+sudo apt update && sudo apt install -y git wget curl
+sudo bash <(wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh)
+
+# Или вручную: git clone + install.sh
+# sudo git clone https://github.com/Kirito0098/AdminPanelAZ.git /opt/AdminPanelAZ
+# cd /opt/AdminPanelAZ && sudo ./install.sh
 ```
 
-Если скрипт запущен вне каталога проекта, можно задать `INSTALL_FROM_GIT=<url>` — установщик клонирует репозиторий сам.
+При запуске через one-liner или вне каталога проекта установщик сам клонирует репозиторий (по умолчанию в `/opt/AdminPanelAZ`). Переопределение: `INSTALL_FROM_GIT=<url>`, `INSTALL_TARGET=<каталог>`.
 
 Для автоматизации (CI) без TTY: `sudo ./install.sh --non-interactive --with-systemd` и переменные окружения мастера (`WIZ_*`). См. `./install.sh --help`.
 
@@ -203,9 +230,10 @@ CIDR DB refresh, сбор трафика, Telegram, автобэкапы.
 4. **Включите 2FA** — Настройки → безопасность (TOTP)
 5. **Добавьте узлы** — страница «Узлы», укажите IP node agent и API-ключ
 
-Управление (не установка):
+Управление (не установка; команды из `/opt/AdminPanelAZ` или вашего `INSTALL_TARGET`):
 
 ```bash
+cd /opt/AdminPanelAZ
 systemctl status adminpanelaz          # если выбран systemd
 ./start.sh status                      # если daemon
 sudo ./scripts/nginx-setup.sh          # сменить режим HTTPS после установки

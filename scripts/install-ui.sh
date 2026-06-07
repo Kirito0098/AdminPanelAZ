@@ -261,8 +261,8 @@ ui_show_help() {
   --help, -h            Показать эту справку
 
 Переменные окружения:
-  INSTALL_FROM_GIT      URL репозитория для клонирования
-  INSTALL_TARGET        Каталог установки при клонировании
+  INSTALL_FROM_GIT      URL репозитория (по умолчанию — основной репозиторий AdminPanelAZ)
+  INSTALL_TARGET        Каталог установки при клонировании (по умолчанию /opt/AdminPanelAZ)
   INSTALL_USER          Пользователь systemd-сервисов (по умолчанию root)
 
 Интерактивный режим:
@@ -271,6 +271,8 @@ ui_show_help() {
   AntiZapret устанавливается отдельно в /root/antizapret (см. README).
 
 Примеры:
+  sudo bash <(wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh)
+  curl -fsSL https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | sudo bash
   cd /opt/AdminPanelAZ && sudo ./install.sh
   sudo ./install.sh --with-systemd
   sudo ./install.sh --non-interactive --with-systemd -y

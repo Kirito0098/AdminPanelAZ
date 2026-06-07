@@ -2,7 +2,72 @@
 # Установка AdminPanelAZ на Ubuntu 24.04 / Debian 13+
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_INSTALL_GIT="https://github.com/Kirito0098/AdminPanelAZ.git"
+DEFAULT_INSTALL_TARGET="/opt/AdminPanelAZ"
+
+_script_path="${BASH_SOURCE[0]:-}"
+if [[ -n "$_script_path" && "$_script_path" != bash && "$_script_path" != -bash ]]; then
+  _script_dir="$(cd "$(dirname "$_script_path")" && pwd)"
+else
+  _script_dir=""
+fi
+
+bootstrap_remote_install() {
+  if [[ -n "$_script_dir" && -f "$_script_dir/scripts/install-ui.sh" && -f "$_script_dir/start.sh" && -f "$_script_dir/backend/requirements.txt" ]]; then
+    return 0
+  fi
+
+  local git_url="${INSTALL_FROM_GIT:-$DEFAULT_INSTALL_GIT}"
+  local target="${INSTALL_TARGET:-$DEFAULT_INSTALL_TARGET}"
+
+  echo "[install] Загрузка AdminPanelAZ из $git_url в $target ..."
+
+  if ! command -v git >/dev/null 2>&1; then
+    echo "[install] ОШИБКА: git не найден. Установите: apt install -y git" >&2
+    exit 1
+  fi
+
+  if [[ "$(id -u)" -ne 0 ]]; then
+    if command -v sudo >/dev/null 2>&1; then
+      echo "[install] Перезапуск с sudo для клонирования в $target ..."
+      # $0 ненадёжен при curl|bash / bash -s — клонируем через sudo и запускаем install.sh из каталога
+      exec sudo -E env INSTALL_FROM_GIT="$git_url" INSTALL_TARGET="$target" bash -s "$@" <<'BOOTSTRAP'
+set -euo pipefail
+git_url="${INSTALL_FROM_GIT}"
+target="${INSTALL_TARGET}"
+mkdir -p "$(dirname "$target")"
+if [[ -d "$target/.git" ]]; then
+  git -C "$target" pull --ff-only || true
+elif [[ -d "$target" ]]; then
+  echo "[install] ОШИБКА: $target существует, но это не git-репозиторий AdminPanelAZ" >&2
+  exit 1
+else
+  git clone "$git_url" "$target"
+fi
+exec bash "$target/install.sh" "$@"
+BOOTSTRAP
+    fi
+    echo "[install] ОШИБКА: для установки в $target нужны права root (sudo)." >&2
+    exit 1
+  fi
+
+  mkdir -p "$(dirname "$target")"
+  if [[ -d "$target/.git" ]]; then
+    echo "[install] Репозиторий уже существует, обновление (git pull)..."
+    git -C "$target" pull --ff-only || echo "[install] ВНИМАНИЕ: git pull не удался, используем существующую копию" >&2
+  elif [[ -d "$target" ]]; then
+    echo "[install] ОШИБКА: $target существует, но это не git-репозиторий AdminPanelAZ" >&2
+    exit 1
+  else
+    git clone "$git_url" "$target"
+  fi
+
+  exec bash "$target/install.sh" "$@"
+}
+
+bootstrap_remote_install "$@"
+
+ROOT_DIR="${_script_dir:-$(pwd)}"
 # shellcheck source=scripts/install-ui.sh
 source "$ROOT_DIR/scripts/install-ui.sh"
 ui_init
@@ -21,7 +86,8 @@ FORCE=false
 NON_INTERACTIVE=false
 ACCEPT_DEFAULTS=false
 INSTALL_FROM_GIT="${INSTALL_FROM_GIT:-}"
-INSTALL_TARGET="${INSTALL_TARGET:-$ROOT_DIR}"
+# Стандартный каталог — /opt/AdminPanelAZ; при запуске из клона resolve_project_dir подставит ROOT_DIR
+INSTALL_TARGET="${INSTALL_TARGET:-$DEFAULT_INSTALL_TARGET}"
 GENERATED_NODE_KEY=""
 WIZARD_RAN=false
 ACTION="install"
@@ -454,7 +520,7 @@ resolve_project_dir() {
     return
   fi
 
-  die "Запустите скрипт из каталога проекта или задайте INSTALL_FROM_GIT=<url>"
+  die "Запустите из каталога проекта или one-liner (клонирование в $DEFAULT_INSTALL_TARGET): см. README"
 }
 
 ensure_executable_scripts() {
