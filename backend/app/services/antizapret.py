@@ -177,11 +177,43 @@ class AntiZapretService:
         return path.read_text(encoding="utf-8", errors="replace")
 
     def write_config_file(self, filename: str, content: str) -> None:
-        allowed = {"include-hosts.txt", "exclude-hosts.txt", "include-ips.txt"}
+        allowed = {
+            "include-hosts.txt",
+            "exclude-hosts.txt",
+            "include-ips.txt",
+            "exclude-ips.txt",
+            "allow-ips.txt",
+        }
         if filename not in allowed:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл недоступен для записи")
         path = self.config_dir / filename
         path.write_text(content, encoding="utf-8")
+
+    def restart_service(self, service_name: str) -> str:
+        allowed = {
+            "openvpn-server@antizapret-udp",
+            "openvpn-server@antizapret-tcp",
+            "openvpn-server@vpn-udp",
+            "openvpn-server@vpn-tcp",
+            "wg-quick@antizapret",
+            "wg-quick@vpn",
+        }
+        if service_name not in allowed:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимое имя службы")
+        try:
+            result = subprocess.run(
+                ["systemctl", "restart", service_name],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Таймаут перезапуска службы") from exc
+        output = (result.stdout or "") + (result.stderr or "")
+        if result.returncode != 0:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=output.strip() or "Ошибка перезапуска")
+        return output.strip() or "ok"
 
     def apply_config_changes(self) -> str:
         doall = self.base_path / "doall.sh"

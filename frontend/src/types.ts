@@ -1,5 +1,24 @@
-export type UserRole = 'admin' | 'user'
+export type UserRole = 'admin' | 'user' | 'viewer'
 export type VpnType = 'openvpn' | 'wireguard'
+export type NodeStatus = 'online' | 'offline' | 'unknown'
+
+export interface Node {
+  id: number
+  name: string
+  host: string
+  port: number
+  status: NodeStatus
+  is_local: boolean
+  last_seen_at?: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface ActiveNode {
+  node: Node
+  active: boolean
+}
 
 export interface User {
   id: number
@@ -57,6 +76,8 @@ export interface MonitoringOverview {
   wireguard_peers: WireGuardPeer[]
   server_ip?: string | null
   timestamp: string
+  node_id?: number | null
+  node_name?: string | null
 }
 
 export interface AppSettings {
@@ -66,4 +87,257 @@ export interface AppSettings {
   include_hosts: string
   exclude_hosts: string
   include_ips: string
+  exclude_ips: string
+  allow_ips: string
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface DashboardSummary {
+  total_configs: number
+  openvpn_configs: number
+  wireguard_configs: number
+  connected_openvpn: number
+  connected_wireguard: number
+  active_services: number
+  total_services: number
+  server_ip?: string | null
+  node_name?: string | null
+}
+
+export interface BackupEntry {
+  file_name: string
+  size_bytes: number
+  created_at: string
+  components: string[]
+  summary: string
+}
+
+export interface BackupSettings {
+  auto_backup_enabled: boolean
+  auto_backup_days: number
+  telegram_on_backup: boolean
+  retention_count: number
+}
+
+export interface TelegramSettings {
+  bot_token_set: boolean
+  chat_id: string
+  notify_enabled: boolean
+  notify_on_backup: boolean
+}
+
+export interface CidrProviderInfo {
+  filename: string
+  name: string
+  description: string
+  category: string
+  enabled: boolean
+  has_source: boolean
+  cidr_count: number
+}
+
+export interface CidrPresetInfo {
+  key: string
+  name: string
+  description: string
+  providers: string[]
+}
+
+export interface RouteStatsInfo {
+  config_include_total: number
+  config_include_per_file: Record<string, number>
+  result_route_ips_count: number
+  result_route_ips_exists: boolean
+}
+
+export interface RoutingOverview {
+  providers: CidrProviderInfo[]
+  presets: CidrPresetInfo[]
+  route_stats: RouteStatsInfo
+  list_dir: string
+  config_dir: string
+  timestamp: string
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface CidrDbProviderMeta {
+  cidr_count?: number
+  last_refreshed_at?: string | null
+  refresh_status?: string
+  refresh_error?: string | null
+  active_asns?: number[]
+  anomaly_level?: string
+  name?: string
+  category?: string
+  tags?: string[]
+}
+
+export interface CidrDbRefreshHistoryItem {
+  id: number
+  started_at?: string | null
+  finished_at?: string | null
+  status?: string
+  providers_updated?: number
+  providers_failed?: number
+  total_cidrs?: number
+  triggered_by?: string | null
+}
+
+export interface CidrDbStatus {
+  success: boolean
+  last_refresh_started?: string | null
+  last_refresh_finished?: string | null
+  last_refresh_status?: string | null
+  last_refresh_triggered_by?: string | null
+  total_cidrs?: number
+  providers: Record<string, CidrDbProviderMeta>
+  alerts?: string[]
+  history?: CidrDbRefreshHistoryItem[]
+}
+
+export interface AntifilterStatus {
+  success: boolean
+  cidr_count?: number
+  last_refreshed_at?: string | null
+  refresh_status?: string
+  refresh_error?: string | null
+}
+
+export interface CidrPipelineTask {
+  task_id: string
+  task_type: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  message: string
+  progress_percent: number
+  progress_stage: string
+  error?: string | null
+  result?: unknown
+  created_at?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+}
+
+export interface TrafficClientRow {
+  common_name: string
+  protocol_type: string
+  total_received: number
+  total_sent: number
+  total_bytes: number
+  total_received_vpn: number
+  total_sent_vpn: number
+  total_bytes_vpn: number
+  total_received_antizapret: number
+  total_sent_antizapret: number
+  total_bytes_antizapret: number
+  traffic_1d: number
+  traffic_7d: number
+  traffic_30d: number
+  total_sessions: number
+  first_seen_at?: string | null
+  last_seen_at?: string | null
+  is_active: boolean
+}
+
+export interface TrafficSummary {
+  users_count: number
+  active_users_count: number
+  total_received: number
+  total_sent: number
+  total_received_vpn: number
+  total_sent_vpn: number
+  total_received_antizapret: number
+  total_sent_antizapret: number
+  latest_sample_at?: string | null
+  db_age_seconds?: number | null
+  db_is_stale: boolean
+}
+
+export interface TrafficOverview {
+  rows: TrafficClientRow[]
+  summary: TrafficSummary
+  timestamp: string
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface ClientAccessPolicy {
+  is_blocked: boolean
+  block_mode: string
+  access_days_left?: number | null
+  blocked_days_left?: number | null
+  block_duration_days?: number | null
+  expires_at?: string | null
+  expired?: boolean
+}
+
+export interface EditFileEntry {
+  key: string
+  filename: string
+  title: string
+}
+
+export interface GameFilterItem {
+  key: string
+  title: string
+  subtitle: string
+  domains: string[]
+  mode: string
+  selected: boolean
+}
+
+export interface SecuritySettings {
+  ip_restriction_enabled: boolean
+  allowed_ips: string[]
+  block_scanners: boolean
+  scanner_max_attempts: number
+  scanner_ban_seconds: number
+  temp_whitelist: Array<{ ip: string; expires_at: string; hours: number }>
+  qr_download_ttl_seconds: number
+  qr_download_max_downloads: number
+  qr_download_pin_set: boolean
+}
+
+export interface ServerMetrics {
+  cpu_percent: number
+  memory_percent: number
+  memory_used: number
+  memory_total: number
+  disk_percent: number
+  uptime: string
+  load_average: Record<string, number>
+  timestamp: string
+}
+
+export interface ActionLogEntry {
+  id: number
+  username?: string | null
+  action: string
+  details?: string | null
+  remote_addr?: string | null
+  created_at: string
+}
+
+export interface OneTimeLinkResponse {
+  url: string
+  token: string
+  expires_at: string
+  max_downloads: number
+  pin_required: boolean
+}
+
+export interface TrafficChartData {
+  client: string
+  range: string
+  bucket: string
+  protocol_filter: string
+  labels: string[]
+  vpn_bytes: number[]
+  antizapret_bytes: number[]
+  openvpn_bytes: number[]
+  wireguard_bytes: number[]
+  total_vpn: number
+  total_antizapret: number
+  total: number
 }

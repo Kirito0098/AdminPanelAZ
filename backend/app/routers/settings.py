@@ -6,7 +6,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, User
 from app.schemas import AppSettingsResponse, AppSettingsUpdate, MessageResponse
-from app.services.antizapret import antizapret_service
+from app.services.node_manager import get_active_adapter, get_active_node
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 settings = get_settings()
@@ -27,14 +27,20 @@ def _set_setting(db: Session, key: str, value: str) -> None:
 
 @router.get("", response_model=AppSettingsResponse)
 def get_settings(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    include_hosts = antizapret_service.read_config_file("include-hosts.txt")
-    exclude_hosts = antizapret_service.read_config_file("exclude-hosts.txt")
-    include_ips = antizapret_service.read_config_file("include-ips.txt")
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    include_hosts = adapter.read_config_file("include-hosts.txt")
+    exclude_hosts = adapter.read_config_file("exclude-hosts.txt")
+    include_ips = adapter.read_config_file("include-ips.txt")
+    exclude_ips = adapter.read_config_file("exclude-ips.txt")
+    allow_ips = adapter.read_config_file("allow-ips.txt")
 
     if current_user.role.value != "admin":
         include_hosts = ""
         exclude_hosts = ""
         include_ips = ""
+        exclude_ips = ""
+        allow_ips = ""
 
     return AppSettingsResponse(
         theme=current_user.theme,
@@ -43,6 +49,10 @@ def get_settings(current_user: User = Depends(get_current_user), db: Session = D
         include_hosts=include_hosts,
         exclude_hosts=exclude_hosts,
         include_ips=include_ips,
+        exclude_ips=exclude_ips,
+        allow_ips=allow_ips,
+        node_id=node.id,
+        node_name=node.name,
     )
 
 
@@ -59,19 +69,26 @@ def update_settings(
         db.add(current_user)
 
     if current_user.role.value == "admin":
+        adapter = get_active_adapter(db)
         if payload.include_hosts is not None:
-            antizapret_service.write_config_file("include-hosts.txt", payload.include_hosts)
+            adapter.write_config_file("include-hosts.txt", payload.include_hosts)
             config_changed = True
         if payload.exclude_hosts is not None:
-            antizapret_service.write_config_file("exclude-hosts.txt", payload.exclude_hosts)
+            adapter.write_config_file("exclude-hosts.txt", payload.exclude_hosts)
             config_changed = True
         if payload.include_ips is not None:
-            antizapret_service.write_config_file("include-ips.txt", payload.include_ips)
+            adapter.write_config_file("include-ips.txt", payload.include_ips)
+            config_changed = True
+        if payload.exclude_ips is not None:
+            adapter.write_config_file("exclude-ips.txt", payload.exclude_ips)
+            config_changed = True
+        if payload.allow_ips is not None:
+            adapter.write_config_file("allow-ips.txt", payload.allow_ips)
             config_changed = True
 
         if config_changed:
             try:
-                antizapret_service.apply_config_changes()
+                adapter.apply_config_changes()
             except HTTPException:
                 raise
             except Exception as exc:
@@ -79,7 +96,10 @@ def update_settings(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Ошибка применения настроек: {exc}",
                 ) from exc
-    elif any(v is not None for v in [payload.include_hosts, payload.exclude_hosts, payload.include_ips]):
+    elif any(
+        v is not None
+        for v in [payload.include_hosts, payload.exclude_hosts, payload.include_ips, payload.exclude_ips, payload.allow_ips]
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять списки AntiZapret")
 
     db.commit()
@@ -88,6 +108,6 @@ def update_settings(
 
 
 @router.post("/recreate-profiles", response_model=MessageResponse)
-def recreate_profiles(_: User = Depends(require_admin)):
-    output = antizapret_service.recreate_profiles()
+def recreate_profiles(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    output = get_active_adapter(db).recreate_profiles()
     return MessageResponse(message="Профили пересозданы", detail=output)

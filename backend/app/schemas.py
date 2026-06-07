@@ -3,7 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.models import UserRole, VpnType
+from app.models import NodeStatus, UserRole, VpnType
 
 
 class Token(BaseModel):
@@ -117,6 +117,8 @@ class MonitoringOverview(BaseModel):
     wireguard_peers: list[WireGuardPeer]
     server_ip: str | None = None
     timestamp: datetime
+    node_id: int | None = None
+    node_name: str | None = None
 
 
 class AppSettingsResponse(BaseModel):
@@ -126,6 +128,10 @@ class AppSettingsResponse(BaseModel):
     include_hosts: str = ""
     exclude_hosts: str = ""
     include_ips: str = ""
+    exclude_ips: str = ""
+    allow_ips: str = ""
+    node_id: int | None = None
+    node_name: str | None = None
 
 
 class AppSettingsUpdate(BaseModel):
@@ -133,8 +139,189 @@ class AppSettingsUpdate(BaseModel):
     include_hosts: str | None = None
     exclude_hosts: str | None = None
     include_ips: str | None = None
+    exclude_ips: str | None = None
+    allow_ips: str | None = None
+
+
+class DashboardSummary(BaseModel):
+    total_configs: int
+    openvpn_configs: int
+    wireguard_configs: int
+    connected_openvpn: int
+    connected_wireguard: int
+    active_services: int
+    total_services: int
+    server_ip: str | None = None
+    node_name: str | None = None
+
+
+class BackupEntry(BaseModel):
+    file_name: str
+    size_bytes: int
+    created_at: str
+    components: list[str] = []
+    summary: str = ""
+
+
+class BackupCreateRequest(BaseModel):
+    include_configs: bool = False
+
+
+class BackupRestoreRequest(BaseModel):
+    file_name: str
+
+
+class BackupSettingsResponse(BaseModel):
+    auto_backup_enabled: bool = False
+    auto_backup_days: int = 7
+    telegram_on_backup: bool = False
+    retention_count: int = 5
+
+
+class BackupSettingsUpdate(BaseModel):
+    auto_backup_enabled: bool | None = None
+    auto_backup_days: int | None = Field(default=None, ge=1, le=90)
+    telegram_on_backup: bool | None = None
+    retention_count: int | None = Field(default=None, ge=1, le=30)
+
+
+class TelegramSettingsResponse(BaseModel):
+    bot_token_set: bool = False
+    chat_id: str = ""
+    notify_enabled: bool = False
+    notify_on_backup: bool = False
+
+
+class TelegramSettingsUpdate(BaseModel):
+    bot_token: str | None = None
+    chat_id: str | None = None
+    notify_enabled: bool | None = None
+    notify_on_backup: bool | None = None
+
+
+class ServiceRestartRequest(BaseModel):
+    service_name: str
 
 
 class MessageResponse(BaseModel):
     message: str
     detail: Any | None = None
+
+
+class NodeBase(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    host: str = Field(min_length=1, max_length=255)
+    port: int = Field(default=9100, ge=1, le=65535)
+
+
+class NodeCreate(NodeBase):
+    api_key: str | None = Field(default=None, min_length=8)
+
+
+class NodeUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    host: str | None = Field(default=None, min_length=1, max_length=255)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    api_key: str | None = Field(default=None, min_length=8)
+
+
+class NodeResponse(NodeBase):
+    id: int
+    status: NodeStatus
+    is_local: bool
+    last_seen_at: datetime | None = None
+    metadata: dict[str, Any] = {}
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class NodeHealthResponse(BaseModel):
+    node_id: int
+    status: NodeStatus
+    health: dict[str, Any] = {}
+    last_seen_at: datetime | None = None
+
+
+class ActiveNodeResponse(BaseModel):
+    node: NodeResponse
+    active: bool = True
+
+
+class CidrProviderInfo(BaseModel):
+    filename: str
+    name: str
+    description: str = ""
+    category: str = ""
+    enabled: bool = False
+    has_source: bool = False
+    cidr_count: int = 0
+
+
+class CidrPresetInfo(BaseModel):
+    key: str
+    name: str
+    description: str = ""
+    providers: list[str] = []
+
+
+class RouteStatsInfo(BaseModel):
+    config_include_total: int = 0
+    config_include_per_file: dict[str, int] = {}
+    result_route_ips_count: int = 0
+    result_route_ips_exists: bool = False
+
+
+class RoutingOverview(BaseModel):
+    providers: list[CidrProviderInfo]
+    presets: list[CidrPresetInfo]
+    route_stats: RouteStatsInfo
+    list_dir: str = ""
+    config_dir: str = ""
+    timestamp: datetime | None = None
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class TrafficClientRow(BaseModel):
+    common_name: str
+    protocol_type: str
+    total_received: int = 0
+    total_sent: int = 0
+    total_bytes: int = 0
+    total_received_vpn: int = 0
+    total_sent_vpn: int = 0
+    total_bytes_vpn: int = 0
+    total_received_antizapret: int = 0
+    total_sent_antizapret: int = 0
+    total_bytes_antizapret: int = 0
+    traffic_1d: int = 0
+    traffic_7d: int = 0
+    traffic_30d: int = 0
+    total_sessions: int = 0
+    first_seen_at: str | None = None
+    last_seen_at: str | None = None
+    is_active: bool = False
+
+
+class TrafficSummary(BaseModel):
+    users_count: int = 0
+    active_users_count: int = 0
+    total_received: int = 0
+    total_sent: int = 0
+    total_received_vpn: int = 0
+    total_sent_vpn: int = 0
+    total_received_antizapret: int = 0
+    total_sent_antizapret: int = 0
+    latest_sample_at: str | None = None
+    db_age_seconds: int | None = None
+    db_is_stale: bool = False
+
+
+class TrafficOverview(BaseModel):
+    rows: list[TrafficClientRow]
+    summary: TrafficSummary
+    timestamp: datetime
+    node_id: int | None = None
+    node_name: str | None = None

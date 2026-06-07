@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import * as api from '../api/client'
-import type { User } from '../types'
+import * as api from '@/api/client'
+import { applyThemeClass, getStoredTheme } from '@/lib/theme'
+import type { User } from '@/types'
 
 interface AuthContextValue {
   user: User | null
@@ -17,8 +18,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   const applyTheme = useCallback((theme: string) => {
-    document.documentElement.setAttribute('data-theme', theme)
-    localStorage.setItem('theme', theme)
+    const t = theme === 'light' ? 'light' : 'dark'
+    applyThemeClass(t)
   }, [])
 
   const refreshUser = useCallback(async () => {
@@ -31,7 +32,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const me = await api.getMe()
       setUser(me)
-      applyTheme(me.theme || localStorage.getItem('theme') || 'dark')
+      applyTheme(me.theme || getStoredTheme())
     } catch {
       localStorage.removeItem('token')
       setUser(null)
@@ -41,16 +42,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [applyTheme])
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme')
-    if (savedTheme) applyTheme(savedTheme)
+    applyTheme(getStoredTheme())
     refreshUser()
   }, [applyTheme, refreshUser])
 
-  const login = useCallback(async (username: string, password: string) => {
-    const { access_token } = await api.login(username, password)
-    localStorage.setItem('token', access_token)
-    await refreshUser()
-  }, [refreshUser])
+  const login = useCallback(
+    async (username: string, password: string) => {
+      const { access_token } = await api.login(username, password)
+      localStorage.setItem('token', access_token)
+      await refreshUser()
+    },
+    [refreshUser],
+  )
 
   const logout = useCallback(() => {
     localStorage.removeItem('token')

@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react'
-import { updateSettings } from '../api/client'
+import { updateSettings } from '@/api/client'
+import { applyThemeClass, getStoredTheme } from '@/lib/theme'
 import { useAuth } from './AuthContext'
 
 interface ThemeContextValue {
@@ -12,27 +13,27 @@ const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const { user, refreshUser } = useAuth()
-  const [theme, setThemeState] = useState<'light' | 'dark'>(
-    () => (localStorage.getItem('theme') as 'light' | 'dark') || 'dark',
-  )
+  const [theme, setThemeState] = useState<'light' | 'dark'>(getStoredTheme)
 
   const apply = useCallback((t: 'light' | 'dark') => {
-    document.documentElement.setAttribute('data-theme', t)
-    localStorage.setItem('theme', t)
+    applyThemeClass(t)
     setThemeState(t)
   }, [])
 
-  const setTheme = useCallback(async (t: 'light' | 'dark') => {
-    apply(t)
-    if (user) {
-      try {
-        await updateSettings({ theme: t })
-        await refreshUser()
-      } catch {
-        /* local theme still applied */
+  const setTheme = useCallback(
+    async (t: 'light' | 'dark') => {
+      apply(t)
+      if (user) {
+        try {
+          await updateSettings({ theme: t })
+          await refreshUser()
+        } catch {
+          /* local theme still applied */
+        }
       }
-    }
-  }, [apply, user, refreshUser])
+    },
+    [apply, user, refreshUser],
+  )
 
   const toggleTheme = useCallback(async () => {
     await setTheme(theme === 'dark' ? 'light' : 'dark')

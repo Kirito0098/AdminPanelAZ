@@ -1,23 +1,37 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
 from app.database import get_db
-from app.models import User, UserRole, VpnConfig, VpnType
+from app.models import AppSetting, User, UserRole, ViewerConfigAccess, VpnConfig, VpnType
 from app.schemas import MessageResponse, VpnConfigCreate, VpnConfigResponse, VpnConfigUpdate
-from app.services.antizapret import antizapret_service
+from app.services.node_manager import get_active_adapter
+from app.services.qr_download import QrDownloadService
+from app.services.qr_generator import generate_qr_png
+from app.services.security import SecurityService
 
 router = APIRouter(prefix="/configs", tags=["configs"])
 
 
-def _can_access_config(user: User, config: VpnConfig) -> bool:
-    return user.role == UserRole.admin or config.owner_id == user.id
+def _can_access_config(user: User, config: VpnConfig, db: Session | None = None) -> bool:
+    if user.role == UserRole.admin:
+        return True
+    if user.role == UserRole.viewer and db is not None:
+        grants = db.query(ViewerConfigAccess).filter_by(user_id=user.id).all()
+        if grants:
+            groups = {g.config_group.lower() for g in grants}
+            return config.client_name.lower() in groups or any(
+                config.client_name.lower().startswith(g) for g in groups
+            )
+        return False
+    return config.owner_id == user.id
 
 
 def _to_response(config: VpnConfig, db: Session, include_files: bool = True) -> VpnConfigResponse:
     owner = db.query(User).filter(User.id == config.owner_id).first()
-    files = antizapret_service.get_profile_files(config.client_name, config.vpn_type) if include_files else []
+    adapter = get_active_adapter(db)
+    files = adapter.get_profile_files(config.client_name, config.vpn_type) if include_files else []
     return VpnConfigResponse(
         id=config.id,
         client_name=config.client_name,
@@ -38,7 +52,14 @@ def list_configs(
     current_user: User = Depends(get_current_user),
 ):
     query = db.query(VpnConfig)
-    if current_user.role != UserRole.admin:
+    if current_user.role == UserRole.viewer:
+        grants = db.query(ViewerConfigAccess).filter_by(user_id=current_user.id).all()
+        if grants:
+            names = [g.config_group for g in grants]
+            query = query.filter(VpnConfig.client_name.in_(names))
+        else:
+            return []
+    elif current_user.role != UserRole.admin:
         query = query.filter(VpnConfig.owner_id == current_user.id)
     configs = query.order_by(VpnConfig.created_at.desc()).all()
     return [_to_response(c, db) for c in configs]
@@ -63,10 +84,11 @@ def create_config(
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Конфигурация уже существует")
 
+    adapter = get_active_adapter(db)
     if payload.vpn_type == VpnType.openvpn:
-        antizapret_service.add_openvpn_client(payload.client_name, payload.cert_expire_days or 3650)
+        adapter.add_openvpn_client(payload.client_name, payload.cert_expire_days or 3650)
     else:
-        antizapret_service.add_wireguard_client(payload.client_name)
+        adapter.add_wireguard_client(payload.client_name)
 
     config = VpnConfig(
         client_name=payload.client_name,
@@ -90,7 +112,7 @@ def get_config(
     config = db.query(VpnConfig).filter(VpnConfig.id == config_id).first()
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config):
+    if not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     return _to_response(config, db)
 
@@ -105,7 +127,7 @@ def update_config(
     config = db.query(VpnConfig).filter(VpnConfig.id == config_id).first()
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config):
+    if not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
     if payload.description is not None:
@@ -118,7 +140,7 @@ def update_config(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Владелец не найден")
         config.owner_id = payload.owner_id
     if payload.cert_expire_days is not None and config.vpn_type == VpnType.openvpn:
-        antizapret_service.add_openvpn_client(config.client_name, payload.cert_expire_days)
+        get_active_adapter(db).add_openvpn_client(config.client_name, payload.cert_expire_days)
         config.cert_expire_days = payload.cert_expire_days
 
     db.commit()
@@ -135,13 +157,14 @@ def delete_config(
     config = db.query(VpnConfig).filter(VpnConfig.id == config_id).first()
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config):
+    if not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
+    adapter = get_active_adapter(db)
     if config.vpn_type == VpnType.openvpn:
-        antizapret_service.delete_openvpn_client(config.client_name)
+        adapter.delete_openvpn_client(config.client_name)
     else:
-        antizapret_service.delete_wireguard_client(config.client_name)
+        adapter.delete_wireguard_client(config.client_name)
 
     db.delete(config)
     db.commit()
@@ -158,12 +181,66 @@ def download_profile(
     config = db.query(VpnConfig).filter(VpnConfig.id == config_id).first()
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config):
+    if not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
-    content = antizapret_service.read_profile_file(path)
+    content = get_active_adapter(db).read_profile_file(path)
     filename = path.split("/")[-1]
     return PlainTextResponse(content, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/{config_id}/qr")
+def generate_qr(
+    config_id: int,
+    path: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    config = db.query(VpnConfig).filter(VpnConfig.id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
+    if not _can_access_config(current_user, config, db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+
+    content = get_active_adapter(db).read_profile_file(path)
+    try:
+        png = generate_qr_png(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return Response(content=png, media_type="image/png")
+
+
+@router.post("/{config_id}/one-time-link")
+def create_one_time_link(
+    config_id: int,
+    path: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    config = db.query(VpnConfig).filter(VpnConfig.id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
+    if not _can_access_config(current_user, config, db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+    sec = SecurityService().get_settings(db)
+    pin_row = db.query(AppSetting).filter(AppSetting.key == "qr_download_pin").first()
+    base_url = str(request.base_url).rstrip("/")
+    svc = QrDownloadService(
+        db,
+        base_url=base_url,
+        ttl_seconds=sec["qr_download_ttl_seconds"],
+        max_downloads=sec["qr_download_max_downloads"],
+        pin=pin_row.value if pin_row else "",
+    )
+    return svc.create_token(
+        file_path=path,
+        config_type=config.vpn_type.value,
+        config_name=path.split("/")[-1],
+        creator_id=current_user.id,
+        creator_username=current_user.username,
+        remote_addr=request.client.host if request.client else None,
+    )
 
 
 @router.post("/sync", response_model=MessageResponse)
@@ -174,7 +251,8 @@ def sync_from_antizapret(db: Session = Depends(get_db), _: User = Depends(requir
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Администратор не найден")
 
     imported = 0
-    for client_name in antizapret_service.list_openvpn_clients():
+    adapter = get_active_adapter(db)
+    for client_name in adapter.list_openvpn_clients():
         exists = (
             db.query(VpnConfig)
             .filter(VpnConfig.client_name == client_name, VpnConfig.vpn_type == VpnType.openvpn)
@@ -184,7 +262,7 @@ def sync_from_antizapret(db: Session = Depends(get_db), _: User = Depends(requir
             db.add(VpnConfig(client_name=client_name, vpn_type=VpnType.openvpn, owner_id=admin.id))
             imported += 1
 
-    for client_name in antizapret_service.list_wireguard_clients():
+    for client_name in adapter.list_wireguard_clients():
         exists = (
             db.query(VpnConfig)
             .filter(VpnConfig.client_name == client_name, VpnConfig.vpn_type == VpnType.wireguard)

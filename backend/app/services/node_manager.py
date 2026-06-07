@@ -1,0 +1,210 @@
+import ipaddress
+import json
+import socket
+from datetime import datetime
+from urllib.parse import urlparse
+
+import httpx
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.auth import get_password_hash, verify_password
+from app.config import get_settings
+from app.models import AppSetting, Node, NodeStatus
+from app.services.crypto import decrypt_secret, encrypt_secret
+from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
+
+settings = get_settings()
+ACTIVE_NODE_KEY = "active_node_id"
+HTTP_TIMEOUT = 30.0
+
+
+def _get_setting(db: Session, key: str, default: str = "") -> str:
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    return row.value if row else default
+
+
+def _set_setting(db: Session, key: str, value: str) -> None:
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if row:
+        row.value = value
+    else:
+        db.add(AppSetting(key=key, value=value))
+
+
+def validate_node_host(host: str) -> str:
+    host = host.strip()
+    if not host:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Хост не может быть пустым")
+    if len(host) > 255:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Слишком длинный хост")
+
+    forbidden_schemes = ("http://", "https://", "ftp://", "file://")
+    if host.lower().startswith(forbidden_schemes):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите хост без схемы URL")
+
+    try:
+        parsed = urlparse(f"//{host}" if "://" not in host else host)
+        if parsed.scheme and parsed.scheme not in ("http", "https"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимая схема URL")
+        hostname = parsed.hostname or host.split(":")[0]
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный хост") from exc
+
+    if not settings.allow_internal_nodes:
+        try:
+            addr = ipaddress.ip_address(socket.gethostbyname(hostname))
+            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Внутренние IP-адреса запрещены (ALLOW_INTERNAL_NODES=true для разрешения)",
+                )
+        except socket.gaierror:
+            if hostname in ("localhost", "127.0.0.1", "::1"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="localhost запрещён для удалённых узлов",
+                )
+    return hostname
+
+
+def hash_api_key(api_key: str) -> str:
+    return get_password_hash(api_key)
+
+
+def store_api_key(db_key_hash: str, api_key: str) -> tuple[str, str]:
+    return hash_api_key(api_key), encrypt_secret(api_key, settings.secret_key)
+
+
+def get_api_key_plain(node: Node) -> str | None:
+    if node.is_local or not node.api_key_encrypted:
+        return None
+    try:
+        return decrypt_secret(node.api_key_encrypted, settings.secret_key)
+    except Exception:
+        return None
+
+
+def node_metadata_dict(node: Node) -> dict:
+    try:
+        return json.loads(node.node_metadata or "{}")
+    except json.JSONDecodeError:
+        return {}
+
+
+def get_active_node_id(db: Session) -> int | None:
+    raw = _get_setting(db, ACTIVE_NODE_KEY)
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def set_active_node_id(db: Session, node_id: int) -> None:
+    _set_setting(db, ACTIVE_NODE_KEY, str(node_id))
+
+
+def get_active_node(db: Session) -> Node:
+    node_id = get_active_node_id(db)
+    if node_id:
+        node = db.query(Node).filter(Node.id == node_id).first()
+        if node:
+            return node
+    local = db.query(Node).filter(Node.is_local.is_(True)).first()
+    if local:
+        set_active_node_id(db, local.id)
+        db.commit()
+        return local
+    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Активный узел не настроен")
+
+
+def get_adapter_for_node(node: Node) -> NodeAdapter:
+    if node.is_local:
+        return LocalNodeAdapter()
+    api_key = get_api_key_plain(node)
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"API-ключ узла '{node.name}' недоступен",
+        )
+    return RemoteNodeAdapter(host=node.host, port=node.port, api_key=api_key)
+
+
+def get_active_adapter(db: Session) -> NodeAdapter:
+    return get_adapter_for_node(get_active_node(db))
+
+
+def ensure_local_node(db: Session) -> Node:
+    local = db.query(Node).filter(Node.is_local.is_(True)).first()
+    if local:
+        return local
+
+    hostname = socket.gethostname()
+    local = Node(
+        name="Локальный сервер",
+        host="127.0.0.1",
+        port=9100,
+        api_key_hash="",
+        api_key_encrypted="",
+        is_local=True,
+        status=NodeStatus.unknown,
+        node_metadata=json.dumps({"hostname": hostname, "antizapret_path": str(settings.antizapret_path)}),
+    )
+    db.add(local)
+    db.commit()
+    db.refresh(local)
+
+    if not get_active_node_id(db):
+        set_active_node_id(db, local.id)
+        db.commit()
+    return local
+
+
+def check_node_health(node: Node, api_key_override: str | None = None) -> dict:
+    if node.is_local:
+        adapter = LocalNodeAdapter()
+        try:
+            health = adapter.health_check()
+            return {"status": "online", **health}
+        except Exception as exc:
+            return {"status": "offline", "error": str(exc)}
+
+    api_key = api_key_override or get_api_key_plain(node)
+    if not api_key:
+        return {"status": "offline", "error": "API-ключ не задан"}
+
+    url = f"http://{node.host}:{node.port}/health"
+    try:
+        with httpx.Client(timeout=HTTP_TIMEOUT) as client:
+            response = client.get(url, headers={"X-Node-Key": api_key})
+        if response.status_code == 200:
+            data = response.json()
+            data["status"] = "online"
+            return data
+        return {"status": "offline", "error": f"HTTP {response.status_code}"}
+    except httpx.RequestError as exc:
+        return {"status": "offline", "error": str(exc)}
+
+
+def update_node_from_health(node: Node, health: dict, db: Session) -> None:
+    status_str = health.get("status", "offline")
+    node.status = NodeStatus.online if status_str == "online" else NodeStatus.offline
+    if status_str == "online":
+        node.last_seen_at = datetime.utcnow()
+        meta = node_metadata_dict(node)
+        for key in ("hostname", "antizapret_path", "antizapret_version", "server_ip"):
+            if key in health:
+                meta[key] = health[key]
+        node.node_metadata = json.dumps(meta)
+    node.updated_at = datetime.utcnow()
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+
+
+def verify_node_api_key(node: Node, api_key: str) -> bool:
+    if not node.api_key_hash:
+        return False
+    return verify_password(api_key, node.api_key_hash)

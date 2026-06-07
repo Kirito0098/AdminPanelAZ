@@ -7,3 +7,9 @@ bcrypt==4.0.1
 python-multipart==0.0.20
 pydantic-settings==2.7.0
 aiosqlite==0.20.0
+httpx==0.28.1
+cryptography==44.0.0
+qrcode[pil]==8.0
+Pillow==11.1.0
+psutil==6.1.1
+websockets==14.1

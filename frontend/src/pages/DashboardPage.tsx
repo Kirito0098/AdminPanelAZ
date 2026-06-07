@@ -1,38 +1,118 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { ApiError, createConfig, deleteConfig, downloadProfile, getConfigs, syncConfigs } from '../api/client'
-import { useAuth } from '../context/AuthContext'
-import type { VpnConfig, VpnType } from '../types'
+import {
+  FileKey,
+  LayoutDashboard,
+  Plus,
+  RefreshCw,
+  Users,
+  Wifi,
+} from 'lucide-react'
+import {
+  ApiError,
+  createConfig,
+  deleteConfig,
+  downloadProfile,
+  fetchQrBlob,
+  getClientPolicies,
+  getConfigs,
+  getDashboardSummary,
+  syncConfigs,
+} from '@/api/client'
+import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
+import MetricCard from '@/components/noc/MetricCard'
+import EmptyState from '@/components/ui/EmptyState'
+import Spinner from '@/components/ui/Spinner'
+import { InlineProgressBar } from '@/components/ui/ProgressBar'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { NodeBadge } from '@/components/NodeSelector'
+import { useAuth } from '@/context/AuthContext'
+import { useNode } from '@/context/NodeContext'
+import { useNotifications } from '@/context/NotificationContext'
+import { useProgress } from '@/context/ProgressContext'
+import type { ClientAccessPolicy, DashboardSummary, VpnConfig, VpnType } from '@/types'
 
 export default function DashboardPage() {
   const { user } = useAuth()
+  const { activeNode } = useNode()
+  const { success, error: notifyError } = useNotifications()
+  const { startGlobal, doneGlobal, inline, withInline } = useProgress()
   const [configs, setConfigs] = useState<VpnConfig[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [clientName, setClientName] = useState('')
   const [vpnType, setVpnType] = useState<VpnType>('openvpn')
   const [certDays, setCertDays] = useState(3650)
   const [description, setDescription] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [summary, setSummary] = useState<DashboardSummary | null>(null)
+  const [qrPreview, setQrPreview] = useState<{ url: string; filename: string } | null>(null)
+  const [policies, setPolicies] = useState<
+    Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
+  >({})
 
-  const load = async () => {
-    setLoading(true)
-    setError('')
+  const load = async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) {
+      setLoading(true)
+      startGlobal()
+    }
     try {
-      setConfigs(await getConfigs())
+      const [configsData, summaryData] = await Promise.all([getConfigs(), getDashboardSummary()])
+      setConfigs(configsData)
+      setSummary(summaryData)
+      if (user?.role === 'admin' && configsData.length > 0) {
+        const names = configsData.map((c) => c.client_name).join(',')
+        getClientPolicies(names).then(setPolicies).catch(() => {})
+      } else {
+        setPolicies({})
+      }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Ошибка загрузки')
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки конфигураций')
     } finally {
-      setLoading(false)
+      if (!opts.silent) {
+        setLoading(false)
+        doneGlobal()
+      }
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+  }, [])
+
+  const resetForm = () => {
+    setClientName('')
+    setDescription('')
+    setVpnType('openvpn')
+    setCertDays(3650)
+  }
+
+  const closeForm = () => {
+    setShowForm(false)
+    resetForm()
+  }
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
-    setError('')
     try {
       await createConfig({
         client_name: clientName,
@@ -40,140 +120,254 @@ export default function DashboardPage() {
         cert_expire_days: vpnType === 'openvpn' ? certDays : undefined,
         description: description || undefined,
       })
-      setShowForm(false)
-      setClientName('')
-      setDescription('')
+      closeForm()
+      success(`Клиент «${clientName}» создан`)
       await load()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Ошибка создания')
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка создания клиента')
     } finally {
       setSubmitting(false)
     }
   }
 
-  const handleDelete = async (id: number, name: string) => {
-    if (!confirm(`Удалить клиента "${name}"?`)) return
+  const handleDownload = async (config: VpnConfig, path: string, filename: string) => {
     try {
-      await deleteConfig(id)
-      await load()
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Ошибка удаления')
+      await withInline(async () => {
+        const res = await downloadProfile(config.id, path)
+        if (!res.ok) throw new Error('Ошибка скачивания')
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        a.click()
+        URL.revokeObjectURL(url)
+      }, 'Скачивание файла...')
+      success(`Файл «${filename}» скачан`)
+    } catch {
+      notifyError('Ошибка скачивания файла')
     }
   }
 
-  const handleDownload = async (config: VpnConfig, path: string, filename: string) => {
+  const handleQr = async (config: VpnConfig, path: string, filename: string) => {
     try {
-      const res = await downloadProfile(config.id, path)
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch {
-      setError('Ошибка скачивания файла')
+      await withInline(async () => {
+        const blob = await fetchQrBlob(config.id, path)
+        const url = URL.createObjectURL(blob)
+        setQrPreview({ url, filename })
+      }, 'Генерация QR-кода...')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка генерации QR')
     }
   }
 
   const handleSync = async () => {
+    setSyncing(true)
     try {
-      await syncConfigs()
-      await load()
+      await withInline(async () => {
+        await syncConfigs()
+        await load({ silent: true })
+      }, 'Синхронизация с AntiZapret...')
+      success('Конфигурации синхронизированы')
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Ошибка синхронизации')
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка синхронизации')
+    } finally {
+      setSyncing(false)
     }
   }
 
   return (
-    <div className="page">
-      <header className="page-header">
-        <div>
-          <h2>VPN Конфигурации</h2>
-          <p>Управление клиентами OpenVPN и WireGuard/AmneziaWG</p>
-        </div>
-        <div className="actions">
-          {user?.role === 'admin' && (
-            <button className="btn secondary" onClick={handleSync}>Синхронизировать</button>
-          )}
-          <button className="btn primary" onClick={() => setShowForm(!showForm)}>
-            {showForm ? 'Отмена' : '+ Новый клиент'}
-          </button>
-        </div>
-      </header>
-
-      {error && <div className="alert error">{error}</div>}
-
-      {showForm && (
-        <form className="card form-card" onSubmit={handleCreate}>
-          <h3>Создать клиента</h3>
-          <div className="form-grid">
-            <label>
-              Имя клиента
-              <input value={clientName} onChange={(e) => setClientName(e.target.value)} pattern="[a-zA-Z0-9_-]{1,32}" required placeholder="my-client" />
-            </label>
-            <label>
-              Тип VPN
-              <select value={vpnType} onChange={(e) => setVpnType(e.target.value as VpnType)}>
-                <option value="openvpn">OpenVPN</option>
-                <option value="wireguard">WireGuard / AmneziaWG</option>
-              </select>
-            </label>
-            {vpnType === 'openvpn' && (
-              <label>
-                Срок сертификата (дней)
-                <input type="number" min={1} max={3650} value={certDays} onChange={(e) => setCertDays(Number(e.target.value))} />
-              </label>
-            )}
-            <label className="full">
-              Описание
-              <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Необязательно" />
-            </label>
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <LayoutDashboard size={22} />
           </div>
-          <button className="btn primary" disabled={submitting}>{submitting ? 'Создание...' : 'Создать'}</button>
-        </form>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-2xl font-bold tracking-tight">VPN Конфигурации</h2>
+              <NodeBadge name={activeNode?.name} status={activeNode?.status} />
+            </div>
+            <p className="text-sm text-muted-foreground">Управление клиентами OpenVPN и WireGuard/AmneziaWG</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {user?.role === 'admin' && (
+            <Button variant="secondary" onClick={handleSync} disabled={syncing}>
+              <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
+              {syncing ? 'Синхронизация...' : 'Синхронизировать'}
+            </Button>
+          )}
+          {user?.role !== 'viewer' && (
+            <Button onClick={() => setShowForm(true)}>
+              <Plus size={16} />
+              Новый клиент
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <InlineProgressBar active={inline.active} label={inline.label} />
+
+      {summary && (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="Клиенты"
+            value={String(summary.total_configs)}
+            sub={`OVPN ${summary.openvpn_configs} · WG ${summary.wireguard_configs}`}
+            icon={Users}
+            accent="cyan"
+          />
+          <MetricCard
+            label="Подключения"
+            value={String(summary.connected_openvpn + summary.connected_wireguard)}
+            sub={`OVPN ${summary.connected_openvpn} · WG ${summary.connected_wireguard}`}
+            icon={Wifi}
+            accent="green"
+          />
+          <MetricCard
+            label="Службы"
+            value={`${summary.active_services}/${summary.total_services}`}
+            sub="активных VPN-служб"
+            icon={LayoutDashboard}
+            accent="amber"
+          />
+          <MetricCard
+            label="Сервер"
+            value={summary.server_ip || '—'}
+            sub={summary.node_name || 'активный узел'}
+            icon={FileKey}
+          />
+        </div>
       )}
+
+      <Dialog open={showForm} onOpenChange={(open) => !open && closeForm()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Создать клиента</DialogTitle>
+            <DialogDescription>Новый VPN-клиент через AntiZapret client.sh</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreate} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="clientName">Имя клиента</Label>
+              <Input
+                id="clientName"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                pattern="[a-zA-Z0-9_-]{1,32}"
+                required
+                placeholder="my-client"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Тип VPN</Label>
+              <Select value={vpnType} onValueChange={(v) => setVpnType(v as VpnType)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="openvpn">OpenVPN</SelectItem>
+                  <SelectItem value="wireguard">WireGuard / AmneziaWG</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {vpnType === 'openvpn' && (
+              <div className="space-y-2">
+                <Label htmlFor="certDays">Срок сертификата (дней)</Label>
+                <Input
+                  id="certDays"
+                  type="number"
+                  min={1}
+                  max={3650}
+                  value={certDays}
+                  onChange={(e) => setCertDays(Number(e.target.value))}
+                />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="description">Описание</Label>
+              <Input
+                id="description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Необязательно"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={closeForm}>
+                Отмена
+              </Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? 'Создание...' : 'Создать'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!qrPreview}
+        onOpenChange={(open) => {
+          if (!open && qrPreview) {
+            URL.revokeObjectURL(qrPreview.url)
+            setQrPreview(null)
+          }
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>QR-код</DialogTitle>
+            <DialogDescription>{qrPreview?.filename}</DialogDescription>
+          </DialogHeader>
+          {qrPreview && (
+            <div className="flex justify-center p-4">
+              <img src={qrPreview.url} alt="QR-код конфигурации" className="max-h-72 rounded-md border" />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {loading ? (
-        <div className="loading-inline">Загрузка конфигураций...</div>
+        <div className="py-16">
+          <Spinner label="Загрузка конфигураций..." />
+        </div>
       ) : configs.length === 0 ? (
-        <div className="card empty-state">
-          <p>Нет конфигураций. Создайте первого клиента или синхронизируйте с AntiZapret.</p>
-        </div>
-      ) : (
-        <div className="config-grid">
-          {configs.map((config) => (
-            <article key={config.id} className="card config-card">
-              <div className="config-card-header">
-                <div>
-                  <h3>{config.client_name}</h3>
-                  <span className={`badge ${config.vpn_type}`}>{config.vpn_type === 'openvpn' ? 'OpenVPN' : 'WireGuard'}</span>
-                </div>
-                <button className="btn danger-outline small" onClick={() => handleDelete(config.id, config.client_name)}>Удалить</button>
+        <Card>
+          <EmptyState
+            icon={FileKey}
+            title="Нет конфигураций"
+            description="Создайте первого клиента или синхронизируйте с AntiZapret."
+            action={
+              <div className="flex flex-wrap justify-center gap-2">
+                {user?.role === 'admin' && (
+                  <Button variant="secondary" onClick={handleSync}>
+                    <RefreshCw size={16} />
+                    Синхронизировать
+                  </Button>
+                )}
+                {user?.role !== 'viewer' && (
+                  <Button onClick={() => setShowForm(true)}>
+                    <Plus size={16} />
+                    Новый клиент
+                  </Button>
+                )}
               </div>
-              {config.description && <p className="muted">{config.description}</p>}
-              <div className="meta">
-                {user?.role === 'admin' && config.owner_username && <span>Владелец: {config.owner_username}</span>}
-                {config.cert_expire_days && <span>Сертификат: {config.cert_expire_days} дн.</span>}
-                <span>Создан: {new Date(config.created_at).toLocaleDateString('ru-RU')}</span>
-              </div>
-              {config.profile_files.length > 0 && (
-                <div className="files">
-                  <strong>Файлы подключения:</strong>
-                  <ul>
-                    {config.profile_files.map((f) => (
-                      <li key={f.path}>
-                        <span>{f.variant} — {f.filename}</span>
-                        <button className="btn ghost small" onClick={() => handleDownload(config, f.path, f.filename)}>Скачать</button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </article>
-          ))}
-        </div>
-      )}
+            }
+          />
+        </Card>
+      ) : user ? (
+        <ConfigCardsSection
+          configs={configs}
+          policies={policies}
+          userRole={user.role}
+          onRefresh={() => load({ silent: true })}
+          onQr={handleQr}
+          onDownload={handleDownload}
+          onNotifySuccess={success}
+          onNotifyError={notifyError}
+        />
+      ) : null}
     </div>
   )
 }

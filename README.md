@@ -2,16 +2,93 @@
 
 Веб-панель администрирования для VPN-сервера [AntiZapret](https://github.com/GubernievS/AntiZapret-VPN).
 
-Стек: **FastAPI** (backend) + **React/Vite** (frontend).
+Стек: **FastAPI** (backend) + **React/Vite/TypeScript** (frontend: Tailwind CSS, shadcn/ui, Recharts).
+
+## Архитектура Controller + Nodes
+
+**Controller** — эта панель администрирования (центральное управление).  
+**Nodes** — VPN-серверы с AntiZapret, которыми управляет controller.
+
+| Компонент | Роль |
+|-----------|------|
+| Admin Panel (backend + frontend) | Controller: CRUD узлов, выбор активного узла, проксирование операций |
+| Локальный узел (`is_local=true`) | Прямой доступ к `/root/antizapret` через shell/файлы |
+| Node Agent (`node_agent/`) | Лёгкий FastAPI-агент на удалённом сервере; аутентификация `X-Node-Key` |
+| `LocalNodeAdapter` | Выполняет команды локально |
+| `RemoteNodeAdapter` | HTTP-вызовы к node agent |
+
+При старте controller автоматически регистрирует локальный узел «Локальный сервер», если его ещё нет. Все страницы (конфигурации, мониторинг, настройки) работают через **активный узел**.
+
+### API узлов (только admin)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/nodes` | Список узлов |
+| POST | `/api/nodes` | Добавить удалённый узел |
+| GET | `/api/nodes/active` | Текущий активный узел |
+| GET | `/api/nodes/{id}` | Детали узла |
+| PUT | `/api/nodes/{id}` | Обновить узел |
+| DELETE | `/api/nodes/{id}` | Удалить узел |
+| POST | `/api/nodes/{id}/health` | Проверка доступности |
+| POST | `/api/nodes/{id}/activate` | Сделать узел активным |
+
+### Добавление удалённого узла
+
+1. На VPN-сервере установите AntiZapret и скопируйте репозиторий панели (или только `backend/`).
+2. Задайте API-ключ и запустите агент:
+
+```bash
+export NODE_AGENT_API_KEY="your-secure-random-key"
+export ANTIZAPRET_PATH=/root/antizapret
+./start_node_agent.sh
+```
+
+3. В панели: **Узлы → Добавить узел** — укажите имя, хост, порт (по умолчанию 9100) и тот же API-ключ.
+4. Нажмите «Проверка здоровья», затем «Активировать» для переключения операций на этот сервер.
+
+API-ключи хранятся в БД в виде bcrypt-хеша и Fernet-шифрования (для исходящих запросов). Заголовок: `X-Node-Key`.
+
+Переменная `ALLOW_INTERNAL_NODES=true` разрешает добавление узлов с приватными IP (по умолчанию запрещено из соображений SSRF).
 
 ## Возможности
 
-- Авторизация с ролями (администратор / пользователь), JWT
-- CRUD VPN-клиентов через `/root/antizapret/client.sh`
-- Скачивание профилей подключения (`.ovpn`, `.conf`)
-- Мониторинг: статус служб, OpenVPN-логи, WireGuard (`wg show`)
-- Настройки: тема, списки доменов/IP AntiZapret, управление пользователями
-- Светлая / тёмная тема с сохранением
+### Ядро (портировано ранее)
+- Авторизация JWT, роли admin / user / **viewer**
+- Controller + Nodes: локальный узел и удалённые через node agent
+- CRUD VPN-клиентов через `client.sh`
+- Скачивание профилей (`.ovpn`, `.conf`), QR-коды
+- KPI на главной, NOC-мониторинг, мониторинг трафика (SQLite + Recharts)
+- CIDR: 12 провайдеров, 6 пресетов, sync → `AP-*-include-ips.txt`
+- Списки AntiZapret (5 базовых файлов в Настройках)
+- Обслуживание: `doall.sh`, `client.sh 7`, перезапуск VPN-служб
+- Бэкапы, Telegram-уведомления, принудительная смена пароля, темы
+
+### Портировано в этом проходе (паритет с AdminAntizapret)
+| Функция | Статус |
+|---------|--------|
+| **Редактор файлов** (10 файлов: hosts, ips, adblock, forward, drop) | ✅ `/edit-files` |
+| **Политики клиентов** (блок/разблок OpenVPN + WG, срок WG) | ✅ `/api/client-access` |
+| **Роль viewer** + scoped config access | ✅ API `/api/system/viewer-access` |
+| **CIDR DB pipeline** (internet download, antifilter, generate) | ✅ `/routing` + `/api/routing/cidr-db/*` |
+| **Игровые фильтры** (15 игр, домены → include-hosts) | ✅ вкладка «Игры» в Routing |
+| **Журналы** (подключения + audit log) | ✅ `/logs` |
+| **IP whitelist / безопасность** | ✅ Настройки → Безопасность |
+| **Авто-бэкап по расписанию** | ✅ фоновый worker (hourly check) |
+| **Мониторинг сервера** (CPU/RAM/диск) | ✅ `/server-monitor` + WebSocket |
+| **Telegram Mini App** (базовый) | ✅ `/api/tg-mini` |
+| **Системные обновления** (git pull) | ✅ `/api/system/updates` |
+| **Скачивание бэкапов** | ✅ кнопка в UI |
+
+### Не портировано (ограничения)
+| Функция | Причина |
+|---------|---------|
+| vnStat bandwidth charts (полные) | vnstat опционален; базовые метрики через psutil |
+| IP scanner iptables firewall | Требует root + iptables на controller |
+| Captcha / Telegram Login Widget | Flask-session специфика |
+| In-panel pytest runner | Низкий приоритет |
+| IP-blocked dwell page | Отдельный Flask blueprint |
+| OpenVPN management socket traffic | Используются status-логи |
+| Полный tg_mini UI (все вкладки) | Портирован core API + минимальная HTML-страница |
 
 ## Учётные данные по умолчанию
 
@@ -105,8 +182,68 @@ npm run build
 
 | Роль | Доступ |
 |------|--------|
-| **admin** | Все конфигурации, пользователи, списки AntiZapret, синхронизация |
-| **user** | Только свои конфигурации, мониторинг, смена пароля и темы |
+| **admin** | Полный доступ: узлы, политики клиентов, редактор файлов, бэкапы, безопасность, CIDR |
+| **user** | Свои конфигурации, мониторинг, смена пароля и темы |
+| **viewer** | Только чтение: назначенные конфигурации, мониторинг, журналы (без редактирования) |
+
+### API обслуживания и бэкапов (только admin)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/api/settings/run-doall` | Запуск `doall.sh` на активном узле |
+| POST | `/api/settings/recreate-profiles` | Пересоздание профилей (`client.sh 7`) |
+| POST | `/api/settings/restart-service` | Перезапуск VPN-службы |
+| GET/PATCH | `/api/settings/telegram` | Настройки Telegram |
+| POST | `/api/settings/telegram/test` | Тестовое сообщение |
+| GET/POST | `/api/backups` | Список / создание бэкапов |
+| POST | `/api/backups/restore` | Восстановление из архива |
+| GET | `/api/monitoring/summary` | KPI для главной страницы |
+| GET | `/api/configs/{id}/qr` | QR-код профиля подключения |
+
+### API маршрутизации / CIDR
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/routing/overview` | Провайдеры, пресеты, статистика маршрутов |
+| POST | `/api/routing/providers/{filename}/enabled` | Вкл/выкл провайдера (admin) |
+| POST | `/api/routing/presets/{key}/apply` | Применить пресет (admin) |
+| POST | `/api/routing/sync` | Синхронизация list → AP-*-include-ips.txt (admin) |
+| POST | `/api/routing/apply` | sync + doall.sh (admin) |
+| GET | `/api/routing/cidr-db/status` | Статус CIDR БД, провайдеры, история |
+| POST | `/api/routing/cidr-db/refresh` | Загрузка провайдеров из интернета (фон) |
+| POST | `/api/routing/cidr-db/generate` | Генерация `data/cidr/list/*.txt` из БД |
+| GET | `/api/routing/cidr-db/antifilter/status` | Статус antifilter.download |
+| POST | `/api/routing/cidr-db/antifilter/refresh` | Обновить antifilter (фон) |
+| GET | `/api/routing/cidr-db/tasks/{id}` | Прогресс фоновой задачи |
+
+### CIDR DB pipeline
+
+Двухэтапная схема (как в AdminAntizapret):
+
+1. **Refresh** — `CidrDbUpdaterService.refresh_all_providers()` скачивает AWS/Google/Cloudflare/RIPE и ASN-префиксы в SQLite на **контроллере** (`provider_cidr`, `provider_meta`, …).
+2. **Generate** — `update_cidr_files_from_db()` пишет `backend/data/cidr/list/*.txt`, опционально с фильтром **antifilter** (пересечение с заблокированными в РФ подсетями).
+3. **Sync + doall** — через активный node adapter: `sync` → `AP-*-include-ips.txt` → `doall.sh` на VPN-узле.
+
+**UI:** вкладка «Маршрутизация / CIDR» → панель «CIDR DB Pipeline».
+
+**Расписание:** фоновый worker (`CIDR_DB_REFRESH_HOUR` / `CIDR_DB_REFRESH_MINUTE`, по умолчанию 02:30 UTC) или cron:
+
+```bash
+30 2 * * * /opt/AdminPanelAZ/backend/.venv/bin/python /opt/AdminPanelAZ/backend/utils/cidr_db_refresh.py
+```
+
+**Данные:** baseline-файлы в `backend/data/cidr/list/_baseline/` (скопированы из AdminAntizapret). Первый generate создаёт runtime backups.
+
+**Переменные** (`backend/.env`): `CIDR_LIST_DIR`, `CIDR_DB_REFRESH_*`, `ANTIFILTER_URL`, `OPENVPN_ROUTE_TOTAL_CIDR_LIMIT`, `CIDR_DB_*_WORKERS` (см. pipeline `constants.py`).
+
+**Antifilter:** список `allyouneed.lst` (~15k /24). При generate с `filter_by_antifilter=true` остаются только provider CIDR, **пересекающиеся** с заблокированными — для маршрутизации трафика к заблокированным ресурсам.
+
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/traffic/overview` | Сводка и таблица per-client |
+| GET | `/api/traffic/chart?client=&range=` | Временной ряд для графика |
+| POST | `/api/traffic/reset` | Сброс статистики (admin) |
 
 ## Структура проекта
 
@@ -115,14 +252,20 @@ npm run build
 ├── backend/
 │   ├── app/
 │   │   ├── main.py
-│   │   ├── auth.py
 │   │   ├── models.py
-│   │   ├── routers/
-│   │   └── services/antizapret.py
+│   │   ├── routers/backups.py, maintenance.py, nodes.py
+│   │   └── services/
+│   │       ├── antizapret.py, backup_manager.py
+│   │       ├── node_adapter.py, qr_generator.py, telegram.py
+│   │       └── node_manager.py
+│   ├── node_agent/main.py
 │   └── requirements.txt
 ├── frontend/
 │   └── src/
+│       ├── pages/NodesPage.tsx
+│       └── components/NodeSelector.tsx
 ├── start.sh
+├── start_node_agent.sh
 └── README.md
 ```
 
@@ -135,11 +278,35 @@ SECRET_KEY=your-secret-key
 DATABASE_URL=sqlite:///./data/adminpanel.db
 ANTIZAPRET_PATH=/root/antizapret
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+CIDR_LIST_DIR=data/cidr/list
+TRAFFIC_SYNC_ENABLED=true
+TRAFFIC_SYNC_INTERVAL_SECONDS=30
+TRAFFIC_DB_STALE_SECONDS=600
 ```
+
+## Новые API (порт второго прохода)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET/PUT | `/api/edit-files/{key}` | Редактор 10 конфиг-файлов AntiZapret |
+| GET/POST | `/api/client-access/*` | Блок/разблок/срок OpenVPN и WireGuard |
+| POST | `/api/configs/{id}/one-time-link` | Одноразовая ссылка на профиль |
+| GET/POST | `/api/public/qr-download/{token}` | Публичное скачивание по токену |
+| GET/PATCH | `/api/security` | IP whitelist, QR settings, scanner block |
+| GET | `/api/server-monitor/metrics` | CPU/RAM/диск |
+| WS | `/api/server-monitor/ws?token=` | Live CPU/RAM (2с) |
+| GET/POST | `/api/routing/game-filters` | Игровые фильтры |
+| GET | `/api/logs/actions` | Audit log |
+| GET | `/api/logs/connections` | Снимок подключений |
+| GET/POST | `/api/system/updates` | Проверка/применение git update |
+| PUT | `/api/system/viewer-access` | Права viewer на конфиги |
+| GET/POST | `/api/tg-mini/*` | Telegram Mini App |
 
 ## Ограничения
 
-- Backend должен запускаться с правами, достаточными для `client.sh` (обычно root)
-- Изменение списков AntiZapret запускает `doall.sh` (может занять несколько минут)
-- WireGuard-пиры без handshake отображаются как неактивные
-- TCP-службы OpenVPN/WireGuard могут быть не установлены — отображаются как inactive
+- Backend должен запускаться с правами root для `client.sh`, `wg set`, `doall.sh`
+- CIDR DB pipeline выполняется на **контроллере**; списки применяются на активном узле через sync/doall (remote node — через agent)
+- WG runtime block через `wg set peer remove` (упрощённо vs полный enforcer AdminAntizapret)
+- IP firewall (iptables) для scanner block — только настройки в БД, без автоматического iptables
+- Авто-бэкап: asyncio worker на controller (не system crontab)
+- Трафик: status-логи OpenVPN + `wg show` (не management sockets)
