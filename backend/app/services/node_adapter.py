@@ -8,7 +8,7 @@ from fastapi import HTTPException, status
 from app.models import VpnType
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.config import get_settings
-from app.services.node_mtls import build_node_agent_ssl_context, node_agent_base_scheme
+from app.services.node_mtls import build_node_agent_ssl_context, node_agent_base_scheme, node_agent_mtls_enabled
 from app.services.antizapret import AntiZapretService
 from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import build_health_payload
@@ -299,6 +299,27 @@ class RemoteNodeAdapter(NodeAdapter):
             kwargs["verify"] = self._verify
         return kwargs
 
+    @staticmethod
+    def _format_connection_error(exc: httpx.RequestError) -> str:
+        msg = str(exc).lower()
+        if isinstance(exc, httpx.TimeoutException):
+            return "Таймаут подключения к node agent — проверьте firewall и доступность порта"
+        if isinstance(exc, httpx.ConnectError):
+            return f"Не удалось подключиться к node agent: {exc}"
+        if isinstance(exc, httpx.RemoteProtocolError) or "disconnected without sending a response" in msg:
+            if not node_agent_mtls_enabled():
+                return (
+                    "Сервер закрыл соединение без ответа. Вероятно, на узле включён mTLS (HTTPS), "
+                    "а панель обращается по HTTP. Включите NODE_AGENT_MTLS_ENABLED=true на панели "
+                    "и скопируйте сертификаты из scripts/generate-mtls-certs.sh, "
+                    "либо отключите mTLS на узле (NODE_AGENT_MTLS_ENABLED=false)."
+                )
+            return (
+                "Сервер закрыл соединение без ответа. Проверьте mTLS-сертификаты панели "
+                "(NODE_AGENT_MTLS_CA_CERT, NODE_AGENT_MTLS_CLIENT_CERT, NODE_AGENT_MTLS_CLIENT_KEY)."
+            )
+        return f"Узел недоступен: {exc}"
+
     def _request(self, method: str, path: str, **kwargs) -> Any:
         url = f"{self.base_url}{path}"
         timeout = kwargs.pop("timeout", HTTP_TIMEOUT)
@@ -308,7 +329,7 @@ class RemoteNodeAdapter(NodeAdapter):
         except httpx.RequestError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Узел недоступен: {exc}",
+                detail=self._format_connection_error(exc),
             ) from exc
 
         if response.status_code >= 400:
@@ -318,6 +339,10 @@ class RemoteNodeAdapter(NodeAdapter):
                 detail = data.get("detail", detail)
             except Exception:
                 pass
+            if response.status_code == status.HTTP_401_UNAUTHORIZED:
+                detail = "Неверный API-ключ узла (заголовок X-Node-Key)"
+            elif response.status_code == status.HTTP_403_FORBIDDEN:
+                detail = detail or "Доступ запрещён — проверьте NODE_AGENT_ALLOWED_IPS на узле"
             raise HTTPException(status_code=response.status_code, detail=detail)
 
         if response.status_code == 204 or not response.content:

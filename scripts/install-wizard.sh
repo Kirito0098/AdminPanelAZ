@@ -56,30 +56,40 @@ WIZ_BACKUP_ROOT="${WIZ_BACKUP_ROOT:-/var/backups/adminpanelaz}"
 
 WIZ_ACCEPT_DEFAULTS="${WIZ_ACCEPT_DEFAULTS:-false}"
 WIZ_APPLY_CONFIRMED="${WIZ_APPLY_CONFIRMED:-false}"
+WIZ_CURRENT_STEP=0
+WIZ_TOTAL_STEPS="?"
 
-_wiz_use_color=false
-if [[ -t 1 ]] && [[ "${TERM:-}" != "dumb" ]]; then
-  _wiz_use_color=true
+if [[ "${UI_INITIALIZED:-false}" != true ]]; then
+  # shellcheck source=scripts/install-ui.sh
+  source "$ROOT_DIR/scripts/install-ui.sh"
+  ui_init
 fi
 
-_wiz_c() {
-  local code="$1"
-  shift
-  if [[ "$_wiz_use_color" == true ]]; then
-    printf '\033[%sm%s\033[0m' "$code" "$*"
-  else
-    printf '%s' "$*"
-  fi
+wiz_set_total_steps() {
+  case "$WIZ_INSTALL_TYPE" in
+    node)
+      WIZ_TOTAL_STEPS=7
+      ;;
+    controller)
+      WIZ_TOTAL_STEPS=10
+      ;;
+    *)
+      WIZ_TOTAL_STEPS=10
+      ;;
+  esac
 }
 
 wiz_title() {
   echo
-  _wiz_c "1;36" "=== $* ==="
-  echo
+  ui_section "$*"
 }
 
 wiz_step() {
-  _wiz_c "1;33" "$*"
+  local title="$1"
+  title="${title#*[0-9]*. }"
+  title="${title#*[0-9a-z]a. }"
+  (( ++WIZ_CURRENT_STEP )) || true
+  ui_step_header "$WIZ_CURRENT_STEP" "$WIZ_TOTAL_STEPS" "$title"
 }
 
 wiz_prompt() {
@@ -198,14 +208,13 @@ wiz_prompt_port_no_conflict() {
 
 wizard_show_redis_rate_limit_hint() {
   echo
-  echo "  ┌─ Rate limit и несколько воркеров uvicorn ─────────────────────────────"
-  echo "  │ Uvicorn workers — это отдельные процессы, обрабатывающие запросы."
-  echo "  │ In-memory счётчик лимита входа хранится в каждом процессе отдельно:"
-  echo "  │ атакующий может обойти лимит, попадая на разные workers."
-  echo "  │ Redis — общее хранилище счётчиков для всех workers."
-  echo "  │ При 1 worker достаточно AUTH_RATE_LIMIT_BACKEND=memory (по умолчанию)."
-  echo "  │ При workers > 1 задайте AUTH_RATE_LIMIT_BACKEND=redis и REDIS_URL."
-  echo "  └──────────────────────────────────────────────────────────────────────"
+  ui_info_box "Rate limit и несколько воркеров uvicorn" \
+    "Uvicorn workers — отдельные процессы, обрабатывающие запросы." \
+    "In-memory счётчик лимита входа хранится в каждом процессе отдельно:" \
+    "атакующий может обойти лимит, попадая на разные workers." \
+    "Redis — общее хранилище счётчиков для всех workers." \
+    "При 1 worker достаточно AUTH_RATE_LIMIT_BACKEND=memory (по умолчанию)." \
+    "При workers > 1 задайте AUTH_RATE_LIMIT_BACKEND=redis и REDIS_URL."
   echo
 }
 
@@ -254,27 +263,31 @@ wizard_derive_cors_origins() {
 
 wizard_check_antizapret() {
   if [[ -d "$WIZ_ANTIZAPRET_PATH" && -f "$WIZ_ANTIZAPRET_PATH/client.sh" ]]; then
-    echo "  AntiZapret найден: $WIZ_ANTIZAPRET_PATH"
+    print_success "AntiZapret найден: $WIZ_ANTIZAPRET_PATH"
     return 0
   fi
 
-  echo "  ВНИМАНИЕ: AntiZapret не найден в $WIZ_ANTIZAPRET_PATH"
+  ui_warn_box "AntiZapret не найден" \
+    "Каталог: $WIZ_ANTIZAPRET_PATH" \
+    "Установите отдельно: https://github.com/GubernievS/AntiZapret-VPN"
   if [[ "$WIZ_REQUIRE_ANTIZAPRET" == true ]]; then
-    die "Установка прервана. Укажите корректный путь к AntiZapret или установите его: https://github.com/GubernievS/AntiZapret-VPN"
-  fi
-  wiz_prompt_yesno "  Продолжить установку без AntiZapret?" "n"
-  if [[ "$REPLY" != "y" ]]; then
-    die "Установка прервана. Укажите корректный путь к AntiZapret."
+    die "Установка прервана. Сначала установите AntiZapret в /root/antizapret."
   fi
 }
 
+wizard_configure_antizapret() {
+  WIZ_ANTIZAPRET_PATH="/root/antizapret"
+  wizard_check_antizapret
+}
+
 wizard_ask_install_type() {
-  wiz_step "1. Тип установки"
+  WIZ_CURRENT_STEP=0
+  WIZ_TOTAL_STEPS="?"
+  wiz_step "Тип установки"
   wiz_prompt_choice "Какой компонент устанавливаем?" \
     "Только панель (без локального AntiZapret)" \
-    "Панель + локальный AntiZapret" \
-    "Только Node agent (удалённый VPN-сервер)" \
-    "Полный стек (панель + AntiZapret + Node agent)"
+    "Панель + локальный AntiZapret (AntiZapret уже установлен в /root/antizapret)" \
+    "Только Node agent (удалённый VPN-сервер)"
 
   case "$REPLY" in
     1)
@@ -289,37 +302,22 @@ wizard_ask_install_type() {
       WIZ_INSTALL_TYPE="node"
       WIZ_REQUIRE_ANTIZAPRET=true
       ;;
-    4)
-      WIZ_INSTALL_TYPE="controller_node"
-      WIZ_REQUIRE_ANTIZAPRET=true
-      ;;
   esac
-  echo
-}
-
-wizard_ask_antizapret() {
-  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
-    wiz_step "2. AntiZapret (на VPN-сервере)"
-  else
-    wiz_step "2. AntiZapret"
-  fi
-  wiz_prompt "Путь к каталогу AntiZapret" "$WIZ_ANTIZAPRET_PATH"
-  WIZ_ANTIZAPRET_PATH="$REPLY"
-  wizard_check_antizapret
+  wiz_set_total_steps
   echo
 }
 
 wizard_ask_network() {
   if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
-    wiz_step "3. Порты node agent"
+    wiz_step "Порты node agent"
     wiz_prompt_port "Порт node agent" "$WIZ_NODE_AGENT_PORT"
     WIZ_NODE_AGENT_PORT="$REPLY"
     echo
     return 0
   fi
 
-  wiz_step "3. Сеть и порты"
-  echo "  Рекомендуется: backend только на 127.0.0.1, наружу — через Nginx (шаг 5)."
+  wiz_step "Сеть и порты"
+  print_info "Рекомендуется: backend только на 127.0.0.1, наружу — через Nginx (шаг публикации)."
   echo
   wiz_prompt "IP или домен для доступа к панели (для CORS и подсказок)" "$WIZ_SERVER_ADDRESS"
   WIZ_SERVER_ADDRESS="$REPLY"
@@ -362,9 +360,8 @@ wizard_ask_ddns() {
     return 0
   fi
 
-  wiz_step "3a. Динамический DNS (бесплатный поддомен)"
-  echo "  Если у вас нет своего домена, можно использовать бесплатный DDNS."
-  echo "  Подробнее о провайдерах — в README.md (раздел «Бесплатные домены»)."
+  wiz_step "Динамический DNS"
+  print_info "Если нет своего домена — бесплатный DDNS (подробнее в README.md, раздел «Бесплатные домены»)."
   echo
   wiz_prompt_choice "Провайдер DDNS" \
     "Не использую DDNS (свой домен или IP)" \
@@ -423,9 +420,10 @@ wizard_ask_app_env() {
     return 0
   fi
 
-  wiz_step "4. Режим приложения и безопасность"
-  echo "  APP_ENV=production включает проверку секретов, политику паролей и усиленные заголовки."
-  echo "  Для доступа из интернета/LAN рекомендуется production + HTTPS (см. SECURITY.md)."
+  wiz_step "Режим приложения и безопасность"
+  ui_info_box "" \
+    "APP_ENV=production — проверка секретов, политика паролей, усиленные заголовки." \
+    "Для доступа из интернета/LAN рекомендуется production + HTTPS (см. SECURITY.md)."
   echo
   wiz_prompt_choice "Режим APP_ENV" \
     "development (локальная разработка / тесты)" \
@@ -455,10 +453,11 @@ wizard_ask_https() {
     return 0
   fi
 
-  wiz_step "5. Публикация через Nginx (рекомендуется)"
-  echo "  Панель слушает только 127.0.0.1:${WIZ_BACKEND_PORT}."
-  echo "  Наружу — только Nginx на HTTPS (и HTTP для ACME)."
-  echo "  Позже можно изменить: ./scripts/nginx-setup.sh"
+  wiz_step "Публикация через Nginx"
+  ui_info_box "Рекомендуется" \
+    "Панель слушает только 127.0.0.1:${WIZ_BACKEND_PORT}." \
+    "Наружу — только Nginx на HTTPS (и HTTP для ACME)." \
+    "Позже можно изменить: ./scripts/nginx-setup.sh"
   echo
   wiz_prompt_choice "Способ публикации" \
     "Nginx + Let's Encrypt (домен, рекомендуется для интернета)" \
@@ -497,7 +496,7 @@ wizard_ask_https() {
         "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT" "$WIZ_HTTPS_PUBLIC_PORT"
       WIZ_HTTP_ACME_PORT="$REPLY"
       if [[ "$WIZ_HTTP_ACME_PORT" != "80" ]]; then
-        echo "  ВНИМАНИЕ: Let's Encrypt проверяет домен на порту 80. Нестандартный порт может потребовать DNS-challenge."
+        print_warn "Let's Encrypt проверяет домен на порту 80. Нестандартный порт может потребовать DNS-challenge."
       fi
     else
       wiz_prompt_port_no_conflict "Публичный HTTPS-порт (Nginx)" "$WIZ_HTTPS_PUBLIC_PORT" \
@@ -513,11 +512,11 @@ wizard_ask_https() {
   elif [[ "$WIZ_NGINX_MODE" == "none" ]]; then
     WIZ_BACKEND_HOST="127.0.0.1"
     WIZ_BEHIND_NGINX="false"
-    echo "  Backend будет доступен только на http://127.0.0.1:${WIZ_BACKEND_PORT}/"
+    print_info "Backend будет доступен только на http://127.0.0.1:${WIZ_BACKEND_PORT}/"
   else
     WIZ_BACKEND_HOST="0.0.0.0"
     WIZ_BEHIND_NGINX="false"
-    echo "  ВНИМАНИЕ: uvicorn будет слушать 0.0.0.0:${WIZ_BACKEND_PORT} — не используйте в интернете без firewall."
+    print_warn "uvicorn будет слушать 0.0.0.0:${WIZ_BACKEND_PORT} — не используйте в интернете без firewall."
   fi
   echo
 }
@@ -527,7 +526,7 @@ wizard_ask_admin() {
     return 0
   fi
 
-  wiz_step "6. Администратор"
+  wiz_step "Администратор"
   wiz_prompt "Имя администратора по умолчанию" "$WIZ_ADMIN_USERNAME"
   WIZ_ADMIN_USERNAME="$REPLY"
 
@@ -566,9 +565,9 @@ wizard_ask_node_agent() {
     return 0
   fi
 
-  wiz_step "7. Node agent"
+  wiz_step "Node agent"
   if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
-    echo "  Порт node agent: ${WIZ_NODE_AGENT_PORT} (задан на шаге 3)"
+    print_info "Порт node agent: ${WIZ_NODE_AGENT_PORT} (задан на шаге сети)"
   fi
 
   wiz_prompt_yesno "Сгенерировать NODE_AGENT_API_KEY автоматически?" "y"
@@ -583,7 +582,7 @@ wizard_ask_node_agent() {
     WIZ_NODE_AGENT_API_KEY="$REPLY"
   fi
 
-  echo "  Ограничьте доступ к порту ${WIZ_NODE_AGENT_PORT} firewall: только IP панели управления."
+  print_info "Ограничьте доступ к порту ${WIZ_NODE_AGENT_PORT} firewall: только IP панели управления."
   wiz_prompt "Разрешённые IP панели (NODE_AGENT_ALLOWED_IPS, CIDR через запятую, пусто = без ограничения)" ""
   WIZ_NODE_AGENT_ALLOWED_IPS="$REPLY"
   echo
@@ -614,7 +613,7 @@ wizard_ask_security_hardening() {
     return 0
   fi
 
-  wiz_step "7a. Дополнительная безопасность"
+  wiz_step "Дополнительная безопасность"
   if [[ "$WIZ_UVICORN_WORKERS" -gt 1 ]]; then
     wizard_show_redis_rate_limit_hint
     wiz_prompt_yesno "Настроить Redis для rate limit auth (AUTH_RATE_LIMIT_BACKEND=redis)?" "y"
@@ -652,7 +651,7 @@ wizard_ask_firewall() {
     backend_port="0"
   fi
 
-  echo "  Рекомендуется закрыть внутренние порты с интернета и открыть только Nginx."
+  print_info "Рекомендуется закрыть внутренние порты с интернета и открыть только Nginx."
   echo
 
   # shellcheck source=scripts/firewall-setup.sh
@@ -677,21 +676,17 @@ wizard_ask_firewall() {
         WIZ_FIREWALL_ENABLE_UFW="true"
       fi
     elif [[ "$tool" == "none" ]]; then
-      echo "  ufw/iptables не найдены — после установки будут показаны команды вручную."
+      print_warn "ufw/iptables не найдены — после установки будут показаны команды вручную."
     fi
   else
     WIZ_CONFIGURE_FIREWALL="false"
-    echo "  Настройте firewall вручную (см. SECURITY.md)."
+    print_info "Настройте firewall вручную (см. SECURITY.md)."
   fi
   echo
 }
 
 wizard_ask_services() {
-  local step_num="8"
-  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
-    step_num="4"
-  fi
-  wiz_step "${step_num}. Сервисы и автозапуск"
+  wiz_step "Сервисы и автозапуск"
   wiz_prompt_choice "Как запускать после установки?" \
     "Вручную (./start.sh / ./start_node_agent.sh)" \
     "Daemon через start.sh (watchdog)" \
@@ -722,14 +717,7 @@ wizard_ask_services() {
 }
 
 wizard_ask_optional() {
-  local step_num="9"
-  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
-    step_num="4"
-  elif [[ "$WIZ_INSTALL_TYPE" == "controller" ]]; then
-    step_num="7"
-  fi
-
-  wiz_step "${step_num}. Опциональные функции"
+  wiz_step "Опциональные функции"
 
   if [[ "$WIZ_INSTALL_TYPE" != "node" ]]; then
     wiz_prompt_yesno "Включить ночное обновление CIDR DB (CIDR_DB_REFRESH_ENABLED)?" "y"
@@ -770,7 +758,6 @@ wizard_ask_optional() {
 }
 
 wizard_ask_paths() {
-  local step_num="10"
   local default_state="$ROOT_DIR/.runtime"
   local default_node_state="$ROOT_DIR/.runtime/node"
 
@@ -779,26 +766,17 @@ wizard_ask_paths() {
     default_node_state="/var/lib/adminpanelaz-node"
   fi
 
-  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
-    step_num="5"
-  elif [[ "$WIZ_INSTALL_TYPE" == "controller" ]]; then
-    step_num="8"
-  fi
-
-  wiz_step "${step_num}. Пути"
-  wiz_prompt "Каталог состояния controller" "${WIZ_STATE_DIR:-$default_state}"
-  WIZ_STATE_DIR="$REPLY"
-
+  WIZ_STATE_DIR="${WIZ_STATE_DIR:-$default_state}"
   if [[ "$WIZ_INSTALL_TYPE" != "controller" ]]; then
-    wiz_prompt "Каталог состояния node agent" "${WIZ_NODE_STATE_DIR:-$default_node_state}"
-    WIZ_NODE_STATE_DIR="$REPLY"
+    WIZ_NODE_STATE_DIR="${WIZ_NODE_STATE_DIR:-$default_node_state}"
   fi
 
   if [[ "$WIZ_INSTALL_TYPE" != "node" ]]; then
+    wiz_step "Пути"
     wiz_prompt "Каталог бэкапов (BACKUP_ROOT)" "$WIZ_BACKUP_ROOT"
     WIZ_BACKUP_ROOT="$REPLY"
+    echo
   fi
-  echo
 }
 
 wizard_apply_run_mode_flags() {
@@ -812,7 +790,7 @@ wizard_apply_run_mode_flags() {
   esac
 
   case "$WIZ_INSTALL_TYPE" in
-    controller_node|node) WITH_NODE_AGENT=true ;;
+    node) WITH_NODE_AGENT=true ;;
   esac
 
   export ADMINPANELAZ_STATE_DIR="$WIZ_STATE_DIR"
@@ -828,7 +806,7 @@ wizard_apply_run_mode_flags() {
 wizard_show_summary() {
   wizard_apply_run_mode_flags
 
-  wiz_title "Сводка конфигурации"
+  ui_summary_title
 
   local install_label="$WIZ_INSTALL_TYPE"
   case "$WIZ_INSTALL_TYPE" in
@@ -839,55 +817,54 @@ wizard_show_summary() {
         install_label="только панель"
       fi
       ;;
-    controller_node) install_label="полный стек" ;;
     node) install_label="только node agent" ;;
   esac
 
-  echo "  Тип установки:     $install_label"
-  echo "  AntiZapret:        $WIZ_ANTIZAPRET_PATH"
+  ui_summary_row "Тип установки" "$install_label"
+  ui_summary_row "AntiZapret" "$WIZ_ANTIZAPRET_PATH"
   if [[ "$WIZ_INSTALL_TYPE" != "node" ]]; then
-    echo "  Доступ:            ${WIZ_SERVER_ADDRESS:-—}"
+    ui_summary_row "Доступ" "${WIZ_SERVER_ADDRESS:-—}"
     if [[ "$WIZ_DDNS_PROVIDER" != "none" ]]; then
-      echo "  DDNS:              $WIZ_DDNS_PROVIDER ($(wizard_ddns_fqdn))"
-      echo "  DDNS auto-update:  $WIZ_DDNS_CONFIGURE_UPDATE"
+      ui_summary_row "DDNS" "$WIZ_DDNS_PROVIDER ($(wizard_ddns_fqdn))"
+      ui_summary_row "DDNS auto-update" "$WIZ_DDNS_CONFIGURE_UPDATE"
     fi
-    echo "  Backend:           ${WIZ_BACKEND_HOST}:${WIZ_BACKEND_PORT} (localhost only)"
-    echo "  APP_ENV:           $WIZ_APP_ENV"
-    echo "  CORS:              $WIZ_CORS_ORIGINS"
-    echo "  Internal nodes:    $WIZ_ALLOW_INTERNAL_NODES"
-    echo "  Nginx/HTTPS:       $WIZ_NGINX_MODE"
-    echo "  BEHIND_NGINX:      $WIZ_BEHIND_NGINX"
+    ui_summary_row "Backend" "${WIZ_BACKEND_HOST}:${WIZ_BACKEND_PORT} (localhost only)"
+    ui_summary_row "APP_ENV" "$WIZ_APP_ENV"
+    ui_summary_row "CORS" "$WIZ_CORS_ORIGINS"
+    ui_summary_row "Internal nodes" "$WIZ_ALLOW_INTERNAL_NODES"
+    ui_summary_row "Nginx/HTTPS" "$WIZ_NGINX_MODE"
+    ui_summary_row "BEHIND_NGINX" "$WIZ_BEHIND_NGINX"
     if [[ "$WIZ_NGINX_MODE" != "none" && -n "$WIZ_NGINX_DOMAIN" ]]; then
-      echo "  Домен:             $WIZ_NGINX_DOMAIN"
+      ui_summary_row "Домен" "$WIZ_NGINX_DOMAIN"
       if [[ "$WIZ_NGINX_MODE" == "le" || "$WIZ_NGINX_MODE" == "selfsigned" ]]; then
-        echo "  Публичные порты:   HTTPS ${WIZ_HTTPS_PUBLIC_PORT}, HTTP ${WIZ_HTTP_ACME_PORT}"
+        ui_summary_row "Публичные порты" "HTTPS ${WIZ_HTTPS_PUBLIC_PORT}, HTTP ${WIZ_HTTP_ACME_PORT}"
       fi
     fi
-    echo "  Uvicorn workers:   $WIZ_UVICORN_WORKERS"
+    ui_summary_row "Uvicorn workers" "$WIZ_UVICORN_WORKERS"
     if [[ "$WIZ_UVICORN_WORKERS" -gt 1 ]]; then
-      echo "  Rate limit:        ${WIZ_AUTH_RATE_LIMIT_BACKEND}${WIZ_REDIS_URL:+, REDIS_URL=$WIZ_REDIS_URL}"
+      ui_summary_row "Rate limit" "${WIZ_AUTH_RATE_LIMIT_BACKEND}${WIZ_REDIS_URL:+, REDIS_URL=$WIZ_REDIS_URL}"
     fi
-    echo "  Администратор:     $WIZ_ADMIN_USERNAME"
-    echo "  Смена пароля:      $WIZ_ADMIN_MUST_CHANGE_PASSWORD"
-    echo "  Политика паролей:  $WIZ_ENFORCE_PASSWORD_POLICY"
-    echo "  BACKUP_ROOT:       $WIZ_BACKUP_ROOT"
-    echo "  CIDR refresh:      $WIZ_CIDR_DB_REFRESH_ENABLED"
-    echo "  Traffic sync:      $WIZ_TRAFFIC_SYNC_ENABLED"
-    echo "  Telegram:          $WIZ_TELEGRAM_ENABLED"
-    echo "  Auto-backup:       $WIZ_AUTO_BACKUP_ENABLED"
+    ui_summary_row "Администратор" "$WIZ_ADMIN_USERNAME"
+    ui_summary_row "Смена пароля" "$WIZ_ADMIN_MUST_CHANGE_PASSWORD"
+    ui_summary_row "Политика паролей" "$WIZ_ENFORCE_PASSWORD_POLICY"
+    ui_summary_row "BACKUP_ROOT" "$WIZ_BACKUP_ROOT"
+    ui_summary_row "CIDR refresh" "$WIZ_CIDR_DB_REFRESH_ENABLED"
+    ui_summary_row "Traffic sync" "$WIZ_TRAFFIC_SYNC_ENABLED"
+    ui_summary_row "Telegram" "$WIZ_TELEGRAM_ENABLED"
+    ui_summary_row "Auto-backup" "$WIZ_AUTO_BACKUP_ENABLED"
   fi
   if [[ "$WIZ_INSTALL_TYPE" != "controller" ]]; then
-    echo "  Node agent port:   $WIZ_NODE_AGENT_PORT"
-    echo "  Node API key:      ${WIZ_NODE_AGENT_API_KEY:0:8}..."
-    echo "  Node allowed IPs:  ${WIZ_NODE_AGENT_ALLOWED_IPS:-(без ограничения)}"
-    echo "  Node state dir:    $WIZ_NODE_STATE_DIR"
+    ui_summary_row "Node agent port" "$WIZ_NODE_AGENT_PORT"
+    ui_summary_row "Node API key" "${WIZ_NODE_AGENT_API_KEY:0:8}..."
+    ui_summary_row "Node allowed IPs" "${WIZ_NODE_AGENT_ALLOWED_IPS:-(без ограничения)}"
+    ui_summary_row "Node state dir" "$WIZ_NODE_STATE_DIR"
   fi
-  echo "  State dir:         $WIZ_STATE_DIR"
-  echo "  Режим запуска:     $WIZ_RUN_MODE"
-  echo "  Firewall auto:     $WIZ_CONFIGURE_FIREWALL"
+  ui_summary_row "State dir" "$WIZ_STATE_DIR"
+  ui_summary_row "Режим запуска" "$WIZ_RUN_MODE"
+  ui_summary_row "Firewall auto" "$WIZ_CONFIGURE_FIREWALL"
   if [[ "$WIZ_INSTALL_TYPE" != "node" && "$WIZ_APP_ENV" == "production" && "$WIZ_NGINX_MODE" == "none" ]]; then
     echo
-    echo "  ВНИМАНИЕ: APP_ENV=production без HTTPS — для интернета настройте Nginx (шаг 5 или ./scripts/nginx-setup.sh)."
+    print_warn "APP_ENV=production без HTTPS — для интернета настройте Nginx (./scripts/nginx-setup.sh)."
   fi
   echo
 }
@@ -898,23 +875,26 @@ wizard_confirm_apply() {
     return 0
   fi
 
-  wiz_prompt_yesno "Применить конфигурацию?" "n"
-  if [[ "$REPLY" == "y" ]]; then
+  echo
+  ui_separator
+  if ui_confirm "Применить конфигурацию и начать установку?" "n"; then
     WIZ_APPLY_CONFIRMED=true
+    print_success "Конфигурация принята, начинаем установку..."
   else
     WIZ_APPLY_CONFIRMED=false
-    echo "Установка отменена."
+    print_info "Установка отменена."
     exit 0
   fi
 }
 
 run_install_wizard() {
-  wiz_title "AdminPanelAZ — мастер установки"
-  echo "Ответьте на вопросы ниже. Enter — значение по умолчанию в [скобках]."
+  ui_show_banner
+  ui_section "Мастер установки"
+  print_info "Ответьте на вопросы ниже. Enter — значение по умолчанию в [скобках]."
   echo
 
   wizard_ask_install_type
-  wizard_ask_antizapret
+  wizard_configure_antizapret
   wizard_ask_network
   wizard_ask_ddns
   wizard_ask_app_env
@@ -933,14 +913,14 @@ run_install_wizard() {
 
 wizard_install_controller() {
   case "$WIZ_INSTALL_TYPE" in
-    controller|controller_node) return 0 ;;
+    controller) return 0 ;;
     *) return 1 ;;
   esac
 }
 
 wizard_install_node() {
   case "$WIZ_INSTALL_TYPE" in
-    controller_node|node) return 0 ;;
+    node) return 0 ;;
     *) return 1 ;;
   esac
 }

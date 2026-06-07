@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# Базовое удаление AdminPanelAZ (остановка сервисов, systemd units)
+# Удаление AdminPanelAZ (остановка сервисов, systemd units, опционально — состояние и каталог проекта)
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_NAME="AdminPanelAZ"
 
 PURGE_STATE=false
+PURGE_REPO=false
+REMOVE_NGINX=false
+REMOVE_FIREWALL=false
+REMOVE_ENV=false
+REMOVE_SYSTEM_CONFIG=false
+YES=false
+SKIP_CONFIRM=false
 
 log() {
   echo "[uninstall] $*"
@@ -15,15 +23,27 @@ warn() {
 }
 
 usage() {
-  cat <<'EOF'
+  cat <<EOF
 Использование: sudo ./scripts/uninstall.sh [опции]
 
 Опции:
-  --purge-state   Удалить каталоги состояния (/var/lib/adminpanelaz, .runtime)
-  --help          Показать справку
+  --purge-state         Удалить каталоги состояния (/var/lib/adminpanelaz, /var/lib/adminpanelaz-node, .runtime)
+  --purge               Удалить каталог проекта ($ROOT_DIR) — необратимо
+  --remove-nginx        Удалить конфигурацию nginx сайта (по DOMAIN из backend/.env)
+  --remove-firewall     Удалить правила ufw с комментарием AdminPanelAZ
+  --remove-env          Удалить backend/.env и backend/node_agent.env
+  --remove-system-config  Удалить /etc/adminpanelaz/ddns.env и mtls (не трогает AntiZapret)
+  -y, --yes             Без интерактивных подтверждений
+  --skip-confirm        Не спрашивать подтверждение (вызывается из install.sh после своего диалога)
+  --help                Показать справку
 
-Останавливает daemon/start.sh, удаляет systemd units adminpanelaz и adminpanelaz-node.
-Каталог проекта и backend/.env не удаляются.
+По умолчанию останавливает сервисы и удаляет systemd units (adminpanelaz, adminpanelaz-node, DDNS timer).
+Каталог проекта, backend/.env и данные AntiZapret не удаляются без явных флагов.
+
+Примеры:
+  sudo ./scripts/uninstall.sh
+  sudo ./scripts/uninstall.sh --purge-state --remove-nginx -y
+  sudo ./scripts/uninstall.sh --purge-state --purge --remove-env -y
 EOF
 }
 
@@ -32,6 +52,28 @@ parse_args() {
     case "$1" in
       --purge-state)
         PURGE_STATE=true
+        ;;
+      --purge)
+        PURGE_REPO=true
+        ;;
+      --remove-nginx)
+        REMOVE_NGINX=true
+        ;;
+      --remove-firewall)
+        REMOVE_FIREWALL=true
+        ;;
+      --remove-env)
+        REMOVE_ENV=true
+        ;;
+      --remove-system-config)
+        REMOVE_SYSTEM_CONFIG=true
+        ;;
+      -y|--yes)
+        YES=true
+        ;;
+      --skip-confirm)
+        SKIP_CONFIRM=true
+        YES=true
         ;;
       --help|-h)
         usage
@@ -45,6 +87,47 @@ parse_args() {
     esac
     shift
   done
+}
+
+confirm_destructive() {
+  if [[ "$SKIP_CONFIRM" == true || "$YES" == true ]]; then
+    return 0
+  fi
+
+  echo
+  warn "Будут остановлены сервисы AdminPanelAZ и удалены systemd units."
+  if [[ "$REMOVE_NGINX" == true ]]; then
+    warn "Будет удалена конфигурация nginx для панели."
+  fi
+  if [[ "$REMOVE_FIREWALL" == true ]]; then
+    warn "Будут удалены правила firewall с меткой AdminPanelAZ."
+  fi
+  if [[ "$PURGE_STATE" == true ]]; then
+    warn "Будут удалены каталоги состояния (/var/lib/adminpanelaz, /var/lib/adminpanelaz-node, .runtime)."
+  fi
+  if [[ "$REMOVE_ENV" == true ]]; then
+    warn "Будут удалены backend/.env и backend/node_agent.env."
+  fi
+  if [[ "$REMOVE_SYSTEM_CONFIG" == true ]]; then
+    warn "Будет удалён /etc/adminpanelaz/ddns.env (и mtls при наличии)."
+  fi
+  if [[ "$PURGE_REPO" == true ]]; then
+    warn "Будет удалён каталог проекта: $ROOT_DIR"
+  fi
+  warn "Данные AntiZapret (/root/antizapret и др.) НЕ удаляются."
+  echo
+  echo "Для подтверждения введите yes или $PROJECT_NAME:"
+  local answer=""
+  read -r answer
+  if [[ "$answer" == "yes" || "$answer" == "$PROJECT_NAME" ]]; then
+    return 0
+  fi
+  die_confirm "Удаление отменено."
+}
+
+die_confirm() {
+  echo "[uninstall] $*" >&2
+  exit 1
 }
 
 stop_local_daemons() {
@@ -90,14 +173,21 @@ remove_ddns_timer() {
 }
 
 remove_nginx_site_if_present() {
+  if [[ "$REMOVE_NGINX" != true ]]; then
+    return 0
+  fi
+
   local env_file="$ROOT_DIR/backend/.env"
   local domain=""
 
-  if [[ ! -f "$env_file" ]]; then
+  if [[ -f "$env_file" ]]; then
+    domain=$(grep -E '^DOMAIN=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ' || true)
+  fi
+
+  if [[ -z "$domain" ]]; then
+    warn "DOMAIN не найден в backend/.env — пропуск удаления nginx (или укажите конфиг вручную)"
     return 0
   fi
-  domain=$(grep -E '^DOMAIN=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ' || true)
-  [[ -n "$domain" ]] || return 0
 
   local conf_base="${domain//./_}"
   local removed=false
@@ -113,11 +203,74 @@ remove_nginx_site_if_present() {
     if command -v nginx >/dev/null 2>&1; then
       nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null || warn "nginx не перезагружен"
     fi
+  else
+    log "Конфигурация nginx для $domain не найдена"
   fi
 
   if [[ -f /etc/ssl/certs/adminpanelaz.crt ]]; then
     rm -f /etc/ssl/certs/adminpanelaz.crt /etc/ssl/private/adminpanelaz.key
     log "Удалён самоподписанный сертификат adminpanelaz"
+  fi
+}
+
+remove_firewall_rules() {
+  if [[ "$REMOVE_FIREWALL" != true ]]; then
+    return 0
+  fi
+
+  if command -v ufw >/dev/null 2>&1; then
+    log "Удаление правил ufw AdminPanelAZ..."
+    local nums
+    nums=$(ufw status numbered 2>/dev/null | grep -i 'AdminPanelAZ' | sed -n 's/^\[\([0-9]*\)\].*/\1/p' | sort -rn || true)
+    if [[ -n "$nums" ]]; then
+      while IFS= read -r num; do
+        [[ -n "$num" ]] || continue
+        ufw --force delete "$num" >/dev/null 2>&1 || true
+      done <<<"$nums"
+      ufw reload >/dev/null 2>&1 || true
+      log "Правила ufw AdminPanelAZ удалены"
+    else
+      log "Правила ufw AdminPanelAZ не найдены"
+    fi
+    return 0
+  fi
+
+  warn "Автоматическое удаление правил iptables не поддерживается — проверьте правила вручную (см. SECURITY.md)"
+}
+
+remove_system_config() {
+  if [[ "$REMOVE_SYSTEM_CONFIG" != true ]]; then
+    return 0
+  fi
+
+  local config_dir="/etc/adminpanelaz"
+  if [[ -f "$config_dir/ddns.env" ]]; then
+    rm -f "$config_dir/ddns.env"
+    log "Удалён $config_dir/ddns.env"
+  fi
+  if [[ -d "$config_dir/mtls" ]]; then
+    rm -rf "$config_dir/mtls"
+    log "Удалён $config_dir/mtls"
+  fi
+  if [[ -d "$config_dir" ]] && [[ -z "$(ls -A "$config_dir" 2>/dev/null || true)" ]]; then
+    rmdir "$config_dir" 2>/dev/null || true
+  fi
+}
+
+remove_env_files() {
+  if [[ "$REMOVE_ENV" != true ]]; then
+    return 0
+  fi
+
+  local env_file="$ROOT_DIR/backend/.env"
+  local node_env="$ROOT_DIR/backend/node_agent.env"
+  if [[ -f "$env_file" ]]; then
+    rm -f "$env_file"
+    log "Удалён $env_file"
+  fi
+  if [[ -f "$node_env" ]]; then
+    rm -f "$node_env"
+    log "Удалён $node_env"
   fi
 }
 
@@ -135,6 +288,38 @@ purge_state_dirs() {
   done
 }
 
+purge_repo_dir() {
+  if [[ "$PURGE_REPO" != true ]]; then
+    return 0
+  fi
+
+  if [[ ! -d "$ROOT_DIR" ]]; then
+    warn "Каталог проекта уже отсутствует: $ROOT_DIR"
+    return 0
+  fi
+
+  log "Удаление каталога проекта $ROOT_DIR..."
+  rm -rf "$ROOT_DIR"
+  log "Каталог проекта удалён"
+}
+
+print_summary() {
+  if [[ "$PURGE_REPO" == true ]]; then
+    log "Полное удаление завершено. Каталог проекта удалён."
+    return
+  fi
+
+  log "Удаление завершено."
+  if [[ "$PURGE_STATE" != true ]]; then
+    warn "Каталоги состояния сохранены. Для удаления: sudo $0 --purge-state"
+  fi
+  if [[ "$REMOVE_ENV" != true ]]; then
+    log "backend/.env и node_agent.env сохранены в $ROOT_DIR/backend/"
+  fi
+  log "Каталог проекта ($ROOT_DIR) сохранён."
+  log "Данные AntiZapret не затронуты."
+}
+
 main() {
   parse_args "$@"
 
@@ -143,20 +328,27 @@ main() {
     exit 1
   fi
 
+  confirm_destructive
+
   stop_local_daemons
   remove_nginx_site_if_present
   remove_ddns_timer
   remove_systemd_unit "adminpanelaz"
   remove_systemd_unit "adminpanelaz-node"
   systemctl daemon-reload 2>/dev/null || true
+  remove_firewall_rules
+  remove_system_config
 
   if [[ "$PURGE_STATE" == true ]]; then
     purge_state_dirs
-  else
-    warn "Каталоги состояния сохранены. Для удаления: sudo $0 --purge-state"
   fi
 
-  log "Удаление завершено. Каталог проекта ($ROOT_DIR) и backend/.env не тронуты."
+  remove_env_files
+
+  # Каталог проекта удаляем последним (скрипт перестанет существовать)
+  purge_repo_dir
+
+  print_summary
 }
 
 main "$@"

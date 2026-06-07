@@ -3,6 +3,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/install-ui.sh
+source "$ROOT_DIR/scripts/install-ui.sh"
+ui_init
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 VENV_DIR="$BACKEND_DIR/.venv"
@@ -21,53 +24,38 @@ INSTALL_FROM_GIT="${INSTALL_FROM_GIT:-}"
 INSTALL_TARGET="${INSTALL_TARGET:-$ROOT_DIR}"
 GENERATED_NODE_KEY=""
 WIZARD_RAN=false
+ACTION="install"
+PURGE_REPO=false
+ENV_BACKUP_DIR=""
+RESTORE_ENV_AFTER_INSTALL=false
 
 log() {
-  echo "[install] $*"
+  if [[ "$NON_INTERACTIVE" == true ]] || [[ ! -t 1 ]]; then
+    echo "[install] $*"
+  else
+    print_info "$*"
+  fi
 }
 
 warn() {
-  echo "[install] ВНИМАНИЕ: $*" >&2
+  if [[ "$NON_INTERACTIVE" == true ]] || [[ ! -t 1 ]]; then
+    echo "[install] ВНИМАНИЕ: $*" >&2
+  else
+    print_warn "$*"
+  fi
 }
 
 die() {
-  echo "[install] ОШИБКА: $*" >&2
+  if [[ "$NON_INTERACTIVE" == true ]] || [[ ! -t 1 ]]; then
+    echo "[install] ОШИБКА: $*" >&2
+  else
+    print_error "$*"
+  fi
   exit 1
 }
 
 usage() {
-  cat <<'EOF'
-Использование: sudo ./install.sh [опции]
-
-Единая точка входа для установки AdminPanelAZ. В интерактивном режиме (TTY)
-задаёт все вопросы: тип установки, сеть, HTTPS, администратор, node agent и т.д.
-
-Опции:
-  --with-daemon         Запустить prod daemon через start.sh после установки
-  --with-systemd        Установить systemd unit (без мастера — флаг явный)
-  --with-node-agent     Настроить node agent (без мастера — флаг явный)
-  --force               Перезаписать существующий backend/.env из .env.example
-  --non-interactive     Без интерактивного мастера (флаги и переменные окружения)
-  -y, --yes             Принять значения по умолчанию (для мастера или авто-подтверждение)
-  --help                Показать эту справку
-
-Переменные окружения:
-  INSTALL_FROM_GIT      URL репозитория для клонирования (если скрипт запущен вне проекта)
-  INSTALL_TARGET        Каталог установки при клонировании (по умолчанию — каталог скрипта)
-  INSTALL_USER          Пользователь systemd-сервисов (по умолчанию root)
-
-Интерактивный режим (по умолчанию при TTY):
-  Мастер установки задаёт тип (controller / controller+node / node-only),
-  сеть, администратора, node agent, systemd/daemon и опции .env.
-
-Примеры:
-  cd /opt/AdminPanelAZ && sudo ./install.sh
-  sudo ./install.sh --with-systemd
-  sudo ./install.sh --with-systemd --with-node-agent
-  sudo ./install.sh --non-interactive --with-systemd
-  sudo ./install.sh -y
-  sudo INSTALL_FROM_GIT=https://github.com/user/AdminPanelAZ.git ./install.sh
-EOF
+  ui_show_help
 }
 
 parse_args() {
@@ -91,6 +79,18 @@ parse_args() {
       -y|--yes)
         ACCEPT_DEFAULTS=true
         ;;
+      --uninstall)
+        ACTION="uninstall"
+        ;;
+      --purge)
+        PURGE_REPO=true
+        if [[ "$ACTION" == "install" ]]; then
+          ACTION="uninstall"
+        fi
+        ;;
+      --reinstall)
+        ACTION="reinstall"
+        ;;
       --help|-h)
         usage
         exit 0
@@ -101,6 +101,185 @@ parse_args() {
     esac
     shift
   done
+}
+
+prompt_yes_no() {
+  local prompt="$1"
+  local default="${2:-n}"
+  local answer=""
+
+  if [[ "$ACCEPT_DEFAULTS" == true ]]; then
+    [[ "$default" == "y" ]]
+    return $?
+  fi
+
+  if [[ "$default" == "y" ]]; then
+    read -r -p "$prompt [Y/n]: " answer
+    answer="${answer:-y}"
+  else
+    read -r -p "$prompt [y/N]: " answer
+    answer="${answer:-n}"
+  fi
+  [[ "$answer" == "y" || "$answer" == "Y" || "$answer" == "yes" || "$answer" == "да" ]]
+}
+
+show_main_menu() {
+  local choice=""
+  while true; do
+    ui_show_main_menu
+    read -r -p "Выберите пункт [1]: " choice
+    choice="${choice:-1}"
+    case "$choice" in
+      1)
+        return 0
+        ;;
+      2)
+        run_reinstall_action
+        exit $?
+        ;;
+      3)
+        run_uninstall_action
+        exit $?
+        ;;
+      4)
+        usage
+        exit 0
+        ;;
+      *)
+        print_warn "Неизвестный пункт: $choice"
+        ;;
+    esac
+  done
+}
+
+collect_uninstall_options() {
+  local -n _out_args=$1
+  _out_args=(--purge-state --remove-system-config)
+
+  if [[ "$NON_INTERACTIVE" == true ]]; then
+    _out_args+=(--remove-nginx --yes)
+    if [[ "$PURGE_REPO" == true ]]; then
+      _out_args+=(--purge)
+    fi
+    return 0
+  fi
+
+  if [[ "$ACCEPT_DEFAULTS" == true ]]; then
+    _out_args+=(--remove-nginx --yes)
+    if [[ "$PURGE_REPO" == true ]]; then
+      _out_args+=(--purge)
+    fi
+    return 0
+  fi
+
+  ui_show_banner
+  ui_section "Полное удаление AdminPanelAZ"
+  ui_warn_box "Внимание" \
+    "Будут остановлены systemd-сервисы, daemon/watchdog и удалены unit-файлы." \
+    "Данные AntiZapret (/root/antizapret и др.) НЕ удаляются."
+  echo
+
+  if ui_confirm "Удалить конфигурацию nginx сайта панели?" "y"; then
+    _out_args+=(--remove-nginx)
+  fi
+  if ui_confirm "Удалить правила firewall AdminPanelAZ (ufw)?" "n"; then
+    _out_args+=(--remove-firewall)
+  fi
+  if ui_confirm "Удалить backend/.env и node_agent.env?" "n" "true"; then
+    _out_args+=(--remove-env)
+  fi
+  if [[ "$PURGE_REPO" == true ]] || ui_confirm "Удалить каталог проекта $ROOT_DIR (--purge)?" "n" "true"; then
+    _out_args+=(--purge)
+    PURGE_REPO=true
+  fi
+}
+
+run_uninstall_action() {
+  resolve_project_dir
+  ensure_executable_scripts
+
+  local -a uninstall_args=()
+  collect_uninstall_options uninstall_args
+
+  log "Запуск удаления..."
+  "$ROOT_DIR/scripts/uninstall.sh" "${uninstall_args[@]}"
+}
+
+backup_env_for_reinstall() {
+  ENV_BACKUP_DIR=""
+  local stamp
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  ENV_BACKUP_DIR="$ROOT_DIR/.reinstall-backup/$stamp"
+  mkdir -p "$ENV_BACKUP_DIR"
+
+  if [[ -f "$ENV_FILE" ]]; then
+    cp -a "$ENV_FILE" "$ENV_BACKUP_DIR/.env"
+    log "Резервная копия: $ENV_BACKUP_DIR/.env"
+  fi
+  if [[ -f "$NODE_ENV_FILE" ]]; then
+    cp -a "$NODE_ENV_FILE" "$ENV_BACKUP_DIR/node_agent.env"
+    log "Резервная копия: $ENV_BACKUP_DIR/node_agent.env"
+  fi
+}
+
+offer_restore_env_backup() {
+  if [[ -z "$ENV_BACKUP_DIR" || ! -d "$ENV_BACKUP_DIR" ]]; then
+    return 0
+  fi
+  if [[ "$RESTORE_ENV_AFTER_INSTALL" == true ]]; then
+    restore_env_backup
+    return 0
+  fi
+  if [[ "$NON_INTERACTIVE" == true ]]; then
+    return 0
+  fi
+  if ! prompt_yes_no "Восстановить backend/.env из резервной копии переустановки?" "n"; then
+    log "Конфигурация из мастера сохранена. Резервная копия: $ENV_BACKUP_DIR"
+    return 0
+  fi
+  restore_env_backup
+}
+
+restore_env_backup() {
+  if [[ -f "$ENV_BACKUP_DIR/.env" ]]; then
+    cp -a "$ENV_BACKUP_DIR/.env" "$ENV_FILE"
+    log "Восстановлен backend/.env из $ENV_BACKUP_DIR"
+  fi
+  if [[ -f "$ENV_BACKUP_DIR/node_agent.env" ]]; then
+    cp -a "$ENV_BACKUP_DIR/node_agent.env" "$NODE_ENV_FILE"
+    log "Восстановлен backend/node_agent.env из $ENV_BACKUP_DIR"
+  fi
+}
+
+run_reinstall_action() {
+  resolve_project_dir
+  ensure_executable_scripts
+
+  if [[ "$NON_INTERACTIVE" != true && "$ACCEPT_DEFAULTS" != true && -t 0 ]]; then
+    ui_show_banner
+    ui_section "Переустановка AdminPanelAZ"
+    ui_info_box "" \
+      "Резервная копия .env → удаление сервисов и состояния → новая установка."
+    echo
+    if ! ui_confirm "Продолжить переустановку?" "n"; then
+      print_info "Переустановка отменена."
+      exit 0
+    fi
+  fi
+
+  backup_env_for_reinstall
+
+  local -a uninstall_args=(--purge-state --remove-nginx --remove-system-config --skip-confirm)
+  if [[ "$NON_INTERACTIVE" == true || "$ACCEPT_DEFAULTS" == true ]]; then
+    uninstall_args+=(--yes)
+  fi
+
+  log "Удаление перед переустановкой..."
+  "$ROOT_DIR/scripts/uninstall.sh" "${uninstall_args[@]}"
+
+  ACTION="install"
+  run_install_flow
+  offer_restore_env_backup
 }
 
 should_run_wizard() {
@@ -228,7 +407,7 @@ install_nodejs() {
 }
 
 install_system_deps() {
-  log "Установка системных зависимостей..."
+  ui_progress_start "Установка системных зависимостей"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y \
@@ -245,6 +424,7 @@ install_system_deps() {
     libssl-dev
 
   install_nodejs
+  ui_progress_done "Системные зависимости"
 }
 
 resolve_project_dir() {
@@ -478,7 +658,7 @@ setup_node_env() {
 }
 
 setup_backend() {
-  log "Настройка backend (Python venv)..."
+  ui_progress_start "Настройка backend (Python venv)"
   if [[ ! -d "$VENV_DIR" ]]; then
     python3 -m venv "$VENV_DIR"
     log "Создано виртуальное окружение: $VENV_DIR"
@@ -491,7 +671,7 @@ setup_backend() {
   pip install -q --upgrade pip
   pip install -q -r "$BACKEND_DIR/requirements.txt"
   mkdir -p "$BACKEND_DIR/data"
-  log "Зависимости backend установлены"
+  ui_progress_done "Backend (Python venv)"
 }
 
 seed_wizard_db_settings() {
@@ -517,16 +697,17 @@ setup_frontend() {
     return 0
   fi
 
-  log "Настройка frontend (npm)..."
+  ui_progress_start "Настройка frontend (npm install)"
   if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
     (cd "$FRONTEND_DIR" && npm install)
   else
-    log "node_modules уже существует, npm install пропущен (удалите node_modules для полной переустановки)"
+    print_info "node_modules уже существует, npm install пропущен (удалите node_modules для полной переустановки)"
   fi
+  ui_progress_done "Frontend (npm install)"
 
-  log "Сборка frontend (npm run build)..."
+  ui_progress_start "Сборка frontend (npm run build)"
   (cd "$FRONTEND_DIR" && npm run build)
-  log "Frontend собран: $FRONTEND_DIR/dist"
+  ui_progress_done "Frontend собран: $FRONTEND_DIR/dist"
 }
 
 setup_runtime_dirs() {
@@ -847,40 +1028,38 @@ print_post_install() {
   local admin_user="${WIZ_ADMIN_USERNAME:-admin}"
   local admin_pass="${WIZ_ADMIN_PASSWORD:-admin}"
 
-  cat <<EOF
-
-================================================================================
-  AdminPanelAZ — установка завершена
-================================================================================
-
-Каталог проекта:  $ROOT_DIR
-
-EOF
+  echo
+  if [[ "$UI_USE_COLOR" == true ]]; then
+    print_success "Установка AdminPanelAZ завершена"
+  else
+    echo "[install] Установка AdminPanelAZ завершена"
+  fi
+  echo
+  ui_summary_title
+  ui_summary_row "Каталог проекта" "$ROOT_DIR"
 
   if install_controller_selected; then
-    cat <<EOF
-Учётные данные:
-  Логин:  ${admin_user}
-  Пароль: ${admin_pass}
-  (смените при первом входе, если включено принудительная смена пароля)
-
-URL (prod / systemd):
-  UI + API:  http://127.0.0.1:${backend_port}/
-  API docs:  http://127.0.0.1:${backend_port}/docs
-
-Конфигурация:     $ENV_FILE
-EOF
+    ui_separator
+    ui_bold "Учётные данные"
+    echo
+    ui_summary_row "Логин" "$admin_user"
+    ui_summary_row "Пароль" "$admin_pass"
+    print_info "Смените пароль при первом входе, если включена принудительная смена"
+    echo
+    ui_separator
+    ui_bold "URL (prod / systemd)"
+    echo
+    ui_summary_row "UI + API" "http://127.0.0.1:${backend_port}/"
+    ui_summary_row "API docs" "http://127.0.0.1:${backend_port}/docs"
+    ui_summary_row "Конфигурация" "$ENV_FILE"
   fi
 
   if install_node_selected; then
-    echo "Node agent env:   $NODE_ENV_FILE"
+    ui_summary_row "Node agent env" "$NODE_ENV_FILE"
   fi
 
-  cat <<EOF
-Логи (локально):  ${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-$ROOT_DIR/.runtime}}/logs/
-Логи (systemd):   /var/lib/adminpanelaz/logs/
-
-EOF
+  ui_summary_row "Логи (локально)" "${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-$ROOT_DIR/.runtime}}/logs/"
+  ui_summary_row "Логи (systemd)" "/var/lib/adminpanelaz/logs/"
 
   if install_controller_selected; then
     if [[ "${WIZ_DDNS_PROVIDER:-none}" != "none" ]]; then
@@ -889,115 +1068,132 @@ EOF
         duckdns) ddns_domain="${WIZ_DDNS_SUBDOMAIN}.duckdns.org" ;;
         noip) ddns_domain="${WIZ_DDNS_HOSTNAME}" ;;
       esac
-      cat <<EOF
-DDNS (${WIZ_DDNS_PROVIDER}):
-  Домен:   ${ddns_domain}
-  Обновление IP: sudo ./scripts/ddns-update.sh update
-  Статус:  sudo ./scripts/ddns-update.sh status
-
-EOF
+      echo
+      ui_separator
+      ui_bold "DDNS (${WIZ_DDNS_PROVIDER})"
+      echo
+      ui_summary_row "Домен" "$ddns_domain"
+      ui_summary_row "Обновление IP" "sudo ./scripts/ddns-update.sh update"
+      ui_summary_row "Статус" "sudo ./scripts/ddns-update.sh status"
     fi
+    echo
+    ui_separator
+    ui_bold "Публикация"
+    echo
     if [[ "${WIZ_NGINX_MODE:-none}" != "none" && -n "${WIZ_NGINX_DOMAIN:-}" ]]; then
       local pub_https="${WIZ_HTTPS_PUBLIC_PORT:-443}"
       local url_suffix=""
       if [[ "$pub_https" != "443" ]]; then
         url_suffix=":${pub_https}"
       fi
-      cat <<EOF
-Публикация (настроено при установке):
-  https://${WIZ_NGINX_DOMAIN}${url_suffix}/
-
-EOF
+      ui_summary_row "HTTPS" "https://${WIZ_NGINX_DOMAIN}${url_suffix}/"
     else
-      cat <<EOF
-Публикация в интернет (nginx + SSL):
-  sudo ./scripts/nginx-setup.sh
-  # или повторно: sudo ./install.sh
-
-EOF
+      print_info "Для интернета: sudo ./scripts/nginx-setup.sh или повторно sudo ./install.sh"
     fi
-    cat <<EOF
-Управление controller:
-  ./start.sh              # dev, foreground
-  ./start.sh daemon       # prod daemon + watchdog
-  ./start.sh stop         # остановка
-  ./start.sh status       # статус
-  systemctl start adminpanelaz    # если установлен systemd
-  systemctl status adminpanelaz
-
-EOF
+    echo
+    ui_separator
+    ui_bold "Управление controller"
+    echo
+    ui_info_box "" \
+      "./start.sh              # dev, foreground" \
+      "./start.sh daemon       # prod daemon + watchdog" \
+      "./start.sh stop         # остановка" \
+      "./start.sh status       # статус" \
+      "systemctl start adminpanelaz    # если установлен systemd"
   fi
 
   if install_node_selected; then
-    cat <<EOF
-Node agent:
-  ./start_node_agent.sh daemon
-  systemctl start adminpanelaz-node   # если установлен systemd
-  Порт: ${node_port}
-
-EOF
+    echo
+    ui_separator
+    ui_bold "Node agent"
+    echo
+    ui_info_box "" \
+      "./start_node_agent.sh daemon" \
+      "systemctl start adminpanelaz-node   # если установлен systemd" \
+      "Порт: ${node_port}"
   fi
 
   if [[ -n "$node_key" ]]; then
-    cat <<EOF
-Сгенерированный NODE_AGENT_API_KEY (сохраните!):
-  $node_key
-
-EOF
+    echo
+    ui_separator
+    ui_bold "NODE_AGENT_API_KEY (сохраните!)"
+    echo
+    if [[ "$UI_USE_COLOR" == true ]]; then
+      echo "  $(ui_yellow "$node_key")"
+    else
+      echo "  $node_key"
+    fi
   fi
 
   if [[ "$WIZARD_RAN" == true ]]; then
+    echo
+    ui_separator
+    ui_bold "Firewall"
+    echo
     if [[ "${WIZ_CONFIGURE_FIREWALL:-false}" == true ]]; then
-      cat <<EOF
-Firewall:
-  Правила применены (backend ${backend_port}/tcp закрыт с интернета;
-  HTTPS ${WIZ_HTTPS_PUBLIC_PORT:-443}, HTTP ${WIZ_HTTP_ACME_PORT:-80} открыты при Nginx).
-  Подробнее: SECURITY.md
-
-EOF
+      ui_info_box "" \
+        "Правила применены (backend ${backend_port}/tcp закрыт с интернета;" \
+        "HTTPS ${WIZ_HTTPS_PUBLIC_PORT:-443}, HTTP ${WIZ_HTTP_ACME_PORT:-80} открыты при Nginx)." \
+        "Подробнее: SECURITY.md"
     else
-      cat <<EOF
-Firewall (рекомендации):
-  • Backend ${backend_port}/tcp — только localhost (127.0.0.1)
-  • Node agent ${node_port}/tcp — только IP панели
-  • Наружу — HTTPS ${WIZ_HTTPS_PUBLIC_PORT:-443} (и HTTP ${WIZ_HTTP_ACME_PORT:-80} для ACME)
-  • Подробнее: SECURITY.md
-
-EOF
+      ui_info_box "Рекомендации" \
+        "Backend ${backend_port}/tcp — только localhost (127.0.0.1)" \
+        "Node agent ${node_port}/tcp — только IP панели" \
+        "Наружу — HTTPS ${WIZ_HTTPS_PUBLIC_PORT:-443} (и HTTP ${WIZ_HTTP_ACME_PORT:-80} для ACME)" \
+        "Подробнее: SECURITY.md"
     fi
   fi
 
+  echo
+  ui_separator
+  ui_bold "Следующий шаг"
+  echo
   if [[ "$WITH_SYSTEMD" == true ]]; then
     if install_controller_selected; then
-      echo "Systemd: systemctl start adminpanelaz"
+      print_info "systemctl start adminpanelaz"
     fi
     if install_node_selected; then
-      echo "         systemctl start adminpanelaz-node"
+      print_info "systemctl start adminpanelaz-node"
     fi
-    echo
   elif [[ "$WITH_DAEMON" == true ]]; then
-    echo "Daemon запущен. Проверка: $ROOT_DIR/start.sh status"
-    echo
-  elif [[ "$WIZ_RUN_MODE:-manual}" == "manual" ]] || [[ "$WIZARD_RAN" != true ]]; then
-    cat <<EOF
-Следующий шаг:
-  cd $ROOT_DIR
-EOF
+    print_info "Daemon запущен. Проверка: $ROOT_DIR/start.sh status"
+  else
+    local -a next_steps=("cd $ROOT_DIR")
     if install_controller_selected; then
-      echo "  sudo ./start.sh daemon          # prod controller"
+      next_steps+=("sudo ./start.sh daemon          # prod controller")
     fi
     if install_node_selected; then
-      echo "  sudo ./start_node_agent.sh daemon"
+      next_steps+=("sudo ./start_node_agent.sh daemon")
     fi
-    echo "  # или"
-    echo "  sudo ./install.sh --with-systemd"
-    echo
+    next_steps+=("# или: sudo ./install.sh --with-systemd")
+    ui_info_box "Запуск вручную" "${next_steps[@]}"
   fi
+  echo
 }
 
 main() {
+  local original_argc=$#
   parse_args "$@"
   require_root "$@"
+
+  if [[ "$ACTION" == "uninstall" ]]; then
+    run_uninstall_action
+    exit 0
+  fi
+
+  if [[ "$ACTION" == "reinstall" ]]; then
+    run_reinstall_action
+    exit 0
+  fi
+
+  if [[ "$original_argc" -eq 0 && -t 0 && "$NON_INTERACTIVE" != true ]]; then
+    show_main_menu
+  fi
+
+  run_install_flow
+}
+
+run_install_flow() {
   check_os
   resolve_project_dir
   run_wizard_if_needed

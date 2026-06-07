@@ -70,6 +70,7 @@ function getNodeMeta(node: Node) {
       servicesActive !== null && servicesTotal !== null ? `${servicesActive}/${servicesTotal}` : null,
     agentVersion: typeof meta.agent_version === 'string' ? meta.agent_version : null,
     antizapretVersion: typeof meta.antizapret_version === 'string' ? meta.antizapret_version : null,
+    lastError: typeof meta.last_error === 'string' ? meta.last_error : null,
   }
 }
 
@@ -264,6 +265,11 @@ function NodeCard({
           )}
           {lastSeen && <span>Последняя проверка: {lastSeen}</span>}
         </div>
+        {node.status === 'offline' && meta.lastError && (
+          <SettingsAlert variant="danger" title="Ошибка связи">
+            {meta.lastError}
+          </SettingsAlert>
+        )}
         <NodeActions
           node={node}
           isActive={isActive}
@@ -404,10 +410,14 @@ export default function NodesPage() {
     try {
       const result = await checkNodeHealth(node.id)
       const label = statusLabels[result.status] ?? result.status
+      const errDetail =
+        typeof result.health?.error === 'string' ? result.health.error : null
       if (result.status === 'online') {
         success(`Узел «${node.name}»: ${label}`)
       } else {
-        notifyError(`Узел «${node.name}»: ${label}`)
+        notifyError(
+          errDetail ? `Узел «${node.name}»: ${errDetail}` : `Узел «${node.name}»: ${label}`,
+        )
       }
       await load()
     } catch (err) {
@@ -575,6 +585,14 @@ export default function NodesPage() {
                             <NodeStatusBadge status={node.status} />
                             {lastSeen && (
                               <div className="mt-1 text-[10px] text-muted-foreground">{lastSeen}</div>
+                            )}
+                            {node.status === 'offline' && meta.lastError && (
+                              <div
+                                className="mt-1 max-w-xs text-[10px] text-destructive"
+                                title={meta.lastError}
+                              >
+                                {meta.lastError}
+                              </div>
                             )}
                           </TableCell>
                           <TableCell>
