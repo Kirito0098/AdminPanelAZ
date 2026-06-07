@@ -40,7 +40,8 @@
 ```bash
 export NODE_AGENT_API_KEY="your-secure-random-key"
 export ANTIZAPRET_PATH=/root/antizapret
-./start_node_agent.sh
+./start_node_agent.sh              # foreground dev (uvicorn --reload)
+./start_node_agent.sh daemon       # prod daemon с watchdog (рекомендуется)
 ```
 
 3. В панели: **Узлы → Добавить узел** — укажите имя, хост, порт (по умолчанию 9100) и тот же API-ключ.
@@ -110,6 +111,60 @@ DEFAULT_ADMIN_PASSWORD=your-secure-password
 - Установленный AntiZapret в `/root/antizapret`
 - Права на выполнение `client.sh`, `doall.sh`, `systemctl`, `wg`
 
+## Установка на новый сервер
+
+Автоматическая установка на **Ubuntu 24.04** / **Debian 13+** (без Docker):
+
+```bash
+# Из копии проекта на сервере
+cd /opt/AdminPanelAZ
+sudo ./install.sh
+
+# С автозапуском через systemd (рекомендуется для production)
+sudo ./install.sh --with-systemd
+
+# Полная установка: controller + node agent на одной машине
+sudo ./install.sh --with-systemd --with-node-agent
+
+# Prod daemon без systemd (watchdog через start.sh)
+sudo ./install.sh --with-daemon
+
+# Клонирование из git при первом запуске
+sudo INSTALL_FROM_GIT=https://github.com/your-org/AdminPanelAZ.git \
+  INSTALL_TARGET=/opt/AdminPanelAZ ./install.sh --with-systemd
+```
+
+Скрипт `install.sh`:
+
+| Этап | Действие |
+|------|----------|
+| Pre-checks | root/sudo, версия ОС, наличие `/root/antizapret` |
+| Зависимости | python3, venv, pip, nodejs 18+, npm, git, curl, build-essential |
+| Backend | venv + `pip install -r requirements.txt` |
+| Frontend | `npm install` + `npm run build` |
+| Конфиг | `backend/.env` из `.env.example`, генерация `SECRET_KEY` |
+| Опции | `--with-daemon`, `--with-systemd`, `--with-node-agent` |
+
+Флаги:
+
+| Флаг | Описание |
+|------|----------|
+| `--with-daemon` | Запустить prod daemon (`./start.sh daemon`) после установки |
+| `--with-systemd` | Установить unit `adminpanelaz` (`scripts/install-systemd.sh`) |
+| `--with-node-agent` | Настроить node agent (+ `install-node-systemd.sh` с `--with-systemd`) |
+| `--force` | Перезаписать существующий `backend/.env` |
+
+Повторный запуск безопасен (идемпотентен): существующий `backend/.env` не перезаписывается без `--force`.
+
+Удаление (остановка сервисов, снятие systemd units):
+
+```bash
+sudo ./scripts/uninstall.sh
+sudo ./scripts/uninstall.sh --purge-state   # + удалить .runtime и /var/lib/adminpanelaz*
+```
+
+**Права root:** backend и node agent требуют root для `client.sh`, `doall.sh`, `wg`, `systemctl` (см. раздел «Ограничения»).
+
 ## Быстрый старт
 
 Запуск backend и frontend одной командой:
@@ -128,6 +183,95 @@ cd /opt/AdminPanelAZ
 - API: http://127.0.0.1:8000
 - Документация: http://127.0.0.1:8000/docs
 - UI: http://127.0.0.1:5173
+
+### Daemon / production (автоперезапуск)
+
+Для сервера используйте detached-режим с watchdog, который перезапускает упавшие процессы.
+
+| Команда | Описание |
+|---------|----------|
+| `./start.sh` или `./start.sh start` | **Dev, foreground** — uvicorn `--reload` + Vite dev; `Ctrl+C` для остановки |
+| `./start.sh daemon` | **Prod daemon** — detached watchdog, frontend из `frontend/dist` через backend |
+| `./start.sh daemon dev` | **Dev daemon** — detached watchdog, Vite dev server (для отладки на сервере) |
+| `./start.sh stop` | Graceful stop watchdog + backend + frontend |
+| `./start.sh status` | Статус процессов, режим, пути к логам |
+| `./start.sh restart` | Перезапуск daemon (сохраняет последний режим dev/prod) |
+
+**Каталог состояния:** по умолчанию `/opt/AdminPanelAZ/.runtime/` (скрытый, вне видимого корня). Переопределение: `ADMINPANELAZ_STATE_DIR` (для systemd: `/var/lib/adminpanelaz`).
+
+**Логи:** `$ADMINPANELAZ_STATE_DIR/logs/` (по умолчанию `.runtime/logs/`)
+
+| Файл | Содержимое |
+|------|------------|
+| `watchdog.log` | События watchdog (рестарты, остановка) |
+| `backend.log` | stdout/stderr uvicorn |
+| `frontend.log` | stdout/stderr Vite (только dev daemon) |
+| `frontend-build.log` | `npm run build` (prod daemon) |
+
+**PID-файлы:** `$ADMINPANELAZ_STATE_DIR/run/` (`watchdog.pid`, `backend.pid`, `frontend.pid`, `mode`)
+
+**Prod vs dev:**
+
+- **dev** — hot-reload backend, Vite на порту 5173 (как при локальной разработке).
+- **prod** — `npm run build`, статика из `frontend/dist` раздаётся через FastAPI (`SERVE_FRONTEND=true`). Один процесс uvicorn на порту 8000; UI: http://127.0.0.1:8000/
+
+Переменные:
+- `ADMINPANELAZ_MODE=dev|prod` — режим для `daemon` / `watchdog`
+- `ADMINPANELAZ_STATE_DIR` — каталог логов и PID (по умолчанию `.runtime/` в корне проекта)
+
+### Node Agent daemon (на VPN-сервере)
+
+| Команда | Описание |
+|---------|----------|
+| `./start_node_agent.sh` | **Dev, foreground** — uvicorn `--reload`; `Ctrl+C` для остановки |
+| `./start_node_agent.sh daemon` | **Prod daemon** — detached watchdog, uvicorn без reload |
+| `./start_node_agent.sh daemon dev` | Dev daemon с `--reload` |
+| `./start_node_agent.sh stop` | Остановка watchdog + agent |
+| `./start_node_agent.sh status` | Статус процессов и пути к логам |
+| `./start_node_agent.sh restart` | Перезапуск daemon |
+
+**Каталог состояния node agent:** по умолчанию `.runtime/node/`. Переопределение: `NODE_AGENT_STATE_DIR` (для systemd: `/var/lib/adminpanelaz-node`).
+
+| Переменная | По умолчанию | Описание |
+|------------|--------------|----------|
+| `NODE_AGENT_API_KEY` | `change-me-node-agent-key` | Ключ `X-Node-Key` |
+| `ANTIZAPRET_PATH` | `/root/antizapret` | Путь к AntiZapret |
+| `NODE_AGENT_PORT` | `9100` | Порт агента |
+| `NODE_AGENT_STATE_DIR` | `.runtime/node` | Логи и PID |
+
+**Логи node agent:** `$NODE_AGENT_STATE_DIR/logs/` (`agent.log`, `watchdog.log`)
+
+### systemd (рекомендуется для production)
+
+**Controller (панель):**
+
+```bash
+sudo ./scripts/install-systemd.sh
+sudo systemctl start adminpanelaz
+sudo systemctl status adminpanelaz
+```
+
+**Node agent (на VPN-сервере):**
+
+```bash
+# Задайте NODE_AGENT_API_KEY в systemd/adminpanelaz-node.service или после установки в /etc/systemd/system/
+sudo ./scripts/install-node-systemd.sh
+sudo systemctl start adminpanelaz-node
+sudo systemctl status adminpanelaz-node
+```
+
+Установщики копируют unit-файлы в `/etc/systemd/system/`, подставляют путь к проекту, создают каталоги состояния и включают автозапуск.
+
+| Сервис | State dir (systemd) | Журнал |
+|--------|---------------------|--------|
+| `adminpanelaz` | `/var/lib/adminpanelaz` | `journalctl -u adminpanelaz -f` |
+| `adminpanelaz-node` | `/var/lib/adminpanelaz-node` | `journalctl -u adminpanelaz-node -f` |
+
+- **Файловые логи controller:** `/var/lib/adminpanelaz/logs/` (или `.runtime/logs/` без systemd)
+- **Файловые логи node agent:** `/var/lib/adminpanelaz-node/logs/` (или `.runtime/node/logs/`)
+- **Остановка:** `systemctl stop …` или `./start.sh stop` / `./start_node_agent.sh stop`
+
+Другой пользователь: `sudo INSTALL_USER=adminpanel ./scripts/install-systemd.sh`
 
 ### Ручной запуск (альтернатива)
 
@@ -160,8 +304,10 @@ UI: http://127.0.0.1:5173
 ```bash
 cd /opt/AdminPanelAZ/frontend
 npm run build
-# Статика в frontend/dist — раздавайте через nginx или FastAPI StaticFiles
+# Статика в frontend/dist
 ```
+
+В daemon prod (`./start.sh daemon`) сборка выполняется автоматически; backend раздаёт `dist/` при `SERVE_FRONTEND=true`. Альтернатива — nginx перед uvicorn.
 
 ## Интеграция с AntiZapret
 
@@ -266,6 +412,13 @@ npm run build
 │       └── components/NodeSelector.tsx
 ├── start.sh
 ├── start_node_agent.sh
+├── install.sh
+├── scripts/install-systemd.sh
+├── scripts/install-node-systemd.sh
+├── scripts/uninstall.sh
+├── systemd/adminpanelaz.service
+├── systemd/adminpanelaz-node.service
+├── .runtime/          # логи и PID (gitignored; создаётся при запуске)
 └── README.md
 ```
 

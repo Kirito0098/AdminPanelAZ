@@ -165,3 +165,38 @@ async def ip_restriction_middleware(request, call_next):
 @app.get("/api/health")
 def health():
     return {"status": "ok", "app": settings.app_name}
+
+
+def _mount_frontend(app: FastAPI) -> None:
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    dist = settings.frontend_dist_path
+    if not dist.is_absolute():
+        dist = Path(__file__).resolve().parents[1] / dist
+    if not dist.is_dir():
+        return
+
+    assets_dir = dist / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+    index_file = dist / "index.html"
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api/") or full_path == "api":
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404)
+        if full_path:
+            candidate = dist / full_path
+            if candidate.is_file():
+                return FileResponse(candidate)
+        return FileResponse(index_file)
+
+
+if settings.serve_frontend:
+    _mount_frontend(app)

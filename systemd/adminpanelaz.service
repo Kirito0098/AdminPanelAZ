@@ -1,0 +1,28 @@
+[Unit]
+Description=AdminPanelAZ (AntiZapret admin panel)
+Documentation=file:///opt/AdminPanelAZ/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/AdminPanelAZ
+Environment=ADMINPANELAZ_MODE=prod
+Environment=ADMINPANELAZ_STATE_DIR=/var/lib/adminpanelaz
+Environment=BACKEND_HOST=0.0.0.0
+Environment=BACKEND_PORT=8000
+ExecStart=/opt/AdminPanelAZ/start.sh watchdog prod
+ExecStop=/opt/AdminPanelAZ/start.sh stop
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# File logs also written to $ADMINPANELAZ_STATE_DIR/logs/ by start.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=adminpanelaz
+
+[Install]
+WantedBy=multi-user.target

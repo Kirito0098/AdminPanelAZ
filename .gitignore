@@ -12,6 +12,7 @@ frontend/dist/
 
 # Runtime
 .start.sh.pids
+.runtime/
 
 # IDE
 .idea/

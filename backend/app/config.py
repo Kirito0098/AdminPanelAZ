@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     cidr_db_refresh_hour: int = 2
     cidr_db_refresh_minute: int = 30
     antifilter_url: str = "https://antifilter.download/list/allyouneed.lst"
+    serve_frontend: bool = False
+    frontend_dist_path: Path = Path("../frontend/dist")
 
     @property
     def cors_origin_list(self) -> list[str]:
