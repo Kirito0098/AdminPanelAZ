@@ -20,6 +20,14 @@ export default function ForcePasswordChange() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
+    if (!currentPwd.trim()) {
+      notifyError('Укажите текущий пароль')
+      return
+    }
+    if (!newPwd || newPwd.length < 8) {
+      notifyError('Новый пароль: минимум 8 символов')
+      return
+    }
     if (newPwd !== confirmPwd) {
       notifyError('Пароли не совпадают')
       return
@@ -47,7 +55,7 @@ export default function ForcePasswordChange() {
           <CardDescription>Для безопасности необходимо сменить пароль по умолчанию</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form noValidate onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="forceCurrent">Текущий пароль</Label>
               <Input
@@ -55,7 +63,6 @@ export default function ForcePasswordChange() {
                 type="password"
                 value={currentPwd}
                 onChange={(e) => setCurrentPwd(e.target.value)}
-                required
               />
             </div>
             <div className="space-y-2">
@@ -65,9 +72,8 @@ export default function ForcePasswordChange() {
                 type="password"
                 value={newPwd}
                 onChange={(e) => setNewPwd(e.target.value)}
-                required
-                minLength={8}
               />
+              <p className="text-xs text-muted-foreground">Минимум 8 символов</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="forceConfirm">Подтверждение</Label>
@@ -76,8 +82,6 @@ export default function ForcePasswordChange() {
                 type="password"
                 value={confirmPwd}
                 onChange={(e) => setConfirmPwd(e.target.value)}
-                required
-                minLength={8}
               />
             </div>
             <Button type="submit" className="w-full" disabled={saving}>

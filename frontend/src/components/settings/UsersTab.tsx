@@ -58,14 +58,13 @@ export default function UsersTab({
           <CardDescription>Создание учётной записи с выбранной ролью</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onCreateUser} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <form noValidate onSubmit={onCreateUser} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-2">
               <Label htmlFor="newUsername">Логин</Label>
               <Input
                 id="newUsername"
                 value={newUsername}
                 onChange={(e) => onNewUsernameChange(e.target.value)}
-                required
                 placeholder="username"
               />
             </div>
@@ -76,7 +75,6 @@ export default function UsersTab({
                 type="password"
                 value={newPassword}
                 onChange={(e) => onNewPasswordChange(e.target.value)}
-                required
               />
             </div>
             <div className="space-y-2">

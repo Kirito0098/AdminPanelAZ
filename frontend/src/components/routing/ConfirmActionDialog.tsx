@@ -49,7 +49,9 @@ export default function ConfirmActionDialog({ action, onClose, onConfirm, loadin
   return (
     <ConfirmDialog
       open
-      onOpenChange={(open) => !open && onClose()}
+      onOpenChange={(open) => {
+        if (!open && !loading) onClose()
+      }}
       title={meta.title}
       description={meta.description}
       confirmLabel={meta.confirmLabel}

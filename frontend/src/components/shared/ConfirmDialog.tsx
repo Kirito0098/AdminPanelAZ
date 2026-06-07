@@ -1,3 +1,4 @@
+import type { FormEvent } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { Loader2 } from 'lucide-react'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -51,12 +52,19 @@ export default function ConfirmDialog({
   children,
   className,
 }: ConfirmDialogProps) {
-  const handleConfirm = () => {
+  const handleOpenChange = (next: boolean) => {
+    if (!next && loading) return
+    onOpenChange(next)
+  }
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault()
+    if (loading) return
     void onConfirm()
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className={cn('max-w-lg', className)}>
         <DialogHeader>
           <DialogTitle className={Icon ? 'flex items-center gap-2' : undefined}>
@@ -66,29 +74,40 @@ export default function ConfirmDialog({
           {description && <DialogDescription>{description}</DialogDescription>}
         </DialogHeader>
 
-        {alert && (
-          <SettingsAlert variant={alert.variant} title={alert.title}>
-            {alert.children}
-          </SettingsAlert>
-        )}
+        <form noValidate onSubmit={handleSubmit} className="space-y-4">
+          {alert && (
+            <SettingsAlert variant={alert.variant} title={alert.title}>
+              {alert.children}
+            </SettingsAlert>
+          )}
 
-        {children}
+          {children}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
-            {cancelLabel}
-          </Button>
-          <Button variant={destructive ? 'destructive' : 'default'} onClick={handleConfirm} disabled={loading}>
-            {loading ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Выполнение...
-              </>
-            ) : (
-              confirmLabel
-            )}
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleOpenChange(false)}
+              disabled={loading}
+            >
+              {cancelLabel}
+            </Button>
+            <Button
+              type="submit"
+              variant={destructive ? 'destructive' : 'default'}
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Выполнение...
+                </>
+              ) : (
+                confirmLabel
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

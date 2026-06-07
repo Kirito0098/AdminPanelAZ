@@ -121,8 +121,23 @@ export default function DashboardPage() {
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault()
+
+    const trimmedName = clientName.trim()
+    if (!trimmedName) {
+      notifyError('Укажите имя клиента')
+      return
+    }
+    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(trimmedName)) {
+      notifyError('Имя: латиница, цифры, _ и -, до 32 символов')
+      return
+    }
+    if (vpnType === 'openvpn' && (!Number.isFinite(certDays) || certDays < 1 || certDays > 3650)) {
+      notifyError('Срок сертификата: от 1 до 3650 дней')
+      return
+    }
+
     setSubmitting(true)
-    const name = clientName
+    const name = trimmedName
     try {
       await withInline(async () => {
         await createConfig({
@@ -274,7 +289,12 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <Dialog open={showForm} onOpenChange={(open) => !open && closeForm()}>
+      <Dialog
+        open={showForm}
+        onOpenChange={(open) => {
+          if (!open && !submitting) closeForm()
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -283,7 +303,7 @@ export default function DashboardPage() {
             </DialogTitle>
             <DialogDescription>Создание VPN-клиента через AntiZapret client.sh</DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleCreate} className="space-y-4">
+          <form noValidate onSubmit={handleCreate} className="space-y-4">
             <SettingsAlert variant="info">
               Имя клиента: латиница, цифры, <strong>_</strong> и <strong>-</strong>, до 32 символов.
             </SettingsAlert>
@@ -293,8 +313,6 @@ export default function DashboardPage() {
                 id="clientName"
                 value={clientName}
                 onChange={(e) => setClientName(e.target.value)}
-                pattern="[a-zA-Z0-9_-]{1,32}"
-                required
                 placeholder="my-client"
                 autoFocus
               />
@@ -334,7 +352,7 @@ export default function DashboardPage() {
               />
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={closeForm}>
+              <Button type="button" variant="outline" onClick={closeForm} disabled={submitting}>
                 Отмена
               </Button>
               <Button type="submit" disabled={submitting}>

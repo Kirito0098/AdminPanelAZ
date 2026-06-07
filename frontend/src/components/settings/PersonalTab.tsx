@@ -103,7 +103,7 @@ export default function PersonalTab({
           <CardDescription>Обновите пароль для вашей учётной записи</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onChangePassword} className="grid max-w-md gap-4">
+          <form noValidate onSubmit={onChangePassword} className="grid max-w-md gap-4">
             <div className="space-y-2">
               <Label htmlFor="currentPwd">Текущий пароль</Label>
               <Input
@@ -111,7 +111,6 @@ export default function PersonalTab({
                 type="password"
                 value={currentPwd}
                 onChange={(e) => onCurrentPwdChange(e.target.value)}
-                required
                 autoComplete="current-password"
               />
             </div>
@@ -122,8 +121,6 @@ export default function PersonalTab({
                 type="password"
                 value={newPwd}
                 onChange={(e) => onNewPwdChange(e.target.value)}
-                required
-                minLength={4}
                 autoComplete="new-password"
               />
               <p className="text-xs text-muted-foreground">Минимум 4 символа</p>

@@ -580,7 +580,9 @@ export default function EditFilesPage() {
 
       <ConfirmDialog
         open={confirmApply}
-        onOpenChange={setConfirmApply}
+        onOpenChange={(open) => {
+          if (!open && !saving) setConfirmApply(false)
+        }}
         title="Сохранить и применить изменения?"
         description={
           <>

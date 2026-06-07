@@ -517,6 +517,17 @@ export default function ClientActionsDialog({
     setPendingAction(null)
   }
 
+  const closePrompt = () => {
+    if (busyAction !== null) return
+    setPromptMode(null)
+    setPendingAction(null)
+  }
+
+  const handleMainOpenChange = (next: boolean) => {
+    if (!next && (busyAction !== null || promptMode !== null)) return
+    onOpenChange(next)
+  }
+
   const statusBadgeVariant =
     status.variant === 'success'
       ? 'success'
@@ -528,7 +539,7 @@ export default function ClientActionsDialog({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open} onOpenChange={handleMainOpenChange}>
         <DialogContent className="max-h-[90vh] max-w-md gap-0 overflow-y-auto p-0 sm:max-w-md">
           <DialogHeader className="space-y-3 border-b px-6 pb-4 pt-6">
             <div className="pr-6">
@@ -662,13 +673,14 @@ export default function ClientActionsDialog({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={promptMode === 'number'} onOpenChange={(v) => !v && setPromptMode(null)}>
+      <Dialog open={promptMode === 'number'} onOpenChange={(v) => !v && closePrompt()}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>{promptTitle}</DialogTitle>
             <DialogDescription>{promptMessage}</DialogDescription>
           </DialogHeader>
           <form
+            noValidate
             onSubmit={(e) => {
               e.preventDefault()
               const days = Number.parseInt(numberValue, 10)
@@ -689,7 +701,7 @@ export default function ClientActionsDialog({
               />
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setPromptMode(null)}>
+              <Button type="button" variant="outline" onClick={closePrompt} disabled={busyAction !== null}>
                 Отмена
               </Button>
               <Button type="submit" disabled={busyAction !== null}>
@@ -703,7 +715,9 @@ export default function ClientActionsDialog({
 
       <ConfirmDialog
         open={promptMode === 'confirm'}
-        onOpenChange={(open) => !open && setPromptMode(null)}
+        onOpenChange={(open) => {
+          if (!open) closePrompt()
+        }}
         title={promptTitle}
         description={promptMessage}
         confirmLabel="Подтвердить"
@@ -712,13 +726,14 @@ export default function ClientActionsDialog({
         onConfirm={() => void submitPrompt()}
       />
 
-      <Dialog open={promptMode === 'renew'} onOpenChange={(v) => !v && setPromptMode(null)}>
+      <Dialog open={promptMode === 'renew'} onOpenChange={(v) => !v && closePrompt()}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Продлить сертификат</DialogTitle>
             <DialogDescription>Укажите новый срок сертификата для клиента.</DialogDescription>
           </DialogHeader>
           <form
+            noValidate
             onSubmit={(e) => {
               e.preventDefault()
               void submitRenew()
@@ -766,7 +781,7 @@ export default function ClientActionsDialog({
               />
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setPromptMode(null)}>
+              <Button type="button" variant="outline" onClick={closePrompt} disabled={busyAction !== null}>
                 Отмена
               </Button>
               <Button type="submit" disabled={busyAction !== null}>
@@ -778,13 +793,14 @@ export default function ClientActionsDialog({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={promptMode === 'traffic-limit'} onOpenChange={(v) => !v && setPromptMode(null)}>
+      <Dialog open={promptMode === 'traffic-limit'} onOpenChange={(v) => !v && closePrompt()}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>{promptTitle}</DialogTitle>
             <DialogDescription>{promptMessage}</DialogDescription>
           </DialogHeader>
           <form
+            noValidate
             onSubmit={(e) => {
               e.preventDefault()
               const value = Number.parseFloat(limitValue)
@@ -850,7 +866,7 @@ export default function ClientActionsDialog({
               <p className="text-sm text-destructive">Клиент сейчас заблокирован по превышению лимита.</p>
             )}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setPromptMode(null)}>
+              <Button type="button" variant="outline" onClick={closePrompt} disabled={busyAction !== null}>
                 Отмена
               </Button>
               <Button type="submit" disabled={busyAction !== null}>
@@ -862,7 +878,7 @@ export default function ClientActionsDialog({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={promptMode === 'expired-wg'} onOpenChange={(v) => !v && setPromptMode(null)}>
+      <Dialog open={promptMode === 'expired-wg'} onOpenChange={(v) => !v && closePrompt()}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Срок действия истёк</DialogTitle>
@@ -872,7 +888,7 @@ export default function ClientActionsDialog({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="secondary" onClick={() => setPromptMode(null)}>
+            <Button type="button" variant="secondary" onClick={closePrompt} disabled={busyAction !== null}>
               Закрыть
             </Button>
             <Button

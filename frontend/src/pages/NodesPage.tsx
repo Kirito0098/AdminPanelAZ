@@ -327,12 +327,16 @@ export default function NodesPage() {
     return <Navigate to="/" replace />
   }
 
-  const openCreate = () => {
+  const resetDialogForm = () => {
     setEditing(null)
     setName('')
     setHost('')
     setPort(9100)
     setApiKey('')
+  }
+
+  const openCreate = () => {
+    resetDialogForm()
     setShowDialog(true)
   }
 
@@ -345,26 +349,55 @@ export default function NodesPage() {
     setShowDialog(true)
   }
 
+  const closeDialog = () => {
+    setShowDialog(false)
+    resetDialogForm()
+  }
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
+
+    const trimmedName = name.trim()
+    const trimmedHost = host.trim()
+
+    if (!trimmedName) {
+      notifyError('Укажите имя узла')
+      return
+    }
+    if (!editing?.is_local && !trimmedHost) {
+      notifyError('Укажите хост')
+      return
+    }
+    if (!Number.isFinite(port) || port < 1 || port > 65535) {
+      notifyError('Укажите корректный порт (1–65535)')
+      return
+    }
+    if (!editing && (!apiKey || apiKey.length < 8)) {
+      notifyError('API-ключ обязателен (минимум 8 символов)')
+      return
+    }
+    if (editing && apiKey && apiKey.length < 8) {
+      notifyError('API-ключ должен содержать минимум 8 символов')
+      return
+    }
+
     setSubmitting(true)
     try {
       if (editing) {
-        const payload: Record<string, string | number> = { name, host, port }
+        const payload: Record<string, string | number> = { name: trimmedName, host: trimmedHost, port }
         if (apiKey) payload.api_key = apiKey
         await updateNode(editing.id, payload)
+        closeDialog()
+        await load()
+        await refresh()
         success('Узел обновлён')
       } else {
-        if (!apiKey) {
-          notifyError('API-ключ обязателен')
-          return
-        }
-        await createNode({ name, host, port, api_key: apiKey })
+        await createNode({ name: trimmedName, host: trimmedHost, port, api_key: apiKey })
+        closeDialog()
+        await load()
+        await refresh()
         success('Узел добавлен')
       }
-      setShowDialog(false)
-      await load()
-      await refresh()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
     } finally {
@@ -372,33 +405,44 @@ export default function NodesPage() {
     }
   }
 
-  const handleDelete = async (node: Node) => {
-    setConfirmAction('delete')
+  const openConfirm = (action: ConfirmAction, node: Node) => {
+    setConfirmAction(action)
     setConfirmTarget(node)
   }
 
-  const handleRotateKey = async (node: Node) => {
-    setConfirmAction('rotate-key')
-    setConfirmTarget(node)
+  const closeConfirm = () => {
+    setConfirmAction(null)
+    setConfirmTarget(null)
+  }
+
+  const handleDelete = (node: Node) => {
+    openConfirm('delete', node)
+  }
+
+  const handleRotateKey = (node: Node) => {
+    openConfirm('rotate-key', node)
   }
 
   const handleConfirm = async () => {
-    if (!confirmTarget || !confirmAction) return
+    const action = confirmAction
+    const target = confirmTarget
+    if (!target || !action) return
+
     setConfirmLoading(true)
     try {
-      if (confirmAction === 'delete') {
-        await deleteNode(confirmTarget.id)
+      if (action === 'delete') {
+        await deleteNode(target.id)
+        closeConfirm()
         success('Узел удалён')
         await load()
         await refresh()
-      } else if (confirmAction === 'rotate-key') {
-        await rotateNodeApiKey(confirmTarget.id)
-        success(`API-ключ узла «${confirmTarget.name}» обновлён`)
+      } else if (action === 'rotate-key') {
+        await rotateNodeApiKey(target.id)
+        closeConfirm()
+        success(`API-ключ узла «${target.name}» обновлён`)
         await load()
         await refresh()
       }
-      setConfirmAction(null)
-      setConfirmTarget(null)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка операции')
     } finally {
@@ -479,15 +523,17 @@ export default function NodesPage() {
       </SettingsAlert>
 
       <InlineProgressBar
-        active={loading || healthLoading !== null || confirmLoading}
+        active={loading || healthLoading !== null || confirmLoading || submitting}
         label={
-          healthLoading !== null
-            ? 'Проверка здоровья узла...'
-            : confirmLoading
-              ? 'Выполнение операции...'
-              : loading
-                ? 'Загрузка узлов...'
-                : undefined
+          submitting
+            ? 'Сохранение узла...'
+            : healthLoading !== null
+              ? 'Проверка здоровья узла...'
+              : confirmLoading
+                ? 'Выполнение операции...'
+                : loading
+                  ? 'Загрузка узлов...'
+                  : undefined
         }
       />
 
@@ -632,22 +678,27 @@ export default function NodesPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+      <Dialog
+        open={showDialog}
+        onOpenChange={(open) => {
+          if (!open && !submitting) closeDialog()
+        }}
+      >
         <DialogContent className="max-w-md">
-          <form onSubmit={handleSubmit}>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                {editing ? <Pencil size={18} /> : <Plus size={18} />}
-                {editing ? 'Редактировать узел' : 'Добавить узел'}
-              </DialogTitle>
-              <DialogDescription>
-                {editing
-                  ? 'Измените параметры подключения к удалённому node agent'
-                  : 'Подключение к node agent на VPN-сервере'}
-              </DialogDescription>
-            </DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {editing ? <Pencil size={18} /> : <Plus size={18} />}
+              {editing ? 'Редактировать узел' : 'Добавить узел'}
+            </DialogTitle>
+            <DialogDescription>
+              {editing
+                ? 'Измените параметры подключения к удалённому node agent'
+                : 'Подключение к node agent на VPN-сервере'}
+            </DialogDescription>
+          </DialogHeader>
 
-            <div className="space-y-4 py-4">
+          <form noValidate onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-4">
               {!editing && (
                 <SettingsAlert variant="info">
                   Удалённый узел должен запускать <strong>node agent</strong> с тем же API-ключом, что указан
@@ -669,7 +720,6 @@ export default function NodesPage() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="vpn-eu-1"
-                    required
                   />
                   <p className="text-xs text-muted-foreground">Отображаемое имя в панели и селекторе узлов</p>
                 </div>
@@ -680,7 +730,6 @@ export default function NodesPage() {
                     value={host}
                     onChange={(e) => setHost(e.target.value)}
                     placeholder="vpn.example.com"
-                    required={!editing?.is_local}
                     disabled={!!editing?.is_local}
                   />
                   <p className="text-xs text-muted-foreground">Домен или IP, доступный с controller</p>
@@ -705,8 +754,6 @@ export default function NodesPage() {
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
                     placeholder={editing ? 'Оставьте пустым, чтобы не менять' : 'Минимум 8 символов'}
-                    required={!editing}
-                    minLength={editing ? undefined : 8}
                   />
                   {!editing && (
                     <p className="text-xs text-muted-foreground">Секретный ключ для аутентификации агента</p>
@@ -716,7 +763,7 @@ export default function NodesPage() {
             </div>
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setShowDialog(false)} disabled={submitting}>
+              <Button type="button" variant="outline" onClick={closeDialog} disabled={submitting}>
                 Отмена
               </Button>
               <Button type="submit" disabled={submitting}>
@@ -742,10 +789,7 @@ export default function NodesPage() {
       <ConfirmDialog
         open={!!confirmAction}
         onOpenChange={(open) => {
-          if (!open) {
-            setConfirmAction(null)
-            setConfirmTarget(null)
-          }
+          if (!open && !confirmLoading) closeConfirm()
         }}
         title={confirmAction === 'delete' ? 'Удалить узел?' : 'Ротация API-ключа?'}
         description={
@@ -780,7 +824,9 @@ export default function NodesPage() {
       <NodeUpdateDialog
         node={updateNodeTarget}
         open={!!updateNodeTarget}
-        onOpenChange={(open) => !open && setUpdateNodeTarget(null)}
+        onOpenChange={(open) => {
+          if (!open) setUpdateNodeTarget(null)
+        }}
         onComplete={async () => {
           await load()
           await refresh()

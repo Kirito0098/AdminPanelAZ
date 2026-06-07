@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { KeyRound, ShieldCheck } from 'lucide-react'
+import { Copy, KeyRound, ShieldCheck } from 'lucide-react'
 import {
   ApiError,
   disable2FA,
@@ -15,6 +15,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useNotifications } from '@/context/NotificationContext'
+
+function formatSecretForDisplay(secret: string): string {
+  return secret.match(/.{1,4}/g)?.join(' ') ?? secret
+}
 
 export default function TwoFactorTab() {
   const { success, error: notifyError } = useNotifications()
@@ -99,6 +103,16 @@ export default function TwoFactorTab() {
     }
   }
 
+  const handleCopySecret = async () => {
+    if (!setupData) return
+    try {
+      await navigator.clipboard.writeText(setupData.secret)
+      success('Секретный ключ скопирован')
+    } catch {
+      notifyError('Не удалось скопировать ключ')
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -132,7 +146,24 @@ export default function TwoFactorTab() {
         {setupData && (
           <div className="space-y-3 rounded-lg border p-4">
             <img src={setupData.qr_data_url} alt="QR 2FA" className="mx-auto h-40 w-40" />
-            <p className="text-center font-mono text-xs break-all">{setupData.secret}</p>
+            <div className="rounded-lg border bg-muted/50 p-3 sm:p-4">
+              <p className="mb-2 text-center text-xs text-muted-foreground">Ключ для ручного ввода</p>
+              <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-center">
+                <code className="select-all break-all rounded-md bg-background px-3 py-2 text-center font-mono text-sm leading-relaxed tracking-wide text-foreground sm:text-base">
+                  {formatSecretForDisplay(setupData.secret)}
+                </code>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => void handleCopySecret()}
+                >
+                  <Copy size={14} />
+                  Копировать
+                </Button>
+              </div>
+            </div>
             <div className="grid gap-2">
               <Label htmlFor="2fa-enable-code">Код из приложения</Label>
               <Input

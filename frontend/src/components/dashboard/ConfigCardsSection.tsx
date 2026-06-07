@@ -375,7 +375,9 @@ export default function ConfigCardsSection({
 
       <ConfirmDialog
         open={confirmAction === 'delete'}
-        onOpenChange={(open) => !open && closeConfirm()}
+        onOpenChange={(open) => {
+          if (!open && !actionBusy) closeConfirm()
+        }}
         title="Удалить клиента?"
         description={
           <>Профиль «{confirmTarget?.client_name}» будет удалён без возможности восстановления.</>
@@ -393,7 +395,9 @@ export default function ConfigCardsSection({
 
       <ConfirmDialog
         open={confirmAction === 'unblock'}
-        onOpenChange={(open) => !open && closeConfirm()}
+        onOpenChange={(open) => {
+          if (!open && !actionBusy) closeConfirm()
+        }}
         title="Снять блокировку?"
         description={
           <>Разблокировать клиента «{confirmTarget?.client_name}» и восстановить доступ?</>
@@ -405,7 +409,9 @@ export default function ConfigCardsSection({
 
       <ConfirmDialog
         open={confirmAction === 'block'}
-        onOpenChange={(open) => !open && closeConfirm()}
+        onOpenChange={(open) => {
+          if (!open && !actionBusy) closeConfirm()
+        }}
         title="Заблокировать клиента"
         description={
           <>

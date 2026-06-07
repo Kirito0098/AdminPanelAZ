@@ -130,7 +130,7 @@ export default function NodeUpdateDialog({ node, open, onOpenChange, onComplete 
         notifyError('Node agent перезапускается — подождите и выполните проверку здоровья')
       }
       setShowConfirm(false)
-      onOpenChange(false)
+      handleOpenChange(false)
       onComplete?.()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка обновления')
@@ -139,8 +139,13 @@ export default function NodeUpdateDialog({ node, open, onOpenChange, onComplete 
     }
   }
 
+  const handleOpenChange = (next: boolean) => {
+    if (!next && (updating || loading)) return
+    onOpenChange(next)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -204,20 +209,20 @@ export default function NodeUpdateDialog({ node, open, onOpenChange, onComplete 
         )}
 
         <DialogFooter className="gap-2 sm:justify-between">
-          <Button variant="outline" onClick={load} disabled={loading || updating}>
+          <Button type="button" variant="outline" onClick={load} disabled={loading || updating}>
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
             {loading ? 'Проверка...' : 'Проверить'}
           </Button>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={updating}>
+            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)} disabled={updating}>
               Закрыть
             </Button>
             {!showConfirm ? (
-              <Button onClick={() => setShowConfirm(true)} disabled={updating || loading || !hasUpdates}>
+              <Button type="button" onClick={() => setShowConfirm(true)} disabled={updating || loading || !hasUpdates}>
                 Применить
               </Button>
             ) : (
-              <Button onClick={handleUpdate} disabled={updating || loading} variant="destructive">
+              <Button type="button" onClick={handleUpdate} disabled={updating || loading} variant="destructive">
                 {updating ? (
                   <>
                     <Loader2 size={16} className="animate-spin" />

@@ -113,7 +113,15 @@ export default function SettingsPage() {
 
   const handleCreateUser = async (e: FormEvent) => {
     e.preventDefault()
-    const createdName = newUsername
+    const createdName = newUsername.trim()
+    if (!createdName) {
+      notifyError('Укажите логин')
+      return
+    }
+    if (!newPassword) {
+      notifyError('Укажите пароль')
+      return
+    }
     try {
       await createUser({ username: createdName, password: newPassword, role: newRole })
       setNewUsername('')
@@ -149,6 +157,14 @@ export default function SettingsPage() {
 
   const handleChangePassword = async (e: FormEvent) => {
     e.preventDefault()
+    if (!currentPwd) {
+      notifyError('Укажите текущий пароль')
+      return
+    }
+    if (!newPwd || newPwd.length < 4) {
+      notifyError('Новый пароль: минимум 4 символа')
+      return
+    }
     try {
       await changePassword(currentPwd, newPwd)
       setCurrentPwd('')
