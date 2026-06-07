@@ -14,6 +14,8 @@ class Token(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+    captcha_id: str | None = None
+    captcha_text: str | None = None
 
 
 class UserBase(BaseModel):

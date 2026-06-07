@@ -42,6 +42,26 @@ export async function login(username: string, password: string) {
   })
 }
 
+export async function loginWithCaptcha(
+  username: string,
+  password: string,
+  captchaId: string,
+  captchaText: string,
+) {
+  return apiFetch<{ access_token: string }>('/auth/login/json', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, captcha_id: captchaId, captcha_text: captchaText }),
+  })
+}
+
+export async function getCaptchaRequired() {
+  return apiFetch<{ required: boolean }>('/auth/captcha/required')
+}
+
+export async function getTelegramLoginConfig() {
+  return apiFetch<{ enabled: boolean; bot_username: string }>('/auth/telegram/config')
+}
+
 export async function getMe() {
   return apiFetch<import('../types').User>('/auth/me')
 }
@@ -443,6 +463,55 @@ export async function updateSecuritySettings(data: Partial<import('../types').Se
 
 export async function getServerMetrics(accurate = false) {
   return apiFetch<import('../types').ServerMetrics>(`/server-monitor/metrics?accurate=${accurate}`)
+}
+
+export async function getServerInterfaces() {
+  return apiFetch<{ interfaces: string[]; groups?: Record<string, string[]> }>('/server-monitor/interfaces')
+}
+
+export async function getBandwidthChart(iface: string, range: string) {
+  return apiFetch<import('../types').BandwidthChart>(
+    `/server-monitor/bandwidth?iface=${encodeURIComponent(iface)}&range_key=${range}`,
+  )
+}
+
+export async function openvpnDisconnect(clientName: string) {
+  return apiFetch('/client-access/openvpn/disconnect', {
+    method: 'POST',
+    body: JSON.stringify({ client_name: clientName }),
+  })
+}
+
+export async function collectTests() {
+  return apiFetch<{ tests: Array<{ id: string; title: string; description?: string }>; count: number }>(
+    '/tests/collect',
+  )
+}
+
+export async function runTests(testIds: string[] = []) {
+  return apiFetch<{ task_id: string; message: string }>('/tests/run', {
+    method: 'POST',
+    body: JSON.stringify({ test_ids: testIds }),
+  })
+}
+
+export async function getTestTask(taskId: string) {
+  return apiFetch<import('../types').CidrPipelineTask>(`/tests/tasks/${taskId}`)
+}
+
+export async function applySystemUpdate() {
+  return apiFetch<{ message: string }>('/system/update', { method: 'POST' })
+}
+
+export async function getScannerBans() {
+  return apiFetch<{ active_bans: import('../types').ScannerBan[] }>('/security/scanner-bans')
+}
+
+export async function unbanScannerIp(ip: string) {
+  return apiFetch('/security/scanner-bans/unban', {
+    method: 'POST',
+    body: JSON.stringify({ ip }),
+  })
 }
 
 export async function getActionLogs(limit = 100) {

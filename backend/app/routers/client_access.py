@@ -72,6 +72,24 @@ def openvpn_unblock(payload: BlockRequest, request: Request, db: Session = Depen
     return result
 
 
+@router.post("/openvpn/disconnect")
+def openvpn_disconnect(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    from app.services.openvpn_management import openvpn_management_service
+
+    result = openvpn_management_service.disconnect_client(payload.client_name)
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("message", "Не удалось отключить"))
+    log_action(
+        db,
+        action="openvpn_disconnect",
+        user_id=user.id,
+        username=user.username,
+        details=f"{payload.client_name} ({result.get('profile', '')})",
+        remote_addr=request.client.host,
+    )
+    return result
+
+
 @router.get("/wireguard/{client_name}")
 def get_wg_policy(client_name: str, db: Session = Depends(get_db), _: User = Depends(require_admin)):
     return _service(db).get_wg_policy(client_name)

@@ -16,6 +16,7 @@ from app.routers import (
     configs,
     edit_files,
     game_filters,
+    ip_blocked,
     logs,
     maintenance,
     monitoring,
@@ -25,6 +26,7 @@ from app.routers import (
     security,
     server_monitor,
     system,
+    tests,
     tg_mini,
     traffic,
 )
@@ -34,7 +36,7 @@ from app.services.backup_scheduler import run_backup_scheduler_loop
 from app.services.cidr.cidr_scheduler import run_cidr_db_scheduler_loop
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.node_manager import ensure_local_node, get_active_adapter
-from app.services.security import SecurityService
+from app.services.ip_restriction import ip_restriction_service
 from app.services.traffic.worker import run_traffic_collector_loop
 
 settings = get_settings()
@@ -105,6 +107,10 @@ async def lifespan(_: FastAPI):
         )
     )
     cidr_task = asyncio.create_task(run_cidr_db_scheduler_loop())
+    try:
+        ip_restriction_service.sync_firewall()
+    except Exception:
+        pass
     yield
     for task in (collector_task, backup_task, cidr_task):
         task.cancel()
@@ -143,20 +149,41 @@ app.include_router(game_filters.router, prefix="/api")
 app.include_router(logs.router, prefix="/api")
 app.include_router(system.router, prefix="/api")
 app.include_router(tg_mini.router, prefix="/api")
+app.include_router(tests.router, prefix="/api")
+app.include_router(ip_blocked.router)
 
 
 @app.middleware("http")
 async def ip_restriction_middleware(request, call_next):
-    if request.url.path.startswith("/api/public/") or request.url.path in ("/api/health", "/api/tg-mini", "/api/tg-mini/auth"):
+    path = request.url.path
+    exempt = (
+        path.startswith("/api/public/")
+        or path.startswith("/api/tg-mini")
+        or path.startswith("/api/ip-blocked")
+        or path.startswith("/api/auth/captcha")
+        or path.startswith("/api/auth/telegram")
+        or path in ("/api/health", "/ip-blocked")
+    )
+    if exempt:
         return await call_next(request)
+
     from app.database import SessionLocal
+    from fastapi.responses import JSONResponse, RedirectResponse
 
     db = SessionLocal()
     try:
-        client_ip = request.client.host if request.client else ""
-        if request.headers.get("authorization") and not SecurityService().is_ip_allowed(db, client_ip):
-            from fastapi.responses import JSONResponse
-            return JSONResponse(status_code=403, content={"detail": "Доступ запрещён с вашего IP"})
+        client_ip = ip_restriction_service.get_client_ip(request)
+        if ip_restriction_service.should_hard_deny(db, client_ip):
+            return JSONResponse(status_code=403, content={"detail": "Доступ заблокирован на уровне сервера"})
+
+        settings = ip_restriction_service.get_settings(db)
+        if settings.get("ip_restriction_enabled") and not ip_restriction_service.is_ip_allowed(db, client_ip):
+            if ip_restriction_service.should_count_denied_access(path):
+                ip_restriction_service.record_denied_access(db, client_ip)
+            accept = request.headers.get("accept", "")
+            if path.startswith("/api/") or "application/json" in accept:
+                return JSONResponse(status_code=403, content={"detail": "Доступ запрещён с вашего IP"})
+            return RedirectResponse(url="/ip-blocked", status_code=302)
     finally:
         db.close()
     return await call_next(request)

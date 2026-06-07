@@ -7,6 +7,7 @@ interface AuthContextValue {
   user: User | null
   loading: boolean
   login: (username: string, password: string) => Promise<void>
+  setToken: (token: string) => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
 }
@@ -55,14 +56,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [refreshUser],
   )
 
+  const setToken = useCallback(
+    async (token: string) => {
+      localStorage.setItem('token', token)
+      await refreshUser()
+    },
+    [refreshUser],
+  )
+
   const logout = useCallback(() => {
     localStorage.removeItem('token')
     setUser(null)
   }, [])
 
   const value = useMemo(
-    () => ({ user, loading, login, logout, refreshUser }),
-    [user, loading, login, logout, refreshUser],
+    () => ({ user, loading, login, setToken, logout, refreshUser }),
+    [user, loading, login, setToken, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

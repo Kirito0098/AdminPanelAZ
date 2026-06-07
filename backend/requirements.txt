@@ -13,3 +13,4 @@ qrcode[pil]==8.0
 Pillow==11.1.0
 psutil==6.1.1
 websockets==14.1
+pytest==8.3.4

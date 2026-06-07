@@ -1,5 +1,13 @@
 # AdminPanel AntiZapret
 
+> **⚠️ Статус проекта**
+>
+> Проект находится на этапе **переноса функциональности и тестирования**. Решение о долгосрочной поддержке и сопровождении **ещё не принято**.
+>
+> **AdminPanelAZ** — экспериментальный порт панели [AdminAntizapret](https://github.com/Kirito0098/AdminAntizapret) на стек **FastAPI + React** (TypeScript, Vite). Основной репозиторий, которым рекомендуется пользоваться на данный момент: [**AdminAntizapret**](https://github.com/Kirito0098/AdminAntizapret).
+>
+> *Project status: experimental FastAPI+React port of [AdminAntizapret](https://github.com/Kirito0098/AdminAntizapret) — functionality migration and testing in progress; long-term maintenance TBD.*
+
 Веб-панель администрирования для VPN-сервера [AntiZapret](https://github.com/GubernievS/AntiZapret-VPN).
 
 Стек: **FastAPI** (backend) + **React/Vite/TypeScript** (frontend: Tailwind CSS, shadcn/ui, Recharts).
@@ -81,16 +89,27 @@ API-ключи хранятся в БД в виде bcrypt-хеша и Fernet-ш
 | **Скачивание бэкапов** | ✅ кнопка в UI |
 | **OpenVPN management socket** (status 3, log tail) | ✅ `/api/logs/openvpn-events`, fallback `*-status.log` |
 
+### Портировано в третьем проходе (полный паритет)
+| Функция | Статус |
+|---------|--------|
+| **OpenVPN client-kill / disconnect** | ✅ `POST /api/client-access/openvpn/disconnect` + UI |
+| **Полный Telegram Mini App UI** | ✅ `/api/tg-mini` — вкладки Дашборд/Конфиги/Настройки |
+| **vnStat bandwidth charts** | ✅ Recharts на `/server-monitor` + `/api/server-monitor/bandwidth` |
+| **iptables scanner firewall** | ✅ `scanner_firewall_store` + ipset/iptables + UI банов |
+| **Captcha + Telegram Login Widget** | ✅ `/api/auth/captcha`, `/api/auth/telegram` |
+| **IP-blocked dwell page** | ✅ `/ip-blocked` + ping + middleware redirect |
+| **In-panel pytest runner** | ✅ `/api/tests/collect`, `/api/tests/run` + вкладка «Тесты» |
+| **WebSocket bandwidth monitor** | ✅ WS `/api/server-monitor/ws` включает live RX/TX |
+| **Системные обновления UI** | ✅ вкладка «Обновления» в Настройках |
+
 ### Не портировано (ограничения)
 | Функция | Причина |
 |---------|---------|
-| vnStat bandwidth charts (полные) | vnstat опционален; базовые метрики через psutil |
-| IP scanner iptables firewall | Требует root + iptables на controller |
-| Captcha / Telegram Login Widget | Flask-session специфика |
-| In-panel pytest runner | Низкий приоритет |
-| IP-blocked dwell page | Отдельный Flask blueprint |
-| OpenVPN client-kill через management | Не реализовано (только чтение) |
-| Полный tg_mini UI (все вкладки) | Портирован core API + минимальная HTML-страница |
+| Panel-port iptables whitelist | Требует direct HTTP + root; не применимо за reverse proxy |
+| Flask CSRF / session heartbeat | Заменено JWT + React SPA |
+| 47 pytest-модулей AdminAntizapret | Собственные smoke-тесты AdminPanelAZ (`backend/tests/`) |
+| tg_mini 1500-line parity (все графики) | Портированы основные вкладки; Chart.js графики трафика — в веб-панели `/traffic` |
+| OpenVPN client-kill в AdminAntizapret | В оригинале тоже не было; добавлено в AdminPanelAZ |
 
 ## Учётные данные по умолчанию
 

@@ -49,3 +49,31 @@ def check_ip(request: Request, db: Session = Depends(get_db), _: User = Depends(
     client_ip = request.client.host if request.client else "unknown"
     allowed = SecurityService().is_ip_allowed(db, client_ip)
     return {"client_ip": client_ip, "allowed": allowed}
+
+
+class UnbanRequest(BaseModel):
+    ip: str
+
+
+@router.get("/scanner-bans")
+def get_scanner_bans(_: User = Depends(require_admin)):
+    from app.services.ip_restriction import ip_restriction_service
+
+    return {"active_bans": ip_restriction_service.get_active_bans()}
+
+
+@router.post("/scanner-bans/unban")
+def unban_scanner_ip(payload: UnbanRequest, _: User = Depends(require_admin)):
+    from app.services.ip_restriction import ip_restriction_service
+
+    if not ip_restriction_service.unban_ip(payload.ip.strip()):
+        raise HTTPException(status_code=400, detail="Некорректный IP")
+    return {"message": f"IP {payload.ip} разблокирован"}
+
+
+@router.post("/scanner-bans/clear")
+def clear_scanner_bans(_: User = Depends(require_admin)):
+    from app.services.ip_restriction import ip_restriction_service
+
+    ip_restriction_service.clear_all_bans()
+    return {"message": "Все баны сканеров сняты"}

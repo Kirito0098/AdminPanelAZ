@@ -397,6 +397,35 @@ class OpenVpnManagementService:
             )
         return rows
 
+    def kill_client(self, profile_key: str, client_name: str) -> dict:
+        """Force-disconnect an OpenVPN client via management socket kill command."""
+        socket_path = self.openvpn_socket_path(profile_key)
+        if not socket_path.exists():
+            return {"success": False, "message": f"Сокет {profile_key} недоступен"}
+        cmd = f"kill {client_name}"
+        raw = self.query_openvpn_management_socket(socket_path, cmd)
+        success = "SUCCESS" in raw.upper() or "killed" in raw.lower() or bool(raw.strip())
+        return {
+            "success": success,
+            "profile": profile_key,
+            "client_name": client_name,
+            "message": "Клиент отключён" if success else (raw.strip() or "Не удалось отключить клиента"),
+            "raw": raw[:500],
+        }
+
+    def disconnect_client(self, client_name: str) -> dict:
+        """Try kill on all profiles where client is connected."""
+        for profile_key in OPENVPN_PROFILES:
+            source = self.read_status_source(profile_key)
+            if not source.get("raw"):
+                continue
+            clients = self.parse_clients_from_status_raw(source["raw"], profile_key)
+            if any(c.common_name == client_name for c in clients):
+                result = self.kill_client(profile_key, client_name)
+                if result.get("success"):
+                    return result
+        return {"success": False, "message": f"Клиент {client_name} не найден среди подключённых"}
+
     def get_socket_status(self) -> list[dict]:
         rows: list[dict] = []
         for profile_key in OPENVPN_PROFILES:

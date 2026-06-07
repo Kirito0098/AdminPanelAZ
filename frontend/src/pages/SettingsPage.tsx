@@ -37,6 +37,8 @@ import BackupTab from '@/components/settings/BackupTab'
 import MaintenanceTab from '@/components/settings/MaintenanceTab'
 import TelegramTab from '@/components/settings/TelegramTab'
 import SecurityTab from '@/components/settings/SecurityTab'
+import TestsTab from '@/components/settings/TestsTab'
+import UpdatesTab from '@/components/settings/UpdatesTab'
 import type { AppSettings, User, UserRole } from '@/types'
 
 export default function SettingsPage() {
@@ -168,6 +170,8 @@ export default function SettingsPage() {
               <TabsTrigger value="backup">Бэкапы</TabsTrigger>
               <TabsTrigger value="telegram">Telegram</TabsTrigger>
               <TabsTrigger value="security">Безопасность</TabsTrigger>
+              <TabsTrigger value="updates">Обновления</TabsTrigger>
+              <TabsTrigger value="tests">Тесты</TabsTrigger>
               <TabsTrigger value="users">Пользователи</TabsTrigger>
             </>
           )}
@@ -304,6 +308,18 @@ export default function SettingsPage() {
         {user?.role === 'admin' && (
           <TabsContent value="security">
             <SecurityTab />
+          </TabsContent>
+        )}
+
+        {user?.role === 'admin' && (
+          <TabsContent value="updates">
+            <UpdatesTab />
+          </TabsContent>
+        )}
+
+        {user?.role === 'admin' && (
+          <TabsContent value="tests">
+            <TestsTab />
           </TabsContent>
         )}
 

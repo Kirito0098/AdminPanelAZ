@@ -330,6 +330,24 @@ export interface ServerMetrics {
   timestamp: string
 }
 
+export interface BandwidthChart {
+  iface: string
+  range: string
+  labels: string[]
+  rx_mbps: number[]
+  tx_mbps: number[]
+  totals?: Record<string, { rx_bytes: number; tx_bytes: number; total_bytes: number }>
+  error?: string
+}
+
+export interface ScannerBan {
+  ip: string
+  ban_until: number
+  remaining_seconds: number
+  strikes: number
+  long_term: boolean
+}
+
 export interface ActionLogEntry {
   id: number
   username?: string | null

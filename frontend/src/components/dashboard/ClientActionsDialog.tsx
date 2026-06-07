@@ -3,6 +3,7 @@ import {
   ApiError,
   createOneTimeLink,
   deleteConfig,
+  openvpnDisconnect,
   openvpnPermanentBlock,
   openvpnTempBlock,
   openvpnUnblock,
@@ -205,6 +206,19 @@ export default function ClientActionsDialog({
                 await openvpnUnblock(config.client_name)
                 onNotifySuccess('Блокировка снята')
               }),
+          },
+          {
+            label: '⚡ Отключить сессию OpenVPN',
+            hidden: !canManage || !isOpenVpn,
+            onClick: () =>
+              askConfirm(
+                'Отключить клиента',
+                `Принудительно отключить активную сессию «${config.client_name}» через management socket?`,
+                async () => {
+                  await openvpnDisconnect(config.client_name)
+                  onNotifySuccess('Клиент отключён')
+                },
+              ),
           },
           {
             label: '♻ Продлить сертификат',
