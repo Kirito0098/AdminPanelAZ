@@ -56,6 +56,28 @@ read_pid() {
   fi
 }
 
+port_listener_pids() {
+  local port="$1"
+  ss -H -tlnp "sport = :${port}" 2>/dev/null \
+    | grep -oE 'pid=[0-9]+' \
+    | cut -d= -f2 \
+    | sort -u
+}
+
+clear_stale_backend_listener() {
+  local expected_pid listener_pid
+  expected_pid="$(read_pid "$BACKEND_PID_FILE")"
+
+  while read -r listener_pid; do
+    [[ -z "$listener_pid" ]] && continue
+    if [[ "$listener_pid" == "$expected_pid" ]] && is_running "$expected_pid"; then
+      continue
+    fi
+    log_watchdog "Port $BACKEND_PORT held by stale backend PID $listener_pid; stopping"
+    stop_process_tree "$listener_pid" "stale backend"
+  done < <(port_listener_pids "$BACKEND_PORT")
+}
+
 wait_for_url() {
   local url="$1"
   local label="$2"
@@ -247,6 +269,7 @@ ensure_backend_running() {
     return 0
   fi
 
+  clear_stale_backend_listener
   log_watchdog "Backend not running; restarting..."
   launch_backend true
 }
@@ -272,6 +295,7 @@ watchdog_loop() {
 
   log_watchdog "Watchdog started (mode=$ADMINPANELAZ_MODE)"
 
+  clear_stale_backend_listener
   setup_backend
   setup_frontend
   if [[ "$ADMINPANELAZ_MODE" == "prod" ]]; then
