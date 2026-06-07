@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -52,9 +52,10 @@ class RefreshToken(Base):
 
 class VpnConfig(Base):
     __tablename__ = "vpn_configs"
-    __table_args__ = (UniqueConstraint("client_name", "vpn_type", name="uq_client_vpn_type"),)
+    __table_args__ = (UniqueConstraint("node_id", "client_name", "vpn_type", name="uq_node_client_vpn_type"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     client_name: Mapped[str] = mapped_column(String(32), index=True)
     vpn_type: Mapped[VpnType] = mapped_column(Enum(VpnType))
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -137,9 +138,11 @@ class UserTrafficStatProtocol(Base):
 
 class WgAccessPolicy(Base):
     __tablename__ = "wg_access_policy"
+    __table_args__ = (UniqueConstraint("node_id", "client_name", name="uq_wg_access_node_client"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    client_name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    client_name: Mapped[str] = mapped_column(String(64), index=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_temp_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     is_permanent_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -155,9 +158,11 @@ class WgAccessPolicy(Base):
 
 class OpenVpnAccessPolicy(Base):
     __tablename__ = "openvpn_access_policy"
+    __table_args__ = (UniqueConstraint("node_id", "client_name", name="uq_ovpn_access_node_client"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    client_name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    client_name: Mapped[str] = mapped_column(String(64), index=True)
     is_temp_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     is_permanent_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     block_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -219,6 +224,34 @@ class UserActionLog(Base):
     action: Mapped[str] = mapped_column(String(64))
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     remote_addr: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class NodeResourceSample(Base):
+    __tablename__ = "node_resource_sample"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    cpu_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    memory_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    memory_used_mb: Mapped[int] = mapped_column(Integer, default=0)
+    memory_total_mb: Mapped[int] = mapped_column(Integer, default=0)
+    disk_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    load_1: Mapped[float | None] = mapped_column(Float, nullable=True)
+    load_5: Mapped[float | None] = mapped_column(Float, nullable=True)
+    load_15: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class PanelResourceSample(Base):
+    __tablename__ = "panel_resource_sample"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    backend_cpu_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    backend_memory_mb: Mapped[int] = mapped_column(Integer, default=0)
+    backend_workers: Mapped[int] = mapped_column(Integer, default=0)
+    nginx_memory_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_panel_memory_mb: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 

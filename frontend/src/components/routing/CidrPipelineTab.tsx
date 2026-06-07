@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { AntifilterStatus, CidrDbStatus, CidrPipelineTask } from '@/types'
-import PipelineTaskProgress from './PipelineTaskProgress'
 import { formatDt, statusBadgeVariant, statusLabel } from './utils'
 
 interface CidrPipelineTabProps {
@@ -54,8 +53,6 @@ export default function CidrPipelineTab({
           </div>
         ))}
       </div>
-
-      <PipelineTaskProgress task={pipelineTask} />
 
       <StatusPanel title="Источники данных" icon={CloudDownload}>
         <p className="mb-4 text-sm text-muted-foreground">

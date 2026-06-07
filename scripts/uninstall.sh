@@ -73,6 +73,22 @@ remove_systemd_unit() {
   log "Удалён $unit"
 }
 
+remove_ddns_timer() {
+  local timer="adminpanelaz-ddns.timer"
+  local service="adminpanelaz-ddns.service"
+
+  if [[ ! -f "/etc/systemd/system/$timer" && ! -f "/etc/systemd/system/$service" ]]; then
+    return 0
+  fi
+
+  log "Удаление DDNS timer..."
+  systemctl stop "$timer" 2>/dev/null || true
+  systemctl disable "$timer" 2>/dev/null || true
+  rm -f "/etc/systemd/system/$timer" "/etc/systemd/system/$service"
+  systemctl daemon-reload
+  log "DDNS timer удалён"
+}
+
 remove_nginx_site_if_present() {
   local env_file="$ROOT_DIR/backend/.env"
   local domain=""
@@ -129,6 +145,7 @@ main() {
 
   stop_local_daemons
   remove_nginx_site_if_present
+  remove_ddns_timer
   remove_systemd_unit "adminpanelaz"
   remove_systemd_unit "adminpanelaz-node"
   systemctl daemon-reload 2>/dev/null || true

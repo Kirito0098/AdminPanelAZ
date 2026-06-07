@@ -1,5 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
-import { Activity, Cpu, HardDrive, MemoryStick, Network } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Activity,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Clock,
+  Cpu,
+  Gauge,
+  HardDrive,
+  Loader2,
+  MemoryStick,
+  Network,
+  RefreshCw,
+  Server,
+  Wifi,
+  WifiOff,
+} from 'lucide-react'
 import {
   Area,
   AreaChart,
@@ -10,62 +25,233 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { Navigate } from 'react-router-dom'
 import { ApiError, getBandwidthChart, getServerInterfaces, getServerMetrics } from '@/api/client'
-import MetricCard from '@/components/noc/MetricCard'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import Spinner from '@/components/ui/Spinner'
 import { NodeBadge } from '@/components/NodeSelector'
+import SettingsAlert from '@/components/settings/SettingsAlert'
+import EmptyState from '@/components/ui/EmptyState'
+import Spinner from '@/components/ui/Spinner'
+import { InlineProgressBar } from '@/components/ui/ProgressBar'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useProgress } from '@/context/ProgressContext'
+import { cn } from '@/lib/utils'
 import type { BandwidthChart, ServerMetrics } from '@/types'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
+const CHART_RX = 'hsl(187, 72%, 45%)'
+const CHART_TX = 'hsl(38, 92%, 50%)'
+
+const RANGE_LABELS: Record<'1d' | '7d' | '30d', string> = {
+  '1d': '1 день',
+  '7d': '7 дней',
+  '30d': '30 дней',
+}
+
+const GROUP_LABELS: Record<string, string> = {
+  vpn: 'VPN',
+  antizapret: 'AntiZapret',
+  openvpn: 'OpenVPN',
+  wireguard: 'WireGuard',
+}
+
+function getUsageBarColor(percent: number) {
+  if (percent >= 80) return 'bg-destructive'
+  if (percent >= 60) return 'bg-amber-500'
+  return 'bg-emerald-500'
+}
+
+function getUsageTextColor(percent: number) {
+  if (percent >= 80) return 'text-destructive'
+  if (percent >= 60) return 'text-amber-500'
+  return 'text-emerald-500'
+}
+
+function formatGb(bytes: number) {
+  return `${(bytes / 1e9).toFixed(1)} GB`
+}
+
+function getInterfaceGroups(
+  iface: string,
+  groups: Record<string, string[]> | undefined,
+): string[] {
+  if (!groups) return []
+  return Object.entries(groups)
+    .filter(([, list]) => list.includes(iface))
+    .map(([key]) => GROUP_LABELS[key] ?? key)
+}
+
+type ResourceGaugeProps = {
+  label: string
+  value: number
+  icon: typeof Cpu
+  sub?: string
+  unit?: string
+}
+
+function ResourceGauge({ label, value, icon: Icon, sub, unit = '%' }: ResourceGaugeProps) {
+  const clamped = Math.min(Math.max(value, 0), 100)
+  return (
+    <Card>
+      <CardContent className="space-y-3 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <div className="rounded-md bg-muted p-2 text-muted-foreground">
+              <Icon size={16} />
+            </div>
+            <div>
+              <p className="text-sm font-medium">{label}</p>
+              {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+            </div>
+          </div>
+          <span className={cn('mono text-2xl font-bold tabular-nums', getUsageTextColor(clamped))}>
+            {Number.isFinite(value) ? `${Math.round(value)}${unit}` : '—'}
+          </span>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-secondary">
+          <div
+            className={cn('h-full transition-all duration-500', getUsageBarColor(clamped))}
+            style={{ width: `${clamped}%` }}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+type LiveMetricProps = {
+  label: string
+  value: string
+  icon: typeof Network
+  direction: 'rx' | 'tx'
+}
+
+function LiveMetricCard({ label, value, icon: Icon, direction }: LiveMetricProps) {
+  const accent = direction === 'rx' ? 'text-primary' : 'text-amber-500'
+  const DirectionIcon = direction === 'rx' ? ArrowDownToLine : ArrowUpFromLine
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
+          <div className={cn('rounded-md bg-muted p-2', accent)}>
+            <Icon size={16} />
+          </div>
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <DirectionIcon size={16} className={cn('shrink-0', accent)} />
+          <span className="mono text-2xl font-bold tracking-tight tabular-nums">{value}</span>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function ServerMonitorPage() {
   const { user } = useAuth()
   const { activeNode } = useNode()
-  const { error: notifyError } = useNotifications()
+  const { error: notifyError, success } = useNotifications()
+  const { startGlobal, doneGlobal, inline, withInline } = useProgress()
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [liveCpu, setLiveCpu] = useState<number | null>(null)
   const [liveRam, setLiveRam] = useState<number | null>(null)
   const [liveBw, setLiveBw] = useState<{ rx: number; tx: number } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [bwLoading, setBwLoading] = useState(false)
+  const [wsConnected, setWsConnected] = useState(false)
   const [iface, setIface] = useState('eth0')
   const [ifaces, setIfaces] = useState<string[]>([])
+  const [interfaceGroups, setInterfaceGroups] = useState<Record<string, string[]>>({})
   const [range, setRange] = useState<'1d' | '7d' | '30d'>('1d')
   const [bwChart, setBwChart] = useState<BandwidthChart | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
 
+  const loadMetrics = useCallback(async () => {
+    try {
+      const [m, ifData] = await Promise.all([getServerMetrics(), getServerInterfaces()])
+      setMetrics(m)
+      setLoadError(null)
+      const list = ifData.interfaces || []
+      setIfaces(list)
+      setInterfaceGroups(ifData.groups || {})
+      setIface((current) => (list.length && !list.includes(current) ? list[0] : current))
+      return m
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Ошибка загрузки метрик'
+      setLoadError(message)
+      notifyError(message)
+      return null
+    }
+  }, [notifyError])
+
+  const loadBandwidth = useCallback(
+    async (targetIface: string, targetRange: '1d' | '7d' | '30d') => {
+      if (!targetIface) return
+      setBwLoading(true)
+      try {
+        setBwChart(await getBandwidthChart(targetIface, targetRange))
+      } catch (err) {
+        notifyError(err instanceof ApiError ? err.message : 'Ошибка vnStat')
+      } finally {
+        setBwLoading(false)
+      }
+    },
+    [notifyError],
+  )
+
   useEffect(() => {
     if (user?.role !== 'admin') return
-    getServerInterfaces()
-      .then((d) => {
-        setIfaces(d.interfaces || [])
-        if (d.interfaces?.[0]) setIface(d.interfaces[0])
+    startGlobal()
+    loadMetrics()
+      .finally(() => {
+        setLoading(false)
+        doneGlobal()
       })
-      .catch(() => {})
-    getServerMetrics()
-      .then(setMetrics)
-      .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка метрик'))
-      .finally(() => setLoading(false))
-  }, [user?.role])
+  }, [user?.role, loadMetrics, activeNode?.id, startGlobal, doneGlobal])
 
   useEffect(() => {
     if (user?.role !== 'admin' || !iface) return
-    getBandwidthChart(iface, range)
-      .then(setBwChart)
-      .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка vnStat'))
-  }, [user?.role, iface, range])
+    loadBandwidth(iface, range)
+  }, [user?.role, iface, range, loadBandwidth, activeNode?.id])
 
   useEffect(() => {
     if (user?.role !== 'admin') return
     const token = localStorage.getItem('token')
     if (!token) return
-    const wsUrl = `${API_BASE.replace('/api', '')}/api/server-monitor/ws?token=${token}&iface=${encodeURIComponent(iface)}`.replace('http', 'ws')
+
+    setWsConnected(false)
+    const wsUrl = `${API_BASE.replace('/api', '')}/api/server-monitor/ws?token=${token}&iface=${encodeURIComponent(iface)}`.replace(
+      'http',
+      'ws',
+    )
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
+
+    ws.onopen = () => setWsConnected(true)
+    ws.onclose = () => setWsConnected(false)
+    ws.onerror = () => setWsConnected(false)
     ws.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data)
@@ -78,17 +264,42 @@ export default function ServerMonitorPage() {
         /* ignore */
       }
     }
-    return () => ws.close()
-  }, [user?.role, iface])
 
-  if (user?.role !== 'admin') {
-    return <p className="text-muted-foreground">Мониторинг сервера доступен только администраторам.</p>
+    return () => ws.close()
+  }, [user?.role, iface, activeNode?.id])
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    try {
+      await withInline(async () => {
+        await loadMetrics()
+        await loadBandwidth(iface, range)
+      }, 'Обновление метрик сервера...')
+      success('Метрики сервера обновлены')
+    } finally {
+      setRefreshing(false)
+    }
   }
 
-  if (loading) return <Spinner label="Загрузка метрик сервера..." />
+  if (user?.role !== 'admin') {
+    return <Navigate to="/" replace />
+  }
+
+  if (loading) {
+    return <Spinner label="Загрузка метрик сервера..." className="py-16" />
+  }
+
+  const nodeOffline = activeNode?.status === 'offline'
+  const nodeUnknown = activeNode?.status === 'unknown'
+  const metricsUnavailable = !!loadError || (!metrics && !liveCpu && !liveRam)
 
   const cpu = liveCpu ?? metrics?.cpu_percent ?? 0
   const ram = liveRam ?? metrics?.memory_percent ?? 0
+  const disk = metrics?.disk_percent ?? 0
+  const ramSub = metrics
+    ? `${formatGb(metrics.memory_used)} / ${formatGb(metrics.memory_total)}`
+    : undefined
+
   const chartData =
     bwChart?.labels?.map((label, i) => ({
       label,
@@ -96,93 +307,385 @@ export default function ServerMonitorPage() {
       tx: bwChart.tx_mbps[i] ?? 0,
     })) ?? []
 
+  const interfaceList = ifaces.length ? ifaces : iface ? [iface] : []
+  const selectedGroups = getInterfaceGroups(iface, interfaceGroups)
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Мониторинг сервера</h2>
-          <p className="text-sm text-muted-foreground">
-            CPU, RAM, vnStat bandwidth — WebSocket каждые 2с
-            {metrics?.hostname ? ` · ${metrics.hostname}` : ''}
-          </p>
-        </div>
-        <NodeBadge name={activeNode?.name ?? metrics?.node_name} status={activeNode?.status} />
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard label="CPU" value={`${cpu}%`} icon={Cpu} accent={cpu > 80 ? 'red' : 'cyan'} />
-        <MetricCard label="RAM" value={`${ram}%`} icon={MemoryStick} accent={ram > 80 ? 'red' : 'green'} />
-        <MetricCard
-          label="RX (live)"
-          value={liveBw ? `${liveBw.rx} Mbps` : '—'}
-          icon={Network}
-          accent="cyan"
-        />
-        <MetricCard
-          label="TX (live)"
-          value={liveBw ? `${liveBw.tx} Mbps` : '—'}
-          icon={Activity}
-          accent="amber"
-        />
-        <MetricCard label="Uptime" value={metrics?.uptime || '—'} icon={HardDrive} />
-      </div>
-      <Card>
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Cpu size={22} />
+          </div>
           <div>
-            <CardTitle className="text-base">Трафик (vnStat)</CardTitle>
-            <CardDescription>Интерфейс: {iface}</CardDescription>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-2xl font-bold tracking-tight">Сервер</h2>
+              <NodeBadge name={activeNode?.name ?? metrics?.node_name} status={activeNode?.status} />
+              {wsConnected ? (
+                <Badge variant="success" className="gap-1 text-[10px]">
+                  <Wifi size={10} />
+                  Live
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="gap-1 text-[10px]">
+                  <WifiOff size={10} />
+                  WS
+                </Badge>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              CPU, RAM, диск и трафик vnStat · WebSocket каждые 2 с
+              {metrics?.hostname ? ` · ${metrics.hostname}` : ''}
+            </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <select
-              className="rounded-md border bg-background px-2 py-1 text-sm"
-              value={iface}
-              onChange={(e) => setIface(e.target.value)}
-            >
-              {(ifaces.length ? ifaces : [iface]).map((i) => (
-                <option key={i} value={i}>
-                  {i}
-                </option>
-              ))}
-            </select>
-            {(['1d', '7d', '30d'] as const).map((r) => (
-              <Button key={r} size="sm" variant={range === r ? 'default' : 'outline'} onClick={() => setRange(r)}>
-                {r}
-              </Button>
-            ))}
+        </div>
+        <Button variant="outline" onClick={handleRefresh} disabled={refreshing}>
+          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+          Обновить
+        </Button>
+      </div>
+
+      <SettingsAlert variant="info" title="Данные активного узла">
+        Метрики собираются с <strong>{activeNode?.name ?? metrics?.node_name ?? 'активного узла'}</strong>
+        {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
+        Переключите узел в шапке или на странице «Узлы», чтобы смотреть другой сервер.
+      </SettingsAlert>
+
+      {nodeOffline && (
+        <SettingsAlert variant="warning" title="Узел офлайн">
+          Активный узел недоступен. Метрики могут быть устаревшими или отсутствовать. Проверьте связь с node
+          agent и повторите обновление.
+        </SettingsAlert>
+      )}
+
+      {nodeUnknown && !nodeOffline && (
+        <SettingsAlert variant="warning" title="Статус узла неизвестен">
+          Связь с узлом не подтверждена. Запустите проверку здоровья на странице «Узлы».
+        </SettingsAlert>
+      )}
+
+      <InlineProgressBar
+        active={inline.active || refreshing || bwLoading}
+        label={
+          inline.label ||
+          (refreshing ? 'Обновление метрик...' : bwLoading ? 'Загрузка графика vnStat...' : undefined)
+        }
+      />
+
+      {metricsUnavailable ? (
+        <Card>
+          <CardContent>
+            <EmptyState
+              icon={Server}
+              title="Метрики недоступны"
+              description={
+                loadError ??
+                'Не удалось получить данные с активного узла. Убедитесь, что node agent запущен и узел в сети.'
+              }
+              action={
+                <Button onClick={handleRefresh} disabled={refreshing}>
+                  {refreshing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                  Повторить
+                </Button>
+              }
+              className="py-8"
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <ResourceGauge label="CPU" value={cpu} icon={Cpu} sub="Загрузка процессора" />
+            <ResourceGauge label="RAM" value={ram} icon={MemoryStick} sub={ramSub} />
+            <ResourceGauge label="Диск" value={disk} icon={HardDrive} sub="Использование корневого раздела" />
           </div>
-        </CardHeader>
-        <CardContent>
-          {bwChart?.error ? (
-            <p className="text-sm text-muted-foreground">{bwChart.error}</p>
-          ) : chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={280}>
-              <AreaChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10 }} unit=" Mbps" />
-                <Tooltip />
-                <Legend />
-                <Area type="monotone" dataKey="rx" name="RX" stroke="#22d3ee" fill="#22d3ee33" />
-                <Area type="monotone" dataKey="tx" name="TX" stroke="#f59e0b" fill="#f59e0b33" />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="text-sm text-muted-foreground">Нет данных vnStat для выбранного интерфейса</p>
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Система</CardTitle>
-          <CardDescription>Load average и ресурсы</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-2 text-sm md:grid-cols-3">
-          <div>Load 1m: {metrics?.load_average?.load_1m ?? '—'}</div>
-          <div>Load 5m: {metrics?.load_average?.load_5m ?? '—'}</div>
-          <div>Load 15m: {metrics?.load_average?.load_15m ?? '—'}</div>
-          <div>RAM: {metrics ? `${Math.round(metrics.memory_used / 1e9)} / ${Math.round(metrics.memory_total / 1e9)} GB` : '—'}</div>
-          <div>Диск: {metrics?.disk_percent ?? 0}%</div>
-        </CardContent>
-      </Card>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <LiveMetricCard
+              label="RX (live)"
+              value={liveBw ? `${liveBw.rx} Mbps` : '—'}
+              icon={Network}
+              direction="rx"
+            />
+            <LiveMetricCard
+              label="TX (live)"
+              value={liveBw ? `${liveBw.tx} Mbps` : '—'}
+              icon={Activity}
+              direction="tx"
+            />
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between">
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Uptime</span>
+                  <div className="rounded-md bg-muted p-2 text-muted-foreground">
+                    <Clock size={16} />
+                  </div>
+                </div>
+                <div className="mono mt-2 text-2xl font-bold tracking-tight">{metrics?.uptime || '—'}</div>
+                {metrics?.timestamp && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Снимок: {new Date(metrics.timestamp).toLocaleString('ru-RU')}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Activity size={18} />
+                  Трафик (vnStat)
+                </CardTitle>
+                <CardDescription>
+                  История пропускной способности · {RANGE_LABELS[range]}
+                  {selectedGroups.length > 0 && ` · ${selectedGroups.join(', ')}`}
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={iface} onValueChange={setIface}>
+                  <SelectTrigger className="h-9 w-[160px] text-xs">
+                    <SelectValue placeholder="Интерфейс" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {interfaceList.map((i) => (
+                      <SelectItem key={i} value={i}>
+                        {i}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {(['1d', '7d', '30d'] as const).map((r) => (
+                  <Button key={r} size="sm" variant={range === r ? 'default' : 'outline'} onClick={() => setRange(r)}>
+                    {RANGE_LABELS[r]}
+                  </Button>
+                ))}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {bwLoading ? (
+                <Spinner label="Загрузка графика..." className="py-12" />
+              ) : bwChart?.error ? (
+                <EmptyState
+                  icon={Network}
+                  title="vnStat недоступен"
+                  description={bwChart.error}
+                  className="py-8"
+                />
+              ) : chartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="bwRx" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={CHART_RX} stopOpacity={0.35} />
+                        <stop offset="95%" stopColor={CHART_RX} stopOpacity={0.02} />
+                      </linearGradient>
+                      <linearGradient id="bwTx" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={CHART_TX} stopOpacity={0.35} />
+                        <stop offset="95%" stopColor={CHART_TX} stopOpacity={0.02} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 11 }}
+                      tickLine={false}
+                      axisLine={false}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis
+                      tick={{ fontSize: 11 }}
+                      tickLine={false}
+                      axisLine={false}
+                      unit=" Mbps"
+                      width={56}
+                    />
+                    <Tooltip
+                      formatter={(value: number, name: string) => [
+                        `${Number(value).toFixed(2)} Mbps`,
+                        name === 'rx' ? 'Приём (RX)' : 'Передача (TX)',
+                      ]}
+                      labelFormatter={(label) => `Период: ${label}`}
+                      contentStyle={{
+                        borderRadius: '8px',
+                        border: '1px solid hsl(var(--border))',
+                        background: 'hsl(var(--popover))',
+                        fontSize: '12px',
+                      }}
+                    />
+                    <Legend
+                      formatter={(value) => (value === 'rx' ? 'Приём (RX)' : 'Передача (TX)')}
+                      wrapperStyle={{ fontSize: '12px' }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="rx"
+                      name="rx"
+                      stroke={CHART_RX}
+                      fill="url(#bwRx)"
+                      strokeWidth={2}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="tx"
+                      name="tx"
+                      stroke={CHART_TX}
+                      fill="url(#bwTx)"
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <EmptyState
+                  icon={Network}
+                  title="Нет данных vnStat"
+                  description="Для выбранного интерфейса нет истории трафика. Проверьте, что vnStat установлен и интерфейс активен."
+                  className="py-8"
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Gauge size={18} />
+                  Load average
+                </CardTitle>
+                <CardDescription>Средняя загрузка системы за 1, 5 и 15 минут</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {[
+                    { key: 'load_1m', label: '1 мин' },
+                    { key: 'load_5m', label: '5 мин' },
+                    { key: 'load_15m', label: '15 мин' },
+                  ].map(({ key, label }) => {
+                    const value = metrics?.load_average?.[key]
+                    return (
+                      <div key={key} className="rounded-lg border bg-muted/30 px-4 py-3 text-center">
+                        <p className="text-xs text-muted-foreground">{label}</p>
+                        <p className="mono mt-1 text-xl font-semibold tabular-nums">
+                          {value !== undefined ? value.toFixed(2) : '—'}
+                        </p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Network size={18} />
+                  Сетевые интерфейсы
+                </CardTitle>
+                <CardDescription>
+                  {interfaceList.length > 0
+                    ? `${interfaceList.length} интерфейс${interfaceList.length === 1 ? '' : interfaceList.length < 5 ? 'а' : 'ов'} · vnStat`
+                    : 'Интерфейсы не обнаружены'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {interfaceList.length === 0 ? (
+                  <EmptyState
+                    icon={Network}
+                    title="Нет интерфейсов"
+                    description="Список сетевых интерфейсов пуст. Проверьте vnStat и доступ node agent к системе."
+                    className="py-6"
+                  />
+                ) : (
+                  <>
+                    <div className="space-y-3 lg:hidden">
+                      {interfaceList.map((name) => {
+                        const groups = getInterfaceGroups(name, interfaceGroups)
+                        const isSelected = name === iface
+                        return (
+                          <div
+                            key={name}
+                            className={cn(
+                              'rounded-lg border p-3',
+                              isSelected && 'border-primary/40 bg-primary/5',
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-mono text-sm font-medium">{name}</span>
+                              {isSelected && (
+                                <Badge variant="default" className="text-[10px]">
+                                  выбран
+                                </Badge>
+                              )}
+                            </div>
+                            {groups.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {groups.map((g) => (
+                                  <Badge key={g} variant="secondary" className="text-[10px]">
+                                    {g}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    <div className="hidden overflow-x-auto rounded-md border lg:block">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Интерфейс</TableHead>
+                            <TableHead>Группы</TableHead>
+                            <TableHead className="text-right">График</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {interfaceList.map((name) => {
+                            const groups = getInterfaceGroups(name, interfaceGroups)
+                            const isSelected = name === iface
+                            return (
+                              <TableRow key={name} className={cn(isSelected && 'bg-primary/5')}>
+                                <TableCell className="font-mono text-sm font-medium">{name}</TableCell>
+                                <TableCell>
+                                  {groups.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {groups.map((g) => (
+                                        <Badge key={g} variant="secondary" className="text-[10px]">
+                                          {g}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground">—</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {isSelected ? (
+                                    <Badge variant="default" className="text-[10px]">
+                                      активный
+                                    </Badge>
+                                  ) : (
+                                    <Button variant="ghost" size="sm" onClick={() => setIface(name)}>
+                                      Показать
+                                    </Button>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
     </div>
   )
 }

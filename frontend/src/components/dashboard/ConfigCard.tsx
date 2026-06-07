@@ -1,107 +1,259 @@
-import { Copy } from 'lucide-react'
-import type { ClientAccessPolicy, VpnConfig } from '@/types'
+import {
+  AlertTriangle,
+  Ban,
+  Calendar,
+  CheckCircle2,
+  Copy,
+  Download,
+  Loader2,
+  MoreHorizontal,
+  QrCode,
+  Shield,
+  Trash2,
+  Unlock,
+} from 'lucide-react'
+import type { ClientAccessPolicy, UserRole, VpnConfig } from '@/types'
 import {
   buildAccessMeta,
+  formatCreatedAt,
+  getConfigStatus,
+  getProtocolBadgeVariant,
   hasAzProfiles,
   hasVpnProfiles,
+  pickPrimaryFile,
   protocolLabel,
   type ProtocolTab,
 } from '@/lib/configCardUtils'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+
+type ActionKey = 'download' | 'qr' | 'block' | 'unblock' | 'delete'
 
 interface ConfigCardProps {
   config: VpnConfig
   tab: ProtocolTab
   policy?: ClientAccessPolicy
-  onOpen: () => void
+  userRole: UserRole
+  loadingAction?: ActionKey | null
+  onOpenDetails: () => void
   onCopyName: () => void
+  onDownload: (path: string, filename: string) => void
+  onQr: (path: string, filename: string) => void
+  onBlock?: () => void
+  onUnblock?: () => void
+  onDelete?: () => void
 }
 
-export default function ConfigCard({ config, tab, policy, onOpen, onCopyName }: ConfigCardProps) {
-  const isBlocked = policy?.is_blocked ?? false
+const statusIcons = {
+  success: CheckCircle2,
+  destructive: Ban,
+  warning: AlertTriangle,
+  secondary: Shield,
+}
+
+export default function ConfigCard({
+  config,
+  tab,
+  policy,
+  userRole,
+  loadingAction,
+  onOpenDetails,
+  onCopyName,
+  onDownload,
+  onQr,
+  onBlock,
+  onUnblock,
+  onDelete,
+}: ConfigCardProps) {
+  const status = getConfigStatus(config, tab, policy)
+  const StatusIcon = statusIcons[status.variant]
   const { lines, tone } = buildAccessMeta(config, tab, policy)
+  const primaryFile = pickPrimaryFile(config)
+  const isAdmin = userRole === 'admin'
+  const canDelete = isAdmin || userRole === 'user'
+  const isBlocked = policy?.is_blocked ?? false
   const showMeta = Boolean(policy) || config.vpn_type === 'openvpn'
+  const keyMeta = lines.slice(0, 2)
+
+  const runPrimary = (action: 'download' | 'qr', fn: (path: string, filename: string) => void) => {
+    if (!primaryFile) return
+    fn(primaryFile.path, primaryFile.filename)
+  }
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onOpen()
-        }
-      }}
+    <Card
       className={cn(
-        'group flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-lg border px-2.5 py-2 text-left',
-        'border-primary/45 bg-gradient-to-br from-background/95 to-muted/40',
-        'shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_4px_14px_rgba(0,0,0,0.28)]',
-        'transition-all duration-200 hover:-translate-y-px hover:border-primary/70',
-        'hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_12px_28px_rgba(0,0,0,0.35),0_0_0_1px_rgba(120,200,140,0.24)]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+        'transition-colors hover:border-primary/40 hover:shadow-md',
+        tone === 'expired' && 'border-destructive/30',
+        tone === 'expiring' && 'border-amber-500/30',
       )}
     >
-      <div className="flex w-full items-start justify-between gap-1">
-        <span className="truncate text-[0.91rem] font-bold leading-tight text-foreground">{config.client_name}</span>
-        <button
-          type="button"
-          title="Копировать имя"
-          onClick={(e) => {
-            e.stopPropagation()
-            onCopyName()
-          }}
-          className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
-        >
-          <Copy size={12} />
-        </button>
-      </div>
-
-      <span
-        className={cn(
-          'inline-flex items-center rounded-full border px-1.5 py-0.5 text-[0.68rem] font-bold leading-tight',
-          isBlocked
-            ? 'border-destructive/50 bg-destructive/20 text-red-200'
-            : 'border-primary/40 bg-primary/15 text-emerald-200',
-        )}
-      >
-        {isBlocked ? 'Заблокирован' : 'Активный'}
-      </span>
-
-      {showMeta && (
-        <div
-          className={cn(
-            'mt-0.5 space-y-0.5 text-[0.72rem] leading-snug',
-            tone === 'expired' && 'text-destructive/90',
-            tone === 'expiring' && 'text-amber-400/90',
-            tone === 'active' && 'text-muted-foreground',
-          )}
-        >
-          {lines.map((line) => (
-            <div key={line.text}>{line.text}</div>
-          ))}
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1 space-y-1">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Shield size={16} className="shrink-0 text-muted-foreground" />
+              <span className="truncate">{config.client_name}</span>
+              <button
+                type="button"
+                title="Копировать имя"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onCopyName()
+                }}
+                className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-primary"
+              >
+                <Copy size={14} />
+              </button>
+            </CardTitle>
+            {config.description && (
+              <CardDescription className="line-clamp-2 text-xs">{config.description}</CardDescription>
+            )}
+          </div>
+          <Badge variant={status.variant === 'success' ? 'success' : status.variant === 'warning' ? 'warning' : status.variant === 'destructive' ? 'destructive' : 'secondary'}>
+            <StatusIcon size={12} />
+            {status.label}
+          </Badge>
         </div>
-      )}
+        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+          <Badge variant={getProtocolBadgeVariant(tab)}>{protocolLabel(tab)}</Badge>
+          {hasVpnProfiles(config) && (
+            <Badge variant="outline" className="text-[10px]">
+              VPN
+            </Badge>
+          )}
+          {hasAzProfiles(config) && (
+            <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-600 dark:text-amber-400">
+              AZ
+            </Badge>
+          )}
+        </div>
+      </CardHeader>
 
-      <div className="mt-1 flex flex-wrap gap-1">
-        <span className="inline-flex items-center rounded-full border border-sky-500/40 bg-sky-500/20 px-1.5 py-0.5 text-[0.66rem] font-bold text-sky-200">
-          {protocolLabel(tab)}
-        </span>
-        {hasVpnProfiles(config) && (
-          <span className="inline-flex items-center rounded-full border border-primary/35 bg-primary/15 px-1.5 py-0.5 text-[0.66rem] font-bold text-emerald-200">
-            VPN
-          </span>
-        )}
-        {hasAzProfiles(config) && (
-          <span className="inline-flex items-center rounded-full border border-amber-500/45 bg-amber-500/20 px-1.5 py-0.5 text-[0.66rem] font-bold text-amber-200">
-            AZ
-          </span>
-        )}
-      </div>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <p className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Calendar size={12} />
+              Создан
+            </p>
+            <p className="text-xs">{formatCreatedAt(config.created_at)}</p>
+          </div>
+          {config.vpn_type === 'openvpn' && (
+            <div>
+              <p className="text-xs text-muted-foreground">Сертификат</p>
+              <p className="text-xs">{config.cert_expire_days ?? '—'} дн.</p>
+            </div>
+          )}
+          {showMeta &&
+            keyMeta.map((line) => {
+              const [label, value] = line.text.includes(':')
+                ? [line.text.split(':')[0], line.text.split(':').slice(1).join(':').trim()]
+                : [line.text, '']
+              return (
+                <div key={line.text}>
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                  <p
+                    className={cn(
+                      'text-xs',
+                      tone === 'expired' && 'text-destructive',
+                      tone === 'expiring' && 'text-amber-600 dark:text-amber-400',
+                    )}
+                  >
+                    {value || label}
+                  </p>
+                </div>
+              )
+            })}
+        </div>
 
-      <span className="mt-1 text-[0.67rem] text-muted-foreground/80">
-        {tab === 'openvpn' ? 'Открыть действия и график' : 'Нажмите для действий'}
-      </span>
-    </div>
+        <div className="flex flex-wrap items-center gap-1 border-t pt-3">
+          {primaryFile && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                title="Скачать профиль"
+                disabled={!!loadingAction}
+                onClick={() => runPrimary('download', onDownload)}
+              >
+                {loadingAction === 'download' ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Download size={14} />
+                )}
+                Скачать
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                title="QR-код"
+                disabled={!!loadingAction}
+                onClick={() => runPrimary('qr', onQr)}
+              >
+                {loadingAction === 'qr' ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <QrCode size={14} />
+                )}
+                QR
+              </Button>
+            </>
+          )}
+          <Button variant="outline" size="sm" title="Все действия" onClick={onOpenDetails}>
+            <MoreHorizontal size={14} />
+            Ещё
+          </Button>
+          {isAdmin && !isBlocked && onBlock && (
+            <Button
+              variant="outline"
+              size="sm"
+              title="Заблокировать"
+              disabled={!!loadingAction}
+              onClick={onBlock}
+            >
+              {loadingAction === 'block' ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Ban size={14} />
+              )}
+            </Button>
+          )}
+          {isAdmin && isBlocked && onUnblock && (
+            <Button
+              variant="outline"
+              size="sm"
+              title="Разблокировать"
+              disabled={!!loadingAction}
+              onClick={onUnblock}
+            >
+              {loadingAction === 'unblock' ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Unlock size={14} />
+              )}
+            </Button>
+          )}
+          {canDelete && onDelete && (
+            <Button
+              variant="ghost"
+              size="sm"
+              title="Удалить"
+              disabled={!!loadingAction}
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={onDelete}
+            >
+              {loadingAction === 'delete' ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Trash2 size={14} />
+              )}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   )
 }

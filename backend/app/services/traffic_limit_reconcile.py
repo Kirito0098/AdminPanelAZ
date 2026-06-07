@@ -15,21 +15,29 @@ settings = get_settings()
 
 
 def reconcile_traffic_limit_policies(db: Session, *, node_id: int | None = None) -> dict:
-    if node_id is not None:
-        node = db.query(Node).filter(Node.id == node_id).first()
-        if node:
-            meta = node_metadata_dict(node)
-            antizapret_path = Path(str(meta.get("antizapret_path") or settings.antizapret_path))
-            svc = AccessPolicyService(
-                db,
-                antizapret_path=antizapret_path,
-                node_id=node.id,
-                adapter=get_adapter_for_node(node),
-            )
-            return svc.reconcile_all_traffic_limits(node_id=node_id)
+    if node_id is None:
+        total_changed = 0
+        for node in db.query(Node).all():
+            result = _reconcile_for_node(db, node)
+            total_changed += int(result.get("changed") or 0)
+        return {"traffic_limit_reconcile": "ok", "changed": total_changed, "node_id": None}
 
-    svc = AccessPolicyService(db, antizapret_path=settings.antizapret_path)
-    return svc.reconcile_all_traffic_limits(node_id=node_id)
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        return {"traffic_limit_reconcile": "skipped", "changed": 0, "node_id": node_id}
+    return _reconcile_for_node(db, node)
+
+
+def _reconcile_for_node(db: Session, node: Node) -> dict:
+    meta = node_metadata_dict(node)
+    antizapret_path = Path(str(meta.get("antizapret_path") or settings.antizapret_path))
+    svc = AccessPolicyService(
+        db,
+        antizapret_path=antizapret_path,
+        node_id=node.id,
+        adapter=get_adapter_for_node(node),
+    )
+    return svc.reconcile_all_traffic_limits(node_id=node.id)
 
 
 def reconcile_traffic_limit_policies_safe(db: Session, *, node_id: int | None = None) -> dict:

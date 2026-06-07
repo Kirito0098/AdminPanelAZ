@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { FlaskConical, Play, RefreshCw } from 'lucide-react'
 import { ApiError, collectTests, getTestTask, runTests } from '@/api/client'
+import EmptyState from '@/components/ui/EmptyState'
+import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
@@ -70,6 +72,10 @@ export default function TestsTab() {
     }
   }
 
+  if (loading) {
+    return <Spinner label="Сбор списка тестов..." className="py-12" />
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -81,7 +87,7 @@ export default function TestsTab() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => handleRun()} disabled={running}>
+          <Button onClick={() => handleRun()} disabled={running || tests.length === 0}>
             <Play size={16} />
             Запустить все ({tests.length})
           </Button>
@@ -95,10 +101,17 @@ export default function TestsTab() {
             <InlineProgressBar active={running} label={taskStatus || 'Выполнение тестов...'} />
           </div>
         )}
-        {tests.length > 0 && (
+        {tests.length === 0 ? (
+          <EmptyState
+            icon={FlaskConical}
+            title="Тесты не найдены"
+            description="pytest не обнаружил тестовых модулей в backend"
+            className="py-6"
+          />
+        ) : (
           <ul className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-3 text-sm">
             {tests.map((t) => (
-              <li key={t.id} className="flex items-center justify-between gap-2">
+              <li key={t.id} className="flex items-center justify-between gap-2 rounded-md px-1 py-0.5 hover:bg-muted/50">
                 <span className="truncate">{t.title}</span>
                 <Button size="sm" variant="ghost" disabled={running} onClick={() => handleRun([t.id])}>
                   Запуск
@@ -108,7 +121,7 @@ export default function TestsTab() {
           </ul>
         )}
         {result && (
-          <pre className="max-h-64 overflow-auto rounded-md border bg-muted/30 p-3 text-xs">{result}</pre>
+          <pre className="max-h-64 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs">{result}</pre>
         )}
       </CardContent>
     </Card>

@@ -591,6 +591,88 @@ start_daemon() {
     ADMINPANELAZ_MODE=prod "$ROOT_DIR/start.sh" daemon
 }
 
+ddns_config_quote() {
+  local value="$1"
+  value="${value//\'/\'\\\'\'}"
+  printf "'%s'" "$value"
+}
+
+write_ddns_config() {
+  local provider="${WIZ_DDNS_PROVIDER:-none}"
+  local config_dir="/etc/adminpanelaz"
+  local config_file="$config_dir/ddns.env"
+
+  [[ "$provider" != "none" && -n "$provider" ]] || return 0
+
+  mkdir -p "$config_dir"
+  chmod 700 "$config_dir"
+
+  local domain=""
+  case "$provider" in
+    duckdns)
+      domain="${WIZ_DDNS_SUBDOMAIN}.duckdns.org"
+      ;;
+    noip)
+      domain="${WIZ_DDNS_HOSTNAME}"
+      ;;
+  esac
+
+  {
+    echo "# AdminPanelAZ DDNS (создан install.sh)"
+    echo "DDNS_PROVIDER=$(ddns_config_quote "$provider")"
+    echo "DDNS_DOMAIN=$(ddns_config_quote "$domain")"
+    case "$provider" in
+      duckdns)
+        echo "DDNS_SUBDOMAIN=$(ddns_config_quote "$WIZ_DDNS_SUBDOMAIN")"
+        echo "DDNS_TOKEN=$(ddns_config_quote "$WIZ_DDNS_TOKEN")"
+        ;;
+      noip)
+        echo "DDNS_HOSTNAME=$(ddns_config_quote "$WIZ_DDNS_HOSTNAME")"
+        echo "DDNS_USERNAME=$(ddns_config_quote "$WIZ_DDNS_USERNAME")"
+        echo "DDNS_PASSWORD=$(ddns_config_quote "$WIZ_DDNS_PASSWORD")"
+        ;;
+    esac
+  } >"$config_file"
+
+  chmod 600 "$config_file"
+  log "DDNS конфигурация: $config_file ($domain)"
+}
+
+setup_ddns_if_selected() {
+  if [[ "$WIZARD_RAN" != true ]] || ! install_controller_selected; then
+    return 0
+  fi
+
+  local provider="${WIZ_DDNS_PROVIDER:-none}"
+  if [[ "$provider" == "none" || -z "$provider" ]]; then
+    return 0
+  fi
+
+  log "Настройка DDNS ($provider)..."
+  write_ddns_config
+
+  if [[ ! -x "$ROOT_DIR/scripts/ddns-update.sh" ]]; then
+    chmod +x "$ROOT_DIR/scripts/ddns-update.sh"
+  fi
+
+  if "$ROOT_DIR/scripts/ddns-update.sh" update; then
+    log "DDNS: начальное обновление IP выполнено"
+  else
+    warn "DDNS: не удалось обновить IP — проверьте token/учётные данные и доступ в интернет"
+    if [[ "${WIZ_NGINX_MODE:-none}" == "le" ]]; then
+      warn "Let's Encrypt может не выдать сертификат, пока DNS не указывает на этот сервер"
+    fi
+  fi
+
+  if [[ "${WIZ_DDNS_CONFIGURE_UPDATE:-false}" == "true" ]]; then
+    if "$ROOT_DIR/scripts/ddns-update.sh" install-timer; then
+      log "DDNS: systemd timer установлен (каждые 5 минут)"
+    else
+      warn "DDNS: не удалось установить timer — запускайте вручную: sudo ./scripts/ddns-update.sh update"
+    fi
+  fi
+}
+
 setup_nginx_if_selected() {
   if [[ "$WIZARD_RAN" != true ]] || ! install_controller_selected; then
     return 0
@@ -801,6 +883,20 @@ EOF
 EOF
 
   if install_controller_selected; then
+    if [[ "${WIZ_DDNS_PROVIDER:-none}" != "none" ]]; then
+      local ddns_domain=""
+      case "${WIZ_DDNS_PROVIDER}" in
+        duckdns) ddns_domain="${WIZ_DDNS_SUBDOMAIN}.duckdns.org" ;;
+        noip) ddns_domain="${WIZ_DDNS_HOSTNAME}" ;;
+      esac
+      cat <<EOF
+DDNS (${WIZ_DDNS_PROVIDER}):
+  Домен:   ${ddns_domain}
+  Обновление IP: sudo ./scripts/ddns-update.sh update
+  Статус:  sudo ./scripts/ddns-update.sh status
+
+EOF
+    fi
     if [[ "${WIZ_NGINX_MODE:-none}" != "none" && -n "${WIZ_NGINX_DOMAIN:-}" ]]; then
       local pub_https="${WIZ_HTTPS_PUBLIC_PORT:-443}"
       local url_suffix=""
@@ -928,6 +1024,7 @@ main() {
     start_daemon
   fi
 
+  setup_ddns_if_selected
   setup_nginx_if_selected
   restart_services_after_nginx
   setup_firewall_if_selected

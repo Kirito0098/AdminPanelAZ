@@ -32,7 +32,7 @@ export type ConfirmAction =
 export function useRoutingPage() {
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
-  const { startGlobal, doneGlobal } = useProgress()
+  const { startGlobal, doneGlobal, inline, withInline } = useProgress()
 
   const [data, setData] = useState<RoutingOverview | null>(null)
   const [cidrDb, setCidrDb] = useState<CidrDbStatus | null>(null)
@@ -171,10 +171,14 @@ export function useRoutingPage() {
     }
   }
 
-  const withAction = async (fn: () => Promise<unknown>, okMsg: string) => {
+  const withAction = async (
+    fn: () => Promise<unknown>,
+    okMsg: string,
+    progressLabel = 'Выполнение операции...',
+  ) => {
     setActionLoading(true)
     try {
-      await fn()
+      await withInline(fn, progressLabel)
       success(okMsg)
       await load()
     } catch (err) {
@@ -191,10 +195,10 @@ export function useRoutingPage() {
 
     switch (action) {
       case 'apply-doall':
-        await withAction(applyRouting, 'doall.sh выполнен')
+        await withAction(applyRouting, 'doall.sh выполнен', 'Применение doall.sh...')
         break
       case 'sync-providers':
-        await withAction(syncRoutingProviders, 'Синхронизация выполнена')
+        await withAction(syncRoutingProviders, 'Синхронизация выполнена', 'Синхронизация провайдеров...')
         break
       case 'generate-only':
         await withPipelineAction(
@@ -240,10 +244,13 @@ export function useRoutingPage() {
       withAction(
         () => toggleRoutingProvider(filename, enabled),
         enabled ? `${name} включён` : `${name} отключён`,
+        enabled ? `Включение ${name}...` : `Отключение ${name}...`,
       ),
     applyPreset: (key: string, name: string) =>
-      withAction(() => applyRoutingPreset(key), `Пресет «${name}» применён`),
-    syncGames: () => withAction(() => syncGameFilters(gameModes), 'Игровые фильтры синхронизированы'),
+      withAction(() => applyRoutingPreset(key), `Пресет «${name}» применён`, `Применение пресета «${name}»...`),
+    syncGames: () =>
+      withAction(() => syncGameFilters(gameModes), 'Игровые фильтры синхронизированы', 'Синхронизация игровых фильтров...'),
+    inline,
     refreshCidrDb: () => withPipelineAction(refreshCidrDb, 'CIDR БД обновлена из интернета'),
     refreshAntifilter: () => withPipelineAction(refreshAntifilter, 'Antifilter синхронизирован'),
   }

@@ -385,6 +385,54 @@ export interface BandwidthChart {
   error?: string
 }
 
+export interface ResourceHistoryPoint {
+  timestamp: string
+  cpu_percent: number
+  memory_percent: number
+  memory_used_mb: number
+  memory_total_mb: number
+  disk_percent: number
+  load_1?: number | null
+  load_5?: number | null
+  load_15?: number | null
+}
+
+export interface ResourceHistory {
+  node_id: number
+  node_name: string
+  period: string
+  sample_count: number
+  points: ResourceHistoryPoint[]
+}
+
+export interface PanelResourceHistoryPoint {
+  timestamp: string
+  backend_cpu_percent: number
+  backend_memory_mb: number
+  backend_workers: number
+  nginx_memory_mb?: number | null
+  total_panel_memory_mb: number
+}
+
+export interface PanelResourceHistory {
+  period: string
+  sample_count: number
+  points: PanelResourceHistoryPoint[]
+}
+
+export interface PanelResourceCurrent {
+  timestamp: string
+  backend_cpu_percent: number
+  backend_memory_mb: number
+  backend_rss_mb: number
+  backend_workers: number
+  nginx_memory_mb?: number | null
+  watchdog_memory_mb?: number | null
+  frontend_dev_memory_mb?: number | null
+  total_panel_memory_mb: number
+  frontend_note: string
+}
+
 export interface ScannerBan {
   ip: string
   ban_until: number

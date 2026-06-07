@@ -1,0 +1,13 @@
+[Unit]
+Description=AdminPanelAZ DDNS update (DuckDNS / No-IP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/adminpanelaz/ddns.env
+ExecStart=/opt/AdminPanelAZ/scripts/ddns-update.sh update
+User=root
+
+[Install]
+WantedBy=multi-user.target

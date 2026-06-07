@@ -195,3 +195,37 @@ export function getPolicyForConfig(
   if (!entry) return undefined
   return config.vpn_type === 'openvpn' ? entry.openvpn : entry.wireguard
 }
+
+export type ConfigStatusVariant = 'success' | 'destructive' | 'warning' | 'secondary'
+
+export function getConfigStatus(
+  config: VpnConfig,
+  tab: ProtocolTab,
+  policy?: ClientAccessPolicy,
+): { label: string; variant: ConfigStatusVariant } {
+  const isBlocked = policy?.is_blocked ?? false
+  const { tone } = buildAccessMeta(config, tab, policy)
+
+  if (isBlocked || tone === 'expired') {
+    return { label: isBlocked ? 'Заблокирован' : 'Истёк', variant: 'destructive' }
+  }
+  if (tone === 'expiring') {
+    return { label: 'Истекает', variant: 'warning' }
+  }
+  return { label: 'Активный', variant: 'success' }
+}
+
+export function formatCreatedAt(value?: string | null): string {
+  if (!value) return '—'
+  return new Date(value).toLocaleDateString('ru-RU')
+}
+
+export function pickPrimaryFile(config: VpnConfig) {
+  return pickVpnFile(config) ?? pickAzFile(config) ?? config.profile_files[0]
+}
+
+export function getProtocolBadgeVariant(tab: ProtocolTab): 'default' | 'secondary' | 'outline' {
+  if (tab === 'openvpn') return 'default'
+  if (tab === 'amneziawg') return 'secondary'
+  return 'outline'
+}

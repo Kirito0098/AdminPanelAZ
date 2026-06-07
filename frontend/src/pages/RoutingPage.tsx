@@ -11,12 +11,14 @@ import CidrPipelineTab from '@/components/routing/CidrPipelineTab'
 import FilesTab from '@/components/routing/FilesTab'
 import GameFiltersTab from '@/components/routing/GameFiltersTab'
 import PipelineStatusBar from '@/components/routing/PipelineStatusBar'
+import PipelineTaskProgress from '@/components/routing/PipelineTaskProgress'
 import PresetsTab from '@/components/routing/PresetsTab'
 import ProvidersTab from '@/components/routing/ProvidersTab'
 import RoutingOverviewTab from '@/components/routing/RoutingOverviewTab'
 import RoutingPageHeader from '@/components/routing/RoutingPageHeader'
 import RoutingPageSkeleton from '@/components/routing/RoutingPageSkeleton'
 import { useRoutingPage } from '@/components/routing/useRoutingPage'
+import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNode } from '@/context/NodeContext'
 import { useAuth } from '@/context/AuthContext'
@@ -52,6 +54,7 @@ export default function RoutingPage() {
     syncGames,
     refreshCidrDb,
     refreshAntifilter,
+    inline,
   } = useRoutingPage()
 
   if (loading && !data) {
@@ -81,6 +84,9 @@ export default function RoutingPage() {
         onSyncProviders={() => setConfirmAction('sync-providers')}
         onApplyDoall={() => setConfirmAction('apply-doall')}
       />
+
+      <InlineProgressBar active={inline.active} label={inline.label} />
+      <PipelineTaskProgress task={pipelineTask} />
 
       <PipelineStatusBar cidrDb={cidrDb} antifilter={antifilter} />
 

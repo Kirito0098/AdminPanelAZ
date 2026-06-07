@@ -16,6 +16,13 @@ WIZ_FIREWALL_ENABLE_UFW="${WIZ_FIREWALL_ENABLE_UFW:-false}"
 WIZ_UVICORN_WORKERS="${WIZ_UVICORN_WORKERS:-1}"
 WIZ_BEHIND_NGINX="${WIZ_BEHIND_NGINX:-false}"
 WIZ_SERVER_ADDRESS="${WIZ_SERVER_ADDRESS:-}"
+WIZ_DDNS_PROVIDER="${WIZ_DDNS_PROVIDER:-none}"
+WIZ_DDNS_SUBDOMAIN="${WIZ_DDNS_SUBDOMAIN:-}"
+WIZ_DDNS_TOKEN="${WIZ_DDNS_TOKEN:-}"
+WIZ_DDNS_HOSTNAME="${WIZ_DDNS_HOSTNAME:-}"
+WIZ_DDNS_USERNAME="${WIZ_DDNS_USERNAME:-}"
+WIZ_DDNS_PASSWORD="${WIZ_DDNS_PASSWORD:-}"
+WIZ_DDNS_CONFIGURE_UPDATE="${WIZ_DDNS_CONFIGURE_UPDATE:-false}"
 WIZ_CORS_ORIGINS="${WIZ_CORS_ORIGINS:-}"
 WIZ_ALLOW_INTERNAL_NODES="${WIZ_ALLOW_INTERNAL_NODES:-false}"
 WIZ_APP_ENV="${WIZ_APP_ENV:-development}"
@@ -335,6 +342,82 @@ wizard_ask_network() {
   echo
 }
 
+wizard_ddns_fqdn() {
+  case "$WIZ_DDNS_PROVIDER" in
+    duckdns)
+      if [[ -n "$WIZ_DDNS_SUBDOMAIN" ]]; then
+        echo "${WIZ_DDNS_SUBDOMAIN}.duckdns.org"
+      fi
+      ;;
+    noip)
+      if [[ -n "$WIZ_DDNS_HOSTNAME" ]]; then
+        echo "$WIZ_DDNS_HOSTNAME"
+      fi
+      ;;
+  esac
+}
+
+wizard_ask_ddns() {
+  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
+    return 0
+  fi
+
+  wiz_step "3a. Динамический DNS (бесплатный поддомен)"
+  echo "  Если у вас нет своего домена, можно использовать бесплатный DDNS."
+  echo "  Подробнее о провайдерах — в README.md (раздел «Бесплатные домены»)."
+  echo
+  wiz_prompt_choice "Провайдер DDNS" \
+    "Не использую DDNS (свой домен или IP)" \
+    "DuckDNS (*.duckdns.org) — рекомендуется для homelab" \
+    "No-IP (*.ddns.net и др.)"
+
+  case "$REPLY" in
+    1) WIZ_DDNS_PROVIDER="none" ;;
+    2) WIZ_DDNS_PROVIDER="duckdns" ;;
+    3) WIZ_DDNS_PROVIDER="noip" ;;
+  esac
+
+  if [[ "$WIZ_DDNS_PROVIDER" == "duckdns" ]]; then
+    echo
+    echo "  Зарегистрируйтесь на https://www.duckdns.org и создайте поддомен."
+    echo "  Токен — на странице домена (token)."
+    wiz_prompt "Поддомен DuckDNS (без .duckdns.org)" "$WIZ_DDNS_SUBDOMAIN"
+    WIZ_DDNS_SUBDOMAIN="${REPLY,,}"
+    WIZ_DDNS_SUBDOMAIN="${WIZ_DDNS_SUBDOMAIN%.duckdns.org}"
+    wiz_prompt_secret "DuckDNS token" "$WIZ_DDNS_TOKEN"
+    WIZ_DDNS_TOKEN="$REPLY"
+    local fqdn="${WIZ_DDNS_SUBDOMAIN}.duckdns.org"
+    if [[ -z "$WIZ_SERVER_ADDRESS" ]]; then
+      WIZ_SERVER_ADDRESS="$fqdn"
+    fi
+    echo "  Полное имя: $fqdn"
+  elif [[ "$WIZ_DDNS_PROVIDER" == "noip" ]]; then
+    echo
+    echo "  Зарегистрируйтесь на https://www.noip.com и создайте hostname."
+    wiz_prompt "Полное имя хоста No-IP (например, myvpn.ddns.net)" "$WIZ_DDNS_HOSTNAME"
+    WIZ_DDNS_HOSTNAME="$REPLY"
+    wiz_prompt "Логин No-IP" "$WIZ_DDNS_USERNAME"
+    WIZ_DDNS_USERNAME="$REPLY"
+    wiz_prompt_secret "Пароль No-IP" "$WIZ_DDNS_PASSWORD"
+    WIZ_DDNS_PASSWORD="$REPLY"
+    if [[ -z "$WIZ_SERVER_ADDRESS" ]]; then
+      WIZ_SERVER_ADDRESS="$WIZ_DDNS_HOSTNAME"
+    fi
+  fi
+
+  if [[ "$WIZ_DDNS_PROVIDER" != "none" ]]; then
+    wiz_prompt_yesno "Настроить автоматическое обновление IP (systemd timer, каждые 5 мин)?" "y"
+    if [[ "$REPLY" == "y" ]]; then
+      WIZ_DDNS_CONFIGURE_UPDATE="true"
+    else
+      WIZ_DDNS_CONFIGURE_UPDATE="false"
+      echo "  Обновляйте IP вручную: sudo ./scripts/ddns-update.sh update"
+    fi
+    echo "  Перед Let's Encrypt IP должен указывать на этот сервер (порты 80/443)."
+  fi
+  echo
+}
+
 wizard_ask_app_env() {
   if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
     return 0
@@ -393,11 +476,15 @@ wizard_ask_https() {
   if [[ "$WIZ_NGINX_MODE" == "le" || "$WIZ_NGINX_MODE" == "selfsigned" ]]; then
     WIZ_BACKEND_HOST="127.0.0.1"
     WIZ_BEHIND_NGINX="true"
-    local default_domain="${WIZ_SERVER_ADDRESS:-}"
-    default_domain="${default_domain#http://}"
-    default_domain="${default_domain#https://}"
-    default_domain="${default_domain%%/*}"
-    default_domain="${default_domain%%:*}"
+    local default_domain
+    default_domain="$(wizard_ddns_fqdn)"
+    if [[ -z "$default_domain" ]]; then
+      default_domain="${WIZ_SERVER_ADDRESS:-}"
+      default_domain="${default_domain#http://}"
+      default_domain="${default_domain#https://}"
+      default_domain="${default_domain%%/*}"
+      default_domain="${default_domain%%:*}"
+    fi
     wiz_prompt "Домен для сертификата и server_name" "${default_domain:-panel.example.com}"
     WIZ_NGINX_DOMAIN="$REPLY"
     if [[ "$WIZ_NGINX_MODE" == "le" ]]; then
@@ -760,6 +847,10 @@ wizard_show_summary() {
   echo "  AntiZapret:        $WIZ_ANTIZAPRET_PATH"
   if [[ "$WIZ_INSTALL_TYPE" != "node" ]]; then
     echo "  Доступ:            ${WIZ_SERVER_ADDRESS:-—}"
+    if [[ "$WIZ_DDNS_PROVIDER" != "none" ]]; then
+      echo "  DDNS:              $WIZ_DDNS_PROVIDER ($(wizard_ddns_fqdn))"
+      echo "  DDNS auto-update:  $WIZ_DDNS_CONFIGURE_UPDATE"
+    fi
     echo "  Backend:           ${WIZ_BACKEND_HOST}:${WIZ_BACKEND_PORT} (localhost only)"
     echo "  APP_ENV:           $WIZ_APP_ENV"
     echo "  CORS:              $WIZ_CORS_ORIGINS"
@@ -825,6 +916,7 @@ run_install_wizard() {
   wizard_ask_install_type
   wizard_ask_antizapret
   wizard_ask_network
+  wizard_ask_ddns
   wizard_ask_app_env
   wizard_ask_https
   wizard_ask_admin

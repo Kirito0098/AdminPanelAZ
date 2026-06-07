@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models import OpenVpnAccessPolicy, WgAccessPolicy
 from app.services.node_adapter import NodeAdapter
+from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.traffic_limit import (
     TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED,
     TrafficLimitExceededError,
@@ -41,17 +42,11 @@ class AccessPolicyService:
         self.node_id = node_id
         self._adapter = adapter
         self.banned_clients_file = antizapret_path / "config" / "banned_clients"
-        self.client_connect_script = antizapret_path / "client-connect.sh"
-        self._ban_check_block = (
-            '# BEGIN adminpanel ban check\n'
-            f'if [ -f {antizapret_path}/config/banned_clients ]; then\n'
-            f'  if grep -qxF "$common_name" {antizapret_path}/config/banned_clients 2>/dev/null; then\n'
-            '    echo "Client $common_name is banned" >&2\n'
-            '    exit 1\n'
-            '  fi\n'
-            'fi\n'
-            '# END adminpanel ban check'
-        )
+
+    def _require_node_id(self) -> int:
+        if self.node_id is None:
+            raise ValueError("node_id is required for access policy DB operations")
+        return self.node_id
 
     def _consumed_bytes(self, client_name: str, *, period_days: int | None = None) -> int:
         return get_client_consumed_traffic_bytes(
@@ -113,33 +108,23 @@ class AccessPolicyService:
         content = "\n".join(ordered) + ("\n" if ordered else "")
         if self._adapter is not None:
             self._adapter.write_config_file("banned_clients", content)
+            self._adapter.ensure_openvpn_ban_check()
             return
         self.banned_clients_file.parent.mkdir(parents=True, exist_ok=True)
         self.banned_clients_file.write_text(content, encoding="utf-8")
-        self._ensure_ban_check_block()
-
-    def _ensure_ban_check_block(self) -> None:
-        if not self.client_connect_script.exists():
-            return
-        content = self.client_connect_script.read_text(encoding="utf-8", errors="replace")
-        if self._ban_check_block in content:
-            return
-        if content.startswith("#!"):
-            idx = content.find("\n")
-            if idx == -1:
-                new_content = content + "\n\n" + self._ban_check_block + "\n"
-            else:
-                new_content = content[: idx + 1] + "\n" + self._ban_check_block + "\n" + content[idx + 1 :].lstrip("\n")
-        else:
-            new_content = self._ban_check_block + "\n" + content.lstrip("\n")
-        self.client_connect_script.write_text(new_content, encoding="utf-8")
+        ensure_openvpn_ban_check(self.banned_clients_file.parent.parent)
 
     # ── OpenVPN ──────────────────────────────────────────────────────────
 
     def _get_ovpn(self, client_name: str) -> OpenVpnAccessPolicy:
-        row = self.db.query(OpenVpnAccessPolicy).filter_by(client_name=client_name).first()
+        node_id = self._require_node_id()
+        row = (
+            self.db.query(OpenVpnAccessPolicy)
+            .filter_by(node_id=node_id, client_name=client_name)
+            .first()
+        )
         if row is None:
-            row = OpenVpnAccessPolicy(client_name=client_name)
+            row = OpenVpnAccessPolicy(node_id=node_id, client_name=client_name)
             self.db.add(row)
             self.db.flush()
         return row
@@ -207,7 +192,12 @@ class AccessPolicyService:
         return changed
 
     def reconcile_openvpn(self, client_name: str, *, traffic_limit_changed: bool = False) -> None:
-        row = self.db.query(OpenVpnAccessPolicy).filter_by(client_name=client_name).first()
+        node_id = self._require_node_id()
+        row = (
+            self.db.query(OpenVpnAccessPolicy)
+            .filter_by(node_id=node_id, client_name=client_name)
+            .first()
+        )
         banned = self.read_banned_clients()
         if row is None:
             if client_name in banned:
@@ -310,7 +300,12 @@ class AccessPolicyService:
         return self._ovpn_state(row)
 
     def get_openvpn_policy(self, client_name: str) -> dict:
-        row = self.db.query(OpenVpnAccessPolicy).filter_by(client_name=client_name).first()
+        node_id = self._require_node_id()
+        row = (
+            self.db.query(OpenVpnAccessPolicy)
+            .filter_by(node_id=node_id, client_name=client_name)
+            .first()
+        )
         if row is None:
             return {
                 "is_blocked": client_name in self.read_banned_clients(),
@@ -323,9 +318,14 @@ class AccessPolicyService:
 
     def _get_wg(self, client_name: str) -> WgAccessPolicy:
         normalized = client_name.strip().lower()
-        row = self.db.query(WgAccessPolicy).filter_by(client_name=normalized).first()
+        node_id = self._require_node_id()
+        row = (
+            self.db.query(WgAccessPolicy)
+            .filter_by(node_id=node_id, client_name=normalized)
+            .first()
+        )
         if row is None:
-            row = WgAccessPolicy(client_name=normalized)
+            row = WgAccessPolicy(node_id=node_id, client_name=normalized)
             self.db.add(row)
             self.db.flush()
         return row
@@ -365,7 +365,12 @@ class AccessPolicyService:
 
     def reconcile_wg(self, client_name: str, *, apply_runtime: bool = True, traffic_limit_changed: bool = False) -> None:
         normalized = client_name.strip().lower()
-        row = self.db.query(WgAccessPolicy).filter_by(client_name=normalized).first()
+        node_id = self._require_node_id()
+        row = (
+            self.db.query(WgAccessPolicy)
+            .filter_by(node_id=node_id, client_name=normalized)
+            .first()
+        )
         if row is None:
             return
         now = _now()
@@ -493,7 +498,12 @@ class AccessPolicyService:
 
     def get_wg_policy(self, client_name: str) -> dict:
         normalized = client_name.strip().lower()
-        row = self.db.query(WgAccessPolicy).filter_by(client_name=normalized).first()
+        node_id = self._require_node_id()
+        row = (
+            self.db.query(WgAccessPolicy)
+            .filter_by(node_id=node_id, client_name=normalized)
+            .first()
+        )
         if row is None:
             return {
                 "is_blocked": False,
@@ -511,17 +521,28 @@ class AccessPolicyService:
         return result
 
     def reconcile_all_traffic_limits(self, *, node_id: int | None = None) -> dict:
+        target_node = node_id if node_id is not None else self.node_id
+        if target_node is None:
+            return {"traffic_limit_reconcile": "skipped", "changed": 0, "node_id": None}
         changed = 0
-        for row in self.db.query(OpenVpnAccessPolicy).all():
+        for row in self.db.query(OpenVpnAccessPolicy).filter_by(node_id=target_node).all():
             before = row.block_reason
             self.reconcile_openvpn(row.client_name)
-            after_row = self.db.query(OpenVpnAccessPolicy).filter_by(client_name=row.client_name).first()
+            after_row = (
+                self.db.query(OpenVpnAccessPolicy)
+                .filter_by(node_id=target_node, client_name=row.client_name)
+                .first()
+            )
             if after_row and after_row.block_reason != before:
                 changed += 1
-        for row in self.db.query(WgAccessPolicy).all():
+        for row in self.db.query(WgAccessPolicy).filter_by(node_id=target_node).all():
             before = row.block_reason
             self.reconcile_wg(row.client_name, apply_runtime=True)
-            after_row = self.db.query(WgAccessPolicy).filter_by(client_name=row.client_name).first()
+            after_row = (
+                self.db.query(WgAccessPolicy)
+                .filter_by(node_id=target_node, client_name=row.client_name)
+                .first()
+            )
             if after_row and after_row.block_reason != before:
                 changed += 1
-        return {"traffic_limit_reconcile": "ok", "changed": changed, "node_id": node_id}
+        return {"traffic_limit_reconcile": "ok", "changed": changed, "node_id": target_node}

@@ -8,10 +8,12 @@ import {
   regenerate2FABackupCodes,
   setup2FA,
 } from '@/api/client'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useNotifications } from '@/context/NotificationContext'
 
 export default function TwoFactorTab() {
@@ -109,10 +111,16 @@ export default function TwoFactorTab() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Статус: {enabled ? 'включена' : 'выключена'}
-          {enabled && backupRemaining > 0 && ` · резервных кодов: ${backupRemaining}`}
-        </p>
+        <InlineProgressBar active={loading} label="Обработка..." />
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={enabled ? 'default' : 'secondary'}>
+            {enabled ? 'Включена' : 'Выключена'}
+          </Badge>
+          {enabled && backupRemaining > 0 && (
+            <span className="text-sm text-muted-foreground">Резервных кодов: {backupRemaining}</span>
+          )}
+        </div>
 
         {!enabled && !setupData && (
           <Button onClick={handleSetup} disabled={loading}>

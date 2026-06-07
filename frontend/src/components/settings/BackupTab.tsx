@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Archive, Download, Trash2 } from 'lucide-react'
+import { Archive, ArchiveX, Download, Trash2 } from 'lucide-react'
 import {
   ApiError,
   createBackup,
@@ -10,11 +10,18 @@ import {
   restoreBackup,
   updateBackupSettings,
 } from '@/api/client'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
+import SettingsAlert from '@/components/settings/SettingsAlert'
+import EmptyState from '@/components/ui/EmptyState'
+import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import type { BackupEntry, BackupSettings } from '@/types'
@@ -28,9 +35,11 @@ function formatSize(bytes: number) {
 export default function BackupTab() {
   const { success, error: notifyError } = useNotifications()
   const { inline, withInline } = useProgress()
+  const { confirm, dialogProps } = useConfirmDialog()
   const [backups, setBackups] = useState<BackupEntry[]>([])
   const [settings, setSettings] = useState<BackupSettings | null>(null)
   const [includeConfigs, setIncludeConfigs] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   const load = async () => {
     const [list, cfg] = await Promise.all([getBackups(), getBackupSettings()])
@@ -39,7 +48,10 @@ export default function BackupTab() {
   }
 
   useEffect(() => {
-    load().catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки бэкапов'))
+    setLoading(true)
+    load()
+      .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки бэкапов'))
+      .finally(() => setLoading(false))
   }, [])
 
   const handleCreate = async () => {
@@ -54,25 +66,44 @@ export default function BackupTab() {
     }
   }
 
-  const handleRestore = async (fileName: string) => {
-    if (!confirm(`Восстановить из «${fileName}»? Панель нужно будет перезапустить.`)) return
-    try {
-      await withInline(() => restoreBackup(fileName), 'Восстановление...')
-      success('Восстановление выполнено — перезапустите панель')
-    } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка восстановления')
-    }
+  const handleRestore = (fileName: string) => {
+    confirm({
+      title: 'Восстановить из бэкапа?',
+      description: <>Архив «{fileName}» будет развёрнут на сервере панели.</>,
+      alert: {
+        variant: 'danger',
+        title: 'Перезапуск панели',
+        children: 'После восстановления необходимо перезапустить панель вручную. Текущие данные будут перезаписаны.',
+      },
+      confirmLabel: 'Восстановить',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await withInline(() => restoreBackup(fileName), 'Восстановление...')
+          success('Восстановление выполнено — перезапустите панель')
+        } catch (err) {
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка восстановления')
+        }
+      },
+    })
   }
 
-  const handleDelete = async (fileName: string) => {
-    if (!confirm(`Удалить «${fileName}»?`)) return
-    try {
-      await deleteBackup(fileName)
-      await load()
-      success('Архив удалён')
-    } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка удаления')
-    }
+  const handleDelete = (fileName: string) => {
+    confirm({
+      title: 'Удалить архив?',
+      description: <>Архив «{fileName}» будет удалён без возможности восстановления.</>,
+      confirmLabel: 'Удалить',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await deleteBackup(fileName)
+          await load()
+          success('Архив удалён')
+        } catch (err) {
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка удаления')
+        }
+      },
+    })
   }
 
   const toggleTelegramBackup = async () => {
@@ -86,45 +117,61 @@ export default function BackupTab() {
     }
   }
 
+  if (loading) {
+    return <Spinner label="Загрузка бэкапов..." className="py-12" />
+  }
+
   return (
     <div className="space-y-4">
+      <ConfirmDialogHost dialogProps={dialogProps} />
       <InlineProgressBar active={inline.active} label={inline.label} />
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Archive size={18} />
-            Резервное копирование
+            Создание бэкапа
           </CardTitle>
           <CardDescription>Бэкап БД панели, .env и опционально списков AntiZapret с активного узла</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2 text-sm">
+          <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={includeConfigs}
                 onChange={(e) => setIncludeConfigs(e.target.checked)}
-                className="rounded border"
+                className="h-4 w-4 rounded border"
               />
               Включить списки AntiZapret
             </label>
             {settings && (
-              <label className="flex items-center gap-2 text-sm">
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
                 <input
                   type="checkbox"
                   checked={settings.telegram_on_backup}
                   onChange={toggleTelegramBackup}
-                  className="rounded border"
+                  className="h-4 w-4 rounded border"
                 />
                 Отправлять в Telegram
               </label>
             )}
-            <Button onClick={handleCreate}>Создать бэкап</Button>
+            <Button onClick={handleCreate} className="sm:ml-auto">
+              Создать бэкап
+            </Button>
           </div>
-          {settings && (
+        </CardContent>
+      </Card>
+
+      {settings && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Автоматизация</CardTitle>
+            <CardDescription>Периодическое создание и ротация архивов</CardDescription>
+          </CardHeader>
+          <CardContent>
             <div className="grid gap-4 rounded-md border p-4 md:grid-cols-3">
-              <label className="flex items-center gap-2 text-sm">
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
                 <input
                   type="checkbox"
                   checked={settings.auto_backup_enabled}
@@ -132,50 +179,63 @@ export default function BackupTab() {
                     const updated = await updateBackupSettings({ auto_backup_enabled: !settings.auto_backup_enabled })
                     setSettings(updated)
                   }}
+                  className="h-4 w-4 rounded border"
                 />
                 Авто-бэкап
               </label>
-              <label className="flex items-center gap-2 text-sm">
-                Интервал (дней):
-                <input
+              <div className="space-y-2">
+                <Label htmlFor="backup-days">Интервал (дней)</Label>
+                <Input
+                  id="backup-days"
                   type="number"
                   min={1}
                   max={90}
-                  className="w-16 rounded border px-2 py-1"
                   value={settings.auto_backup_days}
                   onChange={async (e) => {
                     const updated = await updateBackupSettings({ auto_backup_days: Number(e.target.value) })
                     setSettings(updated)
                   }}
                 />
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                Хранить:
-                <input
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="retention">Хранить архивов</Label>
+                <Input
+                  id="retention"
                   type="number"
                   min={1}
                   max={30}
-                  className="w-16 rounded border px-2 py-1"
                   value={settings.retention_count}
                   onChange={async (e) => {
                     const updated = await updateBackupSettings({ retention_count: Number(e.target.value) })
                     setSettings(updated)
                   }}
                 />
-                архивов
-              </label>
+              </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Архивы</CardTitle>
+          <CardDescription>
+            {backups.length > 0 ? `${backups.length} архив${backups.length === 1 ? '' : backups.length < 5 ? 'а' : 'ов'}` : 'Список сохранённых копий'}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {backups.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Архивов пока нет</p>
+            <EmptyState
+              icon={ArchiveX}
+              title="Архивов пока нет"
+              description="Создайте первый бэкап, чтобы защитить данные панели"
+              action={
+                <Button onClick={handleCreate} variant="secondary">
+                  Создать бэкап
+                </Button>
+              }
+              className="py-8"
+            />
           ) : (
             <div className="overflow-x-auto rounded-md border">
               <Table>
@@ -207,6 +267,7 @@ export default function BackupTab() {
                         <Button
                           variant="outline"
                           size="sm"
+                          title="Скачать"
                           onClick={async () => {
                             const res = await downloadBackup(b.file_name)
                             if (!res.ok) return notifyError('Ошибка скачивания')
@@ -219,13 +280,18 @@ export default function BackupTab() {
                         >
                           <Download size={14} />
                         </Button>
-                        <Button variant="outline" size="sm" onClick={() => handleRestore(b.file_name)}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                          onClick={() => handleRestore(b.file_name)}
+                        >
                           Восстановить
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="border-destructive/30 text-destructive"
+                          className="border-destructive/30 text-destructive hover:bg-destructive/10"
                           onClick={() => handleDelete(b.file_name)}
                         >
                           <Trash2 size={14} />
@@ -239,6 +305,10 @@ export default function BackupTab() {
           )}
         </CardContent>
       </Card>
+
+      <SettingsAlert variant="danger" title="Восстановление из бэкапа">
+        Восстановление перезапишет текущие данные панели. После операции необходимо перезапустить панель вручную.
+      </SettingsAlert>
     </div>
   )
 }

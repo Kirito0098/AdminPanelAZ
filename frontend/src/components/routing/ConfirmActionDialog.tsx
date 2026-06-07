@@ -1,17 +1,10 @@
-import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Loader2 } from 'lucide-react'
+import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import type { ConfirmAction } from './useRoutingPage'
 
 const confirmMeta: Record<
   Exclude<ConfirmAction, null>,
-  { title: string; description: string; confirmLabel: string; destructive?: boolean }
+  { title: string; description: string; confirmLabel: string; destructive?: boolean; alertTitle?: string }
 > = {
   'apply-doall': {
     title: 'Применить маршрутизацию?',
@@ -19,6 +12,7 @@ const confirmMeta: Record<
       'Будет выполнен doall.sh на активном узле. Это может занять несколько минут и перезагрузить правила маршрутизации.',
     confirmLabel: 'Выполнить doall.sh',
     destructive: true,
+    alertTitle: 'Длительная операция',
   },
   'sync-providers': {
     title: 'Синхронизировать провайдеров?',
@@ -37,6 +31,7 @@ const confirmMeta: Record<
       'CIDR-файлы будут сгенерированы из БД, затем автоматически выполнен doall.sh. Операция длительная.',
     confirmLabel: 'Сгенерировать + doall',
     destructive: true,
+    alertTitle: 'Длительная операция',
   },
 }
 
@@ -52,25 +47,24 @@ export default function ConfirmActionDialog({ action, onClose, onConfirm, loadin
   const meta = confirmMeta[action]
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{meta.title}</DialogTitle>
-          <DialogDescription>{meta.description}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={loading}>
-            Отмена
-          </Button>
-          <Button
-            variant={meta.destructive ? 'destructive' : 'default'}
-            onClick={onConfirm}
-            disabled={loading}
-          >
-            {meta.confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog
+      open
+      onOpenChange={(open) => !open && onClose()}
+      title={meta.title}
+      description={meta.description}
+      confirmLabel={meta.confirmLabel}
+      destructive={meta.destructive}
+      loading={loading}
+      onConfirm={onConfirm}
+      alert={
+        meta.destructive
+          ? {
+              variant: 'warning',
+              title: meta.alertTitle || 'Внимание',
+              children: 'Операция может занять несколько минут. Не закрывайте вкладку до завершения.',
+            }
+          : undefined
+      }
+    />
   )
 }

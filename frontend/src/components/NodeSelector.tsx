@@ -1,4 +1,6 @@
-import { Activity, Server } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { Activity, CircleCheck, CircleX, HelpCircle, Server } from 'lucide-react'
+import { ApiError } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
 import {
   Select,
@@ -9,10 +11,11 @@ import {
 } from '@/components/ui/select'
 import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
+import { useNotifications } from '@/context/NotificationContext'
 import { cn } from '@/lib/utils'
 import type { NodeStatus } from '@/types'
 
-const statusLabels: Record<NodeStatus, string> = {
+export const statusLabels: Record<NodeStatus, string> = {
   online: 'Онлайн',
   offline: 'Офлайн',
   unknown: 'Неизвестно',
@@ -24,9 +27,22 @@ const statusColors: Record<NodeStatus, string> = {
   unknown: 'bg-amber-500',
 }
 
+const statusIcons: Record<NodeStatus, LucideIcon> = {
+  online: CircleCheck,
+  offline: CircleX,
+  unknown: HelpCircle,
+}
+
+const statusVariants: Record<NodeStatus, 'success' | 'destructive' | 'warning'> = {
+  online: 'success',
+  offline: 'destructive',
+  unknown: 'warning',
+}
+
 export default function NodeSelector() {
   const { user } = useAuth()
   const { activeNode, nodes, loading, activate } = useNode()
+  const { success, error: notifyError } = useNotifications()
   const isAdmin = user?.role === 'admin'
 
   if (loading || !activeNode) {
@@ -53,7 +69,14 @@ export default function NodeSelector() {
       value={String(activeNode.id)}
       onValueChange={(v) => {
         const id = Number(v)
-        if (id !== activeNode.id) activate(id)
+        if (id !== activeNode.id) {
+          const node = nodes.find((n) => n.id === id)
+          void activate(id)
+            .then(() => success(`Активный узел: ${node?.name ?? id}`))
+            .catch((err) =>
+              notifyError(err instanceof ApiError ? err.message : 'Ошибка активации узла'),
+            )
+        }
       }}
     >
       <SelectTrigger className="h-8 w-[200px] gap-2 text-xs">
@@ -95,6 +118,16 @@ export function NodeBadge({ name, status }: { name?: string | null; status?: Nod
       <Activity size={12} />
       {name}
       {status && <StatusDot status={status} />}
+    </Badge>
+  )
+}
+
+export function NodeStatusBadge({ status, showLabel = true }: { status: NodeStatus; showLabel?: boolean }) {
+  const Icon = statusIcons[status]
+  return (
+    <Badge variant={statusVariants[status]} className="gap-1 font-normal">
+      <Icon size={12} />
+      {showLabel && statusLabels[status]}
     </Badge>
   )
 }

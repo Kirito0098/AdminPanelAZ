@@ -193,6 +193,20 @@ export async function getMonitoring() {
   return apiFetch<import('../types').MonitoringOverview>('/monitoring/overview')
 }
 
+export async function getResourceHistory(period: '1d' | '7d' | '30d' = '1d') {
+  return apiFetch<import('../types').ResourceHistory>(`/monitoring/resource-history?period=${period}`)
+}
+
+export async function getPanelResourceHistory(period: '1d' | '7d' | '30d' = '1d') {
+  return apiFetch<import('../types').PanelResourceHistory>(
+    `/monitoring/panel-resource-history?period=${period}`,
+  )
+}
+
+export async function getPanelResourceCurrent() {
+  return apiFetch<import('../types').PanelResourceCurrent>('/monitoring/panel-resource-current')
+}
+
 export async function getSettings() {
   return apiFetch<import('../types').AppSettings>('/settings')
 }
@@ -488,6 +502,13 @@ export async function saveEditFile(key: string, content: string) {
   return apiFetch(`/edit-files/${key}`, {
     method: 'PUT',
     body: JSON.stringify({ content }),
+  })
+}
+
+export async function saveEditFilesBatch(files: Record<string, string>, runDoall = false) {
+  return apiFetch<{ message: string; detail?: string }>('/edit-files/batch', {
+    method: 'POST',
+    body: JSON.stringify({ files, run_doall: runDoall }),
   })
 }
 

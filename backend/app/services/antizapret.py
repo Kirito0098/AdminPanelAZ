@@ -162,15 +162,25 @@ class AntiZapretService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
         return file_path.read_text(encoding="utf-8", errors="replace")
 
-    def read_config_file(self, filename: str) -> str:
-        allowed = {
+    _CONFIG_FILES = frozenset(
+        {
             "include-hosts.txt",
             "exclude-hosts.txt",
             "include-ips.txt",
             "exclude-ips.txt",
             "allow-ips.txt",
+            "drop-ips.txt",
+            "forward-ips.txt",
+            "include-adblock-hosts.txt",
+            "exclude-adblock-hosts.txt",
+            "remove-hosts.txt",
+            "deny-ips.txt",
             "banned_clients",
         }
+    )
+
+    def read_config_file(self, filename: str) -> str:
+        allowed = self._CONFIG_FILES
         if filename not in allowed:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимый конфигурационный файл")
         path = self.config_dir / filename
@@ -179,14 +189,7 @@ class AntiZapretService:
         return path.read_text(encoding="utf-8", errors="replace")
 
     def write_config_file(self, filename: str, content: str) -> None:
-        allowed = {
-            "include-hosts.txt",
-            "exclude-hosts.txt",
-            "include-ips.txt",
-            "exclude-ips.txt",
-            "allow-ips.txt",
-            "banned_clients",
-        }
+        allowed = self._CONFIG_FILES
         if filename not in allowed:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл недоступен для записи")
         path = self.config_dir / filename

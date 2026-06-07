@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Puzzle, RefreshCw, Save } from 'lucide-react'
 import { ApiError, getFeatureToggles, updateFeatureToggles } from '@/api/client'
+import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useNotifications } from '@/context/NotificationContext'
 import type { FeatureToggleItem } from '@/types'
 
@@ -62,11 +64,13 @@ export default function FeatureTogglesTab() {
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Загрузка модулей...</p>
+    return <Spinner label="Загрузка модулей..." className="py-12" />
   }
 
   return (
     <div className="space-y-4">
+      <InlineProgressBar active={saving} label="Сохранение модулей..." />
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>

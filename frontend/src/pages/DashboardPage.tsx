@@ -1,16 +1,16 @@
 import { FormEvent, useEffect, useState } from 'react'
 import {
   FileKey,
-  LayoutDashboard,
+  Loader2,
   Plus,
   RefreshCw,
+  Shield,
   Users,
   Wifi,
 } from 'lucide-react'
 import {
   ApiError,
   createConfig,
-  deleteConfig,
   downloadProfile,
   fetchQrBlob,
   getClientPolicies,
@@ -20,11 +20,12 @@ import {
 } from '@/api/client'
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
 import MetricCard from '@/components/noc/MetricCard'
+import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -74,6 +75,9 @@ export default function DashboardPage() {
     Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
   >({})
 
+  const nodeOffline = activeNode?.status === 'offline'
+  const nodeUnknown = activeNode?.status === 'unknown'
+
   const load = async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) {
       setLoading(true)
@@ -101,7 +105,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     load()
-  }, [])
+  }, [activeNode?.id])
 
   const resetForm = () => {
     setClientName('')
@@ -118,16 +122,19 @@ export default function DashboardPage() {
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
+    const name = clientName
     try {
-      await createConfig({
-        client_name: clientName,
-        vpn_type: vpnType,
-        cert_expire_days: vpnType === 'openvpn' ? certDays : undefined,
-        description: description || undefined,
-      })
-      closeForm()
-      success(`Клиент «${clientName}» создан`)
-      await load()
+      await withInline(async () => {
+        await createConfig({
+          client_name: name,
+          vpn_type: vpnType,
+          cert_expire_days: vpnType === 'openvpn' ? certDays : undefined,
+          description: description || undefined,
+        })
+        closeForm()
+        await load({ silent: true })
+      }, 'Создание клиента...')
+      success(`Клиент «${name}» создан`)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка создания клиента')
     } finally {
@@ -186,20 +193,22 @@ export default function DashboardPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <LayoutDashboard size={22} />
+            <Shield size={22} />
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-2xl font-bold tracking-tight">VPN Конфигурации</h2>
+              <h2 className="text-2xl font-bold tracking-tight">Конфигурации</h2>
               <NodeBadge name={activeNode?.name} status={activeNode?.status} />
             </div>
-            <p className="text-sm text-muted-foreground">Управление клиентами OpenVPN и WireGuard/AmneziaWG</p>
+            <p className="text-sm text-muted-foreground">
+              Управление клиентами OpenVPN и WireGuard/AmneziaWG на активном узле
+            </p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
           {user?.role === 'admin' && (
-            <Button variant="secondary" onClick={handleSync} disabled={syncing}>
-              <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
+            <Button variant="outline" onClick={handleSync} disabled={syncing}>
+              {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
               {syncing ? 'Синхронизация...' : 'Синхронизировать'}
             </Button>
           )}
@@ -212,33 +221,52 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      <SettingsAlert variant="info" title="Конфигурации активного узла">
+        Список клиентов привязан к узлу <strong>{activeNode?.name ?? summary?.node_name ?? 'не выбран'}</strong>
+        {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'} — при переключении узла
+        отображаются только его конфигурации. Управление — в шапке или на странице «Узлы».
+      </SettingsAlert>
+
+      {nodeOffline && (
+        <SettingsAlert variant="warning" title="Узел офлайн">
+          Активный узел недоступен. Создание и изменение конфигураций может не работать. Проверьте связь с node
+          agent.
+        </SettingsAlert>
+      )}
+
+      {nodeUnknown && !nodeOffline && (
+        <SettingsAlert variant="warning" title="Статус узла неизвестен">
+          Связь с узлом не подтверждена. Запустите проверку здоровья на странице «Узлы».
+        </SettingsAlert>
+      )}
+
       <InlineProgressBar active={inline.active} label={inline.label} />
 
       {summary && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard
-            label="Клиенты"
+            label="Всего клиентов"
             value={String(summary.total_configs)}
             sub={`OVPN ${summary.openvpn_configs} · WG ${summary.wireguard_configs}`}
             icon={Users}
             accent="cyan"
           />
           <MetricCard
-            label="Подключения"
+            label="Онлайн"
             value={String(summary.connected_openvpn + summary.connected_wireguard)}
             sub={`OVPN ${summary.connected_openvpn} · WG ${summary.connected_wireguard}`}
             icon={Wifi}
             accent="green"
           />
           <MetricCard
-            label="Службы"
+            label="VPN-службы"
             value={`${summary.active_services}/${summary.total_services}`}
-            sub="активных VPN-служб"
-            icon={LayoutDashboard}
+            sub="активных на узле"
+            icon={Shield}
             accent="amber"
           />
           <MetricCard
-            label="Сервер"
+            label="IP сервера"
             value={summary.server_ip || '—'}
             sub={summary.node_name || 'активный узел'}
             icon={FileKey}
@@ -247,12 +275,18 @@ export default function DashboardPage() {
       )}
 
       <Dialog open={showForm} onOpenChange={(open) => !open && closeForm()}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Создать клиента</DialogTitle>
-            <DialogDescription>Новый VPN-клиент через AntiZapret client.sh</DialogDescription>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus size={18} />
+              Новый клиент
+            </DialogTitle>
+            <DialogDescription>Создание VPN-клиента через AntiZapret client.sh</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4">
+            <SettingsAlert variant="info">
+              Имя клиента: латиница, цифры, <strong>_</strong> и <strong>-</strong>, до 32 символов.
+            </SettingsAlert>
             <div className="space-y-2">
               <Label htmlFor="clientName">Имя клиента</Label>
               <Input
@@ -300,11 +334,21 @@ export default function DashboardPage() {
               />
             </div>
             <DialogFooter>
-              <Button type="button" variant="secondary" onClick={closeForm}>
+              <Button type="button" variant="outline" onClick={closeForm}>
                 Отмена
               </Button>
               <Button type="submit" disabled={submitting}>
-                {submitting ? 'Создание...' : 'Создать'}
+                {submitting ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Создание...
+                  </>
+                ) : (
+                  <>
+                    <Plus size={16} />
+                    Создать
+                  </>
+                )}
               </Button>
             </DialogFooter>
           </form>
@@ -322,44 +366,52 @@ export default function DashboardPage() {
       >
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>QR-код</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <FileKey size={18} />
+              QR-код
+            </DialogTitle>
             <DialogDescription>{qrPreview?.filename}</DialogDescription>
           </DialogHeader>
           {qrPreview && (
-            <div className="flex justify-center p-4">
-              <img src={qrPreview.url} alt="QR-код конфигурации" className="max-h-72 rounded-md border" />
+            <div className="flex justify-center rounded-lg border bg-muted/30 p-6">
+              <img src={qrPreview.url} alt="QR-код конфигурации" className="max-h-72 rounded-md" />
             </div>
           )}
         </DialogContent>
       </Dialog>
 
       {loading ? (
-        <div className="py-16">
-          <Spinner label="Загрузка конфигураций..." />
-        </div>
+        <Card>
+          <CardContent>
+            <Spinner label="Загрузка конфигураций..." className="py-16" />
+          </CardContent>
+        </Card>
       ) : configs.length === 0 ? (
         <Card>
-          <EmptyState
-            icon={FileKey}
-            title="Нет конфигураций"
-            description="Создайте первого клиента или синхронизируйте с AntiZapret."
-            action={
-              <div className="flex flex-wrap justify-center gap-2">
-                {user?.role === 'admin' && (
-                  <Button variant="secondary" onClick={handleSync}>
-                    <RefreshCw size={16} />
-                    Синхронизировать
-                  </Button>
-                )}
-                {user?.role !== 'viewer' && canCreateClient && (
-                  <Button onClick={() => setShowForm(true)}>
-                    <Plus size={16} />
-                    Новый клиент
-                  </Button>
-                )}
-              </div>
-            }
-          />
+          <CardContent>
+            <EmptyState
+              icon={Shield}
+              title="Нет конфигураций"
+              description="Создайте первого VPN-клиента или синхронизируйте существующие с AntiZapret."
+              action={
+                <div className="flex flex-wrap justify-center gap-2">
+                  {user?.role === 'admin' && (
+                    <Button variant="outline" onClick={handleSync} disabled={syncing}>
+                      {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                      Синхронизировать
+                    </Button>
+                  )}
+                  {user?.role !== 'viewer' && canCreateClient && (
+                    <Button onClick={() => setShowForm(true)}>
+                      <Plus size={16} />
+                      Создать клиента
+                    </Button>
+                  )}
+                </div>
+              }
+              className="py-8"
+            />
+          </CardContent>
         </Card>
       ) : user ? (
         <ConfigCardsSection

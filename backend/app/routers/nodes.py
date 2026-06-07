@@ -18,7 +18,10 @@ from app.schemas import (
     NodeUpdateRequest,
     NodeUpdateResult,
     NodeUpdatesResponse,
+    ResourceHistoryPoint,
+    ResourceHistoryResponse,
 )
+from app.services.resource_metrics import VALID_PERIODS, query_history
 from app.services.node_key_rotation import rotate_node_api_key
 from app.services.node_manager import (
     check_node_health,
@@ -264,6 +267,29 @@ def _get_node_or_404(node_id: int, db: Session) -> Node:
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
     return node
+
+
+@router.get("/{node_id}/resource-history", response_model=ResourceHistoryResponse)
+def node_resource_history(
+    node_id: int,
+    period: str = "1d",
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if period not in VALID_PERIODS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="period должен быть 1d, 7d или 30d",
+        )
+    node = _get_node_or_404(node_id, db)
+    points, sample_count = query_history(db, node.id, period)
+    return ResourceHistoryResponse(
+        node_id=node.id,
+        node_name=node.name,
+        period=period,
+        sample_count=sample_count,
+        points=[ResourceHistoryPoint(**p) for p in points],
+    )
 
 
 @router.get("/{node_id}/updates", response_model=NodeUpdatesResponse)

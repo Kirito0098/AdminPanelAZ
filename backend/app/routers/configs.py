@@ -7,12 +7,26 @@ from app.database import get_db
 from app.models import AppSetting, User, UserRole, ViewerConfigAccess, VpnConfig, VpnType
 from app.schemas import MessageResponse, VpnConfigCreate, VpnConfigResponse, VpnConfigUpdate
 from app.services.feature_guards import get_feature_service, require_vpn_type
-from app.services.node_manager import get_active_adapter
+from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.qr_download import QrDownloadService
 from app.services.qr_generator import generate_qr_png
 from app.services.security import SecurityService
 
 router = APIRouter(prefix="/configs", tags=["configs"])
+
+
+def _active_node_id(db: Session) -> int:
+    return get_active_node(db).id
+
+
+def _scoped_config_query(db: Session, query=None):
+    node_id = _active_node_id(db)
+    base = query if query is not None else db.query(VpnConfig)
+    return base.filter(VpnConfig.node_id == node_id)
+
+
+def _get_config_for_active_node(db: Session, config_id: int) -> VpnConfig | None:
+    return _scoped_config_query(db).filter(VpnConfig.id == config_id).first()
 
 
 def _can_access_config(user: User, config: VpnConfig, db: Session | None = None) -> bool:
@@ -52,7 +66,7 @@ def list_configs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = db.query(VpnConfig)
+    query = _scoped_config_query(db)
     if current_user.role == UserRole.viewer:
         grants = db.query(ViewerConfigAccess).filter_by(user_id=current_user.id).all()
         if grants:
@@ -77,9 +91,14 @@ def create_config(
     if not owner:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Владелец не найден")
 
+    node_id = _active_node_id(db)
     existing = (
         db.query(VpnConfig)
-        .filter(VpnConfig.client_name == payload.client_name, VpnConfig.vpn_type == payload.vpn_type)
+        .filter(
+            VpnConfig.node_id == node_id,
+            VpnConfig.client_name == payload.client_name,
+            VpnConfig.vpn_type == payload.vpn_type,
+        )
         .first()
     )
     if existing:
@@ -94,6 +113,7 @@ def create_config(
         adapter.add_wireguard_client(payload.client_name)
 
     config = VpnConfig(
+        node_id=node_id,
         client_name=payload.client_name,
         vpn_type=payload.vpn_type,
         owner_id=owner_id,
@@ -112,7 +132,7 @@ def get_config(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    config = db.query(VpnConfig).filter(VpnConfig.id == config_id).first()
+    config = _get_config_for_active_node(db, config_id)
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     if not _can_access_config(current_user, config, db):
@@ -127,7 +147,7 @@ def update_config(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    config = db.query(VpnConfig).filter(VpnConfig.id == config_id).first()
+    config = _get_config_for_active_node(db, config_id)
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     if not _can_access_config(current_user, config, db):
@@ -157,7 +177,7 @@ def delete_config(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    config = db.query(VpnConfig).filter(VpnConfig.id == config_id).first()
+    config = _get_config_for_active_node(db, config_id)
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     if not _can_access_config(current_user, config, db):
@@ -181,7 +201,7 @@ def download_profile(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    config = db.query(VpnConfig).filter(VpnConfig.id == config_id).first()
+    config = _get_config_for_active_node(db, config_id)
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     if not _can_access_config(current_user, config, db):
@@ -199,7 +219,7 @@ def generate_qr(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    config = db.query(VpnConfig).filter(VpnConfig.id == config_id).first()
+    config = _get_config_for_active_node(db, config_id)
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     if not _can_access_config(current_user, config, db):
@@ -221,7 +241,7 @@ def create_one_time_link(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    config = db.query(VpnConfig).filter(VpnConfig.id == config_id).first()
+    config = _get_config_for_active_node(db, config_id)
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     if not _can_access_config(current_user, config, db):
@@ -254,25 +274,48 @@ def sync_from_antizapret(db: Session = Depends(get_db), _: User = Depends(requir
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Администратор не найден")
 
     imported = 0
+    node_id = _active_node_id(db)
     adapter = get_active_adapter(db)
     for client_name in adapter.list_openvpn_clients():
         exists = (
             db.query(VpnConfig)
-            .filter(VpnConfig.client_name == client_name, VpnConfig.vpn_type == VpnType.openvpn)
+            .filter(
+                VpnConfig.node_id == node_id,
+                VpnConfig.client_name == client_name,
+                VpnConfig.vpn_type == VpnType.openvpn,
+            )
             .first()
         )
         if not exists:
-            db.add(VpnConfig(client_name=client_name, vpn_type=VpnType.openvpn, owner_id=admin.id))
+            db.add(
+                VpnConfig(
+                    node_id=node_id,
+                    client_name=client_name,
+                    vpn_type=VpnType.openvpn,
+                    owner_id=admin.id,
+                )
+            )
             imported += 1
 
     for client_name in adapter.list_wireguard_clients():
         exists = (
             db.query(VpnConfig)
-            .filter(VpnConfig.client_name == client_name, VpnConfig.vpn_type == VpnType.wireguard)
+            .filter(
+                VpnConfig.node_id == node_id,
+                VpnConfig.client_name == client_name,
+                VpnConfig.vpn_type == VpnType.wireguard,
+            )
             .first()
         )
         if not exists:
-            db.add(VpnConfig(client_name=client_name, vpn_type=VpnType.wireguard, owner_id=admin.id))
+            db.add(
+                VpnConfig(
+                    node_id=node_id,
+                    client_name=client_name,
+                    vpn_type=VpnType.wireguard,
+                    owner_id=admin.id,
+                )
+            )
             imported += 1
 
     db.commit()

@@ -1,5 +1,20 @@
 import { FormEvent, useState } from 'react'
 import {
+  AlertTriangle,
+  Ban,
+  CheckCircle2,
+  Download,
+  Gauge,
+  Link2,
+  Loader2,
+  QrCode,
+  RefreshCw,
+  Shield,
+  Trash2,
+  Unlock,
+  Zap,
+} from 'lucide-react'
+import {
   ApiError,
   createOneTimeLink,
   deleteConfig,
@@ -17,6 +32,8 @@ import {
   wgTempBlock,
   wgUnblock,
 } from '@/api/client'
+import ConfirmDialog from '@/components/shared/ConfirmDialog'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -28,7 +45,17 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { pickAzFile, pickVpnFile, type ProtocolTab } from '@/lib/configCardUtils'
+import {
+  getConfigStatus,
+  getProtocolBadgeVariant,
+  hasAzProfiles,
+  hasVpnProfiles,
+  pickAzFile,
+  pickVpnFile,
+  protocolLabel,
+  type ProtocolTab,
+} from '@/lib/configCardUtils'
+import { cn } from '@/lib/utils'
 import type { ClientAccessPolicy, UserRole, VpnConfig } from '@/types'
 
 interface ClientActionsDialogProps {
@@ -46,6 +73,67 @@ interface ClientActionsDialogProps {
 }
 
 type PromptMode = 'number' | 'confirm' | 'renew' | 'expired-wg' | 'traffic-limit' | null
+
+interface ActionItem {
+  key: string
+  label: string
+  icon: React.ReactNode
+  onClick: () => void
+  hidden?: boolean
+  destructive?: boolean
+  title?: string
+}
+
+const statusIcons = {
+  success: CheckCircle2,
+  destructive: Ban,
+  warning: AlertTriangle,
+  secondary: Shield,
+}
+
+function ActionButton({
+  action,
+  busyAction,
+  fullWidth = false,
+  destructive = false,
+}: {
+  action: ActionItem
+  busyAction: string | null
+  fullWidth?: boolean
+  destructive?: boolean
+}) {
+  const isBusy = busyAction === action.key
+  const isDisabled = busyAction !== null
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={isDisabled}
+      title={action.title ?? action.label}
+      onClick={action.onClick}
+      className={cn(
+        'h-9 justify-start gap-2 text-left text-xs',
+        fullWidth && 'col-span-2',
+        destructive &&
+          'border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive',
+      )}
+    >
+      {isBusy ? <Loader2 size={14} className="shrink-0 animate-spin" /> : action.icon}
+      <span className="truncate">{action.label}</span>
+    </Button>
+  )
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3">
+      <h3 className="shrink-0 text-sm font-medium text-foreground">{children}</h3>
+      <div className="h-px flex-1 bg-border" />
+    </div>
+  )
+}
 
 export default function ClientActionsDialog({
   config,
@@ -70,7 +158,7 @@ export default function ClientActionsDialog({
   const [limitUnit, setLimitUnit] = useState('GB')
   const [limitPeriodDays, setLimitPeriodDays] = useState('7')
   const [pendingAction, setPendingAction] = useState<((days?: number) => Promise<void>) | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [busyAction, setBusyAction] = useState<string | null>(null)
 
   if (!config) return null
 
@@ -86,21 +174,23 @@ export default function ClientActionsDialog({
   const wgExpired = Boolean(policy?.expired) || blockMode === 'expired'
   const hasTrafficLimit = Boolean(policy?.traffic_limit_human || policy?.traffic_limit_bytes)
   const trafficLimitExceeded = Boolean(policy?.traffic_limit_exceeded) || blockMode === 'traffic_limit'
+  const status = getConfigStatus(config, tab, policy)
+  const StatusIcon = statusIcons[status.variant]
 
   const todayStr = () => {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   }
 
-  const runAction = async (fn: () => Promise<void>) => {
-    setBusy(true)
+  const runAction = async (key: string, fn: () => Promise<void>) => {
+    setBusyAction(key)
     try {
       await fn()
       await onRefresh()
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка выполнения действия')
     } finally {
-      setBusy(false)
+      setBusyAction(null)
     }
   }
 
@@ -128,13 +218,38 @@ export default function ClientActionsDialog({
     setPromptMode('confirm')
   }
 
-  const handleOneTime = async (path: string) => {
+  const handleOneTime = async (key: string, path: string) => {
+    setBusyAction(key)
     try {
       const link = await createOneTimeLink(config.id, path)
       await navigator.clipboard.writeText(link.url)
       onNotifySuccess('Одноразовая ссылка скопирована в буфер')
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка формирования ссылки')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const handleFileDownload = async (key: string, path: string, filename: string) => {
+    setBusyAction(key)
+    try {
+      await onDownload(config, path, filename)
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка скачивания')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const handleFileQr = async (key: string, path: string, filename: string) => {
+    setBusyAction(key)
+    try {
+      await onQr(config, path, filename)
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка QR-кода')
+    } finally {
+      setBusyAction(null)
     }
   }
 
@@ -157,7 +272,7 @@ export default function ClientActionsDialog({
       return
     }
     setPromptMode(null)
-    await runAction(async () => {
+    await runAction('renew-cert', async () => {
       await updateConfig(config.id, { cert_expire_days: days })
       onNotifySuccess('Сертификат продлён')
       onOpenChange(false)
@@ -169,260 +284,381 @@ export default function ClientActionsDialog({
       setPromptMode('expired-wg')
       return
     }
-    await runAction(async () => {
+    await runAction('unblock', async () => {
       await wgUnblock(config.client_name)
       onNotifySuccess('Блокировка снята')
     })
   }
 
-  const actionGroups: Array<{ title: string; actions: Array<{ label: string; onClick: () => void; hidden?: boolean }> }> =
-    [
-      {
-        title: 'Управление',
-        actions: [
-          {
-            label: '⛔ Временная блокировка OpenVPN',
-            hidden: !canManage || !isOpenVpn,
-            onClick: () =>
-              askNumber(
-                'Временная блокировка OpenVPN',
-                `Укажите срок блокировки для клиента «${config.client_name}»`,
-                '7',
-                async (days) => {
-                  await openvpnTempBlock(config.client_name, days)
-                  onNotifySuccess('Статус OpenVPN обновлён')
-                },
-              ),
+  const managementActions: ActionItem[] = isOpenVpn
+    ? [
+        {
+          key: 'temp-block',
+          label: 'Временная блокировка',
+          icon: <Ban size={14} />,
+          hidden: !canManage,
+          onClick: () =>
+            askNumber(
+              'Временная блокировка',
+              `Укажите срок блокировки для клиента «${config.client_name}»`,
+              '7',
+              async (days) => {
+                await openvpnTempBlock(config.client_name, days)
+                onNotifySuccess('Клиент временно заблокирован')
+              },
+            ),
+        },
+        {
+          key: 'unblock',
+          label: 'Снять блокировку',
+          icon: <Unlock size={14} />,
+          hidden: !canManage || !isBlocked,
+          onClick: () =>
+            runAction('unblock', async () => {
+              await openvpnUnblock(config.client_name)
+              onNotifySuccess('Блокировка снята')
+            }),
+        },
+        {
+          key: 'disconnect',
+          label: 'Отключить сессию',
+          icon: <Zap size={14} />,
+          hidden: !canManage,
+          title: 'Принудительно отключить активную сессию',
+          onClick: () =>
+            askConfirm(
+              'Отключить клиента',
+              `Принудительно отключить активную сессию «${config.client_name}» через management socket?`,
+              async () => {
+                await openvpnDisconnect(config.client_name)
+                onNotifySuccess('Клиент отключён')
+              },
+            ),
+        },
+        {
+          key: 'renew-cert',
+          label: 'Продлить сертификат',
+          icon: <RefreshCw size={14} />,
+          hidden: !isOwner,
+          onClick: handleRenewCert,
+        },
+        {
+          key: 'traffic-limit',
+          label: 'Лимит трафика',
+          icon: <Gauge size={14} />,
+          hidden: !canManage,
+          onClick: () => {
+            setLimitValue('10')
+            setLimitUnit('GB')
+            setLimitPeriodDays('7')
+            setPromptTitle('Лимит трафика')
+            setPromptMessage(`Укажите лимит для клиента «${config.client_name}»`)
+            setPromptMode('traffic-limit')
           },
-          {
-            label: '⛔ Блокировать до ручной разблокировки',
-            hidden: !canManage || !isOpenVpn || isBlocked,
-            onClick: () =>
-              askConfirm(
-                'Бессрочная блокировка OpenVPN',
-                `Заблокировать клиента «${config.client_name}» до ручной разблокировки?`,
-                async () => {
-                  await openvpnPermanentBlock(config.client_name)
-                  onNotifySuccess('Клиент заблокирован')
-                },
-              ),
+        },
+        {
+          key: 'clear-traffic-limit',
+          label: 'Снять лимит трафика',
+          icon: <Gauge size={14} />,
+          hidden: !canManage || !hasTrafficLimit,
+          onClick: () =>
+            askConfirm(
+              'Снять лимит трафика',
+              `Снять лимит трафика для «${config.client_name}»?`,
+              async () => {
+                await openvpnClearTrafficLimit(config.client_name)
+                onNotifySuccess('Лимит трафика снят')
+              },
+            ),
+        },
+      ]
+    : [
+        {
+          key: 'temp-block',
+          label: 'Временная блокировка',
+          icon: <Ban size={14} />,
+          hidden: !canManage,
+          onClick: () =>
+            askNumber(
+              'Временная блокировка',
+              `Укажите срок блокировки для клиента «${config.client_name}»`,
+              '7',
+              async (days) => {
+                await wgTempBlock(config.client_name, days)
+                onNotifySuccess('Клиент временно заблокирован')
+              },
+            ),
+        },
+        {
+          key: 'unblock',
+          label: 'Снять блокировку',
+          icon: <Unlock size={14} />,
+          hidden: !canManage || !['temp', 'permanent', 'expired'].includes(blockMode),
+          onClick: handleWgUnblock,
+        },
+        {
+          key: 'extend-expiry',
+          label: 'Продлить срок',
+          icon: <RefreshCw size={14} />,
+          hidden: !canManage,
+          onClick: () =>
+            askNumber(
+              'Продлить срок',
+              `Укажите срок продления для клиента «${config.client_name}»`,
+              '30',
+              async (days) => {
+                await wgSetExpiry(config.client_name, days, true)
+                onNotifySuccess('Срок доступа обновлён')
+              },
+            ),
+        },
+        {
+          key: 'traffic-limit',
+          label: 'Лимит трафика',
+          icon: <Gauge size={14} />,
+          hidden: !canManage,
+          onClick: () => {
+            setLimitValue('10')
+            setLimitUnit('GB')
+            setLimitPeriodDays('7')
+            setPromptTitle('Лимит трафика')
+            setPromptMessage(`Укажите лимит для клиента «${config.client_name}»`)
+            setPromptMode('traffic-limit')
           },
-          {
-            label: '🔓 Снять блокировку OpenVPN',
-            hidden: !canManage || !isOpenVpn || !isBlocked,
-            onClick: () =>
-              runAction(async () => {
-                await openvpnUnblock(config.client_name)
-                onNotifySuccess('Блокировка снята')
-              }),
-          },
-          {
-            label: '⚡ Отключить сессию OpenVPN',
-            hidden: !canManage || !isOpenVpn,
-            onClick: () =>
-              askConfirm(
-                'Отключить клиента',
-                `Принудительно отключить активную сессию «${config.client_name}» через management socket?`,
-                async () => {
-                  await openvpnDisconnect(config.client_name)
-                  onNotifySuccess('Клиент отключён')
-                },
-              ),
-          },
-          {
-            label: '♻ Продлить сертификат',
-            hidden: !isOwner || !isOpenVpn,
-            onClick: handleRenewCert,
-          },
-          {
-            label: '📊 Установить лимит трафика',
-            hidden: !canManage,
-            onClick: () => {
-              setLimitValue('10')
-              setLimitUnit('GB')
-              setLimitPeriodDays('7')
-              setPromptTitle('Лимит трафика')
-              setPromptMessage(`Укажите лимит для клиента «${config.client_name}»`)
-              setPromptMode('traffic-limit')
-            },
-          },
-          {
-            label: '🧹 Снять лимит трафика',
-            hidden: !canManage || !hasTrafficLimit,
-            onClick: () =>
-              askConfirm(
-                'Снять лимит трафика',
-                `Снять лимит трафика для «${config.client_name}»?`,
-                async () => {
-                  if (isOpenVpn) {
-                    await openvpnClearTrafficLimit(config.client_name)
-                  } else {
-                    await wgClearTrafficLimit(config.client_name)
-                  }
-                  onNotifySuccess('Лимит трафика снят')
-                },
-              ),
-          },
-          {
-            label: '⛔ Временная блокировка WG/AWG',
-            hidden: !canManage || isOpenVpn,
-            onClick: () =>
-              askNumber(
-                'Временная блокировка WG/AWG',
-                `Укажите срок блокировки для клиента «${config.client_name}»`,
-                '7',
-                async (days) => {
-                  await wgTempBlock(config.client_name, days)
-                  onNotifySuccess('Статус WG/AWG обновлён')
-                },
-              ),
-          },
-          {
-            label: '⛔ Блокировать до ручной разблокировки',
-            hidden: !canManage || isOpenVpn || isBlocked,
-            onClick: () =>
-              askConfirm(
-                'Бессрочная блокировка WG/AWG',
-                `Заблокировать клиента «${config.client_name}» до ручной разблокировки?`,
-                async () => {
-                  await wgPermanentBlock(config.client_name)
-                  onNotifySuccess('Клиент заблокирован')
-                },
-              ),
-          },
-          {
-            label: '🔓 Снять блокировку WG/AWG',
-            hidden: !canManage || isOpenVpn || !['temp', 'permanent', 'expired'].includes(blockMode),
-            onClick: handleWgUnblock,
-          },
-          {
-            label: '♻ Продлить срок WG/AWG',
-            hidden: !canManage || isOpenVpn,
-            onClick: () =>
-              askNumber(
-                'Продлить срок WG/AWG',
-                `Укажите срок продления для клиента «${config.client_name}»`,
-                '30',
-                async (days) => {
-                  await wgSetExpiry(config.client_name, days, true)
-                  onNotifySuccess('Срок WG/AWG обновлён')
-                },
-              ),
-          },
-          {
-            label: '🗑 Удалить профиль',
-            hidden: !canDelete,
-            onClick: () =>
-              askConfirm('Подтверждение удаления', `Удалить профиль «${config.client_name}»?`, async () => {
-                await deleteConfig(config.id)
-                onNotifySuccess(`Клиент «${config.client_name}» удалён`)
-                onOpenChange(false)
-              }),
-          },
-        ],
-      },
-      {
-        title: 'Скачать',
-        actions: [
-          {
-            label: '⬇️ Скачать VPN',
-            hidden: !vpnFile,
-            onClick: () => void onDownload(config, vpnFile!.path, vpnFile!.filename),
-          },
-          {
-            label: '⬇️ Скачать AZ',
-            hidden: !azFile,
-            onClick: () => void onDownload(config, azFile!.path, azFile!.filename),
-          },
-        ],
-      },
-      {
-        title: 'QR',
-        actions: [
-          {
-            label: '📱 QR VPN',
-            hidden: !vpnFile,
-            onClick: () => void onQr(config, vpnFile!.path, vpnFile!.filename),
-          },
-          {
-            label: '📱 QR AZ',
-            hidden: !azFile,
-            onClick: () => void onQr(config, azFile!.path, azFile!.filename),
-          },
-        ],
-      },
-      {
-        title: 'Одноразовые ссылки',
-        actions: [
-          {
-            label: '🔗 Ссылка VPN',
-            hidden: !vpnFile,
-            onClick: () => void handleOneTime(vpnFile!.path),
-          },
-          {
-            label: '🔗 Ссылка AZ',
-            hidden: !azFile,
-            onClick: () => void handleOneTime(azFile!.path),
-          },
-        ],
-      },
-    ]
+        },
+        {
+          key: 'clear-traffic-limit',
+          label: 'Снять лимит трафика',
+          icon: <Gauge size={14} />,
+          hidden: !canManage || !hasTrafficLimit,
+          onClick: () =>
+            askConfirm(
+              'Снять лимит трафика',
+              `Снять лимит трафика для «${config.client_name}»?`,
+              async () => {
+                await wgClearTrafficLimit(config.client_name)
+                onNotifySuccess('Лимит трафика снят')
+              },
+            ),
+        },
+      ]
 
-  const visibleGroups = actionGroups
-    .map((g) => ({ ...g, actions: g.actions.filter((a) => !a.hidden) }))
-    .filter((g) => g.actions.length > 0)
+  const dangerActions: ActionItem[] = [
+    {
+      key: 'permanent-block',
+      label: 'Блокировать навсегда',
+      icon: <Ban size={14} />,
+      hidden: !canManage || isBlocked,
+      destructive: true,
+      onClick: () =>
+        askConfirm(
+          'Бессрочная блокировка',
+          `Заблокировать клиента «${config.client_name}» до ручной разблокировки?`,
+          async () => {
+            if (isOpenVpn) {
+              await openvpnPermanentBlock(config.client_name)
+            } else {
+              await wgPermanentBlock(config.client_name)
+            }
+            onNotifySuccess('Клиент заблокирован')
+          },
+        ),
+    },
+    {
+      key: 'delete',
+      label: 'Удалить профиль',
+      icon: <Trash2 size={14} />,
+      hidden: !canDelete,
+      destructive: true,
+      onClick: () =>
+        askConfirm('Подтверждение удаления', `Удалить профиль «${config.client_name}»?`, async () => {
+          await deleteConfig(config.id)
+          onNotifySuccess(`Клиент «${config.client_name}» удалён`)
+          onOpenChange(false)
+        }),
+    },
+  ]
+
+  const visibleManagement = managementActions.filter((a) => !a.hidden)
+  const visibleDanger = dangerActions.filter((a) => !a.hidden)
+
+  type FileRow = {
+    key: string
+    label: string
+    path: string
+    filename: string
+  }
+
+  const fileRows: FileRow[] = []
+  if (vpnFile) {
+    fileRows.push({
+      key: 'vpn',
+      label: isOpenVpn ? 'VPN профиль' : 'Конфигурация',
+      path: vpnFile.path,
+      filename: vpnFile.filename,
+    })
+  }
+  if (azFile) {
+    fileRows.push({
+      key: 'az',
+      label: 'AntiZapret',
+      path: azFile.path,
+      filename: azFile.filename,
+    })
+  }
 
   const submitPrompt = async (e?: FormEvent, daysOverride?: number) => {
     e?.preventDefault()
     if (!pendingAction) return
     setPromptMode(null)
-    await runAction(async () => {
+    await runAction('prompt', async () => {
       await pendingAction(daysOverride)
     })
     setPendingAction(null)
   }
 
+  const statusBadgeVariant =
+    status.variant === 'success'
+      ? 'success'
+      : status.variant === 'warning'
+        ? 'warning'
+        : status.variant === 'destructive'
+          ? 'destructive'
+          : 'secondary'
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{config.client_name}</DialogTitle>
-            <DialogDescription>
-              {protocolLabel(tab)}
-              {config.description ? ` · ${config.description}` : ''}
-            </DialogDescription>
+        <DialogContent className="max-h-[90vh] max-w-md gap-0 overflow-y-auto p-0 sm:max-w-md">
+          <DialogHeader className="space-y-3 border-b px-6 pb-4 pt-6">
+            <div className="pr-6">
+              <DialogTitle className="text-xl font-semibold tracking-tight">{config.client_name}</DialogTitle>
+              {config.description && (
+                <DialogDescription className="mt-1 line-clamp-2">{config.description}</DialogDescription>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Badge variant={getProtocolBadgeVariant(tab)}>{protocolLabel(tab)}</Badge>
+              <Badge variant={statusBadgeVariant} className="gap-1">
+                <StatusIcon size={12} />
+                {status.label}
+              </Badge>
+              {hasVpnProfiles(config) && (
+                <Badge variant="outline" className="text-[10px]">
+                  VPN
+                </Badge>
+              )}
+              {hasAzProfiles(config) && (
+                <Badge
+                  variant="outline"
+                  className="border-amber-500/40 text-[10px] text-amber-600 dark:text-amber-400"
+                >
+                  AZ
+                </Badge>
+              )}
+            </div>
           </DialogHeader>
 
-          <section className="space-y-3">
-            <h4 className="text-sm font-semibold">Действия</h4>
-            {visibleGroups.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Для этого клиента нет доступных действий.</p>
-            ) : (
-              visibleGroups.map((group) => (
-                <div key={group.title} className="rounded-lg border border-primary/25 bg-muted/20 p-3">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {group.title}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {group.actions.map((action) => (
-                      <Button
-                        key={action.label}
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={busy}
-                        onClick={action.onClick}
-                        className="h-auto whitespace-normal py-1.5 text-left text-xs"
-                      >
-                        {action.label}
-                      </Button>
-                    ))}
-                  </div>
+          <div className="space-y-5 px-6 py-5">
+            {visibleManagement.length > 0 && (
+              <section className="space-y-3">
+                <SectionTitle>Управление</SectionTitle>
+                <div className="grid grid-cols-2 gap-2">
+                  {visibleManagement.map((action) => (
+                    <ActionButton key={action.key} action={action} busyAction={busyAction} />
+                  ))}
                 </div>
-              ))
+              </section>
             )}
-          </section>
+
+            {fileRows.length > 0 && (
+              <section className="space-y-3">
+                <SectionTitle>Файлы и доступ</SectionTitle>
+                <div className="space-y-2">
+                  {fileRows.map((row) => (
+                    <div
+                      key={row.key}
+                      className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{row.label}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">{row.filename}</p>
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="Скачать"
+                          disabled={busyAction !== null}
+                          onClick={() => void handleFileDownload(`dl-${row.key}`, row.path, row.filename)}
+                        >
+                          {busyAction === `dl-${row.key}` ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Download size={14} />
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="QR-код"
+                          disabled={busyAction !== null}
+                          onClick={() => void handleFileQr(`qr-${row.key}`, row.path, row.filename)}
+                        >
+                          {busyAction === `qr-${row.key}` ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <QrCode size={14} />
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="Одноразовая ссылка"
+                          disabled={busyAction !== null}
+                          onClick={() => void handleOneTime(`link-${row.key}`, row.path)}
+                        >
+                          {busyAction === `link-${row.key}` ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Link2 size={14} />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {visibleDanger.length > 0 && (
+              <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                <h3 className="mb-2.5 text-sm font-medium text-destructive">Опасные действия</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {visibleDanger.map((action) => (
+                    <ActionButton
+                      key={action.key}
+                      action={action}
+                      busyAction={busyAction}
+                      destructive
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {visibleManagement.length === 0 && fileRows.length === 0 && visibleDanger.length === 0 && (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                Для этого клиента нет доступных действий.
+              </p>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -453,10 +689,11 @@ export default function ClientActionsDialog({
               />
             </div>
             <DialogFooter>
-              <Button type="button" variant="secondary" onClick={() => setPromptMode(null)}>
+              <Button type="button" variant="outline" onClick={() => setPromptMode(null)}>
                 Отмена
               </Button>
-              <Button type="submit" disabled={busy}>
+              <Button type="submit" disabled={busyAction !== null}>
+                {busyAction === 'prompt' ? <Loader2 size={14} className="animate-spin" /> : null}
                 Применить
               </Button>
             </DialogFooter>
@@ -464,22 +701,16 @@ export default function ClientActionsDialog({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={promptMode === 'confirm'} onOpenChange={(v) => !v && setPromptMode(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{promptTitle}</DialogTitle>
-            <DialogDescription>{promptMessage}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="secondary" onClick={() => setPromptMode(null)}>
-              Отмена
-            </Button>
-            <Button type="button" variant="destructive" disabled={busy} onClick={() => void submitPrompt()}>
-              Подтвердить
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={promptMode === 'confirm'}
+        onOpenChange={(open) => !open && setPromptMode(null)}
+        title={promptTitle}
+        description={promptMessage}
+        confirmLabel="Подтвердить"
+        destructive
+        loading={busyAction === 'prompt'}
+        onConfirm={() => void submitPrompt()}
+      />
 
       <Dialog open={promptMode === 'renew'} onOpenChange={(v) => !v && setPromptMode(null)}>
         <DialogContent className="max-w-sm">
@@ -535,10 +766,11 @@ export default function ClientActionsDialog({
               />
             </div>
             <DialogFooter>
-              <Button type="button" variant="secondary" onClick={() => setPromptMode(null)}>
+              <Button type="button" variant="outline" onClick={() => setPromptMode(null)}>
                 Отмена
               </Button>
-              <Button type="submit" disabled={busy}>
+              <Button type="submit" disabled={busyAction !== null}>
+                {busyAction === 'renew-cert' ? <Loader2 size={14} className="animate-spin" /> : null}
                 Сохранить
               </Button>
             </DialogFooter>
@@ -566,7 +798,7 @@ export default function ClientActionsDialog({
                 return
               }
               setPromptMode(null)
-              void runAction(async () => {
+              void runAction('traffic-limit', async () => {
                 if (isOpenVpn) {
                   await openvpnSetTrafficLimit(config.client_name, value, limitUnit, period)
                 } else {
@@ -618,10 +850,11 @@ export default function ClientActionsDialog({
               <p className="text-sm text-destructive">Клиент сейчас заблокирован по превышению лимита.</p>
             )}
             <DialogFooter>
-              <Button type="button" variant="secondary" onClick={() => setPromptMode(null)}>
+              <Button type="button" variant="outline" onClick={() => setPromptMode(null)}>
                 Отмена
               </Button>
-              <Button type="submit" disabled={busy}>
+              <Button type="submit" disabled={busyAction !== null}>
+                {busyAction === 'traffic-limit' ? <Loader2 size={14} className="animate-spin" /> : null}
                 Установить
               </Button>
             </DialogFooter>
@@ -644,31 +877,26 @@ export default function ClientActionsDialog({
             </Button>
             <Button
               type="button"
-              disabled={busy}
+              disabled={busyAction !== null}
               onClick={() => {
                 setPromptMode(null)
                 askNumber(
-                  'Продлить срок WG/AWG',
+                  'Продлить срок',
                   `Укажите срок продления для клиента «${config.client_name}»`,
                   '30',
                   async (days) => {
                     await wgSetExpiry(config.client_name, days, true)
-                    onNotifySuccess('Срок WG/AWG обновлён')
+                    onNotifySuccess('Срок доступа обновлён')
                   },
                 )
               }}
             >
-              ♻ Продлить срок WG/AWG
+              <RefreshCw size={14} />
+              Продлить срок
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
   )
-}
-
-function protocolLabel(tab: ProtocolTab): string {
-  if (tab === 'openvpn') return 'OpenVPN'
-  if (tab === 'amneziawg') return 'AmneziaWG'
-  return 'WireGuard'
 }

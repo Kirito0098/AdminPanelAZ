@@ -166,6 +166,54 @@ class MonitoringOverview(BaseModel):
     openvpn_data_source: str = "status_log"
 
 
+class ResourceHistoryPoint(BaseModel):
+    timestamp: datetime
+    cpu_percent: float
+    memory_percent: float
+    memory_used_mb: int
+    memory_total_mb: int
+    disk_percent: float
+    load_1: float | None = None
+    load_5: float | None = None
+    load_15: float | None = None
+
+
+class ResourceHistoryResponse(BaseModel):
+    node_id: int
+    node_name: str
+    period: str
+    sample_count: int
+    points: list[ResourceHistoryPoint]
+
+
+class PanelResourceHistoryPoint(BaseModel):
+    timestamp: datetime
+    backend_cpu_percent: float
+    backend_memory_mb: int
+    backend_workers: int
+    nginx_memory_mb: int | None = None
+    total_panel_memory_mb: int
+
+
+class PanelResourceHistoryResponse(BaseModel):
+    period: str
+    sample_count: int
+    points: list[PanelResourceHistoryPoint]
+
+
+class PanelResourceCurrentResponse(BaseModel):
+    timestamp: datetime
+    backend_cpu_percent: float
+    backend_memory_mb: int
+    backend_rss_mb: int
+    backend_workers: int
+    nginx_memory_mb: int | None = None
+    watchdog_memory_mb: int | None = None
+    frontend_dev_memory_mb: int | None = None
+    total_panel_memory_mb: int
+    frontend_note: str
+
+
 class AppSettingsResponse(BaseModel):
     theme: str
     app_name: str

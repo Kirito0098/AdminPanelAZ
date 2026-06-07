@@ -38,9 +38,11 @@ from app.routers import users
 from app.services.backup_scheduler import run_backup_scheduler_loop
 from app.services.cidr.cidr_scheduler import run_cidr_db_scheduler_loop
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
-from app.services.node_manager import ensure_local_node, get_active_adapter
+from app.services.node_manager import ensure_local_node, get_active_adapter, get_active_node
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_health_worker import run_node_health_loop
+from app.services.panel_resource_metrics_worker import run_panel_resource_metrics_loop
+from app.services.resource_metrics_worker import run_resource_metrics_loop
 from app.services.node_key_rotation import run_node_key_rotation_loop
 from app.services.traffic.worker import run_traffic_collector_loop
 
@@ -75,18 +77,37 @@ def seed_database():
 
         try:
             adapter = get_active_adapter(db)
+            node_id = get_active_node(db).id
             ovpn_clients = adapter.list_openvpn_clients()
             wg_clients = adapter.list_wireguard_clients()
             for name in ovpn_clients:
                 if not db.query(VpnConfig).filter(
-                    VpnConfig.client_name == name, VpnConfig.vpn_type == VpnType.openvpn
+                    VpnConfig.node_id == node_id,
+                    VpnConfig.client_name == name,
+                    VpnConfig.vpn_type == VpnType.openvpn,
                 ).first():
-                    db.add(VpnConfig(client_name=name, vpn_type=VpnType.openvpn, owner_id=admin.id))
+                    db.add(
+                        VpnConfig(
+                            node_id=node_id,
+                            client_name=name,
+                            vpn_type=VpnType.openvpn,
+                            owner_id=admin.id,
+                        )
+                    )
             for name in wg_clients:
                 if not db.query(VpnConfig).filter(
-                    VpnConfig.client_name == name, VpnConfig.vpn_type == VpnType.wireguard
+                    VpnConfig.node_id == node_id,
+                    VpnConfig.client_name == name,
+                    VpnConfig.vpn_type == VpnType.wireguard,
                 ).first():
-                    db.add(VpnConfig(client_name=name, vpn_type=VpnType.wireguard, owner_id=admin.id))
+                    db.add(
+                        VpnConfig(
+                            node_id=node_id,
+                            client_name=name,
+                            vpn_type=VpnType.wireguard,
+                            owner_id=admin.id,
+                        )
+                    )
             db.commit()
         except Exception:
             pass
@@ -106,6 +127,8 @@ async def lifespan(_: FastAPI):
         db_path = app_root / db_path
     collector_task = asyncio.create_task(run_traffic_collector_loop())
     health_task = asyncio.create_task(run_node_health_loop())
+    resource_metrics_task = asyncio.create_task(run_resource_metrics_loop())
+    panel_resource_metrics_task = asyncio.create_task(run_panel_resource_metrics_loop())
     backup_task = asyncio.create_task(
         run_backup_scheduler_loop(
             app_root=app_root,
@@ -121,7 +144,15 @@ async def lifespan(_: FastAPI):
     except Exception:
         pass
     yield
-    for task in (collector_task, health_task, backup_task, cidr_task, key_rotation_task):
+    for task in (
+        collector_task,
+        health_task,
+        resource_metrics_task,
+        panel_resource_metrics_task,
+        backup_task,
+        cidr_task,
+        key_rotation_task,
+    ):
         task.cancel()
         try:
             await task

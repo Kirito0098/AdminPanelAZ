@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     traffic_limit_reconcile_after_sync: bool = True
     node_health_sync_enabled: bool = True
     node_health_sync_interval_seconds: int = 60
+    resource_metrics_enabled: bool = True
+    resource_metrics_interval_seconds: int = 60
+    resource_metrics_retention_days: int = 30
+    panel_resource_metrics_enabled: bool = True
+    panel_resource_metrics_interval_seconds: int = 60
+    panel_resource_metrics_retention_days: int = 30
     traffic_db_stale_seconds: int = 600
     openvpn_socket_dir: Path = Path("/run/openvpn-server")
     openvpn_socket_timeout: float = 2.5

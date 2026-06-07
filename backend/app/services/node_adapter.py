@@ -14,6 +14,7 @@ from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import build_health_payload
 from app.services.node_update import apply_node_update, check_all_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
+from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.server_monitor import ServerMonitorService
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 
@@ -139,6 +140,9 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def apply_update(self, *, scope: str = "all", run_doall: bool = True) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def ensure_openvpn_ban_check(self) -> dict: ...
 
 
 class LocalNodeAdapter(NodeAdapter):
@@ -274,6 +278,9 @@ class LocalNodeAdapter(NodeAdapter):
             run_doall=run_doall,
             repo_root=resolve_repo_root(),
         )
+
+    def ensure_openvpn_ban_check(self) -> dict:
+        return ensure_openvpn_ban_check(self._service.base_path)
 
 
 class RemoteNodeAdapter(NodeAdapter):
@@ -485,6 +492,9 @@ class RemoteNodeAdapter(NodeAdapter):
             json={"scope": scope, "run_doall": run_doall},
             timeout=300.0,
         )
+
+    def ensure_openvpn_ban_check(self) -> dict:
+        return self._request("POST", "/system/ensure-openvpn-ban-check", timeout=30.0)
 
     def rotate_api_key(self, new_api_key: str) -> dict[str, Any]:
         return self._request(

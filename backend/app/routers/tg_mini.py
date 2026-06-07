@@ -17,7 +17,7 @@ from app.auth import create_access_token, get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, User, VpnConfig, VpnType
-from app.services.node_manager import get_active_adapter
+from app.services.node_manager import get_active_adapter, get_active_node
 
 router = APIRouter(prefix="/tg-mini", tags=["tg-mini"])
 settings = get_settings()
@@ -297,7 +297,12 @@ def mini_dashboard(current_user: User = Depends(get_current_user), db: Session =
     adapter = get_active_adapter(db)
     ovpn = adapter.parse_openvpn_status()
     wg = adapter.parse_wireguard_status()
-    configs = db.query(VpnConfig).filter(VpnConfig.owner_id == current_user.id).count()
+    node = get_active_node(db)
+    configs = (
+        db.query(VpnConfig)
+        .filter(VpnConfig.node_id == node.id, VpnConfig.owner_id == current_user.id)
+        .count()
+    )
     return {
         "total_configs": configs,
         "connected_openvpn": len(ovpn),
@@ -319,10 +324,11 @@ def mini_dashboard(current_user: User = Depends(get_current_user), db: Session =
 
 @router.get("/configs")
 def mini_configs(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user.role.value == "admin":
-        rows = db.query(VpnConfig).all()
-    else:
-        rows = db.query(VpnConfig).filter(VpnConfig.owner_id == current_user.id).all()
+    node = get_active_node(db)
+    query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id)
+    if current_user.role.value != "admin":
+        query = query.filter(VpnConfig.owner_id == current_user.id)
+    rows = query.all()
     return {
         "configs": [
             {
@@ -349,7 +355,12 @@ def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(ge
 
 @router.post("/send-config")
 def send_config(payload: SendConfigRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    config = db.query(VpnConfig).filter(VpnConfig.id == payload.config_id).first()
+    node = get_active_node(db)
+    config = (
+        db.query(VpnConfig)
+        .filter(VpnConfig.id == payload.config_id, VpnConfig.node_id == node.id)
+        .first()
+    )
     if not config or (config.owner_id != current_user.id and current_user.role.value != "admin"):
         raise HTTPException(status_code=404, detail="Конфигурация не найдена")
     adapter = get_active_adapter(db)

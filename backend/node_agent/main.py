@@ -17,6 +17,7 @@ from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import build_health_payload
 from app.services.node_update import apply_node_update, check_all_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
+from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.server_monitor import ServerMonitorService
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 
@@ -326,6 +327,11 @@ def routing_result_content(key: str, _: None = Depends(verify_api_key)):
 @app.get("/system/updates")
 def system_updates(_: None = Depends(verify_api_key)):
     return check_all_updates(antizapret_path=ANTIZAPRET_PATH, repo_root=resolve_repo_root())
+
+
+@app.post("/system/ensure-openvpn-ban-check")
+def system_ensure_openvpn_ban_check(_: None = Depends(verify_api_key)):
+    return ensure_openvpn_ban_check(ANTIZAPRET_PATH)
 
 
 @app.post("/system/rotate-api-key")
