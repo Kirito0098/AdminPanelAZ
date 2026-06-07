@@ -27,6 +27,7 @@ export interface User {
   theme: string
   is_active: boolean
   must_change_password: boolean
+  totp_enabled?: boolean
   created_at: string
 }
 
@@ -290,6 +291,47 @@ export interface ClientAccessPolicy {
   block_duration_days?: number | null
   expires_at?: string | null
   expired?: boolean
+  traffic_limit_bytes?: number | null
+  traffic_limit_period_days?: number | null
+  traffic_limit_period_label?: string | null
+  traffic_limit_human?: string | null
+  traffic_consumed_bytes?: number | null
+  traffic_consumed_human?: string | null
+  traffic_bytes_left?: number | null
+  traffic_bytes_left_human?: string | null
+  traffic_limit_exceeded?: boolean
+  traffic_limit_unblock_at?: string | null
+  traffic_limit_unblock_label?: string | null
+}
+
+export interface FeatureToggleItem {
+  key: string
+  env_key: string
+  label: string
+  description: string
+  default: boolean
+  group: string
+  icon: string
+  disable_hint?: string | null
+  resource_impact_level: string
+  resource_impact_label: string
+  resource_savings: string
+  enabled: boolean
+  group_meta: { label?: string; description?: string; badge?: string }
+}
+
+export interface FeatureTogglesResponse {
+  items: FeatureToggleItem[]
+  groups: Record<string, { label: string; description: string; badge: string }>
+  total: number
+  enabled_count: number
+  disabled_count: number
+}
+
+export interface FeatureModulesResponse {
+  features: Record<string, boolean>
+  frontend_paths: Record<string, string>
+  settings_tabs: Record<string, string>
 }
 
 export interface EditFileEntry {
@@ -328,6 +370,9 @@ export interface ServerMetrics {
   uptime: string
   load_average: Record<string, number>
   timestamp: string
+  hostname?: string
+  node_id?: number | null
+  node_name?: string | null
 }
 
 export interface BandwidthChart {

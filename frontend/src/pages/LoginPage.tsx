@@ -1,7 +1,14 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import { LogIn, Shield } from 'lucide-react'
-import { ApiError, getCaptchaRequired, getTelegramLoginConfig, loginWithCaptcha } from '@/api/client'
+import {
+  ApiError,
+  getCaptchaRequired,
+  getFeatureModules,
+  getTelegramLoginConfig,
+  login2FA,
+  loginWithCaptcha,
+} from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -24,11 +31,19 @@ export default function LoginPage() {
   const [captchaKey, setCaptchaKey] = useState(0)
   const [tgBot, setTgBot] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [needs2FA, setNeeds2FA] = useState(false)
+  const [tempToken, setTempToken] = useState('')
+  const [totpCode, setTotpCode] = useState('')
 
   useEffect(() => {
-    const token = searchParams.get('token')
+    const hashToken = window.location.hash.match(/^#token=(.+)$/)?.[1]
+    const queryToken = searchParams.get('token')
+    const token = hashToken || queryToken
     if (token && setToken) {
-      setToken(token)
+      setToken(decodeURIComponent(token))
+      if (hashToken) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      }
     }
   }, [searchParams, setToken])
 
@@ -36,11 +51,13 @@ export default function LoginPage() {
     getCaptchaRequired()
       .then((d) => setCaptchaRequired(d.required))
       .catch(() => {})
-    getTelegramLoginConfig()
-      .then((d) => {
-        if (d.enabled && d.bot_username) setTgBot(d.bot_username)
+    Promise.all([getFeatureModules().catch(() => null), getTelegramLoginConfig().catch(() => null)])
+      .then(([modules, tgConfig]) => {
+        const telegramEnabled = modules?.features?.telegram ?? true
+        if (telegramEnabled && tgConfig?.enabled && tgConfig.bot_username) {
+          setTgBot(tgConfig.bot_username)
+        }
       })
-      .catch(() => {})
   }, [])
 
   const refreshCaptcha = async () => {
@@ -65,12 +82,24 @@ export default function LoginPage() {
     e.preventDefault()
     setSubmitting(true)
     try {
+      if (needs2FA && tempToken) {
+        const res = await login2FA(tempToken, totpCode)
+        if (setToken) await setToken(res.access_token)
+        return
+      }
+      let res
       if (captchaRequired && captchaId) {
-        const res = await loginWithCaptcha(username, password, captchaId, captchaText)
-        if (setToken) setToken(res.access_token)
-        else await login(username, password)
+        res = await loginWithCaptcha(username, password, captchaId, captchaText)
       } else {
-        await login(username, password)
+        res = await login(username, password)
+      }
+      if ('requires_2fa' in res && res.requires_2fa) {
+        setNeeds2FA(true)
+        setTempToken(res.temp_token)
+        return
+      }
+      if ('access_token' in res && res.access_token && setToken) {
+        await setToken(res.access_token)
       }
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Ошибка входа'
@@ -119,7 +148,20 @@ export default function LoginPage() {
                 required
               />
             </div>
-            {captchaRequired && (
+            {needs2FA && (
+              <div className="space-y-2">
+                <Label htmlFor="totp">Код 2FA</Label>
+                <Input
+                  id="totp"
+                  value={totpCode}
+                  onChange={(e) => setTotpCode(e.target.value.replace(/\s/g, ''))}
+                  placeholder="123456"
+                  autoComplete="one-time-code"
+                  required
+                />
+              </div>
+            )}
+            {captchaRequired && !needs2FA && (
               <div className="space-y-2">
                 <Label>Капча</Label>
                 <div className="flex items-center gap-2">

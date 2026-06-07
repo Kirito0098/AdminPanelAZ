@@ -97,6 +97,7 @@ export function buildAccessMeta(
   const lines: AccessMetaLine[] = []
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
   const isBlocked = policy?.is_blocked ?? false
+  let tone: 'active' | 'expiring' | 'expired' = 'active'
 
   let accessExpiresAt: string | null | undefined
   if (config.vpn_type === 'openvpn') {
@@ -112,7 +113,30 @@ export function buildAccessMeta(
     lines.push({ text: 'Осталось: неизвестно' })
   }
 
-  if (blockMode === 'temp') {
+  if (policy?.traffic_limit_human) {
+    let limitText = `Лимит: ${policy.traffic_limit_human}`
+    if (policy.traffic_limit_period_label) {
+      limitText += ` (${policy.traffic_limit_period_label})`
+    }
+    lines.push({ text: limitText })
+    if (policy.traffic_consumed_human) {
+      const left = policy.traffic_bytes_left_human ? `, осталось ${policy.traffic_bytes_left_human}` : ''
+      lines.push({ text: `Трафик: ${policy.traffic_consumed_human}${left}` })
+    }
+    if (policy.traffic_limit_exceeded) {
+      tone = 'expired'
+    }
+  } else if (!isBlocked) {
+    lines.push({ text: 'Трафик · Лимит не задан' })
+  }
+
+  if (blockMode === 'traffic_limit' || policy?.traffic_limit_exceeded) {
+    lines.push({ text: 'Блокировка: превышен лимит трафика' })
+    if (policy?.traffic_limit_unblock_label) {
+      lines.push({ text: policy.traffic_limit_unblock_label })
+    }
+    tone = 'expired'
+  } else if (blockMode === 'temp') {
     if (policy?.block_duration_days != null) {
       lines.push({ text: `Блокировка: на ${policy.block_duration_days} дн.` })
     } else if (policy?.blocked_days_left != null && policy.blocked_days_left >= 0) {
@@ -126,8 +150,7 @@ export function buildAccessMeta(
     lines.push({ text: 'Блокировка: нет' })
   }
 
-  let tone: 'active' | 'expiring' | 'expired' = 'active'
-  if (blockMode === 'temp' || blockMode === 'permanent' || blockMode === 'expired' || isBlocked) {
+  if (blockMode === 'temp' || blockMode === 'permanent' || blockMode === 'expired' || blockMode === 'traffic_limit' || isBlocked) {
     tone = 'expired'
   } else if (config.vpn_type === 'openvpn' && config.cert_expire_days != null && config.cert_expire_days <= 30) {
     tone = 'expiring'
@@ -137,7 +160,7 @@ export function buildAccessMeta(
     tone = 'expired'
   }
 
-  if (tab === 'openvpn' && config.cert_expire_days != null && config.cert_expire_days <= 0) {
+  if (tab === 'openvpn' && config.cert_expire_days != null && config.cert_expire_days < 0) {
     tone = 'expired'
   }
 

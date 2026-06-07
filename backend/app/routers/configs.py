@@ -6,6 +6,7 @@ from app.auth import get_current_user, require_admin
 from app.database import get_db
 from app.models import AppSetting, User, UserRole, ViewerConfigAccess, VpnConfig, VpnType
 from app.schemas import MessageResponse, VpnConfigCreate, VpnConfigResponse, VpnConfigUpdate
+from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_manager import get_active_adapter
 from app.services.qr_download import QrDownloadService
 from app.services.qr_generator import generate_qr_png
@@ -83,6 +84,8 @@ def create_config(
     )
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Конфигурация уже существует")
+
+    require_vpn_type(payload.vpn_type.value, service=get_feature_service())
 
     adapter = get_active_adapter(db)
     if payload.vpn_type == VpnType.openvpn:

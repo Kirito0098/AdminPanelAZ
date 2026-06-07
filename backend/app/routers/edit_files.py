@@ -3,15 +3,13 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
-from app.config import get_settings
 from app.database import get_db
 from app.models import User, UserRole
 from app.schemas import MessageResponse
-from app.services.file_editor import FileEditorService
+from app.services.file_editor import EDITABLE_FILES, FileEditorService
 from app.services.node_manager import get_active_adapter
 
 router = APIRouter(prefix="/edit-files", tags=["edit-files"])
-settings = get_settings()
 
 
 class FileContentUpdate(BaseModel):
@@ -23,6 +21,13 @@ class BatchUpdate(BaseModel):
     run_doall: bool = True
 
 
+def _filename_for_key(file_key: str) -> str:
+    fname = EDITABLE_FILES.get(file_key)
+    if not fname:
+        raise ValueError("Неизвестный файл")
+    return fname
+
+
 @router.get("")
 def list_edit_files(current_user: User = Depends(get_current_user)):
     if current_user.role == UserRole.viewer:
@@ -31,11 +36,13 @@ def list_edit_files(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/{file_key}")
-def read_edit_file(file_key: str, current_user: User = Depends(get_current_user)):
+def read_edit_file(file_key: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role not in (UserRole.admin, UserRole.user):
         raise HTTPException(status_code=403, detail="Недостаточно прав")
     try:
-        return {"key": file_key, "content": FileEditorService().read_file(file_key)}
+        adapter = get_active_adapter(db)
+        content = adapter.read_config_file(_filename_for_key(file_key))
+        return {"key": file_key, "content": content}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -47,13 +54,12 @@ def save_edit_file(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    editor = FileEditorService()
     try:
-        editor.write_file(file_key, payload.content)
+        adapter = get_active_adapter(db)
+        adapter.write_config_file(_filename_for_key(file_key), payload.content)
+        output = adapter.apply_config_changes()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
-        output = get_active_adapter(db).apply_config_changes()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Файл сохранён, но doall.sh ошибка: {exc}") from exc
     return MessageResponse(message="Файл сохранён и применён", detail=output)
@@ -65,10 +71,10 @@ def save_batch(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    editor = FileEditorService()
+    adapter = get_active_adapter(db)
     for key, content in payload.files.items():
-        editor.write_file(key, content)
+        adapter.write_config_file(_filename_for_key(key), content)
     output = None
     if payload.run_doall:
-        output = get_active_adapter(db).apply_config_changes()
+        output = adapter.apply_config_changes()
     return MessageResponse(message="Файлы сохранены", detail=output)

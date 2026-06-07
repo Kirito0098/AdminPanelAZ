@@ -3,11 +3,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
+from app.config import get_settings
 from app.database import get_db
 from app.models import User
+from app.services.action_log import log_action
+from app.services.ip_restriction import ip_restriction_service
 from app.services.security import SecurityService
 
 router = APIRouter(prefix="/security", tags=["security"])
+settings = get_settings()
 
 
 class SecuritySettingsUpdate(BaseModel):
@@ -32,14 +36,45 @@ def get_security(db: Session = Depends(get_db), _: User = Depends(require_admin)
 
 
 @router.patch("")
-def update_security(payload: SecuritySettingsUpdate, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    return SecurityService().update_settings(db, payload.model_dump(exclude_none=True))
+def update_security(
+    payload: SecuritySettingsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    result = SecurityService().update_settings(db, payload.model_dump(exclude_none=True))
+    if settings.audit_log_enabled:
+        changed = ", ".join(payload.model_dump(exclude_none=True).keys())
+        log_action(
+            db,
+            action="security_settings_update",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=changed or "no-op",
+        )
+    return result
 
 
 @router.post("/temp-whitelist")
-def add_temp_whitelist(payload: TempWhitelistRequest, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def add_temp_whitelist(
+    payload: TempWhitelistRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
     try:
-        return SecurityService().add_temp_whitelist(db, payload.ip, payload.hours)
+        result = SecurityService().add_temp_whitelist(db, payload.ip, payload.hours)
+        if settings.audit_log_enabled:
+            log_action(
+                db,
+                action="security_temp_whitelist",
+                user_id=admin.id,
+                username=admin.username,
+                remote_addr=ip_restriction_service.get_client_ip(request),
+                details=f"ip={payload.ip}, hours={payload.hours}",
+            )
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

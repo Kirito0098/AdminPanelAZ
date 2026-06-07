@@ -25,8 +25,10 @@ FRONTEND_PID_FILE="$RUN_DIR/frontend.pid"
 MODE_FILE="$RUN_DIR/mode"
 LEGACY_PID_FILE="$ROOT_DIR/.start.sh.pids"
 
-BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
+BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
+UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
+FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-127.0.0.1,::1}"
 FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 ADMINPANELAZ_MODE="${ADMINPANELAZ_MODE:-dev}"
@@ -178,9 +180,12 @@ build_frontend() {
 launch_backend() {
   local detach="$1"
   local reload_flag=""
+  local workers_flag=""
 
   if [[ "$ADMINPANELAZ_MODE" == "dev" ]]; then
     reload_flag="--reload"
+  elif [[ "$UVICORN_WORKERS" -gt 1 ]]; then
+    workers_flag="--workers $UVICORN_WORKERS"
   fi
 
   if [[ "$detach" == "true" ]]; then
@@ -192,7 +197,9 @@ launch_backend() {
         export SERVE_FRONTEND=true
         export FRONTEND_DIST_PATH="$FRONTEND_DIR/dist"
       fi
-      exec uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" $reload_flag
+      # shellcheck disable=SC2086
+      exec uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" \
+        --proxy-headers --forwarded-allow-ips="$FORWARDED_ALLOW_IPS" $reload_flag $workers_flag
     ) >>"$LOG_DIR/backend.log" 2>&1 &
     echo "$!" >"$BACKEND_PID_FILE"
     return 0
@@ -202,7 +209,9 @@ launch_backend() {
     cd "$BACKEND_DIR"
     # shellcheck source=/dev/null
     source "$VENV_DIR/bin/activate"
-    exec uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" $reload_flag
+    # shellcheck disable=SC2086
+    exec uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" \
+      --proxy-headers --forwarded-allow-ips="$FORWARDED_ALLOW_IPS" $reload_flag $workers_flag
   ) &
   echo "$! backend" >>"$LEGACY_PID_FILE"
 }
@@ -430,8 +439,10 @@ Commands:
 Environment:
   ADMINPANELAZ_STATE_DIR  runtime dir for logs/PIDs (default: $ROOT_DIR/.runtime)
   ADMINPANELAZ_MODE       dev | prod (prod serves frontend/dist via backend)
-  BACKEND_HOST            default: 0.0.0.0
+  BACKEND_HOST            default: 127.0.0.1 (localhost; за Nginx — только 127.0.0.1)
   BACKEND_PORT            default: 8000
+  UVICORN_WORKERS         prod workers (default: 1; >1 — см. AUTH_RATE_LIMIT_BACKEND=redis)
+  FORWARDED_ALLOW_IPS     trusted proxies for X-Forwarded-* (default: 127.0.0.1,::1)
   FRONTEND_HOST           default: 127.0.0.1 (dev daemon/foreground)
   FRONTEND_PORT           default: 5173 (dev only)
   WATCHDOG_INTERVAL       seconds between health checks (default: 5)

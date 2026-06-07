@@ -1,12 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, get_password_hash, require_admin
+from app.config import get_settings
 from app.database import get_db
 from app.models import User, UserRole
 from app.schemas import MessageResponse, UserCreate, UserResponse, UserUpdate
+from app.services.action_log import log_action
+from app.services.ip_restriction import ip_restriction_service
+from app.services.password_policy import validate_password
 
 router = APIRouter(prefix="/users", tags=["users"])
+settings = get_settings()
 
 
 @router.get("", response_model=list[UserResponse])
@@ -15,9 +20,15 @@ def list_users(db: Session = Depends(get_db), _: User = Depends(require_admin)):
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def create_user(payload: UserCreate, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def create_user(
+    payload: UserCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
     if db.query(User).filter(User.username == payload.username).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Пользователь уже существует")
+    validate_password(payload.password, username=payload.username)
     user = User(
         username=payload.username,
         password_hash=get_password_hash(payload.password),
@@ -28,6 +39,15 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db), _: User = De
     db.add(user)
     db.commit()
     db.refresh(user)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="user_create",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"created={payload.username}, role={payload.role.value}",
+        )
     return user
 
 
@@ -35,6 +55,7 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db), _: User = De
 def update_user(
     user_id: int,
     payload: UserUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -59,20 +80,45 @@ def update_user(
     if payload.password:
         if not is_admin and current_user.id != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+        validate_password(payload.password, username=user.username)
         user.password_hash = get_password_hash(payload.password)
 
     db.commit()
     db.refresh(user)
+    if settings.audit_log_enabled and (payload.password or payload.role is not None or payload.is_active is not None):
+        log_action(
+            db,
+            action="user_update",
+            user_id=current_user.id,
+            username=current_user.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"target={user.username}",
+        )
     return user
 
 
 @router.delete("/{user_id}", response_model=MessageResponse)
-def delete_user(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+def delete_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     if current_user.id == user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Нельзя удалить себя")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    deleted_username = user.username
     db.delete(user)
     db.commit()
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="user_delete",
+            user_id=current_user.id,
+            username=current_user.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"deleted={deleted_username}",
+        )
     return MessageResponse(message="Пользователь удалён")

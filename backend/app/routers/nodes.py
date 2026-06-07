@@ -1,7 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
+from app.config import get_settings
 from app.database import get_db
 from app.models import Node, NodeStatus, User
 from app.schemas import (
@@ -10,13 +13,19 @@ from app.schemas import (
     NodeCreate,
     NodeHealthResponse,
     NodeResponse,
+    NodeRotateKeyResponse,
     NodeUpdate,
+    NodeUpdateRequest,
+    NodeUpdateResult,
+    NodeUpdatesResponse,
 )
+from app.services.node_key_rotation import rotate_node_api_key
 from app.services.node_manager import (
     check_node_health,
     ensure_local_node,
     get_active_node,
     get_active_node_id,
+    get_adapter_for_node,
     get_api_key_plain,
     node_metadata_dict,
     set_active_node_id,
@@ -24,8 +33,11 @@ from app.services.node_manager import (
     update_node_from_health,
     validate_node_host,
 )
+from app.services.action_log import log_action
+from app.services.ip_restriction import ip_restriction_service
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
+settings = get_settings()
 
 
 def _to_response(node: Node) -> NodeResponse:
@@ -51,7 +63,12 @@ def list_nodes(_: User = Depends(require_admin), db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=NodeResponse, status_code=status.HTTP_201_CREATED)
-def create_node(payload: NodeCreate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def create_node(
+    payload: NodeCreate,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     host = validate_node_host(payload.host)
     if not payload.api_key:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API-ключ обязателен для удалённого узла")
@@ -73,6 +90,15 @@ def create_node(payload: NodeCreate, _: User = Depends(require_admin), db: Sessi
 
     health = check_node_health(node, api_key_override=payload.api_key)
     update_node_from_health(node, health, db)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_create",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"name={node.name}, host={node.host}",
+        )
     return _to_response(node)
 
 
@@ -95,7 +121,8 @@ def get_node(node_id: int, _: User = Depends(require_admin), db: Session = Depen
 def update_node(
     node_id: int,
     payload: NodeUpdate,
-    _: User = Depends(require_admin),
+    request: Request,
+    admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     node = db.query(Node).filter(Node.id == node_id).first()
@@ -116,11 +143,25 @@ def update_node(
 
     db.commit()
     db.refresh(node)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_update",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"name={node.name}, id={node.id}",
+        )
     return _to_response(node)
 
 
 @router.delete("/{node_id}", response_model=MessageResponse)
-def delete_node(node_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def delete_node(
+    node_id: int,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -136,6 +177,15 @@ def delete_node(node_id: int, _: User = Depends(require_admin), db: Session = De
         set_active_node_id(db, local.id)
         db.commit()
 
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_delete",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"name={node.name}, id={node_id}",
+        )
     return MessageResponse(message=f"Узел '{node.name}' удалён")
 
 
@@ -155,13 +205,137 @@ def health_check(node_id: int, _: User = Depends(require_admin), db: Session = D
     )
 
 
+@router.post("/{node_id}/rotate-key", response_model=NodeRotateKeyResponse)
+def rotate_node_key(
+    node_id: int,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    if node.is_local:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Локальный узел не поддерживает ротацию ключа")
+    try:
+        rotate_node_api_key(db, node, actor_username=admin.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Не удалось обновить ключ на узле: {exc}",
+        ) from exc
+    return NodeRotateKeyResponse(message="API-ключ узла успешно обновлён", node_id=node.id)
+
+
 @router.post("/{node_id}/activate", response_model=ActiveNodeResponse)
-def activate_node(node_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def activate_node(
+    node_id: int,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
 
     set_active_node_id(db, node.id)
     db.commit()
+    health = check_node_health(node)
+    update_node_from_health(node, health, db)
     db.refresh(node)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_activate",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"name={node.name}, id={node.id}",
+        )
     return ActiveNodeResponse(node=_to_response(node))
+
+
+def _get_node_or_404(node_id: int, db: Session) -> Node:
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    return node
+
+
+@router.get("/{node_id}/updates", response_model=NodeUpdatesResponse)
+def check_node_updates(node_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    node = _get_node_or_404(node_id, db)
+    if node.status == NodeStatus.offline:
+        health = check_node_health(node)
+        update_node_from_health(node, health, db)
+        if node.status == NodeStatus.offline:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Узел недоступен")
+
+    adapter = get_adapter_for_node(node)
+    updates = adapter.check_updates()
+    return NodeUpdatesResponse(
+        node_id=node.id,
+        agent=updates.get("agent", {}),
+        antizapret=updates.get("antizapret", {}),
+    )
+
+
+@router.post("/{node_id}/update", response_model=NodeUpdateResult)
+def apply_node_update_endpoint(
+    node_id: int,
+    payload: NodeUpdateRequest,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = _get_node_or_404(node_id, db)
+    if node.status == NodeStatus.offline:
+        health = check_node_health(node)
+        update_node_from_health(node, health, db)
+        if node.status == NodeStatus.offline:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Узел недоступен")
+
+    meta = node_metadata_dict(node)
+    adapter = get_adapter_for_node(node)
+    result = adapter.apply_update(scope=payload.scope, run_doall=payload.run_doall)
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="; ".join(result.get("errors") or [result.get("message", "Ошибка обновления")]),
+        )
+
+    if not result.get("restarting"):
+        health = check_node_health(node)
+        update_node_from_health(node, health, db)
+    else:
+        after = result.get("after") or {}
+        if after.get("antizapret_version"):
+            meta["antizapret_version"] = after["antizapret_version"]
+            node.node_metadata = json.dumps(meta)
+            db.add(node)
+            db.commit()
+
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_update_apply",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"node={node.name}, scope={payload.scope}",
+        )
+    return NodeUpdateResult(
+        node_id=node.id,
+        success=True,
+        message=result.get("message", "Обновление выполнено"),
+        restarting=bool(result.get("restarting")),
+        before=result.get("before", {}),
+        after=result.get("after", {}),
+        detail=result.get("detail", {}),
+        errors=result.get("errors", []),
+    )

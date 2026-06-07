@@ -3,12 +3,16 @@ import {
   ApiError,
   createOneTimeLink,
   deleteConfig,
+  openvpnClearTrafficLimit,
   openvpnDisconnect,
   openvpnPermanentBlock,
+  openvpnSetTrafficLimit,
   openvpnTempBlock,
   openvpnUnblock,
   updateConfig,
+  wgClearTrafficLimit,
   wgPermanentBlock,
+  wgSetTrafficLimit,
   wgSetExpiry,
   wgTempBlock,
   wgUnblock,
@@ -41,7 +45,7 @@ interface ClientActionsDialogProps {
   onNotifyError: (msg: string) => void
 }
 
-type PromptMode = 'number' | 'confirm' | 'renew' | 'expired-wg' | null
+type PromptMode = 'number' | 'confirm' | 'renew' | 'expired-wg' | 'traffic-limit' | null
 
 export default function ClientActionsDialog({
   config,
@@ -62,6 +66,9 @@ export default function ClientActionsDialog({
   const [numberValue, setNumberValue] = useState('7')
   const [renewDays, setRenewDays] = useState('365')
   const [renewDate, setRenewDate] = useState('')
+  const [limitValue, setLimitValue] = useState('10')
+  const [limitUnit, setLimitUnit] = useState('GB')
+  const [limitPeriodDays, setLimitPeriodDays] = useState('7')
   const [pendingAction, setPendingAction] = useState<((days?: number) => Promise<void>) | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -77,6 +84,8 @@ export default function ClientActionsDialog({
   const isBlocked = policy?.is_blocked ?? false
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
   const wgExpired = Boolean(policy?.expired) || blockMode === 'expired'
+  const hasTrafficLimit = Boolean(policy?.traffic_limit_human || policy?.traffic_limit_bytes)
+  const trafficLimitExceeded = Boolean(policy?.traffic_limit_exceeded) || blockMode === 'traffic_limit'
 
   const todayStr = () => {
     const now = new Date()
@@ -224,6 +233,35 @@ export default function ClientActionsDialog({
             label: '♻ Продлить сертификат',
             hidden: !isOwner || !isOpenVpn,
             onClick: handleRenewCert,
+          },
+          {
+            label: '📊 Установить лимит трафика',
+            hidden: !canManage,
+            onClick: () => {
+              setLimitValue('10')
+              setLimitUnit('GB')
+              setLimitPeriodDays('7')
+              setPromptTitle('Лимит трафика')
+              setPromptMessage(`Укажите лимит для клиента «${config.client_name}»`)
+              setPromptMode('traffic-limit')
+            },
+          },
+          {
+            label: '🧹 Снять лимит трафика',
+            hidden: !canManage || !hasTrafficLimit,
+            onClick: () =>
+              askConfirm(
+                'Снять лимит трафика',
+                `Снять лимит трафика для «${config.client_name}»?`,
+                async () => {
+                  if (isOpenVpn) {
+                    await openvpnClearTrafficLimit(config.client_name)
+                  } else {
+                    await wgClearTrafficLimit(config.client_name)
+                  }
+                  onNotifySuccess('Лимит трафика снят')
+                },
+              ),
           },
           {
             label: '⛔ Временная блокировка WG/AWG',
@@ -502,6 +540,89 @@ export default function ClientActionsDialog({
               </Button>
               <Button type="submit" disabled={busy}>
                 Сохранить
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={promptMode === 'traffic-limit'} onOpenChange={(v) => !v && setPromptMode(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{promptTitle}</DialogTitle>
+            <DialogDescription>{promptMessage}</DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              const value = Number.parseFloat(limitValue)
+              if (!Number.isFinite(value) || value <= 0) {
+                onNotifyError('Укажите корректный лимит трафика')
+                return
+              }
+              const period = limitPeriodDays ? Number.parseInt(limitPeriodDays, 10) : null
+              if (period != null && ![1, 7, 30].includes(period)) {
+                onNotifyError('Период лимита: 1, 7 или 30 дней')
+                return
+              }
+              setPromptMode(null)
+              void runAction(async () => {
+                if (isOpenVpn) {
+                  await openvpnSetTrafficLimit(config.client_name, value, limitUnit, period)
+                } else {
+                  await wgSetTrafficLimit(config.client_name, value, limitUnit, period)
+                }
+                onNotifySuccess('Лимит трафика установлен')
+              })
+            }}
+            className="space-y-4"
+          >
+            <div className="space-y-2">
+              <Label htmlFor="limitValue">Лимит</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="limitValue"
+                  type="number"
+                  min={0.01}
+                  step="any"
+                  value={limitValue}
+                  onChange={(e) => setLimitValue(e.target.value)}
+                  autoFocus
+                />
+                <select
+                  className="rounded-md border border-input bg-background px-2 text-sm"
+                  value={limitUnit}
+                  onChange={(e) => setLimitUnit(e.target.value)}
+                >
+                  <option value="MB">MB</option>
+                  <option value="GB">GB</option>
+                  <option value="TB">TB</option>
+                </select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="limitPeriod">Период (опционально)</Label>
+              <select
+                id="limitPeriod"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={limitPeriodDays}
+                onChange={(e) => setLimitPeriodDays(e.target.value)}
+              >
+                <option value="">Всё время</option>
+                <option value="1">1 день (календарный)</option>
+                <option value="7">7 дней (пн–вс)</option>
+                <option value="30">30 дней (месяц)</option>
+              </select>
+            </div>
+            {trafficLimitExceeded && (
+              <p className="text-sm text-destructive">Клиент сейчас заблокирован по превышению лимита.</p>
+            )}
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setPromptMode(null)}>
+                Отмена
+              </Button>
+              <Button type="submit" disabled={busy}>
+                Установить
               </Button>
             </DialogFooter>
           </form>

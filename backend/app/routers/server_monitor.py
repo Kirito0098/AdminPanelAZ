@@ -3,30 +3,51 @@ import json
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from jose import JWTError, jwt
+from sqlalchemy.orm import Session
 
 from app.auth import require_admin
 from app.config import get_settings
+from app.database import get_db
 from app.models import User
-from app.services.server_monitor import ServerMonitorService
+from app.services.node_manager import get_active_adapter, get_active_node
 
 router = APIRouter(prefix="/server-monitor", tags=["server-monitor"])
 settings = get_settings()
-monitor = ServerMonitorService()
 
 
 @router.get("/metrics")
-def get_metrics(accurate: bool = False, _: User = Depends(require_admin)):
-    return monitor.get_metrics(accurate_cpu=accurate)
+def get_metrics(accurate: bool = False, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    data = adapter.get_server_metrics(accurate_cpu=accurate)
+    data["node_id"] = node.id
+    data["node_name"] = node.name
+    return data
 
 
 @router.get("/bandwidth")
-def get_bandwidth(iface: str = "eth0", range_key: str = "1d", _: User = Depends(require_admin)):
-    return monitor.get_bandwidth(iface, range_key)
+def get_bandwidth(
+    iface: str = "eth0",
+    range_key: str = "1d",
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    data = adapter.get_server_bandwidth(iface, range_key)
+    data["node_id"] = node.id
+    data["node_name"] = node.name
+    return data
 
 
 @router.get("/interfaces")
-def list_interfaces(_: User = Depends(require_admin)):
-    return monitor.list_interfaces()
+def list_interfaces(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    data = adapter.list_server_interfaces()
+    data["node_id"] = node.id
+    data["node_name"] = node.name
+    return data
 
 
 @router.websocket("/ws")
@@ -45,8 +66,15 @@ async def monitor_ws(websocket: WebSocket):
     iface = websocket.query_params.get("iface", "eth0")
     try:
         while True:
-            metrics = monitor.get_metrics()
-            bw = monitor.get_bandwidth(iface, "1d")
+            from app.database import SessionLocal
+
+            db = SessionLocal()
+            try:
+                adapter = get_active_adapter(db)
+                metrics = adapter.get_server_metrics()
+                bw = adapter.get_server_bandwidth(iface, "1d")
+            finally:
+                db.close()
             payload = {
                 "cpu_percent": metrics["cpu_percent"],
                 "memory_percent": metrics["memory_percent"],

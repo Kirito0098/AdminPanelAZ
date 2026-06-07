@@ -26,15 +26,28 @@ class IpRestrictionService:
         self.block_ip_blocked_dwell = True
         self.ip_blocked_dwell_seconds = 120
 
-    def get_client_ip(self, request) -> str:
-        remote_ip = (request.client.host if request.client else "") or ""
-        ip = remote_ip
+    def _normalize_remote_ip(self, remote_ip: str) -> str:
+        ip = (remote_ip or "").strip()
         if ip.startswith("::ffff:"):
             ip = ip[7:]
-        forwarded = request.headers.get("x-forwarded-for", "")
-        if forwarded:
-            ip = forwarded.split(",")[0].strip()
-        return ip or remote_ip
+        return ip
+
+    def _remote_is_trusted_proxy(self, remote_ip: str) -> bool:
+        from app.config import get_settings
+
+        normalized = self._normalize_remote_ip(remote_ip)
+        if not normalized:
+            return False
+        return normalized in set(get_settings().trusted_proxy_ip_list)
+
+    def get_client_ip(self, request) -> str:
+        remote_ip = (request.client.host if request.client else "") or ""
+        remote_ip = self._normalize_remote_ip(remote_ip)
+        if self._remote_is_trusted_proxy(remote_ip):
+            forwarded = request.headers.get("x-forwarded-for", "")
+            if forwarded:
+                return forwarded.split(",")[0].strip() or remote_ip
+        return remote_ip
 
     def _normalize_ip(self, ip_str: str) -> str | None:
         ip_str = (ip_str or "").strip()

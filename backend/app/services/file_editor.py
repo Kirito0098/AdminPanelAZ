@@ -17,6 +17,7 @@ EDITABLE_FILES: dict[str, str] = {
     "include_adblock_hosts": "include-adblock-hosts.txt",
     "exclude_adblock_hosts": "exclude-adblock-hosts.txt",
     "remove_hosts": "remove-hosts.txt",
+    "deny_ips": "deny-ips.txt",
 }
 
 FILE_TITLES: dict[str, str] = {
@@ -30,6 +31,7 @@ FILE_TITLES: dict[str, str] = {
     "include_adblock_hosts": "Adblock — включить",
     "exclude_adblock_hosts": "Adblock — исключить",
     "remove_hosts": "Удалить домены",
+    "deny_ips": "Запретить входящие IP",
 }
 
 

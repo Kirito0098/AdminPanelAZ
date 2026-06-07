@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
+# Служебный скрипт: вызывается из install.sh. Для установки используйте: sudo ./install.sh
 set -euo pipefail
+
+if [[ "${INSTALL_FROM_INSTALL_SH:-}" != "1" ]]; then
+  echo "[install-node-systemd] ВНИМАНИЕ: единая установка — sudo ./install.sh" >&2
+  echo "[install-node-systemd] Этот скрипт — служебный (systemd unit node agent)." >&2
+fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_NAME="adminpanelaz-node"

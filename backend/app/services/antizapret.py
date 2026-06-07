@@ -169,6 +169,7 @@ class AntiZapretService:
             "include-ips.txt",
             "exclude-ips.txt",
             "allow-ips.txt",
+            "banned_clients",
         }
         if filename not in allowed:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимый конфигурационный файл")
@@ -184,6 +185,7 @@ class AntiZapretService:
             "include-ips.txt",
             "exclude-ips.txt",
             "allow-ips.txt",
+            "banned_clients",
         }
         if filename not in allowed:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл недоступен для записи")
@@ -249,6 +251,28 @@ class AntiZapretService:
             return ip or None
         except (subprocess.TimeoutExpired, OSError):
             return None
+
+    def get_antizapret_version(self) -> str | None:
+        version_file = self.base_path / "VERSION"
+        if version_file.is_file():
+            version = version_file.read_text(encoding="utf-8", errors="replace").strip()
+            if version:
+                return version
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(self.base_path), "describe", "--tags", "--always"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode == 0:
+                version = result.stdout.strip()
+                if version:
+                    return version
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        return None
 
     def get_service_status(self) -> list[MonitoringService]:
         services = [

@@ -24,24 +24,26 @@ import { Separator } from '@/components/ui/separator'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useTheme } from '@/context/ThemeContext'
 import ForcePasswordChange from './ForcePasswordChange'
 import LiveClock from './noc/LiveClock'
 
 const baseNavItems = [
-  { to: '/', label: 'Конфигурации', icon: LayoutDashboard, end: true, adminOnly: false, viewerOk: true },
-  { to: '/monitoring', label: 'NOC Мониторинг', icon: Activity, end: false, adminOnly: false, viewerOk: true },
-  { to: '/traffic', label: 'Мониторинг трафика', icon: HardDrive, end: false, adminOnly: false, viewerOk: true },
-  { to: '/routing', label: 'Маршрутизация / CIDR', icon: GitBranch, end: false, adminOnly: false, viewerOk: true },
-  { to: '/edit-files', label: 'Редактор файлов', icon: FileText, end: false, adminOnly: false, viewerOk: false },
-  { to: '/logs', label: 'Журналы', icon: ClipboardList, end: false, adminOnly: false, viewerOk: true },
-  { to: '/server-monitor', label: 'Сервер', icon: Cpu, end: false, adminOnly: true, viewerOk: false },
-  { to: '/nodes', label: 'Узлы', icon: Server, end: false, adminOnly: true, viewerOk: false },
-  { to: '/settings', label: 'Настройки', icon: Settings, end: false, adminOnly: false, viewerOk: true },
+  { to: '/', label: 'Конфигурации', icon: LayoutDashboard, end: true, adminOnly: false, viewerOk: true, featureKey: null },
+  { to: '/monitoring', label: 'NOC Мониторинг', icon: Activity, end: false, adminOnly: false, viewerOk: true, featureKey: 'logs_dashboard' },
+  { to: '/traffic', label: 'Мониторинг трафика', icon: HardDrive, end: false, adminOnly: false, viewerOk: true, featureKey: 'traffic_sync' },
+  { to: '/routing', label: 'Маршрутизация / CIDR', icon: GitBranch, end: false, adminOnly: false, viewerOk: true, featureKey: 'routing' },
+  { to: '/edit-files', label: 'Редактор файлов', icon: FileText, end: false, adminOnly: false, viewerOk: false, featureKey: 'edit_files' },
+  { to: '/logs', label: 'Журналы', icon: ClipboardList, end: false, adminOnly: false, viewerOk: true, featureKey: 'logs_dashboard' },
+  { to: '/server-monitor', label: 'Сервер', icon: Cpu, end: false, adminOnly: true, viewerOk: false, featureKey: 'server_monitor' },
+  { to: '/nodes', label: 'Узлы', icon: Server, end: false, adminOnly: true, viewerOk: false, featureKey: null },
+  { to: '/settings', label: 'Настройки', icon: Settings, end: false, adminOnly: false, viewerOk: true, featureKey: null },
 ]
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { user, logout } = useAuth()
+  const { isEnabled } = useFeatureModules()
   const { theme, toggleTheme } = useTheme()
   const initials = user?.username?.slice(0, 2).toUpperCase() ?? '?'
 
@@ -69,6 +71,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <nav className="flex flex-1 flex-col gap-1 px-2">
         {baseNavItems
           .filter((item) => {
+            if (item.featureKey && !isEnabled(item.featureKey)) return false
             if (user?.role === 'viewer') return item.viewerOk
             if (item.adminOnly) return user?.role === 'admin'
             return true

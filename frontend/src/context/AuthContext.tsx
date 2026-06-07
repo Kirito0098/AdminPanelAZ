@@ -1,12 +1,15 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/api/client'
 import { applyThemeClass, getStoredTheme } from '@/lib/theme'
 import type { User } from '@/types'
 
+const API_BASE = import.meta.env.VITE_API_URL || '/api'
+const REFRESH_INTERVAL_MS = 25 * 60 * 1000
+
 interface AuthContextValue {
   user: User | null
   loading: boolean
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<api.LoginResult>
   setToken: (token: string) => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
@@ -17,6 +20,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const applyTheme = useCallback((theme: string) => {
     const t = theme === 'light' ? 'light' : 'dark'
@@ -42,19 +46,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [applyTheme])
 
+  const silentRefresh = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      if (!response.ok) return
+      const data = await response.json()
+      if (data.access_token) {
+        localStorage.setItem('token', data.access_token)
+      }
+    } catch {
+      /* ignore background refresh errors */
+    }
+  }, [])
+
   useEffect(() => {
     applyTheme(getStoredTheme())
     refreshUser()
   }, [applyTheme, refreshUser])
 
-  const login = useCallback(
-    async (username: string, password: string) => {
-      const { access_token } = await api.login(username, password)
-      localStorage.setItem('token', access_token)
+  useEffect(() => {
+    if (!user) {
+      if (refreshTimer.current) {
+        clearInterval(refreshTimer.current)
+        refreshTimer.current = null
+      }
+      return
+    }
+    refreshTimer.current = setInterval(silentRefresh, REFRESH_INTERVAL_MS)
+    return () => {
+      if (refreshTimer.current) clearInterval(refreshTimer.current)
+    }
+  }, [user, silentRefresh])
+
+  const login = useCallback(async (username: string, password: string) => {
+    const result = await api.login(username, password)
+    if ('access_token' in result && result.access_token) {
+      localStorage.setItem('token', result.access_token)
       await refreshUser()
-    },
-    [refreshUser],
-  )
+    }
+    return result
+  }, [refreshUser])
 
   const setToken = useCallback(
     async (token: string) => {
@@ -65,6 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   )
 
   const logout = useCallback(() => {
+    api.logoutApi().catch(() => {})
     localStorage.removeItem('token')
     setUser(null)
   }, [])

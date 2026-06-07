@@ -2,7 +2,9 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import RouteProgress from './components/RouteProgress'
+import FeatureGuardRoute from './components/FeatureGuardRoute'
 import { AuthProvider } from './context/AuthContext'
+import { FeatureModulesProvider } from './context/FeatureModulesContext'
 import { NodeProvider } from './context/NodeContext'
 import { NotificationProvider } from './context/NotificationContext'
 import { ProgressProvider } from './context/ProgressContext'
@@ -21,6 +23,7 @@ import ServerMonitorPage from './pages/ServerMonitorPage'
 export default function App() {
   return (
     <AuthProvider>
+      <FeatureModulesProvider>
       <ThemeProvider>
         <NotificationProvider>
           <ProgressProvider>
@@ -38,12 +41,12 @@ export default function App() {
                   }
                 >
                   <Route index element={<DashboardPage />} />
-                  <Route path="monitoring" element={<MonitoringPage />} />
-                  <Route path="traffic" element={<TrafficPage />} />
-                  <Route path="routing" element={<RoutingPage />} />
-                  <Route path="edit-files" element={<EditFilesPage />} />
-                  <Route path="logs" element={<LogsPage />} />
-                  <Route path="server-monitor" element={<ServerMonitorPage />} />
+                  <Route path="monitoring" element={<FeatureGuardRoute feature="logs_dashboard"><MonitoringPage /></FeatureGuardRoute>} />
+                  <Route path="traffic" element={<FeatureGuardRoute feature="traffic_sync"><TrafficPage /></FeatureGuardRoute>} />
+                  <Route path="routing" element={<FeatureGuardRoute feature="routing"><RoutingPage /></FeatureGuardRoute>} />
+                  <Route path="edit-files" element={<FeatureGuardRoute feature="edit_files"><EditFilesPage /></FeatureGuardRoute>} />
+                  <Route path="logs" element={<FeatureGuardRoute feature="logs_dashboard"><LogsPage /></FeatureGuardRoute>} />
+                  <Route path="server-monitor" element={<FeatureGuardRoute feature="server_monitor"><ServerMonitorPage /></FeatureGuardRoute>} />
                   <Route path="nodes" element={<NodesPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                 </Route>
@@ -54,6 +57,7 @@ export default function App() {
           </ProgressProvider>
         </NotificationProvider>
       </ThemeProvider>
+      </FeatureModulesProvider>
     </AuthProvider>
   )
 }

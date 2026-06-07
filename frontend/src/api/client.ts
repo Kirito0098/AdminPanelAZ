@@ -12,7 +12,29 @@ function getToken(): string | null {
   return localStorage.getItem('token')
 }
 
-export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+let refreshPromise: Promise<string | null> | null = null
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+      .then(async (response) => {
+        if (!response.ok) return null
+        const data = await response.json()
+        const token = data.access_token as string
+        localStorage.setItem('token', token)
+        return token
+      })
+      .finally(() => {
+        refreshPromise = null
+      })
+  }
+  return refreshPromise
+}
+
+export async function apiFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
   const headers = new Headers(options.headers)
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
@@ -20,7 +42,14 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   const token = getToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers })
+  const response = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'include' })
+  if (response.status === 401 && retry && !path.startsWith('/auth/')) {
+    const newToken = await refreshAccessToken()
+    if (newToken) {
+      return apiFetch<T>(path, options, false)
+    }
+    localStorage.removeItem('token')
+  }
   if (!response.ok) {
     let detail = 'Ошибка запроса'
     try {
@@ -35,8 +64,12 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   return response.json()
 }
 
-export async function login(username: string, password: string) {
-  return apiFetch<{ access_token: string }>('/auth/login/json', {
+export type LoginResult =
+  | { access_token: string; requires_2fa?: false }
+  | { requires_2fa: true; temp_token: string }
+
+export async function login(username: string, password: string): Promise<LoginResult> {
+  return apiFetch<LoginResult>('/auth/login/json', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
   })
@@ -47,10 +80,58 @@ export async function loginWithCaptcha(
   password: string,
   captchaId: string,
   captchaText: string,
-) {
-  return apiFetch<{ access_token: string }>('/auth/login/json', {
+): Promise<LoginResult> {
+  return apiFetch<LoginResult>('/auth/login/json', {
     method: 'POST',
     body: JSON.stringify({ username, password, captcha_id: captchaId, captcha_text: captchaText }),
+  })
+}
+
+export async function login2FA(tempToken: string, code: string) {
+  return apiFetch<{ access_token: string }>('/auth/login/2fa', {
+    method: 'POST',
+    body: JSON.stringify({ temp_token: tempToken, code }),
+  })
+}
+
+export async function logoutApi() {
+  return apiFetch('/auth/logout', { method: 'POST' })
+}
+
+export async function get2FAStatus() {
+  return apiFetch<{ enabled: boolean; backup_codes_remaining: number }>('/auth/2fa/status')
+}
+
+export async function setup2FA() {
+  return apiFetch<{ secret: string; otpauth_uri: string; qr_data_url: string }>('/auth/2fa/setup', {
+    method: 'POST',
+  })
+}
+
+export async function enable2FA(code: string) {
+  return apiFetch<{ backup_codes: string[] }>('/auth/2fa/enable', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  })
+}
+
+export async function disable2FA(code: string) {
+  return apiFetch('/auth/2fa/disable', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  })
+}
+
+export async function regenerate2FABackupCodes(code: string) {
+  return apiFetch<{ backup_codes: string[] }>('/auth/2fa/regenerate-backup-codes', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  })
+}
+
+export async function rotateNodeApiKey(nodeId: number) {
+  return apiFetch<{ message: string; node_id: number }>(`/nodes/${nodeId}/rotate-key`, {
+    method: 'POST',
   })
 }
 
@@ -200,6 +281,33 @@ export async function checkNodeHealth(id: number) {
 
 export async function activateNode(id: number) {
   return apiFetch<import('../types').ActiveNode>(`/nodes/${id}/activate`, { method: 'POST' })
+}
+
+export async function checkNodeUpdates(id: number) {
+  return apiFetch<{
+    node_id: number
+    agent: Record<string, unknown>
+    antizapret: Record<string, unknown>
+  }>(`/nodes/${id}/updates`)
+}
+
+export async function applyNodeUpdate(
+  id: number,
+  data: { scope?: 'all' | 'agent' | 'antizapret'; run_doall?: boolean } = {},
+) {
+  return apiFetch<{
+    node_id: number
+    success: boolean
+    message: string
+    restarting: boolean
+    before: Record<string, unknown>
+    after: Record<string, unknown>
+    detail: Record<string, unknown>
+    errors: string[]
+  }>(`/nodes/${id}/update`, {
+    method: 'POST',
+    body: JSON.stringify({ scope: data.scope ?? 'all', run_doall: data.run_doall ?? true }),
+  })
 }
 
 export async function getDashboardSummary() {
@@ -436,6 +544,69 @@ export async function wgPermanentBlock(clientName: string) {
   return apiFetch('/client-access/wireguard/permanent-block', {
     method: 'POST',
     body: JSON.stringify({ client_name: clientName }),
+  })
+}
+
+export async function openvpnSetTrafficLimit(
+  clientName: string,
+  limitValue: number,
+  limitUnit = 'MB',
+  limitPeriodDays?: number | null,
+) {
+  return apiFetch('/client-access/openvpn/set-traffic-limit', {
+    method: 'POST',
+    body: JSON.stringify({
+      client_name: clientName,
+      limit_value: limitValue,
+      limit_unit: limitUnit,
+      limit_period_days: limitPeriodDays ?? null,
+    }),
+  })
+}
+
+export async function openvpnClearTrafficLimit(clientName: string) {
+  return apiFetch('/client-access/openvpn/clear-traffic-limit', {
+    method: 'POST',
+    body: JSON.stringify({ client_name: clientName }),
+  })
+}
+
+export async function wgSetTrafficLimit(
+  clientName: string,
+  limitValue: number,
+  limitUnit = 'MB',
+  limitPeriodDays?: number | null,
+) {
+  return apiFetch('/client-access/wireguard/set-traffic-limit', {
+    method: 'POST',
+    body: JSON.stringify({
+      client_name: clientName,
+      limit_value: limitValue,
+      limit_unit: limitUnit,
+      limit_period_days: limitPeriodDays ?? null,
+    }),
+  })
+}
+
+export async function wgClearTrafficLimit(clientName: string) {
+  return apiFetch('/client-access/wireguard/clear-traffic-limit', {
+    method: 'POST',
+    body: JSON.stringify({ client_name: clientName }),
+  })
+}
+
+export async function getFeatureModules() {
+  return apiFetch<import('../types').FeatureModulesResponse>('/feature-modules')
+}
+
+export async function getFeatureToggles() {
+  return apiFetch<import('../types').FeatureTogglesResponse>('/feature-toggles')
+}
+
+export async function updateFeatureToggles(toggles: Record<string, boolean>) {
+  return apiFetch<import('../types').FeatureTogglesResponse>('/feature-toggles', {
+    method: 'PUT',
+    body: JSON.stringify({ toggles }),
   })
 }
 

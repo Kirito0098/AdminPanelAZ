@@ -15,7 +15,9 @@ import MetricCard from '@/components/noc/MetricCard'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Spinner from '@/components/ui/Spinner'
+import { NodeBadge } from '@/components/NodeSelector'
 import { useAuth } from '@/context/AuthContext'
+import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import type { BandwidthChart, ServerMetrics } from '@/types'
 
@@ -23,6 +25,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
 export default function ServerMonitorPage() {
   const { user } = useAuth()
+  const { activeNode } = useNode()
   const { error: notifyError } = useNotifications()
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null)
   const [liveCpu, setLiveCpu] = useState<number | null>(null)
@@ -95,9 +98,15 @@ export default function ServerMonitorPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Мониторинг сервера</h2>
-        <p className="text-sm text-muted-foreground">CPU, RAM, vnStat bandwidth — WebSocket каждые 2с</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Мониторинг сервера</h2>
+          <p className="text-sm text-muted-foreground">
+            CPU, RAM, vnStat bandwidth — WebSocket каждые 2с
+            {metrics?.hostname ? ` · ${metrics.hostname}` : ''}
+          </p>
+        </div>
+        <NodeBadge name={activeNode?.name ?? metrics?.node_name} status={activeNode?.status} />
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="CPU" value={`${cpu}%`} icon={Cpu} accent={cpu > 80 ? 'red' : 'cyan'} />

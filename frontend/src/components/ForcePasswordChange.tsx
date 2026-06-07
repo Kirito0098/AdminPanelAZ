@@ -66,7 +66,7 @@ export default function ForcePasswordChange() {
                 value={newPwd}
                 onChange={(e) => setNewPwd(e.target.value)}
                 required
-                minLength={4}
+                minLength={8}
               />
             </div>
             <div className="space-y-2">
@@ -77,7 +77,7 @@ export default function ForcePasswordChange() {
                 value={confirmPwd}
                 onChange={(e) => setConfirmPwd(e.target.value)}
                 required
-                minLength={4}
+                minLength={8}
               />
             </div>
             <Button type="submit" className="w-full" disabled={saving}>

@@ -73,6 +73,38 @@ remove_systemd_unit() {
   log "Удалён $unit"
 }
 
+remove_nginx_site_if_present() {
+  local env_file="$ROOT_DIR/backend/.env"
+  local domain=""
+
+  if [[ ! -f "$env_file" ]]; then
+    return 0
+  fi
+  domain=$(grep -E '^DOMAIN=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ' || true)
+  [[ -n "$domain" ]] || return 0
+
+  local conf_base="${domain//./_}"
+  local removed=false
+  for path in "/etc/nginx/sites-available/${conf_base}" "/etc/nginx/sites-enabled/${conf_base}"; do
+    if [[ -f "$path" || -L "$path" ]]; then
+      rm -f "$path"
+      removed=true
+    fi
+  done
+
+  if [[ "$removed" == true ]]; then
+    log "Удалена конфигурация nginx для $domain"
+    if command -v nginx >/dev/null 2>&1; then
+      nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null || warn "nginx не перезагружен"
+    fi
+  fi
+
+  if [[ -f /etc/ssl/certs/adminpanelaz.crt ]]; then
+    rm -f /etc/ssl/certs/adminpanelaz.crt /etc/ssl/private/adminpanelaz.key
+    log "Удалён самоподписанный сертификат adminpanelaz"
+  fi
+}
+
 purge_state_dirs() {
   local dirs=(
     /var/lib/adminpanelaz
@@ -96,6 +128,7 @@ main() {
   fi
 
   stop_local_daemons
+  remove_nginx_site_if_present
   remove_systemd_unit "adminpanelaz"
   remove_systemd_unit "adminpanelaz-node"
   systemctl daemon-reload 2>/dev/null || true

@@ -148,9 +148,23 @@ setup_backend() {
   pip install -q -r "$BACKEND_DIR/requirements.txt"
 }
 
+mtls_uvicorn_flags() {
+  if [[ "${NODE_AGENT_MTLS_ENABLED:-false}" != "true" ]]; then
+    return
+  fi
+  local cert="${NODE_AGENT_MTLS_SERVER_CERT:-/etc/adminpanelaz/mtls/agent.crt}"
+  local key="${NODE_AGENT_MTLS_SERVER_KEY:-/etc/adminpanelaz/mtls/agent.key}"
+  local ca="${NODE_AGENT_MTLS_CA_CERT:-/etc/adminpanelaz/mtls/ca.crt}"
+  if [[ -f "$cert" && -f "$key" && -f "$ca" ]]; then
+    echo "--ssl-certfile $cert --ssl-keyfile $key --ssl-ca-certs $ca --ssl-cert-reqs 2"
+  fi
+}
+
 launch_agent() {
   local detach="$1"
   local reload_flag=""
+  local mtls_flags
+  mtls_flags="$(mtls_uvicorn_flags)"
 
   if [[ "$NODE_AGENT_MODE" == "dev" ]]; then
     reload_flag="--reload"
@@ -164,7 +178,8 @@ launch_agent() {
       export PYTHONPATH="$BACKEND_DIR:${PYTHONPATH:-}"
       # shellcheck source=/dev/null
       source "$VENV_DIR/bin/activate"
-      exec uvicorn node_agent.main:app --host "$NODE_AGENT_HOST" --port "$NODE_AGENT_PORT" $reload_flag
+      # shellcheck disable=SC2086
+      exec uvicorn node_agent.main:app --host "$NODE_AGENT_HOST" --port "$NODE_AGENT_PORT" $reload_flag $mtls_flags
     ) >>"$LOG_DIR/agent.log" 2>&1 &
     echo "$!" >"$AGENT_PID_FILE"
     return 0
@@ -175,7 +190,8 @@ launch_agent() {
     export PYTHONPATH="$BACKEND_DIR:${PYTHONPATH:-}"
     # shellcheck source=/dev/null
     source "$VENV_DIR/bin/activate"
-    exec uvicorn node_agent.main:app --host "$NODE_AGENT_HOST" --port "$NODE_AGENT_PORT" $reload_flag
+    # shellcheck disable=SC2086
+    exec uvicorn node_agent.main:app --host "$NODE_AGENT_HOST" --port "$NODE_AGENT_PORT" $reload_flag $mtls_flags
   ) &
   echo "$! node-agent" >>"$LEGACY_PID_FILE"
 }

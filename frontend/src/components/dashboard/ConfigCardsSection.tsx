@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Search, X } from 'lucide-react'
 import ConfigCard from '@/components/dashboard/ConfigCard'
 import ClientActionsDialog from '@/components/dashboard/ClientActionsDialog'
@@ -12,6 +12,7 @@ import {
   type ClientFilter,
   type ProtocolTab,
 } from '@/lib/configCardUtils'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import type { ClientAccessPolicy, UserRole, VpnConfig } from '@/types'
 
 interface ConfigCardsSectionProps {
@@ -27,6 +28,14 @@ interface ConfigCardsSectionProps {
 
 const TAB_ORDER: ProtocolTab[] = ['openvpn', 'amneziawg', 'wireguard']
 
+function useVisibleTabs(): ProtocolTab[] {
+  const { isEnabled } = useFeatureModules()
+  return TAB_ORDER.filter((tab) => {
+    if (tab === 'openvpn') return isEnabled('openvpn')
+    return isEnabled('wireguard')
+  })
+}
+
 export default function ConfigCardsSection({
   configs,
   policies,
@@ -37,7 +46,13 @@ export default function ConfigCardsSection({
   onNotifySuccess,
   onNotifyError,
 }: ConfigCardsSectionProps) {
-  const [activeTab, setActiveTab] = useState<ProtocolTab>('openvpn')
+  const visibleTabs = useVisibleTabs()
+  const [activeTab, setActiveTab] = useState<ProtocolTab>(visibleTabs[0] ?? 'openvpn')
+  useEffect(() => {
+    if (!visibleTabs.includes(activeTab) && visibleTabs.length > 0) {
+      setActiveTab(visibleTabs[0])
+    }
+  }, [activeTab, visibleTabs])
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<ClientFilter>('all')
   const [selectedConfig, setSelectedConfig] = useState<VpnConfig | null>(null)
@@ -86,18 +101,24 @@ export default function ConfigCardsSection({
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ProtocolTab)} className="space-y-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <TabsList className="h-auto flex-wrap justify-start">
-            <TabsTrigger value="openvpn" className="gap-1.5">
-              <span>OpenVPN</span>
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold">{tabCounts.openvpn}</span>
-            </TabsTrigger>
-            <TabsTrigger value="amneziawg" className="gap-1.5">
-              <span>AmneziaWG</span>
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold">{tabCounts.amneziawg}</span>
-            </TabsTrigger>
-            <TabsTrigger value="wireguard" className="gap-1.5">
-              <span>WireGuard</span>
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold">{tabCounts.wireguard}</span>
-            </TabsTrigger>
+            {visibleTabs.includes('openvpn') && (
+              <TabsTrigger value="openvpn" className="gap-1.5">
+                <span>OpenVPN</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold">{tabCounts.openvpn}</span>
+              </TabsTrigger>
+            )}
+            {visibleTabs.includes('amneziawg') && (
+              <TabsTrigger value="amneziawg" className="gap-1.5">
+                <span>AmneziaWG</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold">{tabCounts.amneziawg}</span>
+              </TabsTrigger>
+            )}
+            {visibleTabs.includes('wireguard') && (
+              <TabsTrigger value="wireguard" className="gap-1.5">
+                <span>WireGuard</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold">{tabCounts.wireguard}</span>
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -145,7 +166,7 @@ export default function ConfigCardsSection({
           </div>
         </div>
 
-        {TAB_ORDER.map((tab) => (
+        {visibleTabs.map((tab) => (
           <TabsContent key={tab} value={tab} className="mt-0">
             {filteredByTab[tab].length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">Нет клиентов в этой категории</p>

@@ -11,11 +11,49 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
+class Login2FARequired(BaseModel):
+    requires_2fa: bool = True
+    temp_token: str
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str
     captcha_id: str | None = None
     captcha_text: str | None = None
+
+
+class Login2FARequest(BaseModel):
+    temp_token: str
+    code: str = Field(min_length=6, max_length=16)
+
+
+class TwoFASetupResponse(BaseModel):
+    secret: str
+    otpauth_uri: str
+    qr_data_url: str
+
+
+class TwoFAEnableRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=8)
+
+
+class TwoFADisableRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=16)
+
+
+class TwoFAStatusResponse(BaseModel):
+    enabled: bool
+    backup_codes_remaining: int = 0
+
+
+class TwoFABackupCodesResponse(BaseModel):
+    backup_codes: list[str]
+
+
+class NodeRotateKeyResponse(BaseModel):
+    message: str
+    node_id: int
 
 
 class UserBase(BaseModel):
@@ -39,6 +77,7 @@ class UserUpdate(BaseModel):
 class UserResponse(UserBase):
     id: int
     must_change_password: bool
+    totp_enabled: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -253,6 +292,28 @@ class NodeHealthResponse(BaseModel):
 class ActiveNodeResponse(BaseModel):
     node: NodeResponse
     active: bool = True
+
+
+class NodeUpdateRequest(BaseModel):
+    scope: str = Field(default="all", pattern="^(all|agent|antizapret)$")
+    run_doall: bool = True
+
+
+class NodeUpdatesResponse(BaseModel):
+    node_id: int
+    agent: dict[str, Any] = {}
+    antizapret: dict[str, Any] = {}
+
+
+class NodeUpdateResult(BaseModel):
+    node_id: int
+    success: bool
+    message: str
+    restarting: bool = False
+    before: dict[str, Any] = {}
+    after: dict[str, Any] = {}
+    detail: dict[str, Any] = {}
+    errors: list[str] = []
 
 
 class CidrProviderInfo(BaseModel):

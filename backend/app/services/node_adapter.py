@@ -8,9 +8,14 @@ from fastapi import HTTPException, status
 from app.models import VpnType
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.config import get_settings
+from app.services.node_mtls import build_node_agent_ssl_context, node_agent_base_scheme
 from app.services.antizapret import AntiZapretService
 from app.services.cidr.service import CidrRoutingService
+from app.services.node_health import build_health_payload
+from app.services.node_update import apply_node_update, check_all_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
+from app.services.server_monitor import ServerMonitorService
+from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 
 _settings = get_settings()
 
@@ -111,24 +116,39 @@ class NodeAdapter(ABC):
     @abstractmethod
     def get_route_result_content(self, key: str) -> dict: ...
 
+    @abstractmethod
+    def get_server_metrics(self, *, accurate_cpu: bool = False) -> dict: ...
+
+    @abstractmethod
+    def get_server_bandwidth(self, iface: str = "eth0", range_key: str = "1d") -> dict: ...
+
+    @abstractmethod
+    def list_server_interfaces(self) -> dict: ...
+
+    @abstractmethod
+    def block_wireguard_client_runtime(self, client_name: str) -> dict: ...
+
+    @abstractmethod
+    def unblock_wireguard_client_runtime(self, client_name: str) -> dict: ...
+
+    @abstractmethod
+    def disconnect_openvpn_client(self, client_name: str) -> dict: ...
+
+    @abstractmethod
+    def check_updates(self) -> dict[str, Any]: ...
+
+    @abstractmethod
+    def apply_update(self, *, scope: str = "all", run_doall: bool = True) -> dict[str, Any]: ...
+
 
 class LocalNodeAdapter(NodeAdapter):
     def __init__(self, service: AntiZapretService | None = None):
         self._service = service or AntiZapretService()
         self._cidr = CidrRoutingService(self._service.base_path, _settings.cidr_list_dir)
+        self._monitor = ServerMonitorService()
 
     def health_check(self) -> dict[str, Any]:
-        import socket
-
-        services = self._service.get_service_status()
-        active_count = sum(1 for s in services if s.active)
-        return {
-            "hostname": socket.gethostname(),
-            "antizapret_path": str(self._service.base_path),
-            "services_active": active_count,
-            "services_total": len(services),
-            "server_ip": self._service.get_server_ip(),
-        }
+        return build_health_payload(self._service)
 
     def add_openvpn_client(self, client_name: str, cert_expire_days: int = 3650) -> str:
         return self._service.add_openvpn_client(client_name, cert_expire_days)
@@ -225,20 +245,58 @@ class LocalNodeAdapter(NodeAdapter):
     def get_route_result_content(self, key: str) -> dict:
         return self._cidr.get_result_content(key)
 
+    def get_server_metrics(self, *, accurate_cpu: bool = False) -> dict:
+        return self._monitor.get_metrics(accurate_cpu=accurate_cpu)
+
+    def get_server_bandwidth(self, iface: str = "eth0", range_key: str = "1d") -> dict:
+        return self._monitor.get_bandwidth(iface, range_key)
+
+    def list_server_interfaces(self) -> dict:
+        return self._monitor.list_interfaces()
+
+    def block_wireguard_client_runtime(self, client_name: str) -> dict:
+        return block_client_runtime(client_name)
+
+    def unblock_wireguard_client_runtime(self, client_name: str) -> dict:
+        return unblock_client_runtime(client_name)
+
+    def disconnect_openvpn_client(self, client_name: str) -> dict:
+        return openvpn_management_service.disconnect_client(client_name)
+
+    def check_updates(self) -> dict[str, Any]:
+        return check_all_updates(antizapret_path=self._service.base_path, repo_root=resolve_repo_root())
+
+    def apply_update(self, *, scope: str = "all", run_doall: bool = True) -> dict[str, Any]:
+        return apply_node_update(
+            antizapret_path=self._service.base_path,
+            service=self._service,
+            scope=scope,
+            run_doall=run_doall,
+            repo_root=resolve_repo_root(),
+        )
+
 
 class RemoteNodeAdapter(NodeAdapter):
     def __init__(self, host: str, port: int, api_key: str):
-        self.base_url = f"http://{host}:{port}"
+        scheme = node_agent_base_scheme()
+        self.base_url = f"{scheme}://{host}:{port}"
         self.api_key = api_key
+        self._verify = build_node_agent_ssl_context()
 
     def _headers(self) -> dict[str, str]:
         return {"X-Node-Key": self.api_key}
+
+    def _client_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {}
+        if self._verify is not None:
+            kwargs["verify"] = self._verify
+        return kwargs
 
     def _request(self, method: str, path: str, **kwargs) -> Any:
         url = f"{self.base_url}{path}"
         timeout = kwargs.pop("timeout", HTTP_TIMEOUT)
         try:
-            with httpx.Client(timeout=timeout) as client:
+            with httpx.Client(timeout=timeout, **self._client_kwargs()) as client:
                 response = client.request(method, url, headers=self._headers(), **kwargs)
         except httpx.RequestError as exc:
             raise HTTPException(
@@ -383,3 +441,55 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def get_route_result_content(self, key: str) -> dict:
         return self._request("GET", f"/routing/results/{key}")
+
+    def get_server_metrics(self, *, accurate_cpu: bool = False) -> dict:
+        return self._request(
+            "GET",
+            "/server-monitor/metrics",
+            params={"accurate": "true" if accurate_cpu else "false"},
+            timeout=30.0,
+        )
+
+    def get_server_bandwidth(self, iface: str = "eth0", range_key: str = "1d") -> dict:
+        return self._request(
+            "GET",
+            "/server-monitor/bandwidth",
+            params={"iface": iface, "range_key": range_key},
+            timeout=30.0,
+        )
+
+    def list_server_interfaces(self) -> dict:
+        return self._request("GET", "/server-monitor/interfaces", timeout=15.0)
+
+    def block_wireguard_client_runtime(self, client_name: str) -> dict:
+        return self._request("POST", f"/clients/wireguard/{client_name}/block", timeout=30.0)
+
+    def unblock_wireguard_client_runtime(self, client_name: str) -> dict:
+        return self._request("POST", f"/clients/wireguard/{client_name}/unblock", timeout=30.0)
+
+    def disconnect_openvpn_client(self, client_name: str) -> dict:
+        return self._request(
+            "POST",
+            "/openvpn/management/disconnect",
+            json={"client_name": client_name},
+            timeout=30.0,
+        )
+
+    def check_updates(self) -> dict[str, Any]:
+        return self._request("GET", "/system/updates", timeout=60.0)
+
+    def apply_update(self, *, scope: str = "all", run_doall: bool = True) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/system/update",
+            json={"scope": scope, "run_doall": run_doall},
+            timeout=300.0,
+        )
+
+    def rotate_api_key(self, new_api_key: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/system/rotate-api-key",
+            json={"new_api_key": new_api_key},
+            timeout=30.0,
+        )

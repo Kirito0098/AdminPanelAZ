@@ -31,12 +31,16 @@ def _collect_all_nodes():
         nodes = db.query(Node).all()
         for node in nodes:
             try:
-                adapter = get_adapter_for_node(db, node)
+                adapter = get_adapter_for_node(node)
                 ovpn = adapter.parse_openvpn_status()
                 wg = adapter.parse_wireguard_status()
                 status_rows = build_status_rows(ovpn, wg)
                 collector = TrafficCollectorService(db, node.id)
                 collector.persist_snapshot(status_rows)
+                if settings.traffic_limit_reconcile_after_sync:
+                    from app.services.traffic_limit_reconcile import reconcile_traffic_limit_policies_safe
+
+                    reconcile_traffic_limit_policies_safe(db, node_id=node.id)
             except Exception as exc:
                 logger.debug("Traffic collect failed for node %s: %s", node.name, exc)
     finally:

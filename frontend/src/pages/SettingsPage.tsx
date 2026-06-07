@@ -29,6 +29,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { NodeBadge } from '@/components/NodeSelector'
 import { useAuth } from '@/context/AuthContext'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
@@ -37,12 +38,15 @@ import BackupTab from '@/components/settings/BackupTab'
 import MaintenanceTab from '@/components/settings/MaintenanceTab'
 import TelegramTab from '@/components/settings/TelegramTab'
 import SecurityTab from '@/components/settings/SecurityTab'
+import TwoFactorTab from '@/components/settings/TwoFactorTab'
+import FeatureTogglesTab from '@/components/settings/FeatureTogglesTab'
 import TestsTab from '@/components/settings/TestsTab'
 import UpdatesTab from '@/components/settings/UpdatesTab'
 import type { AppSettings, User, UserRole } from '@/types'
 
 export default function SettingsPage() {
   const { user } = useAuth()
+  const { isSettingsTabEnabled } = useFeatureModules()
   const { activeNode } = useNode()
   const { theme, setTheme } = useTheme()
   const { success, error: notifyError } = useNotifications()
@@ -167,11 +171,12 @@ export default function SettingsPage() {
             <>
               <TabsTrigger value="admin">Списки</TabsTrigger>
               <TabsTrigger value="maintenance">Обслуживание</TabsTrigger>
-              <TabsTrigger value="backup">Бэкапы</TabsTrigger>
-              <TabsTrigger value="telegram">Telegram</TabsTrigger>
-              <TabsTrigger value="security">Безопасность</TabsTrigger>
+              {isSettingsTabEnabled('backup') && <TabsTrigger value="backup">Бэкапы</TabsTrigger>}
+              {isSettingsTabEnabled('telegram') && <TabsTrigger value="telegram">Telegram</TabsTrigger>}
+              {isSettingsTabEnabled('security') && <TabsTrigger value="security">Безопасность</TabsTrigger>}
+              <TabsTrigger value="modules">Модули</TabsTrigger>
               <TabsTrigger value="updates">Обновления</TabsTrigger>
-              <TabsTrigger value="tests">Тесты</TabsTrigger>
+              {isSettingsTabEnabled('tests') && <TabsTrigger value="tests">Тесты</TabsTrigger>}
               <TabsTrigger value="users">Пользователи</TabsTrigger>
             </>
           )}
@@ -293,21 +298,30 @@ export default function SettingsPage() {
           </TabsContent>
         )}
 
-        {user?.role === 'admin' && (
+        {user?.role === 'admin' && isSettingsTabEnabled('backup') && (
           <TabsContent value="backup">
             <BackupTab />
           </TabsContent>
         )}
 
-        {user?.role === 'admin' && (
+        {user?.role === 'admin' && isSettingsTabEnabled('telegram') && (
           <TabsContent value="telegram">
             <TelegramTab />
           </TabsContent>
         )}
 
-        {user?.role === 'admin' && (
+        {user?.role === 'admin' && isSettingsTabEnabled('security') && (
           <TabsContent value="security">
-            <SecurityTab />
+            <div className="space-y-4">
+              {user?.role === 'admin' && <TwoFactorTab />}
+              <SecurityTab />
+            </div>
+          </TabsContent>
+        )}
+
+        {user?.role === 'admin' && (
+          <TabsContent value="modules">
+            <FeatureTogglesTab />
           </TabsContent>
         )}
 
@@ -317,7 +331,7 @@ export default function SettingsPage() {
           </TabsContent>
         )}
 
-        {user?.role === 'admin' && (
+        {user?.role === 'admin' && isSettingsTabEnabled('tests') && (
           <TabsContent value="tests">
             <TestsTab />
           </TabsContent>

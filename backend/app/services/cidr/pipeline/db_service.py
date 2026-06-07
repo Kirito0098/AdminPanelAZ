@@ -97,6 +97,14 @@ ASN_FETCH_SOURCE_TIMEOUT_SECONDS = _read_positive_int_env(
     "CIDR_DB_ASN_FETCH_TIMEOUT",
     30,
 )
+SOURCE_FETCH_TIMEOUT_SECONDS = _read_positive_int_env(
+    "CIDR_DB_SOURCE_FETCH_TIMEOUT",
+    90,
+)
+SOURCE_FETCH_RETRIES = _read_positive_int_env(
+    "CIDR_DB_SOURCE_FETCH_RETRIES",
+    3,
+)
 CIDR_FALLBACK_DROP_RATIO_WITH_ERRORS = 0.45
 CIDR_FALLBACK_MIN_CANDIDATE = _read_positive_int_env(
     "CIDR_DB_FALLBACK_MIN_CANDIDATE",
@@ -1309,34 +1317,55 @@ class CidrDbUpdaterService:
 
         def _fetch_single(source):
             fmt = source.get("format", "")
-            timeout = source.get("timeout", 45)
+            timeout = source.get("timeout", SOURCE_FETCH_TIMEOUT_SECONDS)
             try:
                 timeout = int(timeout)
             except (TypeError, ValueError):
-                timeout = 45
-            timeout = max(3, min(timeout, 120))
+                timeout = SOURCE_FETCH_TIMEOUT_SECONDS
+            timeout = max(3, min(timeout, 180))
 
             cache_ttl = self._current_source_cache_ttl_seconds()
             cache_key = f"{source.get('url')}|{fmt}|{timeout}"
-            cache_hit = False
-            now = time.time()
-            with self._source_cache_lock:
-                cached = self._source_cache.get(cache_key)
-                if cached and (now - float(cached.get("ts") or 0)) <= float(cache_ttl):
-                    text_data = deepcopy(cached.get("payload") or "")
-                    cache_hit = True
-                else:
-                    text_data = None
+            retries = max(1, int(SOURCE_FETCH_RETRIES or 1))
+            last_exc = None
 
-            if text_data is None:
-                text_data = _download_text(source["url"], timeout=timeout)
+            for attempt in range(retries):
+                cache_hit = False
+                text_data = None
+                now = time.time()
                 with self._source_cache_lock:
-                    self._source_cache[cache_key] = {"ts": now, "payload": str(text_data or "")}
+                    cached = self._source_cache.get(cache_key)
+                    if cached and (now - float(cached.get("ts") or 0)) <= float(cache_ttl):
+                        text_data = deepcopy(cached.get("payload") or "")
+                        cache_hit = True
 
-            items = _extract_cidrs_with_meta(text_data, fmt)
-            if not items:
-                raise ValueError("Пустой результат")
-            return items, cache_hit
+                if text_data is None:
+                    try:
+                        text_data = _download_text(source["url"], timeout=timeout)
+                    except Exception as exc:
+                        last_exc = exc
+                        if attempt < retries - 1:
+                            time.sleep(1 + attempt)
+                            continue
+                        raise
+
+                try:
+                    items = _extract_cidrs_with_meta(text_data, fmt)
+                    if not items:
+                        raise ValueError("Пустой результат")
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt < retries - 1:
+                        time.sleep(1 + attempt)
+                        continue
+                    raise
+
+                if not cache_hit:
+                    with self._source_cache_lock:
+                        self._source_cache[cache_key] = {"ts": now, "payload": str(text_data or "")}
+                return items, cache_hit
+
+            raise last_exc or ValueError("Не удалось загрузить источник")
 
         if workers <= 1:
             for source in source_list:

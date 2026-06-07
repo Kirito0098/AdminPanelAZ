@@ -1,31 +1,86 @@
 """Lightweight AntiZapret node agent — runs on each VPN server node."""
 
+import ipaddress
 import os
-import socket
+import secrets
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.models import VpnType
 from app.config import get_settings
 from app.services.antizapret import AntiZapretService
 from app.services.cidr.service import CidrRoutingService
+from app.services.node_health import build_health_payload
+from app.services.node_update import apply_node_update, check_all_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
+from app.services.server_monitor import ServerMonitorService
+from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 
 NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
 NODE_AGENT_PORT = int(os.environ.get("NODE_AGENT_PORT", "9100"))
+NODE_AGENT_MODE = os.environ.get("NODE_AGENT_MODE", "prod").strip().lower()
+NODE_AGENT_ALLOWED_IPS = [
+    ip.strip() for ip in os.environ.get("NODE_AGENT_ALLOWED_IPS", "").split(",") if ip.strip()
+]
+NODE_AGENT_MTLS_ENABLED = os.environ.get("NODE_AGENT_MTLS_ENABLED", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+NODE_AGENT_MTLS_SERVER_CERT = os.environ.get("NODE_AGENT_MTLS_SERVER_CERT", "/etc/adminpanelaz/mtls/agent.crt")
+NODE_AGENT_MTLS_SERVER_KEY = os.environ.get("NODE_AGENT_MTLS_SERVER_KEY", "/etc/adminpanelaz/mtls/agent.key")
+NODE_AGENT_MTLS_CA_CERT = os.environ.get("NODE_AGENT_MTLS_CA_CERT", "/etc/adminpanelaz/mtls/ca.crt")
+NODE_AGENT_ENV_FILE = Path(os.environ.get("NODE_AGENT_ENV_FILE", "/etc/adminpanelaz/node_agent.env"))
+
+from app.services.security_bootstrap import validate_node_agent_key
+
+validate_node_agent_key(NODE_AGENT_API_KEY, production=NODE_AGENT_MODE == "prod")
 
 _settings = get_settings()
 service = AntiZapretService(base_path=ANTIZAPRET_PATH)
 cidr_service = CidrRoutingService(ANTIZAPRET_PATH, _settings.cidr_list_dir)
-app = FastAPI(title="AntiZapret Node Agent", version="1.0.0")
+monitor = ServerMonitorService()
+app = FastAPI(title="AntiZapret Node Agent", version="1.1.0")
+
+
+class NodeAgentIpAllowlistMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if not NODE_AGENT_ALLOWED_IPS:
+            return await call_next(request)
+        client_ip = request.client.host if request.client else ""
+        if client_ip.startswith("::ffff:"):
+            client_ip = client_ip[7:]
+        try:
+            addr = ipaddress.ip_address(client_ip)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён") from None
+        for entry in NODE_AGENT_ALLOWED_IPS:
+            try:
+                if "/" in entry:
+                    if addr in ipaddress.ip_network(entry, strict=False):
+                        return await call_next(request)
+                elif addr == ipaddress.ip_address(entry):
+                    return await call_next(request)
+            except ValueError:
+                continue
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён с вашего IP")
+
+
+app.add_middleware(NodeAgentIpAllowlistMiddleware)
+
+
+class NodeUpdateRequest(BaseModel):
+    scope: str = Field(default="all", pattern="^(all|agent|antizapret)$")
+    run_doall: bool = True
 
 
 def verify_api_key(x_node_key: str = Header(..., alias="X-Node-Key")) -> None:
-    if x_node_key != NODE_AGENT_API_KEY:
+    if not x_node_key or not secrets.compare_digest(x_node_key, NODE_AGENT_API_KEY):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный API-ключ узла")
 
 
@@ -46,15 +101,53 @@ class ServiceRestartRequest(BaseModel):
     service_name: str
 
 
+class RotateApiKeyRequest(BaseModel):
+    new_api_key: str = Field(min_length=24)
+
+
+def _persist_api_key(new_key: str) -> None:
+    global NODE_AGENT_API_KEY
+    NODE_AGENT_API_KEY = new_key
+    if not NODE_AGENT_ENV_FILE.is_file():
+        return
+    lines: list[str] = []
+    replaced = False
+    for line in NODE_AGENT_ENV_FILE.read_text(encoding="utf-8").splitlines():
+        if line.startswith("NODE_AGENT_API_KEY="):
+            lines.append(f"NODE_AGENT_API_KEY={new_key}")
+            replaced = True
+        else:
+            lines.append(line)
+    if not replaced:
+        lines.append(f"NODE_AGENT_API_KEY={new_key}")
+    NODE_AGENT_ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 @app.get("/health")
 def health(_: None = Depends(verify_api_key)):
-    return {
-        "status": "online",
-        "hostname": socket.gethostname(),
-        "antizapret_path": str(service.base_path),
-        "server_ip": service.get_server_ip(),
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+    payload = build_health_payload(service, agent_version=app.version)
+    payload["status"] = "online"
+    payload["timestamp"] = datetime.utcnow().isoformat()
+    return payload
+
+
+@app.get("/server-monitor/metrics")
+def server_metrics(accurate: bool = False, _: None = Depends(verify_api_key)):
+    return monitor.get_metrics(accurate_cpu=accurate)
+
+
+@app.get("/server-monitor/bandwidth")
+def server_bandwidth(
+    iface: str = "eth0",
+    range_key: str = "1d",
+    _: None = Depends(verify_api_key),
+):
+    return monitor.get_bandwidth(iface, range_key)
+
+
+@app.get("/server-monitor/interfaces")
+def server_interfaces(_: None = Depends(verify_api_key)):
+    return monitor.list_interfaces()
 
 
 @app.get("/monitoring/overview")
@@ -91,6 +184,11 @@ def server_ip(_: None = Depends(verify_api_key)):
     return {"server_ip": service.get_server_ip()}
 
 
+@app.post("/openvpn/management/disconnect")
+def openvpn_disconnect(payload: WireGuardClientRequest, _: None = Depends(verify_api_key)):
+    return openvpn_management_service.disconnect_client(payload.client_name)
+
+
 @app.get("/clients/openvpn")
 def list_openvpn(_: None = Depends(verify_api_key)):
     return {"clients": service.list_openvpn_clients()}
@@ -123,6 +221,16 @@ def add_wireguard(payload: WireGuardClientRequest, _: None = Depends(verify_api_
 def delete_wireguard(client_name: str, _: None = Depends(verify_api_key)):
     output = service.delete_wireguard_client(client_name)
     return {"message": f"Клиент '{client_name}' удалён", "detail": output}
+
+
+@app.post("/clients/wireguard/{client_name}/block")
+def block_wireguard(client_name: str, _: None = Depends(verify_api_key)):
+    return block_client_runtime(client_name)
+
+
+@app.post("/clients/wireguard/{client_name}/unblock")
+def unblock_wireguard(client_name: str, _: None = Depends(verify_api_key)):
+    return unblock_client_runtime(client_name)
 
 
 @app.get("/configs/files/{filename}")
@@ -215,7 +323,58 @@ def routing_result_content(key: str, _: None = Depends(verify_api_key)):
     return cidr_service.get_result_content(key)
 
 
+@app.get("/system/updates")
+def system_updates(_: None = Depends(verify_api_key)):
+    return check_all_updates(antizapret_path=ANTIZAPRET_PATH, repo_root=resolve_repo_root())
+
+
+@app.post("/system/rotate-api-key")
+def rotate_api_key(payload: RotateApiKeyRequest, _: None = Depends(verify_api_key)):
+    _persist_api_key(payload.new_api_key)
+    return {"message": "API-ключ обновлён", "success": True}
+
+
+@app.post("/system/update")
+def system_update(payload: NodeUpdateRequest, _: None = Depends(verify_api_key)):
+    result = apply_node_update(
+        antizapret_path=ANTIZAPRET_PATH,
+        service=service,
+        scope=payload.scope,
+        run_doall=payload.run_doall,
+        agent_version=app.version,
+        repo_root=resolve_repo_root(),
+    )
+    if not result["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="; ".join(result.get("errors") or [result.get("message", "Ошибка обновления")]),
+        )
+    return result
+
+
+def _uvicorn_ssl_kwargs() -> dict:
+    if not NODE_AGENT_MTLS_ENABLED:
+        return {}
+    cert = Path(NODE_AGENT_MTLS_SERVER_CERT)
+    key = Path(NODE_AGENT_MTLS_SERVER_KEY)
+    ca = Path(NODE_AGENT_MTLS_CA_CERT)
+    if not all(p.is_file() for p in (cert, key, ca)):
+        return {}
+    return {
+        "ssl_certfile": str(cert),
+        "ssl_keyfile": str(key),
+        "ssl_ca_certs": str(ca),
+        "ssl_cert_reqs": 2,
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=NODE_AGENT_PORT, reload=False)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=NODE_AGENT_PORT,
+        reload=False,
+        **_uvicorn_ssl_kwargs(),
+    )

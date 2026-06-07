@@ -12,8 +12,9 @@ WorkingDirectory=/opt/AdminPanelAZ
 EnvironmentFile=-/opt/AdminPanelAZ/backend/.env
 Environment=ADMINPANELAZ_MODE=prod
 Environment=ADMINPANELAZ_STATE_DIR=/var/lib/adminpanelaz
-Environment=BACKEND_HOST=0.0.0.0
+Environment=BACKEND_HOST=127.0.0.1
 Environment=BACKEND_PORT=8000
+Environment=UVICORN_WORKERS=1
 ExecStart=/opt/AdminPanelAZ/start.sh watchdog prod
 ExecStop=/opt/AdminPanelAZ/start.sh stop
 Restart=on-failure

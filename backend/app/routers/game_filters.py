@@ -9,8 +9,8 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, User
 from app.schemas import MessageResponse
-from app.services.cidr.game_filters import get_game_filters_state, sync_game_filters
-from app.services.node_manager import get_active_adapter
+from app.services.cidr.game_filters import get_game_filters_state, sync_game_filters_via_adapter
+from app.services.node_manager import get_active_adapter, get_node_antizapret_path
 
 router = APIRouter(prefix="/routing/game-filters", tags=["game-filters"])
 settings = get_settings()
@@ -54,9 +54,8 @@ def sync_filters(payload: GameFiltersUpdate, db: Session = Depends(get_db), _: U
     include_keys = [k for k, m in payload.modes.items() if m == "include"]
     exclude_keys = [k for k, m in payload.modes.items() if m == "exclude"]
     adapter = get_active_adapter(db)
-    config_dir = settings.antizapret_path / "config"
-    result = sync_game_filters(
-        config_dir,
+    result = sync_game_filters_via_adapter(
+        adapter,
         include_keys=include_keys,
         exclude_keys=exclude_keys,
         include_domains=payload.include_domains,

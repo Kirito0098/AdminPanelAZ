@@ -2,6 +2,7 @@
 
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from app.services.cidr.game_catalog import (
     GAME_BLOCK_END,
@@ -10,6 +11,9 @@ from app.services.cidr.game_catalog import (
     GAME_IP_BLOCK_END,
     GAME_IP_BLOCK_START,
 )
+
+if TYPE_CHECKING:
+    from app.services.node_adapter import NodeAdapter
 
 
 def _strip_block(content: str, start: str, end: str) -> str:
@@ -35,21 +39,16 @@ def get_game_filters_state(saved_keys: list[str], saved_modes: dict[str, str]) -
     }
 
 
-def sync_game_filters(
-    config_dir: Path,
+def _compute_game_filter_contents(
+    hosts_content: str,
+    ips_content: str,
     *,
     include_keys: list[str],
     exclude_keys: list[str],
     include_domains: bool = True,
-) -> dict:
+) -> tuple[str, str, bool, bool, dict]:
     include_games = _games_by_keys(include_keys)
     exclude_games = _games_by_keys(exclude_keys)
-
-    hosts_path = config_dir / "include-hosts.txt"
-    ips_path = config_dir / "include-ips.txt"
-
-    hosts_content = hosts_path.read_text(encoding="utf-8", errors="replace") if hosts_path.exists() else ""
-    ips_content = ips_path.read_text(encoding="utf-8", errors="replace") if ips_path.exists() else ""
 
     hosts_clean = _strip_block(hosts_content, GAME_BLOCK_START, GAME_BLOCK_END)
     ips_clean = _strip_block(ips_content, GAME_IP_BLOCK_START, GAME_IP_BLOCK_END)
@@ -74,9 +73,37 @@ def sync_game_filters(
     next_hosts = "\n".join(filter(None, [hosts_clean, "\n".join(domain_lines)])).strip() + "\n"
     next_ips = "\n".join(filter(None, [ips_clean, "\n".join(ip_lines)])).strip() + "\n"
 
-    hosts_path.parent.mkdir(parents=True, exist_ok=True)
     hosts_changed = next_hosts != hosts_content
     ips_changed = next_ips != ips_content
+    meta = {
+        "include_count": len(include_games),
+        "exclude_count": len(exclude_games),
+        "domain_count": sum(len(g["domains"]) for g in include_games) if include_domains else 0,
+    }
+    return next_hosts, next_ips, hosts_changed, ips_changed, meta
+
+
+def sync_game_filters(
+    config_dir: Path,
+    *,
+    include_keys: list[str],
+    exclude_keys: list[str],
+    include_domains: bool = True,
+) -> dict:
+    hosts_path = config_dir / "include-hosts.txt"
+    ips_path = config_dir / "include-ips.txt"
+    hosts_content = hosts_path.read_text(encoding="utf-8", errors="replace") if hosts_path.exists() else ""
+    ips_content = ips_path.read_text(encoding="utf-8", errors="replace") if ips_path.exists() else ""
+
+    next_hosts, next_ips, hosts_changed, ips_changed, meta = _compute_game_filter_contents(
+        hosts_content,
+        ips_content,
+        include_keys=include_keys,
+        exclude_keys=exclude_keys,
+        include_domains=include_domains,
+    )
+
+    hosts_path.parent.mkdir(parents=True, exist_ok=True)
     if hosts_changed:
         hosts_path.write_text(next_hosts, encoding="utf-8")
     if ips_changed:
@@ -85,7 +112,35 @@ def sync_game_filters(
     return {
         "hosts_changed": hosts_changed,
         "ips_changed": ips_changed,
-        "include_count": len(include_games),
-        "exclude_count": len(exclude_games),
-        "domain_count": sum(len(g["domains"]) for g in include_games) if include_domains else 0,
+        **meta,
+    }
+
+
+def sync_game_filters_via_adapter(
+    adapter: "NodeAdapter",
+    *,
+    include_keys: list[str],
+    exclude_keys: list[str],
+    include_domains: bool = True,
+) -> dict:
+    hosts_content = adapter.read_config_file("include-hosts.txt")
+    ips_content = adapter.read_config_file("include-ips.txt")
+
+    next_hosts, next_ips, hosts_changed, ips_changed, meta = _compute_game_filter_contents(
+        hosts_content,
+        ips_content,
+        include_keys=include_keys,
+        exclude_keys=exclude_keys,
+        include_domains=include_domains,
+    )
+
+    if hosts_changed:
+        adapter.write_config_file("include-hosts.txt", next_hosts)
+    if ips_changed:
+        adapter.write_config_file("include-ips.txt", next_ips)
+
+    return {
+        "hosts_changed": hosts_changed,
+        "ips_changed": ips_changed,
+        **meta,
     }

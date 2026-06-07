@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
+# Служебный скрипт: вызывается из install.sh. Для установки используйте: sudo ./install.sh
 set -euo pipefail
+
+if [[ "${INSTALL_FROM_INSTALL_SH:-}" != "1" ]]; then
+  echo "[install-systemd] ВНИМАНИЕ: единая установка — sudo ./install.sh" >&2
+  echo "[install-systemd] Этот скрипт — служебный (systemd unit). Мастер установки в install.sh." >&2
+fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_NAME="adminpanelaz"
@@ -36,8 +42,9 @@ sed \
   -e "s|/var/lib/adminpanelaz|$STATE_DIR|g" \
   -e "s|^User=root|User=$INSTALL_USER|" \
   -e "s|^Group=root|Group=$INSTALL_GROUP|" \
-  -e "s|Environment=BACKEND_HOST=0.0.0.0|Environment=BACKEND_HOST=${BACKEND_HOST:-0.0.0.0}|" \
+  -e "s|Environment=BACKEND_HOST=127.0.0.1|Environment=BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}|" \
   -e "s|Environment=BACKEND_PORT=8000|Environment=BACKEND_PORT=${BACKEND_PORT:-8000}|" \
+  -e "s|Environment=UVICORN_WORKERS=1|Environment=UVICORN_WORKERS=${UVICORN_WORKERS:-1}|" \
   -e "s|EnvironmentFile=-/opt/AdminPanelAZ/backend/.env|EnvironmentFile=-$ROOT_DIR/backend/.env|" \
   "$UNIT_SRC" >"$UNIT_DST"
 

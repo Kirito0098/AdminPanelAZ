@@ -1,21 +1,63 @@
 import hashlib
 import hmac
+import json
 import os
 import time
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import RedirectResponse, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from app.auth import authenticate_user, create_access_token, get_current_user, get_password_hash, verify_password
+from app.auth import (
+    authenticate_user,
+    create_2fa_pending_token,
+    create_access_token,
+    decode_2fa_pending_token,
+    get_current_user,
+    get_password_hash,
+    require_admin,
+    verify_password,
+)
 from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, User, UserRole
-from app.schemas import LoginRequest, MessageResponse, PasswordChangeRequest, Token, UserResponse
+from app.schemas import (
+    Login2FARequest,
+    Login2FARequired,
+    LoginRequest,
+    MessageResponse,
+    PasswordChangeRequest,
+    Token,
+    TwoFABackupCodesResponse,
+    TwoFADisableRequest,
+    TwoFAEnableRequest,
+    TwoFASetupResponse,
+    TwoFAStatusResponse,
+    UserResponse,
+)
+from app.services.action_log import log_action
+from app.services.auth_rate_limit import auth_rate_limit_service
 from app.services.captcha import captcha_service
 from app.services.ip_restriction import ip_restriction_service
+from app.services.password_policy import validate_password
+from app.services.refresh_token import (
+    create_refresh_token,
+    revoke_all_user_tokens,
+    revoke_refresh_token,
+    rotate_refresh_token,
+)
+from app.services.totp_service import (
+    encrypt_backup_codes,
+    encrypt_totp_secret,
+    generate_backup_codes,
+    generate_qr_data_url,
+    generate_totp_secret,
+    get_totp_uri,
+    require_valid_totp,
+    verify_totp_code,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
@@ -51,12 +93,32 @@ def _verify_telegram_login(payload: dict[str, str], bot_token: str, max_age: int
     return True, ""
 
 
-def _issue_token(user: User) -> Token:
-    token = create_access_token(
+def _set_refresh_cookie(response: Response, raw_token: str) -> None:
+    secure = settings.refresh_token_cookie_secure or settings.is_production or settings.enforce_https
+    response.set_cookie(
+        key=settings.refresh_token_cookie_name,
+        value=raw_token,
+        httponly=True,
+        secure=secure,
+        samesite=settings.refresh_token_cookie_samesite,
+        max_age=settings.refresh_token_expire_days * 86400,
+        path="/api/auth",
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(key=settings.refresh_token_cookie_name, path="/api/auth")
+
+
+def _issue_token_pair(user: User, db: Session, response: Response | None = None) -> Token:
+    access = create_access_token(
         data={"sub": user.username, "role": user.role.value},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
-    return Token(access_token=token)
+    raw_refresh, _ = create_refresh_token(db, user)
+    if response is not None:
+        _set_refresh_cookie(response, raw_refresh)
+    return Token(access_token=access)
 
 
 def _login_with_checks(
@@ -66,23 +128,48 @@ def _login_with_checks(
     password: str,
     captcha_id: str | None = None,
     captcha_text: str | None = None,
-) -> Token:
+    response: Response | None = None,
+) -> Token | Login2FARequired:
     client_ip = ip_restriction_service.get_client_ip(request)
+    auth_rate_limit_service.check(client_ip)
     if ip_restriction_service.login_needs_captcha(client_ip):
         if not captcha_id or not captcha_text:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Требуется капча")
         if not captcha_service.verify(captcha_id, captcha_text):
             ip_restriction_service.record_login_attempt(client_ip, success=False)
+            auth_rate_limit_service.record_failure(client_ip)
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный код капчи")
     user = authenticate_user(db, username, password)
     if not user:
         attempts = ip_restriction_service.record_login_attempt(client_ip, success=False)
+        auth_rate_limit_service.record_failure(client_ip)
+        if settings.audit_log_enabled:
+            log_action(
+                db,
+                action="login_failed",
+                username=username,
+                remote_addr=client_ip,
+                details="invalid credentials",
+            )
         detail = "Неверный логин или пароль"
         if attempts > 2:
             detail += " (требуется капча)"
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
+
+    if user.totp_enabled and user.role == UserRole.admin:
+        return Login2FARequired(temp_token=create_2fa_pending_token(user.username))
+
     ip_restriction_service.record_login_attempt(client_ip, success=True)
-    return _issue_token(user)
+    auth_rate_limit_service.record_success(client_ip)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="login_success",
+            user_id=user.id,
+            username=user.username,
+            remote_addr=client_ip,
+        )
+    return _issue_token_pair(user, db, response)
 
 
 @router.get("/captcha")
@@ -132,22 +219,34 @@ def telegram_login_callback(request: Request, db: Session = Depends(get_db)):
         db.add(user)
         db.commit()
         db.refresh(user)
-    access = _issue_token(user)
-    redirect_url = f"/login?token={access.access_token}"
+    access = create_access_token(
+        data={"sub": user.username, "role": user.role.value},
+        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
+    )
+    redirect_url = f"/login#token={access.access_token}"
     return RedirectResponse(url=redirect_url, status_code=302)
 
 
 @router.post("/login", response_model=Token)
 def login(
     request: Request,
+    response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
-    return _login_with_checks(db, request, form_data.username, form_data.password)
+    result = _login_with_checks(db, request, form_data.username, form_data.password, response=response)
+    if isinstance(result, Login2FARequired):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Требуется код 2FA")
+    return result
 
 
-@router.post("/login/json", response_model=Token)
-def login_json(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
+@router.post("/login/json", response_model=Token | Login2FARequired)
+def login_json(
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
     return _login_with_checks(
         db,
         request,
@@ -155,7 +254,58 @@ def login_json(payload: LoginRequest, request: Request, db: Session = Depends(ge
         payload.password,
         payload.captcha_id,
         payload.captcha_text,
+        response=response,
     )
+
+
+@router.post("/login/2fa", response_model=Token)
+def login_2fa(payload: Login2FARequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    client_ip = ip_restriction_service.get_client_ip(request)
+    auth_rate_limit_service.check(client_ip)
+    username = decode_2fa_pending_token(payload.temp_token)
+    user = db.query(User).filter(User.username == username).first()
+    if not user or not user.is_active or not user.totp_enabled:
+        auth_rate_limit_service.record_failure(client_ip)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный код 2FA")
+    if not verify_totp_code(user, payload.code):
+        auth_rate_limit_service.record_failure(client_ip)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный код 2FA")
+    ip_restriction_service.record_login_attempt(client_ip, success=True)
+    auth_rate_limit_service.record_success(client_ip)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="login_success",
+            user_id=user.id,
+            username=user.username,
+            remote_addr=client_ip,
+            details="2fa",
+        )
+    db.commit()
+    return _issue_token_pair(user, db, response)
+
+
+@router.post("/refresh", response_model=Token)
+def refresh_token(request: Request, response: Response, db: Session = Depends(get_db)):
+    raw = request.cookies.get(settings.refresh_token_cookie_name)
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh-токен отсутствует")
+    new_raw, user = rotate_refresh_token(db, raw)
+    access = create_access_token(
+        data={"sub": user.username, "role": user.role.value},
+        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
+    )
+    _set_refresh_cookie(response, new_raw)
+    return Token(access_token=access)
+
+
+@router.post("/logout", response_model=MessageResponse)
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    raw = request.cookies.get(settings.refresh_token_cookie_name)
+    if raw:
+        revoke_refresh_token(db, raw)
+    _clear_refresh_cookie(response)
+    return MessageResponse(message="Выход выполнен")
 
 
 @router.get("/me", response_model=UserResponse)
@@ -166,12 +316,115 @@ def me(current_user: User = Depends(get_current_user)):
 @router.post("/change-password", response_model=MessageResponse)
 def change_password(
     payload: PasswordChangeRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный текущий пароль")
+    validate_password(payload.new_password, username=current_user.username)
     current_user.password_hash = get_password_hash(payload.new_password)
     current_user.must_change_password = False
+    revoke_all_user_tokens(db, current_user.id)
     db.commit()
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="password_change",
+            user_id=current_user.id,
+            username=current_user.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+        )
     return MessageResponse(message="Пароль успешно изменён")
+
+
+@router.get("/2fa/status", response_model=TwoFAStatusResponse)
+def twofa_status(current_user: User = Depends(require_admin)):
+    remaining = 0
+    if current_user.totp_backup_codes_encrypted:
+        try:
+            from app.services.crypto import decrypt_secret
+
+            codes = json.loads(decrypt_secret(current_user.totp_backup_codes_encrypted, settings.secret_key))
+            remaining = len(codes)
+        except Exception:
+            remaining = 0
+    return TwoFAStatusResponse(enabled=current_user.totp_enabled, backup_codes_remaining=remaining)
+
+
+@router.post("/2fa/setup", response_model=TwoFASetupResponse)
+def twofa_setup(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    if current_user.totp_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA уже включена")
+    secret = generate_totp_secret()
+    current_user.totp_secret_encrypted = encrypt_totp_secret(secret)
+    db.commit()
+    uri = get_totp_uri(current_user, secret)
+    return TwoFASetupResponse(secret=secret, otpauth_uri=uri, qr_data_url=generate_qr_data_url(uri))
+
+
+@router.post("/2fa/enable", response_model=TwoFABackupCodesResponse)
+def twofa_enable(
+    payload: TwoFAEnableRequest,
+    request: Request,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if current_user.totp_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA уже включена")
+    if not current_user.totp_secret_encrypted:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Сначала выполните /2fa/setup")
+    require_valid_totp(current_user, payload.code)
+    backup_codes = generate_backup_codes()
+    current_user.totp_enabled = True
+    current_user.totp_backup_codes_encrypted = encrypt_backup_codes(backup_codes)
+    db.commit()
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="2fa_enable",
+            user_id=current_user.id,
+            username=current_user.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+        )
+    return TwoFABackupCodesResponse(backup_codes=backup_codes)
+
+
+@router.post("/2fa/disable", response_model=MessageResponse)
+def twofa_disable(
+    payload: TwoFADisableRequest,
+    request: Request,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if not current_user.totp_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA не включена")
+    require_valid_totp(current_user, payload.code)
+    current_user.totp_enabled = False
+    current_user.totp_secret_encrypted = None
+    current_user.totp_backup_codes_encrypted = None
+    db.commit()
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="2fa_disable",
+            user_id=current_user.id,
+            username=current_user.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+        )
+    return MessageResponse(message="2FA отключена")
+
+
+@router.post("/2fa/regenerate-backup-codes", response_model=TwoFABackupCodesResponse)
+def twofa_regenerate_backup(
+    payload: TwoFADisableRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if not current_user.totp_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA не включена")
+    require_valid_totp(current_user, payload.code)
+    backup_codes = generate_backup_codes()
+    current_user.totp_backup_codes_encrypted = encrypt_backup_codes(backup_codes)
+    db.commit()
+    return TwoFABackupCodesResponse(backup_codes=backup_codes)

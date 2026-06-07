@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -8,6 +8,8 @@ from app.auth import require_admin
 from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, User
+from app.services.action_log import log_action
+from app.services.ip_restriction import ip_restriction_service
 from app.schemas import (
     BackupCreateRequest,
     BackupEntry,
@@ -128,8 +130,22 @@ def create_backup(
 
 
 @router.post("/restore", response_model=MessageResponse)
-def restore_backup(payload: BackupRestoreRequest, _: User = Depends(require_admin)):
+def restore_backup(
+    payload: BackupRestoreRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
     result = _get_backup_manager().restore_backup(payload.file_name)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="backup_restore",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=payload.file_name,
+        )
     return MessageResponse(
         message="Восстановление выполнено. Перезапустите панель для применения БД.",
         detail=result,

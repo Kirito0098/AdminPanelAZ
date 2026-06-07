@@ -1,6 +1,15 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { Check, HeartPulse, Pencil, Plus, Server, Trash2 } from 'lucide-react'
-import { ApiError, checkNodeHealth, createNode, deleteNode, getNodes, updateNode } from '@/api/client'
+import { Check, Download, HeartPulse, KeyRound, Pencil, Plus, Server, Trash2 } from 'lucide-react'
+import {
+  ApiError,
+  checkNodeHealth,
+  createNode,
+  deleteNode,
+  getNodes,
+  rotateNodeApiKey,
+  updateNode,
+} from '@/api/client'
+import NodeUpdateDialog from '@/components/NodeUpdateDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -55,6 +64,7 @@ export default function NodesPage() {
   const [apiKey, setApiKey] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [healthLoading, setHealthLoading] = useState<number | null>(null)
+  const [updateNodeTarget, setUpdateNodeTarget] = useState<Node | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -151,6 +161,17 @@ export default function NodesPage() {
     }
   }
 
+  const handleRotateKey = async (node: Node) => {
+    if (!confirm(`Сгенерировать новый API-ключ для «${node.name}»? Старый ключ перестанет работать.`)) return
+    try {
+      await rotateNodeApiKey(node.id)
+      success(`API-ключ узла «${node.name}» обновлён`)
+      await load()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка ротации ключа')
+    }
+  }
+
   const handleActivate = async (node: Node) => {
     try {
       await activate(node.id)
@@ -197,6 +218,9 @@ export default function NodesPage() {
                 <TableRow>
                   <TableHead>Имя</TableHead>
                   <TableHead>Адрес</TableHead>
+                  <TableHead>IP сервера</TableHead>
+                  <TableHead>Версии</TableHead>
+                  <TableHead>Службы</TableHead>
                   <TableHead>Статус</TableHead>
                   <TableHead>Тип</TableHead>
                   <TableHead className="text-right">Действия</TableHead>
@@ -205,6 +229,17 @@ export default function NodesPage() {
               <TableBody>
                 {nodes.map((node) => {
                   const isActive = activeNode?.id === node.id
+                  const meta = node.metadata ?? {}
+                  const serverIp = typeof meta.server_ip === 'string' ? meta.server_ip : '—'
+                  const servicesActive = meta.services_active
+                  const servicesTotal = meta.services_total
+                  const servicesLabel =
+                    typeof servicesActive === 'number' && typeof servicesTotal === 'number'
+                      ? `${servicesActive}/${servicesTotal}`
+                      : '—'
+                  const agentVersion = typeof meta.agent_version === 'string' ? meta.agent_version : '—'
+                  const antizapretVersion =
+                    typeof meta.antizapret_version === 'string' ? meta.antizapret_version : '—'
                   return (
                     <TableRow key={node.id} className={cn(isActive && 'bg-muted/40')}>
                       <TableCell className="font-medium">
@@ -218,8 +253,19 @@ export default function NodesPage() {
                       <TableCell className="mono text-xs">
                         {node.is_local ? 'local' : `${node.host}:${node.port}`}
                       </TableCell>
+                      <TableCell className="mono text-xs">{serverIp}</TableCell>
+                      <TableCell className="text-xs">
+                        <div>agent: {agentVersion}</div>
+                        <div className="text-muted-foreground">az: {antizapretVersion}</div>
+                      </TableCell>
+                      <TableCell className="text-xs">{servicesLabel}</TableCell>
                       <TableCell>
                         <Badge variant={statusVariant[node.status]}>{statusLabels[node.status]}</Badge>
+                        {node.last_seen_at && (
+                          <div className="mt-1 text-[10px] text-muted-foreground">
+                            {new Date(node.last_seen_at).toLocaleString()}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell>
                         {node.is_local ? (
@@ -249,6 +295,24 @@ export default function NodesPage() {
                           >
                             <HeartPulse size={16} />
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Обновление узла"
+                            onClick={() => setUpdateNodeTarget(node)}
+                          >
+                            <Download size={16} />
+                          </Button>
+                          {!node.is_local && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Ротация API-ключа"
+                              onClick={() => handleRotateKey(node)}
+                            >
+                              <KeyRound size={16} />
+                            </Button>
+                          )}
                           {!node.is_local && (
                             <>
                               <Button
@@ -341,6 +405,13 @@ export default function NodesPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <NodeUpdateDialog
+        node={updateNodeTarget}
+        open={!!updateNodeTarget}
+        onOpenChange={(open) => !open && setUpdateNodeTarget(null)}
+        onComplete={load}
+      />
     </div>
   )
 }

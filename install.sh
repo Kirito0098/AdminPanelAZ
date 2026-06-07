@@ -39,10 +39,13 @@ usage() {
   cat <<'EOF'
 Использование: sudo ./install.sh [опции]
 
+Единая точка входа для установки AdminPanelAZ. В интерактивном режиме (TTY)
+задаёт все вопросы: тип установки, сеть, HTTPS, администратор, node agent и т.д.
+
 Опции:
   --with-daemon         Запустить prod daemon через start.sh после установки
-  --with-systemd        Установить systemd unit (scripts/install-systemd.sh)
-  --with-node-agent     Настроить node agent (+ install-node-systemd.sh с --with-systemd)
+  --with-systemd        Установить systemd unit (без мастера — флаг явный)
+  --with-node-agent     Настроить node agent (без мастера — флаг явный)
   --force               Перезаписать существующий backend/.env из .env.example
   --non-interactive     Без интерактивного мастера (флаги и переменные окружения)
   -y, --yes             Принять значения по умолчанию (для мастера или авто-подтверждение)
@@ -277,6 +280,7 @@ resolve_project_dir() {
 ensure_executable_scripts() {
   chmod +x "$ROOT_DIR/start.sh" "$ROOT_DIR/start_node_agent.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
+  chmod +x "$ROOT_DIR/scripts/nginx-setup.sh" "$ROOT_DIR/scripts/nginx-common.sh" "$ROOT_DIR/scripts/firewall-setup.sh" 2>/dev/null || true
 }
 
 env_get() {
@@ -363,6 +367,7 @@ setup_env() {
   fi
 
   if [[ "$WIZARD_RAN" == true ]]; then
+    env_set APP_ENV "$WIZ_APP_ENV"
     env_set ANTIZAPRET_PATH "$WIZ_ANTIZAPRET_PATH"
     env_set CORS_ORIGINS "$WIZ_CORS_ORIGINS"
     env_set ALLOW_INTERNAL_NODES "$WIZ_ALLOW_INTERNAL_NODES"
@@ -371,14 +376,45 @@ setup_env() {
     env_set DEFAULT_ADMIN_MUST_CHANGE_PASSWORD "$WIZ_ADMIN_MUST_CHANGE_PASSWORD"
     env_set BACKEND_HOST "$WIZ_BACKEND_HOST"
     env_set BACKEND_PORT "$WIZ_BACKEND_PORT"
+    if [[ "${WIZ_BEHIND_NGINX:-false}" == "true" ]]; then
+      env_set BEHIND_NGINX "true"
+      env_set TRUSTED_PROXY_IPS "127.0.0.1,::1"
+      env_set FORWARDED_ALLOW_IPS "127.0.0.1,::1"
+    fi
+    if [[ "${WIZ_UVICORN_WORKERS:-1}" -gt 1 ]]; then
+      env_set UVICORN_WORKERS "$WIZ_UVICORN_WORKERS"
+    fi
     env_set BACKUP_ROOT "$WIZ_BACKUP_ROOT"
     env_set CIDR_DB_REFRESH_ENABLED "$WIZ_CIDR_DB_REFRESH_ENABLED"
     env_set CIDR_DB_REFRESH_HOUR "$WIZ_CIDR_DB_REFRESH_HOUR"
     env_set CIDR_DB_REFRESH_MINUTE "$WIZ_CIDR_DB_REFRESH_MINUTE"
     env_set TRAFFIC_SYNC_ENABLED "$WIZ_TRAFFIC_SYNC_ENABLED"
     env_set NODE_AGENT_PORT "$WIZ_NODE_AGENT_PORT"
+    if [[ "$WIZ_ENFORCE_PASSWORD_POLICY" == true ]]; then
+      env_set ENFORCE_PASSWORD_POLICY "true"
+    fi
+    if [[ "$WIZ_APP_ENV" == "production" ]]; then
+      env_set AUTH_RATE_LIMIT_ENABLED "true"
+      env_set SECURITY_HEADERS_ENABLED "true"
+      env_set AUDIT_LOG_ENABLED "true"
+    fi
     if [[ -n "$WIZ_NODE_AGENT_API_KEY" ]]; then
       env_set NODE_AGENT_API_KEY "$WIZ_NODE_AGENT_API_KEY"
+    fi
+    if [[ -n "${WIZ_AUTH_RATE_LIMIT_BACKEND:-}" ]]; then
+      env_set AUTH_RATE_LIMIT_BACKEND "$WIZ_AUTH_RATE_LIMIT_BACKEND"
+    fi
+    if [[ -n "${WIZ_REDIS_URL:-}" ]]; then
+      env_set REDIS_URL "$WIZ_REDIS_URL"
+    fi
+    if [[ "${WIZ_NODE_AGENT_MTLS_ENABLED:-false}" == "true" ]]; then
+      env_set NODE_AGENT_MTLS_ENABLED "true"
+    fi
+    if [[ -n "${WIZ_NODE_API_KEY_ROTATION_DAYS:-}" && "${WIZ_NODE_API_KEY_ROTATION_DAYS:-0}" != "0" ]]; then
+      env_set NODE_API_KEY_ROTATION_DAYS "$WIZ_NODE_API_KEY_ROTATION_DAYS"
+    fi
+    if [[ "$WIZ_APP_ENV" == "production" ]]; then
+      env_set REFRESH_TOKEN_COOKIE_SECURE "true"
     fi
   else
     local az_path="${ANTIZAPRET_PATH:-/root/antizapret}"
@@ -386,6 +422,14 @@ setup_env() {
 
     local backend_port="${BACKEND_PORT:-8000}"
     env_set CORS_ORIGINS "http://127.0.0.1:${backend_port},http://localhost:${backend_port},http://127.0.0.1:5173,http://localhost:5173"
+    env_set BACKEND_HOST "127.0.0.1"
+  fi
+
+  if [[ -f "$ROOT_DIR/scripts/env_defaults.sh" ]]; then
+    # shellcheck source=scripts/env_defaults.sh
+    source "$ROOT_DIR/scripts/env_defaults.sh"
+    ensure_env_defaults
+    log "Добавлены значения по умолчанию из scripts/env_defaults.sh (AdminAntizapret 1.9.0)"
   fi
 
   mkdir -p "$BACKEND_DIR/data" "${WIZ_BACKUP_ROOT:-/var/backups/adminpanelaz}"
@@ -420,6 +464,14 @@ setup_node_env() {
   node_env_set NODE_AGENT_STATE_DIR "$node_state"
   node_env_set NODE_AGENT_HOST "0.0.0.0"
   node_env_set NODE_AGENT_MODE "prod"
+
+  local allowed_ips="${WIZ_NODE_AGENT_ALLOWED_IPS:-}"
+  if [[ -n "$allowed_ips" ]]; then
+    node_env_set NODE_AGENT_ALLOWED_IPS "$allowed_ips"
+  fi
+  if [[ "${WIZ_NODE_AGENT_MTLS_ENABLED:-false}" == "true" ]]; then
+    node_env_set NODE_AGENT_MTLS_ENABLED "true"
+  fi
 
   GENERATED_NODE_KEY="$api_key"
   export NODE_AGENT_API_KEY="$api_key"
@@ -494,10 +546,12 @@ setup_systemd() {
   fi
 
   log "Установка systemd unit для controller..."
-  INSTALL_USER="${INSTALL_USER:-root}" \
+  INSTALL_FROM_INSTALL_SH=1 \
+    INSTALL_USER="${INSTALL_USER:-root}" \
     ADMINPANELAZ_STATE_DIR="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-/var/lib/adminpanelaz}}" \
-    BACKEND_HOST="${BACKEND_HOST:-${WIZ_BACKEND_HOST:-0.0.0.0}}" \
+    BACKEND_HOST="${BACKEND_HOST:-${WIZ_BACKEND_HOST:-127.0.0.1}}" \
     BACKEND_PORT="${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}" \
+    UVICORN_WORKERS="${UVICORN_WORKERS:-${WIZ_UVICORN_WORKERS:-1}}" \
     "$ROOT_DIR/scripts/install-systemd.sh"
 }
 
@@ -514,7 +568,8 @@ setup_node_agent_systemd() {
   fi
 
   log "Установка systemd unit для node agent..."
-  INSTALL_USER="${INSTALL_USER:-root}" \
+  INSTALL_FROM_INSTALL_SH=1 \
+    INSTALL_USER="${INSTALL_USER:-root}" \
     NODE_AGENT_STATE_DIR="${NODE_AGENT_STATE_DIR:-${WIZ_NODE_STATE_DIR:-/var/lib/adminpanelaz-node}}" \
     NODE_AGENT_PORT="${NODE_AGENT_PORT:-${WIZ_NODE_AGENT_PORT:-9100}}" \
     NODE_AGENT_API_KEY="$api_key" \
@@ -529,10 +584,159 @@ start_daemon() {
   fi
 
   log "Запуск prod daemon..."
-  BACKEND_HOST="${BACKEND_HOST:-${WIZ_BACKEND_HOST:-0.0.0.0}}" \
+  BACKEND_HOST="${BACKEND_HOST:-${WIZ_BACKEND_HOST:-127.0.0.1}}" \
   BACKEND_PORT="${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}" \
+  UVICORN_WORKERS="${UVICORN_WORKERS:-${WIZ_UVICORN_WORKERS:-1}}" \
   ADMINPANELAZ_STATE_DIR="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-$ROOT_DIR/.runtime}}" \
     ADMINPANELAZ_MODE=prod "$ROOT_DIR/start.sh" daemon
+}
+
+setup_nginx_if_selected() {
+  if [[ "$WIZARD_RAN" != true ]] || ! install_controller_selected; then
+    return 0
+  fi
+
+  local mode="${WIZ_NGINX_MODE:-none}"
+  if [[ "$mode" == "none" ]]; then
+    return 0
+  fi
+
+  log "Настройка публикации (Nginx/HTTPS): $mode"
+
+  # shellcheck source=scripts/nginx-common.sh
+  source "$ROOT_DIR/scripts/nginx-common.sh"
+  nginx_common_init
+
+  local backend_port="${WIZ_BACKEND_PORT:-8000}"
+  local domain="${WIZ_NGINX_DOMAIN:-}"
+  local https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
+  local http_port="${WIZ_HTTP_ACME_PORT:-80}"
+
+  case "$mode" in
+    http_direct)
+      nginx_apply_direct_http_env "$backend_port"
+      nginx_remove_site "$(nginx_env_get DOMAIN)"
+      log "HTTP без nginx: http://<сервер>:${backend_port}/ (не рекомендуется для интернета)"
+      ;;
+    le)
+      [[ -n "$domain" ]] || die "Для Let's Encrypt нужен домен (запустите install.sh заново или ./scripts/nginx-setup.sh)"
+      nginx_ensure_nginx || die "Не удалось установить nginx"
+      nginx_obtain_letsencrypt_cert "$domain" "${WIZ_NGINX_EMAIL:-}"
+      local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
+      local key="/etc/letsencrypt/live/${domain}/privkey.pem"
+      local conf
+      conf="$(nginx_render_template \
+        "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
+        "$domain" "$backend_port" "$cert" "$key" "$https_port" "$http_port")"
+      nginx_install_site "$conf" "$domain"
+      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https"
+      if [[ "$WIZ_APP_ENV" == "production" ]]; then
+        nginx_env_set ENFORCE_HTTPS "true"
+      fi
+      systemctl enable --now snap.certbot.renew.timer 2>/dev/null || \
+        systemctl enable --now certbot.timer 2>/dev/null || true
+      log "Nginx + Let's Encrypt: https://${domain}:${https_port}/"
+      ;;
+    selfsigned)
+      [[ -n "$domain" ]] || domain="$(hostname -f 2>/dev/null || hostname)"
+      nginx_ensure_nginx || die "Не удалось установить nginx"
+      mkdir -p /etc/ssl/private
+      if [[ ! -f "$NGINX_SELF_SIGNED_CERT" ]]; then
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          -keyout "$NGINX_SELF_SIGNED_KEY" \
+          -out "$NGINX_SELF_SIGNED_CERT" \
+          -subj "/CN=${domain}" >/dev/null 2>&1
+      fi
+      local conf
+      conf="$(nginx_render_template \
+        "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
+        "$domain" "$backend_port" "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" \
+        "$https_port" "$http_port")"
+      nginx_install_site "$conf" "$domain"
+      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https"
+      if [[ "$WIZ_APP_ENV" == "production" ]]; then
+        nginx_env_set ENFORCE_HTTPS "true"
+      fi
+      log "Nginx + самоподписанный SSL: https://${domain}:${https_port}/"
+      ;;
+    *)
+      warn "Неизвестный режим Nginx: $mode — пропуск"
+      return 0
+      ;;
+  esac
+}
+
+restart_services_after_nginx() {
+  if [[ "${WIZ_NGINX_MODE:-none}" == "none" ]]; then
+    return 0
+  fi
+  if ! install_controller_selected; then
+    return 0
+  fi
+  if [[ "$WITH_SYSTEMD" == true ]]; then
+    systemctl restart adminpanelaz 2>/dev/null || true
+  elif [[ "$WITH_DAEMON" == true ]]; then
+    "$ROOT_DIR/start.sh" restart 2>/dev/null || true
+  fi
+}
+
+setup_firewall_if_selected() {
+  if [[ "$WIZARD_RAN" != true ]] || [[ "${WIZ_CONFIGURE_FIREWALL:-false}" != true ]]; then
+    return 0
+  fi
+
+  log "Настройка firewall..."
+  # shellcheck source=scripts/firewall-setup.sh
+  source "$ROOT_DIR/scripts/firewall-setup.sh"
+
+  local has_nginx=false
+  local has_node=false
+  local has_controller=false
+
+  if install_controller_selected; then
+    has_controller=true
+  fi
+  if install_node_selected; then
+    has_node=true
+  fi
+  if [[ "${WIZ_NGINX_MODE:-none}" == "le" || "${WIZ_NGINX_MODE:-none}" == "selfsigned" ]]; then
+    has_nginx=true
+  fi
+
+  local panel_ip="${WIZ_NODE_AGENT_ALLOWED_IPS:-}"
+  if [[ -z "$panel_ip" ]]; then
+    panel_ip="${WIZ_SERVER_ADDRESS:-}"
+    panel_ip="${panel_ip#http://}"
+    panel_ip="${panel_ip#https://}"
+    panel_ip="${panel_ip%%/*}"
+    panel_ip="${panel_ip%%:*}"
+  else
+    panel_ip="${panel_ip%%,*}"
+    panel_ip="${panel_ip%%/*}"
+  fi
+
+  export FIREWALL_ENABLE_UFW="${WIZ_FIREWALL_ENABLE_UFW:-false}"
+
+  local backend_port="${WIZ_BACKEND_PORT:-8000}"
+  if [[ "$has_controller" != true ]]; then
+    backend_port="0"
+  fi
+
+  firewall_show_rules_summary "$backend_port" "${WIZ_NODE_AGENT_PORT:-9100}" \
+    "${WIZ_HTTPS_PUBLIC_PORT:-443}" "${WIZ_HTTP_ACME_PORT:-80}" \
+    "$has_node" "$has_nginx" "$panel_ip" || true
+
+  if [[ "$has_controller" == true ]]; then
+    firewall_apply_rules "$backend_port" "${WIZ_NODE_AGENT_PORT:-9100}" \
+      "${WIZ_HTTPS_PUBLIC_PORT:-443}" "${WIZ_HTTP_ACME_PORT:-80}" \
+      "$has_node" "$has_nginx" "$panel_ip" || \
+      warn "Не удалось применить правила firewall — см. SECURITY.md"
+  elif [[ "$has_node" == true ]]; then
+    firewall_apply_rules "0" "${WIZ_NODE_AGENT_PORT:-9100}" \
+      "${WIZ_HTTPS_PUBLIC_PORT:-443}" "${WIZ_HTTP_ACME_PORT:-80}" \
+      true false "$panel_ip" || \
+      warn "Не удалось применить правила firewall — см. SECURITY.md"
+  fi
 }
 
 start_node_agent_daemon() {
@@ -597,6 +801,25 @@ EOF
 EOF
 
   if install_controller_selected; then
+    if [[ "${WIZ_NGINX_MODE:-none}" != "none" && -n "${WIZ_NGINX_DOMAIN:-}" ]]; then
+      local pub_https="${WIZ_HTTPS_PUBLIC_PORT:-443}"
+      local url_suffix=""
+      if [[ "$pub_https" != "443" ]]; then
+        url_suffix=":${pub_https}"
+      fi
+      cat <<EOF
+Публикация (настроено при установке):
+  https://${WIZ_NGINX_DOMAIN}${url_suffix}/
+
+EOF
+    else
+      cat <<EOF
+Публикация в интернет (nginx + SSL):
+  sudo ./scripts/nginx-setup.sh
+  # или повторно: sudo ./install.sh
+
+EOF
+    fi
     cat <<EOF
 Управление controller:
   ./start.sh              # dev, foreground
@@ -625,6 +848,27 @@ EOF
   $node_key
 
 EOF
+  fi
+
+  if [[ "$WIZARD_RAN" == true ]]; then
+    if [[ "${WIZ_CONFIGURE_FIREWALL:-false}" == true ]]; then
+      cat <<EOF
+Firewall:
+  Правила применены (backend ${backend_port}/tcp закрыт с интернета;
+  HTTPS ${WIZ_HTTPS_PUBLIC_PORT:-443}, HTTP ${WIZ_HTTP_ACME_PORT:-80} открыты при Nginx).
+  Подробнее: SECURITY.md
+
+EOF
+    else
+      cat <<EOF
+Firewall (рекомендации):
+  • Backend ${backend_port}/tcp — только localhost (127.0.0.1)
+  • Node agent ${node_port}/tcp — только IP панели
+  • Наружу — HTTPS ${WIZ_HTTPS_PUBLIC_PORT:-443} (и HTTP ${WIZ_HTTP_ACME_PORT:-80} для ACME)
+  • Подробнее: SECURITY.md
+
+EOF
+    fi
   fi
 
   if [[ "$WITH_SYSTEMD" == true ]]; then
@@ -683,6 +927,10 @@ main() {
   elif [[ "$WITH_DAEMON" == true ]]; then
     start_daemon
   fi
+
+  setup_nginx_if_selected
+  restart_services_after_nginx
+  setup_firewall_if_selected
 
   if install_node_selected; then
     if [[ "$WITH_SYSTEMD" == true ]]; then

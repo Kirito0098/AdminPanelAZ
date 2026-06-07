@@ -6,7 +6,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, User
 from app.schemas import AppSettingsResponse, AppSettingsUpdate, MessageResponse
-from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 settings = get_settings()
@@ -45,7 +45,7 @@ def get_settings(current_user: User = Depends(get_current_user), db: Session = D
     return AppSettingsResponse(
         theme=current_user.theme,
         app_name=_get_setting(db, "app_name", settings.app_name),
-        antizapret_path=str(settings.antizapret_path),
+        antizapret_path=str(get_node_antizapret_path(db)),
         include_hosts=include_hosts,
         exclude_hosts=exclude_hosts,
         include_ips=include_ips,

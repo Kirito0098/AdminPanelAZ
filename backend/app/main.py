@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth import get_password_hash
 from app.config import get_settings
-from app.database import Base, SessionLocal, engine
+from app.middleware.http_security import HttpSecurityMiddleware
+from app.services.security_bootstrap import validate_panel_settings
+from app.database import Base, SessionLocal, engine, run_db_migrations
 from app.models import User, UserRole, VpnConfig, VpnType
 from app.routers import (
     auth,
@@ -26,6 +28,7 @@ from app.routers import (
     security,
     server_monitor,
     system,
+    feature_toggles,
     tests,
     tg_mini,
     traffic,
@@ -37,13 +40,17 @@ from app.services.cidr.cidr_scheduler import run_cidr_db_scheduler_loop
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.node_manager import ensure_local_node, get_active_adapter
 from app.services.ip_restriction import ip_restriction_service
+from app.services.node_health_worker import run_node_health_loop
+from app.services.node_key_rotation import run_node_key_rotation_loop
 from app.services.traffic.worker import run_traffic_collector_loop
 
 settings = get_settings()
+validate_panel_settings(settings)
 
 
 def seed_database():
     Base.metadata.create_all(bind=engine)
+    run_db_migrations()
     db = SessionLocal()
     try:
         admin = db.query(User).filter(User.username == settings.default_admin_username).first()
@@ -98,6 +105,7 @@ async def lifespan(_: FastAPI):
     if not db_path.is_absolute():
         db_path = app_root / db_path
     collector_task = asyncio.create_task(run_traffic_collector_loop())
+    health_task = asyncio.create_task(run_node_health_loop())
     backup_task = asyncio.create_task(
         run_backup_scheduler_loop(
             app_root=app_root,
@@ -107,12 +115,13 @@ async def lifespan(_: FastAPI):
         )
     )
     cidr_task = asyncio.create_task(run_cidr_db_scheduler_loop())
+    key_rotation_task = asyncio.create_task(run_node_key_rotation_loop())
     try:
         ip_restriction_service.sync_firewall()
     except Exception:
         pass
     yield
-    for task in (collector_task, backup_task, cidr_task):
+    for task in (collector_task, health_task, backup_task, cidr_task, key_rotation_task):
         task.cancel()
         try:
             await task
@@ -121,12 +130,13 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+app.add_middleware(HttpSecurityMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Captcha-Id", "Accept"],
 )
 
 app.include_router(auth.router, prefix="/api")
@@ -150,7 +160,22 @@ app.include_router(logs.router, prefix="/api")
 app.include_router(system.router, prefix="/api")
 app.include_router(tg_mini.router, prefix="/api")
 app.include_router(tests.router, prefix="/api")
+app.include_router(feature_toggles.router, prefix="/api")
+app.include_router(feature_toggles.feature_modules_router, prefix="/api")
 app.include_router(ip_blocked.router)
+
+
+@app.middleware("http")
+async def feature_guard_middleware(request, call_next):
+    path = request.url.path
+    if path.startswith("/api/"):
+        from app.services.feature_guards import blocked_json_response, check_path_access, get_feature_service
+
+        blocked = check_path_access(path, service=get_feature_service())
+        if blocked is not None:
+            module_key, _ = blocked
+            return blocked_json_response(module_key)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -162,6 +187,8 @@ async def ip_restriction_middleware(request, call_next):
         or path.startswith("/api/ip-blocked")
         or path.startswith("/api/auth/captcha")
         or path.startswith("/api/auth/telegram")
+        or path.startswith("/api/auth/refresh")
+        or path.startswith("/api/auth/login")
         or path in ("/api/health", "/ip-blocked")
     )
     if exempt:

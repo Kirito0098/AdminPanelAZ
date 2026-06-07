@@ -44,6 +44,7 @@ import {
 } from '@/components/ui/select'
 import { NodeBadge } from '@/components/NodeSelector'
 import { useAuth } from '@/context/AuthContext'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
@@ -51,6 +52,10 @@ import type { ClientAccessPolicy, DashboardSummary, VpnConfig, VpnType } from '@
 
 export default function DashboardPage() {
   const { user } = useAuth()
+  const { isEnabled } = useFeatureModules()
+  const openvpnEnabled = isEnabled('openvpn')
+  const wireguardEnabled = isEnabled('wireguard')
+  const canCreateClient = openvpnEnabled || wireguardEnabled
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal, inline, withInline } = useProgress()
@@ -198,7 +203,7 @@ export default function DashboardPage() {
               {syncing ? 'Синхронизация...' : 'Синхронизировать'}
             </Button>
           )}
-          {user?.role !== 'viewer' && (
+          {user?.role !== 'viewer' && canCreateClient && (
             <Button onClick={() => setShowForm(true)}>
               <Plus size={16} />
               Новый клиент
@@ -267,8 +272,8 @@ export default function DashboardPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="openvpn">OpenVPN</SelectItem>
-                  <SelectItem value="wireguard">WireGuard / AmneziaWG</SelectItem>
+                  {openvpnEnabled && <SelectItem value="openvpn">OpenVPN</SelectItem>}
+                  {wireguardEnabled && <SelectItem value="wireguard">WireGuard / AmneziaWG</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
@@ -346,7 +351,7 @@ export default function DashboardPage() {
                     Синхронизировать
                   </Button>
                 )}
-                {user?.role !== 'viewer' && (
+                {user?.role !== 'viewer' && canCreateClient && (
                   <Button onClick={() => setShowForm(true)}>
                     <Plus size={16} />
                     Новый клиент
