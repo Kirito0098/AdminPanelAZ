@@ -254,11 +254,17 @@ ui_show_help() {
 Опции установки:
   --with-daemon         Запустить prod daemon через start.sh после установки
   --with-systemd        Установить systemd unit (без мастера - флаг явный)
-  --with-node-agent     Настроить node agent (без мастера - флаг явный)
+  --with-node-agent     Добавить node agent к панели (без мастера - флаг явный)
+  --node-only           Только node agent на VPN-сервере (без панели)
   --force               Перезаписать существующий backend/.env из .env.example
   --non-interactive     Без интерактивного мастера (флаги и переменные окружения)
   -y, --yes             Принять значения по умолчанию
   --help, -h            Показать эту справку
+
+Без TTY (pipe, CI):
+  wget|curl | sudo bash без флагов НЕ поддерживается — мастер недоступен.
+  Скачайте скрипт: wget -qO /tmp/install.sh URL && sudo bash /tmp/install.sh
+  Или явные флаги: --non-interactive --with-systemd / --node-only --with-systemd
 
 Переменные окружения:
   INSTALL_FROM_GIT      URL репозитория (по умолчанию — основной репозиторий AdminPanelAZ)
@@ -270,14 +276,12 @@ ui_show_help() {
   сеть, администратора, node agent, systemd/daemon и опции .env.
   AntiZapret устанавливается отдельно в /root/antizapret (см. README).
 
-Примеры (one-liner; не используйте sudo bash <(wget ...) — fd недоступен sudo):
-  wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | sudo bash
-  curl -fsSL https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | sudo bash
-  wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh && sudo bash /tmp/install.sh
-  bash <(wget -qO- ...)   # только от root, без sudo
+Примеры:
+  wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh
+  sudo bash /tmp/install.sh
   cd /opt/AdminPanelAZ && sudo ./install.sh
-  sudo ./install.sh --with-systemd
   sudo ./install.sh --non-interactive --with-systemd -y
+  sudo ./install.sh --node-only --with-systemd -y
   sudo ./install.sh --uninstall -y
   sudo ./install.sh --uninstall --purge -y
   sudo ./install.sh --reinstall

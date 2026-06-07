@@ -82,6 +82,7 @@ NODE_ENV_EXAMPLE="$BACKEND_DIR/node_agent.env.example"
 WITH_DAEMON=false
 WITH_SYSTEMD=false
 WITH_NODE_AGENT=false
+NODE_ONLY=false
 FORCE=false
 NON_INTERACTIVE=false
 ACCEPT_DEFAULTS=false
@@ -124,6 +125,51 @@ usage() {
   ui_show_help
 }
 
+has_explicit_install_intent() {
+  [[ "$NON_INTERACTIVE" == true ]] && return 0
+  [[ "$WITH_SYSTEMD" == true ]] && return 0
+  [[ "$WITH_DAEMON" == true ]] && return 0
+  [[ "$WITH_NODE_AGENT" == true ]] && return 0
+  [[ "$NODE_ONLY" == true ]] && return 0
+  [[ "${WIZ_INSTALL_TYPE:-}" == "node" ]] && return 0
+  return 1
+}
+
+require_tty_or_explicit_intent() {
+  if [[ -t 0 ]]; then
+    return 0
+  fi
+  if has_explicit_install_intent; then
+    return 0
+  fi
+
+  cat >&2 <<'EOF'
+[install] ОШИБКА: нет TTY (stdin не терминал) — интерактивный мастер и меню недоступны.
+Установка через pipe (wget|curl | sudo bash) без явных флагов не поддерживается:
+скрипт не может определить тип установки и не будет устанавливать панель «молча».
+
+Рекомендуемый способ (интерактивно):
+  wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh
+  sudo bash /tmp/install.sh
+  # или из клона: cd /opt/AdminPanelAZ && sudo ./install.sh
+
+Без TTY (CI / automation) — передайте явные флаги, например:
+  sudo bash install.sh --non-interactive --with-systemd -y
+  sudo bash install.sh --node-only --with-systemd -y
+
+ERROR: no TTY — interactive wizard unavailable.
+Do not use wget|curl | sudo bash without flags. Download and run: sudo bash /tmp/install.sh
+Or pass explicit flags: --non-interactive --with-systemd or --node-only --with-systemd
+EOF
+  exit 1
+}
+
+validate_install_flags() {
+  if [[ "$NODE_ONLY" == true && "$WITH_NODE_AGENT" == true ]]; then
+    die "--node-only и --with-node-agent несовместимы: --node-only — только node agent без панели; --with-node-agent добавляет агент к панели"
+  fi
+}
+
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -135,6 +181,10 @@ parse_args() {
         ;;
       --with-node-agent)
         WITH_NODE_AGENT=true
+        ;;
+      --node-only)
+        NODE_ONLY=true
+        export WIZ_INSTALL_TYPE=node
         ;;
       --force)
         FORCE=true
@@ -520,7 +570,7 @@ resolve_project_dir() {
     return
   fi
 
-  die "Запустите из каталога проекта или one-liner (клонирование в $DEFAULT_INSTALL_TARGET): см. README"
+  die "Запустите из каталога проекта или скачайте install.sh (клонирование в $DEFAULT_INSTALL_TARGET): см. README"
 }
 
 ensure_executable_scripts() {
@@ -569,6 +619,13 @@ is_placeholder_secret() {
 }
 
 install_controller_selected() {
+  if [[ "$NODE_ONLY" == true ]] || [[ "${WIZ_INSTALL_TYPE:-controller}" == "node" ]]; then
+    if [[ "$WIZARD_RAN" == true ]]; then
+      wizard_install_controller
+      return $?
+    fi
+    return 1
+  fi
   if [[ "$WIZARD_RAN" == true ]]; then
     wizard_install_controller
     return $?
@@ -577,6 +634,13 @@ install_controller_selected() {
 }
 
 install_node_selected() {
+  if [[ "$NODE_ONLY" == true ]] || [[ "${WIZ_INSTALL_TYPE:-}" == "node" ]]; then
+    if [[ "$WIZARD_RAN" == true ]]; then
+      wizard_install_node
+      return $?
+    fi
+    return 0
+  fi
   if [[ "$WIZARD_RAN" == true ]]; then
     wizard_install_node
     return $?
@@ -1240,6 +1304,7 @@ print_post_install() {
 main() {
   local original_argc=$#
   parse_args "$@"
+  validate_install_flags
   require_root "$@"
 
   if [[ "$ACTION" == "uninstall" ]]; then
@@ -1250,6 +1315,10 @@ main() {
   if [[ "$ACTION" == "reinstall" ]]; then
     run_reinstall_action
     exit 0
+  fi
+
+  if [[ "$ACTION" == "install" ]]; then
+    require_tty_or_explicit_intent
   fi
 
   if [[ "$original_argc" -eq 0 && -t 0 && "$NON_INTERACTIVE" != true ]]; then

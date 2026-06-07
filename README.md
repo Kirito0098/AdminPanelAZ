@@ -18,43 +18,38 @@
 
 ## Установка
 
-**Единственный поддерживаемый способ установки** — интерактивный мастер `install.sh` (клонирование репозитория, зависимости, мастер, systemd/nginx — всё в одном скрипте).
+**Единственный поддерживаемый способ установки** — интерактивный мастер `install.sh` (клонирование репозитория, зависимости, мастер, systemd/nginx — всё в одном скрипте). Запускайте скрипт **с TTY** (SSH-сессия, локальный терминал), чтобы мастер мог задать вопросы.
 
-### Быстрая установка (one-liner)
+> **⚠️ Не используйте `wget|curl | sudo bash`**
+>
+> Передача скрипта через pipe **не даёт TTY** — интерактивный мастер и меню не запускаются. Установщик **откажется продолжать** без явных флагов (`--non-interactive`, `--with-systemd`, `--node-only` и т.д.), чтобы не установить панель «молча» с настройками по умолчанию.
+>
+> *Do not pipe install.sh into bash — no TTY, no wizard. Download the script and run `sudo bash /tmp/install.sh`, or pass explicit flags.*
 
-Стандартный каталог установки — **`/opt/AdminPanelAZ`** (переопределяется через `INSTALL_TARGET`).
+### Рекомендуемая установка
 
-На чистом **Ubuntu 24.04+** или **Debian 13+** с `root`/`sudo`, `git` и доступом в интернет:
+Стандартный каталог — **`/opt/AdminPanelAZ`** (переопределяется через `INSTALL_TARGET`).
+
+На **Ubuntu 24.04+** или **Debian 13+** с `root`/`sudo`, `git` и доступом в интернет:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | sudo bash
+sudo apt update && sudo apt install -y git wget curl
+wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh
+sudo bash /tmp/install.sh
 ```
 
 Альтернатива через `curl`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | sudo bash
-```
-
-Скачать во временный файл и запустить (удобно при нестабильной сети):
-
-```bash
-wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh && sudo bash /tmp/install.sh
-```
-
-**Почему не `sudo bash <(wget …)`?** Конструкция `<(wget …)` (process substitution) создаёт временный дескриптор файла в **текущей** оболочке. `sudo` запускает **новый** процесс `bash`, которому этот fd недоступен — отсюда ошибка `bash: /dev/fd/63: No such file or directory`. Передача скрипта через pipe (`wget | sudo bash`) или скачивание в файл решает проблему.
-
-Если вы уже под **root** (без `sudo`), process substitution работает в той же оболочке:
-
-```bash
-bash <(wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh)
+curl -fsSL -o /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh
+sudo bash /tmp/install.sh
 ```
 
 Скрипт клонирует репозиторий в `/opt/AdminPanelAZ` (или в `INSTALL_TARGET`) и запускает интерактивный мастер. Другой форк или каталог:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | \
-  sudo INSTALL_FROM_GIT=https://github.com/you/AdminPanelAZ.git INSTALL_TARGET=/opt/my-panel bash
+wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh
+sudo INSTALL_FROM_GIT=https://github.com/you/AdminPanelAZ.git INSTALL_TARGET=/opt/my-panel bash /tmp/install.sh
 ```
 
 ### Установка из уже клонированного репозитория
@@ -63,6 +58,32 @@ wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/m
 cd /opt/AdminPanelAZ
 sudo ./install.sh
 ```
+
+### Только Node agent (VPN-сервер без панели)
+
+**Интерактивно:** в мастере выберите пункт **«Только Node agent»** (вариант 3 на шаге «Тип установки»).
+
+**Без TTY (automation):**
+
+```bash
+sudo bash /tmp/install.sh --node-only --with-systemd -y
+```
+
+Флаг `--with-node-agent` добавляет агент **вместе с панелью**, а не вместо неё — для node-only используйте `--node-only` или мастер.
+
+### Автоматизация без TTY (CI)
+
+Явно укажите режим установки флагами и переменными `WIZ_*`:
+
+```bash
+sudo bash /tmp/install.sh --non-interactive --with-systemd -y
+# node-only:
+sudo bash /tmp/install.sh --node-only --with-systemd -y
+```
+
+См. `./install.sh --help`.
+
+**Почему не `sudo bash <(wget …)`?** Process substitution `<(wget …)` создаёт fd в текущей оболочке; `sudo bash` запускает новый процесс без доступа к этому fd — ошибка `bash: /dev/fd/63: No such file or directory`. Скачивание в файл (`/tmp/install.sh`) решает проблему.
 
 Другие пути (ручная настройка systemd, отдельный запуск `nginx-setup.sh` как установщик, `start.sh` вместо install) **не предусмотрены**. Скрипты `scripts/nginx-setup.sh`, `scripts/uninstall.sh` и др. — **утилиты после установки**, не альтернатива `install.sh`.
 
@@ -73,25 +94,24 @@ sudo ./install.sh
 | ОС | **Ubuntu 24.04+** или **Debian 13+** (другие дистрибутивы — на свой риск) |
 | Права | `root` или `sudo` |
 | Сеть | Доступ в интернет для apt, npm, pip, Let's Encrypt |
-| Репозиторий | Клонирование в `/opt/AdminPanelAZ` (one-liner делает это автоматически) |
+| Репозиторий | Клонирование в `/opt/AdminPanelAZ` (install.sh делает это автоматически) |
 | AntiZapret (VPN) | Устанавливается **отдельно** на VPN-сервере в каталог **`/root/antizapret`** ([AntiZapret-VPN](https://github.com/GubernievS/AntiZapret-VPN)). AdminPanelAZ не ставит AntiZapret — только проверяет наличие `client.sh` и пишет `ANTIZAPRET_PATH=/root/antizapret` в конфиг. |
 
 ```bash
 # Пример: сначала AntiZapret на VPN-сервере (если нужен локальный VPN)
 # curl -s ... | bash   # см. инструкции AntiZapret-VPN
 
-# Затем панель (one-liner — рекомендуется)
+# Затем панель (скачать install.sh и запустить с TTY)
 sudo apt update && sudo apt install -y git wget curl
-wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | sudo bash
+wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh
+sudo bash /tmp/install.sh
 
 # Или вручную: git clone + install.sh
 # sudo git clone https://github.com/Kirito0098/AdminPanelAZ.git /opt/AdminPanelAZ
 # cd /opt/AdminPanelAZ && sudo ./install.sh
 ```
 
-При запуске через one-liner или вне каталога проекта установщик сам клонирует репозиторий (по умолчанию в `/opt/AdminPanelAZ`). Переопределение: `INSTALL_FROM_GIT=<url>`, `INSTALL_TARGET=<каталог>`.
-
-Для автоматизации (CI) без TTY: `sudo ./install.sh --non-interactive --with-systemd` и переменные окружения мастера (`WIZ_*`). См. `./install.sh --help`.
+При запуске `install.sh` вне каталога проекта установщик сам клонирует репозиторий (по умолчанию в `/opt/AdminPanelAZ`). Переопределение: `INSTALL_FROM_GIT=<url>`, `INSTALL_TARGET=<каталог>`.
 
 Без аргументов в интерактивном режиме `install.sh` показывает меню:
 
