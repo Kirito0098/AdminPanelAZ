@@ -113,48 +113,79 @@ DEFAULT_ADMIN_PASSWORD=your-secure-password
 
 ## Установка на новый сервер
 
-Автоматическая установка на **Ubuntu 24.04** / **Debian 13+** (без Docker):
+Автоматическая установка на **Ubuntu 24.04** / **Debian 13+** (без Docker).
+
+### Интерактивный мастер (по умолчанию)
+
+При запуске в терминале (`sudo ./install.sh`) открывается пошаговый мастер на русском языке:
+
+1. **Тип установки** — controller / controller+node / node-only  
+2. **AntiZapret** — путь к каталогу (`ANTIZAPRET_PATH`)  
+3. **Сеть** — `BACKEND_HOST`, `BACKEND_PORT`, CORS, `ALLOW_INTERNAL_NODES`  
+4. **Администратор** — `DEFAULT_ADMIN_*`, принудительная смена пароля  
+5. **Node agent** — порт, `NODE_AGENT_API_KEY` → `backend/node_agent.env`  
+6. **Автозапуск** — manual / daemon / systemd  
+7. **Опции** — CIDR refresh, traffic sync, Telegram, auto-backup  
+8. **Пути** — state dir, `BACKUP_ROOT`  
+
+Enter принимает значение в `[скобках]`. Перед применением показывается сводка: **«Применить конфигурацию? [y/N]»**.
 
 ```bash
-# Из копии проекта на сервере
 cd /opt/AdminPanelAZ
-sudo ./install.sh
+sudo ./install.sh              # интерактивный мастер
+sudo ./install.sh -y           # все значения по умолчанию, без вопросов
+sudo ./install.sh --non-interactive --with-systemd   # CI / скрипты, только флаги
+```
 
+### Флаги (неинтерактивный режим)
+
+```bash
 # С автозапуском через systemd (рекомендуется для production)
-sudo ./install.sh --with-systemd
+sudo ./install.sh --non-interactive --with-systemd
 
 # Полная установка: controller + node agent на одной машине
-sudo ./install.sh --with-systemd --with-node-agent
+sudo ./install.sh --non-interactive --with-systemd --with-node-agent
 
 # Prod daemon без systemd (watchdog через start.sh)
-sudo ./install.sh --with-daemon
+sudo ./install.sh --non-interactive --with-daemon
 
 # Клонирование из git при первом запуске
 sudo INSTALL_FROM_GIT=https://github.com/your-org/AdminPanelAZ.git \
-  INSTALL_TARGET=/opt/AdminPanelAZ ./install.sh --with-systemd
+  INSTALL_TARGET=/opt/AdminPanelAZ ./install.sh --non-interactive --with-systemd
 ```
 
 Скрипт `install.sh`:
 
 | Этап | Действие |
 |------|----------|
-| Pre-checks | root/sudo, версия ОС, наличие `/root/antizapret` |
+| Pre-checks | root/sudo, версия ОС, мастер или флаги |
 | Зависимости | python3, venv, pip, nodejs 18+, npm, git, curl, build-essential |
 | Backend | venv + `pip install -r requirements.txt` |
-| Frontend | `npm install` + `npm run build` |
-| Конфиг | `backend/.env` из `.env.example`, генерация `SECRET_KEY` |
+| Frontend | `npm install` + `npm run build` (пропуск в режиме node-only) |
+| Конфиг | `backend/.env`, `backend/node_agent.env`, генерация секретов |
 | Опции | `--with-daemon`, `--with-systemd`, `--with-node-agent` |
 
 Флаги:
 
 | Флаг | Описание |
 |------|----------|
+| *(без флагов, TTY)* | Интерактивный мастер установки |
+| `-y`, `--yes` | Принять значения по умолчанию в мастере |
+| `--non-interactive` | Без мастера: только флаги и переменные окружения |
 | `--with-daemon` | Запустить prod daemon (`./start.sh daemon`) после установки |
 | `--with-systemd` | Установить unit `adminpanelaz` (`scripts/install-systemd.sh`) |
 | `--with-node-agent` | Настроить node agent (+ `install-node-systemd.sh` с `--with-systemd`) |
 | `--force` | Перезаписать существующий `backend/.env` |
 
-Повторный запуск безопасен (идемпотентен): существующий `backend/.env` не перезаписывается без `--force`.
+Файлы конфигурации после мастера:
+
+| Файл | Назначение |
+|------|------------|
+| `backend/.env` | Controller: секреты, CORS, admin, опции |
+| `backend/node_agent.env` | Node agent (gitignore), подключается systemd |
+| `/etc/systemd/system/adminpanelaz*.service` | `EnvironmentFile` на env-файлы проекта |
+
+Повторный запуск безопасен (идемпотентен): существующий `backend/.env` не перезаписывается без `--force` (мастер использует `--force` при подтверждении).
 
 Удаление (остановка сервисов, снятие systemd units):
 
@@ -413,6 +444,7 @@ npm run build
 ├── start.sh
 ├── start_node_agent.sh
 ├── install.sh
+├── scripts/install-wizard.sh
 ├── scripts/install-systemd.sh
 ├── scripts/install-node-systemd.sh
 ├── scripts/uninstall.sh

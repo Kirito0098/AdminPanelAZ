@@ -36,6 +36,9 @@ sed \
   -e "s|/var/lib/adminpanelaz|$STATE_DIR|g" \
   -e "s|^User=root|User=$INSTALL_USER|" \
   -e "s|^Group=root|Group=$INSTALL_GROUP|" \
+  -e "s|Environment=BACKEND_HOST=0.0.0.0|Environment=BACKEND_HOST=${BACKEND_HOST:-0.0.0.0}|" \
+  -e "s|Environment=BACKEND_PORT=8000|Environment=BACKEND_PORT=${BACKEND_PORT:-8000}|" \
+  -e "s|EnvironmentFile=-/opt/AdminPanelAZ/backend/.env|EnvironmentFile=-$ROOT_DIR/backend/.env|" \
   "$UNIT_SRC" >"$UNIT_DST"
 
 systemctl daemon-reload

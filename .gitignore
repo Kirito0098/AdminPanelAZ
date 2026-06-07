@@ -5,6 +5,7 @@ backend/__pycache__/
 **/__pycache__/
 *.pyc
 .env
+backend/node_agent.env
 
 # Node
 frontend/node_modules/

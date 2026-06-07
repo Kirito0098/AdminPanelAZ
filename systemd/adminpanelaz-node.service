@@ -9,6 +9,7 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/opt/AdminPanelAZ
+EnvironmentFile=-/opt/AdminPanelAZ/backend/node_agent.env
 Environment=NODE_AGENT_MODE=prod
 Environment=NODE_AGENT_STATE_DIR=/var/lib/adminpanelaz-node
 Environment=NODE_AGENT_HOST=0.0.0.0

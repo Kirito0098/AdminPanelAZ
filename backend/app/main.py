@@ -51,7 +51,7 @@ def seed_database():
                 password_hash=get_password_hash(settings.default_admin_password),
                 role=UserRole.admin,
                 theme="dark",
-                must_change_password=True,
+                must_change_password=settings.default_admin_must_change_password,
             )
             db.add(admin)
             db.commit()

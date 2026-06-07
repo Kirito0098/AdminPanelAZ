@@ -36,13 +36,16 @@ sed \
   -e "s|/var/lib/adminpanelaz-node|$STATE_DIR|g" \
   -e "s|^User=root|User=$INSTALL_USER|" \
   -e "s|^Group=root|Group=$INSTALL_GROUP|" \
+  -e "s|Environment=NODE_AGENT_PORT=9100|Environment=NODE_AGENT_PORT=${NODE_AGENT_PORT:-9100}|" \
+  -e "s|NODE_AGENT_API_KEY=change-me-node-agent-key|NODE_AGENT_API_KEY=${NODE_AGENT_API_KEY:-change-me-node-agent-key}|" \
+  -e "s|EnvironmentFile=-/opt/AdminPanelAZ/backend/node_agent.env|EnvironmentFile=-$ROOT_DIR/backend/node_agent.env|" \
   "$UNIT_SRC" >"$UNIT_DST"
 
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 
 log "Установлен и включён $SERVICE_NAME"
-log "Перед запуском задайте NODE_AGENT_API_KEY в $UNIT_DST"
+log "EnvironmentFile: $ROOT_DIR/backend/node_agent.env"
 log "Старт:   systemctl start $SERVICE_NAME"
 log "Статус:  systemctl status $SERVICE_NAME"
 log "Журнал:  journalctl -u $SERVICE_NAME -f"

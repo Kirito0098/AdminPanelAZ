@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
     default_admin_username: str = "admin"
     default_admin_password: str = "admin"
+    default_admin_must_change_password: bool = True
     allow_internal_nodes: bool = False
     node_agent_port: int = 9100
     backup_root: Path = Path("/var/backups/adminpanelaz")
