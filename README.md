@@ -27,7 +27,7 @@
 На чистом **Ubuntu 24.04+** или **Debian 13+** с `root`/`sudo`, `git` и доступом в интернет:
 
 ```bash
-sudo bash <(wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh)
+wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | sudo bash
 ```
 
 Альтернатива через `curl`:
@@ -36,11 +36,25 @@ sudo bash <(wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/
 curl -fsSL https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | sudo bash
 ```
 
+Скачать во временный файл и запустить (удобно при нестабильной сети):
+
+```bash
+wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh && sudo bash /tmp/install.sh
+```
+
+**Почему не `sudo bash <(wget …)`?** Конструкция `<(wget …)` (process substitution) создаёт временный дескриптор файла в **текущей** оболочке. `sudo` запускает **новый** процесс `bash`, которому этот fd недоступен — отсюда ошибка `bash: /dev/fd/63: No such file or directory`. Передача скрипта через pipe (`wget | sudo bash`) или скачивание в файл решает проблему.
+
+Если вы уже под **root** (без `sudo`), process substitution работает в той же оболочке:
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh)
+```
+
 Скрипт клонирует репозиторий в `/opt/AdminPanelAZ` (или в `INSTALL_TARGET`) и запускает интерактивный мастер. Другой форк или каталог:
 
 ```bash
-sudo INSTALL_FROM_GIT=https://github.com/you/AdminPanelAZ.git INSTALL_TARGET=/opt/my-panel \
-  bash <(wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh)
+wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | \
+  sudo INSTALL_FROM_GIT=https://github.com/you/AdminPanelAZ.git INSTALL_TARGET=/opt/my-panel bash
 ```
 
 ### Установка из уже клонированного репозитория
@@ -68,7 +82,7 @@ sudo ./install.sh
 
 # Затем панель (one-liner — рекомендуется)
 sudo apt update && sudo apt install -y git wget curl
-sudo bash <(wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh)
+wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | sudo bash
 
 # Или вручную: git clone + install.sh
 # sudo git clone https://github.com/Kirito0098/AdminPanelAZ.git /opt/AdminPanelAZ

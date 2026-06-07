@@ -270,9 +270,11 @@ ui_show_help() {
   сеть, администратора, node agent, systemd/daemon и опции .env.
   AntiZapret устанавливается отдельно в /root/antizapret (см. README).
 
-Примеры:
-  sudo bash <(wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh)
+Примеры (one-liner; не используйте sudo bash <(wget ...) — fd недоступен sudo):
+  wget -qO- https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | sudo bash
   curl -fsSL https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh | sudo bash
+  wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh && sudo bash /tmp/install.sh
+  bash <(wget -qO- ...)   # только от root, без sudo
   cd /opt/AdminPanelAZ && sudo ./install.sh
   sudo ./install.sh --with-systemd
   sudo ./install.sh --non-interactive --with-systemd -y
