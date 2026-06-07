@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Общие UI-хелперы для install.sh и install-wizard.sh (не запускать напрямую)
+# Рамки и иконки — только ASCII (+ - | [i] [!] …) для совместимости с PuTTY/Windows SSH.
 
 UI_USE_COLOR=false
 UI_INTERACTIVE=false
@@ -35,6 +36,10 @@ ui_yellow() { ui_c "33" "$*"; }
 ui_red() { ui_c "31" "$*"; }
 ui_cyan() { ui_c "36" "$*"; }
 
+ui_border_h() {
+  printf -- '-%.0s' $(seq 1 "$UI_BOX_WIDTH")
+}
+
 ui_detect_version() {
   local pkg="${ROOT_DIR:-}/frontend/package.json"
   if [[ -f "$pkg" ]]; then
@@ -60,16 +65,10 @@ ui_show_banner() {
 ui_box_top() {
   local title="$1"
   local border
-  border="$(printf '─%.0s' $(seq 1 "$UI_BOX_WIDTH"))"
-  if [[ "$UI_USE_COLOR" == true ]]; then
-    echo "$(ui_cyan "┌${border}┐")"
-    printf "%s %s\n" "$(ui_cyan "│")" "$(ui_bold "$title")"
-    echo "$(ui_cyan "├${border}┤")"
-  else
-    echo "+$(printf -- '-%.0s' $(seq 1 "$UI_BOX_WIDTH"))+"
-    echo "| $title"
-    echo "+$(printf -- '-%.0s' $(seq 1 "$UI_BOX_WIDTH"))+"
-  fi
+  border="$(ui_border_h)"
+  echo "$(ui_cyan "+${border}+")"
+  printf "%s %s\n" "$(ui_cyan "|")" "$(ui_bold "$title")"
+  echo "$(ui_cyan "+${border}+")"
 }
 
 ui_box_line() {
@@ -79,23 +78,15 @@ ui_box_line() {
   if (( pad < 0 )); then
     pad=0
   fi
-  if [[ "$UI_USE_COLOR" == true ]]; then
-    printf "%s %s%s %s\n" "$(ui_cyan "│")" "$text" "$(printf '%*s' "$pad" '')" "$(ui_cyan "│")"
-  else
-    printf "| %s%s |\n" "$text" "$(printf '%*s' "$pad" '')"
-  fi
+  printf "%s %s%s %s\n" "$(ui_cyan "|")" "$text" "$(printf '%*s' "$pad" '')" "$(ui_cyan "|")"
 }
 
 ui_box_bottom() {
-  if [[ "$UI_USE_COLOR" == true ]]; then
-    echo "$(ui_cyan "└$(printf '─%.0s' $(seq 1 "$UI_BOX_WIDTH"))┘")"
-  else
-    echo "+$(printf -- '-%.0s' $(seq 1 "$UI_BOX_WIDTH"))+"
-  fi
+  echo "$(ui_cyan "+$(ui_border_h)+")"
 }
 
 ui_separator() {
-  local char="${1:-─}"
+  local char="${1:--}"
   if [[ "$UI_USE_COLOR" == true ]]; then
     echo "$(ui_cyan "$(printf '%*s' "$UI_BOX_WIDTH" '' | tr ' ' "$char")")"
   else
@@ -112,38 +103,22 @@ ui_section() {
 
 print_info() {
   local msg="$1"
-  if [[ "$UI_USE_COLOR" == true ]]; then
-    echo "$(ui_cyan "  ℹ")  $msg"
-  else
-    echo "  [i] $msg"
-  fi
+  echo "$(ui_cyan "  [i]")  $msg"
 }
 
 print_warn() {
   local msg="$1"
-  if [[ "$UI_USE_COLOR" == true ]]; then
-    echo "$(ui_yellow "  ⚠")  $msg" >&2
-  else
-    echo "  [!] $msg" >&2
-  fi
+  echo "$(ui_yellow "  [!]")  $msg" >&2
 }
 
 print_error() {
   local msg="$1"
-  if [[ "$UI_USE_COLOR" == true ]]; then
-    echo "$(ui_red "  ✖")  $msg" >&2
-  else
-    echo "  [x] $msg" >&2
-  fi
+  echo "$(ui_red "  [x]")  $msg" >&2
 }
 
 print_success() {
   local msg="$1"
-  if [[ "$UI_USE_COLOR" == true ]]; then
-    echo "$(ui_green "  ✔")  $msg"
-  else
-    echo "  [+] $msg"
-  fi
+  echo "$(ui_green "  [+]")  $msg"
 }
 
 ui_info_box() {
@@ -151,49 +126,25 @@ ui_info_box() {
   shift || true
   local line
   if [[ -n "$title" ]]; then
-    if [[ "$UI_USE_COLOR" == true ]]; then
-      echo "  $(ui_cyan "┌─") $(ui_bold "$title") $(ui_cyan "$(printf '─%.0s' $(seq 1 $((UI_BOX_WIDTH - ${#title} - 6))))┐")"
-    else
-      echo "  +-- $title --"
-    fi
+    echo "  $(ui_cyan "+--") $(ui_bold "$title") $(ui_cyan "$(printf -- '-%.0s' $(seq 1 $((UI_BOX_WIDTH - ${#title} - 6))))+")"
   else
     echo "  +--"
   fi
   for line in "$@"; do
-    if [[ "$UI_USE_COLOR" == true ]]; then
-      echo "  $(ui_cyan "│") $line"
-    else
-      echo "  | $line"
-    fi
+    echo "  $(ui_cyan "|") $line"
   done
-  if [[ "$UI_USE_COLOR" == true ]]; then
-    echo "  $(ui_cyan "└$(printf '─%.0s' $(seq 1 "$UI_BOX_WIDTH"))┘")"
-  else
-    echo "  +$(printf -- '-%.0s' $(seq 1 "$UI_BOX_WIDTH"))+"
-  fi
+  echo "  $(ui_cyan "+$(ui_border_h)+")"
 }
 
 ui_warn_box() {
   local title="$1"
   shift
-  if [[ "$UI_USE_COLOR" == true ]]; then
-    echo "  $(ui_yellow "┌─ ⚠") $(ui_bold "$title")"
-  else
-    echo "  [!] $title"
-  fi
+  echo "  $(ui_yellow "+-- [!]") $(ui_bold "$title")"
   local line
   for line in "$@"; do
-    if [[ "$UI_USE_COLOR" == true ]]; then
-      echo "  $(ui_yellow "│") $line"
-    else
-      echo "    $line"
-    fi
+    echo "  $(ui_yellow "|") $line"
   done
-  if [[ "$UI_USE_COLOR" == true ]]; then
-    echo "  $(ui_yellow "└$(printf '─%.0s' $(seq 1 "$UI_BOX_WIDTH"))┘")"
-  else
-    echo
-  fi
+  echo "  $(ui_yellow "+$(ui_border_h)+")"
 }
 
 ui_step_header() {
@@ -232,11 +183,7 @@ ui_progress_start() {
   local msg="$1"
   UI_PROGRESS_MSG="$msg"
   if [[ "$UI_INTERACTIVE" == true ]]; then
-    if [[ "$UI_USE_COLOR" == true ]]; then
-      printf "%s %s...\n" "$(ui_cyan "▸")" "$msg"
-    else
-      printf "[install] %s...\n" "$msg"
-    fi
+    printf "%s %s...\n" "$(ui_cyan ">")" "$msg"
   else
     printf "[install] %s...\n" "$msg"
   fi
@@ -245,38 +192,24 @@ ui_progress_start() {
 ui_progress_done() {
   local msg="${1:-$UI_PROGRESS_MSG}"
   if [[ "$UI_INTERACTIVE" == true && "$UI_USE_COLOR" == true ]]; then
-    print_success "${msg} — готово"
+    print_success "${msg} - готово"
   else
-    printf "[install] %s — готово\n" "$msg"
+    printf "[install] %s - готово\n" "$msg"
   fi
 }
 
 ui_show_main_menu() {
   ui_show_banner
-  if [[ "$UI_USE_COLOR" == true ]]; then
-    ui_box_top "Выберите действие"
-    ui_box_line "  1) Новая установка"
-    ui_box_line "     Интерактивный мастер, настройка с нуля"
-    ui_box_line "  2) Переустановка"
-    ui_box_line "     Резервная копия .env, удаление сервисов, новая установка"
-    ui_box_line "  3) Полное удаление"
-    ui_box_line "     Остановка сервисов, опционально — каталог проекта"
-    ui_box_line "  4) Справка"
-    ui_box_line "     Опции CLI и примеры запуска"
-    ui_box_bottom
-  else
-    echo "=== AdminPanelAZ — установщик ==="
-    echo
-    echo "  1) Новая установка"
-    echo "     Интерактивный мастер, настройка с нуля"
-    echo "  2) Переустановка"
-    echo "     Резервная копия .env, удаление сервисов, новая установка"
-    echo "  3) Полное удаление"
-    echo "     Остановка сервисов, опционально — каталог проекта"
-    echo "  4) Справка"
-    echo "     Опции CLI и примеры запуска"
-    echo
-  fi
+  ui_box_top "Выберите действие"
+  ui_box_line "  1) Новая установка"
+  ui_box_line "     Интерактивный мастер, настройка с нуля"
+  ui_box_line "  2) Переустановка"
+  ui_box_line "     Резервная копия .env, удаление сервисов, новая установка"
+  ui_box_line "  3) Полное удаление"
+  ui_box_line "     Остановка сервисов, опционально - каталог проекта"
+  ui_box_line "  4) Справка"
+  ui_box_line "     Опции CLI и примеры запуска"
+  ui_box_bottom
 }
 
 ui_confirm() {
@@ -296,11 +229,7 @@ ui_confirm() {
   fi
 
   if [[ "$danger" == true ]]; then
-    if [[ "$UI_USE_COLOR" == true ]]; then
-      echo "$(ui_red "  ⚠ ОПАСНОЕ ДЕЙСТВИЕ")"
-    else
-      echo "  [!] ОПАСНОЕ ДЕЙСТВИЕ"
-    fi
+    echo "$(ui_red "  [!] ОПАСНОЕ ДЕЙСТВИЕ")"
   fi
 
   read -r -p "$prompt [$hint]: " answer
@@ -314,7 +243,7 @@ ui_show_help() {
 Использование: sudo ./install.sh [опции]
 
 Единая точка входа для установки AdminPanelAZ.
-Без аргументов (TTY) — интерактивное меню.
+Без аргументов (TTY) - интерактивное меню.
 
 Действия:
   (меню)                Новая установка / переустановка / удаление / справка
@@ -324,8 +253,8 @@ ui_show_help() {
 
 Опции установки:
   --with-daemon         Запустить prod daemon через start.sh после установки
-  --with-systemd        Установить systemd unit (без мастера — флаг явный)
-  --with-node-agent     Настроить node agent (без мастера — флаг явный)
+  --with-systemd        Установить systemd unit (без мастера - флаг явный)
+  --with-node-agent     Настроить node agent (без мастера - флаг явный)
   --force               Перезаписать существующий backend/.env из .env.example
   --non-interactive     Без интерактивного мастера (флаги и переменные окружения)
   -y, --yes             Принять значения по умолчанию
@@ -355,23 +284,13 @@ ui_show_success_screen() {
   local title="$1"
   shift
   echo
-  if [[ "$UI_USE_COLOR" == true ]]; then
-    echo "$(ui_green "┌$(printf '─%.0s' $(seq 1 "$UI_BOX_WIDTH"))┐")"
-    printf "%s %s %s\n" "$(ui_green "│")" "$(ui_bold "$title")" "$(ui_green "$(printf '%*s│' $((UI_BOX_WIDTH - ${#title} - 1)) '')")"
-    echo "$(ui_green "├$(printf '─%.0s' $(seq 1 "$UI_BOX_WIDTH"))┤")"
-    local line
-    for line in "$@"; do
-      ui_box_line "$line"
-    done
-    ui_box_bottom
-  else
-    echo "================================================================================"
-    echo "  $title"
-    echo "================================================================================"
-    local line
-    for line in "$@"; do
-      echo "$line"
-    done
-  fi
+  echo "$(ui_green "+$(ui_border_h)+")"
+  printf "%s %s %s\n" "$(ui_green "|")" "$(ui_bold "$title")" "$(ui_green "$(printf '%*s|' $((UI_BOX_WIDTH - ${#title} - 1)) '')")"
+  echo "$(ui_green "+$(ui_border_h)+")"
+  local line
+  for line in "$@"; do
+    ui_box_line "$line"
+  done
+  ui_box_bottom
   echo
 }

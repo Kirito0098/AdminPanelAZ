@@ -823,7 +823,7 @@ wizard_show_summary() {
   ui_summary_row "Тип установки" "$install_label"
   ui_summary_row "AntiZapret" "$WIZ_ANTIZAPRET_PATH"
   if [[ "$WIZ_INSTALL_TYPE" != "node" ]]; then
-    ui_summary_row "Доступ" "${WIZ_SERVER_ADDRESS:-—}"
+    ui_summary_row "Доступ" "${WIZ_SERVER_ADDRESS:--}"
     if [[ "$WIZ_DDNS_PROVIDER" != "none" ]]; then
       ui_summary_row "DDNS" "$WIZ_DDNS_PROVIDER ($(wizard_ddns_fqdn))"
       ui_summary_row "DDNS auto-update" "$WIZ_DDNS_CONFIGURE_UPDATE"
