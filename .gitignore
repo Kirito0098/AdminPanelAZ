@@ -1,0 +1,19 @@
+# Python
+backend/.venv/
+backend/data/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+.env
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Runtime
+.start.sh.pids
+
+# IDE
+.idea/
+.vscode/
+*.swp
