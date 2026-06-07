@@ -79,7 +79,10 @@ export default function BackupTab() {
       destructive: true,
       onConfirm: async () => {
         try {
-          await withInline(() => restoreBackup(fileName), 'Восстановление...')
+          await withInline(async () => {
+            await restoreBackup(fileName)
+            await load()
+          }, 'Восстановление...')
           success('Восстановление выполнено — перезапустите панель')
         } catch (err) {
           notifyError(err instanceof ApiError ? err.message : 'Ошибка восстановления')

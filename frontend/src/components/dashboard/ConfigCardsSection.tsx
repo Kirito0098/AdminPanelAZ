@@ -170,6 +170,7 @@ export default function ConfigCardsSection({
       if (confirmAction === 'delete') {
         await deleteConfig(confirmTarget.id)
         onNotifySuccess(`Клиент «${name}» удалён`)
+        if (selectedConfig?.id === confirmTarget.id) setSelectedConfig(null)
         closeConfirm()
         await onRefresh()
         return

@@ -395,6 +395,7 @@ export default function NodesPage() {
         await rotateNodeApiKey(confirmTarget.id)
         success(`API-ключ узла «${confirmTarget.name}» обновлён`)
         await load()
+        await refresh()
       }
       setConfirmAction(null)
       setConfirmTarget(null)
@@ -780,7 +781,10 @@ export default function NodesPage() {
         node={updateNodeTarget}
         open={!!updateNodeTarget}
         onOpenChange={(open) => !open && setUpdateNodeTarget(null)}
-        onComplete={load}
+        onComplete={async () => {
+          await load()
+          await refresh()
+        }}
       />
     </div>
   )

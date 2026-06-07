@@ -61,6 +61,20 @@ export function useRoutingPage() {
     }
   }, [])
 
+  const loadGames = useCallback(async () => {
+    try {
+      const { games: gameList } = await getGameFilters()
+      setGames(gameList)
+      const modes: Record<string, string> = {}
+      gameList.forEach((g) => {
+        modes[g.key] = g.mode
+      })
+      setGameModes(modes)
+    } catch {
+      /* optional panel */
+    }
+  }, [])
+
   const load = useCallback(
     async (opts: { initial?: boolean; manual?: boolean } = {}) => {
       const { initial = false, manual = false } = opts
@@ -72,7 +86,7 @@ export function useRoutingPage() {
       }
       try {
         setData(await getRoutingOverview())
-        await loadPipelineMeta()
+        await Promise.all([loadPipelineMeta(), loadGames()])
         setCountdown(REFRESH_INTERVAL)
         if (manual) success('Данные маршрутизации обновлены')
       } catch (err) {
@@ -83,7 +97,7 @@ export function useRoutingPage() {
         if (initial) doneGlobal()
       }
     },
-    [startGlobal, doneGlobal, notifyError, loadPipelineMeta, success],
+    [startGlobal, doneGlobal, notifyError, loadPipelineMeta, loadGames, success],
   )
 
   const stopPolling = useCallback(() => {
@@ -122,16 +136,6 @@ export function useRoutingPage() {
 
   useEffect(() => {
     load({ initial: true })
-    getGameFilters()
-      .then((r) => {
-        setGames(r.games)
-        const modes: Record<string, string> = {}
-        r.games.forEach((g) => {
-          modes[g.key] = g.mode
-        })
-        setGameModes(modes)
-      })
-      .catch(() => {})
   }, [load, activeNode?.id])
 
   useEffect(() => {

@@ -6,10 +6,12 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
 import type { FeatureToggleItem } from '@/types'
 
 export default function FeatureTogglesTab() {
+  const { refresh: refreshModules } = useFeatureModules()
   const { success, error: notifyError } = useNotifications()
   const [items, setItems] = useState<FeatureToggleItem[]>([])
   const [draft, setDraft] = useState<Record<string, boolean>>({})
@@ -55,6 +57,7 @@ export default function FeatureTogglesTab() {
       const data = await updateFeatureToggles(updates)
       setItems(data.items)
       setDraft(Object.fromEntries(data.items.map((item) => [item.key, item.enabled])))
+      await refreshModules()
       success('Модули сохранены. Перезапустите панель для применения фоновых задач.')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения модулей')
