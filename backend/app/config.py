@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     traffic_sync_enabled: bool = True
     traffic_sync_interval_seconds: int = 30
     traffic_db_stale_seconds: int = 600
+    openvpn_socket_dir: Path = Path("/run/openvpn-server")
+    openvpn_socket_timeout: float = 2.5
+    openvpn_socket_idle_timeout: float = 0.12
+    openvpn_log_tail_lines: int = 200
+    openvpn_event_max_response_bytes: int = 524288
     cidr_db_refresh_enabled: bool = True
     cidr_db_refresh_hour: int = 2
     cidr_db_refresh_minute: int = 30

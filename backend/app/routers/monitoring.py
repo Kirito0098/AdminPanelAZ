@@ -17,14 +17,16 @@ router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 def monitoring_overview(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
+    ovpn_clients, openvpn_data_source = adapter.get_openvpn_status_snapshot()
     return MonitoringOverview(
         services=adapter.get_service_status(),
-        openvpn_clients=adapter.parse_openvpn_status(),
+        openvpn_clients=ovpn_clients,
         wireguard_peers=adapter.parse_wireguard_status(),
         server_ip=adapter.get_server_ip(),
         timestamp=datetime.utcnow(),
         node_id=node.id,
         node_name=node.name,
+        openvpn_data_source=openvpn_data_source,
     )
 
 

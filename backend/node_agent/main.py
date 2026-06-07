@@ -12,6 +12,7 @@ from app.models import VpnType
 from app.config import get_settings
 from app.services.antizapret import AntiZapretService
 from app.services.cidr.service import CidrRoutingService
+from app.services.openvpn_management import openvpn_management_service
 
 NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
@@ -58,11 +59,29 @@ def health(_: None = Depends(verify_api_key)):
 
 @app.get("/monitoring/overview")
 def monitoring_overview(_: None = Depends(verify_api_key)):
+    ovpn_clients, openvpn_data_source = service.parse_openvpn_status()
     return {
         "services": [s.model_dump() for s in service.get_service_status()],
-        "openvpn_clients": [c.model_dump() for c in service.parse_openvpn_status()],
+        "openvpn_clients": [c.model_dump() for c in ovpn_clients],
         "wireguard_peers": [p.model_dump() for p in service.parse_wireguard_status()],
         "server_ip": service.get_server_ip(),
+        "timestamp": datetime.utcnow().isoformat(),
+        "openvpn_data_source": openvpn_data_source,
+    }
+
+
+@app.get("/openvpn/management/events")
+def openvpn_management_events(_: None = Depends(verify_api_key)):
+    return {
+        "profiles": openvpn_management_service.collect_events(),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/openvpn/management/sockets")
+def openvpn_management_sockets(_: None = Depends(verify_api_key)):
+    return {
+        "sockets": openvpn_management_service.get_socket_status(),
         "timestamp": datetime.utcnow().isoformat(),
     }
 

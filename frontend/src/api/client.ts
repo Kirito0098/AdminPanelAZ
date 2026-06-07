@@ -450,7 +450,11 @@ export async function getActionLogs(limit = 100) {
 }
 
 export async function getConnectionLogs() {
-  return apiFetch<{ openvpn_clients: unknown[]; wireguard_peers: unknown[]; timestamp: string }>('/logs/connections')
+  return apiFetch<import('../types').ConnectionLogsSnapshot>('/logs/connections')
+}
+
+export async function getOpenVpnEvents() {
+  return apiFetch<{ profiles: import('../types').OpenVpnEventProfile[]; timestamp: string }>('/logs/openvpn-events')
 }
 
 export async function checkSystemUpdates() {

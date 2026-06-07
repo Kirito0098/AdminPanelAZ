@@ -58,10 +58,39 @@ def connection_snapshot(
 ):
     """Live connection snapshot (complements traffic page with real-time status)."""
     adapter = get_active_adapter(db)
-    ovpn = [c.model_dump() for c in adapter.parse_openvpn_status()]
+    ovpn_clients, openvpn_data_source = adapter.get_openvpn_status_snapshot()
+    ovpn = [c.model_dump() for c in ovpn_clients]
     wg = [p.model_dump() for p in adapter.parse_wireguard_status()]
     return {
         "openvpn_clients": ovpn,
         "wireguard_peers": wg,
+        "openvpn_data_source": openvpn_data_source,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/openvpn-events")
+def openvpn_management_events(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Recent OpenVPN management log lines per profile (from Unix sockets)."""
+    adapter = get_active_adapter(db)
+    profiles = adapter.get_openvpn_management_events()
+    return {
+        "profiles": profiles,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/openvpn-sockets")
+def openvpn_socket_status(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """OpenVPN management socket availability (admin diagnostics)."""
+    adapter = get_active_adapter(db)
+    return {
+        "sockets": adapter.get_openvpn_socket_status(),
         "timestamp": datetime.utcnow().isoformat(),
     }

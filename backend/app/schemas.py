@@ -98,6 +98,9 @@ class OpenVpnClient(BaseModel):
     bytes_received: int
     bytes_sent: int
     connected_since: str
+    connected_since_ts: int = 0
+    profile: str | None = None
+    data_source: str = "status_log"
 
 
 class WireGuardPeer(BaseModel):
@@ -119,6 +122,7 @@ class MonitoringOverview(BaseModel):
     timestamp: datetime
     node_id: int | None = None
     node_name: str | None = None
+    openvpn_data_source: str = "status_log"
 
 
 class AppSettingsResponse(BaseModel):

@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 from app.config import get_settings
 from app.models import VpnType
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
+from app.services.openvpn_management import openvpn_management_service
 
 settings = get_settings()
 CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
@@ -281,7 +282,12 @@ class AntiZapretService:
             )
         return result_list
 
-    def parse_openvpn_status(self) -> list[OpenVpnClient]:
+    def parse_openvpn_status(self) -> tuple[list[OpenVpnClient], str]:
+        clients, data_source = openvpn_management_service.collect_clients(self.openvpn_logs)
+        return clients, data_source
+
+    def parse_openvpn_status_legacy(self) -> list[OpenVpnClient]:
+        """Parse OpenVPN clients from *-status.log files (legacy fallback)."""
         clients: list[OpenVpnClient] = []
         if not self.openvpn_logs.exists():
             return clients

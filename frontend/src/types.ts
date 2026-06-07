@@ -57,6 +57,9 @@ export interface OpenVpnClient {
   bytes_received: number
   bytes_sent: number
   connected_since: string
+  connected_since_ts?: number
+  profile?: string | null
+  data_source?: string
 }
 
 export interface WireGuardPeer {
@@ -78,6 +81,23 @@ export interface MonitoringOverview {
   timestamp: string
   node_id?: number | null
   node_name?: string | null
+  openvpn_data_source?: string
+}
+
+export interface OpenVpnEventProfile {
+  profile: string
+  source_name: string
+  exists: boolean
+  updated_at_ts: number
+  line_count: number
+  recent_lines: string[]
+}
+
+export interface ConnectionLogsSnapshot {
+  openvpn_clients: OpenVpnClient[]
+  wireguard_peers: WireGuardPeer[]
+  openvpn_data_source?: string
+  timestamp: string
 }
 
 export interface AppSettings {

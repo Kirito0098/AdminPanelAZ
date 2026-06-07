@@ -23,16 +23,16 @@ def build_status_rows(
 
     ovpn_by_profile: dict[str, list[dict]] = {}
     for client in openvpn_clients:
-        profile = "vpn-udp"
-        if client.common_name.startswith("antizapret"):
-            profile = "antizapret-udp"
+        profile = (client.profile or "").strip()
+        if not profile:
+            profile = "antizapret-udp" if client.common_name.startswith("antizapret") else "vpn-udp"
         ovpn_by_profile.setdefault(profile, []).append({
             "common_name": client.common_name,
             "real_address": client.real_address,
             "virtual_address": client.virtual_address,
             "bytes_received": client.bytes_received,
             "bytes_sent": client.bytes_sent,
-            "connected_since_ts": 0,
+            "connected_since_ts": int(client.connected_since_ts or 0),
             "session_kind": "openvpn",
         })
 

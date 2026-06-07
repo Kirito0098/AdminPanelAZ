@@ -10,6 +10,7 @@ from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.config import get_settings
 from app.services.antizapret import AntiZapretService
 from app.services.cidr.service import CidrRoutingService
+from app.services.openvpn_management import openvpn_management_service
 
 _settings = get_settings()
 
@@ -64,6 +65,15 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def parse_openvpn_status(self) -> list[OpenVpnClient]: ...
+
+    @abstractmethod
+    def get_openvpn_status_snapshot(self) -> tuple[list[OpenVpnClient], str]: ...
+
+    @abstractmethod
+    def get_openvpn_management_events(self) -> list[dict]: ...
+
+    @abstractmethod
+    def get_openvpn_socket_status(self) -> list[dict]: ...
 
     @abstractmethod
     def parse_wireguard_status(self) -> list[WireGuardPeer]: ...
@@ -163,7 +173,21 @@ class LocalNodeAdapter(NodeAdapter):
         return self._service.get_service_status()
 
     def parse_openvpn_status(self) -> list[OpenVpnClient]:
+        clients, _ = self.get_openvpn_status_snapshot()
+        return clients
+
+    def get_openvpn_status_snapshot(self) -> tuple[list[OpenVpnClient], str]:
         return self._service.parse_openvpn_status()
+
+    def get_openvpn_data_source(self) -> str:
+        _, data_source = self.get_openvpn_status_snapshot()
+        return data_source
+
+    def get_openvpn_management_events(self) -> list[dict]:
+        return openvpn_management_service.collect_events()
+
+    def get_openvpn_socket_status(self) -> list[dict]:
+        return openvpn_management_service.get_socket_status()
 
     def parse_wireguard_status(self) -> list[WireGuardPeer]:
         return self._service.parse_wireguard_status()
@@ -302,8 +326,25 @@ class RemoteNodeAdapter(NodeAdapter):
         return [MonitoringService(**s) for s in overview.get("services", [])]
 
     def parse_openvpn_status(self) -> list[OpenVpnClient]:
+        clients, _ = self.get_openvpn_status_snapshot()
+        return clients
+
+    def get_openvpn_status_snapshot(self) -> tuple[list[OpenVpnClient], str]:
         overview = self._request("GET", "/monitoring/overview")
-        return [OpenVpnClient(**c) for c in overview.get("openvpn_clients", [])]
+        clients = [OpenVpnClient(**c) for c in overview.get("openvpn_clients", [])]
+        return clients, overview.get("openvpn_data_source", "status_log")
+
+    def get_openvpn_data_source(self) -> str:
+        _, data_source = self.get_openvpn_status_snapshot()
+        return data_source
+
+    def get_openvpn_management_events(self) -> list[dict]:
+        data = self._request("GET", "/openvpn/management/events")
+        return data.get("profiles", [])
+
+    def get_openvpn_socket_status(self) -> list[dict]:
+        data = self._request("GET", "/openvpn/management/sockets")
+        return data.get("sockets", [])
 
     def parse_wireguard_status(self) -> list[WireGuardPeer]:
         overview = self._request("GET", "/monitoring/overview")

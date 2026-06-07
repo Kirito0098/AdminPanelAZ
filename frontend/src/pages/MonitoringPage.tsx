@@ -9,6 +9,7 @@ import StatusPanel from '@/components/noc/StatusPanel'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import Spinner from '@/components/ui/Spinner'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { NodeBadge } from '@/components/NodeSelector'
 import { useNode } from '@/context/NodeContext'
@@ -92,7 +93,18 @@ export default function MonitoringPage() {
               <h2 className="text-2xl font-bold tracking-tight">NOC · Мониторинг</h2>
               <NodeBadge name={activeNode?.name ?? data?.node_name} status={activeNode?.status} />
             </div>
-            <p className="mono text-sm text-muted-foreground">LIVE · службы · подключения · трафик</p>
+            <p className="mono text-sm text-muted-foreground">
+              LIVE · службы · подключения · трафик
+              {data.openvpn_data_source && (
+                <>
+                  {' '}
+                  · OVPN:{' '}
+                  <Badge variant={data.openvpn_data_source === 'management_socket' ? 'default' : 'secondary'} className="align-middle">
+                    {data.openvpn_data_source === 'management_socket' ? 'management socket' : 'status-логи'}
+                  </Badge>
+                </>
+              )}
+            </p>
           </div>
         </div>
         <AutoRefreshControl

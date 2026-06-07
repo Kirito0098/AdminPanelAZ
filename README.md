@@ -79,6 +79,7 @@ API-ключи хранятся в БД в виде bcrypt-хеша и Fernet-ш
 | **Telegram Mini App** (базовый) | ✅ `/api/tg-mini` |
 | **Системные обновления** (git pull) | ✅ `/api/system/updates` |
 | **Скачивание бэкапов** | ✅ кнопка в UI |
+| **OpenVPN management socket** (status 3, log tail) | ✅ `/api/logs/openvpn-events`, fallback `*-status.log` |
 
 ### Не портировано (ограничения)
 | Функция | Причина |
@@ -88,7 +89,7 @@ API-ключи хранятся в БД в виде bcrypt-хеша и Fernet-ш
 | Captcha / Telegram Login Widget | Flask-session специфика |
 | In-panel pytest runner | Низкий приоритет |
 | IP-blocked dwell page | Отдельный Flask blueprint |
-| OpenVPN management socket traffic | Используются status-логи |
+| OpenVPN client-kill через management | Не реализовано (только чтение) |
 | Полный tg_mini UI (все вкладки) | Портирован core API + минимальная HTML-страница |
 
 ## Учётные данные по умолчанию
@@ -351,9 +352,22 @@ npm run build
 | Файлы профилей | `/root/antizapret/client/` |
 | Списки доменов/IP | `/root/antizapret/config/*.txt` |
 | Применить списки | `doall.sh` |
-| OpenVPN-подключения | `/etc/openvpn/server/logs/*-status.log` |
+| OpenVPN-подключения | Unix-сокеты `/run/openvpn-server/*.sock` (`status 3`), fallback `*-status.log` |
 | WireGuard-подключения | `wg show all dump` |
 | Статус служб | `systemctl is-active` |
+
+### OpenVPN management interface
+
+Для live-трафика и событий подключений OpenVPN должен быть настроен management interface (Unix socket). AntiZapret создаёт сокеты в `/run/openvpn-server/`:
+
+| Профиль | Сокет | Status-лог (fallback) |
+|---------|-------|------------------------|
+| `antizapret-udp` | `antizapret-udp.sock` | `antizapret-udp-status.log` |
+| `antizapret-tcp` | `antizapret-tcp.sock` | `antizapret-tcp-status.log` |
+| `vpn-udp` | `vpn-udp.sock` | `vpn-udp-status.log` |
+| `vpn-tcp` | `vpn-tcp.sock` | `vpn-tcp-status.log` |
+
+Панель отправляет команды `status 3` (CLIENT_LIST + байты) и `log N` (хвост событий). Если сокет недоступен, используется парсинг `*-status.log` из `/etc/openvpn/server/logs/`. Переменные — `OPENVPN_SOCKET_DIR`, `OPENVPN_LOG_TAIL_LINES` в `backend/.env`.
 
 ## Роли
 
@@ -467,6 +481,12 @@ CIDR_LIST_DIR=data/cidr/list
 TRAFFIC_SYNC_ENABLED=true
 TRAFFIC_SYNC_INTERVAL_SECONDS=30
 TRAFFIC_DB_STALE_SECONDS=600
+# OpenVPN management Unix sockets (см. /etc/openvpn/server/*.conf → management ...)
+OPENVPN_SOCKET_DIR=/run/openvpn-server
+OPENVPN_SOCKET_TIMEOUT=2.5
+OPENVPN_SOCKET_IDLE_TIMEOUT=0.12
+OPENVPN_LOG_TAIL_LINES=200
+OPENVPN_EVENT_MAX_RESPONSE_BYTES=524288
 ```
 
 ## Новые API (порт второго прохода)
@@ -482,7 +502,9 @@ TRAFFIC_DB_STALE_SECONDS=600
 | WS | `/api/server-monitor/ws?token=` | Live CPU/RAM (2с) |
 | GET/POST | `/api/routing/game-filters` | Игровые фильтры |
 | GET | `/api/logs/actions` | Audit log |
-| GET | `/api/logs/connections` | Снимок подключений |
+| GET | `/api/logs/connections` | Снимок подключений (+ `openvpn_data_source`) |
+| GET | `/api/logs/openvpn-events` | Хвост событий OpenVPN management (`log N`) |
+| GET | `/api/logs/openvpn-sockets` | Диагностика сокетов (admin) |
 | GET/POST | `/api/system/updates` | Проверка/применение git update |
 | PUT | `/api/system/viewer-access` | Права viewer на конфиги |
 | GET/POST | `/api/tg-mini/*` | Telegram Mini App |
@@ -494,4 +516,5 @@ TRAFFIC_DB_STALE_SECONDS=600
 - WG runtime block через `wg set peer remove` (упрощённо vs полный enforcer AdminAntizapret)
 - IP firewall (iptables) для scanner block — только настройки в БД, без автоматического iptables
 - Авто-бэкап: asyncio worker на controller (не system crontab)
-- Трафик: status-логи OpenVPN + `wg show` (не management sockets)
+- Трафик OpenVPN: management socket (`status 3`) с fallback на `*-status.log`; WireGuard — `wg show`
+- Node agent: `/openvpn/management/events`, `/openvpn/management/sockets` для удалённых узлов
