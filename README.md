@@ -14,7 +14,8 @@
 
 ## Архитектура Controller + Nodes
 
-**Controller** — эта панель администрирования (центральное управление).  
+
+**Controller** — эта панель администрирования (центральное управление).
 **Nodes** — VPN-серверы с AntiZapret, которыми управляет controller.
 
 | Компонент | Роль |
@@ -139,14 +140,14 @@ DEFAULT_ADMIN_PASSWORD=your-secure-password
 
 При запуске в терминале (`sudo ./install.sh`) открывается пошаговый мастер на русском языке:
 
-1. **Тип установки** — controller / controller+node / node-only  
-2. **AntiZapret** — путь к каталогу (`ANTIZAPRET_PATH`)  
-3. **Сеть** — `BACKEND_HOST`, `BACKEND_PORT`, CORS, `ALLOW_INTERNAL_NODES`  
-4. **Администратор** — `DEFAULT_ADMIN_*`, принудительная смена пароля  
-5. **Node agent** — порт, `NODE_AGENT_API_KEY` → `backend/node_agent.env`  
-6. **Автозапуск** — manual / daemon / systemd  
-7. **Опции** — CIDR refresh, traffic sync, Telegram, auto-backup  
-8. **Пути** — state dir, `BACKUP_ROOT`  
+1. **Тип установки** — controller / controller+node / node-only
+2. **AntiZapret** — путь к каталогу (`ANTIZAPRET_PATH`)
+3. **Сеть** — `BACKEND_HOST`, `BACKEND_PORT`, CORS, `ALLOW_INTERNAL_NODES`
+4. **Администратор** — `DEFAULT_ADMIN_*`, принудительная смена пароля
+5. **Node agent** — порт, `NODE_AGENT_API_KEY` → `backend/node_agent.env`
+6. **Автозапуск** — manual / daemon / systemd
+7. **Опции** — CIDR refresh, traffic sync, Telegram, auto-backup
+8. **Пути** — state dir, `BACKUP_ROOT`
 
 Enter принимает значение в `[скобках]`. Перед применением показывается сводка: **«Применить конфигурацию? [y/N]»**.
 
@@ -337,7 +338,7 @@ mkdir -p data
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-API: http://127.0.0.1:8000  
+API: http://127.0.0.1:8000
 Документация: http://127.0.0.1:8000/docs
 
 #### Frontend
