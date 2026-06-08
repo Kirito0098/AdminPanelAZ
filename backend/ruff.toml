@@ -1,0 +1,33 @@
+# Ruff configuration — intentionally a soft starter ruleset.
+# Goal: catch real errors (undefined names, unused imports, bad imports)
+# without forcing a large stylistic refactor across the existing codebase.
+
+target-version = "py312"
+line-length = 120
+
+extend-exclude = [
+    "venv",
+    ".venv",
+    "env",
+    "ENV",
+    "data",
+    "build",
+    "dist",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+]
+
+[lint]
+select = ["E", "F", "I"]
+
+ignore = [
+    "E501",  # line too long (cosmetic; not worth a mass reflow)
+    "E741",  # ambiguous variable name (l, I, O)
+    "E402",  # module import not at top (CLI helpers tweak sys.path first)
+    "F401",  # unused import (legacy re-exports; revisit module by module)
+    "F541",  # f-string without placeholders
+    "F811",  # redefinition of unused name
+    "F841",  # assigned-but-unused local variable
+    "I001",  # unsorted/unformatted import block (enable after a cleanup pass)
+]

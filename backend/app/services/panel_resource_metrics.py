@@ -70,7 +70,9 @@ def _aggregate_bucket(samples: list[PanelResourceSample]) -> dict[str, Any]:
     count = len(samples)
     if count == 0:
         return {}
-    avg = lambda attr: round(sum(getattr(s, attr) or 0 for s in samples) / count, 1)
+
+    def avg(attr: str) -> float:
+        return round(sum(getattr(s, attr) or 0 for s in samples) / count, 1)
     nginx_vals = [s.nginx_memory_mb for s in samples if s.nginx_memory_mb is not None]
     latest = max(samples, key=lambda s: s.created_at)
     return {

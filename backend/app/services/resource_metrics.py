@@ -78,7 +78,9 @@ def _aggregate_bucket(samples: list[NodeResourceSample]) -> dict[str, Any]:
     count = len(samples)
     if count == 0:
         return {}
-    avg = lambda attr: round(sum(getattr(s, attr) or 0 for s in samples) / count, 1)
+
+    def avg(attr: str) -> float:
+        return round(sum(getattr(s, attr) or 0 for s in samples) / count, 1)
     loads = [s.load_1 for s in samples if s.load_1 is not None]
     load_5 = [s.load_5 for s in samples if s.load_5 is not None]
     load_15 = [s.load_15 for s in samples if s.load_15 is not None]
