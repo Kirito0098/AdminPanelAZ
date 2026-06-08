@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Play, RotateCcw, ServerCrash } from 'lucide-react'
+import { FolderOpen, Play, RotateCcw, ServerCrash } from 'lucide-react'
 import { ApiError, recreateProfiles, restartService, runDoall } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import type { AppSettings } from '@/types'
 
 const SERVICES = [
   'openvpn-server@antizapret-udp',
@@ -25,7 +26,11 @@ const SERVICES = [
   'wg-quick@vpn',
 ]
 
-export default function MaintenanceTab() {
+interface MaintenanceTabProps {
+  settings: AppSettings | null
+}
+
+export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
   const { success, error: notifyError } = useNotifications()
   const { inline, withInline, trackBackgroundTask, backgroundTaskPolling } = useProgress()
   const [service, setService] = useState(SERVICES[0])
@@ -109,6 +114,23 @@ export default function MaintenanceTab() {
           </Button>
         </CardContent>
       </Card>
+
+      {settings && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FolderOpen size={18} />
+              Путь AntiZapret
+            </CardTitle>
+            <CardDescription>Корневая директория на активном узле (только чтение)</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <code className="mono block w-full overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs">
+              {settings.antizapret_path}
+            </code>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="border-destructive/20">
         <CardHeader>

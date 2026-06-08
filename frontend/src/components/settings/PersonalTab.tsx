@@ -1,16 +1,15 @@
 import { FormEvent } from 'react'
-import { FolderOpen, KeyRound, Moon, Palette, Sun } from 'lucide-react'
+import { KeyRound, Moon, Palette, Sun } from 'lucide-react'
+import TwoFactorTab from '@/components/settings/TwoFactorTab'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
-import type { AppSettings } from '@/types'
 
 interface PersonalTabProps {
   theme: 'light' | 'dark'
   onThemeChange: (theme: 'light' | 'dark') => void
-  settings: AppSettings | null
   currentPwd: string
   newPwd: string
   onCurrentPwdChange: (value: string) => void
@@ -21,7 +20,6 @@ interface PersonalTabProps {
 export default function PersonalTab({
   theme,
   onThemeChange,
-  settings,
   currentPwd,
   newPwd,
   onCurrentPwdChange,
@@ -77,23 +75,6 @@ export default function PersonalTab({
         </CardContent>
       </Card>
 
-      {settings && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FolderOpen size={18} />
-              Путь AntiZapret
-            </CardTitle>
-            <CardDescription>Корневая директория на активном узле (только чтение)</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <code className="mono block w-full overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs">
-              {settings.antizapret_path}
-            </code>
-          </CardContent>
-        </Card>
-      )}
-
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -131,6 +112,8 @@ export default function PersonalTab({
           </form>
         </CardContent>
       </Card>
+
+      <TwoFactorTab />
     </div>
   )
 }

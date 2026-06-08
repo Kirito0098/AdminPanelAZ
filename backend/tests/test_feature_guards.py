@@ -62,6 +62,7 @@ def test_feature_modules_endpoint(client):
     assert data["features"]["routing"] is False
     assert "amneziawg" in data["features"]
     assert data["settings_tabs"]["users"] == "user_management"
+    assert data["settings_tabs"]["monitoring"] == "resource_monitor"
 
 
 def test_blocked_routing_api_returns_403(client):

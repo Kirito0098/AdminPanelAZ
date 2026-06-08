@@ -4,8 +4,10 @@ import { ApiError, changePassword, createUser, deleteUser, getSettings, getUsers
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import BackupTab from '@/components/settings/BackupTab'
+import ConfigDeliveryTab from '@/components/settings/ConfigDeliveryTab'
 import FeatureTogglesTab from '@/components/settings/FeatureTogglesTab'
 import MaintenanceTab from '@/components/settings/MaintenanceTab'
+import MonitoringTab from '@/components/settings/MonitoringTab'
 import PersonalTab from '@/components/settings/PersonalTab'
 import SecurityTab from '@/components/settings/SecurityTab'
 import SettingsNav, {
@@ -15,7 +17,6 @@ import SettingsNav, {
 } from '@/components/settings/SettingsNav'
 import TelegramTab from '@/components/settings/TelegramTab'
 import TestsTab from '@/components/settings/TestsTab'
-import TwoFactorTab from '@/components/settings/TwoFactorTab'
 import UpdatesTab from '@/components/settings/UpdatesTab'
 import UsersTab from '@/components/settings/UsersTab'
 import VpnNetworkTab from '@/components/settings/VpnNetworkTab'
@@ -31,24 +32,40 @@ import type { AppSettings, User, UserRole } from '@/types'
 
 const SECTION_TITLES: Record<SettingsSection, { title: string; description: string }> = {
   personal: {
-    title: 'Личные настройки',
-    description: 'Тема интерфейса, путь AntiZapret и смена пароля',
+    title: 'Профиль',
+    description: 'Тема интерфейса, смена пароля и двухфакторная аутентификация',
+  },
+  users: {
+    title: 'Пользователи',
+    description: 'Управление учётными записями, ролями и доступом viewer',
+  },
+  security: {
+    title: 'Доступ к панели',
+    description: 'IP whitelist, защита от сканеров и активные баны',
+  },
+  config_delivery: {
+    title: 'Раздача конфигов',
+    description: 'Одноразовые QR-ссылки и публичные route-файлы для роутеров',
   },
   maintenance: {
     title: 'Обслуживание',
-    description: 'Пересоздание профилей и перезапуск VPN-служб на активном узле',
+    description: 'Пересоздание профилей, путь AntiZapret и перезапуск VPN-служб',
   },
   backup: {
     title: 'Резервные копии',
     description: 'Создание, восстановление и автоматизация бэкапов панели',
   },
+  monitoring: {
+    title: 'Мониторинг',
+    description: 'Пороги CPU/RAM и интервалы Telegram-оповещений о нагрузке',
+  },
+  vpn_network: {
+    title: 'Сеть и публикация',
+    description: 'Публикация панели и reverse-proxy (фаза 17 — полный UI)',
+  },
   telegram: {
     title: 'Telegram',
     description: 'Бот для оповещений администратора и доставки бэкапов',
-  },
-  security: {
-    title: 'Безопасность',
-    description: 'Двухфакторная аутентификация, IP whitelist и защита от сканеров',
   },
   modules: {
     title: 'Модули',
@@ -59,22 +76,14 @@ const SECTION_TITLES: Record<SettingsSection, { title: string; description: stri
     description: 'Проверка и применение обновлений из git-репозитория',
   },
   tests: {
-    title: 'Тесты',
+    title: 'Диагностика',
     description: 'Запуск smoke-тестов backend из панели',
-  },
-  users: {
-    title: 'Пользователи',
-    description: 'Управление учётными записями и ролями доступа',
-  },
-  vpn_network: {
-    title: 'Порт, HTTPS и Nginx',
-    description: 'Публикация панели и reverse-proxy (фаза 17 — полный UI)',
   },
 }
 
 export default function SettingsPage() {
   const { user } = useAuth()
-  const { isSettingsTabEnabled } = useFeatureModules()
+  const { isSettingsTabEnabled, isEnabled } = useFeatureModules()
   const { activeNode } = useNode()
   const { theme, setTheme } = useTheme()
   const { success, error: notifyError } = useNotifications()
@@ -92,10 +101,10 @@ export default function SettingsPage() {
   const [activeSection, setActiveSection] = useState<SettingsSection>(() => getDefaultSection(isAdmin))
 
   useEffect(() => {
-    if (!isSectionAvailable(activeSection, isAdmin, isSettingsTabEnabled)) {
+    if (!isSectionAvailable(activeSection, isAdmin, isSettingsTabEnabled, isEnabled)) {
       setActiveSection(getDefaultSection(isAdmin))
     }
-  }, [activeSection, isAdmin, isSettingsTabEnabled])
+  }, [activeSection, isAdmin, isSettingsTabEnabled, isEnabled])
 
   const load = async () => {
     startGlobal()
@@ -189,7 +198,6 @@ export default function SettingsPage() {
           <PersonalTab
             theme={theme}
             onThemeChange={setTheme}
-            settings={settings}
             currentPwd={currentPwd}
             newPwd={newPwd}
             onCurrentPwdChange={setCurrentPwd}
@@ -197,25 +205,6 @@ export default function SettingsPage() {
             onChangePassword={handleChangePassword}
           />
         )
-      case 'maintenance':
-        return <MaintenanceTab />
-      case 'backup':
-        return <BackupTab />
-      case 'telegram':
-        return <TelegramTab />
-      case 'security':
-        return (
-          <div className="space-y-4">
-            <TwoFactorTab />
-            <SecurityTab />
-          </div>
-        )
-      case 'modules':
-        return <FeatureTogglesTab />
-      case 'updates':
-        return <UpdatesTab />
-      case 'tests':
-        return <TestsTab />
       case 'users':
         return (
           <UsersTab
@@ -231,6 +220,24 @@ export default function SettingsPage() {
             onDeleteUser={handleDeleteUser}
           />
         )
+      case 'security':
+        return <SecurityTab />
+      case 'config_delivery':
+        return <ConfigDeliveryTab />
+      case 'maintenance':
+        return <MaintenanceTab settings={settings} />
+      case 'backup':
+        return <BackupTab />
+      case 'monitoring':
+        return <MonitoringTab />
+      case 'telegram':
+        return <TelegramTab />
+      case 'modules':
+        return <FeatureTogglesTab />
+      case 'updates':
+        return <UpdatesTab />
+      case 'tests':
+        return <TestsTab />
       case 'vpn_network':
         return <VpnNetworkTab />
       default:
@@ -252,8 +259,8 @@ export default function SettingsPage() {
           </div>
           <p className="text-sm text-muted-foreground">
             {isAdmin
-              ? 'Учётная запись, безопасность и параметры панели'
-              : 'Тема интерфейса и смена пароля'}
+              ? 'Учётная запись, безопасность, операции и параметры системы'
+              : 'Тема интерфейса, смена пароля и двухфакторная аутентификация'}
           </p>
         </div>
       </div>
@@ -268,6 +275,7 @@ export default function SettingsPage() {
               onChange={setActiveSection}
               isAdmin={isAdmin}
               isTabEnabled={isSettingsTabEnabled}
+              isModuleEnabled={isEnabled}
             />
           </div>
         </aside>

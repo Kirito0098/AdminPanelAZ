@@ -19,8 +19,6 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useNotifications } from '@/context/NotificationContext'
 import type { User, UserRole, VpnConfig } from '@/types'
-import MonitorSettingsCard from '@/components/settings/MonitorSettingsCard'
-
 const roleLabels: Record<UserRole, string> = {
   admin: 'Администратор',
   user: 'Пользователь',
@@ -407,8 +405,6 @@ export default function UsersTab({
           </div>
         )}
       </AppDialog>
-
-      <MonitorSettingsCard />
     </div>
   )
 }

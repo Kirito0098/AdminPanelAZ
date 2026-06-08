@@ -20,17 +20,12 @@ import { Separator } from '@/components/ui/separator'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useNotifications } from '@/context/NotificationContext'
-import { useFeatureModules } from '@/context/FeatureModulesContext'
 import type { ScannerBan, SecuritySettings } from '@/types'
 
 export default function SecurityTab() {
   const { success, error: notifyError } = useNotifications()
-  const { isEnabled } = useFeatureModules()
-  const qrDownloadsEnabled = isEnabled('qr_downloads')
-  const openvpnEnabled = isEnabled('openvpn')
   const [settings, setSettings] = useState<SecuritySettings | null>(null)
   const [allowedIps, setAllowedIps] = useState('')
-  const [qrPin, setQrPin] = useState('')
   const [bans, setBans] = useState<ScannerBan[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -71,10 +66,6 @@ export default function SecurityTab() {
         scanner_window_seconds: settings?.scanner_window_seconds,
         block_ip_blocked_dwell: settings?.block_ip_blocked_dwell,
         ip_blocked_dwell_seconds: settings?.ip_blocked_dwell_seconds,
-        qr_download_ttl_seconds: settings?.qr_download_ttl_seconds,
-        qr_download_max_downloads: settings?.qr_download_max_downloads,
-        qr_download_pin: qrPin || undefined,
-        public_download_enabled: settings?.public_download_enabled,
       })
       setSettings(updated)
       success('Настройки безопасности сохранены')
@@ -146,7 +137,7 @@ export default function SecurityTab() {
             <Shield size={18} />
             Доступ и защита
           </CardTitle>
-          <CardDescription>IP whitelist, блокировка сканеров (iptables/ipset), одноразовые ссылки</CardDescription>
+          <CardDescription>IP whitelist и блокировка сканеров (iptables/ipset)</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-4">
@@ -367,70 +358,6 @@ export default function SecurityTab() {
               </div>
             </div>
           </div>
-
-          <Separator />
-
-          {openvpnEnabled && (
-            <div className="space-y-4">
-              <h4 className="text-sm font-medium">Публичные route-файлы</h4>
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={settings.public_download_enabled}
-                  onChange={(e) =>
-                    setSettings({ ...settings, public_download_enabled: e.target.checked })
-                  }
-                  className="h-4 w-4 rounded border"
-                />
-                Разрешить публичное скачивание route-файлов (Keenetic, MikroTik, TP-Link)
-              </label>
-              <p className="text-xs text-muted-foreground">
-                Ссылки: /api/public/route-download/&#123;keenetic|mikrotik|tplink&#125;
-              </p>
-            </div>
-          )}
-
-          {qrDownloadsEnabled && (
-          <div className="space-y-4">
-            <h4 className="text-sm font-medium">Одноразовые ссылки</h4>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>TTL одноразовой ссылки (сек)</Label>
-                <Input
-                  type="number"
-                  value={settings.qr_download_ttl_seconds}
-                  onChange={(e) => setSettings({ ...settings, qr_download_ttl_seconds: Number(e.target.value) })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Макс. скачиваний</Label>
-                <div className="flex flex-wrap gap-4">
-                  {([1, 3, 5] as const).map((n) => (
-                    <label key={n} className="flex cursor-pointer items-center gap-2 text-sm">
-                      <input
-                        type="radio"
-                        name="qr-download-max-downloads"
-                        checked={settings.qr_download_max_downloads === n}
-                        onChange={() => setSettings({ ...settings, qr_download_max_downloads: n })}
-                        className="h-4 w-4"
-                      />
-                      {n}
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>PIN для скачивания</Label>
-                <Input
-                  type="password"
-                  value={qrPin}
-                  onChange={(e) => setQrPin(e.target.value)}
-                  placeholder="Пусто = без PIN"
-                />
-              </div>
-            </div>
-          </div>
-          )}
 
           <Button onClick={save} disabled={saving}>
             {saving ? 'Сохранение...' : 'Сохранить настройки'}

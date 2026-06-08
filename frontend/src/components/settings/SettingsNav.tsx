@@ -1,11 +1,13 @@
 import type { LucideIcon } from 'lucide-react'
 import {
+  Activity,
   Archive,
   Download,
   FlaskConical,
   Globe,
   KeyRound,
   Puzzle,
+  QrCode,
   Send,
   Shield,
   User,
@@ -17,22 +19,37 @@ import { cn } from '@/lib/utils'
 
 export type SettingsSection =
   | 'personal'
+  | 'users'
+  | 'security'
+  | 'config_delivery'
   | 'maintenance'
   | 'backup'
+  | 'monitoring'
+  | 'vpn_network'
   | 'telegram'
-  | 'security'
   | 'modules'
   | 'updates'
   | 'tests'
+
+type SettingsTabKey =
+  | 'backup'
+  | 'maintenance'
+  | 'telegram'
+  | 'security'
+  | 'tests'
   | 'users'
+  | 'updates'
   | 'vpn_network'
+  | 'qr_downloads'
+  | 'monitoring'
 
 interface NavItem {
   id: SettingsSection
   label: string
   icon: LucideIcon
   description: string
-  settingsTab?: 'backup' | 'maintenance' | 'telegram' | 'security' | 'tests' | 'users' | 'updates' | 'vpn_network'
+  settingsTab?: SettingsTabKey
+  adminOnly?: boolean
 }
 
 interface NavGroup {
@@ -47,16 +64,37 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
     items: [
       {
         id: 'personal',
-        label: 'Личные',
+        label: 'Профиль',
         icon: User,
-        description: 'Тема, пароль, путь AntiZapret',
+        description: 'Тема, пароль и двухфакторная аутентификация',
       },
       {
+        id: 'users',
+        label: 'Пользователи',
+        icon: Users,
+        description: 'Учётные записи, роли и доступ viewer',
+        settingsTab: 'users',
+        adminOnly: true,
+      },
+    ],
+  },
+  {
+    label: 'Безопасность',
+    adminOnly: true,
+    items: [
+      {
         id: 'security',
-        label: 'Безопасность',
+        label: 'Доступ к панели',
         icon: Shield,
-        description: '2FA, IP whitelist, защита от сканеров',
+        description: 'IP whitelist, сканеры и активные баны',
         settingsTab: 'security',
+      },
+      {
+        id: 'config_delivery',
+        label: 'Раздача конфигов',
+        icon: QrCode,
+        description: 'Одноразовые QR-ссылки и публичные route-файлы',
+        settingsTab: 'qr_downloads',
       },
     ],
   },
@@ -68,15 +106,29 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
         id: 'maintenance',
         label: 'Обслуживание',
         icon: Wrench,
-        description: 'Профили клиентов и перезапуск VPN',
+        description: 'Профили клиентов, путь AntiZapret и перезапуск VPN',
         settingsTab: 'maintenance',
       },
       {
         id: 'backup',
-        label: 'Бэкапы',
+        label: 'Резервные копии',
         icon: Archive,
-        description: 'Резервные копии панели и списков',
+        description: 'Создание, восстановление и автоматизация бэкапов',
         settingsTab: 'backup',
+      },
+      {
+        id: 'monitoring',
+        label: 'Мониторинг',
+        icon: Activity,
+        description: 'Пороги CPU/RAM и интервалы Telegram-оповещений',
+        settingsTab: 'monitoring',
+      },
+      {
+        id: 'vpn_network',
+        label: 'Сеть и публикация',
+        icon: Globe,
+        description: 'HTTPS, домен и reverse-proxy',
+        settingsTab: 'vpn_network',
       },
     ],
   },
@@ -94,14 +146,14 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Панель',
+    label: 'Система',
     adminOnly: true,
     items: [
       {
         id: 'modules',
         label: 'Модули',
         icon: Puzzle,
-        description: 'Фоновые задачи и разделы',
+        description: 'Фоновые задачи и разделы панели',
       },
       {
         id: 'updates',
@@ -112,24 +164,10 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
       },
       {
         id: 'tests',
-        label: 'Тесты',
+        label: 'Диагностика',
         icon: FlaskConical,
         description: 'Smoke-тесты backend (pytest)',
         settingsTab: 'tests',
-      },
-      {
-        id: 'users',
-        label: 'Пользователи',
-        icon: Users,
-        description: 'Учётные записи и роли',
-        settingsTab: 'users',
-      },
-      {
-        id: 'vpn_network',
-        label: 'Порт и Nginx',
-        icon: Globe,
-        description: 'HTTPS, домен и reverse-proxy',
-        settingsTab: 'vpn_network',
       },
     ],
   },
@@ -140,17 +178,36 @@ interface SettingsNavProps {
   onChange: (section: SettingsSection) => void
   isAdmin: boolean
   isTabEnabled: (tab: string) => boolean
+  isModuleEnabled?: (key: string) => boolean
 }
 
-export default function SettingsNav({ active, onChange, isAdmin, isTabEnabled }: SettingsNavProps) {
+function isNavItemVisible(
+  item: NavItem,
+  group: NavGroup,
+  isAdmin: boolean,
+  isTabEnabled: (tab: string) => boolean,
+  isModuleEnabled: (key: string) => boolean,
+): boolean {
+  if ((group.adminOnly || item.adminOnly) && !isAdmin) return false
+  if (item.id === 'config_delivery') {
+    return isTabEnabled('qr_downloads') || isModuleEnabled('openvpn')
+  }
+  if (item.settingsTab && !isTabEnabled(item.settingsTab)) return false
+  return true
+}
+
+export default function SettingsNav({
+  active,
+  onChange,
+  isAdmin,
+  isTabEnabled,
+  isModuleEnabled = () => true,
+}: SettingsNavProps) {
   const visibleGroups = SETTINGS_NAV_GROUPS.map((group) => ({
     ...group,
-    items: group.items.filter((item) => {
-      if (group.adminOnly && !isAdmin) return false
-      if (item.id === 'security' && !isAdmin) return false
-      if (item.settingsTab && !isTabEnabled(item.settingsTab)) return false
-      return true
-    }),
+    items: group.items.filter((item) =>
+      isNavItemVisible(item, group, isAdmin, isTabEnabled, isModuleEnabled),
+    ),
   })).filter((group) => group.items.length > 0)
 
   return (
@@ -213,14 +270,12 @@ export function isSectionAvailable(
   section: SettingsSection,
   isAdmin: boolean,
   isTabEnabled: (tab: string) => boolean,
+  isModuleEnabled: (key: string) => boolean = () => true,
 ): boolean {
   for (const group of SETTINGS_NAV_GROUPS) {
     for (const item of group.items) {
       if (item.id !== section) continue
-      if (group.adminOnly && !isAdmin) return false
-      if (item.id === 'security' && !isAdmin) return false
-      if (item.settingsTab && !isTabEnabled(item.settingsTab)) return false
-      return true
+      return isNavItemVisible(item, group, isAdmin, isTabEnabled, isModuleEnabled)
     }
   }
   return false

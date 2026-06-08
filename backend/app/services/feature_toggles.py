@@ -82,6 +82,7 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         resource_impact_level="low",
         default=True,
         group="background",
+        settings_tabs=("monitoring",),
     ),
     FeatureToggleDefinition(
         key="openvpn",
