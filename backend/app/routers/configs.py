@@ -71,12 +71,12 @@ def list_configs(
     query = _scoped_config_query(db)
     if current_user.role == UserRole.viewer:
         grants = db.query(ViewerConfigAccess).filter_by(user_id=current_user.id).all()
-        if grants:
-            names = [g.config_group for g in grants]
-            query = query.filter(VpnConfig.client_name.in_(names))
-        else:
+        if not grants:
             return []
-    elif current_user.role != UserRole.admin:
+        configs = query.order_by(VpnConfig.created_at.desc()).all()
+        configs = [c for c in configs if _can_access_config(current_user, c, db)]
+        return [_to_response(c, db) for c in configs]
+    if current_user.role != UserRole.admin:
         query = query.filter(VpnConfig.owner_id == current_user.id)
     configs = query.order_by(VpnConfig.created_at.desc()).all()
     return [_to_response(c, db) for c in configs]

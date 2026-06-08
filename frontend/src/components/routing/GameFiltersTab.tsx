@@ -1,8 +1,10 @@
-import { Gamepad2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Gamepad2, Search } from 'lucide-react'
 import EmptyState from '@/components/ui/EmptyState'
 import StatusPanel from '@/components/noc/StatusPanel'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -35,6 +37,20 @@ export default function GameFiltersTab({
   onModeChange,
   onSync,
 }: GameFiltersTabProps) {
+  const [search, setSearch] = useState('')
+
+  const filteredGames = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return games
+    return games.filter(
+      (g) =>
+        g.title.toLowerCase().includes(q) ||
+        g.subtitle.toLowerCase().includes(q) ||
+        g.key.toLowerCase().includes(q) ||
+        g.domains.some((d) => d.toLowerCase().includes(q)),
+    )
+  }, [games, search])
+
   if (games.length === 0) {
     return (
       <EmptyState
@@ -49,11 +65,25 @@ export default function GameFiltersTab({
     <StatusPanel title="Игровые фильтры" icon={Gamepad2}>
       <p className="mb-4 text-sm text-muted-foreground">
         Домены и IP игровых серверов → AZ-Game-include-* в config AntiZapret. Режим «Включить»
-        добавляет трафик в маршрутизацию, «Исключить» — убирает из неё.
+        добавляет трафик в маршрутизацию, «Исключить» — убирает из неё. Каталог: {games.length}{' '}
+        игр.
       </p>
 
+      <div className="relative mb-4 max-w-sm">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder="Поиск по названию, издателю, домену..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-9"
+        />
+      </div>
+
+      {filteredGames.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Ничего не найдено по запросу «{search}».</p>
+      ) : (
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {games.map((g) => (
+        {filteredGames.map((g) => (
           <div
             key={g.key}
             className="flex items-center justify-between gap-3 rounded-lg border p-4"
@@ -88,6 +118,7 @@ export default function GameFiltersTab({
           </div>
         ))}
       </div>
+      )}
 
       {isAdmin && (
         <Button className="mt-6" disabled={actionLoading} onClick={onSync}>

@@ -5,7 +5,9 @@ import {
   LayoutDashboard,
   Layers,
   Route,
+  Settings2,
 } from 'lucide-react'
+import AntizapretConfigTab from '@/components/routing/AntizapretConfigTab'
 import ConfirmActionDialog from '@/components/routing/ConfirmActionDialog'
 import CidrPipelineTab from '@/components/routing/CidrPipelineTab'
 import FilesTab from '@/components/routing/FilesTab'
@@ -118,6 +120,12 @@ export default function RoutingPage() {
             <Gamepad2 size={14} />
             <span className="hidden sm:inline">Игровые фильтры</span>
           </TabsTrigger>
+          {isAdmin && (
+            <TabsTrigger value="antizapret-config" className="gap-1.5">
+              <Settings2 size={14} />
+              <span className="hidden sm:inline">Конфиг AntiZapret</span>
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="overview">
@@ -175,6 +183,12 @@ export default function RoutingPage() {
             onSync={syncGames}
           />
         </TabsContent>
+
+        {isAdmin && (
+          <TabsContent value="antizapret-config">
+            <AntizapretConfigTab />
+          </TabsContent>
+        )}
       </Tabs>
 
       <ConfirmActionDialog

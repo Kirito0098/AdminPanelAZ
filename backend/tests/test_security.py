@@ -1,6 +1,6 @@
 """Security hardening tests."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pyotp
 import pytest
@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.auth import create_2fa_pending_token, decode_2fa_pending_token
 from app.config import Settings
-from app.models import User, UserRole
+from app.models import User, UserRole, ViewerConfigAccess, VpnConfig
 from app.services.auth_rate_limit import AuthRateLimitService, MemoryRateLimitBackend
 from app.services.password_policy import effective_min_password_length, validate_password
 from app.services.refresh_token import create_refresh_token, revoke_refresh_token, validate_refresh_token
@@ -197,3 +197,179 @@ def test_login_requires_2fa_for_admin_with_totp():
         db.commit()
     finally:
         db.close()
+
+
+@pytest.fixture()
+def viewer_config_client(tmp_path):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.auth import get_password_hash
+    from app.database import Base, get_db
+    from app.main import app
+    from app.models import Node, NodeStatus, User, UserRole, ViewerConfigAccess, VpnConfig, VpnType
+
+    db_path = tmp_path / "viewer_config.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    TestingSession = sessionmaker(bind=engine)
+    session = TestingSession()
+
+    admin = User(
+        username="vc_admin",
+        password_hash=get_password_hash("secret123"),
+        role=UserRole.admin,
+        is_active=True,
+    )
+    viewer = User(
+        username="vc_viewer",
+        password_hash=get_password_hash("secret123"),
+        role=UserRole.viewer,
+        is_active=True,
+    )
+    regular = User(
+        username="vc_user",
+        password_hash=get_password_hash("secret123"),
+        role=UserRole.user,
+        is_active=True,
+    )
+    node = Node(
+        name="local",
+        host="127.0.0.1",
+        port=9100,
+        is_local=True,
+        status=NodeStatus.online,
+    )
+    session.add_all([admin, viewer, regular, node])
+    session.flush()
+
+    session.add_all(
+        [
+            VpnConfig(node_id=node.id, client_name="alice", vpn_type=VpnType.openvpn, owner_id=admin.id),
+            VpnConfig(node_id=node.id, client_name="alice", vpn_type=VpnType.wireguard, owner_id=admin.id),
+            VpnConfig(node_id=node.id, client_name="bob", vpn_type=VpnType.openvpn, owner_id=admin.id),
+            VpnConfig(node_id=node.id, client_name="charlie", vpn_type=VpnType.wireguard, owner_id=admin.id),
+            ViewerConfigAccess(user_id=viewer.id, config_group="alice"),
+        ]
+    )
+    session.commit()
+
+    def override_get_db():
+        db = TestingSession()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    test_settings = Settings(
+        app_env="development",
+        enforce_password_policy=False,
+        auth_rate_limit_enabled=False,
+        audit_log_enabled=False,
+    )
+
+    mock_adapter = MagicMock()
+    mock_adapter.get_profile_files.return_value = []
+
+    with (
+        patch("app.config.get_settings", return_value=test_settings),
+        patch("app.routers.configs.get_active_adapter", return_value=mock_adapter),
+        patch("app.routers.configs.get_active_node", return_value=node),
+        patch("app.services.auth_rate_limit.get_settings", return_value=test_settings),
+        patch("app.services.ip_restriction.ip_restriction_service.login_needs_captcha", return_value=False),
+        patch("app.services.ip_restriction.ip_restriction_service.record_login_attempt", return_value=0),
+        patch("app.services.auth_rate_limit.auth_rate_limit_service.check", return_value=None),
+        patch("app.services.auth_rate_limit.auth_rate_limit_service.record_failure", return_value=None),
+        patch("app.services.auth_rate_limit.auth_rate_limit_service.record_success", return_value=None),
+    ):
+        client = TestClient(app)
+
+        def _login(username: str) -> dict[str, str]:
+            response = client.post("/api/auth/login/json", json={"username": username, "password": "secret123"})
+            assert response.status_code == 200
+            token = response.json()["access_token"]
+            return {"Authorization": f"Bearer {token}"}
+
+        yield {
+            "client": client,
+            "admin_headers": _login("vc_admin"),
+            "viewer_headers": _login("vc_viewer"),
+            "user_headers": _login("vc_user"),
+            "session": TestingSession,
+            "viewer_id": viewer.id,
+            "node": node,
+        }
+
+    app.dependency_overrides.clear()
+    session.close()
+
+
+def test_viewer_sees_only_granted_configs(viewer_config_client):
+    client = viewer_config_client["client"]
+    response = client.get("/api/configs", headers=viewer_config_client["viewer_headers"])
+    assert response.status_code == 200
+    names = {item["client_name"] for item in response.json()}
+    assert names == {"alice"}
+
+
+def test_viewer_denied_ungranted_config_detail(viewer_config_client):
+    client = viewer_config_client["client"]
+    db = viewer_config_client["session"]()
+    try:
+        bob = db.query(VpnConfig).filter(VpnConfig.client_name == "bob").first()
+        assert bob is not None
+        response = client.get(f"/api/configs/{bob.id}", headers=viewer_config_client["viewer_headers"])
+        assert response.status_code == 403
+    finally:
+        db.close()
+
+
+def test_viewer_without_grants_sees_empty_list(viewer_config_client):
+    client = viewer_config_client["client"]
+    db = viewer_config_client["session"]()
+    try:
+        db.query(ViewerConfigAccess).delete()
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get("/api/configs", headers=viewer_config_client["viewer_headers"])
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_admin_can_set_viewer_access(viewer_config_client):
+    client = viewer_config_client["client"]
+    viewer_id = viewer_config_client["viewer_id"]
+
+    response = client.put(
+        "/api/system/viewer-access",
+        headers=viewer_config_client["admin_headers"],
+        json={"user_id": viewer_id, "config_groups": ["bob", "charlie"]},
+    )
+    assert response.status_code == 200
+
+    get_response = client.get(f"/api/system/viewer-access/{viewer_id}", headers=viewer_config_client["admin_headers"])
+    assert get_response.status_code == 200
+    assert set(get_response.json()["config_groups"]) == {"bob", "charlie"}
+
+    list_response = client.get("/api/configs", headers=viewer_config_client["viewer_headers"])
+    names = {item["client_name"] for item in list_response.json()}
+    assert names == {"bob", "charlie"}
+
+
+def test_viewer_access_endpoints_require_admin(viewer_config_client):
+    client = viewer_config_client["client"]
+    viewer_id = viewer_config_client["viewer_id"]
+
+    get_response = client.get(f"/api/system/viewer-access/{viewer_id}", headers=viewer_config_client["viewer_headers"])
+    assert get_response.status_code == 403
+
+    put_response = client.put(
+        "/api/system/viewer-access",
+        headers=viewer_config_client["user_headers"],
+        json={"user_id": viewer_id, "config_groups": ["alice"]},
+    )
+    assert put_response.status_code == 403

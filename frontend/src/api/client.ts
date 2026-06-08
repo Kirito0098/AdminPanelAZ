@@ -237,6 +237,17 @@ export async function deleteUser(id: number) {
   return apiFetch(`/users/${id}`, { method: 'DELETE' })
 }
 
+export async function getViewerAccess(userId: number) {
+  return apiFetch<{ user_id: number; config_groups: string[] }>(`/system/viewer-access/${userId}`)
+}
+
+export async function setViewerAccess(userId: number, configGroups: string[]) {
+  return apiFetch<{ message: string }>('/system/viewer-access', {
+    method: 'PUT',
+    body: JSON.stringify({ user_id: userId, config_groups: configGroups }),
+  })
+}
+
 export async function updateUser(id: number, data: Record<string, unknown>) {
   return apiFetch<import('../types').User>(`/users/${id}`, {
     method: 'PATCH',
@@ -657,6 +668,17 @@ export async function syncGameFilters(modes: Record<string, string>, runDoall = 
   return apiFetch('/routing/game-filters/sync', {
     method: 'POST',
     body: JSON.stringify({ modes, include_domains: true, run_doall: runDoall }),
+  })
+}
+
+export async function getAntizapretSettings() {
+  return apiFetch<import('../types').AntizapretSettingsResponse>('/routing/antizapret-settings')
+}
+
+export async function updateAntizapretSettings(updates: Record<string, string | boolean>) {
+  return apiFetch<import('../types').AntizapretSettingsUpdateResponse>('/routing/antizapret-settings', {
+    method: 'PUT',
+    body: JSON.stringify(updates),
   })
 }
 

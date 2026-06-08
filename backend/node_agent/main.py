@@ -13,6 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.models import VpnType
 from app.config import get_settings
 from app.services.antizapret import AntiZapretService
+from app.services.antizapret_settings import build_schema, filter_known_keys, read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import build_health_payload
 from app.services.node_update import apply_node_update, check_all_updates, resolve_repo_root
@@ -322,6 +323,20 @@ def routing_results(_: None = Depends(verify_api_key)):
 @app.get("/routing/results/{key}")
 def routing_result_content(key: str, _: None = Depends(verify_api_key)):
     return cidr_service.get_result_content(key)
+
+
+@app.get("/routing/antizapret-settings")
+def routing_antizapret_settings_get(_: None = Depends(verify_api_key)):
+    settings_data = read_antizapret_settings(ANTIZAPRET_PATH / "setup")
+    return {"settings": settings_data, "schema": build_schema()}
+
+
+@app.put("/routing/antizapret-settings")
+def routing_antizapret_settings_put(payload: dict, _: None = Depends(verify_api_key)):
+    try:
+        return update_antizapret_settings(ANTIZAPRET_PATH / "setup", filter_known_keys(payload))
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав на запись") from exc
 
 
 @app.get("/system/updates")

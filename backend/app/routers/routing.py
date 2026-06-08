@@ -1,13 +1,21 @@
 from datetime import datetime
+from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
 from app.database import get_db
 from app.models import User
-from app.schemas import MessageResponse, RoutingOverview
+from app.schemas import (
+    AntizapretSettingFieldSchema,
+    AntizapretSettingsResponse,
+    AntizapretSettingsUpdateResponse,
+    MessageResponse,
+    RoutingOverview,
+)
+from app.services.antizapret_settings import build_schema, filter_known_keys
 from app.services.node_manager import get_active_adapter, get_active_node
 
 router = APIRouter(prefix="/routing", tags=["routing"])
@@ -92,6 +100,34 @@ def result_files(_: User = Depends(get_current_user), db: Session = Depends(get_
 @router.get("/results/{key}")
 def result_content(key: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return get_active_adapter(db).get_route_result_content(key)
+
+
+@router.get("/antizapret-settings", response_model=AntizapretSettingsResponse)
+def get_antizapret_settings(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    settings = adapter.get_antizapret_settings()
+    return AntizapretSettingsResponse(
+        settings=settings,
+        param_schema=[AntizapretSettingFieldSchema(**item) for item in build_schema()],
+        node_id=node.id,
+        node_name=node.name,
+    )
+
+
+@router.put("/antizapret-settings", response_model=AntizapretSettingsUpdateResponse)
+def put_antizapret_settings(
+    payload: dict[str, Any],
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ожидается JSON-объект")
+    try:
+        result = get_active_adapter(db).update_antizapret_settings(filter_known_keys(payload))
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав на запись") from exc
+    return AntizapretSettingsUpdateResponse(**result)
 
 
 @router.post("/apply", response_model=MessageResponse)

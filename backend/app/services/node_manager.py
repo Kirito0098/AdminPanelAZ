@@ -12,6 +12,7 @@ from app.auth import get_password_hash, verify_password
 from app.config import get_settings
 from app.models import AppSetting, Node, NodeStatus
 from app.services.crypto import decrypt_secret, encrypt_secret
+from app.services.antizapret import AntiZapretService
 from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
 from app.services.node_health import HEALTH_METADATA_KEYS
 
@@ -122,7 +123,10 @@ def get_active_node(db: Session) -> Node:
 
 def get_adapter_for_node(node: Node) -> NodeAdapter:
     if node.is_local:
-        return LocalNodeAdapter()
+        meta = node_metadata_dict(node)
+        raw_path = meta.get("antizapret_path")
+        base_path = Path(str(raw_path)) if raw_path else settings.antizapret_path
+        return LocalNodeAdapter(AntiZapretService(base_path=base_path))
     api_key = get_api_key_plain(node)
     if not api_key:
         raise HTTPException(

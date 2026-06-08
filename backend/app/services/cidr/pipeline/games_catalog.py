@@ -13,7 +13,7 @@ from app.services.cidr.constants import IP_FILES
 from app.services.cidr.pipeline.constants import SOURCE_FORMATS_WITH_GEO
 from app.services.cidr.pipeline.facade_compat import get_attr as _cfg
 from app.services.cidr.pipeline.parsers import _normalize_cidrs
-from app.services.cidr.pipeline.provider_sources import (
+from app.services.cidr.game_catalog import (
     GAME_FILTER_ALIASES,
     GAME_FILTER_BY_KEY,
     GAME_FILTER_CATALOG,

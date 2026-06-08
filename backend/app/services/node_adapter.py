@@ -10,6 +10,7 @@ from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.config import get_settings
 from app.services.node_mtls import build_node_agent_ssl_context, node_agent_base_scheme, node_agent_mtls_enabled
 from app.services.antizapret import AntiZapretService
+from app.services.antizapret_settings import read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import build_health_payload
 from app.services.node_update import apply_node_update, check_all_updates, resolve_repo_root
@@ -116,6 +117,12 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def get_route_result_content(self, key: str) -> dict: ...
+
+    @abstractmethod
+    def get_antizapret_settings(self) -> dict[str, str]: ...
+
+    @abstractmethod
+    def update_antizapret_settings(self, updates: dict) -> dict: ...
 
     @abstractmethod
     def get_server_metrics(self, *, accurate_cpu: bool = False) -> dict: ...
@@ -248,6 +255,12 @@ class LocalNodeAdapter(NodeAdapter):
 
     def get_route_result_content(self, key: str) -> dict:
         return self._cidr.get_result_content(key)
+
+    def get_antizapret_settings(self) -> dict[str, str]:
+        return read_antizapret_settings(self._service.base_path / "setup")
+
+    def update_antizapret_settings(self, updates: dict) -> dict:
+        return update_antizapret_settings(self._service.base_path / "setup", updates)
 
     def get_server_metrics(self, *, accurate_cpu: bool = False) -> dict:
         return self._monitor.get_metrics(accurate_cpu=accurate_cpu)
@@ -473,6 +486,13 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def get_route_result_content(self, key: str) -> dict:
         return self._request("GET", f"/routing/results/{key}")
+
+    def get_antizapret_settings(self) -> dict[str, str]:
+        data = self._request("GET", "/routing/antizapret-settings")
+        return data.get("settings", {})
+
+    def update_antizapret_settings(self, updates: dict) -> dict:
+        return self._request("PUT", "/routing/antizapret-settings", json=updates)
 
     def get_server_metrics(self, *, accurate_cpu: bool = False) -> dict:
         return self._request(

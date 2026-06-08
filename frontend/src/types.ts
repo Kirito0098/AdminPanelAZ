@@ -485,3 +485,27 @@ export interface TrafficChartData {
   total_antizapret: number
   total: number
 }
+
+export interface AntizapretSettingField {
+  key: string
+  html_id: string
+  type: 'flag' | 'string'
+  env: string
+  param_label: string
+  title: string
+  description: string
+}
+
+export interface AntizapretSettingsResponse {
+  settings: Record<string, string>
+  schema: AntizapretSettingField[]
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface AntizapretSettingsUpdateResponse {
+  success: boolean
+  message: string
+  changes: number
+  needs_apply: boolean
+}

@@ -46,6 +46,8 @@ REMOTE_ADAPTER_ENDPOINTS: dict[str, str] = {
     "write_route_file": "PUT /routing/files/{file_key}",
     "get_route_result_files": "GET /routing/results",
     "get_route_result_content": "GET /routing/results/{key}",
+    "get_antizapret_settings": "GET /routing/antizapret-settings",
+    "update_antizapret_settings": "PUT /routing/antizapret-settings",
     "get_server_metrics": "GET /server-monitor/metrics",
     "get_server_bandwidth": "GET /server-monitor/bandwidth",
     "list_server_interfaces": "GET /server-monitor/interfaces",

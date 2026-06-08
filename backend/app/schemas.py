@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import NodeStatus, UserRole, VpnType
 
@@ -415,6 +415,32 @@ class RoutingOverview(BaseModel):
     timestamp: datetime | None = None
     node_id: int | None = None
     node_name: str | None = None
+
+
+class AntizapretSettingFieldSchema(BaseModel):
+    key: str
+    html_id: str
+    type: Literal["flag", "string"]
+    env: str
+    param_label: str = ""
+    title: str = ""
+    description: str = ""
+
+
+class AntizapretSettingsResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    settings: dict[str, str]
+    param_schema: list[AntizapretSettingFieldSchema] = Field(alias="schema")
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class AntizapretSettingsUpdateResponse(BaseModel):
+    success: bool = True
+    message: str
+    changes: int
+    needs_apply: bool
 
 
 class TrafficClientRow(BaseModel):

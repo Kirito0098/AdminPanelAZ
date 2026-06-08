@@ -23,7 +23,7 @@ from app.services.cidr.pipeline.constants import (
 )
 from app.services.cidr.pipeline.facade_compat import call as _facade_call, get_attr as _cfg
 from app.services.cidr.pipeline.parsers import _normalize_cidrs
-from app.services.cidr.pipeline.provider_sources import (
+from app.services.cidr.game_catalog import (
     GAME_FILTER_ALIASES,
     GAME_FILTER_BY_KEY,
     GAME_FILTER_CATALOG,

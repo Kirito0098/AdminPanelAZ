@@ -36,7 +36,7 @@ AdminPanelAZ — экспериментальный порт веб-панели
 | Политики доступа (блок, срок, лимиты) | ✅ | OpenVPN + WG/AWG |
 | Синхронизация и графики трафика | ✅ | Фоновый collector + страница «Мониторинг трафика» |
 | Лимиты трафика (reconcile) | ✅ | Без TG-уведомлений при превышении (🟡 notify) |
-| Маршрутизация / CIDR | 🟡 | Pipeline, провайдеры, presets, games — без вкладки «Конфиг AntiZapret» |
+| Маршрутизация / CIDR | 🟡 | Pipeline, провайдеры, presets, games; вкладка «Конфиг AntiZapret» — ✅ |
 | Редактор файлов AntiZapret | ✅ | Мультифайловый редактор + apply |
 | Мониторинг сервера (CPU/RAM/vnstat/WS) | ✅ | Страница «Сервер» |
 | NOC / подключённые клиенты / логи | ✅ | Monitoring + Logs |
@@ -47,7 +47,7 @@ AdminPanelAZ — экспериментальный порт веб-панели
 | Telegram Login + Mini App | ✅ | |
 | Telegram admin-уведомления | ✅ | AdminNotify + traffic_limit + CPU/RAM; UI подписок в TelegramTab |
 | Auth (login, captcha, роли) | ✅ | + 🆕 2FA/TOTP, refresh tokens |
-| Viewer role | 🟡 | API и ограничения есть, UI назначения доступа — нет |
+| Viewer role | ✅ | API, ограничения и UI назначения доступа в UsersTab |
 | Журнал действий | 🟡 | Просмотр есть, экспорт CSV — нет |
 | Обновление системы (git) | ✅ | Панель + 🆕 node agent / AntiZapret на узлах |
 | In-panel pytest | ✅ | 9 модулей vs 53 в AA |
@@ -134,10 +134,10 @@ flowchart LR
 | CIDR DB pipeline (refresh/generate) | cidr_db APIs | `cidr_db.py`, `CidrPipelineTab` | ✅ |
 | Antifilter.net sync | antifilter API | `cidr_db.py` | ✅ |
 | Пресеты CIDR | presets API | `PresetsTab` | ✅ |
-| Game filters | полный `GAME_FILTER_CATALOG` | 15 игр в `game_catalog.py` | 🟡 |
+| Game filters | полный `GAME_FILTER_CATALOG` | `game_catalog.py` (~75 игр, AA 1.9.0) | ✅ |
 | Route-файлы (include/exclude IPs) | routing files | `FilesTab` | ✅ |
 | run-doall / apply | `/run-doall` | `POST /api/routing/apply` | ✅ |
-| Вкладка «Конфиг AntiZapret» | `get/update_antizapret_settings`, schema | — | ❌ |
+| Вкладка «Конфиг AntiZapret» | `get/update_antizapret_settings`, schema | `AntizapretConfigTab`, `GET/PUT /api/routing/antizapret-settings` | ✅ |
 | Nightly CIDR DB refresh cron | cron + updater | `cidr_scheduler.py` (worker) | ✅ |
 
 ### 5. Редактор файлов
@@ -201,7 +201,7 @@ flowchart LR
 | Функция | AA | AZ | Статус |
 |---------|----|----|--------|
 | Управление пользователями | settings users tab | `UsersTab.tsx` | ✅ |
-| Viewer config access UI | users tab | API only (`/api/system/viewer-access`) | 🟡 |
+| Viewer config access UI | users tab | `UsersTab.tsx` + `/api/system/viewer-access` | ✅ |
 | Feature toggles UI | settings tab | `FeatureTogglesTab.tsx` | 🟡 |
 | QR-настройки (TTL, PIN, max downloads) | отдельная вкладка | `SecurityTab.tsx` | 🟡 |
 | VPN-сеть (порт, HTTPS, Nginx из UI) | `_tab_vpn_network.html` | nginx через `install.sh` / `nginx-setup.sh` | 🟡 |
@@ -305,7 +305,7 @@ flowchart LR
 | `utils/app_auto_backup.py` | `backend/app/services/backup_scheduler.py` | ported |
 | `core/services/cidr/*` | `backend/app/services/cidr/*` | ported |
 | `ips/ip_manager.py` | `backend/app/services/cidr/ip_manager.py` | ported |
-| `core/services/game_catalog.py` | `backend/app/services/cidr/game_catalog.py` | subset (15 games) |
+| `core/services/game_catalog.py` | `backend/app/services/cidr/game_catalog.py` | full catalog (AA 1.9.0) |
 | `tg_mini/` | `backend/app/routers/tg_mini.py` + static | ported |
 | `routes/settings/api_tests.py` | `backend/app/routers/tests.py` | ported |
 | `ip_blocked/` | `backend/app/routers/ip_blocked.py` | ported |
@@ -325,9 +325,11 @@ flowchart LR
 
 ### Высокий приоритет
 
-1. **Вкладка «Конфиг AntiZapret»** на маршрутизации (`get/update_antizapret_settings`)
-2. **UI viewer config access** — назначение групп конфигов для роли viewer
-3. **Полный game filter catalog** + тест покрытия
+1. **Полный game filter catalog** + тест покрытия
+
+**Сделано (0.5.2):** UI viewer config access — назначение групп конфигов в `UsersTab`.
+
+**Сделано (0.5.1):** вкладка «Конфиг AntiZapret» на маршрутизации (`AntizapretConfigTab`).
 
 **Сделано (0.5.0):** AdminNotify (login, client ops, settings, CPU/RAM, traffic limits) + UI подписок в TelegramTab.
 
