@@ -12,7 +12,61 @@
 
 Стек: **FastAPI** (backend) + **React/Vite/TypeScript** (frontend: Tailwind CSS, shadcn/ui, Recharts).
 
-Документация: [`SECURITY.md`](SECURITY.md) · [`CHANGELOG.md`](CHANGELOG.md)
+Документация: [`MIGRATION.md`](MIGRATION.md) · [`MIGRATION_PLAN.md`](MIGRATION_PLAN.md) · [`SECURITY.md`](SECURITY.md) · [`CHANGELOG.md`](CHANGELOG.md)
+
+---
+
+## Статус переноса из AdminAntizapret
+
+Сравнение с upstream [AdminAntizapret](https://github.com/Kirito0098/AdminAntizapret) **1.9.0** (Flask + Jinja2). Полные таблицы по разделам, карта файлов и backlog — в [`MIGRATION.md`](MIGRATION.md). Поэтапный план переноса (20 фаз, промпты для Cursor, режимы Ask/Plan/Agent/Debug) — в [`MIGRATION_PLAN.md`](MIGRATION_PLAN.md).
+
+**Оценка готовности:** ~**70–75%** функциональности AA 1.9.0 перенесено или покрыто эквивалентами.
+
+| Маркер | Значение |
+|--------|----------|
+| ✅ | Перенесено — API и UI работают |
+| 🟡 | Частично — упрощённый порт или подмножество возможностей |
+| ❌ | Не перенесено |
+| 🆕 | Есть только в AdminPanelAZ |
+
+### Сводка по областям
+
+| Область | Статус | Комментарий |
+|---------|--------|-------------|
+| VPN-клиенты (OpenVPN, WireGuard, AmneziaWG) | ✅ | CRUD, sync, download, QR |
+| Политики доступа (блок, срок, лимиты) | ✅ | OpenVPN + WG/AWG |
+| Синхронизация и графики трафика | ✅ | Collector + «Мониторинг трафика» |
+| Лимиты трафика (reconcile) | ✅ | Без TG-уведомлений при превышении |
+| Маршрутизация / CIDR | 🟡 | Pipeline, провайдеры, presets — без вкладки «Конфиг AntiZapret» |
+| Редактор файлов AntiZapret | ✅ | Мультифайловый редактор + apply |
+| Мониторинг сервера (CPU/RAM/vnstat) | ✅ | Страница «Сервер» |
+| NOC / клиенты / логи | ✅ | Monitoring + Logs |
+| Безопасность | 🟡 | IP whitelist, scanner — упрощённый порт |
+| QR / одноразовые ссылки | ✅ | Настройки в SecurityTab |
+| Бэкапы (ручные + авто + TG) | ✅ | Без `client.sh 8` как отдельной опции в UI |
+| Feature toggles | 🟡 | ~12 toggles vs больше в AA 1.9.0 |
+| Telegram Login + Mini App | ✅ | |
+| Telegram admin-уведомления | 🟡 | Бэкапы + тест; нет полного AdminNotify |
+| Auth (login, captcha, роли) | ✅ | + 🆕 2FA/TOTP, refresh tokens |
+| Viewer role | 🟡 | API есть, UI назначения доступа — нет |
+| Журнал действий | 🟡 | Просмотр есть, экспорт CSV — нет |
+| Обновление системы (git) | ✅ | + 🆕 node agent / AntiZapret на узлах |
+| In-panel pytest | ✅ | 9 модулей vs 53 в AA |
+| Установка / ops | 🟡 | `install.sh` + scripts; нет `adminpanel.sh`, diagnostics CLI |
+| Multi-node | 🆕 | Controller + Node Agent |
+| CI/CD | 🟡 | `.github/workflows/ci.yml` (pytest, ruff, build, shellcheck); pre-commit — нет |
+
+### Основные пробелы (backlog)
+
+**Высокий приоритет:** AdminNotify (TG-алерты login/client/settings/CPU/RAM), вкладка «Конфиг AntiZapret», UI viewer config access, traffic limit notify, полный каталог game filters (~75 игр в AA vs 15 в AZ).
+
+**Средний приоритет:** parity feature toggles и background jobs, экспорт action logs CSV, публичные route-файлы для роутеров (Keenetic/MikroTik/TP-Link), OpenVPN UDP/TCP group switching, CI pipeline.
+
+**Низкий приоритет:** session heartbeat, active session tracking, nightly idle restart, diagnostics CLI, global API rate limiting.
+
+### Новое только в AdminPanelAZ
+
+Функциональность, которой **не было** в AdminAntizapret 1.9.0: **multi-node** (Controller + Node Agent, mTLS), **NOC-мониторинг** и история CPU/RAM, **2FA/TOTP**, обновление node agent/AntiZapret с панели, **DDNS timer**, роль `user`, **React SPA** вместо Jinja2.
 
 ---
 
