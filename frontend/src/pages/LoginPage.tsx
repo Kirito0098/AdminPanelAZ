@@ -227,7 +227,6 @@ export default function LoginPage() {
                 />
               </div>
             )}
-            <p className="text-center text-xs text-muted-foreground">По умолчанию: admin / admin</p>
           </form>
         </CardContent>
       </Card>

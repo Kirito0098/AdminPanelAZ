@@ -38,6 +38,10 @@ from app.schemas import (
     UserResponse,
 )
 from app.services.action_log import log_action
+from app.services.admin_bootstrap import (
+    scrub_admin_bootstrap_secret_from_env,
+    should_scrub_env_after_password_change,
+)
 from app.services.auth_rate_limit import auth_rate_limit_service
 from app.services.captcha import captcha_service
 from app.services.ip_restriction import ip_restriction_service
@@ -385,6 +389,8 @@ def change_password(
     current_user.must_change_password = False
     revoke_all_user_tokens(db, current_user.id)
     db.commit()
+    if should_scrub_env_after_password_change(current_user.username):
+        scrub_admin_bootstrap_secret_from_env()
     if settings.audit_log_enabled:
         log_action(
             db,

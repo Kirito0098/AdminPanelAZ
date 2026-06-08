@@ -28,10 +28,11 @@ def validate_panel_settings(settings: Settings) -> None:
             "В production задайте SECRET_KEY (минимум 32 случайных символа). "
             "Пример: openssl rand -hex 32"
         )
-    if settings.default_admin_password.lower() in _WEAK_ADMIN_PASSWORDS:
+    bootstrap_password = (settings.default_admin_password or "").strip()
+    if bootstrap_password and bootstrap_password.lower() in _WEAK_ADMIN_PASSWORDS:
         _fail(
-            "В production нельзя использовать слабый DEFAULT_ADMIN_PASSWORD. "
-            "Задайте надёжный пароль в .env до первого запуска."
+            "В production нельзя использовать слабый DEFAULT_ADMIN_PASSWORD при установке. "
+            "Задайте надёжный пароль в мастере установки; после входа он хранится только в БД."
         )
 
 

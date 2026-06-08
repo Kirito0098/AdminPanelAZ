@@ -883,7 +883,7 @@ seed_admin_user_from_env() {
 
   log "Синхронизация учётной записи администратора (мастер → БД)..."
   mkdir -p "$BACKEND_DIR/data"
-  (cd "$BACKEND_DIR" && "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/seed-admin-user.py") \
+  (cd "$BACKEND_DIR" && "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/seed-admin-user.py" --bootstrap) \
     || die "Не удалось создать/обновить администратора в БД"
 }
 

@@ -10,6 +10,10 @@ from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
 from app.services.ip_restriction import ip_restriction_service
 from app.services.notify_time import get_client_timezone_from_request
+from app.services.admin_bootstrap import (
+    scrub_admin_bootstrap_secret_from_env,
+    should_scrub_env_after_password_change,
+)
 from app.services.password_policy import validate_password
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -94,6 +98,8 @@ def update_user(
 
     db.commit()
     db.refresh(user)
+    if payload.password and should_scrub_env_after_password_change(user.username):
+        scrub_admin_bootstrap_secret_from_env()
     if settings.audit_log_enabled and (payload.password or payload.role is not None or payload.is_active is not None):
         log_action(
             db,

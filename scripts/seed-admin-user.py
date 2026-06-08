@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Upsert default admin user from backend/.env (called by install.sh after wizard)."""
+"""Upsert default admin from backend/.env — bootstrap only (install wizard / --bootstrap)."""
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -11,39 +12,33 @@ os.chdir(BACKEND_DIR)
 sys.path.insert(0, str(BACKEND_DIR))
 (BACKEND_DIR / "data").mkdir(parents=True, exist_ok=True)
 
-from app.auth import get_password_hash  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.database import Base, SessionLocal, engine  # noqa: E402
-from app.models import User, UserRole  # noqa: E402
+from app.services.admin_bootstrap import upsert_bootstrap_admin  # noqa: E402
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Bootstrap admin user from DEFAULT_ADMIN_* in .env")
+    parser.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="Create admin or overwrite password from .env (install wizard). "
+        "Without this flag, only creates admin if missing — never resets an existing password.",
+    )
+    args = parser.parse_args()
+
     settings = get_settings()
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.username == settings.default_admin_username).first()
-        if user:
-            user.password_hash = get_password_hash(settings.default_admin_password)
-            user.must_change_password = settings.default_admin_must_change_password
-            user.is_active = True
-            if user.role != UserRole.admin:
-                user.role = UserRole.admin
-            action = "updated"
-        else:
-            db.add(
-                User(
-                    username=settings.default_admin_username,
-                    password_hash=get_password_hash(settings.default_admin_password),
-                    role=UserRole.admin,
-                    theme="dark",
-                    must_change_password=settings.default_admin_must_change_password,
-                    is_active=True,
-                )
+        action = upsert_bootstrap_admin(db, force=args.bootstrap, settings=settings)
+        if action == "skipped":
+            print(
+                f"[seed-admin-user] Admin {settings.default_admin_username!r} already exists — "
+                "password unchanged (use --bootstrap to force sync from .env)"
             )
-            action = "created"
-        db.commit()
-        print(f"[seed-admin-user] Admin {settings.default_admin_username!r} {action} from DEFAULT_ADMIN_*")
+        else:
+            print(f"[seed-admin-user] Admin {settings.default_admin_username!r} {action} from DEFAULT_ADMIN_*")
     finally:
         db.close()
     return 0
