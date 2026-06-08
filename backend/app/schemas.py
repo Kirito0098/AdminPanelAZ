@@ -9,6 +9,7 @@ from app.models import NodeStatus, UserRole, VpnType
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    web_session_id: str | None = None
 
 
 class Login2FARequired(BaseModel):

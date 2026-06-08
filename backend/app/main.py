@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth import get_password_hash
 from app.config import get_settings
 from app.middleware.http_security import HttpSecurityMiddleware
+from app.middleware.active_session import ActiveSessionMiddleware
 from app.services.security_bootstrap import validate_panel_settings
 from app.database import Base, SessionLocal, engine, run_db_migrations
 from app.models import User, UserRole, VpnConfig, VpnType
@@ -33,12 +34,14 @@ from app.routers import (
     tasks,
     tg_mini,
     traffic,
+    session,
 )
 from app.routers import settings as settings_router
 from app.routers import users
 from app.services.backup_scheduler import run_backup_scheduler_loop
 from app.services.cidr.cidr_scheduler import run_cidr_db_scheduler_loop
 from app.services.wg_policy_sync_worker import run_wg_policy_sync_loop
+from app.services.nightly_idle_restart_worker import run_nightly_idle_restart_loop
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.node_manager import ensure_local_node, get_active_adapter, get_active_node
 from app.services.ip_restriction import ip_restriction_service
@@ -141,6 +144,7 @@ async def lifespan(_: FastAPI):
     )
     cidr_task = asyncio.create_task(run_cidr_db_scheduler_loop())
     wg_policy_sync_task = asyncio.create_task(run_wg_policy_sync_loop())
+    nightly_idle_restart_task = asyncio.create_task(run_nightly_idle_restart_loop())
     key_rotation_task = asyncio.create_task(run_node_key_rotation_loop())
     from app.services.admin_notify import admin_notify_service
 
@@ -158,6 +162,7 @@ async def lifespan(_: FastAPI):
         backup_task,
         cidr_task,
         wg_policy_sync_task,
+        nightly_idle_restart_task,
         key_rotation_task,
     ):
         task.cancel()
@@ -168,16 +173,18 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+app.add_middleware(ActiveSessionMiddleware)
 app.add_middleware(HttpSecurityMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Captcha-Id", "Accept"],
+    allow_headers=["Authorization", "Content-Type", "X-Captcha-Id", "X-Web-Session-Id", "Accept"],
 )
 
 app.include_router(auth.router, prefix="/api")
+app.include_router(session.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(configs.router, prefix="/api")
 app.include_router(monitoring.router, prefix="/api")

@@ -165,9 +165,9 @@ flowchart LR
 | Глобальный rate limit API | Flask-Limiter | — | ❌ |
 | 2FA / TOTP | — | `TwoFactorTab`, TOTP columns | 🆕 |
 | IP blocked dwell page | `ip_blocked/` | `ip_blocked.py` | ✅ |
-| Session heartbeat | `/api/session-heartbeat` | — | ❌ |
-| Active session tracking | `ActiveWebSessionService` | — | ❌ |
-| Nightly idle restart | `nightly_idle_restart.py` | — | ❌ |
+| Session heartbeat | `/api/session-heartbeat` | `session.py` + `useSessionHeartbeat` | ✅ |
+| Active session tracking | `ActiveWebSessionService` | `active_web_session.py` | ✅ |
+| Nightly idle restart | `nightly_idle_restart.py` | `nightly_idle_restart_worker.py` | ✅ |
 
 ### 7. Бэкапы и обслуживание
 
@@ -234,11 +234,11 @@ flowchart LR
 | `FEATURE_QR_DOWNLOADS_ENABLED` | `qr_downloads` | ✅ |
 | `FEATURE_VPN_NETWORK_ENABLED` | `vpn_network` (stub UI) | 🟡 |
 | `WG_POLICY_SYNC` (background) | cron `wg_awg_policy_sync.py` | `wg_policy_sync_worker.py` (async loop) | ✅ |
-| `ACTIVE_SESSION_TRACKING` (background) | — | ❌ |
-| `NIGHTLY_IDLE_RESTART` (background) | — | ❌ |
+| `ACTIVE_SESSION_TRACKING` (background) | `active_web_session.py` | `active_web_session.py` + toggle | ✅ |
+| `NIGHTLY_IDLE_RESTART` (background) | `nightly_idle_restart.py` | `nightly_idle_restart_worker.py` | ✅ |
 | `RUNTIME_BACKUP_CLEANUP` (background) | — | ❌ |
 
-> **Feature toggles (фаза 10):** UI parity для app_module toggles ✅; фоновые workers WG_POLICY_SYNC ✅; ACTIVE_SESSION_TRACKING / NIGHTLY_IDLE_RESTART / RUNTIME_BACKUP_CLEANUP — фазы 16/19.
+> **Feature toggles (фаза 10):** UI parity для app_module toggles ✅; фоновые workers WG_POLICY_SYNC ✅; ACTIVE_SESSION_TRACKING / NIGHTLY_IDLE_RESTART ✅ (фаза 16); RUNTIME_BACKUP_CLEANUP — фаза 19.
 
 ### 11. Установка и ops
 
@@ -318,7 +318,7 @@ flowchart LR
 | `templates/` + `static/` | `frontend/src/` | full rewrite React |
 | `core/services/admin_notify.py` | `backend/app/services/admin_notify.py` | service ported (hooks pending) |
 | `routes/settings/antizapret.py` | — | not ported |
-| `utils/nightly_idle_restart.py` | — | not ported |
+| `utils/nightly_idle_restart.py` | `nightly_idle_restart_worker.py` | ported (async worker) |
 | `utils/wg_awg_runtime_apply.py` | `wg_runtime.py` + `wg_policy_sync_worker.py` | inline, no standalone CLI |
 | `script_sh/adminpanel.sh` | `install.sh`, `start.sh`, systemd | different UX |
 
@@ -347,7 +347,7 @@ flowchart LR
 
 ### Низкий приоритет
 
-12. Session heartbeat + active session tracking + nightly idle restart
+12. ~~Session heartbeat + active session tracking + nightly idle restart~~ — **Сделано (0.7.0):** фаза 16
 13. **VPN-сеть** — управление HTTPS/Nginx из UI (сейчас через scripts)
 14. **Site diagnostics CLI** и **Safe Browsing status CLI**
 15. **adminpanel.sh**-style console menu (опционально)

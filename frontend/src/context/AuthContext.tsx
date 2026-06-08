@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/api/client'
+import { useSessionHeartbeat } from '@/hooks/useSessionHeartbeat'
 import { applyThemeClass, getStoredTheme } from '@/lib/theme'
+import { storeWebSessionId } from '@/lib/webSession'
 import type { User } from '@/types'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
@@ -81,10 +83,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user, silentRefresh])
 
+  useSessionHeartbeat(!!user)
+
   const login = useCallback(async (username: string, password: string) => {
     const result = await api.login(username, password)
     if ('access_token' in result && result.access_token) {
       localStorage.setItem('token', result.access_token)
+      if (result.web_session_id) {
+        storeWebSessionId(result.web_session_id)
+      }
       await refreshUser()
     }
     return result

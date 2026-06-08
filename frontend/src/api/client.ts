@@ -8,6 +8,8 @@ export class ApiError extends Error {
   }
 }
 
+import { clearWebSessionId, getWebSessionId } from '@/lib/webSession'
+
 function getToken(): string | null {
   return localStorage.getItem('token')
 }
@@ -41,6 +43,8 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, retry
   }
   const token = getToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
+  const sessionId = getWebSessionId()
+  if (sessionId) headers.set('X-Web-Session-Id', sessionId)
 
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'include' })
   if (response.status === 401 && retry && !path.startsWith('/auth/')) {
@@ -65,7 +69,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, retry
 }
 
 export type LoginResult =
-  | { access_token: string; requires_2fa?: false }
+  | { access_token: string; web_session_id?: string; requires_2fa?: false }
   | { requires_2fa: true; temp_token: string }
 
 export async function login(username: string, password: string): Promise<LoginResult> {
@@ -88,14 +92,18 @@ export async function loginWithCaptcha(
 }
 
 export async function login2FA(tempToken: string, code: string) {
-  return apiFetch<{ access_token: string }>('/auth/login/2fa', {
+  return apiFetch<{ access_token: string; web_session_id?: string }>('/auth/login/2fa', {
     method: 'POST',
     body: JSON.stringify({ temp_token: tempToken, code }),
   })
 }
 
 export async function logoutApi() {
-  return apiFetch('/auth/logout', { method: 'POST' })
+  try {
+    return await apiFetch('/auth/logout', { method: 'POST' })
+  } finally {
+    clearWebSessionId()
+  }
 }
 
 export async function get2FAStatus() {

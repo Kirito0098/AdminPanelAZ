@@ -272,6 +272,39 @@ def _migrate_node_resource_sample_table() -> None:
     logger.info("DB migration: created node_resource_sample table")
 
 
+def _migrate_active_web_session_table() -> None:
+    inspector = inspect(engine)
+    if "active_web_session" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE active_web_session (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    session_id VARCHAR(64) NOT NULL,
+                    username VARCHAR(80) NOT NULL,
+                    remote_addr VARCHAR(64),
+                    user_agent VARCHAR(255),
+                    created_at DATETIME,
+                    last_seen_at DATETIME,
+                    UNIQUE (session_id)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_active_web_session_session_id ON active_web_session (session_id)")
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_active_web_session_username ON active_web_session (username)")
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_active_web_session_last_seen_at ON active_web_session (last_seen_at)")
+        )
+    logger.info("DB migration: created active_web_session table")
+
+
 def _migrate_panel_resource_sample_table() -> None:
     inspector = inspect(engine)
     if "panel_resource_sample" in inspector.get_table_names():
@@ -307,6 +340,7 @@ def run_db_migrations() -> None:
     _migrate_access_policy_node_scope()
     _migrate_node_resource_sample_table()
     _migrate_panel_resource_sample_table()
+    _migrate_active_web_session_table()
     inspector = inspect(engine)
     migrations = {
         "wg_access_policy": [

@@ -91,6 +91,12 @@ class Settings(BaseSettings):
     node_agent_mtls_client_key: str = "/etc/adminpanelaz/mtls/panel.key"
     node_api_key_rotation_days: int = 0
     node_api_key_rotation_check_hours: int = 24
+    active_web_session_tracking_enabled: bool = True
+    active_web_session_ttl_seconds: int = 180
+    active_web_session_touch_interval_seconds: int = 30
+    nightly_idle_restart_enabled: bool = True
+    nightly_idle_restart_cron: str = "0 4 * * *"
+    admin_panel_az_service_name: str = "admin-panel-az.service"
 
     @field_validator("auth_rate_limit_backend")
     @classmethod

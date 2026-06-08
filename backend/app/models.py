@@ -89,6 +89,18 @@ class RefreshToken(Base):
     user: Mapped["User"] = relationship(back_populates="refresh_tokens")
 
 
+class ActiveWebSession(Base):
+    __tablename__ = "active_web_session"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(80), index=True)
+    remote_addr: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
 class VpnConfig(Base):
     __tablename__ = "vpn_configs"
     __table_args__ = (UniqueConstraint("node_id", "client_name", "vpn_type", name="uq_node_client_vpn_type"),)

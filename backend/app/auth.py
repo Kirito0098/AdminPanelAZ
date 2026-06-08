@@ -63,6 +63,17 @@ def authenticate_user(db: Session, username: str, password: str) -> User | None:
     return user
 
 
+def decode_access_token_username(token: str) -> str | None:
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        if payload.get("type") not in (None, "access"):
+            return None
+        username: str | None = payload.get("sub")
+        return username
+    except JWTError:
+        return None
+
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

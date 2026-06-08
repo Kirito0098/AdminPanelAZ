@@ -40,6 +40,12 @@ ensure_env_defaults() {
     _ensure_env_default "FEATURE_SYSTEM_UPDATES_ENABLED" "true"
     _ensure_env_default "FEATURE_QR_DOWNLOADS_ENABLED" "true"
     _ensure_env_default "FEATURE_VPN_NETWORK_ENABLED" "true"
+    _ensure_env_default "ACTIVE_WEB_SESSION_TRACKING_ENABLED" "true"
+    _ensure_env_default "ACTIVE_WEB_SESSION_TTL_SECONDS" "180"
+    _ensure_env_default "ACTIVE_WEB_SESSION_TOUCH_INTERVAL_SECONDS" "30"
+    _ensure_env_default "NIGHTLY_IDLE_RESTART_ENABLED" "true"
+    _ensure_env_default "NIGHTLY_IDLE_RESTART_CRON" "0 4 * * *"
+    _ensure_env_default "ADMIN_PANEL_AZ_SERVICE_NAME" "admin-panel-az.service"
     # Публикация (nginx-setup.sh задаёт DOMAIN, BEHIND_NGINX, TRUSTED_PROXY_IPS)
     _ensure_env_default "BEHIND_NGINX" "false"
     _ensure_env_default "APP_ENV" "development"

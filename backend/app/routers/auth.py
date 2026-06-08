@@ -48,6 +48,7 @@ from app.services.refresh_token import (
     revoke_refresh_token,
     rotate_refresh_token,
 )
+from app.services.active_web_session import active_web_session_service
 from app.services.admin_notify import admin_notify_service
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.totp_service import (
@@ -112,15 +113,29 @@ def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(key=settings.refresh_token_cookie_name, path="/api/auth")
 
 
-def _issue_token_pair(user: User, db: Session, response: Response | None = None) -> Token:
+def _issue_token_pair(
+    user: User,
+    db: Session,
+    response: Response | None = None,
+    request: Request | None = None,
+) -> Token:
     access = create_access_token(
         data={"sub": user.username, "role": user.role.value},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
     raw_refresh, _ = create_refresh_token(db, user)
+    web_session_id = active_web_session_service.generate_session_id()
     if response is not None:
         _set_refresh_cookie(response, raw_refresh)
-    return Token(access_token=access)
+    if request is not None:
+        active_web_session_service.touch_active_web_session(
+            db,
+            user.username,
+            request=request,
+            session_id=web_session_id,
+            force=True,
+        )
+    return Token(access_token=access, web_session_id=web_session_id)
 
 
 def _login_with_checks(
@@ -184,7 +199,7 @@ def _login_with_checks(
             remote_addr=client_ip,
             client_timezone=get_client_timezone_from_request(request),
         )
-    return _issue_token_pair(user, db, response)
+    return _issue_token_pair(user, db, response, request)
 
 
 @router.get("/captcha")
@@ -316,10 +331,10 @@ def login_2fa(payload: Login2FARequest, request: Request, response: Response, db
             client_timezone=get_client_timezone_from_request(request),
         )
     db.commit()
-    return _issue_token_pair(user, db, response)
+    return _issue_token_pair(user, db, response, request)
 
 
-@router.post("/refresh", response_model=Token)
+@router.post("/refresh", response_model=Token, response_model_exclude_none=True)
 def refresh_token(request: Request, response: Response, db: Session = Depends(get_db)):
     raw = request.cookies.get(settings.refresh_token_cookie_name)
     if not raw:
@@ -335,6 +350,12 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
 
 @router.post("/logout", response_model=MessageResponse)
 def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    session_id = active_web_session_service.get_session_id_from_request(request)
+    if session_id:
+        try:
+            active_web_session_service.remove_active_web_session(db, session_id)
+        except Exception:
+            db.rollback()
     raw = request.cookies.get(settings.refresh_token_cookie_name)
     if raw:
         revoke_refresh_token(db, raw)

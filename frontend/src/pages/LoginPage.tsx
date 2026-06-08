@@ -9,6 +9,7 @@ import {
   login2FA,
   loginWithCaptcha,
 } from '@/api/client'
+import { storeWebSessionId } from '@/lib/webSession'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -84,6 +85,7 @@ export default function LoginPage() {
     try {
       if (needs2FA && tempToken) {
         const res = await login2FA(tempToken, totpCode)
+        if (res.web_session_id) storeWebSessionId(res.web_session_id)
         if (setToken) await setToken(res.access_token)
         return
       }

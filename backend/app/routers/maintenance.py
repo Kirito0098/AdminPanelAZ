@@ -20,6 +20,8 @@ from app.services.admin_notify import TG_NOTIFY_EVENT_LABELS, admin_notify_servi
 from app.services.background_tasks import background_task_service
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.notify_time import get_client_timezone_from_request
+from app.config import get_settings
+from app.services.active_web_session import active_web_session_service
 from app.services.telegram import send_tg_message
 
 router = APIRouter(tags=["maintenance"])
@@ -225,3 +227,15 @@ def test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin
     if not ok:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
     return MessageResponse(message="Тестовое сообщение отправлено")
+
+
+@router.get("/maintenance/session-stats")
+def session_stats(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    cfg = get_settings()
+    return {
+        "active_web_sessions_count": active_web_session_service.count_active_sessions(db),
+        "tracking_enabled": cfg.active_web_session_tracking_enabled,
+        "nightly_idle_restart_enabled": cfg.nightly_idle_restart_enabled,
+        "active_web_session_ttl_seconds": cfg.active_web_session_ttl_seconds,
+        "nightly_idle_restart_cron": cfg.nightly_idle_restart_cron,
+    }

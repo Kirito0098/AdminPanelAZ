@@ -293,6 +293,31 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         group="app_module",
         settings_tabs=("vpn_network",),
     ),
+    FeatureToggleDefinition(
+        key="active_web_sessions",
+        env_key="ACTIVE_WEB_SESSION_TRACKING_ENABLED",
+        label="Учёт активных web-сессий",
+        description="Heartbeat и last_seen для определения активных вкладок панели (нужен для ночного рестарта).",
+        icon="👁️",
+        disable_hint="Heartbeat не будет обновлять БД; ночной рестарт не увидит активных пользователей.",
+        resource_impact_level="low",
+        resource_savings="Периодические записи в SQLite при heartbeat и API-запросах.",
+        default=True,
+        group="background",
+        api_paths=("/api/session-heartbeat",),
+    ),
+    FeatureToggleDefinition(
+        key="nightly_idle_restart",
+        env_key="NIGHTLY_IDLE_RESTART_ENABLED",
+        label="Ночной рестарт при простое",
+        description="Перезапуск systemd-сервиса панели, если нет активных web-сессий (по расписанию cron).",
+        icon="🌙",
+        disable_hint="Автоматический ночной перезапуск панели при отсутствии активных сессий будет отключён.",
+        resource_impact_level="low",
+        resource_savings="Один systemctl restart в сутки при простое.",
+        default=True,
+        group="background",
+    ),
 )
 
 FEATURE_TOGGLE_BY_KEY = {item.key: item for item in FEATURE_TOGGLES}

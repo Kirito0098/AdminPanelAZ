@@ -135,21 +135,63 @@ def test_totp_verify_valid_code():
 
 
 def test_auth_refresh_endpoint():
-    from app.database import SessionLocal
+    from app.database import SessionLocal, run_db_migrations
     from app.main import app
+    from app.models import ActiveWebSession
 
+    run_db_migrations()
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == "admin").first()
         assert user is not None
         raw, _ = create_refresh_token(db, user)
+        before_count = db.query(ActiveWebSession).count()
     finally:
         db.close()
 
     client = TestClient(app)
-    response = client.post("/api/auth/refresh", cookies={"refresh_token": raw})
+    response = client.post(
+        "/api/auth/refresh",
+        cookies={"refresh_token": raw},
+        headers={"X-Web-Session-Id": "refresh-should-not-touch"},
+    )
     assert response.status_code == 200
     assert "access_token" in response.json()
+    assert "web_session_id" not in response.json()
+
+    db = SessionLocal()
+    try:
+        assert db.query(ActiveWebSession).count() == before_count
+    finally:
+        db.close()
+
+
+def test_login_json_returns_web_session_id():
+    from app.auth import get_password_hash
+    from app.database import SessionLocal, run_db_migrations
+    from app.main import app
+
+    run_db_migrations()
+    test_password = "LoginSessionPass1"
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == "admin").first()
+        assert user is not None
+        user.password_hash = get_password_hash(test_password)
+        user.totp_enabled = False
+        db.commit()
+    finally:
+        db.close()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/auth/login/json",
+        json={"username": "admin", "password": test_password},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("access_token")
+    assert data.get("web_session_id")
 
 
 def test_login_requires_2fa_for_admin_with_totp():
