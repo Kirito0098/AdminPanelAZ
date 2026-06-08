@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -9,6 +11,7 @@ from app.models import AppSetting, User, UserRole, ViewerConfigAccess, VpnConfig
 from app.schemas import MessageResponse, VpnConfigCreate, VpnConfigResponse, VpnConfigUpdate
 from app.services.admin_notify import admin_notify_service
 from app.services.feature_guards import get_feature_service, require_vpn_type
+from app.services.node_adapter import NodeAdapter
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.openvpn_cert import resolve_openvpn_cert_days_remaining
 from app.services.openvpn_group import (
@@ -23,6 +26,8 @@ from app.services.qr_generator import generate_qr_png
 from app.services.security import SecurityService
 
 router = APIRouter(prefix="/configs", tags=["configs"])
+
+PROFILE_FILES_MAX_WORKERS = 12
 
 
 def _active_node_id(db: Session) -> int:
@@ -53,13 +58,13 @@ def _can_access_config(user: User, config: VpnConfig, db: Session | None = None)
     return config.owner_id == user.id
 
 
-def _fill_missing_cert_expire_days(configs: list[VpnConfig], db: Session) -> None:
-    adapter = get_active_adapter(db)
+def _fill_missing_cert_expire_days(configs: list[VpnConfig], db: Session, adapter: NodeAdapter | None = None) -> None:
+    node_adapter = adapter or get_active_adapter(db)
     dirty = False
     for config in configs:
         if config.vpn_type != VpnType.openvpn or config.cert_expire_days is not None:
             continue
-        days = resolve_openvpn_cert_days_remaining(adapter, config.client_name)
+        days = resolve_openvpn_cert_days_remaining(node_adapter, config.client_name)
         if days is not None:
             config.cert_expire_days = days
             dirty = True
@@ -70,15 +75,22 @@ def _fill_missing_cert_expire_days(configs: list[VpnConfig], db: Session) -> Non
 def _to_response(
     config: VpnConfig,
     db: Session,
-    include_files: bool = True,
+    include_files: bool = False,
     *,
     openvpn_group: str | None = None,
+    adapter: NodeAdapter | None = None,
+    profile_files: list[dict[str, str]] | None = None,
 ) -> VpnConfigResponse:
     owner = db.query(User).filter(User.id == config.owner_id).first()
-    adapter = get_active_adapter(db)
-    files = adapter.get_profile_files(config.client_name, config.vpn_type) if include_files else []
-    if include_files and config.vpn_type == VpnType.openvpn and openvpn_group:
-        files = filter_openvpn_profile_files(files, openvpn_group)
+    files: list[dict[str, str]] = []
+    if include_files:
+        if profile_files is not None:
+            files = profile_files
+        else:
+            node_adapter = adapter or get_active_adapter(db)
+            files = node_adapter.get_profile_files(config.client_name, config.vpn_type)
+        if config.vpn_type == VpnType.openvpn and openvpn_group:
+            files = filter_openvpn_profile_files(files, openvpn_group)
     return VpnConfigResponse(
         id=config.id,
         client_name=config.client_name,
@@ -93,26 +105,104 @@ def _to_response(
     )
 
 
-@router.get("", response_model=list[VpnConfigResponse])
-def list_configs(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    openvpn_group = get_user_openvpn_group(db, current_user.id)
+def _list_accessible_configs(db: Session, current_user: User) -> list[VpnConfig]:
     query = _scoped_config_query(db)
     if current_user.role == UserRole.viewer:
         grants = db.query(ViewerConfigAccess).filter_by(user_id=current_user.id).all()
         if not grants:
             return []
         configs = query.order_by(VpnConfig.created_at.desc()).all()
-        configs = [c for c in configs if _can_access_config(current_user, c, db)]
-        _fill_missing_cert_expire_days(configs, db)
-        return [_to_response(c, db, openvpn_group=openvpn_group) for c in configs]
+        return [c for c in configs if _can_access_config(current_user, c, db)]
     if current_user.role != UserRole.admin:
         query = query.filter(VpnConfig.owner_id == current_user.id)
-    configs = query.order_by(VpnConfig.created_at.desc()).all()
-    _fill_missing_cert_expire_days(configs, db)
-    return [_to_response(c, db, openvpn_group=openvpn_group) for c in configs]
+    return query.order_by(VpnConfig.created_at.desc()).all()
+
+
+def _fetch_profile_files_map(
+    adapter: NodeAdapter,
+    configs: list[VpnConfig],
+    *,
+    openvpn_group: str | None = None,
+) -> dict[int, list[dict[str, str]]]:
+    if not configs:
+        return {}
+
+    clients = [(c.client_name, c.vpn_type) for c in configs]
+    files_by_name: dict[str, list[dict[str, str]]] = {}
+    try:
+        files_by_name = adapter.get_profile_files_batch(clients)
+    except Exception:
+        files_by_name = {}
+
+    missing = [c for c in configs if c.client_name not in files_by_name]
+    if missing:
+        with ThreadPoolExecutor(max_workers=PROFILE_FILES_MAX_WORKERS) as pool:
+            futures = {
+                pool.submit(adapter.get_profile_files, c.client_name, c.vpn_type): c
+                for c in missing
+            }
+            for future in as_completed(futures):
+                config = futures[future]
+                try:
+                    files_by_name[config.client_name] = future.result()
+                except Exception:
+                    files_by_name[config.client_name] = []
+
+    result: dict[int, list[dict[str, str]]] = {}
+    for config in configs:
+        files = list(files_by_name.get(config.client_name, []))
+        if config.vpn_type == VpnType.openvpn and openvpn_group:
+            files = filter_openvpn_profile_files(files, openvpn_group)
+        result[config.id] = files
+    return result
+
+
+@router.get("", response_model=list[VpnConfigResponse])
+def list_configs(
+    include_files: bool = Query(False, description="Загружать список файлов профилей с узла"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    openvpn_group = get_user_openvpn_group(db, current_user.id)
+    configs = _list_accessible_configs(db, current_user)
+    adapter = get_active_adapter(db) if include_files else None
+    files_map: dict[int, list[dict[str, str]]] = {}
+    if include_files and adapter is not None and configs:
+        files_map = _fetch_profile_files_map(adapter, configs, openvpn_group=openvpn_group)
+    return [
+        _to_response(
+            c,
+            db,
+            include_files=include_files,
+            openvpn_group=openvpn_group,
+            adapter=adapter,
+            profile_files=files_map.get(c.id) if include_files else None,
+        )
+        for c in configs
+    ]
+
+
+@router.get("/profile-files")
+def list_profile_files(
+    ids: str = Query("", description="ID конфигураций через запятую; пусто — все доступные"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    openvpn_group = get_user_openvpn_group(db, current_user.id)
+    configs = _list_accessible_configs(db, current_user)
+    if ids.strip():
+        try:
+            id_set = {int(part.strip()) for part in ids.split(",") if part.strip()}
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ids должен содержать целые числа через запятую",
+            ) from exc
+        configs = [c for c in configs if c.id in id_set]
+
+    adapter = get_active_adapter(db)
+    files_map = _fetch_profile_files_map(adapter, configs, openvpn_group=openvpn_group)
+    return {str(config_id): files for config_id, files in files_map.items()}
 
 
 class OpenVpnGroupUpdate(BaseModel):
@@ -191,12 +281,13 @@ def create_config(
         node_name=node.name,
         client_timezone=get_client_timezone_from_request(request),
     )
-    return _to_response(config, db)
+    return _to_response(config, db, include_files=True, adapter=adapter)
 
 
 @router.get("/{config_id}", response_model=VpnConfigResponse)
 def get_config(
     config_id: int,
+    include_files: bool = Query(True, description="Загружать список файлов профилей с узла"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -205,7 +296,7 @@ def get_config(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     if not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
-    return _to_response(config, db)
+    return _to_response(config, db, include_files=include_files)
 
 
 @router.patch("/{config_id}", response_model=VpnConfigResponse)
@@ -236,7 +327,7 @@ def update_config(
 
     db.commit()
     db.refresh(config)
-    return _to_response(config, db)
+    return _to_response(config, db, include_files=True)
 
 
 @router.delete("/{config_id}", response_model=MessageResponse)

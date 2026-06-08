@@ -1,4 +1,5 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -32,15 +33,31 @@ def _set_setting(db: Session, key: str, value: str) -> None:
         db.add(AppSetting(key=key, value=value))
 
 
+_CONFIG_FILE_NAMES = (
+    "include-hosts.txt",
+    "exclude-hosts.txt",
+    "include-ips.txt",
+    "exclude-ips.txt",
+    "allow-ips.txt",
+)
+
+
+def _read_config_files_parallel(adapter, filenames: tuple[str, ...]) -> dict[str, str]:
+    with ThreadPoolExecutor(max_workers=len(filenames)) as pool:
+        contents = list(pool.map(adapter.read_config_file, filenames))
+    return dict(zip(filenames, contents, strict=True))
+
+
 @router.get("", response_model=AppSettingsResponse)
 def get_settings(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
-    include_hosts = adapter.read_config_file("include-hosts.txt")
-    exclude_hosts = adapter.read_config_file("exclude-hosts.txt")
-    include_ips = adapter.read_config_file("include-ips.txt")
-    exclude_ips = adapter.read_config_file("exclude-ips.txt")
-    allow_ips = adapter.read_config_file("allow-ips.txt")
+    file_contents = _read_config_files_parallel(adapter, _CONFIG_FILE_NAMES)
+    include_hosts = file_contents["include-hosts.txt"]
+    exclude_hosts = file_contents["exclude-hosts.txt"]
+    include_ips = file_contents["include-ips.txt"]
+    exclude_ips = file_contents["exclude-ips.txt"]
+    allow_ips = file_contents["allow-ips.txt"]
 
     if current_user.role.value != "admin":
         include_hosts = ""

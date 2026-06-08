@@ -14,6 +14,7 @@ import {
   downloadProfile,
   fetchQrBlob,
   getClientPolicies,
+  getConfigProfileFiles,
   getConfigs,
   getDashboardSummary,
   syncConfigs,
@@ -62,6 +63,8 @@ export default function DashboardPage() {
   const { startGlobal, doneGlobal, inline, withInline } = useProgress()
   const [configs, setConfigs] = useState<VpnConfig[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingFiles, setLoadingFiles] = useState(false)
+  const [summaryLoading, setSummaryLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [clientName, setClientName] = useState('')
   const [vpnType, setVpnType] = useState<VpnType>('openvpn')
@@ -78,21 +81,51 @@ export default function DashboardPage() {
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
 
+  const loadProfileFiles = async (configsData: VpnConfig[]) => {
+    if (configsData.length === 0) return
+    setLoadingFiles(true)
+    try {
+      const filesMap = await getConfigProfileFiles(configsData.map((c) => c.id))
+      setConfigs((prev) =>
+        prev.map((config) => ({
+          ...config,
+          profile_files: filesMap[String(config.id)] ?? config.profile_files,
+        })),
+      )
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки файлов профилей')
+    } finally {
+      setLoadingFiles(false)
+    }
+  }
+
   const load = async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) {
       setLoading(true)
+      setSummaryLoading(true)
       startGlobal()
     }
+    void getDashboardSummary()
+      .then((summaryData) => {
+        setSummary(summaryData)
+      })
+      .catch((err) => {
+        notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки сводки')
+      })
+      .finally(() => {
+        setSummaryLoading(false)
+      })
+
     try {
-      const [configsData, summaryData] = await Promise.all([getConfigs(), getDashboardSummary()])
+      const configsData = await getConfigs(false)
       setConfigs(configsData)
-      setSummary(summaryData)
       if (user?.role === 'admin' && configsData.length > 0) {
         const names = configsData.map((c) => c.client_name).join(',')
         getClientPolicies(names).then(setPolicies).catch(() => {})
       } else {
         setPolicies({})
       }
+      void loadProfileFiles(configsData)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки конфигураций')
     } finally {
@@ -256,6 +289,14 @@ export default function DashboardPage() {
       )}
 
       <InlineProgressBar active={inline.active} label={inline.label} />
+
+      {summaryLoading && !summary && (
+        <Card>
+          <CardContent>
+            <Spinner label="Загрузка сводки узла..." className="py-8" />
+          </CardContent>
+        </Card>
+      )}
 
       {summary && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -436,6 +477,7 @@ export default function DashboardPage() {
           configs={configs}
           policies={policies}
           userRole={user.role}
+          filesLoading={loadingFiles}
           onRefresh={() => load({ silent: true })}
           onQr={handleQr}
           onDownload={handleDownload}

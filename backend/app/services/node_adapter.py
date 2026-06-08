@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
-import time
 from typing import Any
 
 import httpx
@@ -18,6 +17,7 @@ from app.services.node_update import apply_node_update, check_all_updates, resol
 from app.services.openvpn_management import openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.server_monitor import ServerMonitorService
+from app.services.node_remote_cache import get_cached_monitoring_overview, monitoring_overview_cache_key
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 
 _settings = get_settings()
@@ -55,6 +55,12 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]: ...
+
+    def get_profile_files_batch(
+        self,
+        clients: list[tuple[str, VpnType]],
+    ) -> dict[str, list[dict[str, str]]]:
+        return {name: self.get_profile_files(name, vpn_type) for name, vpn_type in clients}
 
     @abstractmethod
     def read_profile_file(self, path: str) -> str: ...
@@ -334,26 +340,26 @@ class RemoteNodeAdapter(NodeAdapter):
         self.base_url = f"{scheme}://{host}:{port}"
         self.api_key = api_key
         self._verify = build_node_agent_ssl_context()
-        self._monitoring_overview_cache: dict[str, Any] | None = None
-        self._monitoring_overview_cache_expires: float = 0.0
+        self._overview_cache_key = monitoring_overview_cache_key(host, port)
+        self._http_client: httpx.Client | None = None
+
+    def _get_http_client(self) -> httpx.Client:
+        if self._http_client is None:
+            self._http_client = httpx.Client(timeout=HTTP_TIMEOUT, **self._client_kwargs())
+        return self._http_client
+
+    def close(self) -> None:
+        if self._http_client is not None:
+            self._http_client.close()
+            self._http_client = None
 
     def _get_monitoring_overview(self) -> dict[str, Any]:
         ttl = max(0, int(_settings.monitoring_overview_cache_ttl_seconds))
-        now = time.monotonic()
-        if (
-            ttl > 0
-            and self._monitoring_overview_cache is not None
-            and now < self._monitoring_overview_cache_expires
-        ):
-            return self._monitoring_overview_cache
-        overview = self._request("GET", "/monitoring/overview")
-        if ttl > 0:
-            self._monitoring_overview_cache = overview
-            self._monitoring_overview_cache_expires = now + ttl
-        else:
-            self._monitoring_overview_cache = None
-            self._monitoring_overview_cache_expires = 0.0
-        return overview
+        return get_cached_monitoring_overview(
+            self._overview_cache_key,
+            ttl,
+            lambda: self._request("GET", "/monitoring/overview"),
+        )
 
     def _headers(self) -> dict[str, str]:
         return {"X-Node-Key": self.api_key}
@@ -389,8 +395,14 @@ class RemoteNodeAdapter(NodeAdapter):
         url = f"{self.base_url}{path}"
         timeout = kwargs.pop("timeout", HTTP_TIMEOUT)
         try:
-            with httpx.Client(timeout=timeout, **self._client_kwargs()) as client:
-                response = client.request(method, url, headers=self._headers(), **kwargs)
+            client = self._get_http_client()
+            response = client.request(
+                method,
+                url,
+                headers=self._headers(),
+                timeout=timeout,
+                **kwargs,
+            )
         except httpx.RequestError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -464,6 +476,22 @@ class RemoteNodeAdapter(NodeAdapter):
         )
         return data.get("files", [])
 
+    def get_profile_files_batch(
+        self,
+        clients: list[tuple[str, VpnType]],
+    ) -> dict[str, list[dict[str, str]]]:
+        if not clients:
+            return {}
+        payload = {
+            "clients": [
+                {"client_name": name, "vpn_type": vpn_type.value}
+                for name, vpn_type in clients
+            ]
+        }
+        data = self._request("POST", "/profiles/files/batch", json=payload)
+        raw = data.get("files_by_client", {})
+        return {str(key): list(value or []) for key, value in raw.items()}
+
     def read_profile_file(self, path: str) -> str:
         data = self._request("GET", "/profiles/download", params={"path": path})
         return data.get("content", "")
@@ -480,6 +508,13 @@ class RemoteNodeAdapter(NodeAdapter):
         return data.get("detail") or data.get("message", "ok")
 
     def get_server_ip(self) -> str | None:
+        try:
+            overview = self._get_monitoring_overview()
+            ip = overview.get("server_ip")
+            if ip:
+                return str(ip)
+        except Exception:
+            pass
         data = self._request("GET", "/server/ip")
         return data.get("server_ip")
 

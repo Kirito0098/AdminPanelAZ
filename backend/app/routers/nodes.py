@@ -1,6 +1,7 @@
 import json
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
@@ -110,13 +111,28 @@ def create_node(
     return _to_response(node)
 
 
+def _should_skip_live_health_check(node: Node) -> bool:
+    cache_seconds = max(0, int(settings.node_active_health_cache_seconds))
+    if cache_seconds <= 0 or node.status == NodeStatus.unknown:
+        return False
+    if not node.last_seen_at:
+        return False
+    age = (datetime.utcnow() - node.last_seen_at).total_seconds()
+    return age < cache_seconds
+
+
 @router.get("/active", response_model=ActiveNodeResponse)
-def get_active(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_active(
+    force_check: bool = Query(False, description="Принудительная live-проверка node agent"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     sync_local_node(db)
     node = get_active_node(db)
-    health = check_node_health(node)
-    update_node_from_health(node, health, db)
-    db.refresh(node)
+    if force_check or not _should_skip_live_health_check(node):
+        health = check_node_health(node)
+        update_node_from_health(node, health, db)
+        db.refresh(node)
     return ActiveNodeResponse(node=_to_response(node))
 
 

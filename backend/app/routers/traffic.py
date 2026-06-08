@@ -55,6 +55,16 @@ def _set_setting(db: Session, key: str, value: str) -> None:
         db.add(AppSetting(key=key, value=value))
 
 
+def _db_active_traffic_client_names(db: Session, node_id: int) -> set[str]:
+    rows = (
+        db.query(TrafficSessionState.common_name)
+        .filter(TrafficSessionState.node_id == node_id, TrafficSessionState.is_active.is_(True))
+        .distinct()
+        .all()
+    )
+    return {name for (name,) in rows if name}
+
+
 def _active_traffic_client_names(db: Session, node_id: int) -> set[str]:
     active_names: set[str] = set()
     try:
@@ -67,21 +77,34 @@ def _active_traffic_client_names(db: Session, node_id: int) -> set[str]:
         active_names = set()
 
     if not active_names:
-        rows = (
-            db.query(TrafficSessionState.common_name)
-            .filter(TrafficSessionState.node_id == node_id, TrafficSessionState.is_active.is_(True))
-            .distinct()
-            .all()
-        )
-        active_names = {name for (name,) in rows if name}
+        active_names = _db_active_traffic_client_names(db, node_id)
 
     return active_names
 
 
-@router.get("/overview", response_model=TrafficOverview)
-def traffic_overview(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.get("/active-clients")
+def traffic_active_clients(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
     node = get_active_node(db)
     active_names = _active_traffic_client_names(db, node.id)
+    return {
+        "active_clients": sorted(active_names),
+        "timestamp": datetime.utcnow(),
+        "node_id": node.id,
+        "node_name": node.name,
+    }
+
+
+@router.get("/overview", response_model=TrafficOverview)
+def traffic_overview(
+    live: bool = Query(True, description="Запрашивать live-статус онлайн с узла"),
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    node = get_active_node(db)
+    if live:
+        active_names = _active_traffic_client_names(db, node.id)
+    else:
+        active_names = _db_active_traffic_client_names(db, node.id)
 
     collector = TrafficCollectorService(db, node.id)
     rows, summary = collector.get_summary(active_names, settings.traffic_db_stale_seconds)

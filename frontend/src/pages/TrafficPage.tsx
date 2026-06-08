@@ -35,6 +35,7 @@ import {
   getDeletedClientTraffic,
   getTrafficChart,
   getTrafficCleanupSchedule,
+  getTrafficActiveClients,
   getTrafficOverview,
   resetTraffic,
   setTrafficCleanupSchedule,
@@ -243,6 +244,7 @@ export default function TrafficPage() {
   const [selectedClient, setSelectedClient] = useState<string>('')
   const [chartRange, setChartRange] = useState('7d')
   const [loading, setLoading] = useState(true)
+  const [liveLoading, setLiveLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [chartLoading, setChartLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -272,12 +274,7 @@ export default function TrafficPage() {
       }
       if (manual) setRefreshing(true)
       try {
-        const overview = await Promise.race([
-          getTrafficOverview(),
-          new Promise<never>((_, reject) => {
-            window.setTimeout(() => reject(new Error('Таймаут загрузки трафика (25 с)')), 25_000)
-          }),
-        ])
+        const overview = await getTrafficOverview(false)
         setData(overview)
         setLoadError(null)
         setSelectedClient((current) => {
@@ -285,6 +282,26 @@ export default function TrafficPage() {
           return overview.rows[0]?.common_name ?? ''
         })
         setCountdown(REFRESH_INTERVAL)
+
+        if (!initial) setLiveLoading(true)
+        void getTrafficActiveClients()
+          .then(({ active_clients }) => {
+            const activeSet = new Set(active_clients)
+            setData((prev) => {
+              if (!prev) return prev
+              return {
+                ...prev,
+                rows: prev.rows.map((row) => ({
+                  ...row,
+                  is_active: activeSet.has(row.common_name),
+                })),
+              }
+            })
+          })
+          .catch(() => {})
+          .finally(() => {
+            setLiveLoading(false)
+          })
       } catch (err) {
         const message =
           err instanceof ApiError
@@ -490,6 +507,12 @@ export default function TrafficPage() {
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-2xl font-bold tracking-tight">Мониторинг трафика</h2>
               <NodeBadge name={activeNode?.name ?? data?.node_name} status={activeNode?.status} />
+              {liveLoading && (
+                <Badge variant="secondary" className="gap-1 text-[10px]">
+                  <Loader2 size={10} className="animate-spin" />
+                  Live-статус
+                </Badge>
+              )}
               {summary?.db_is_stale && (
                 <Badge variant="warning" className="gap-1 text-[10px]">
                   <Database size={10} />

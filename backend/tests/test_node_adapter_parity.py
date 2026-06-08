@@ -26,6 +26,7 @@ REMOTE_ADAPTER_ENDPOINTS: dict[str, str] = {
     "recreate_profiles": "POST /configs/recreate-profiles",
     "create_antizapret_backup": "POST /backups/antizapret",
     "get_profile_files": "GET /profiles/files",
+    "get_profile_files_batch": "POST /profiles/files/batch",
     "read_profile_file": "GET /profiles/download",
     "read_config_file": "GET /configs/files/{filename}",
     "write_config_file": "PUT /configs/files/{filename}",

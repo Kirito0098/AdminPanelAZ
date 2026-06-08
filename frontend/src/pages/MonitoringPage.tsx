@@ -16,7 +16,7 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react'
-import { ApiError, getMonitoring, getResourceHistory } from '@/api/client'
+import { ApiError, getMonitoring, getResourceHistory, openMonitoringStream } from '@/api/client'
 import MonitoringCharts, { formatBytes, totalTraffic } from '@/components/monitoring/MonitoringCharts'
 import PanelResourceHistoryCharts from '@/components/monitoring/PanelResourceHistoryCharts'
 import ResourceHistoryCharts from '@/components/monitoring/ResourceHistoryCharts'
@@ -206,7 +206,7 @@ export default function MonitoringPage() {
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal } = useProgress()
   const [data, setData] = useState<MonitoringOverview | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [liveLoading, setLiveLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -223,7 +223,7 @@ export default function MonitoringPage() {
     async (opts: { initial?: boolean; manual?: boolean } = {}) => {
       const { initial = false, manual = false } = opts
       if (initial) {
-        setLoading(true)
+        setLiveLoading(true)
         startGlobal()
       } else if (manual) {
         setRefreshing(true)
@@ -238,7 +238,7 @@ export default function MonitoringPage() {
         setLoadError(message)
         notifyError(message)
       } finally {
-        setLoading(false)
+        setLiveLoading(false)
         setRefreshing(false)
         if (initial) doneGlobal()
       }
@@ -274,18 +274,24 @@ export default function MonitoringPage() {
   useEffect(() => {
     if (!autoRefresh) return
 
+    const source = openMonitoringStream(
+      (payload) => {
+        setData(payload)
+        setLoadError(null)
+        setCountdown(REFRESH_INTERVAL)
+      },
+      () => {},
+    )
+
     const tick = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) {
-          loadRef.current?.()
-          return REFRESH_INTERVAL
-        }
-        return c - 1
-      })
+      setCountdown((c) => (c <= 1 ? REFRESH_INTERVAL : c - 1))
     }, 1000)
 
-    return () => clearInterval(tick)
-  }, [autoRefresh])
+    return () => {
+      source?.close()
+      clearInterval(tick)
+    }
+  }, [autoRefresh, activeNode?.id])
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
@@ -331,10 +337,6 @@ export default function MonitoringPage() {
   const handleRefresh = () => {
     load({ manual: true })
     loadResourceHistory(resourcePeriod)
-  }
-
-  if (loading && !data) {
-    return <Spinner label="Загрузка NOC мониторинга..." className="py-16" />
   }
 
   return (
@@ -388,7 +390,13 @@ export default function MonitoringPage() {
 
       <InlineProgressBar active={refreshing} label="Обновление данных мониторинга..." />
 
-      {loadError && !data ? (
+      {liveLoading && !data && !loadError ? (
+        <Card>
+          <CardContent>
+            <Spinner label="Загрузка live-данных с узла..." className="py-12" />
+          </CardContent>
+        </Card>
+      ) : loadError && !data ? (
         <Card>
           <CardContent>
             <EmptyState

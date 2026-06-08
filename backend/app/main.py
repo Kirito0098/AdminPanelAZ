@@ -50,6 +50,7 @@ from app.services.node_health_worker import run_node_health_loop
 from app.services.panel_resource_metrics_worker import run_panel_resource_metrics_loop
 from app.services.resource_metrics_worker import run_resource_metrics_loop
 from app.services.node_key_rotation import run_node_key_rotation_loop
+from app.services.cert_sync_worker import run_cert_sync_loop
 from app.services.traffic.worker import run_traffic_collector_loop
 
 settings = get_settings()
@@ -132,6 +133,9 @@ async def lifespan(_: FastAPI):
     if not db_path.is_absolute():
         db_path = app_root / db_path
     collector_task = asyncio.create_task(run_traffic_collector_loop())
+    cert_sync_task = (
+        asyncio.create_task(run_cert_sync_loop()) if settings.cert_sync_enabled else None
+    )
     health_task = asyncio.create_task(run_node_health_loop())
     resource_metrics_task = asyncio.create_task(run_resource_metrics_loop())
     panel_resource_metrics_task = asyncio.create_task(run_panel_resource_metrics_loop())
@@ -171,6 +175,7 @@ async def lifespan(_: FastAPI):
     yield
     for task in (
         collector_task,
+        cert_sync_task,
         health_task,
         resource_metrics_task,
         panel_resource_metrics_task,
@@ -181,6 +186,8 @@ async def lifespan(_: FastAPI):
         nightly_idle_restart_task,
         key_rotation_task,
     ):
+        if task is None:
+            continue
         task.cancel()
         try:
             await task

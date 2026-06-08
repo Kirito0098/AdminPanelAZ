@@ -1,10 +1,15 @@
+import asyncio
+import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
-from app.database import get_db
+from app.config import get_settings
+from app.database import SessionLocal, get_db
 from app.models import User
 from app.models import VpnConfig, VpnType
 from app.schemas import (
@@ -23,10 +28,10 @@ from app.services.panel_resource_metrics import query_history as query_panel_his
 from app.services.resource_metrics import VALID_PERIODS, query_history
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
+_settings = get_settings()
 
 
-@router.get("/overview", response_model=MonitoringOverview)
-def monitoring_overview(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def _build_monitoring_overview(db: Session) -> MonitoringOverview:
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     ovpn_clients, openvpn_data_source = adapter.get_openvpn_status_snapshot()
@@ -39,6 +44,67 @@ def monitoring_overview(_: User = Depends(get_current_user), db: Session = Depen
         node_id=node.id,
         node_name=node.name,
         openvpn_data_source=openvpn_data_source,
+    )
+
+
+@router.get("/overview", response_model=MonitoringOverview)
+def monitoring_overview(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _build_monitoring_overview(db)
+
+
+def _user_from_access_token(token: str, db: Session) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Неверный токен авторизации",
+    )
+    try:
+        payload = jwt.decode(token, _settings.secret_key, algorithms=[_settings.algorithm])
+        if payload.get("type") not in (None, "access"):
+            raise credentials_exception
+        username: str | None = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError as exc:
+        raise credentials_exception from exc
+
+    user = db.query(User).filter(User.username == username).first()
+    if user is None or not user.is_active:
+        raise credentials_exception
+    return user
+
+
+@router.get("/stream")
+async def monitoring_stream(
+    request: Request,
+    token: str = Query(..., description="JWT access token"),
+):
+    db = SessionLocal()
+    try:
+        _user_from_access_token(token, db)
+    finally:
+        db.close()
+
+    interval = max(5, int(_settings.monitoring_overview_cache_ttl_seconds))
+
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                break
+            db = SessionLocal()
+            try:
+                overview = _build_monitoring_overview(db)
+                payload = overview.model_dump(mode="json")
+                yield f"data: {json.dumps(payload, default=str)}\n\n"
+            except Exception as exc:
+                yield f"event: error\ndata: {json.dumps({'detail': str(exc)}, default=str)}\n\n"
+            finally:
+                db.close()
+            await asyncio.sleep(interval)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

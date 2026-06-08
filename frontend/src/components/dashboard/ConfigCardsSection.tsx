@@ -37,6 +37,7 @@ interface ConfigCardsSectionProps {
   configs: VpnConfig[]
   policies: Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
   userRole: UserRole
+  filesLoading?: boolean
   onRefresh: () => Promise<void>
   onQr: (config: VpnConfig, path: string, filename: string) => Promise<void>
   onDownload: (config: VpnConfig, path: string, filename: string) => Promise<void>
@@ -62,6 +63,7 @@ export default function ConfigCardsSection({
   configs,
   policies,
   userRole,
+  filesLoading = false,
   onRefresh,
   onQr,
   onDownload,
@@ -390,6 +392,7 @@ export default function ConfigCardsSection({
                         tab={tab}
                         policy={getPolicyForConfig(config, policies)}
                         userRole={userRole}
+                        filesLoading={filesLoading}
                         loadingAction={getCardLoading(config.id)}
                         onOpenDetails={() => {
                           setSelectedTab(tab)

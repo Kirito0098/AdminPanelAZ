@@ -36,6 +36,7 @@ interface ConfigCardProps {
   tab: ProtocolTab
   policy?: ClientAccessPolicy
   userRole: UserRole
+  filesLoading?: boolean
   loadingAction?: ActionKey | null
   onOpenDetails: () => void
   onCopyName: () => void
@@ -59,6 +60,7 @@ export default function ConfigCard({
   tab,
   policy,
   userRole,
+  filesLoading = false,
   loadingAction,
   onOpenDetails,
   onCopyName,
@@ -172,6 +174,12 @@ export default function ConfigCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-1 border-t pt-3">
+          {filesLoading && !primaryFile && (
+            <div className="flex gap-2">
+              <div className="h-8 w-24 animate-pulse rounded-md bg-muted" />
+              <div className="h-8 w-20 animate-pulse rounded-md bg-muted" />
+            </div>
+          )}
           {primaryFile && showQrDownloads && (
             <>
               <Button

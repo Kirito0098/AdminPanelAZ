@@ -99,6 +99,15 @@ class WireGuardClientRequest(BaseModel):
     client_name: str = Field(min_length=1, max_length=32)
 
 
+class ProfileFilesClientRequest(BaseModel):
+    client_name: str = Field(min_length=1, max_length=32)
+    vpn_type: str
+
+
+class ProfileFilesBatchRequest(BaseModel):
+    clients: list[ProfileFilesClientRequest] = Field(default_factory=list)
+
+
 class ServiceRestartRequest(BaseModel):
     service_name: str
 
@@ -277,6 +286,19 @@ def restart_service(payload: ServiceRestartRequest, _: None = Depends(verify_api
 def profile_files(client_name: str, vpn_type: str, _: None = Depends(verify_api_key)):
     vt = VpnType(vpn_type)
     return {"files": service.get_profile_files(client_name, vt)}
+
+
+@app.post("/profiles/files/batch")
+def profile_files_batch(payload: ProfileFilesBatchRequest, _: None = Depends(verify_api_key)):
+    files_by_client: dict[str, list] = {}
+    for item in payload.clients:
+        try:
+            vt = VpnType(item.vpn_type)
+        except ValueError:
+            files_by_client[item.client_name] = []
+            continue
+        files_by_client[item.client_name] = service.get_profile_files(item.client_name, vt)
+    return {"files_by_client": files_by_client}
 
 
 @app.get("/profiles/download")

@@ -162,8 +162,18 @@ export async function changePassword(current: string, newPassword: string) {
   })
 }
 
-export async function getConfigs() {
-  return apiFetch<import('../types').VpnConfig[]>('/configs')
+export async function getConfigs(includeFiles = false) {
+  const params = new URLSearchParams()
+  if (includeFiles) params.set('include_files', 'true')
+  const query = params.toString() ? `?${params.toString()}` : ''
+  return apiFetch<import('../types').VpnConfig[]>(`/configs${query}`)
+}
+
+export async function getConfigProfileFiles(ids?: number[]) {
+  const query = ids?.length ? `?ids=${ids.join(',')}` : ''
+  return apiFetch<Record<string, import('../types').VpnConfig['profile_files']>>(
+    `/configs/profile-files${query}`,
+  )
 }
 
 export async function createConfig(data: {
@@ -199,6 +209,34 @@ export async function syncConfigs() {
 
 export async function getMonitoring() {
   return apiFetch<import('../types').MonitoringOverview>('/monitoring/overview')
+}
+
+export function openMonitoringStream(
+  onData: (data: import('../types').MonitoringOverview) => void,
+  onError?: (message: string) => void,
+): EventSource | null {
+  const token = getToken()
+  if (!token) return null
+  const url = `${API_BASE}/monitoring/stream?token=${encodeURIComponent(token)}`
+  const source = new EventSource(url)
+  source.onmessage = (event) => {
+    try {
+      onData(JSON.parse(event.data) as import('../types').MonitoringOverview)
+    } catch {
+      onError?.('Ошибка разбора потока мониторинга')
+    }
+  }
+  source.addEventListener('error', (event) => {
+    if (event instanceof MessageEvent && event.data) {
+      try {
+        const payload = JSON.parse(event.data) as { detail?: string }
+        onError?.(payload.detail || 'Ошибка потока мониторинга')
+      } catch {
+        onError?.('Ошибка потока мониторинга')
+      }
+    }
+  })
+  return source
 }
 
 export async function getResourceHistory(period: '1d' | '7d' | '30d' = '1d') {
@@ -569,8 +607,17 @@ export async function getBackgroundTask(taskId: string) {
   return apiFetch<import('../types').BackgroundTask>(`/tasks/${encodeURIComponent(taskId)}`)
 }
 
-export async function getTrafficOverview() {
-  return apiFetch<import('../types').TrafficOverview>('/traffic/overview')
+export async function getTrafficOverview(live = true) {
+  return apiFetch<import('../types').TrafficOverview>(`/traffic/overview?live=${live}`)
+}
+
+export async function getTrafficActiveClients() {
+  return apiFetch<{
+    active_clients: string[]
+    timestamp: string
+    node_id: number
+    node_name: string
+  }>('/traffic/active-clients')
 }
 
 export async function getTrafficChart(client: string, range = '7d', protocol = 'all') {
