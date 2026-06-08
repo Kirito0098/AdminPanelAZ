@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
@@ -16,6 +17,7 @@ from app.schemas import (
     TelegramSettingsUpdate,
 )
 from app.services.admin_notify import TG_NOTIFY_EVENT_LABELS, admin_notify_service
+from app.services.background_tasks import background_task_service
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.telegram import send_tg_message
@@ -36,23 +38,51 @@ def _set_setting(db: Session, key: str, value: str) -> None:
         db.add(AppSetting(key=key, value=value))
 
 
-@router.post("/settings/run-doall", response_model=MessageResponse)
+@router.post("/settings/run-doall", status_code=status.HTTP_202_ACCEPTED)
 def run_doall(
     request: Request,
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    output = get_active_adapter(db).apply_config_changes()
-    node = get_active_node(db)
-    admin_notify_service.send_settings_change(
-        db,
-        actor_username=admin.username,
-        settings_key="settings_run_doall",
-        node_id=node.id,
-        node_name=node.name,
-        client_timezone=get_client_timezone_from_request(request),
+    active = background_task_service.find_active_task("run_doall")
+    if active:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": "doall.sh уже выполняется",
+                "active_task_id": active.id,
+            },
+        )
+
+    client_timezone = get_client_timezone_from_request(request)
+
+    def _callable(progress_updater=None):
+        from app.database import SessionLocal
+
+        worker_db = SessionLocal()
+        try:
+            adapter = get_active_adapter(worker_db)
+            result = background_task_service.task_run_doall(adapter, progress_updater)
+            node = get_active_node(worker_db)
+            admin_notify_service.send_settings_change(
+                worker_db,
+                actor_username=admin.username,
+                settings_key="settings_run_doall",
+                node_id=node.id,
+                node_name=node.name,
+                client_timezone=client_timezone,
+            )
+            return result
+        finally:
+            worker_db.close()
+
+    task = background_task_service.enqueue_background_task(
+        "run_doall",
+        _callable,
+        created_by_username=admin.username,
+        queued_message="Запуск doall поставлен в очередь",
     )
-    return MessageResponse(message="doall.sh выполнен", detail=output)
+    return background_task_service.build_accepted_payload(task, "Скрипт doall запущен в фоне.")
 
 
 @router.post("/settings/restart-service", response_model=MessageResponse)

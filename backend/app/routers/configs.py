@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse, Response
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
@@ -9,6 +10,12 @@ from app.schemas import MessageResponse, VpnConfigCreate, VpnConfigResponse, Vpn
 from app.services.admin_notify import admin_notify_service
 from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.openvpn_group import (
+    filter_openvpn_profile_files,
+    get_user_openvpn_group,
+    list_openvpn_groups,
+    set_user_openvpn_group,
+)
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.qr_download import QrDownloadService
 from app.services.qr_generator import generate_qr_png
@@ -45,10 +52,18 @@ def _can_access_config(user: User, config: VpnConfig, db: Session | None = None)
     return config.owner_id == user.id
 
 
-def _to_response(config: VpnConfig, db: Session, include_files: bool = True) -> VpnConfigResponse:
+def _to_response(
+    config: VpnConfig,
+    db: Session,
+    include_files: bool = True,
+    *,
+    openvpn_group: str | None = None,
+) -> VpnConfigResponse:
     owner = db.query(User).filter(User.id == config.owner_id).first()
     adapter = get_active_adapter(db)
     files = adapter.get_profile_files(config.client_name, config.vpn_type) if include_files else []
+    if include_files and config.vpn_type == VpnType.openvpn and openvpn_group:
+        files = filter_openvpn_profile_files(files, openvpn_group)
     return VpnConfigResponse(
         id=config.id,
         client_name=config.client_name,
@@ -68,6 +83,7 @@ def list_configs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    openvpn_group = get_user_openvpn_group(db, current_user.id)
     query = _scoped_config_query(db)
     if current_user.role == UserRole.viewer:
         grants = db.query(ViewerConfigAccess).filter_by(user_id=current_user.id).all()
@@ -75,11 +91,33 @@ def list_configs(
             return []
         configs = query.order_by(VpnConfig.created_at.desc()).all()
         configs = [c for c in configs if _can_access_config(current_user, c, db)]
-        return [_to_response(c, db) for c in configs]
+        return [_to_response(c, db, openvpn_group=openvpn_group) for c in configs]
     if current_user.role != UserRole.admin:
         query = query.filter(VpnConfig.owner_id == current_user.id)
     configs = query.order_by(VpnConfig.created_at.desc()).all()
-    return [_to_response(c, db) for c in configs]
+    return [_to_response(c, db, openvpn_group=openvpn_group) for c in configs]
+
+
+class OpenVpnGroupUpdate(BaseModel):
+    group: str
+
+
+@router.get("/openvpn-group")
+def get_openvpn_group(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return {
+        "group": get_user_openvpn_group(db, current_user.id),
+        "options": list_openvpn_groups(),
+    }
+
+
+@router.put("/openvpn-group")
+def put_openvpn_group(
+    payload: OpenVpnGroupUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    group = set_user_openvpn_group(db, current_user.id, payload.group)
+    return {"group": group, "options": list_openvpn_groups()}
 
 
 @router.post("", response_model=VpnConfigResponse, status_code=status.HTTP_201_CREATED)

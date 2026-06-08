@@ -48,9 +48,9 @@ AdminPanelAZ — экспериментальный порт веб-панели
 | Telegram admin-уведомления | ✅ | AdminNotify + traffic_limit + CPU/RAM; UI подписок в TelegramTab |
 | Auth (login, captcha, роли) | ✅ | + 🆕 2FA/TOTP, refresh tokens |
 | Viewer role | ✅ | API, ограничения и UI назначения доступа в UsersTab |
-| Журнал действий | 🟡 | Просмотр есть, экспорт CSV — нет |
+| Журнал действий | ✅ | Просмотр и экспорт CSV |
 | Обновление системы (git) | ✅ | Панель + 🆕 node agent / AntiZapret на узлах |
-| In-panel pytest | ✅ | 9 модулей vs 53 в AA |
+| In-panel pytest | 🟡 | 28 модулей vs 53 в AA |
 | Установка / ops | 🟡 | `install.sh` + scripts; нет `adminpanel.sh`, diagnostics CLI |
 | Multi-node | 🆕 | Controller + Node Agent |
 | CI/CD | 🟡 | `.github/workflows/ci.yml`; `.pre-commit-config.yaml` (ruff, shellcheck) |
@@ -94,9 +94,9 @@ flowchart LR
 | QR-коды | `QRGenerator` | configs + qr endpoints | ✅ |
 | Одноразовые ссылки | `QrDownloadService` | `qr_download.py`, `public_download.py` | ✅ |
 | Продление сертификата OpenVPN | client actions | `ClientActionsDialog` | ✅ |
-| Переключение OpenVPN UDP/TCP группы | `/set_openvpn_group` | — | ❌ |
-| Публичные route-файлы (Keenetic, MikroTik, TP-Link) | `/public_download/<router>` | — | ❌ |
-| Toggle public download | `/toggle_public_download` | — | ❌ |
+| Переключение OpenVPN UDP/TCP группы | `/set_openvpn_group` | `PUT /api/configs/openvpn-group`, `ConfigCardsSection` | ✅ |
+| Публичные route-файлы (Keenetic, MikroTik, TP-Link) | `/public_download/<router>` | `GET /api/public/route-download/{router}` | ✅ |
+| Toggle public download | `/toggle_public_download` | `POST /api/security/public-download`, `SecurityTab` | ✅ |
 | `client.sh` в репозитории | ships `client.sh` | использует AntiZapret на сервере | — |
 
 ### 2. Политики доступа
@@ -104,7 +104,7 @@ flowchart LR
 | Функция | AA | AZ | Статус |
 |---------|----|----|--------|
 | Временная / постоянная блокировка OpenVPN | `OpenVpnAccessPolicyService` | `access_policy.py` | ✅ |
-| Блокировка WG/AWG + runtime | `WgAccessPolicyService`, `wg_awg_runtime_apply.py` | `access_policy.py`, `wg_runtime.py` (упрощённо) | 🟡 |
+| Блокировка WG/AWG + runtime | `WgAccessPolicyService`, `wg_awg_runtime_apply.py` | `access_policy.py`, `wg_runtime.py`, `wg_policy_sync_worker.py` | ✅ |
 | Срок действия WG | WG policy | `client_access.py` | ✅ |
 | Лимиты трафика (1/7/30 дней) | `traffic_limit.py` | `traffic_limit.py` | ✅ |
 | Reconcile после sync | `traffic_limit_reconcile.py` | `traffic_limit_reconcile.py` | ✅ |
@@ -206,9 +206,9 @@ flowchart LR
 | QR-настройки (TTL, PIN, max downloads) | отдельная вкладка | `SecurityTab.tsx` | 🟡 |
 | VPN-сеть (порт, HTTPS, Nginx из UI) | `_tab_vpn_network.html` | nginx через `install.sh` / `nginx-setup.sh` | 🟡 |
 | Журнал действий (просмотр) | action logs | `LogsPage.tsx` | ✅ |
-| Экспорт action logs CSV | `/api/settings/action-logs/export` | — | ❌ |
+| Экспорт action logs CSV | `/api/settings/action-logs/export` | `GET /api/logs/action-logs/export` | ✅ |
 | Обновление панели (git) | `/update_system` | `UpdatesTab.tsx`, `system.py` | ✅ |
-| In-panel pytest | `api_tests.py` | `TestsTab.tsx`, `tests.py` | ✅ |
+| In-panel pytest | `api_tests.py` | `TestsTab.tsx`, `tests.py`, `backend/tests/` (28 модулей) | 🟡 |
 | Обновление node agent + AntiZapret | — | `NodeUpdateDialog`, `nodes.py` | 🆕 |
 
 ### 10. Feature toggles (сравнение)
@@ -219,24 +219,26 @@ flowchart LR
 | `MONITOR_ENABLED` | `resource_monitor` | ✅ |
 | `FEATURE_OPENVPN_ENABLED` | `openvpn` | ✅ |
 | `FEATURE_WIREGUARD_ENABLED` | `wireguard` | ✅ |
-| `FEATURE_AMNEZIAWG_ENABLED` | — (AWG в UI без отдельного toggle) | 🟡 |
+| `FEATURE_AMNEZIAWG_ENABLED` | `amneziawg` | ✅ |
 | `FEATURE_LOGS_DASHBOARD_ENABLED` | `logs_dashboard` | ✅ |
 | `FEATURE_SERVER_MONITOR_ENABLED` | `server_monitor` | ✅ |
 | `FEATURE_ROUTING_ENABLED` | `routing` | ✅ |
 | `FEATURE_EDIT_FILES_ENABLED` | `edit_files` | ✅ |
 | `FEATURE_TELEGRAM_ENABLED` | `telegram` | ✅ |
 | `FEATURE_BACKUPS_ENABLED` | `backups` | ✅ |
-| `FEATURE_USER_MANAGEMENT_ENABLED` | — (users всегда доступны admin) | 🟡 |
+| `FEATURE_USER_MANAGEMENT_ENABLED` | `user_management` | ✅ |
 | `FEATURE_SECURITY_ENABLED` | `security` | ✅ |
-| `FEATURE_ACTION_LOGS_ENABLED` | — (logs всегда при включённом модуле) | 🟡 |
-| `FEATURE_SYSTEM_UPDATES_ENABLED` | — (updates tab без toggle) | 🟡 |
+| `FEATURE_ACTION_LOGS_ENABLED` | `action_logs` | ✅ |
+| `FEATURE_SYSTEM_UPDATES_ENABLED` | `system_updates` | ✅ |
 | `FEATURE_DIAGNOSTICS_TESTS_ENABLED` | `diagnostics_tests` | ✅ |
-| `FEATURE_QR_DOWNLOADS_ENABLED` | — (в security) | 🟡 |
-| `FEATURE_VPN_NETWORK_ENABLED` | — | ❌ |
-| `WG_POLICY_SYNC` (background) | — | ❌ |
+| `FEATURE_QR_DOWNLOADS_ENABLED` | `qr_downloads` | ✅ |
+| `FEATURE_VPN_NETWORK_ENABLED` | `vpn_network` (stub UI) | 🟡 |
+| `WG_POLICY_SYNC` (background) | cron `wg_awg_policy_sync.py` | `wg_policy_sync_worker.py` (async loop) | ✅ |
 | `ACTIVE_SESSION_TRACKING` (background) | — | ❌ |
 | `NIGHTLY_IDLE_RESTART` (background) | — | ❌ |
 | `RUNTIME_BACKUP_CLEANUP` (background) | — | ❌ |
+
+> **Feature toggles (фаза 10):** UI parity для app_module toggles ✅; фоновые workers WG_POLICY_SYNC ✅; ACTIVE_SESSION_TRACKING / NIGHTLY_IDLE_RESTART / RUNTIME_BACKUP_CLEANUP — фазы 16/19.
 
 ### 11. Установка и ops
 
@@ -261,7 +263,7 @@ flowchart LR
 | Рендеринг | Jinja2 + vanilla JS | React SPA (Vite, Tailwind, shadcn/ui) | 🆕 |
 | Тёмная тема | CSS | Tailwind dark | ✅ |
 | Mobile / Telegram Mini App | tg_mini templates | static tg_mini | ✅ |
-| Прогресс фоновых задач (doall/update) | BackgroundTaskService | CIDR pipeline + pytest tasks | 🟡 |
+| Прогресс фоновых задач (doall/update) | BackgroundTaskService | BackgroundTaskService + GET /api/tasks/{id} | ✅ |
 | Multi-node selector | — | `NodeSelector`, `NodesPage` | 🆕 |
 
 ---
@@ -300,9 +302,10 @@ flowchart LR
 | `core/services/security.py` | `backend/app/services/security.py` | simplified |
 | `core/services/server_monitor.py` | `backend/app/services/server_monitor.py` | ported |
 | `core/services/openvpn_management.py` | `backend/app/services/openvpn_management.py` | ported |
-| `core/services/wg_awg_runtime_enforcer.py` | `backend/app/services/wg_runtime.py` | simplified |
+| `core/services/wg_awg_runtime_enforcer.py` | `backend/app/services/wg_runtime.py` | ported (syncconf fallback) |
 | `core/services/qr_download*.py` | `backend/app/services/qr_download.py` | ported |
 | `utils/app_auto_backup.py` | `backend/app/services/backup_scheduler.py` | ported |
+| `core/services/background_tasks.py` | `backend/app/services/background_tasks.py` | ported (phase 14) |
 | `core/services/cidr/*` | `backend/app/services/cidr/*` | ported |
 | `ips/ip_manager.py` | `backend/app/services/cidr/ip_manager.py` | ported |
 | `core/services/game_catalog.py` | `backend/app/services/cidr/game_catalog.py` | full catalog (AA 1.9.0) |
@@ -316,7 +319,7 @@ flowchart LR
 | `core/services/admin_notify.py` | `backend/app/services/admin_notify.py` | service ported (hooks pending) |
 | `routes/settings/antizapret.py` | — | not ported |
 | `utils/nightly_idle_restart.py` | — | not ported |
-| `utils/wg_awg_runtime_apply.py` | inline in workers | no standalone CLI |
+| `utils/wg_awg_runtime_apply.py` | `wg_runtime.py` + `wg_policy_sync_worker.py` | inline, no standalone CLI |
 | `script_sh/adminpanel.sh` | `install.sh`, `start.sh`, systemd | different UX |
 
 ---
@@ -336,10 +339,10 @@ flowchart LR
 ### Средний приоритет
 
 6. Feature toggles parity — `FEATURE_AMNEZIAWG_ENABLED`, `FEATURE_VPN_NETWORK_ENABLED`, background jobs
-7. **Экспорт action logs CSV**
+7. ~~**Экспорт action logs CSV**~~ — **Сделано (0.6.2):** `GET /api/logs/action-logs/export`
 8. **Публичные route-файлы** для роутеров (Keenetic, MikroTik, TP-Link)
 9. **OpenVPN UDP/TCP group switching**
-10. **WG policy sync cron** (`wg_awg_runtime_apply` как worker/CLI)
+10. ~~**WG policy sync cron** (`wg_awg_runtime_apply` как worker/CLI)~~ — **Сделано (0.6.1):** `wg_policy_sync_worker.py`
 11. **CI pipeline** — pytest, ruff, frontend build
 
 ### Низкий приоритет
@@ -351,7 +354,7 @@ flowchart LR
 16. **Telegram.md** — отдельная документация
 17. Расширение test suite до паритета с AA (~53 модуля)
 18. Global API rate limiting (Flask-Limiter equivalent)
-19. **BackgroundTaskService** — единый прогресс для doall/update/restart
+19. ~~**BackgroundTaskService** — единый прогресс для doall/update/restart~~ ✅ (0.6.4)
 
 ---
 
@@ -359,7 +362,7 @@ flowchart LR
 
 | Область | AA tests | AZ tests | Статус |
 |---------|----------|----------|--------|
-| Общее покрытие | ~53 pytest modules | 9 modules | 🟡 |
+| Общее покрытие | ~53 pytest modules | 28 modules | 🟡 |
 | Node adapter local/remote | — | `test_node_adapter_parity.py` | 🆕 |
 | Feature guards | `test_feature_toggles.py` | `test_feature_guards.py` | ✅ |
 | Security / IP restriction | multiple | `test_security.py` | 🟡 |

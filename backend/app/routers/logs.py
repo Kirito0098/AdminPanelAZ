@@ -1,12 +1,17 @@
+import csv
+import io
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
 from app.database import get_db
 from app.models import QrDownloadAuditLog, User, UserActionLog
 from app.services.node_manager import get_active_adapter
+
+ACTION_LOG_CSV_HEADERS = ("id", "username", "action", "details", "remote_addr", "created_at")
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
@@ -29,6 +34,44 @@ def action_logs(
         }
         for r in rows
     ]
+
+
+def _iter_action_log_csv(rows: list[UserActionLog]):
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(ACTION_LOG_CSV_HEADERS)
+    yield buffer.getvalue()
+    buffer.seek(0)
+    buffer.truncate(0)
+    for row in rows:
+        writer.writerow(
+            [
+                row.id,
+                row.username or "",
+                row.action,
+                row.details or "",
+                row.remote_addr or "",
+                row.created_at.isoformat(),
+            ]
+        )
+        yield buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
+
+
+@router.get("/action-logs/export")
+def export_action_logs(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    rows = db.query(UserActionLog).order_by(UserActionLog.created_at.desc()).all()
+    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    filename = f"action-logs-{stamp}.csv"
+    return StreamingResponse(
+        _iter_action_log_csv(rows),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/qr-downloads")

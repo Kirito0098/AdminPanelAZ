@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,7 @@ from app.schemas import (
     RoutingOverview,
 )
 from app.services.antizapret_settings import build_schema, filter_known_keys
+from app.services.background_tasks import background_task_service
 from app.services.node_manager import get_active_adapter, get_active_node
 
 router = APIRouter(prefix="/routing", tags=["routing"])
@@ -130,12 +132,35 @@ def put_antizapret_settings(
     return AntizapretSettingsUpdateResponse(**result)
 
 
-@router.post("/apply", response_model=MessageResponse)
-def apply_routing(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    adapter = get_active_adapter(db)
-    sync = adapter.sync_cidr_providers()
-    output = adapter.apply_config_changes()
-    return MessageResponse(
-        message="Маршрутизация применена (doall.sh)",
-        detail={"sync": sync, "doall_output": output},
+@router.post("/apply", status_code=status.HTTP_202_ACCEPTED)
+def apply_routing(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    active = background_task_service.find_active_task("routing_apply")
+    if active:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": "Применение маршрутизации уже выполняется",
+                "active_task_id": active.id,
+            },
+        )
+
+    def _callable(progress_updater=None):
+        from app.database import SessionLocal
+
+        worker_db = SessionLocal()
+        try:
+            adapter = get_active_adapter(worker_db)
+            return background_task_service.task_routing_apply(adapter, progress_updater)
+        finally:
+            worker_db.close()
+
+    task = background_task_service.enqueue_background_task(
+        "routing_apply",
+        _callable,
+        created_by_username=admin.username,
+        queued_message="Применение маршрутизации поставлено в очередь",
+    )
+    return background_task_service.build_accepted_payload(
+        task,
+        "Маршрутизация запущена в фоне (sync + doall.sh)",
     )

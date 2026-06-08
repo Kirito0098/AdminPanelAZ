@@ -11,10 +11,11 @@ import { Badge } from '@/components/ui/badge'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { useProgress } from '@/context/ProgressContext'
 
 export default function UpdatesTab() {
   const { success, error: notifyError } = useNotifications()
-  const { inline, withInline } = useProgress()
+  const { inline, trackBackgroundTask, backgroundTaskPolling } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
   const [info, setInfo] = useState<{
     updates_available?: boolean
@@ -55,9 +56,16 @@ export default function UpdatesTab() {
       onConfirm: async () => {
         setUpdating(true)
         try {
-          const res = await withInline(() => applySystemUpdate(), 'Применение обновления...')
-          success(res.message || 'Обновление применено')
-          await load()
+          const resp = await applySystemUpdate()
+          trackBackgroundTask(resp.task_id, {
+            onComplete: () => {
+              success(resp.message || 'Обновление применено')
+              void load()
+            },
+            onError: (task, message) => {
+              notifyError(task?.error || task?.message || message)
+            },
+          })
         } catch (err) {
           notifyError(err instanceof ApiError ? err.message : 'Ошибка обновления')
         } finally {
@@ -74,7 +82,7 @@ export default function UpdatesTab() {
   return (
     <div className="space-y-4">
       <ConfirmDialogHost dialogProps={dialogProps} />
-      <InlineProgressBar active={inline.active || updating} label={inline.label || (updating ? 'Применение обновления...' : undefined)} />
+      <InlineProgressBar active={inline.active || updating || backgroundTaskPolling} label={inline.label || (updating ? 'Применение обновления...' : undefined)} />
 
       <Card>
         <CardHeader>

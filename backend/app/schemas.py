@@ -319,6 +319,24 @@ class MessageResponse(BaseModel):
     detail: Any | None = None
 
 
+class BackgroundTaskResponse(BaseModel):
+    success: bool = True
+    task_id: str
+    task_type: str
+    status: str
+    message: str | None = None
+    progress_percent: int = 0
+    progress_stage: str | None = None
+    output: str | None = None
+    error: str | None = None
+    result: Any | None = None
+    created_at: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    queued: bool | None = None
+    status_url: str | None = None
+
+
 class NodeBase(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     host: str = Field(min_length=1, max_length=255)

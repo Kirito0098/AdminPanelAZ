@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.models import AppSetting
+from app.services.public_download_settings import is_public_download_enabled, set_public_download_enabled
 
 
 def _get(db: Session, key: str, default: str = "") -> str:
@@ -46,6 +47,7 @@ class SecurityService:
             "qr_download_ttl_seconds": int(_get(db, "qr_download_ttl_seconds", "600") or "600"),
             "qr_download_max_downloads": int(_get(db, "qr_download_max_downloads", "1") or "1"),
             "qr_download_pin_set": bool(_get(db, "qr_download_pin", "")),
+            "public_download_enabled": is_public_download_enabled(db),
         }
 
     def update_settings(self, db: Session, payload: dict) -> dict:
@@ -76,6 +78,8 @@ class SecurityService:
             _set(db, "qr_download_max_downloads", str(val if val in (1, 3, 5) else 1))
         if "qr_download_pin" in payload:
             _set(db, "qr_download_pin", (payload["qr_download_pin"] or "").strip())
+        if "public_download_enabled" in payload:
+            set_public_download_enabled(db, bool(payload["public_download_enabled"]))
         db.commit()
         return self.get_settings(db)
 

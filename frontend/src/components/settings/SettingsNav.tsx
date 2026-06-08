@@ -3,6 +3,7 @@ import {
   Archive,
   Download,
   FlaskConical,
+  Globe,
   KeyRound,
   Puzzle,
   Send,
@@ -24,13 +25,14 @@ export type SettingsSection =
   | 'updates'
   | 'tests'
   | 'users'
+  | 'vpn_network'
 
 interface NavItem {
   id: SettingsSection
   label: string
   icon: LucideIcon
   description: string
-  settingsTab?: 'backup' | 'telegram' | 'security' | 'tests'
+  settingsTab?: 'backup' | 'telegram' | 'security' | 'tests' | 'users' | 'updates' | 'vpn_network'
 }
 
 interface NavGroup {
@@ -105,6 +107,7 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
         label: 'Обновления',
         icon: Download,
         description: 'Git pull из origin/main',
+        settingsTab: 'updates',
       },
       {
         id: 'tests',
@@ -118,6 +121,14 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
         label: 'Пользователи',
         icon: Users,
         description: 'Учётные записи и роли',
+        settingsTab: 'users',
+      },
+      {
+        id: 'vpn_network',
+        label: 'Порт и Nginx',
+        icon: Globe,
+        description: 'HTTPS, домен и reverse-proxy',
+        settingsTab: 'vpn_network',
       },
     ],
   },

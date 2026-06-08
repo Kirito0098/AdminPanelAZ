@@ -32,7 +32,7 @@ export type ConfirmAction =
 export function useRoutingPage() {
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
-  const { startGlobal, doneGlobal, inline, withInline } = useProgress()
+  const { startGlobal, doneGlobal, inline, withInline, trackBackgroundTask } = useProgress()
 
   const [data, setData] = useState<RoutingOverview | null>(null)
   const [cidrDb, setCidrDb] = useState<CidrDbStatus | null>(null)
@@ -192,6 +192,29 @@ export function useRoutingPage() {
     }
   }
 
+  const withBackgroundTask = async (
+    fn: () => Promise<{ task_id: string; message?: string }>,
+    okMsg: string,
+  ) => {
+    setActionLoading(true)
+    try {
+      const resp = await fn()
+      trackBackgroundTask(resp.task_id, {
+        onComplete: () => {
+          success(okMsg)
+          void load()
+        },
+        onError: (task, message) => {
+          notifyError(task?.error || task?.message || message)
+        },
+      })
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка операции')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const executeConfirm = async () => {
     const action = confirmAction
     setConfirmAction(null)
@@ -199,7 +222,7 @@ export function useRoutingPage() {
 
     switch (action) {
       case 'apply-doall':
-        await withAction(applyRouting, 'doall.sh выполнен', 'Применение doall.sh...')
+        await withBackgroundTask(applyRouting, 'doall.sh выполнен')
         break
       case 'sync-providers':
         await withAction(syncRoutingProviders, 'Синхронизация выполнена', 'Синхронизация провайдеров...')

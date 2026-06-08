@@ -253,6 +253,14 @@ export interface CidrPipelineTask {
   finished_at?: string | null
 }
 
+export type BackgroundTask = CidrPipelineTask
+
+export interface BackgroundTaskAcceptedResponse extends BackgroundTask {
+  success: boolean
+  queued: boolean
+  status_url: string
+}
+
 export interface TrafficClientRow {
   common_name: string
   protocol_type: string
@@ -372,6 +380,17 @@ export interface SecuritySettings {
   qr_download_ttl_seconds: number
   qr_download_max_downloads: number
   qr_download_pin_set: boolean
+  public_download_enabled: boolean
+}
+
+export interface OpenVpnGroupOption {
+  key: string
+  label: string
+}
+
+export interface OpenVpnGroupState {
+  group: string
+  options: OpenVpnGroupOption[]
 }
 
 export interface ServerMetrics {

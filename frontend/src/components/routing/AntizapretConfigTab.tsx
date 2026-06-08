@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useProgress } from '@/context/ProgressContext'
 import type { AntizapretSettingField } from '@/types'
 
 const FIELD_SECTIONS: { title: string; description?: string; keys: string[] }[] = [
@@ -86,6 +87,7 @@ function groupSchema(schema: AntizapretSettingField[]) {
 export default function AntizapretConfigTab() {
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
+  const { trackBackgroundTask } = useProgress()
 
   const [schema, setSchema] = useState<AntizapretSettingField[]>([])
   const [saved, setSaved] = useState<Record<string, string>>({})
@@ -156,10 +158,17 @@ export default function AntizapretConfigTab() {
   const apply = async () => {
     setApplying(true)
     try {
-      const result = await applyRouting()
-      setNeedsApply(false)
-      success(result.message || 'Маршрутизация применена (doall.sh)')
-      setApplyOpen(false)
+      const resp = await applyRouting()
+      trackBackgroundTask(resp.task_id, {
+        onComplete: () => {
+          setNeedsApply(false)
+          success(resp.message || 'Маршрутизация применена (doall.sh)')
+          setApplyOpen(false)
+        },
+        onError: (task, message) => {
+          notifyError(task?.error || task?.message || message)
+        },
+      })
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка применения конфигурации')
     } finally {

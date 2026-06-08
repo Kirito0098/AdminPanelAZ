@@ -81,7 +81,9 @@ def test_panel_resource_worker_collects_sample():
     ) as persist, patch.object(worker, "purge_old_samples"):
         worker._collect_sample()
 
-    persist.assert_called_once_with(db)
+    persist.assert_called_once()
+    assert persist.call_args.args[0] is db
+    assert isinstance(persist.call_args.args[1], dict)
 
 
 def test_panel_resource_history_api(db_session):

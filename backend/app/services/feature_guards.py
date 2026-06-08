@@ -21,19 +21,23 @@ ALWAYS_ALLOWED_PREFIXES = (
     "/api/auth/me",
     "/api/auth/change-password",
     "/api/ip-blocked",
-    "/api/public/",
     "/api/settings",
-    "/api/users",
     "/api/nodes",
-    "/api/configs",
     "/api/monitoring/summary",
-    "/api/system/viewer-access",
 )
+
+WG_ACCESS_PREFIX = "/api/client-access/wireguard"
+CONFIGS_QR_PATH_MARKERS = ("/download", "/qr", "/one-time-link")
 
 PATH_TO_MODULES: dict[str, tuple[str, ...]] = {}
 PREFIX_TO_MODULES: dict[str, tuple[str, ...]] = {}
 SHARED_PREFIX_TO_MODULES: dict[str, tuple[str, ...]] = {
     "/api/routing/cidr-db/tasks/": ("routing", "diagnostics_tests"),
+    "/api/tasks/": ("settings",),
+}
+
+ALL_REQUIRED_PREFIXES: dict[str, tuple[str, ...]] = {
+    "/api/public/route-download": ("security", "openvpn"),
 }
 
 for _item in FEATURE_TOGGLES:
@@ -56,7 +60,50 @@ def module_disabled_message(module_key: str) -> str:
     return f'Раздел «{_module_label(module_key)}» отключён администратором.'
 
 
+def _configs_qr_modules(path: str) -> tuple[str, ...] | None:
+    if not path.startswith("/api/configs/"):
+        return None
+    if any(marker in path for marker in CONFIGS_QR_PATH_MARKERS):
+        return ("qr_downloads",)
+    return None
+
+
+def _public_qr_modules(path: str) -> tuple[str, ...] | None:
+    if path.startswith("/api/public/qr-download"):
+        return ("qr_downloads",)
+    return None
+
+
+def _security_public_download_modules(path: str) -> tuple[str, ...] | None:
+    if path == "/api/security/public-download":
+        return ("security",)
+    return None
+
+
+def _openvpn_group_modules(path: str) -> tuple[str, ...] | None:
+    if path == "/api/configs/openvpn-group":
+        return ("openvpn",)
+    return None
+
+
+def _wg_access_modules(path: str) -> tuple[str, ...] | None:
+    if not path.startswith(WG_ACCESS_PREFIX):
+        return None
+    return ("wireguard", "amneziawg")
+
+
 def _modules_for_path(path: str) -> tuple[str, ...] | None:
+    for resolver in (
+        _public_qr_modules,
+        _security_public_download_modules,
+        _openvpn_group_modules,
+        _configs_qr_modules,
+        _wg_access_modules,
+    ):
+        modules = resolver(path)
+        if modules is not None:
+            return modules
+
     if path in PATH_TO_MODULES:
         return PATH_TO_MODULES[path]
 
@@ -77,9 +124,23 @@ def _is_always_allowed(path: str) -> bool:
     return any(path.startswith(prefix) for prefix in ALWAYS_ALLOWED_PREFIXES)
 
 
+def _all_required_modules(path: str) -> tuple[str, ...] | None:
+    for prefix, modules in ALL_REQUIRED_PREFIXES.items():
+        if path.startswith(prefix):
+            return modules
+    return None
+
+
 def check_path_access(path: str, *, service: FeatureToggleService) -> tuple[str, str] | None:
     """Return (module_key, message) when access must be denied, else None."""
     if _is_always_allowed(path):
+        return None
+
+    all_required = _all_required_modules(path)
+    if all_required is not None:
+        for key in all_required:
+            if not service.is_enabled(key):
+                return key, module_disabled_message(key)
         return None
 
     module_keys = _modules_for_path(path)
@@ -105,9 +166,27 @@ def blocked_json_response(module_key: str) -> JSONResponse:
 
 
 def require_vpn_type(vpn_type: str, *, service: FeatureToggleService) -> None:
-    key = "openvpn" if str(vpn_type).lower() == "openvpn" else "wireguard"
-    if not service.is_enabled(key):
-        raise HTTPException(status_code=403, detail=module_disabled_message(key))
+    vt = str(vpn_type).lower()
+    if vt == "openvpn":
+        if not service.is_enabled("openvpn"):
+            raise HTTPException(status_code=403, detail=module_disabled_message("openvpn"))
+        return
+    if service.is_enabled("wireguard") or service.is_enabled("amneziawg"):
+        return
+    raise HTTPException(status_code=403, detail=module_disabled_message("wireguard"))
+
+
+def require_qr_downloads(*, service: FeatureToggleService) -> None:
+    if not service.is_enabled("qr_downloads"):
+        raise HTTPException(status_code=403, detail=module_disabled_message("qr_downloads"))
+
+
+def require_openvpn_and_security(*, service: FeatureToggleService | None = None) -> None:
+    svc = service or get_feature_service()
+    if not svc.is_enabled("security"):
+        raise HTTPException(status_code=403, detail=module_disabled_message("security"))
+    if not svc.is_enabled("openvpn"):
+        raise HTTPException(status_code=403, detail=module_disabled_message("openvpn"))
 
 
 def get_feature_service() -> FeatureToggleService:

@@ -1,7 +1,8 @@
 import subprocess
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,7 @@ from app.database import get_db
 from app.models import User
 from app.schemas import MessageResponse
 from app.services.action_log import log_action
+from app.services.background_tasks import background_task_service
 
 router = APIRouter(prefix="/system", tags=["system"])
 APP_ROOT = Path(__file__).resolve().parents[2]
@@ -45,19 +47,37 @@ def check_updates(_: User = Depends(require_admin)):
         return {"error": str(exc), "updates_available": False}
 
 
-@router.post("/update", response_model=MessageResponse)
+@router.post("/update", status_code=status.HTTP_202_ACCEPTED)
 def apply_update(db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    try:
-        result = subprocess.run(
-            ["git", "pull", "origin", "main"],
-            cwd=APP_ROOT, capture_output=True, text=True, timeout=120, check=False,
+    active = background_task_service.find_active_task("update_system")
+    if active:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": "Обновление системы уже выполняется",
+                "active_task_id": active.id,
+            },
         )
-        if result.returncode != 0:
-            raise HTTPException(status_code=500, detail=result.stderr or result.stdout)
-        log_action(db, action="system_update", user_id=user.id, username=user.username, details=result.stdout[:500])
-        return MessageResponse(message="Обновление применено", detail=result.stdout.strip())
-    except subprocess.TimeoutExpired as exc:
-        raise HTTPException(status_code=504, detail="Таймаут обновления") from exc
+
+    def _callable(progress_updater=None):
+        return background_task_service.task_update_system(progress_updater)
+
+    task = background_task_service.enqueue_background_task(
+        "update_system",
+        _callable,
+        created_by_username=user.username,
+        queued_message="Обновление системы поставлено в очередь",
+    )
+
+    log_action(
+        db,
+        action="system_update_queued",
+        user_id=user.id,
+        username=user.username,
+        details=f"task_id={task.id}",
+    )
+
+    return background_task_service.build_accepted_payload(task, "Обновление системы запущено в фоне.")
 
 
 @router.get("/viewer-access/{user_id}")

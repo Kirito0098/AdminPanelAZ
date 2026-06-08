@@ -70,6 +70,7 @@ interface ClientActionsDialogProps {
   onDownload: (config: VpnConfig, path: string, filename: string) => Promise<void>
   onNotifySuccess: (msg: string) => void
   onNotifyError: (msg: string) => void
+  showQrDownloads?: boolean
 }
 
 type PromptMode = 'number' | 'confirm' | 'renew' | 'expired-wg' | 'traffic-limit' | null
@@ -147,6 +148,7 @@ export default function ClientActionsDialog({
   onDownload,
   onNotifySuccess,
   onNotifyError,
+  showQrDownloads = true,
 }: ClientActionsDialogProps) {
   const [promptMode, setPromptMode] = useState<PromptMode>(null)
   const [promptTitle, setPromptTitle] = useState('')
@@ -582,7 +584,7 @@ export default function ClientActionsDialog({
               </section>
             )}
 
-            {fileRows.length > 0 && (
+            {fileRows.length > 0 && showQrDownloads && (
               <section className="space-y-3">
                 <SectionTitle>Файлы и доступ</SectionTitle>
                 <div className="space-y-2">

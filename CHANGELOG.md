@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-08
+
+### Added
+- **Feature toggles parity (UI)** — шесть недостающих app_module toggles из AdminAntizapret 1.9.0: `amneziawg`, `user_management`, `action_logs`, `system_updates`, `qr_downloads`, `vpn_network` (stub).
+- **Guards** — backend middleware и frontend `FeatureGuardRoute` / `SettingsNav` / dashboard для новых модулей; AWG tab отдельно от WireGuard; QR/download/one-time links под `qr_downloads`.
+- **Тесты** — расширен `test_feature_guards.py` (users, action logs, updates, QR download, WG/AWG).
+
+### Changed
+- **Журналы** — `logs_dashboard` и `action_logs` разделены: вкладки и API guards независимы.
+- **MIGRATION.md** — секция Feature toggles: app_module ✅/🟡, background workers ❌ (фазы 11/16/19).
+
 ## [0.5.2] - 2026-06-08
 
 ### Added

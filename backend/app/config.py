@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     traffic_sync_enabled: bool = True
     traffic_sync_interval_seconds: int = 30
     traffic_limit_reconcile_after_sync: bool = True
+    wg_policy_sync_enabled: bool = True
+    wg_policy_sync_interval_seconds: int = 120
     node_health_sync_enabled: bool = True
     node_health_sync_interval_seconds: int = 60
     resource_metrics_enabled: bool = True

@@ -45,7 +45,7 @@ export default function App() {
                   <Route path="traffic" element={<FeatureGuardRoute feature="traffic_sync"><TrafficPage /></FeatureGuardRoute>} />
                   <Route path="routing" element={<FeatureGuardRoute feature="routing"><RoutingPage /></FeatureGuardRoute>} />
                   <Route path="edit-files" element={<FeatureGuardRoute feature="edit_files"><EditFilesPage /></FeatureGuardRoute>} />
-                  <Route path="logs" element={<FeatureGuardRoute feature="logs_dashboard"><LogsPage /></FeatureGuardRoute>} />
+                  <Route path="logs" element={<FeatureGuardRoute anyOf={['logs_dashboard', 'action_logs']}><LogsPage /></FeatureGuardRoute>} />
                   <Route path="server-monitor" element={<FeatureGuardRoute feature="server_monitor"><ServerMonitorPage /></FeatureGuardRoute>} />
                   <Route path="nodes" element={<NodesPage />} />
                   <Route path="settings" element={<SettingsPage />} />

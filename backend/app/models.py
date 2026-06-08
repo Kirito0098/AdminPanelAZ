@@ -416,3 +416,20 @@ class AntifilterMeta(Base):
     last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     refresh_status: Mapped[str] = mapped_column(String(16), default="never")
     refresh_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class BackgroundTask(Base):
+    __tablename__ = "background_task"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    task_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", index=True)
+    created_by_username: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    message: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_stage: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

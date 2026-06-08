@@ -29,13 +29,22 @@ import { useTheme } from '@/context/ThemeContext'
 import ForcePasswordChange from './ForcePasswordChange'
 import LiveClock from './noc/LiveClock'
 
-const baseNavItems = [
+const baseNavItems: Array<{
+  to: string
+  label: string
+  icon: typeof LayoutDashboard
+  end: boolean
+  adminOnly: boolean
+  viewerOk: boolean
+  featureKey: string | null
+  featureAnyOf?: readonly string[]
+}> = [
   { to: '/', label: 'Конфигурации', icon: LayoutDashboard, end: true, adminOnly: false, viewerOk: true, featureKey: null },
   { to: '/monitoring', label: 'NOC Мониторинг', icon: Activity, end: false, adminOnly: false, viewerOk: true, featureKey: 'logs_dashboard' },
   { to: '/traffic', label: 'Мониторинг трафика', icon: HardDrive, end: false, adminOnly: false, viewerOk: true, featureKey: 'traffic_sync' },
   { to: '/routing', label: 'Маршрутизация / CIDR', icon: GitBranch, end: false, adminOnly: false, viewerOk: true, featureKey: 'routing' },
   { to: '/edit-files', label: 'Редактор файлов', icon: FileText, end: false, adminOnly: false, viewerOk: false, featureKey: 'edit_files' },
-  { to: '/logs', label: 'Журналы', icon: ClipboardList, end: false, adminOnly: false, viewerOk: true, featureKey: 'logs_dashboard' },
+  { to: '/logs', label: 'Журналы', icon: ClipboardList, end: false, adminOnly: false, viewerOk: true, featureKey: null, featureAnyOf: ['logs_dashboard', 'action_logs'] as const },
   { to: '/server-monitor', label: 'Сервер', icon: Cpu, end: false, adminOnly: true, viewerOk: false, featureKey: 'server_monitor' },
   { to: '/nodes', label: 'Узлы', icon: Server, end: false, adminOnly: true, viewerOk: false, featureKey: null },
   { to: '/settings', label: 'Настройки', icon: Settings, end: false, adminOnly: false, viewerOk: true, featureKey: null },
@@ -71,7 +80,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <nav className="flex flex-1 flex-col gap-1 px-2">
         {baseNavItems
           .filter((item) => {
-            if (item.featureKey && !isEnabled(item.featureKey)) return false
+            if ('featureAnyOf' in item && item.featureAnyOf?.length) {
+              if (!item.featureAnyOf.some((key) => isEnabled(key))) return false
+            } else if (item.featureKey && !isEnabled(item.featureKey)) return false
             if (user?.role === 'viewer') return item.viewerOk
             if (item.adminOnly) return user?.role === 'admin'
             return true

@@ -55,7 +55,7 @@ export default function DashboardPage() {
   const { user } = useAuth()
   const { isEnabled } = useFeatureModules()
   const openvpnEnabled = isEnabled('openvpn')
-  const wireguardEnabled = isEnabled('wireguard')
+  const wireguardEnabled = isEnabled('wireguard') || isEnabled('amneziawg')
   const canCreateClient = openvpnEnabled || wireguardEnabled
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()

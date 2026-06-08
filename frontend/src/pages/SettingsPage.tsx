@@ -18,6 +18,7 @@ import TestsTab from '@/components/settings/TestsTab'
 import TwoFactorTab from '@/components/settings/TwoFactorTab'
 import UpdatesTab from '@/components/settings/UpdatesTab'
 import UsersTab from '@/components/settings/UsersTab'
+import VpnNetworkTab from '@/components/settings/VpnNetworkTab'
 import { NodeBadge } from '@/components/NodeSelector'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
@@ -64,6 +65,10 @@ const SECTION_TITLES: Record<SettingsSection, { title: string; description: stri
   users: {
     title: 'Пользователи',
     description: 'Управление учётными записями и ролями доступа',
+  },
+  vpn_network: {
+    title: 'Порт, HTTPS и Nginx',
+    description: 'Публикация панели и reverse-proxy (фаза 17 — полный UI)',
   },
 }
 
@@ -226,6 +231,8 @@ export default function SettingsPage() {
             onDeleteUser={handleDeleteUser}
           />
         )
+      case 'vpn_network':
+        return <VpnNetworkTab />
       default:
         return null
     }

@@ -7,11 +7,12 @@ import Spinner from '@/components/ui/Spinner'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 
 interface FeatureGuardRouteProps {
-  feature: string
+  feature?: string
+  anyOf?: string[]
   children: ReactNode
 }
 
-export default function FeatureGuardRoute({ feature, children }: FeatureGuardRouteProps) {
+export default function FeatureGuardRoute({ feature, anyOf, children }: FeatureGuardRouteProps) {
   const { isEnabled, loading } = useFeatureModules()
 
   if (loading) {
@@ -22,7 +23,13 @@ export default function FeatureGuardRoute({ feature, children }: FeatureGuardRou
     )
   }
 
-  if (!isEnabled(feature)) {
+  const allowed = anyOf?.length
+    ? anyOf.some((key) => isEnabled(key))
+    : feature
+      ? isEnabled(feature)
+      : true
+
+  if (!allowed) {
     return (
       <Card className="mx-auto max-w-lg">
         <CardHeader>

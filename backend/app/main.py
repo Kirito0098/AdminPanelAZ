@@ -30,6 +30,7 @@ from app.routers import (
     system,
     feature_toggles,
     tests,
+    tasks,
     tg_mini,
     traffic,
 )
@@ -37,6 +38,7 @@ from app.routers import settings as settings_router
 from app.routers import users
 from app.services.backup_scheduler import run_backup_scheduler_loop
 from app.services.cidr.cidr_scheduler import run_cidr_db_scheduler_loop
+from app.services.wg_policy_sync_worker import run_wg_policy_sync_loop
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.node_manager import ensure_local_node, get_active_adapter, get_active_node
 from app.services.ip_restriction import ip_restriction_service
@@ -138,6 +140,7 @@ async def lifespan(_: FastAPI):
         )
     )
     cidr_task = asyncio.create_task(run_cidr_db_scheduler_loop())
+    wg_policy_sync_task = asyncio.create_task(run_wg_policy_sync_loop())
     key_rotation_task = asyncio.create_task(run_node_key_rotation_loop())
     from app.services.admin_notify import admin_notify_service
 
@@ -154,6 +157,7 @@ async def lifespan(_: FastAPI):
         panel_resource_metrics_task,
         backup_task,
         cidr_task,
+        wg_policy_sync_task,
         key_rotation_task,
     ):
         task.cancel()
@@ -194,6 +198,7 @@ app.include_router(logs.router, prefix="/api")
 app.include_router(system.router, prefix="/api")
 app.include_router(tg_mini.router, prefix="/api")
 app.include_router(tests.router, prefix="/api")
+app.include_router(tasks.router, prefix="/api")
 app.include_router(feature_toggles.router, prefix="/api")
 app.include_router(feature_toggles.feature_modules_router, prefix="/api")
 app.include_router(ip_blocked.router)

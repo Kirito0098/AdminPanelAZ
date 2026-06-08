@@ -13,7 +13,13 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react'
-import { ApiError, getActionLogs, getConnectionLogs, getOpenVpnEvents } from '@/api/client'
+import {
+  ApiError,
+  downloadActionLogsExport,
+  getActionLogs,
+  getConnectionLogs,
+  getOpenVpnEvents,
+} from '@/api/client'
 import { NodeBadge } from '@/components/NodeSelector'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -34,6 +40,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/context/AuthContext'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
@@ -362,6 +369,9 @@ function ActionLogCard({ entry }: ActionLogCardProps) {
 
 export default function LogsPage() {
   const { user } = useAuth()
+  const { isEnabled } = useFeatureModules()
+  const logsDashboardEnabled = isEnabled('logs_dashboard')
+  const actionLogsEnabled = isEnabled('action_logs')
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal } = useProgress()
@@ -375,6 +385,7 @@ export default function LogsPage() {
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
   const [selectedProfile, setSelectedProfile] = useState<string>('all')
   const [actionSearch, setActionSearch] = useState('')
+  const [exportingActions, setExportingActions] = useState(false)
   const actionsLoadedRef = useRef(false)
 
   const load = useCallback(
@@ -386,11 +397,13 @@ export default function LogsPage() {
         setRefreshing(true)
       }
       try {
-        const [conn, evt] = await Promise.all([getConnectionLogs(), getOpenVpnEvents()])
-        setConnections(conn)
+        const connPromise = logsDashboardEnabled ? getConnectionLogs() : Promise.resolve(null)
+        const evtPromise = logsDashboardEnabled ? getOpenVpnEvents() : Promise.resolve({ profiles: [] })
+        const [conn, evt] = await Promise.all([connPromise, evtPromise])
+        if (conn) setConnections(conn)
         setEvents(evt.profiles)
         setLoadError(null)
-        if (user?.role === 'admin' && !actionsLoadedRef.current) {
+        if (user?.role === 'admin' && actionLogsEnabled && !actionsLoadedRef.current) {
           setActions(await getActionLogs())
           actionsLoadedRef.current = true
         }
@@ -406,7 +419,7 @@ export default function LogsPage() {
         if (initial) doneGlobal()
       }
     },
-    [user?.role, notifyError, success, startGlobal, doneGlobal],
+    [user?.role, notifyError, success, startGlobal, doneGlobal, logsDashboardEnabled, actionLogsEnabled],
   )
 
   useEffect(() => {
@@ -456,7 +469,42 @@ export default function LogsPage() {
 
   const handleRefresh = () => load(true)
 
-  if (loading && !connections && events.length === 0) {
+  const handleExportActions = async () => {
+    setExportingActions(true)
+    try {
+      const res = await downloadActionLogsExport()
+      if (!res.ok) {
+        let detail = 'Ошибка экспорта журнала'
+        try {
+          const data = await res.json()
+          detail = typeof data.detail === 'string' ? data.detail : detail
+        } catch {
+          /* non-JSON error body */
+        }
+        throw new ApiError(detail, res.status)
+      }
+      const blob = await res.blob()
+      const disposition = res.headers.get('Content-Disposition') ?? ''
+      const match = disposition.match(/filename="([^"]+)"/)
+      const filename = match?.[1] ?? `action-logs-${new Date().toISOString().slice(0, 10)}.csv`
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(a.href)
+      success('Журнал действий экспортирован')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка экспорта журнала')
+    } finally {
+      setExportingActions(false)
+    }
+  }
+
+  const defaultLogTab = logsDashboardEnabled ? 'connections' : 'actions'
+  const showConnectionTabs = logsDashboardEnabled
+  const showActionTab = user?.role === 'admin' && actionLogsEnabled
+
+  if (loading && !connections && events.length === 0 && actions.length === 0) {
     return <Spinner label="Загрузка логов..." className="py-16" />
   }
 
@@ -527,8 +575,9 @@ export default function LogsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Tabs defaultValue="connections">
+        <Tabs defaultValue={defaultLogTab}>
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
+            {showConnectionTabs && (
             <TabsTrigger value="connections" className="gap-1.5">
               <Wifi size={14} />
               Подключения
@@ -538,6 +587,8 @@ export default function LogsPage() {
                 </Badge>
               )}
             </TabsTrigger>
+            )}
+            {showConnectionTabs && (
             <TabsTrigger value="openvpn-events" className="gap-1.5">
               <Radio size={14} />
               OpenVPN события
@@ -547,7 +598,8 @@ export default function LogsPage() {
                 </Badge>
               )}
             </TabsTrigger>
-            {user?.role === 'admin' && (
+            )}
+            {showActionTab && (
               <TabsTrigger value="actions" className="gap-1.5">
                 <ClipboardList size={14} />
                 Действия
@@ -780,11 +832,26 @@ export default function LogsPage() {
             <TabsContent value="actions" className="space-y-4">
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <ClipboardList size={16} />
-                    Журнал действий
-                  </CardTitle>
-                  <CardDescription>Последние операции администраторов панели</CardDescription>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <ClipboardList size={16} />
+                        Журнал действий
+                      </CardTitle>
+                      <CardDescription>Последние операции администраторов панели</CardDescription>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() => void handleExportActions()}
+                      disabled={exportingActions}
+                    >
+                      <Download size={14} />
+                      {exportingActions ? 'Экспорт…' : 'Экспорт CSV'}
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="relative max-w-md">

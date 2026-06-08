@@ -44,6 +44,7 @@ interface ConfigCardProps {
   onBlock?: () => void
   onUnblock?: () => void
   onDelete?: () => void
+  showQrDownloads?: boolean
 }
 
 const statusIcons = {
@@ -66,6 +67,7 @@ export default function ConfigCard({
   onBlock,
   onUnblock,
   onDelete,
+  showQrDownloads = true,
 }: ConfigCardProps) {
   const status = getConfigStatus(config, tab, policy)
   const StatusIcon = statusIcons[status.variant]
@@ -170,7 +172,7 @@ export default function ConfigCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-1 border-t pt-3">
-          {primaryFile && (
+          {primaryFile && showQrDownloads && (
             <>
               <Button
                 variant="outline"

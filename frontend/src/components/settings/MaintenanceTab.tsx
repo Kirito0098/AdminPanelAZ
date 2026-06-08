@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Play, RotateCcw, ServerCrash } from 'lucide-react'
-import { ApiError, recreateProfiles, restartService } from '@/api/client'
+import { ApiError, recreateProfiles, restartService, runDoall } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Button } from '@/components/ui/button'
@@ -27,7 +27,7 @@ const SERVICES = [
 
 export default function MaintenanceTab() {
   const { success, error: notifyError } = useNotifications()
-  const { inline, withInline } = useProgress()
+  const { inline, withInline, trackBackgroundTask, backgroundTaskPolling } = useProgress()
   const [service, setService] = useState(SERVICES[0])
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -45,7 +45,45 @@ export default function MaintenanceTab() {
 
   return (
     <div className="space-y-4">
-      <InlineProgressBar active={inline.active} label={inline.label} />
+      <InlineProgressBar active={inline.active || backgroundTaskPolling} label={inline.label} />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Play size={18} />
+            Применение doall.sh
+          </CardTitle>
+          <CardDescription>
+            Запуск doall.sh и пересоздание профилей клиентов на активном узле
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <SettingsAlert variant="warning" title="Длительная операция">
+            doall.sh может занять несколько минут. Прогресс отображается в верхней полосе задачи.
+          </SettingsAlert>
+          <Button
+            variant="secondary"
+            disabled={!!busy}
+            onClick={async () => {
+              setBusy('doall')
+              try {
+                const resp = await runDoall()
+                trackBackgroundTask(resp.task_id, {
+                  onComplete: () => success(resp.message || 'doall.sh выполнен'),
+                  onError: (task, message) => notifyError(task?.error || task?.message || message),
+                })
+              } catch (err) {
+                notifyError(err instanceof ApiError ? err.message : 'Ошибка запуска doall')
+              } finally {
+                setBusy(null)
+              }
+            }}
+          >
+            <Play size={16} className={busy === 'doall' ? 'animate-spin' : ''} />
+            Запустить doall.sh
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

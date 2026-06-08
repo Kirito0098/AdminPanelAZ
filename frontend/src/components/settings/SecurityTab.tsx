@@ -17,10 +17,14 @@ import { Separator } from '@/components/ui/separator'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useNotifications } from '@/context/NotificationContext'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import type { ScannerBan, SecuritySettings } from '@/types'
 
 export default function SecurityTab() {
   const { success, error: notifyError } = useNotifications()
+  const { isEnabled } = useFeatureModules()
+  const qrDownloadsEnabled = isEnabled('qr_downloads')
+  const openvpnEnabled = isEnabled('openvpn')
   const [settings, setSettings] = useState<SecuritySettings | null>(null)
   const [allowedIps, setAllowedIps] = useState('')
   const [qrPin, setQrPin] = useState('')
@@ -57,6 +61,7 @@ export default function SecurityTab() {
         qr_download_ttl_seconds: settings?.qr_download_ttl_seconds,
         qr_download_max_downloads: settings?.qr_download_max_downloads,
         qr_download_pin: qrPin || undefined,
+        public_download_enabled: settings?.public_download_enabled,
       })
       setSettings(updated)
       success('Настройки безопасности сохранены')
@@ -154,6 +159,27 @@ export default function SecurityTab() {
 
           <Separator />
 
+          {openvpnEnabled && (
+            <div className="space-y-4">
+              <h4 className="text-sm font-medium">Публичные route-файлы</h4>
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={settings.public_download_enabled}
+                  onChange={(e) =>
+                    setSettings({ ...settings, public_download_enabled: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border"
+                />
+                Разрешить публичное скачивание route-файлов (Keenetic, MikroTik, TP-Link)
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Ссылки: /api/public/route-download/&#123;keenetic|mikrotik|tplink&#125;
+              </p>
+            </div>
+          )}
+
+          {qrDownloadsEnabled && (
           <div className="space-y-4">
             <h4 className="text-sm font-medium">Одноразовые ссылки</h4>
             <div className="grid gap-4 md:grid-cols-2">
@@ -176,6 +202,7 @@ export default function SecurityTab() {
               </div>
             </div>
           </div>
+          )}
 
           <Button onClick={save} disabled={saving}>
             {saving ? 'Сохранение...' : 'Сохранить настройки'}

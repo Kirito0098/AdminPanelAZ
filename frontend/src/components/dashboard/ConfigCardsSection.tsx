@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   ApiError,
   deleteConfig,
+  getOpenVpnGroup,
   openvpnPermanentBlock,
   openvpnTempBlock,
   openvpnUnblock,
+  setOpenVpnGroup,
   wgPermanentBlock,
   wgTempBlock,
   wgUnblock,
@@ -28,7 +30,7 @@ import {
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
-import type { ClientAccessPolicy, UserRole, VpnConfig } from '@/types'
+import type { ClientAccessPolicy, OpenVpnGroupOption, UserRole, VpnConfig } from '@/types'
 import { FileKey, Filter, Search, Shield, X } from 'lucide-react'
 
 interface ConfigCardsSectionProps {
@@ -51,6 +53,7 @@ function useVisibleTabs(): ProtocolTab[] {
   const { isEnabled } = useFeatureModules()
   return TAB_ORDER.filter((tab) => {
     if (tab === 'openvpn') return isEnabled('openvpn')
+    if (tab === 'amneziawg') return isEnabled('amneziawg')
     return isEnabled('wireguard')
   })
 }
@@ -65,6 +68,8 @@ export default function ConfigCardsSection({
   onNotifySuccess,
   onNotifyError,
 }: ConfigCardsSectionProps) {
+  const { isEnabled } = useFeatureModules()
+  const qrDownloadsEnabled = isEnabled('qr_downloads')
   const visibleTabs = useVisibleTabs()
   const [activeTab, setActiveTab] = useState<ProtocolTab>(visibleTabs[0] ?? 'openvpn')
   useEffect(() => {
@@ -81,8 +86,24 @@ export default function ConfigCardsSection({
   const [blockDays, setBlockDays] = useState('7')
   const [actionBusy, setActionBusy] = useState(false)
   const [loadingAction, setLoadingAction] = useState<LoadingKey>(null)
+  const [openvpnGroup, setOpenvpnGroup] = useState('GROUP_UDP\\TCP')
+  const [openvpnGroupOptions, setOpenvpnGroupOptions] = useState<OpenVpnGroupOption[]>([])
+  const [groupBusy, setGroupBusy] = useState(false)
 
   const isAdmin = userRole === 'admin'
+  const openvpnTabEnabled = isEnabled('openvpn')
+
+  useEffect(() => {
+    if (!openvpnTabEnabled) return
+    void getOpenVpnGroup()
+      .then((state) => {
+        setOpenvpnGroup(state.group)
+        setOpenvpnGroupOptions(state.options)
+      })
+      .catch(() => {
+        /* group selector is optional; ignore load errors */
+      })
+  }, [openvpnTabEnabled])
 
   const filteredByTab = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -219,6 +240,22 @@ export default function ConfigCardsSection({
     return loadingAction.split('-').slice(1).join('-') as 'download' | 'qr' | 'block' | 'unblock' | 'delete'
   }
 
+  const handleOpenVpnGroupChange = async (group: string) => {
+    if (group === openvpnGroup || groupBusy) return
+    setGroupBusy(true)
+    try {
+      const state = await setOpenVpnGroup(group)
+      setOpenvpnGroup(state.group)
+      setOpenvpnGroupOptions(state.options)
+      await onRefresh()
+      onNotifySuccess('Группа OpenVPN обновлена')
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка смены группы OpenVPN')
+    } finally {
+      setGroupBusy(false)
+    }
+  }
+
   return (
     <>
       <Card>
@@ -264,6 +301,23 @@ export default function ConfigCardsSection({
               </TabsList>
 
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                {activeTab === 'openvpn' && openvpnTabEnabled && openvpnGroupOptions.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1 rounded-md border bg-muted/30 p-1">
+                    {openvpnGroupOptions.map((option) => (
+                      <Button
+                        key={option.key}
+                        type="button"
+                        size="sm"
+                        variant={openvpnGroup === option.key ? 'default' : 'ghost'}
+                        className="h-7 px-2 text-xs"
+                        disabled={groupBusy}
+                        onClick={() => void handleOpenVpnGroupChange(option.key)}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
+                )}
                 <div className="relative min-w-[220px] flex-1 sm:max-w-xs">
                   <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -349,6 +403,7 @@ export default function ConfigCardsSection({
                         onDelete={
                           isAdmin || userRole === 'user' ? () => openConfirm('delete', config) : undefined
                         }
+                        showQrDownloads={qrDownloadsEnabled}
                       />
                     ))}
                   </div>
@@ -371,6 +426,7 @@ export default function ConfigCardsSection({
         onDownload={onDownload}
         onNotifySuccess={onNotifySuccess}
         onNotifyError={onNotifyError}
+        showQrDownloads={qrDownloadsEnabled}
       />
 
       <ConfirmDialog

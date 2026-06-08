@@ -344,7 +344,7 @@ export async function recreateProfiles() {
 }
 
 export async function runDoall() {
-  return apiFetch<{ message: string; detail?: string }>('/settings/run-doall', { method: 'POST' })
+  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/settings/run-doall', { method: 'POST' })
 }
 
 export async function restartService(serviceName: string) {
@@ -451,7 +451,7 @@ export async function syncRoutingProviders() {
 }
 
 export async function applyRouting() {
-  return apiFetch<{ message: string; detail?: unknown }>('/routing/apply', { method: 'POST' })
+  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/routing/apply', { method: 'POST' })
 }
 
 export async function getCidrDbStatus() {
@@ -493,9 +493,12 @@ export async function generateCidrFromDb(options?: {
 }
 
 export async function getCidrPipelineTask(taskId: string) {
-  return apiFetch<{ success: boolean; task: import('../types').CidrPipelineTask }>(
-    `/routing/cidr-db/tasks/${encodeURIComponent(taskId)}`,
-  )
+  const task = await getBackgroundTask(taskId)
+  return { success: true, task }
+}
+
+export async function getBackgroundTask(taskId: string) {
+  return apiFetch<import('../types').BackgroundTask>(`/tasks/${encodeURIComponent(taskId)}`)
 }
 
 export async function getTrafficOverview() {
@@ -686,10 +689,30 @@ export async function getSecuritySettings() {
   return apiFetch<import('../types').SecuritySettings>('/security')
 }
 
-export async function updateSecuritySettings(data: Partial<import('../types').SecuritySettings & { qr_download_pin?: string }>) {
+export async function updateSecuritySettings(
+  data: Partial<import('../types').SecuritySettings & { qr_download_pin?: string }>,
+) {
   return apiFetch<import('../types').SecuritySettings>('/security', {
     method: 'PATCH',
     body: JSON.stringify(data),
+  })
+}
+
+export async function togglePublicDownload(enabled?: boolean) {
+  return apiFetch<{ enabled: boolean; message: string }>('/security/public-download', {
+    method: 'POST',
+    body: JSON.stringify(enabled === undefined ? {} : { enabled }),
+  })
+}
+
+export async function getOpenVpnGroup() {
+  return apiFetch<import('../types').OpenVpnGroupState>('/configs/openvpn-group')
+}
+
+export async function setOpenVpnGroup(group: string) {
+  return apiFetch<import('../types').OpenVpnGroupState>('/configs/openvpn-group', {
+    method: 'PUT',
+    body: JSON.stringify({ group }),
   })
 }
 
@@ -728,11 +751,11 @@ export async function runTests(testIds: string[] = []) {
 }
 
 export async function getTestTask(taskId: string) {
-  return apiFetch<import('../types').CidrPipelineTask>(`/tests/tasks/${taskId}`)
+  return getBackgroundTask(taskId)
 }
 
 export async function applySystemUpdate() {
-  return apiFetch<{ message: string }>('/system/update', { method: 'POST' })
+  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/system/update', { method: 'POST' })
 }
 
 export async function getScannerBans() {
@@ -748,6 +771,14 @@ export async function unbanScannerIp(ip: string) {
 
 export async function getActionLogs(limit = 100) {
   return apiFetch<import('../types').ActionLogEntry[]>(`/logs/actions?limit=${limit}`)
+}
+
+export function downloadActionLogsExport() {
+  const token = getToken()
+  return fetch(`${API_BASE}/logs/action-logs/export`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+  })
 }
 
 export async function getConnectionLogs() {
