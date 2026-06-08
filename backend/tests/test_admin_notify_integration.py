@@ -308,7 +308,7 @@ def test_openvpn_unblock_triggers_admin_notify(hooks_client):
 def test_tg_mini_unlinked_triggers_admin_notify(hooks_client):
     client, sent, _session, _headers, _node = hooks_client
     sent.clear()
-    bot_token = "123456789:AAHooksHooksHooksHooksHooksHooksHo"
+    bot_token = "hooks-tg-mini-bot-token"
     init_data = _sign_telegram_init_data(
         {
             "auth_date": str(int(time.time())),

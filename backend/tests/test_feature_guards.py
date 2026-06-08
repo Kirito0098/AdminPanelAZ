@@ -4,14 +4,21 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+def _feature_service_factory(env_file):
+    def factory():
+        return __import__(
+            "app.services.feature_toggles", fromlist=["FeatureToggleService"]
+        ).FeatureToggleService(env_file)
+
+    return factory
+
+
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("FEATURE_ROUTING_ENABLED=false\nTRAFFIC_SYNC_ENABLED=false\n", encoding="utf-8")
 
-    service_factory = lambda: __import__(
-        "app.services.feature_toggles", fromlist=["FeatureToggleService"]
-    ).FeatureToggleService(env_file)
+    service_factory = _feature_service_factory(env_file)
     monkeypatch.setattr("app.services.feature_guards.get_feature_service", service_factory)
     monkeypatch.setattr("app.routers.feature_toggles.get_feature_service", service_factory)
 
@@ -38,9 +45,7 @@ def guarded_client(monkeypatch, tmp_path):
         encoding="utf-8",
     )
 
-    service_factory = lambda: __import__(
-        "app.services.feature_toggles", fromlist=["FeatureToggleService"]
-    ).FeatureToggleService(env_file)
+    service_factory = _feature_service_factory(env_file)
     monkeypatch.setattr("app.services.feature_guards.get_feature_service", service_factory)
     monkeypatch.setattr("app.routers.feature_toggles.get_feature_service", service_factory)
 
@@ -116,9 +121,7 @@ def maintenance_disabled_client(monkeypatch, tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("FEATURE_MAINTENANCE_ENABLED=false\n", encoding="utf-8")
 
-    service_factory = lambda: __import__(
-        "app.services.feature_toggles", fromlist=["FeatureToggleService"]
-    ).FeatureToggleService(env_file)
+    service_factory = _feature_service_factory(env_file)
     monkeypatch.setattr("app.services.feature_guards.get_feature_service", service_factory)
     monkeypatch.setattr("app.routers.feature_toggles.get_feature_service", service_factory)
 

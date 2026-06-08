@@ -31,7 +31,7 @@ def _sign_init_data(fields: dict[str, str], bot_token: str) -> str:
 
 
 def test_verify_accepts_valid_init_data() -> None:
-    token = "123456789:AAExampleExampleExampleExampleExample"
+    token = "test-tg-mini-verify-token"
     auth_date = str(int(time.time()))
     user_json = '{"id":777001,"first_name":"Ada","last_name":"Lovelace","username":"ada"}'
     raw = _sign_init_data(
@@ -44,7 +44,7 @@ def test_verify_accepts_valid_init_data() -> None:
 
 
 def test_verify_rejects_bad_hash() -> None:
-    token = "987654321:BBExampleExampleExampleExampleExample"
+    token = "test-tg-mini-bad-hash-token"
     auth_date = str(int(time.time()))
     user_json = '{"id":1,"first_name":"X"}'
     raw = _sign_init_data(
