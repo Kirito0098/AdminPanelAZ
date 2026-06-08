@@ -9,6 +9,7 @@ SERVICE_NAME="${SERVICE_NAME:-adminpanelaz}"
 DEFAULT_PORT="${DEFAULT_PORT:-8000}"
 HTTPS_PUBLIC_PORT="${HTTPS_PUBLIC_PORT:-443}"
 HTTP_ACME_PORT="${HTTP_ACME_PORT:-80}"
+NON_INTERACTIVE="${NON_INTERACTIVE:-false}"
 
 # shellcheck source=scripts/nginx-common.sh
 source "$ROOT_DIR/scripts/nginx-common.sh"
@@ -24,19 +25,51 @@ usage() {
   --nginx-le         Nginx + Let's Encrypt (нужен DOMAIN, опционально EMAIL)
   --nginx-selfsigned Nginx + самоподписанный сертификат
   --change           Сменить режим публикации (интерактивно)
+  --non-interactive  Не запрашивать ввод (для вызова из панели / background task)
   --help             Справка
 
 Переменные окружения (для неинтерактивного режима):
   DOMAIN             Доменное имя
   EMAIL              Email для Let's Encrypt
   BACKEND_PORT       Порт uvicorn (по умолчанию 8000)
+  HTTPS_PUBLIC_PORT  Публичный HTTPS-порт Nginx (по умолчанию 443)
+  HTTP_ACME_PORT     Публичный HTTP-порт (ACME/редирект, по умолчанию 80)
+  NON_INTERACTIVE    true — пропускать prompts при заданных env
 EOF
+}
+
+is_non_interactive() {
+  [[ "$NON_INTERACTIVE" == "true" || "$NON_INTERACTIVE" == "1" ]] || [[ ! -t 0 ]]
+}
+
+validate_port() {
+  local value="$1"
+  local label="$2"
+  [[ "$value" =~ ^[0-9]+$ ]] && ((value >= 1 && value <= 65535)) || nginx_die "${label}: некорректный порт (1-65535)"
+}
+
+validate_domain() {
+  local value="$1"
+  [[ "$value" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] || nginx_die "Неверный формат домена: $value"
 }
 
 require_root() {
   if [[ "$(id -u)" -ne 0 ]]; then
     nginx_die "Запустите от root: sudo $0"
   fi
+}
+
+resolve_public_ports() {
+  if is_non_interactive; then
+    validate_port "$BACKEND_PORT" "BACKEND_PORT"
+    validate_port "$HTTPS_PUBLIC_PORT" "HTTPS_PUBLIC_PORT"
+    validate_port "$HTTP_ACME_PORT" "HTTP_ACME_PORT"
+    [[ "$HTTPS_PUBLIC_PORT" != "$BACKEND_PORT" ]] || nginx_die "HTTPS_PUBLIC_PORT совпадает с BACKEND_PORT"
+    [[ "$HTTP_ACME_PORT" != "$BACKEND_PORT" && "$HTTP_ACME_PORT" != "$HTTPS_PUBLIC_PORT" ]] \
+      || nginx_die "HTTP_ACME_PORT конфликтует с другими портами"
+    return 0
+  fi
+  prompt_public_ports
 }
 
 prompt_public_ports() {
@@ -65,6 +98,20 @@ prompt_public_ports() {
   done
 }
 
+resolve_backend_port() {
+  if [[ -n "${BACKEND_PORT:-}" ]]; then
+    validate_port "$BACKEND_PORT" "BACKEND_PORT"
+    return 0
+  fi
+  if is_non_interactive; then
+    BACKEND_PORT="$(nginx_env_get BACKEND_PORT)"
+    BACKEND_PORT="${BACKEND_PORT:-$DEFAULT_PORT}"
+    validate_port "$BACKEND_PORT" "BACKEND_PORT"
+    return 0
+  fi
+  prompt_port
+}
+
 prompt_port() {
   local current
   current="$(nginx_env_get BACKEND_PORT)"
@@ -79,6 +126,24 @@ prompt_port() {
     fi
     echo "Некорректный порт."
   done
+}
+
+resolve_domain() {
+  local required="${1:-false}"
+  if [[ -n "${DOMAIN:-}" ]]; then
+    validate_domain "$DOMAIN"
+    return 0
+  fi
+  if [[ "$required" == "true" ]] && is_non_interactive; then
+    nginx_die "DOMAIN обязателен в неинтерактивном режиме"
+  fi
+  if is_non_interactive; then
+    DOMAIN="$(hostname -f 2>/dev/null || hostname)"
+    [[ -n "$DOMAIN" ]] || nginx_die "DOMAIN не задан и hostname пуст"
+    validate_domain "$DOMAIN"
+    return 0
+  fi
+  prompt_domain
 }
 
 prompt_domain() {
@@ -100,7 +165,7 @@ restart_panel_if_needed() {
 }
 
 setup_http_direct() {
-  prompt_port
+  resolve_backend_port
   nginx_apply_direct_http_env "$BACKEND_PORT"
   nginx_remove_site "$(nginx_env_get DOMAIN)"
   nginx_log "HTTP без nginx: http://<сервер>:${BACKEND_PORT}/"
@@ -108,17 +173,14 @@ setup_http_direct() {
 }
 
 setup_nginx_letsencrypt() {
-  local domain="${DOMAIN:-}"
+  resolve_domain true
+  local domain="$DOMAIN"
   local email="${EMAIL:-}"
-  if [[ -z "$domain" ]]; then
-    prompt_domain
-    domain="$DOMAIN"
-  fi
-  if [[ -z "${email:-}" ]] && [[ -t 0 ]]; then
+  if [[ -z "${email:-}" ]] && ! is_non_interactive; then
     read -r -p "Email для Let's Encrypt (ENTER — пропустить): " email
   fi
-  prompt_port
-  prompt_public_ports
+  resolve_backend_port
+  resolve_public_ports
 
   nginx_ensure_nginx || nginx_die "Не удалось установить nginx"
   nginx_obtain_letsencrypt_cert "$domain" "$email"
@@ -140,15 +202,10 @@ setup_nginx_letsencrypt() {
 }
 
 setup_nginx_selfsigned() {
-  local domain="${DOMAIN:-}"
-  if [[ -z "$domain" ]]; then
-    if [[ -t 0 ]]; then
-      read -r -p "Домен для server_name (ENTER — $(hostname -f 2>/dev/null || hostname)): " domain
-    fi
-    domain="${domain:-$(hostname -f 2>/dev/null || hostname)}"
-  fi
-  prompt_port
-  prompt_public_ports
+  resolve_domain false
+  local domain="$DOMAIN"
+  resolve_backend_port
+  resolve_public_ports
   nginx_ensure_nginx || nginx_die "Не удалось установить nginx"
 
   mkdir -p /etc/ssl/private
@@ -176,18 +233,24 @@ setup_nginx_custom_certs() {
   local key_path="${SSL_KEY:-}"
 
   if [[ -z "$domain" ]]; then
-    prompt_domain
+    resolve_domain true
     domain="$DOMAIN"
   fi
   if [[ -z "$cert_path" ]]; then
+    if is_non_interactive; then
+      nginx_die "SSL_CERT обязателен в неинтерактивном режиме"
+    fi
     read -r -p "Путь к сертификату (.crt/.pem): " cert_path
   fi
   if [[ -z "$key_path" ]]; then
+    if is_non_interactive; then
+      nginx_die "SSL_KEY обязателен в неинтерактивном режиме"
+    fi
     read -r -p "Путь к приватному ключу (.key): " key_path
   fi
   [[ -f "$cert_path" && -f "$key_path" ]] || nginx_die "Файлы сертификата не найдены"
-  prompt_port
-  prompt_public_ports
+  resolve_backend_port
+  resolve_public_ports
   nginx_ensure_nginx || nginx_die "Не удалось установить nginx"
 
   local conf
@@ -223,7 +286,14 @@ main() {
   mkdir -p "$(dirname "$ENV_FILE")"
   touch "$ENV_FILE"
 
-  case "${1:-}" in
+  local cmd="${1:-}"
+  if [[ "$cmd" == "--non-interactive" ]]; then
+    NON_INTERACTIVE=true
+    shift
+    cmd="${1:-}"
+  fi
+
+  case "$cmd" in
     --http)
       BACKEND_PORT="${BACKEND_PORT:-$(nginx_env_get BACKEND_PORT)}"
       BACKEND_PORT="${BACKEND_PORT:-$DEFAULT_PORT}"
@@ -236,6 +306,7 @@ main() {
       setup_nginx_selfsigned
       ;;
     --change|"")
+      is_non_interactive && nginx_die "Интерактивный режим недоступен без TTY; укажите --http, --nginx-le или --nginx-selfsigned"
       choose_installation_type
       ;;
     --help|-h)
@@ -243,7 +314,7 @@ main() {
       ;;
     *)
       usage
-      nginx_die "Неизвестный аргумент: $1"
+      nginx_die "Неизвестный аргумент: ${cmd:-}"
       ;;
   esac
 

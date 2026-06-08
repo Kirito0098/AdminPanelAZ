@@ -26,6 +26,7 @@ SETTINGS_CHANGE_LABELS: dict[str, str] = {
     "settings_cidr_preset_reset": "Сброс CIDR-пресета до базовых значений",
     "settings_antifilter_refresh": "Обновление AntiFilter",
     "settings_run_doall": "Перегенерация конфигурации VPN (doall.sh)",
+    "settings_vpn_network_publish": "Публикация панели (VPN-сеть)",
 }
 
 _ROLE_LABELS_RU = {

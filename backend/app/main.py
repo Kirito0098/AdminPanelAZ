@@ -158,6 +158,16 @@ async def lifespan(_: FastAPI):
         ip_restriction_service.sync_firewall()
     except Exception:
         pass
+    try:
+        from app.database import SessionLocal
+
+        startup_db = SessionLocal()
+        try:
+            ip_restriction_service.sync_whitelist_port_firewall(startup_db)
+        finally:
+            startup_db.close()
+    except Exception:
+        pass
     yield
     for task in (
         collector_task,

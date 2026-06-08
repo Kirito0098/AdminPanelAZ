@@ -76,6 +76,7 @@ SETTINGS_CHANGE_NOTIFY = frozenset({
     "settings_cidr_preset_reset",
     "settings_antifilter_refresh",
     "settings_run_doall",
+    "settings_vpn_network_publish",
 })
 
 SETTINGS_TG_TITLES = {
@@ -100,6 +101,7 @@ SETTINGS_TG_TITLES = {
     "settings_cidr_preset_reset": "CIDR-пресет",
     "settings_antifilter_refresh": "AntiFilter",
     "settings_run_doall": "Применение изменений",
+    "settings_vpn_network_publish": "Публикация панели",
 }
 
 SETTINGS_ACTION_EVENTS = frozenset({
@@ -108,6 +110,7 @@ SETTINGS_ACTION_EVENTS = frozenset({
     "settings_backup_restore",
     "settings_backup_delete",
     "settings_run_doall",
+    "settings_vpn_network_publish",
     "settings_cidr_update_queued",
     "settings_cidr_rollback_queued",
     "settings_cidr_db_refresh_queued",

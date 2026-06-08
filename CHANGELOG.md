@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-06-08
+
+### Added
+- **Ops console menu (фаза 29)** — `scripts/adminpanel-menu.sh`: интерактивное меню и флаги `--restart`, `--update`, `--backup`, `--tests`, `--diagnose`; обёртка над `start.sh`, systemd, `site-diagnostics.sh`.
+- **`scripts/backup-cli.py`** — CLI создания/восстановления бэкапа через `BackupManager` (без веб-панели).
+
+### Changed
+- **`MIGRATION.md`**, **`README.md`** — консольное меню `adminpanel.sh` → ✅.
+
+## [1.3.0] - 2026-06-08
+
+### Added
+- **VPN network guided wizard (фаза 28)** — `POST /api/settings/vpn-network/publish` запускает `scripts/nginx-setup.sh` через `BackgroundTaskService`; мастер в `VpnNetworkTab.tsx` (Nginx+LE, self-signed, direct HTTP).
+- **Runtime panel port firewall** — `panel_port_firewall.py`; toggle «Блок на порту панели (iptables)» в Security tab; sync при сохранении whitelist и на startup.
+- **`scripts/nginx-setup.sh`** — неинтерактивный режим (`--non-interactive`, env vars) для вызова из панели.
+- **Tests** — `test_panel_port_firewall.py`, `test_ip_restriction_whitelist_firewall_gating.py`; расширен `test_vpn_network_settings.py`.
+
+### Changed
+- **`MIGRATION.md`**, **`README.md`** — VPN-сеть и firewall panel port → ✅; install `firewall-setup.sh` ≠ runtime whitelist (документировано).
+
 ## [1.2.2] - 2026-06-08
 
 ### Added

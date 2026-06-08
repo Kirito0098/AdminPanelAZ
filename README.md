@@ -50,7 +50,7 @@
 | Viewer role | ✅ | API + UI назначения доступа в UsersTab |
 | Обновление системы (git) | ✅ | + 🆕 node agent / AntiZapret на узлах |
 | In-panel pytest | ✅ | 48 модулей / 385 тестов vs 53 в AA |
-| Установка / ops | 🟡 | `install.sh` + diagnostics/safe-browsing CLI ✅; нет `adminpanel.sh` menu |
+| Установка / ops | ✅ | `install.sh` + `scripts/adminpanel-menu.sh`; diagnostics/safe-browsing CLI ✅ |
 | Multi-node | 🆕 | Controller + Node Agent |
 | CI/CD | ✅ | pytest + ruff + build + shellcheck + eslint; pip-audit/bandit advisory |
 
@@ -91,8 +91,8 @@
 | Временный whitelist UI (1h/12h/24h) | API `POST /api/security/temp-whitelist` |
 | CIDR presets CRUD | Apply встроенных пресетов; кастомные — вручную на узле |
 | Diff в редакторе файлов | Сравнение вне панели |
-| `adminpanel.sh` console menu | `systemctl`, `install.sh`, `start.sh` |
-| Runtime iptables whitelist порта | `scripts/firewall-setup.sh` при установке |
+| `adminpanel.sh` console menu | `sudo ./scripts/adminpanel-menu.sh` (или `systemctl`, `start.sh`) |
+| Custom SSL certs в VPN wizard | `sudo ./scripts/nginx-setup.sh` (интерактивно) |
 
 ### 🆕 Только в AdminPanelAZ (сверх AA 1.9.0)
 
@@ -362,9 +362,10 @@ CIDR DB refresh, сбор трафика, Telegram, автобэкапы.
 
 ```bash
 cd /opt/AdminPanelAZ
+sudo ./scripts/adminpanel-menu.sh      # ops-меню: restart, backup, update, pytest, diagnose
 systemctl status adminpanelaz          # если выбран systemd
 ./start.sh status                      # если daemon
-sudo ./scripts/nginx-setup.sh          # сменить режим HTTPS после установки
+sudo ./scripts/nginx-setup.sh          # сменить режим HTTPS после установки (или Настройки → VPN-сеть → мастер публикации)
 sudo ./scripts/ddns-update.sh status   # статус DDNS
 sudo ./scripts/uninstall.sh --purge-state -y   # полное удаление сервисов и состояния
 sudo ./install.sh --reinstall                  # переустановка через меню install.sh

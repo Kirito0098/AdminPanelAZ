@@ -18,6 +18,7 @@ settings = get_settings()
 class SecuritySettingsUpdate(BaseModel):
     ip_restriction_enabled: bool | None = None
     allowed_ips: list[str] | None = None
+    whitelist_firewall: bool | None = None
     block_scanners: bool | None = None
     scanner_max_attempts: int | None = Field(default=None, ge=1, le=20)
     scanner_ban_seconds: int | None = Field(default=None, ge=60, le=86400)
@@ -48,7 +49,9 @@ def update_security(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    result = SecurityService().update_settings(db, payload.model_dump(exclude_none=True))
+    service = SecurityService()
+    result = service.update_settings(db, payload.model_dump(exclude_none=True))
+    service.sync_whitelist_port_firewall(db)
     if settings.audit_log_enabled:
         changed = ", ".join(payload.model_dump(exclude_none=True).keys())
         log_action(
@@ -70,7 +73,9 @@ def add_temp_whitelist(
     admin: User = Depends(require_admin),
 ):
     try:
-        result = SecurityService().add_temp_whitelist(db, payload.ip, payload.hours)
+        service = SecurityService()
+        result = service.add_temp_whitelist(db, payload.ip, payload.hours)
+        service.sync_whitelist_port_firewall(db)
         if settings.audit_log_enabled:
             log_action(
                 db,
@@ -92,7 +97,9 @@ def remove_temp_whitelist(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    result = SecurityService().remove_temp_whitelist(db, ip)
+    service = SecurityService()
+    result = service.remove_temp_whitelist(db, ip)
+    service.sync_whitelist_port_firewall(db)
     if settings.audit_log_enabled:
         log_action(
             db,

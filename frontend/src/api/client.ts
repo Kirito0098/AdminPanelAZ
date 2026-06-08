@@ -402,6 +402,13 @@ export async function getVpnNetworkSettings() {
   return apiFetch<import('../types').VpnNetworkSettings>('/settings/vpn-network')
 }
 
+export async function publishVpnNetwork(data: import('../types').VpnNetworkPublishPayload) {
+  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/settings/vpn-network/publish', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
 export async function getTelegramSettings() {
   return apiFetch<import('../types').TelegramSettings>('/settings/telegram')
 }

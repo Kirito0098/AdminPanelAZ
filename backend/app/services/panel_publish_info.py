@@ -189,3 +189,33 @@ def build_panel_publish_context(
         "env_rows": env_rows,
         "backend_port": backend_port,
     }
+
+
+def build_vpn_network_publish_modes() -> list[dict[str, str | bool | None]]:
+    """Publish modes available from the settings wizard."""
+    return [
+        {
+            "key": "nginx_le",
+            "title": "Nginx + Let's Encrypt",
+            "description": "Рекомендуемый режим: TLS на Nginx, uvicorn на loopback.",
+            "requires_domain": True,
+            "requires_email": False,
+            "warning": None,
+        },
+        {
+            "key": "nginx_selfsigned",
+            "title": "Nginx + самоподписанный SSL",
+            "description": "HTTPS через Nginx с локальным сертификатом (для тестов или LAN).",
+            "requires_domain": False,
+            "requires_email": False,
+            "warning": None,
+        },
+        {
+            "key": "http_direct",
+            "title": "Прямой HTTP (без Nginx)",
+            "description": "Uvicorn слушает 0.0.0.0 — только для LAN/тестов.",
+            "requires_domain": False,
+            "requires_email": False,
+            "warning": "Не используйте в интернете без firewall. Включите блок на порту панели в разделе «Безопасность».",
+        },
+    ]

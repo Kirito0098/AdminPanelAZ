@@ -1,12 +1,19 @@
-import { useEffect, useState } from 'react'
-import { ExternalLink, Globe, Terminal } from 'lucide-react'
-import { ApiError, getVpnNetworkSettings } from '@/api/client'
+import { useCallback, useEffect, useState } from 'react'
+import { ExternalLink, Globe, Rocket, Terminal } from 'lucide-react'
+import { ApiError, getVpnNetworkSettings, publishVpnNetwork } from '@/api/client'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
+import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
-import type { VpnNetworkSettings } from '@/types'
+import { useProgress } from '@/context/ProgressContext'
+import type { VpnNetworkPublishMode, VpnNetworkSettings } from '@/types'
 
 const MODE_LABELS: Record<string, string> = {
   reverse_proxy: 'Nginx / прокси',
@@ -21,23 +28,108 @@ function modeBadgeVariant(modeKey: string): 'default' | 'secondary' | 'outline' 
 }
 
 export default function VpnNetworkTab() {
-  const { error: notifyError } = useNotifications()
+  const { success, error: notifyError } = useNotifications()
+  const { inline, trackBackgroundTask, backgroundTaskPolling } = useProgress()
+  const { confirm, dialogProps } = useConfirmDialog()
   const [settings, setSettings] = useState<VpnNetworkSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [selectedMode, setSelectedMode] = useState<string>('nginx_le')
+  const [backendPort, setBackendPort] = useState('8000')
+  const [domain, setDomain] = useState('')
+  const [email, setEmail] = useState('')
+  const [httpsPublicPort, setHttpsPublicPort] = useState('443')
+  const [httpAcmePort, setHttpAcmePort] = useState('80')
+  const [publishing, setPublishing] = useState(false)
 
-  useEffect(() => {
+  const loadSettings = useCallback(async () => {
     setLoading(true)
     setLoadError(null)
-    getVpnNetworkSettings()
-      .then(setSettings)
-      .catch((err) => {
-        const message = err instanceof ApiError ? err.message : 'Ошибка загрузки'
-        setLoadError(message)
-        notifyError(message)
-      })
-      .finally(() => setLoading(false))
-  }, [])
+    try {
+      const data = await getVpnNetworkSettings()
+      setSettings(data)
+      setBackendPort(data.backend_port || '8000')
+      const domainRow = data.env_rows.find((r) => r.label.includes('DOMAIN'))
+      if (domainRow && domainRow.value !== '—') {
+        setDomain(domainRow.value)
+      }
+      if (data.publish_modes?.length) {
+        setSelectedMode(data.publish_modes[0].key)
+      }
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Ошибка загрузки'
+      setLoadError(message)
+      notifyError(message)
+    } finally {
+      setLoading(false)
+    }
+  }, [notifyError])
+
+  useEffect(() => {
+    void loadSettings()
+  }, [loadSettings])
+
+  const selectedModeInfo: VpnNetworkPublishMode | undefined = settings?.publish_modes?.find(
+    (m) => m.key === selectedMode,
+  )
+
+  const handlePublish = () => {
+    if (!selectedModeInfo) return
+
+    const port = Number(backendPort)
+    const httpsPort = Number(httpsPublicPort)
+    const httpPort = Number(httpAcmePort)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      notifyError('Некорректный BACKEND_PORT')
+      return
+    }
+    if (selectedModeInfo.requires_domain && !domain.trim()) {
+      notifyError('Укажите домен')
+      return
+    }
+
+    const isDirect = selectedMode === 'http_direct'
+    confirm({
+      title: 'Применить публикацию панели?',
+      description: `Режим: ${selectedModeInfo.title}. Панель может быть недоступна несколько минут.`,
+      alert: {
+        variant: isDirect ? 'danger' : 'warning',
+        title: isDirect ? 'Прямой HTTP' : 'Изменение публикации',
+        children: isDirect
+          ? (selectedModeInfo.warning ||
+            'Не используйте прямой HTTP в интернете. Включите блок на порту панели в разделе «Безопасность».')
+          : 'Будет запущен scripts/nginx-setup.sh на controller. Убедитесь, что DNS и firewall настроены.',
+      },
+      confirmLabel: 'Запустить публикацию',
+      destructive: isDirect,
+      onConfirm: async () => {
+        setPublishing(true)
+        try {
+          const resp = await publishVpnNetwork({
+            mode: selectedMode as 'http_direct' | 'nginx_le' | 'nginx_selfsigned',
+            backend_port: port,
+            domain: domain.trim() || null,
+            email: email.trim() || null,
+            https_public_port: httpsPort,
+            http_acme_port: httpPort,
+          })
+          trackBackgroundTask(resp.task_id, {
+            onComplete: () => {
+              success(resp.message || 'Публикация завершена')
+              void loadSettings()
+            },
+            onError: (task, message) => {
+              notifyError(task?.error || task?.message || message)
+            },
+          })
+        } catch (err) {
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка запуска публикации')
+        } finally {
+          setPublishing(false)
+        }
+      },
+    })
+  }
 
   if (loading && !settings) {
     return <Spinner label="Загрузка настроек публикации..." className="py-12" />
@@ -56,9 +148,13 @@ export default function VpnNetworkTab() {
   }
 
   const modeLabel = MODE_LABELS[settings.mode_key] ?? settings.mode_title
+  const showNginxPorts = selectedMode !== 'http_direct'
 
   return (
     <div className="space-y-6">
+      <InlineProgressBar active={inline.active || backgroundTaskPolling || publishing} label={inline.label} />
+      <ConfirmDialogHost {...dialogProps} />
+
       <header>
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Сеть и публикация</p>
         <h2 className="mt-1 text-lg font-semibold">Порт, HTTPS и Nginx</h2>
@@ -144,23 +240,123 @@ export default function VpnNetworkTab() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Terminal size={18} />
-            Смена режима и порта
+            <Rocket size={18} />
+            Мастер публикации
           </CardTitle>
           <CardDescription>
-            Текущий порт uvicorn: <strong>{settings.backend_port}</strong>. При Nginx это внутренний upstream, а не
-            443.
+            Запускает <code>scripts/nginx-setup.sh</code> на controller в фоне. Операция только на этом сервере.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid gap-3 sm:grid-cols-3">
+            {(settings.publish_modes || []).map((mode) => (
+              <button
+                key={mode.key}
+                type="button"
+                onClick={() => setSelectedMode(mode.key)}
+                className={`rounded-lg border p-4 text-left transition-colors ${
+                  selectedMode === mode.key
+                    ? 'border-primary bg-primary/5'
+                    : 'hover:bg-muted/50'
+                }`}
+              >
+                <p className="text-sm font-medium">{mode.title}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{mode.description}</p>
+              </button>
+            ))}
+          </div>
+
+          {selectedModeInfo?.warning && (
+            <SettingsAlert variant="warning" title="Внимание">
+              {selectedModeInfo.warning}
+            </SettingsAlert>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="vpn-backend-port">BACKEND_PORT (uvicorn)</Label>
+              <Input
+                id="vpn-backend-port"
+                type="number"
+                min={1}
+                max={65535}
+                value={backendPort}
+                onChange={(e) => setBackendPort(e.target.value)}
+              />
+            </div>
+            {selectedModeInfo?.requires_domain && (
+              <div className="space-y-2">
+                <Label htmlFor="vpn-domain">DOMAIN</Label>
+                <Input
+                  id="vpn-domain"
+                  value={domain}
+                  onChange={(e) => setDomain(e.target.value)}
+                  placeholder="panel.example.com"
+                />
+              </div>
+            )}
+            {selectedMode === 'nginx_le' && (
+              <div className="space-y-2">
+                <Label htmlFor="vpn-email">EMAIL (Let&apos;s Encrypt)</Label>
+                <Input
+                  id="vpn-email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="admin@example.com"
+                />
+              </div>
+            )}
+            {showNginxPorts && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="vpn-https-port">HTTPS_PUBLIC_PORT</Label>
+                  <Input
+                    id="vpn-https-port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={httpsPublicPort}
+                    onChange={(e) => setHttpsPublicPort(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="vpn-http-port">HTTP_ACME_PORT</Label>
+                  <Input
+                    id="vpn-http-port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={httpAcmePort}
+                    onChange={(e) => setHttpAcmePort(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
+          <Button onClick={handlePublish} disabled={publishing || backgroundTaskPolling}>
+            {publishing ? 'Запуск...' : 'Применить публикацию'}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Terminal size={18} />
+            Ручная настройка
+          </CardTitle>
+          <CardDescription>
+            Альтернатива мастеру — выполните на сервере вручную.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <p>
-            Для смены режима HTTPS/Nginx, домена или порта выполните на сервере:
-          </p>
           <code className="block rounded-lg border bg-muted/50 px-3 py-2 font-mono text-xs">
             sudo ./{settings.nginx_setup_hint}
           </code>
           <p>
-            Первичная установка и публикация также описаны в <code>README.md</code> (разделы «Nginx + Let&apos;s Encrypt» и
+            Первичная установка описана в <code>README.md</code> (разделы «Nginx + Let&apos;s Encrypt» и
             «scripts/nginx-setup.sh»).
           </p>
         </CardContent>

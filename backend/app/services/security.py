@@ -7,6 +7,10 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.models import AppSetting
+from app.services.env_file import EnvFileService
+from app.services.firewall_tools_check import check_firewall_tools
+from app.services.panel_port_firewall import panel_port_firewall
+from app.services.panel_publish_info import is_whitelist_port_firewall_applicable
 from app.services.public_download_settings import is_public_download_enabled, set_public_download_enabled
 
 
@@ -24,6 +28,33 @@ def _set(db: Session, key: str, value: str) -> None:
 
 
 class SecurityService:
+    def _env_file(self) -> EnvFileService:
+        from pathlib import Path
+
+        env_path = Path(__file__).resolve().parents[2] / ".env"
+        return EnvFileService(env_path)
+
+    def _firewall_whitelist_entries(self, settings: dict) -> list[str]:
+        entries = list(settings.get("allowed_ips") or [])
+        for row in settings.get("temp_whitelist") or []:
+            ip = (row.get("ip") if isinstance(row, dict) else None) or ""
+            ip = str(ip).strip()
+            if ip:
+                entries.append(ip)
+        return entries
+
+    def is_whitelist_port_firewall_active(self, db: Session) -> bool:
+        settings = self.get_settings(db)
+        return (
+            bool(settings.get("ip_restriction_enabled"))
+            and bool(settings.get("whitelist_firewall"))
+            and self.is_whitelist_port_firewall_applicable()
+        )
+
+    def is_whitelist_port_firewall_applicable(self) -> bool:
+        env = self._env_file()
+        return is_whitelist_port_firewall_applicable(get_env_value=env.get_env_value)
+
     def get_settings(self, db: Session) -> dict:
         allowed_raw = _get(db, "security_allowed_ips", "")
         allowed = [ip.strip() for ip in allowed_raw.split(",") if ip.strip()]
@@ -37,7 +68,10 @@ class SecurityService:
             e for e in temp_list
             if datetime.fromisoformat(e["expires_at"].replace("Z", "+00:00")) > now
         ]
-        return {
+        fw_status = check_firewall_tools()
+        applicable = self.is_whitelist_port_firewall_applicable()
+        whitelist_firewall = _get(db, "security_whitelist_firewall", "false") == "true"
+        result = {
             "ip_restriction_enabled": _get(db, "security_ip_restriction", "false") == "true",
             "allowed_ips": allowed,
             "block_scanners": _get(db, "security_block_scanners", "false") == "true",
@@ -48,7 +82,18 @@ class SecurityService:
             "qr_download_max_downloads": int(_get(db, "qr_download_max_downloads", "1") or "1"),
             "qr_download_pin_set": bool(_get(db, "qr_download_pin", "")),
             "public_download_enabled": is_public_download_enabled(db),
+            "whitelist_firewall": whitelist_firewall,
+            "whitelist_firewall_applicable": applicable,
+            "whitelist_firewall_active": False,
+            "firewall_tools_ready": fw_status.fully_ready,
+            "firewall_tools_detail": fw_status.operational_detail,
         }
+        result["whitelist_firewall_active"] = (
+            bool(result["ip_restriction_enabled"])
+            and bool(result["whitelist_firewall"])
+            and applicable
+        )
+        return result
 
     def update_settings(self, db: Session, payload: dict) -> dict:
         if "ip_restriction_enabled" in payload:
@@ -80,8 +125,32 @@ class SecurityService:
             _set(db, "qr_download_pin", (payload["qr_download_pin"] or "").strip())
         if "public_download_enabled" in payload:
             set_public_download_enabled(db, bool(payload["public_download_enabled"]))
+        if "whitelist_firewall" in payload:
+            requested = bool(payload["whitelist_firewall"])
+            if requested and not self.is_whitelist_port_firewall_applicable():
+                requested = False
+            _set(db, "security_whitelist_firewall", "true" if requested else "false")
         db.commit()
         return self.get_settings(db)
+
+    def sync_whitelist_port_firewall(self, db: Session) -> bool:
+        settings = self.get_settings(db)
+        try:
+            if not self.is_whitelist_port_firewall_applicable():
+                if settings.get("whitelist_firewall"):
+                    _set(db, "security_whitelist_firewall", "false")
+                    db.commit()
+                panel_port_firewall.disable()
+                return False
+
+            if not self.is_whitelist_port_firewall_active(db):
+                panel_port_firewall.disable()
+                return False
+
+            entries = self._firewall_whitelist_entries(settings)
+            return panel_port_firewall.sync(entries)
+        except Exception:
+            return False
 
     def add_temp_whitelist(self, db: Session, ip: str, hours: int) -> dict:
         try:

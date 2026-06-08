@@ -320,6 +320,24 @@ class VpnNetworkEnvRow(BaseModel):
     mono: bool = True
 
 
+class VpnNetworkPublishModeInfo(BaseModel):
+    key: str
+    title: str
+    description: str
+    requires_domain: bool = False
+    requires_email: bool = False
+    warning: str | None = None
+
+
+class VpnNetworkPublishRequest(BaseModel):
+    mode: str = Field(pattern=r"^(http_direct|nginx_le|nginx_selfsigned)$")
+    backend_port: int = Field(default=8000, ge=1, le=65535)
+    domain: str | None = Field(default=None, max_length=255)
+    email: str | None = Field(default=None, max_length=255)
+    https_public_port: int = Field(default=443, ge=1, le=65535)
+    http_acme_port: int = Field(default=80, ge=1, le=65535)
+
+
 class VpnNetworkSettingsResponse(BaseModel):
     mode_key: str
     mode_title: str
@@ -329,6 +347,7 @@ class VpnNetworkSettingsResponse(BaseModel):
     env_rows: list[VpnNetworkEnvRow]
     backend_port: str
     nginx_setup_hint: str = "scripts/nginx-setup.sh"
+    publish_modes: list[VpnNetworkPublishModeInfo] = []
 
 
 class ServiceRestartRequest(BaseModel):

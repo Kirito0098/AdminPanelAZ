@@ -64,6 +64,7 @@ export default function SecurityTab() {
       const updated = await updateSecuritySettings({
         ip_restriction_enabled: settings?.ip_restriction_enabled,
         allowed_ips: allowedIps.split(',').map((s) => s.trim()).filter(Boolean),
+        whitelist_firewall: settings?.whitelist_firewall,
         block_scanners: settings?.block_scanners,
         scanner_max_attempts: settings?.scanner_max_attempts,
         scanner_ban_seconds: settings?.scanner_ban_seconds,
@@ -164,6 +165,34 @@ export default function SecurityTab() {
                 placeholder="192.168.1.0/24, 10.0.0.1"
               />
               <p className="text-xs text-muted-foreground">Оставьте пустым при выключенном ограничении</p>
+            </div>
+
+            <div className="space-y-2 rounded-md border p-4">
+              <label className="flex cursor-pointer items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={settings.whitelist_firewall}
+                  disabled={
+                    !ipRestrictionActive ||
+                    !settings.whitelist_firewall_applicable ||
+                    !settings.firewall_tools_ready
+                  }
+                  onChange={(e) => setSettings({ ...settings, whitelist_firewall: e.target.checked })}
+                  className="mt-0.5 h-4 w-4 rounded border"
+                />
+                <span>
+                  <span className="font-medium">Блок на порту панели (iptables)</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    Доступ к BACKEND_PORT только с IP из whitelist (режим direct HTTP, не за Nginx).
+                    {settings.whitelist_firewall_active && ' Активно.'}
+                    {!settings.whitelist_firewall_applicable &&
+                      ' Недоступно: панель за Nginx или на localhost.'}
+                    {!settings.firewall_tools_ready &&
+                      settings.whitelist_firewall_applicable &&
+                      ` iptables/ipset: ${settings.firewall_tools_detail}`}
+                  </span>
+                </span>
+              </label>
             </div>
 
             <div className={`space-y-4 rounded-md border p-4 ${!ipRestrictionActive ? 'opacity-60' : ''}`}>

@@ -13,11 +13,14 @@ from app.schemas import (
     AdminNotifyEventItem,
     AdminNotifySettingsResponse,
     AdminNotifySettingsUpdate,
+    BackgroundTaskResponse,
     MessageResponse,
     ServiceRestartRequest,
     TelegramSettingsResponse,
     TelegramSettingsUpdate,
     VpnNetworkEnvRow,
+    VpnNetworkPublishModeInfo,
+    VpnNetworkPublishRequest,
     VpnNetworkSettingsResponse,
 )
 from app.services.admin_notify import TG_NOTIFY_EVENT_LABELS, admin_notify_service
@@ -28,7 +31,12 @@ from app.config import get_settings
 from app.services.active_web_session import active_web_session_service
 from app.services.env_file import EnvFileService
 from app.services.feature_guards import get_feature_service, module_disabled_message
-from app.services.panel_publish_info import build_panel_publish_context, resolve_request_url_root
+from app.services.action_log import log_action
+from app.services.panel_publish_info import (
+    build_panel_publish_context,
+    build_vpn_network_publish_modes,
+    resolve_request_url_root,
+)
 from app.services.telegram import send_tg_message
 
 router = APIRouter(tags=["maintenance"])
@@ -254,6 +262,7 @@ def get_vpn_network_settings(
         request_url=resolve_request_url_root(request, behind_nginx=settings.behind_nginx),
         settings=settings,
     )
+    publish_modes = [VpnNetworkPublishModeInfo(**row) for row in build_vpn_network_publish_modes()]
     return VpnNetworkSettingsResponse(
         mode_key=ctx["mode_key"],
         mode_title=ctx["mode_title"],
@@ -262,6 +271,76 @@ def get_vpn_network_settings(
         primary_urls=ctx["primary_urls"],
         env_rows=[VpnNetworkEnvRow(**row) for row in ctx["env_rows"]],
         backend_port=ctx["backend_port"],
+        publish_modes=publish_modes,
+    )
+
+
+@router.post("/settings/vpn-network/publish", status_code=status.HTTP_202_ACCEPTED, response_model=BackgroundTaskResponse)
+def publish_vpn_network(
+    payload: VpnNetworkPublishRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    if not get_feature_service().is_enabled("vpn_network"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("vpn_network"),
+        )
+
+    if payload.mode == "nginx_le" and not (payload.domain or "").strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="DOMAIN обязателен для Let's Encrypt")
+
+    if payload.backend_port == payload.https_public_port or payload.backend_port == payload.http_acme_port:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="BACKEND_PORT конфликтует с публичными портами")
+    if payload.http_acme_port == payload.https_public_port:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="HTTP_ACME_PORT совпадает с HTTPS_PUBLIC_PORT")
+
+    active = background_task_service.find_active_task("vpn_network_publish")
+    if active:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": "Публикация панели уже выполняется",
+                "active_task_id": active.id,
+            },
+        )
+
+    task_payload = payload.model_dump()
+
+    def _callable(progress_updater=None):
+        return background_task_service.task_vpn_network_publish(task_payload, progress_updater)
+
+    task = background_task_service.enqueue_background_task(
+        "vpn_network_publish",
+        _callable,
+        created_by_username=admin.username,
+        queued_message="Публикация панели поставлена в очередь",
+    )
+
+    from app.services.ip_restriction import ip_restriction_service
+
+    if get_settings().audit_log_enabled:
+        log_action(
+            db,
+            action="settings_vpn_network_publish",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"mode={payload.mode}, port={payload.backend_port}",
+        )
+
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_vpn_network_publish",
+        details=f"mode={payload.mode}",
+        client_timezone=get_client_timezone_from_request(request),
+    )
+
+    return background_task_service.build_accepted_payload(
+        task,
+        "Публикация панели запущена в фоне.",
     )
 
 

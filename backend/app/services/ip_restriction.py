@@ -172,6 +172,9 @@ class IpRestrictionService:
     def sync_firewall(self) -> None:
         self._firewall.sync_firewall_from_store()
 
+    def sync_whitelist_port_firewall(self, db: Session) -> bool:
+        return self._security.sync_whitelist_port_firewall(db)
+
     def record_login_attempt(self, client_ip: str, success: bool) -> int:
         with LOGIN_LOCK:
             entry = LOGIN_ATTEMPTS.setdefault(client_ip, {"count": 0, "last": 0})

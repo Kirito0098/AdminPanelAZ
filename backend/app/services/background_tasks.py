@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import os
 import secrets
 import subprocess
 import threading
@@ -23,6 +24,7 @@ from app.models import BackgroundTask
 logger = logging.getLogger(__name__)
 
 APP_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = APP_ROOT.parent
 MAX_OUTPUT_CHARS = 50_000
 _EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="bg-task")
 
@@ -46,6 +48,7 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "cidr_estimate_from_db": ("Оценка CIDR из БД…", "Подготовка оценки…", 3),
     "cidr_generate_from_db": ("Генерация CIDR из БД…", "Подготовка генерации…", 3),
     "antifilter_refresh": ("Обновление Antifilter…", "Подготовка Antifilter…", 3),
+    "vpn_network_publish": ("Публикация панели…", "Запуск nginx-setup.sh…", 5),
 }
 
 _TASK_DONE_PROGRESS: dict[str, str] = {
@@ -59,6 +62,7 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "cidr_estimate_from_db": "Оценка завершена",
     "cidr_generate_from_db": "Генерация завершена",
     "antifilter_refresh": "Antifilter обновлён",
+    "vpn_network_publish": "Публикация панели завершена",
 }
 
 
@@ -285,7 +289,11 @@ class BackgroundTaskService:
         args: list[str],
         cwd: str | Path | None = None,
         timeout: int = 120,
+        env: dict[str, str] | None = None,
     ) -> tuple[str, str]:
+        run_env = os.environ.copy()
+        if env:
+            run_env.update(env)
         result = subprocess.run(
             args,
             cwd=str(cwd) if cwd else None,
@@ -293,6 +301,7 @@ class BackgroundTaskService:
             text=True,
             check=False,
             timeout=timeout,
+            env=run_env,
         )
         stdout = (result.stdout or "").strip()
         stderr = (result.stderr or "").strip()
@@ -365,6 +374,65 @@ class BackgroundTaskService:
         return {
             "message": "Обновление применено",
             "output": "\n".join(output_parts).strip(),
+        }
+
+    def task_vpn_network_publish(
+        self,
+        payload: dict[str, object],
+        progress_updater: Callable[[int, str, str | None], None] | None = None,
+    ) -> dict[str, str]:
+        mode_flags = {
+            "http_direct": "--http",
+            "nginx_le": "--nginx-le",
+            "nginx_selfsigned": "--nginx-selfsigned",
+        }
+        mode = str(payload.get("mode") or "")
+        flag = mode_flags.get(mode)
+        if not flag:
+            raise RuntimeError(f"Неизвестный режим публикации: {mode}")
+
+        if progress_updater:
+            progress_updater(10, "Подготовка nginx-setup.sh…")
+
+        cmd_env: dict[str, str] = {
+            "NON_INTERACTIVE": "true",
+            "BACKEND_PORT": str(payload.get("backend_port") or 8000),
+            "HTTPS_PUBLIC_PORT": str(payload.get("https_public_port") or 443),
+            "HTTP_ACME_PORT": str(payload.get("http_acme_port") or 80),
+        }
+        domain = payload.get("domain")
+        if domain:
+            cmd_env["DOMAIN"] = str(domain)
+        email = payload.get("email")
+        if email:
+            cmd_env["EMAIL"] = str(email)
+
+        script = PROJECT_ROOT / "scripts" / "nginx-setup.sh"
+        if not script.is_file():
+            raise RuntimeError(f"Скрипт не найден: {script}")
+
+        if progress_updater:
+            progress_updater(25, f"Запуск nginx-setup.sh {flag}…")
+
+        stdout, stderr = self.run_checked_command(
+            ["bash", str(script), "--non-interactive", flag],
+            cwd=PROJECT_ROOT,
+            timeout=600,
+            env=cmd_env,
+        )
+
+        if progress_updater:
+            progress_updater(95, "Перезапуск панели…")
+
+        output = "\n".join(part for part in [stdout, stderr] if part).strip()
+        mode_labels = {
+            "http_direct": "Прямой HTTP",
+            "nginx_le": "Nginx + Let's Encrypt",
+            "nginx_selfsigned": "Nginx + самоподписанный SSL",
+        }
+        return {
+            "message": f"Публикация применена: {mode_labels.get(mode, mode)}",
+            "output": output,
         }
 
     def start_cidr_runner(self, task_id: str, runner: Callable) -> None:

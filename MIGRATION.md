@@ -51,7 +51,7 @@ AdminPanelAZ — порт веб-панели AdminAntizapret на FastAPI + Rea
 | Журнал действий | ✅ | Просмотр и экспорт CSV |
 | Обновление системы (git) | ✅ | Панель + 🆕 node agent / AntiZapret на узлах |
 | In-panel pytest | ✅ | 48 модулей / 385 тестов (AA: 53; ~5 Jinja/Flask-only не портируются) |
-| Установка / ops | 🟡 | `install.sh` + scripts; diagnostics/safe-browsing CLI ✅; нет `adminpanel.sh` menu |
+| Установка / ops | ✅ | `install.sh` + `scripts/adminpanel-menu.sh`; diagnostics/safe-browsing CLI ✅ |
 | Multi-node | 🆕 | Controller + Node Agent |
 | CI/CD | ✅ | pytest + ruff + shellcheck + frontend build + eslint; pip-audit/bandit advisory |
 
@@ -204,7 +204,7 @@ flowchart LR
 | Viewer config access UI | users tab | `UsersTab.tsx` + `/api/system/viewer-access` | ✅ |
 | Feature toggles UI | settings tab | `FeatureTogglesTab.tsx` | ✅ |
 | QR-настройки (TTL, PIN, max downloads) | отдельная вкладка | `SecurityTab.tsx` | ✅ |
-| VPN-сеть (порт, HTTPS, Nginx из UI) | `_tab_vpn_network.html` | `VpnNetworkTab.tsx` (read-only) + `GET /api/settings/vpn-network`; мутации — `install.sh` / `nginx-setup.sh` | 🟡 |
+| VPN-сеть (порт, HTTPS, Nginx из UI) | `_tab_vpn_network.html` | `VpnNetworkTab.tsx` + guided wizard (`POST /api/settings/vpn-network/publish` → `nginx-setup.sh`); custom certs — ops-only | ✅ |
 | Журнал действий (просмотр) | action logs | `LogsPage.tsx` | ✅ |
 | Экспорт action logs CSV | `/api/settings/action-logs/export` | `GET /api/logs/action-logs/export` | ✅ |
 | Обновление панели (git) | `/update_system` | `UpdatesTab.tsx`, `system.py` | ✅ |
@@ -232,7 +232,7 @@ flowchart LR
 | `FEATURE_SYSTEM_UPDATES_ENABLED` | `system_updates` | ✅ |
 | `FEATURE_DIAGNOSTICS_TESTS_ENABLED` | `diagnostics_tests` | ✅ |
 | `FEATURE_QR_DOWNLOADS_ENABLED` | `qr_downloads` | ✅ |
-| `FEATURE_VPN_NETWORK_ENABLED` | `vpn_network` | 🟡 |
+| `FEATURE_VPN_NETWORK_ENABLED` | `vpn_network` | ✅ |
 | `WG_POLICY_SYNC` (background) | cron `wg_awg_policy_sync.py` | `wg_policy_sync_worker.py` (async loop) | ✅ |
 | `ACTIVE_SESSION_TRACKING` (background) | `active_web_session.py` | `active_web_session.py` + toggle | ✅ |
 | `NIGHTLY_IDLE_RESTART` (background) | `nightly_idle_restart.py` (без env-toggle) | `nightly_idle_restart_worker.py` + toggle | 🆕 |
@@ -247,9 +247,9 @@ flowchart LR
 |-----------|----|----|--------|
 | One-liner install | `install.sh` | `install.sh` (+ pipe guard) | ✅ |
 | Интерактивный мастер | `adminpanel.sh --install` | `install.sh` wizard | ✅ |
-| Консольное меню (`adminpanel.sh`) | restart/update/backup/tests | `start.sh`, systemd | 🟡 |
+| Консольное меню (`adminpanel.sh`) | restart/update/backup/tests | `scripts/adminpanel-menu.sh` → `start.sh`, systemd, `backup-cli.py` | ✅ |
 | SSL / Nginx setup | `ssl_setup.sh` | `scripts/nginx-setup.sh` | ✅ |
-| Firewall panel port | `panel_port_firewall.py` | `scripts/firewall-setup.sh` | 🟡 |
+| Firewall panel port (runtime whitelist) | `panel_port_firewall.py` | `panel_port_firewall.py` + Security tab toggle; `firewall-setup.sh` — install-time only | ✅ |
 | Uninstall / reinstall | `uninstall.sh` | `scripts/uninstall.sh` + menu | ✅ |
 | Site diagnostics CLI | `site_diagnostics.sh` | `scripts/site-diagnostics.sh` + CLI | ✅ |
 | Safe Browsing status CLI | `safe_browsing_status_cli.py` | `scripts/safe-browsing-status.py` | ✅ |
@@ -321,7 +321,7 @@ flowchart LR
 | `routes/settings/antizapret.py` | `routing.py` + `AntizapretConfigTab` | ported (фаза 5) |
 | `utils/nightly_idle_restart.py` | `nightly_idle_restart_worker.py` | ported (async worker) |
 | `utils/wg_awg_runtime_apply.py` | `wg_runtime.py` + `wg_policy_sync_worker.py` | inline, no standalone CLI |
-| `script_sh/adminpanel.sh` | `install.sh`, `start.sh`, systemd | different UX |
+| `script_sh/adminpanel.sh` | `install.sh`, `scripts/adminpanel-menu.sh`, `start.sh`, systemd | install wizard + ops menu split |
 | `script_sh/site_diagnostics.sh` | `scripts/site-diagnostics.sh` | AZ paths (backend/.env, uvicorn) |
 | `script_sh/safe_browsing_status_cli.py` | `scripts/safe-browsing-status.py` | AZ User-Agent |
 | `core/services/antizapret_backup.py` | `backend/app/services/antizapret_backup.py` | via node_adapter |
@@ -346,10 +346,10 @@ flowchart LR
 
 ### Низкий приоритет
 
-8. **adminpanel.sh**-style console menu (опционально)
-9. **iptables whitelist port** runtime (`panel_port_firewall.py` parity) — сейчас только `scripts/firewall-setup.sh` при установке
-10. Расширение test suite до полного паритета с AA (~53 модуля; сейчас 40)
-11. **VPN-сеть** — мутации порта/nginx из UI (сейчас read-only + `scripts/nginx-setup.sh`)
+8. ~~**adminpanel.sh**-style console menu~~ ✅ — `scripts/adminpanel-menu.sh` + `backup-cli.py`
+9. ~~**iptables whitelist port** runtime (`panel_port_firewall.py`)~~ ✅ — `panel_port_firewall.py` + Security tab; `firewall-setup.sh` остаётся install-time
+10. Расширение test suite до полного паритета с AA (~53 модуля; сейчас 40+)
+11. ~~**VPN-сеть** guided wizard~~ ✅ — `POST /api/settings/vpn-network/publish` → `nginx-setup.sh` (custom certs — ops-only)
 
 ### Закрыто в 0.5.x–1.0.0
 

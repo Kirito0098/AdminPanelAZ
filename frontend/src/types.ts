@@ -168,6 +168,15 @@ export interface VpnNetworkEnvRow {
   mono: boolean
 }
 
+export interface VpnNetworkPublishMode {
+  key: string
+  title: string
+  description: string
+  requires_domain: boolean
+  requires_email: boolean
+  warning: string | null
+}
+
 export interface VpnNetworkSettings {
   mode_key: string
   mode_title: string
@@ -177,6 +186,16 @@ export interface VpnNetworkSettings {
   env_rows: VpnNetworkEnvRow[]
   backend_port: string
   nginx_setup_hint: string
+  publish_modes: VpnNetworkPublishMode[]
+}
+
+export interface VpnNetworkPublishPayload {
+  mode: 'http_direct' | 'nginx_le' | 'nginx_selfsigned'
+  backend_port: number
+  domain?: string | null
+  email?: string | null
+  https_public_port: number
+  http_acme_port: number
 }
 
 export interface CidrProviderInfo {
@@ -411,6 +430,11 @@ export interface GameFilterItem {
 export interface SecuritySettings {
   ip_restriction_enabled: boolean
   allowed_ips: string[]
+  whitelist_firewall: boolean
+  whitelist_firewall_applicable: boolean
+  whitelist_firewall_active: boolean
+  firewall_tools_ready: boolean
+  firewall_tools_detail: string
   block_scanners: boolean
   scanner_max_attempts: number
   scanner_ban_seconds: number
