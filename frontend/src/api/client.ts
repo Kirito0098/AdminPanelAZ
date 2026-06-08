@@ -358,14 +358,10 @@ export async function checkNodeUpdates(id: number) {
   return apiFetch<{
     node_id: number
     agent: Record<string, unknown>
-    antizapret: Record<string, unknown>
   }>(`/nodes/${id}/updates`)
 }
 
-export async function applyNodeUpdate(
-  id: number,
-  data: { scope?: 'all' | 'agent' | 'antizapret'; run_doall?: boolean } = {},
-) {
+export async function applyNodeUpdate(id: number) {
   return apiFetch<{
     node_id: number
     success: boolean
@@ -377,7 +373,7 @@ export async function applyNodeUpdate(
     errors: string[]
   }>(`/nodes/${id}/update`, {
     method: 'POST',
-    body: JSON.stringify({ scope: data.scope ?? 'all', run_doall: data.run_doall ?? true }),
+    body: JSON.stringify({}),
   })
 }
 

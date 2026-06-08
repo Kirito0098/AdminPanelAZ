@@ -38,19 +38,13 @@ def test_check_git_updates_up_to_date(mock_git_run, tmp_path: Path):
 
 @patch("app.services.node_update.schedule_agent_restart")
 @patch("app.services.node_update.git_pull")
-def test_apply_node_update_agent_scope(mock_pull, mock_restart, tmp_path: Path):
+def test_apply_node_update(mock_pull, mock_restart, tmp_path: Path):
     from app.services.node_update import apply_node_update
 
     (tmp_path / ".git").mkdir()
-    service = MagicMock()
-    service.get_antizapret_version.return_value = "v1.0"
     mock_pull.return_value = {"success": True, "output": "Already up to date.", "error": None}
 
     result = apply_node_update(
-        antizapret_path=tmp_path,
-        service=service,
-        scope="agent",
-        run_doall=False,
         agent_version="1.0.0",
         repo_root=tmp_path,
     )
@@ -61,27 +55,36 @@ def test_apply_node_update_agent_scope(mock_pull, mock_restart, tmp_path: Path):
     mock_restart.assert_called_once_with(tmp_path)
 
 
-@patch("app.services.node_update.git_pull")
-def test_apply_node_update_antizapret_with_doall(mock_pull, tmp_path: Path):
-    from app.services.node_update import apply_node_update
+@patch("app.services.node_update.subprocess.run")
+def test_restart_node_agent_prefers_systemd(mock_run, tmp_path: Path):
+    from app.services.node_update import restart_node_agent
 
-    az_path = tmp_path / "antizapret"
-    az_path.mkdir()
-    (az_path / ".git").mkdir()
+    mock_run.side_effect = [
+        MagicMock(returncode=0, stdout="", stderr=""),  # systemctl cat
+        MagicMock(returncode=0, stdout="", stderr=""),  # systemctl restart
+    ]
 
-    service = MagicMock()
-    service.get_antizapret_version.side_effect = ["v1.0", "v1.1"]
-    service.apply_config_changes.return_value = "doall ok"
-    mock_pull.return_value = {"success": True, "output": "Updated.", "error": None}
-
-    result = apply_node_update(
-        antizapret_path=az_path,
-        service=service,
-        scope="antizapret",
-        run_doall=True,
-        repo_root=None,
-    )
+    result = restart_node_agent(tmp_path)
 
     assert result["success"] is True
-    assert result["after"]["antizapret_version"] == "v1.1"
-    service.apply_config_changes.assert_called_once()
+    assert result["method"] == "systemd"
+    assert mock_run.call_args_list[1].args[0] == ["systemctl", "restart", "adminpanelaz-node"]
+
+
+@patch("app.services.node_update.subprocess.run")
+def test_restart_node_agent_falls_back_to_script(mock_run, tmp_path: Path):
+    from app.services.node_update import restart_node_agent
+
+    script = tmp_path / "start_node_agent.sh"
+    script.write_text("#!/bin/bash\n", encoding="utf-8")
+    script.chmod(0o755)
+
+    mock_run.side_effect = [
+        MagicMock(returncode=1, stdout="", stderr=""),  # systemctl cat — unit missing
+        MagicMock(returncode=0, stdout="ok", stderr=""),
+    ]
+
+    result = restart_node_agent(tmp_path)
+
+    assert result["success"] is True
+    assert result["method"] == "script"

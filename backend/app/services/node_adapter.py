@@ -13,7 +13,7 @@ from app.services.antizapret import AntiZapretService
 from app.services.antizapret_settings import read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import build_health_payload
-from app.services.node_update import apply_node_update, check_all_updates, resolve_repo_root
+from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.server_monitor import ServerMonitorService
@@ -165,7 +165,7 @@ class NodeAdapter(ABC):
     def check_updates(self) -> dict[str, Any]: ...
 
     @abstractmethod
-    def apply_update(self, *, scope: str = "all", run_doall: bool = True) -> dict[str, Any]: ...
+    def apply_update(self) -> dict[str, Any]: ...
 
     @abstractmethod
     def ensure_openvpn_ban_check(self) -> dict: ...
@@ -319,16 +319,10 @@ class LocalNodeAdapter(NodeAdapter):
         return openvpn_management_service.disconnect_client(client_name)
 
     def check_updates(self) -> dict[str, Any]:
-        return check_all_updates(antizapret_path=self._service.base_path, repo_root=resolve_repo_root())
+        return check_agent_updates(repo_root=resolve_repo_root())
 
-    def apply_update(self, *, scope: str = "all", run_doall: bool = True) -> dict[str, Any]:
-        return apply_node_update(
-            antizapret_path=self._service.base_path,
-            service=self._service,
-            scope=scope,
-            run_doall=run_doall,
-            repo_root=resolve_repo_root(),
-        )
+    def apply_update(self) -> dict[str, Any]:
+        return apply_node_update(repo_root=resolve_repo_root())
 
     def ensure_openvpn_ban_check(self) -> dict:
         return ensure_openvpn_ban_check(self._service.base_path)
@@ -645,13 +639,8 @@ class RemoteNodeAdapter(NodeAdapter):
     def check_updates(self) -> dict[str, Any]:
         return self._request("GET", "/system/updates", timeout=60.0)
 
-    def apply_update(self, *, scope: str = "all", run_doall: bool = True) -> dict[str, Any]:
-        return self._request(
-            "POST",
-            "/system/update",
-            json={"scope": scope, "run_doall": run_doall},
-            timeout=300.0,
-        )
+    def apply_update(self) -> dict[str, Any]:
+        return self._request("POST", "/system/update", json={}, timeout=300.0)
 
     def ensure_openvpn_ban_check(self) -> dict:
         return self._request("POST", "/system/ensure-openvpn-ban-check", timeout=30.0)

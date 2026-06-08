@@ -16,7 +16,7 @@ from app.services.antizapret import AntiZapretService
 from app.services.antizapret_settings import build_schema, filter_known_keys, read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import build_health_payload
-from app.services.node_update import apply_node_update, check_all_updates, resolve_repo_root
+from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.server_monitor import ServerMonitorService
@@ -77,8 +77,7 @@ app.add_middleware(NodeAgentIpAllowlistMiddleware)
 
 
 class NodeUpdateRequest(BaseModel):
-    scope: str = Field(default="all", pattern="^(all|agent|antizapret)$")
-    run_doall: bool = True
+    pass
 
 
 def verify_api_key(x_node_key: str = Header(..., alias="X-Node-Key")) -> None:
@@ -393,7 +392,7 @@ def routing_antizapret_settings_put(payload: dict, _: None = Depends(verify_api_
 
 @app.get("/system/updates")
 def system_updates(_: None = Depends(verify_api_key)):
-    return check_all_updates(antizapret_path=ANTIZAPRET_PATH, repo_root=resolve_repo_root())
+    return check_agent_updates(repo_root=resolve_repo_root())
 
 
 @app.post("/system/ensure-openvpn-ban-check")
@@ -408,12 +407,8 @@ def rotate_api_key(payload: RotateApiKeyRequest, _: None = Depends(verify_api_ke
 
 
 @app.post("/system/update")
-def system_update(payload: NodeUpdateRequest, _: None = Depends(verify_api_key)):
+def system_update(_payload: NodeUpdateRequest, _: None = Depends(verify_api_key)):
     result = apply_node_update(
-        antizapret_path=ANTIZAPRET_PATH,
-        service=service,
-        scope=payload.scope,
-        run_doall=payload.run_doall,
         agent_version=app.version,
         repo_root=resolve_repo_root(),
     )

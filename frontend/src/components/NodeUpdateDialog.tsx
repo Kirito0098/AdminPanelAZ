@@ -6,7 +6,7 @@ import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -15,14 +15,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { useNotifications } from '@/context/NotificationContext'
 import type { Node } from '@/types'
 
@@ -80,15 +72,12 @@ function GitBlock({ title, info }: { title: string; info: GitStatus | null }) {
 export default function NodeUpdateDialog({ node, open, onOpenChange, onComplete }: Props) {
   const { success, error: notifyError } = useNotifications()
   const [agentInfo, setAgentInfo] = useState<GitStatus | null>(null)
-  const [antizapretInfo, setAntizapretInfo] = useState<GitStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [updating, setUpdating] = useState(false)
-  const [scope, setScope] = useState<'all' | 'agent' | 'antizapret'>('all')
   const [showConfirm, setShowConfirm] = useState(false)
 
   const meta = node?.metadata ?? {}
   const agentVersion = typeof meta.agent_version === 'string' ? meta.agent_version : '—'
-  const antizapretVersion = typeof meta.antizapret_version === 'string' ? meta.antizapret_version : '—'
 
   const load = async () => {
     if (!node) return
@@ -96,7 +85,6 @@ export default function NodeUpdateDialog({ node, open, onOpenChange, onComplete 
     try {
       const res = await checkNodeUpdates(node.id)
       setAgentInfo(res.agent as GitStatus)
-      setAntizapretInfo(res.antizapret as GitStatus)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка проверки обновлений')
     } finally {
@@ -106,25 +94,19 @@ export default function NodeUpdateDialog({ node, open, onOpenChange, onComplete 
 
   useEffect(() => {
     if (open && node) {
-      setScope('all')
       setShowConfirm(false)
       setAgentInfo(null)
-      setAntizapretInfo(null)
       load()
     }
   }, [open, node?.id])
 
-  const hasUpdates =
-    Boolean(agentInfo?.updates_available) || Boolean(antizapretInfo?.updates_available)
-
-  const scopeLabel =
-    scope === 'all' ? 'node agent и AntiZapret' : scope === 'agent' ? 'node agent' : 'AntiZapret'
+  const hasUpdates = Boolean(agentInfo?.updates_available)
 
   const handleUpdate = async () => {
     if (!node) return
     setUpdating(true)
     try {
-      const res = await applyNodeUpdate(node.id, { scope, run_doall: true })
+      const res = await applyNodeUpdate(node.id)
       success(res.message || 'Обновление выполнено')
       if (res.restarting) {
         notifyError('Node agent перезапускается — подождите и выполните проверку здоровья')
@@ -153,56 +135,30 @@ export default function NodeUpdateDialog({ node, open, onOpenChange, onComplete 
             Обновление узла
           </DialogTitle>
           <DialogDescription>
-            {node ? `Узел «${node.name}» — git pull для node agent и/или AntiZapret` : ''}
+            {node ? `Узел «${node.name}» — git pull для node agent` : ''}
           </DialogDescription>
         </DialogHeader>
 
-        {loading && !agentInfo && !antizapretInfo ? (
+        {loading && !agentInfo ? (
           <Spinner label="Проверка обновлений..." className="py-8" />
         ) : (
           <div className="space-y-4">
             <InlineProgressBar active={updating} label="Обновление узла..." />
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-4 text-sm md:grid-cols-2">
-              <div>
-                <span className="text-muted-foreground">Agent: </span>
-                <span className="font-mono text-xs">{agentVersion}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">AntiZapret: </span>
-                <span className="font-mono text-xs">{antizapretVersion}</span>
-              </div>
+            <div className="rounded-md border bg-muted/30 p-4 text-sm">
+              <span className="text-muted-foreground">Agent: </span>
+              <span className="font-mono text-xs">{agentVersion}</span>
             </div>
 
-            <div className="grid gap-2">
-              <Label>Что обновлять</Label>
-              <Select value={scope} onValueChange={(v) => setScope(v as typeof scope)} disabled={updating}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Всё (agent + AntiZapret)</SelectItem>
-                  <SelectItem value="agent">Только node agent</SelectItem>
-                  <SelectItem value="antizapret">Только AntiZapret</SelectItem>
-                </SelectContent>
-              </Select>
-              <CardDescription>
-                При обновлении AntiZapret автоматически выполняется doall.sh
-              </CardDescription>
-            </div>
-
-            <div className="space-y-3">
-              <GitBlock title="Node agent (AdminPanelAZ)" info={agentInfo} />
-              <GitBlock title="AntiZapret" info={antizapretInfo} />
-            </div>
+            <GitBlock title="Node agent (AdminPanelAZ)" info={agentInfo} />
 
             {!hasUpdates && !loading && agentInfo && (
-              <SettingsAlert variant="info">Обновления не найдены — репозитории актуальны</SettingsAlert>
+              <SettingsAlert variant="info">Обновления не найдены — репозиторий актуален</SettingsAlert>
             )}
 
             {showConfirm && hasUpdates && (
               <SettingsAlert variant="warning" title="Подтвердите обновление">
-                Будет выполнен git pull для <strong>{scopeLabel}</strong> на узле «{node?.name}». Node agent
-                может перезапуститься — выполните проверку здоровья после завершения.
+                Будет выполнен git pull для node agent на узле «{node?.name}». Node agent может перезапуститься —
+                выполните проверку здоровья после завершения.
               </SettingsAlert>
             )}
           </div>

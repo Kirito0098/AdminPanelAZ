@@ -337,14 +337,13 @@ def check_node_updates(node_id: int, _: User = Depends(require_admin), db: Sessi
     return NodeUpdatesResponse(
         node_id=node.id,
         agent=updates.get("agent", {}),
-        antizapret=updates.get("antizapret", {}),
     )
 
 
 @router.post("/{node_id}/update", response_model=NodeUpdateResult)
 def apply_node_update_endpoint(
     node_id: int,
-    payload: NodeUpdateRequest,
+    _payload: NodeUpdateRequest,
     request: Request,
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -356,9 +355,8 @@ def apply_node_update_endpoint(
         if node.status == NodeStatus.offline:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Узел недоступен")
 
-    meta = node_metadata_dict(node)
     adapter = get_adapter_for_node(node)
-    result = adapter.apply_update(scope=payload.scope, run_doall=payload.run_doall)
+    result = adapter.apply_update()
 
     if not result.get("success"):
         raise HTTPException(
@@ -369,13 +367,6 @@ def apply_node_update_endpoint(
     if not result.get("restarting"):
         health = check_node_health(node)
         update_node_from_health(node, health, db)
-    else:
-        after = result.get("after") or {}
-        if after.get("antizapret_version"):
-            meta["antizapret_version"] = after["antizapret_version"]
-            node.node_metadata = json.dumps(meta)
-            db.add(node)
-            db.commit()
 
     if settings.audit_log_enabled:
         log_action(
@@ -384,7 +375,7 @@ def apply_node_update_endpoint(
             user_id=admin.id,
             username=admin.username,
             remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"node={node.name}, scope={payload.scope}",
+            details=f"node={node.name}",
         )
     return NodeUpdateResult(
         node_id=node.id,

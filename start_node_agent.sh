@@ -259,7 +259,7 @@ start_daemon() {
   echo "$watchdog_pid" >"$WATCHDOG_PID_FILE"
   disown "$watchdog_pid" 2>/dev/null || true
 
-  wait_for_health
+  wait_for_health || log "Health check не прошёл после запуска — см. $LOG_DIR/agent.log"
 
   echo ""
   log "Daemon запущен (watchdog PID $watchdog_pid):"
@@ -301,6 +301,12 @@ show_status() {
 }
 
 restart_daemon() {
+  if systemctl is-enabled adminpanelaz-node >/dev/null 2>&1; then
+    log "Перезапуск через systemd (adminpanelaz-node)..."
+    systemctl restart adminpanelaz-node
+    return
+  fi
+
   local mode="$NODE_AGENT_MODE"
 
   if [[ -f "$MODE_FILE" ]]; then

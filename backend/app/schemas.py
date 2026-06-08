@@ -446,14 +446,12 @@ class ActiveNodeResponse(BaseModel):
 
 
 class NodeUpdateRequest(BaseModel):
-    scope: str = Field(default="all", pattern="^(all|agent|antizapret)$")
-    run_doall: bool = True
+    pass
 
 
 class NodeUpdatesResponse(BaseModel):
     node_id: int
     agent: dict[str, Any] = {}
-    antizapret: dict[str, Any] = {}
 
 
 class NodeUpdateResult(BaseModel):

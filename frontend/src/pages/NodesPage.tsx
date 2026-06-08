@@ -69,7 +69,6 @@ function getNodeMeta(node: Node) {
     servicesLabel:
       servicesActive !== null && servicesTotal !== null ? `${servicesActive}/${servicesTotal}` : null,
     agentVersion: typeof meta.agent_version === 'string' ? meta.agent_version : null,
-    antizapretVersion: typeof meta.antizapret_version === 'string' ? meta.antizapret_version : null,
     lastError: typeof meta.last_error === 'string' ? meta.last_error : null,
   }
 }
@@ -248,10 +247,6 @@ function NodeCard({
           <div>
             <p className="text-xs text-muted-foreground">Agent</p>
             <p className="font-mono text-xs">{meta.agentVersion ?? '—'}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">AntiZapret</p>
-            <p className="font-mono text-xs">{meta.antizapretVersion ?? '—'}</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -511,7 +506,7 @@ export default function NodesPage() {
               <NodeBadge name={activeNode?.name} status={activeNode?.status} />
             </div>
             <p className="text-sm text-muted-foreground">
-              Управление VPN-серверами AntiZapret (Controller → Nodes)
+              Управление VPN-серверами (node agent)
             </p>
           </div>
         </div>
@@ -605,7 +600,7 @@ export default function NodesPage() {
                       <TableHead>Имя</TableHead>
                       <TableHead>Адрес</TableHead>
                       <TableHead>IP сервера</TableHead>
-                      <TableHead>Версии</TableHead>
+                      <TableHead>Agent</TableHead>
                       <TableHead>Службы</TableHead>
                       <TableHead>Статус</TableHead>
                       <TableHead>Тип</TableHead>
@@ -634,10 +629,7 @@ export default function NodesPage() {
                           </TableCell>
                           <TableCell className="font-mono text-xs">{address}</TableCell>
                           <TableCell className="font-mono text-xs">{meta.serverIp ?? '—'}</TableCell>
-                          <TableCell className="text-xs">
-                            <div>agent: {meta.agentVersion ?? '—'}</div>
-                            <div className="text-muted-foreground">az: {meta.antizapretVersion ?? '—'}</div>
-                          </TableCell>
+                          <TableCell className="font-mono text-xs">{meta.agentVersion ?? '—'}</TableCell>
                           <TableCell className="text-xs">{meta.servicesLabel ?? '—'}</TableCell>
                           <TableCell>
                             <NodeStatusBadge status={node.status} />

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Обновление узла** — перезапуск node agent после git pull через `systemctl restart adminpanelaz-node`, если unit установлен; лог в `update-restart.log`.
+
+### Changed
+- **Узлы** — обновление узла только для node agent: убраны AntiZapret из `NodeUpdateDialog`, API `GET/POST /api/nodes/{id}/updates|update` и колонка `az` на странице «Узлы».
+
 ## [1.4.3] - 2026-06-09
 
 ### Added

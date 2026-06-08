@@ -1,14 +1,15 @@
-"""Git-based updates for node agent and AntiZapret on VPN nodes."""
+"""Git-based updates for node agent on VPN nodes."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from app.services.antizapret import AntiZapretService
+SYSTEMD_UNIT = "adminpanelaz-node"
 
 DEFAULT_GIT_BRANCH = "main"
 GIT_TIMEOUT = 120.0
@@ -122,90 +123,144 @@ def _pip_install(repo_root: Path) -> dict[str, Any]:
         return {"skipped": False, "success": False, "output": str(exc)}
 
 
-def schedule_agent_restart(repo_root: Path, *, delay_seconds: float = 1.5) -> None:
-    script = repo_root / "start_node_agent.sh"
-    if not script.is_file():
-        return
+def _restart_log_path(repo_root: Path) -> Path:
+    state = os.environ.get("NODE_AGENT_STATE_DIR")
+    if state:
+        return Path(state) / "logs" / "update-restart.log"
+    return repo_root / ".runtime" / "node" / "logs" / "update-restart.log"
 
-    def _restart() -> None:
-        subprocess.run(
+
+def _append_restart_log(log_path: Path, message: str) -> None:
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"[{stamp}] {message}\n")
+    except OSError:
+        pass
+
+
+def _systemd_unit_installed(unit: str = SYSTEMD_UNIT) -> bool:
+    try:
+        result = subprocess.run(
+            ["systemctl", "cat", unit],
+            capture_output=True,
+            text=True,
+            timeout=10.0,
+            check=False,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def restart_node_agent(repo_root: Path) -> dict[str, Any]:
+    """Restart node agent after git pull. Prefer systemd when the unit is installed."""
+    log_path = _restart_log_path(repo_root)
+    script = repo_root / "start_node_agent.sh"
+
+    if _systemd_unit_installed():
+        try:
+            result = subprocess.run(
+                ["systemctl", "restart", SYSTEMD_UNIT],
+                capture_output=True,
+                text=True,
+                timeout=180.0,
+                check=False,
+            )
+            output = ((result.stdout or "") + (result.stderr or "")).strip()
+            success = result.returncode == 0
+            _append_restart_log(
+                log_path,
+                f"systemctl restart {SYSTEMD_UNIT}: rc={result.returncode}"
+                + (f" — {output}" if output else ""),
+            )
+            return {
+                "method": "systemd",
+                "success": success,
+                "output": output,
+                "error": None if success else output or f"systemctl restart {SYSTEMD_UNIT} failed",
+            }
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            _append_restart_log(log_path, f"systemctl restart {SYSTEMD_UNIT}: {exc}")
+            return {"method": "systemd", "success": False, "output": "", "error": str(exc)}
+
+    if not script.is_file():
+        message = f"Не найден {script} и unit {SYSTEMD_UNIT}"
+        _append_restart_log(log_path, message)
+        return {"method": "none", "success": False, "output": "", "error": message}
+
+    try:
+        result = subprocess.run(
             [str(script), "restart"],
             cwd=repo_root,
             capture_output=True,
+            text=True,
             timeout=180.0,
             check=False,
         )
+        output = ((result.stdout or "") + (result.stderr or "")).strip()
+        success = result.returncode == 0
+        _append_restart_log(
+            log_path,
+            f"{script} restart: rc={result.returncode}" + (f" — {output}" if output else ""),
+        )
+        return {
+            "method": "script",
+            "success": success,
+            "output": output,
+            "error": None if success else output or "start_node_agent.sh restart failed",
+        }
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        _append_restart_log(log_path, f"{script} restart: {exc}")
+        return {"method": "script", "success": False, "output": "", "error": str(exc)}
+
+
+def schedule_agent_restart(repo_root: Path, *, delay_seconds: float = 1.5) -> None:
+    def _restart() -> None:
+        restart_node_agent(repo_root)
 
     timer = threading.Timer(delay_seconds, _restart)
     timer.daemon = True
     timer.start()
 
 
-def check_all_updates(*, antizapret_path: Path, repo_root: Path | None = None) -> dict[str, Any]:
+def check_agent_updates(*, repo_root: Path | None = None) -> dict[str, Any]:
     repo_root = repo_root or resolve_repo_root()
     return {
         "agent": check_git_updates(repo_root) if repo_root else {"error": "Репозиторий панели не найден", "updates_available": False},
-        "antizapret": check_git_updates(antizapret_path),
     }
 
 
 def apply_node_update(
     *,
-    antizapret_path: Path,
-    service: AntiZapretService,
-    scope: str = "all",
-    run_doall: bool = True,
     agent_version: str = "1.0.0",
     repo_root: Path | None = None,
 ) -> dict[str, Any]:
     repo_root = repo_root or resolve_repo_root()
-    scope = scope if scope in ("all", "agent", "antizapret") else "all"
 
-    before = {
-        "agent_version": agent_version,
-        "antizapret_version": service.get_antizapret_version(),
-    }
-    detail: dict[str, Any] = {"scope": scope}
+    before = {"agent_version": agent_version}
+    detail: dict[str, Any] = {}
     messages: list[str] = []
     errors: list[str] = []
     restarting = False
 
-    if scope in ("all", "antizapret"):
-        pull = git_pull(antizapret_path)
-        detail["antizapret_pull"] = pull
+    if not repo_root:
+        errors.append("Репозиторий панели (node agent) не найден")
+    else:
+        pull = git_pull(repo_root)
+        detail["agent_pull"] = pull
         if pull["success"]:
-            messages.append("AntiZapret обновлён")
-            if run_doall:
-                try:
-                    doall_output = service.apply_config_changes()
-                    detail["doall_output"] = doall_output
-                    messages.append("doall.sh выполнен")
-                except Exception as exc:
-                    errors.append(f"doall.sh: {exc}")
+            detail["pip"] = _pip_install(repo_root)
+            messages.append("Node agent обновлён, перезапуск через несколько секунд")
+            schedule_agent_restart(repo_root)
+            restarting = True
         else:
-            errors.append(pull.get("error") or "Ошибка git pull AntiZapret")
-
-    if scope in ("all", "agent"):
-        if not repo_root:
-            errors.append("Репозиторий панели (node agent) не найден")
-        else:
-            pull = git_pull(repo_root)
-            detail["agent_pull"] = pull
-            if pull["success"]:
-                detail["pip"] = _pip_install(repo_root)
-                messages.append("Node agent обновлён, перезапуск через несколько секунд")
-                schedule_agent_restart(repo_root)
-                restarting = True
-            else:
-                errors.append(pull.get("error") or "Ошибка git pull node agent")
+            errors.append(pull.get("error") or "Ошибка git pull node agent")
 
     after_agent_version = before["agent_version"]
-    if scope in ("all", "agent") and not errors and detail.get("agent_pull", {}).get("success"):
-        after_agent_version = agent_version  # new version visible after agent restart + health poll
-
-    after_antizapret_version = before["antizapret_version"]
-    if scope in ("all", "antizapret") and not errors:
-        after_antizapret_version = service.get_antizapret_version()
+    if not errors and detail.get("agent_pull", {}).get("success"):
+        after_agent_version = agent_version
 
     success = not errors
     message = "; ".join(messages) if messages else ("Обновление не выполнено" if errors else "Нечего обновлять")
@@ -216,9 +271,6 @@ def apply_node_update(
         "errors": errors,
         "restarting": restarting,
         "before": before,
-        "after": {
-            "agent_version": after_agent_version,
-            "antizapret_version": after_antizapret_version,
-        },
+        "after": {"agent_version": after_agent_version},
         "detail": detail,
     }
