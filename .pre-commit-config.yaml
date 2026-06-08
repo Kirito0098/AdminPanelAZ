@@ -22,7 +22,7 @@ repos:
     hooks:
       - id: shellcheck
         args: [-x, -S, warning]
-        files: ^scripts/.*\.sh$
+        files: ^(install|start|start_node_agent|scripts/.*)\.sh$
 
   - repo: local
     hooks:

@@ -71,7 +71,7 @@ jobs:
       - name: Shell scripts (shellcheck)
         run: |
           if command -v shellcheck >/dev/null 2>&1; then
-            shellcheck scripts/*.sh
+            shellcheck install.sh start.sh start_node_agent.sh scripts/*.sh
           else
             echo "shellcheck not available, skipping"
           fi

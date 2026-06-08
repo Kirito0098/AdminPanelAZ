@@ -271,6 +271,15 @@ ui_show_help() {
   INSTALL_TARGET        Каталог установки при клонировании (по умолчанию /opt/AdminPanelAZ)
   INSTALL_USER          Пользователь systemd-сервисов (по умолчанию root)
 
+Без TTY (--non-interactive): мастер не запускается. Минимальная установка:
+  sudo ./install.sh --non-interactive --with-systemd -y
+Для production экспортируйте WIZ_* перед запуском (примеры):
+  WIZ_APP_ENV=production WIZ_NGINX_MODE=le WIZ_NGINX_DOMAIN=panel.example.com
+  WIZ_NGINX_EMAIL=admin@example.com WIZ_CONFIGURE_FIREWALL=true
+  WIZ_DDNS_PROVIDER=duckdns WIZ_DDNS_SUBDOMAIN=myhost WIZ_DDNS_TOKEN=...
+  WIZ_ADMIN_USERNAME=admin WIZ_ADMIN_PASSWORD=... WIZ_BACKEND_PORT=8000
+  WIZ_INSTALL_TYPE=controller|node  WIZ_RUN_MODE=systemd (через --with-systemd)
+
 Интерактивный режим:
   Мастер задаёт тип (панель / панель+локальный AZ / node-only),
   сеть, администратора, node agent, systemd/daemon и опции .env.

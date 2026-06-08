@@ -13,7 +13,7 @@ else
 fi
 
 bootstrap_remote_install() {
-  if [[ -n "$_script_dir" && -f "$_script_dir/scripts/install-ui.sh" && -f "$_script_dir/start.sh" && -f "$_script_dir/backend/requirements.txt" ]]; then
+  if [[ -n "$_script_dir" && -f "$_script_dir/scripts/install-ui.sh" && -f "$_script_dir/scripts/install-wizard.sh" && -f "$_script_dir/scripts/uninstall.sh" && -f "$_script_dir/start.sh" && -f "$_script_dir/backend/requirements.txt" && -f "$_script_dir/backend/.env.example" ]]; then
     return 0
   fi
 
@@ -270,10 +270,10 @@ show_main_menu() {
 
 collect_uninstall_options() {
   local -n _out_args=$1
-  _out_args=(--purge-state --remove-system-config)
+  _out_args=(--remove-system-config)
 
   if [[ "$NON_INTERACTIVE" == true ]]; then
-    _out_args+=(--remove-nginx --yes)
+    _out_args+=(--purge-state --remove-nginx --yes)
     if [[ "$PURGE_REPO" == true ]]; then
       _out_args+=(--purge)
     fi
@@ -281,7 +281,7 @@ collect_uninstall_options() {
   fi
 
   if [[ "$ACCEPT_DEFAULTS" == true ]]; then
-    _out_args+=(--remove-nginx --yes)
+    _out_args+=(--purge-state --remove-nginx --yes)
     if [[ "$PURGE_REPO" == true ]]; then
       _out_args+=(--purge)
     fi
@@ -295,6 +295,9 @@ collect_uninstall_options() {
     "Данные AntiZapret (/root/antizapret и др.) НЕ удаляются."
   echo
 
+  if ui_confirm "Удалить каталоги состояния (/var/lib/adminpanelaz, .runtime)?" "y"; then
+    _out_args+=(--purge-state)
+  fi
   if ui_confirm "Удалить конфигурацию nginx сайта панели?" "y"; then
     _out_args+=(--remove-nginx)
   fi
@@ -385,7 +388,7 @@ run_reinstall_action() {
 
   backup_env_for_reinstall
 
-  local -a uninstall_args=(--purge-state --remove-nginx --remove-system-config --skip-confirm)
+  local -a uninstall_args=(--purge-state --remove-nginx --remove-firewall --remove-system-config --skip-confirm)
   if [[ "$NON_INTERACTIVE" == true || "$ACCEPT_DEFAULTS" == true ]]; then
     uninstall_args+=(--yes)
   fi
@@ -420,8 +423,23 @@ run_wizard_if_needed() {
   source "$ROOT_DIR/scripts/install-wizard.sh"
   WIZ_ACCEPT_DEFAULTS="$ACCEPT_DEFAULTS"
   run_install_wizard
+  if [[ "${WIZ_APPLY_CONFIRMED:-false}" != true ]]; then
+    exit 0
+  fi
   WIZARD_RAN=true
   FORCE=true
+}
+
+wiz_env_exported() {
+  [[ -n "${WIZ_APP_ENV:-}" || -n "${WIZ_NGINX_MODE:-}" || -n "${WIZ_DDNS_PROVIDER:-}" \
+    || "${WIZ_CONFIGURE_FIREWALL:-}" == "true" || -n "${WIZ_ADMIN_USERNAME:-}" \
+    || -n "${WIZ_BACKEND_PORT:-}" || -n "${WIZ_INSTALL_TYPE:-}" ]] && return 0
+  return 1
+}
+
+wiz_config_active() {
+  [[ "$WIZARD_RAN" == true ]] && return 0
+  wiz_env_exported
 }
 
 require_root() {
@@ -446,7 +464,7 @@ check_os() {
 
   case "${ID:-}" in
     ubuntu)
-      if [[ "${VERSION_ID:-}" == "24.04" ]] || [[ "${VERSION_ID:-}" > "24.04" ]]; then
+      if dpkg --compare-versions "${VERSION_ID:-0}" ge "24.04" 2>/dev/null; then
         supported=true
       fi
       ;;
@@ -587,23 +605,31 @@ env_get() {
   grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true
 }
 
+env_escape_for_sed() {
+  printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
+}
+
 env_set() {
   local key="$1"
   local value="$2"
+  local escaped
+  escaped="$(env_escape_for_sed "$value")"
   if grep -qE "^${key}=" "$ENV_FILE" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+    sed -i "s|^${key}=.*|${key}=${escaped}|" "$ENV_FILE"
   else
-    echo "${key}=${value}" >>"$ENV_FILE"
+    printf '%s=%s\n' "$key" "$value" >>"$ENV_FILE"
   fi
 }
 
 node_env_set() {
   local key="$1"
   local value="$2"
+  local escaped
+  escaped="$(env_escape_for_sed "$value")"
   if grep -qE "^${key}=" "$NODE_ENV_FILE" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$NODE_ENV_FILE"
+    sed -i "s|^${key}=.*|${key}=${escaped}|" "$NODE_ENV_FILE"
   else
-    echo "${key}=${value}" >>"$NODE_ENV_FILE"
+    printf '%s=%s\n' "$key" "$value" >>"$NODE_ENV_FILE"
   fi
 }
 
@@ -648,6 +674,89 @@ install_node_selected() {
   [[ "$WITH_NODE_AGENT" == true ]]
 }
 
+_wiz_should_apply() {
+  local wiz_var="$1"
+  [[ "$WIZARD_RAN" == true || -n "${!wiz_var:-}" ]]
+}
+
+apply_wiz_env_settings() {
+  if _wiz_should_apply WIZ_APP_ENV; then
+    env_set APP_ENV "$WIZ_APP_ENV"
+  fi
+  if _wiz_should_apply WIZ_ANTIZAPRET_PATH; then
+    env_set ANTIZAPRET_PATH "$WIZ_ANTIZAPRET_PATH"
+  fi
+  if _wiz_should_apply WIZ_CORS_ORIGINS; then
+    env_set CORS_ORIGINS "$WIZ_CORS_ORIGINS"
+  fi
+  if _wiz_should_apply WIZ_ALLOW_INTERNAL_NODES; then
+    env_set ALLOW_INTERNAL_NODES "$WIZ_ALLOW_INTERNAL_NODES"
+  fi
+  if _wiz_should_apply WIZ_ADMIN_USERNAME; then
+    env_set DEFAULT_ADMIN_USERNAME "$WIZ_ADMIN_USERNAME"
+    env_set DEFAULT_ADMIN_PASSWORD "$WIZ_ADMIN_PASSWORD"
+    env_set DEFAULT_ADMIN_MUST_CHANGE_PASSWORD "$WIZ_ADMIN_MUST_CHANGE_PASSWORD"
+  fi
+  if _wiz_should_apply WIZ_BACKEND_HOST; then
+    env_set BACKEND_HOST "$WIZ_BACKEND_HOST"
+  fi
+  if _wiz_should_apply WIZ_BACKEND_PORT; then
+    env_set BACKEND_PORT "$WIZ_BACKEND_PORT"
+  fi
+  if [[ "$WIZARD_RAN" == true && "${WIZ_BEHIND_NGINX:-false}" == "true" ]] \
+    || [[ -n "${WIZ_BEHIND_NGINX:-}" && "${WIZ_BEHIND_NGINX:-false}" == "true" ]]; then
+    env_set BEHIND_NGINX "true"
+    env_set TRUSTED_PROXY_IPS "127.0.0.1,::1"
+    env_set FORWARDED_ALLOW_IPS "127.0.0.1,::1"
+  fi
+  if [[ "$WIZARD_RAN" == true && "${WIZ_UVICORN_WORKERS:-1}" -gt 1 ]] \
+    || [[ -n "${WIZ_UVICORN_WORKERS:-}" && "${WIZ_UVICORN_WORKERS:-1}" -gt 1 ]]; then
+    env_set UVICORN_WORKERS "$WIZ_UVICORN_WORKERS"
+  fi
+  if _wiz_should_apply WIZ_BACKUP_ROOT; then
+    env_set BACKUP_ROOT "$WIZ_BACKUP_ROOT"
+  fi
+  if _wiz_should_apply WIZ_CIDR_DB_REFRESH_ENABLED; then
+    env_set CIDR_DB_REFRESH_ENABLED "$WIZ_CIDR_DB_REFRESH_ENABLED"
+    env_set CIDR_DB_REFRESH_HOUR "$WIZ_CIDR_DB_REFRESH_HOUR"
+    env_set CIDR_DB_REFRESH_MINUTE "$WIZ_CIDR_DB_REFRESH_MINUTE"
+  fi
+  if _wiz_should_apply WIZ_TRAFFIC_SYNC_ENABLED; then
+    env_set TRAFFIC_SYNC_ENABLED "$WIZ_TRAFFIC_SYNC_ENABLED"
+  fi
+  if _wiz_should_apply WIZ_NODE_AGENT_PORT; then
+    env_set NODE_AGENT_PORT "$WIZ_NODE_AGENT_PORT"
+  fi
+  if [[ "$WIZARD_RAN" == true && "$WIZ_ENFORCE_PASSWORD_POLICY" == true ]] \
+    || [[ "${WIZ_ENFORCE_PASSWORD_POLICY:-}" == "true" ]]; then
+    env_set ENFORCE_PASSWORD_POLICY "true"
+  fi
+  local app_env="${WIZ_APP_ENV:-development}"
+  if [[ "$app_env" == "production" ]] && { [[ "$WIZARD_RAN" == true ]] || [[ -n "${WIZ_APP_ENV:-}" ]]; }; then
+    env_set AUTH_RATE_LIMIT_ENABLED "true"
+    env_set SECURITY_HEADERS_ENABLED "true"
+    env_set AUDIT_LOG_ENABLED "true"
+    env_set REFRESH_TOKEN_COOKIE_SECURE "true"
+  fi
+  if _wiz_should_apply WIZ_NODE_AGENT_API_KEY; then
+    env_set NODE_AGENT_API_KEY "$WIZ_NODE_AGENT_API_KEY"
+  fi
+  if _wiz_should_apply WIZ_AUTH_RATE_LIMIT_BACKEND; then
+    env_set AUTH_RATE_LIMIT_BACKEND "$WIZ_AUTH_RATE_LIMIT_BACKEND"
+  fi
+  if _wiz_should_apply WIZ_REDIS_URL; then
+    env_set REDIS_URL "$WIZ_REDIS_URL"
+  fi
+  if [[ "$WIZARD_RAN" == true && "${WIZ_NODE_AGENT_MTLS_ENABLED:-false}" == "true" ]] \
+    || [[ "${WIZ_NODE_AGENT_MTLS_ENABLED:-}" == "true" ]]; then
+    env_set NODE_AGENT_MTLS_ENABLED "true"
+  fi
+  if [[ "${WIZ_NODE_API_KEY_ROTATION_DAYS:-0}" != "0" ]] \
+    && { [[ "$WIZARD_RAN" == true ]] || [[ -n "${WIZ_NODE_API_KEY_ROTATION_DAYS:-}" ]]; }; then
+    env_set NODE_API_KEY_ROTATION_DAYS "$WIZ_NODE_API_KEY_ROTATION_DAYS"
+  fi
+}
+
 setup_env() {
   if ! install_controller_selected; then
     log "Режим node-only: пропуск backend/.env"
@@ -676,56 +785,8 @@ setup_env() {
     log "Сгенерирован SECRET_KEY"
   fi
 
-  if [[ "$WIZARD_RAN" == true ]]; then
-    env_set APP_ENV "$WIZ_APP_ENV"
-    env_set ANTIZAPRET_PATH "$WIZ_ANTIZAPRET_PATH"
-    env_set CORS_ORIGINS "$WIZ_CORS_ORIGINS"
-    env_set ALLOW_INTERNAL_NODES "$WIZ_ALLOW_INTERNAL_NODES"
-    env_set DEFAULT_ADMIN_USERNAME "$WIZ_ADMIN_USERNAME"
-    env_set DEFAULT_ADMIN_PASSWORD "$WIZ_ADMIN_PASSWORD"
-    env_set DEFAULT_ADMIN_MUST_CHANGE_PASSWORD "$WIZ_ADMIN_MUST_CHANGE_PASSWORD"
-    env_set BACKEND_HOST "$WIZ_BACKEND_HOST"
-    env_set BACKEND_PORT "$WIZ_BACKEND_PORT"
-    if [[ "${WIZ_BEHIND_NGINX:-false}" == "true" ]]; then
-      env_set BEHIND_NGINX "true"
-      env_set TRUSTED_PROXY_IPS "127.0.0.1,::1"
-      env_set FORWARDED_ALLOW_IPS "127.0.0.1,::1"
-    fi
-    if [[ "${WIZ_UVICORN_WORKERS:-1}" -gt 1 ]]; then
-      env_set UVICORN_WORKERS "$WIZ_UVICORN_WORKERS"
-    fi
-    env_set BACKUP_ROOT "$WIZ_BACKUP_ROOT"
-    env_set CIDR_DB_REFRESH_ENABLED "$WIZ_CIDR_DB_REFRESH_ENABLED"
-    env_set CIDR_DB_REFRESH_HOUR "$WIZ_CIDR_DB_REFRESH_HOUR"
-    env_set CIDR_DB_REFRESH_MINUTE "$WIZ_CIDR_DB_REFRESH_MINUTE"
-    env_set TRAFFIC_SYNC_ENABLED "$WIZ_TRAFFIC_SYNC_ENABLED"
-    env_set NODE_AGENT_PORT "$WIZ_NODE_AGENT_PORT"
-    if [[ "$WIZ_ENFORCE_PASSWORD_POLICY" == true ]]; then
-      env_set ENFORCE_PASSWORD_POLICY "true"
-    fi
-    if [[ "$WIZ_APP_ENV" == "production" ]]; then
-      env_set AUTH_RATE_LIMIT_ENABLED "true"
-      env_set SECURITY_HEADERS_ENABLED "true"
-      env_set AUDIT_LOG_ENABLED "true"
-    fi
-    if [[ -n "$WIZ_NODE_AGENT_API_KEY" ]]; then
-      env_set NODE_AGENT_API_KEY "$WIZ_NODE_AGENT_API_KEY"
-    fi
-    if [[ -n "${WIZ_AUTH_RATE_LIMIT_BACKEND:-}" ]]; then
-      env_set AUTH_RATE_LIMIT_BACKEND "$WIZ_AUTH_RATE_LIMIT_BACKEND"
-    fi
-    if [[ -n "${WIZ_REDIS_URL:-}" ]]; then
-      env_set REDIS_URL "$WIZ_REDIS_URL"
-    fi
-    if [[ "${WIZ_NODE_AGENT_MTLS_ENABLED:-false}" == "true" ]]; then
-      env_set NODE_AGENT_MTLS_ENABLED "true"
-    fi
-    if [[ -n "${WIZ_NODE_API_KEY_ROTATION_DAYS:-}" && "${WIZ_NODE_API_KEY_ROTATION_DAYS:-0}" != "0" ]]; then
-      env_set NODE_API_KEY_ROTATION_DAYS "$WIZ_NODE_API_KEY_ROTATION_DAYS"
-    fi
-    if [[ "$WIZ_APP_ENV" == "production" ]]; then
-      env_set REFRESH_TOKEN_COOKIE_SECURE "true"
-    fi
+  if wiz_config_active; then
+    apply_wiz_env_settings
   else
     local az_path="${ANTIZAPRET_PATH:-/root/antizapret}"
     env_set ANTIZAPRET_PATH "$az_path"
@@ -805,7 +866,7 @@ setup_backend() {
 }
 
 seed_wizard_db_settings() {
-  if [[ "$WIZARD_RAN" != true ]] || ! install_controller_selected; then
+  if ! wiz_config_active || ! install_controller_selected; then
     return 0
   fi
   if [[ "$WIZ_TELEGRAM_ENABLED" != true && "$WIZ_AUTO_BACKUP_ENABLED" != true ]]; then
@@ -950,7 +1011,7 @@ write_ddns_config() {
 }
 
 setup_ddns_if_selected() {
-  if [[ "$WIZARD_RAN" != true ]] || ! install_controller_selected; then
+  if ! wiz_config_active || ! install_controller_selected; then
     return 0
   fi
 
@@ -985,7 +1046,7 @@ setup_ddns_if_selected() {
 }
 
 setup_nginx_if_selected() {
-  if [[ "$WIZARD_RAN" != true ]] || ! install_controller_selected; then
+  if ! wiz_config_active || ! install_controller_selected; then
     return 0
   fi
 
@@ -1074,7 +1135,7 @@ restart_services_after_nginx() {
 }
 
 setup_firewall_if_selected() {
-  if [[ "$WIZARD_RAN" != true ]] || [[ "${WIZ_CONFIGURE_FIREWALL:-false}" != true ]]; then
+  if ! wiz_config_active || [[ "${WIZ_CONFIGURE_FIREWALL:-false}" != "true" ]]; then
     return 0
   fi
 
@@ -1238,7 +1299,7 @@ print_post_install() {
     ui_bold "Node agent"
     echo
     ui_info_box "" \
-      "./start_node_agent.sh daemon" \
+      "./start_node_agent.sh daemon   # читает backend/node_agent.env" \
       "systemctl start adminpanelaz-node   # если установлен systemd" \
       "Порт: ${node_port}"
   fi

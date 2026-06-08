@@ -48,7 +48,7 @@ ensure_env_defaults() {
     _ensure_env_default "NIGHTLY_IDLE_RESTART_ENABLED" "true"
     _ensure_env_default "NIGHTLY_IDLE_RESTART_CRON" "0 4 * * *"
     _ensure_env_default "RUNTIME_BACKUP_CLEANUP_ENABLED" "true"
-    _ensure_env_default "ADMIN_PANEL_AZ_SERVICE_NAME" "admin-panel-az.service"
+    _ensure_env_default "ADMIN_PANEL_AZ_SERVICE_NAME" "adminpanelaz"
     # Публикация (nginx-setup.sh задаёт DOMAIN, BEHIND_NGINX, TRUSTED_PROXY_IPS)
     _ensure_env_default "BEHIND_NGINX" "false"
     _ensure_env_default "APP_ENV" "development"

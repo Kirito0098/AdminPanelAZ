@@ -4,6 +4,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 VENV_DIR="$BACKEND_DIR/.venv"
+NODE_ENV_FILE="${NODE_AGENT_ENV_FILE:-$BACKEND_DIR/node_agent.env}"
+
+if [[ -f "$NODE_ENV_FILE" && -z "${NODE_AGENT_ENV_LOADED:-}" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$NODE_ENV_FILE"
+  set +a
+  export NODE_AGENT_ENV_LOADED=1
+fi
 
 # Каталог состояния node agent (логи и PID вне корня проекта)
 resolve_state_dir() {

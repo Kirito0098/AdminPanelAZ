@@ -589,6 +589,8 @@ wizard_ask_node_agent() {
 }
 
 wizard_ask_security_hardening() {
+  wiz_step "Дополнительная безопасность"
+
   if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
     wiz_prompt_yesno "Включить mTLS для node agent (требует scripts/generate-mtls-certs.sh)?" "n"
     if [[ "$REPLY" == "y" ]]; then
@@ -599,21 +601,6 @@ wizard_ask_security_hardening() {
     return 0
   fi
 
-  if [[ "$WIZ_INSTALL_TYPE" == "controller" ]]; then
-    if [[ "$WIZ_UVICORN_WORKERS" -gt 1 ]]; then
-      wizard_show_redis_rate_limit_hint
-      wiz_prompt_yesno "Настроить Redis для rate limit auth (AUTH_RATE_LIMIT_BACKEND=redis)?" "y"
-      if [[ "$REPLY" == "y" ]]; then
-        WIZ_AUTH_RATE_LIMIT_BACKEND="redis"
-        wiz_prompt "REDIS_URL" "redis://127.0.0.1:6379/0"
-        WIZ_REDIS_URL="$REPLY"
-      fi
-    fi
-    echo
-    return 0
-  fi
-
-  wiz_step "Дополнительная безопасность"
   if [[ "$WIZ_UVICORN_WORKERS" -gt 1 ]]; then
     wizard_show_redis_rate_limit_hint
     wiz_prompt_yesno "Настроить Redis для rate limit auth (AUTH_RATE_LIMIT_BACKEND=redis)?" "y"
