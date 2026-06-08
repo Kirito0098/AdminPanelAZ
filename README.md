@@ -49,10 +49,10 @@
 | Auth (login, captcha, роли) | ✅ | + 🆕 2FA/TOTP, refresh tokens |
 | Viewer role | ✅ | API + UI назначения доступа в UsersTab |
 | Обновление системы (git) | ✅ | + 🆕 node agent / AntiZapret на узлах |
-| In-panel pytest | 🟡 | 40 модулей / 240 тестов vs 53 в AA |
+| In-panel pytest | ✅ | 48 модулей / 385 тестов vs 53 в AA |
 | Установка / ops | 🟡 | `install.sh` + diagnostics/safe-browsing CLI ✅; нет `adminpanel.sh` menu |
 | Multi-node | 🆕 | Controller + Node Agent |
-| CI/CD | 🟡 | pytest + ruff + build + shellcheck; нет eslint advisory |
+| CI/CD | ✅ | pytest + ruff + build + shellcheck + eslint; pip-audit/bandit advisory |
 
 ---
 
@@ -81,7 +81,7 @@
 - [ ] **Nginx + TLS** — `scripts/nginx-setup.sh`, `BEHIND_NGINX`, сертификаты
 - [ ] **Firewall** — `scripts/firewall-setup.sh`; backend на `127.0.0.1` за reverse proxy
 - [ ] **Telegram** — Login Widget, Mini App, AdminNotify на реальный `telegram_id`
-- [ ] **In-panel pytest** — вкладка «Тесты» в настройках (или `cd backend && pytest`)
+- [x] **In-panel pytest** — вкладка «Тесты» в настройках (или `cd backend && pytest`); 48 модулей / 385 тестов
 
 ### Известные пробелы vs AdminAntizapret 1.9.0
 

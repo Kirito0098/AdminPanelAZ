@@ -3,9 +3,11 @@
 from app.services.cidr.pipeline import constants
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.cidr.pipeline.download import _download_text
+from app.services.cidr.pipeline.provider_sources import PROVIDER_SOURCES
 
 __all__ = [
     "CidrDbUpdaterService",
+    "PROVIDER_SOURCES",
     "_download_text",
     "ENV_FILE_PATH",
     "LIST_DIR",

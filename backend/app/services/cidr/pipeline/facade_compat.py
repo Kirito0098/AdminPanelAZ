@@ -2,9 +2,11 @@
 
 
 def get_attr(name):
-    from app.services.cidr import pipeline_facade
+    from app.services.cidr import cidr_list_updater, pipeline_facade
 
-    return getattr(pipeline_facade, name)
+    if hasattr(pipeline_facade, name):
+        return getattr(pipeline_facade, name)
+    return getattr(cidr_list_updater, name)
 
 
 def call(name, *args, **kwargs):

@@ -1,4 +1,3 @@
-import { Loader2 } from 'lucide-react'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import type { ConfirmAction } from './useRoutingPage'
 

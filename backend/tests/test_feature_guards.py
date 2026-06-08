@@ -66,6 +66,12 @@ def test_blocked_routing_api_returns_403(client):
     assert body["feature_disabled"] == "routing"
 
 
+def test_blocked_cidr_db_presets_returns_403(client):
+    resp = client.get("/api/routing/cidr-db/presets")
+    assert resp.status_code == 403
+    assert resp.json()["feature_disabled"] == "routing"
+
+
 def test_allowed_health_endpoint(client):
     resp = client.get("/api/health")
     assert resp.status_code == 200
@@ -103,3 +109,54 @@ def test_wireguard_api_allowed_when_amneziawg_disabled_but_wireguard_enabled(gua
     resp = guarded_client.get("/api/client-access/wireguard/alice")
     if resp.status_code == 403:
         assert resp.json().get("feature_disabled") not in {"wireguard", "amneziawg"}
+
+
+@pytest.fixture()
+def maintenance_disabled_client(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("FEATURE_MAINTENANCE_ENABLED=false\n", encoding="utf-8")
+
+    service_factory = lambda: __import__(
+        "app.services.feature_toggles", fromlist=["FeatureToggleService"]
+    ).FeatureToggleService(env_file)
+    monkeypatch.setattr("app.services.feature_guards.get_feature_service", service_factory)
+    monkeypatch.setattr("app.routers.feature_toggles.get_feature_service", service_factory)
+
+    from app.main import app
+
+    return TestClient(app)
+
+
+def test_blocked_maintenance_run_doall_when_disabled(maintenance_disabled_client):
+    resp = maintenance_disabled_client.post("/api/settings/run-doall")
+    assert resp.status_code == 403
+    assert resp.json()["feature_disabled"] == "maintenance"
+
+
+def test_blocked_maintenance_restart_service_when_disabled(maintenance_disabled_client):
+    resp = maintenance_disabled_client.post(
+        "/api/settings/restart-service",
+        json={"service_name": "openvpn-server@antizapret-udp"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["feature_disabled"] == "maintenance"
+
+
+def test_blocked_maintenance_recreate_profiles_when_disabled(maintenance_disabled_client):
+    resp = maintenance_disabled_client.post("/api/settings/recreate-profiles")
+    assert resp.status_code == 403
+    assert resp.json()["feature_disabled"] == "maintenance"
+
+
+def test_blocked_maintenance_session_stats_when_disabled(maintenance_disabled_client):
+    resp = maintenance_disabled_client.get("/api/maintenance/session-stats")
+    assert resp.status_code == 403
+    assert resp.json()["feature_disabled"] == "maintenance"
+
+
+def test_feature_modules_includes_maintenance_tab(maintenance_disabled_client):
+    resp = maintenance_disabled_client.get("/api/feature-modules")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["features"]["maintenance"] is False
+    assert data["settings_tabs"]["maintenance"] == "maintenance"

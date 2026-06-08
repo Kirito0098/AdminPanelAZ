@@ -238,22 +238,25 @@ def telegram_login_callback(request: Request, db: Session = Depends(get_db)):
     if not ok:
         raise HTTPException(status_code=401, detail=err)
     tg_id = str(payload.get("id", ""))
-    user = db.query(User).filter(User.username == f"tg_{tg_id}").first()
+    user = db.query(User).filter(User.telegram_id == tg_id).first()
     if not user:
-        user = User(
-            username=f"tg_{tg_id}",
-            password_hash=get_password_hash(tg_id),
-            role=UserRole.user,
-            is_active=True,
-            telegram_id=tg_id,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    elif not user.telegram_id:
-        user.telegram_id = tg_id
-        db.commit()
+        user = db.query(User).filter(User.username == f"tg_{tg_id}").first()
+        if user and not user.telegram_id:
+            user.telegram_id = tg_id
+            db.commit()
     client_ip = ip_restriction_service.get_client_ip(request)
+    if not user:
+        admin_notify_service.send_tg_login_unlinked(
+            db,
+            telegram_id=tg_id,
+            remote_addr=client_ip,
+            mini=False,
+            client_timezone=get_client_timezone_from_request(request),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Этот Telegram аккаунт не привязан ни к одному пользователю панели",
+        )
     if user.role != UserRole.viewer:
         admin_notify_service.send_login_success(
             db,

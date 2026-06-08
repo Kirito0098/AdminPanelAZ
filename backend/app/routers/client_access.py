@@ -8,7 +8,9 @@ from app.database import get_db
 from app.models import User
 from app.services.access_policy import AccessPolicyService
 from app.services.action_log import log_action
+from app.services.admin_notify import admin_notify_service
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
+from app.services.notify_time import get_client_timezone_from_request
 from app.services.traffic_limit import (
     TrafficLimitExceededError,
     parse_traffic_limit_bytes,
@@ -47,6 +49,44 @@ def _service(db: Session) -> AccessPolicyService:
     )
 
 
+def _client_ban_details(
+    action: str,
+    *,
+    days: int | None = None,
+    block_until: str | None = None,
+) -> str:
+    parts = [f"action={action}"]
+    if days is not None:
+        parts.append(f"days={days}")
+    if block_until:
+        parts.append(f"block_until={block_until}")
+    return " ".join(parts)
+
+
+def _notify_client_ban(
+    db: Session,
+    request: Request,
+    user: User,
+    *,
+    client_name: str,
+    target_type: str,
+    action: str,
+    days: int | None = None,
+    block_until: str | None = None,
+) -> None:
+    node = get_active_node(db)
+    admin_notify_service.send_client_ban(
+        db,
+        actor_username=user.username,
+        target_name=client_name,
+        target_type=target_type,
+        details=_client_ban_details(action, days=days, block_until=block_until),
+        node_id=node.id,
+        node_name=node.name,
+        client_timezone=get_client_timezone_from_request(request),
+    )
+
+
 @router.get("/policies")
 def list_policies(
     clients: str = "",
@@ -72,6 +112,16 @@ def openvpn_temp_block(payload: BlockRequest, request: Request, db: Session = De
     result = _service(db).openvpn_temp_block(payload.client_name, payload.days, actor=user.username)
     log_action(db, action="openvpn_temp_block", user_id=user.id, username=user.username,
                details=f"{payload.client_name} {payload.days}d", remote_addr=request.client.host)
+    _notify_client_ban(
+        db,
+        request,
+        user,
+        client_name=payload.client_name,
+        target_type="openvpn",
+        action="temp_block",
+        days=payload.days,
+        block_until=result.get("block_until"),
+    )
     return result
 
 
@@ -80,6 +130,14 @@ def openvpn_perm_block(payload: BlockRequest, request: Request, db: Session = De
     result = _service(db).openvpn_permanent_block(payload.client_name, actor=user.username)
     log_action(db, action="openvpn_perm_block", user_id=user.id, username=user.username,
                details=payload.client_name, remote_addr=request.client.host)
+    _notify_client_ban(
+        db,
+        request,
+        user,
+        client_name=payload.client_name,
+        target_type="openvpn",
+        action="permanent_block",
+    )
     return result
 
 
@@ -94,6 +152,14 @@ def openvpn_unblock(payload: BlockRequest, request: Request, db: Session = Depen
         ) from exc
     log_action(db, action="openvpn_unblock", user_id=user.id, username=user.username,
                details=payload.client_name, remote_addr=request.client.host)
+    _notify_client_ban(
+        db,
+        request,
+        user,
+        client_name=payload.client_name,
+        target_type="openvpn",
+        action="unblock",
+    )
     return result
 
 
@@ -133,6 +199,16 @@ def wg_temp_block(payload: BlockRequest, request: Request, db: Session = Depends
     result = _service(db).wg_temp_block(payload.client_name, payload.days, actor=user.username)
     log_action(db, action="wg_temp_block", user_id=user.id, username=user.username,
                details=f"{payload.client_name} {payload.days}d", remote_addr=request.client.host)
+    _notify_client_ban(
+        db,
+        request,
+        user,
+        client_name=payload.client_name,
+        target_type="wireguard",
+        action="temp_block",
+        days=payload.days,
+        block_until=result.get("block_until"),
+    )
     return result
 
 
@@ -141,6 +217,14 @@ def wg_perm_block(payload: BlockRequest, request: Request, db: Session = Depends
     result = _service(db).wg_permanent_block(payload.client_name, actor=user.username)
     log_action(db, action="wg_perm_block", user_id=user.id, username=user.username,
                details=payload.client_name, remote_addr=request.client.host)
+    _notify_client_ban(
+        db,
+        request,
+        user,
+        client_name=payload.client_name,
+        target_type="wireguard",
+        action="permanent_block",
+    )
     return result
 
 
@@ -157,6 +241,14 @@ def wg_unblock(payload: BlockRequest, request: Request, db: Session = Depends(ge
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     log_action(db, action="wg_unblock", user_id=user.id, username=user.username,
                details=payload.client_name, remote_addr=request.client.host)
+    _notify_client_ban(
+        db,
+        request,
+        user,
+        client_name=payload.client_name,
+        target_type="wireguard",
+        action="unblock",
+    )
     return result
 
 

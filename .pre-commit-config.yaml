@@ -1,4 +1,4 @@
-# Local checks aligned with .github/workflows/ci.yml (without pytest).
+# Local checks aligned with .github/workflows/ci.yml (without pytest/pip-audit).
 # Setup: pip install -r backend/requirements-dev.txt && pre-commit install
 
 default_language_version:
@@ -23,3 +23,19 @@ repos:
       - id: shellcheck
         args: [-x, -S, warning]
         files: ^scripts/.*\.sh$
+
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint (frontend, advisory)
+        entry: bash -c 'cd "$(git rev-parse --show-toplevel)/frontend" && npm run lint || true'
+        language: system
+        files: ^frontend/.*\.(ts|tsx)$
+        pass_filenames: false
+
+      - id: bandit
+        name: bandit (advisory)
+        entry: bash -c 'cd "$(git rev-parse --show-toplevel)" && bandit -r backend/app backend/node_agent -ll --exclude backend/tests,backend/.venv,backend/app/data || true'
+        language: system
+        files: ^backend/.*\.py$
+        pass_filenames: false

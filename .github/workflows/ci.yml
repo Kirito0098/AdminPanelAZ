@@ -39,6 +39,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements-dev.txt
 
+      # Advisory: known CVEs in pinned deps are tracked here until bumps are reviewed.
+      - name: pip-audit (dependency vulnerabilities, advisory)
+        continue-on-error: true
+        run: pip-audit -r backend/requirements.txt
+
       - name: Ruff (lint)
         run: ruff check backend/
 
@@ -53,11 +58,15 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Build frontend
+      - name: ESLint (frontend)
         working-directory: frontend
         run: |
           npm ci
-          npm run build
+          npm run lint
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
 
       - name: Shell scripts (shellcheck)
         run: |
@@ -66,3 +75,10 @@ jobs:
           else
             echo "shellcheck not available, skipping"
           fi
+
+      # Advisory security scan; findings are surfaced for review but do not block CI.
+      - name: Bandit (security scan, advisory)
+        continue-on-error: true
+        run: |
+          bandit -r backend/app backend/node_agent -ll \
+            --exclude backend/tests,backend/.venv,backend/app/data

@@ -1,10 +1,10 @@
 # План миграции AdminAntizapret → AdminPanelAZ
 
-> **Baseline:** [AdminAntizapret](https://github.com/Kirito0098/AdminAntizapret) **1.9.0** → AdminPanelAZ **0.3.0**
+> **Baseline:** [AdminAntizapret](https://github.com/Kirito0098/AdminAntizapret) **1.9.0** → AdminPanelAZ **1.0.0**
 > **Цель:** ~**95%+** функционального паритета с upstream + сохранение 🆕-функций AZ (multi-node, 2FA, NOC)
 > **Статус переноса:** см. [`MIGRATION.md`](MIGRATION.md) · **Исходники AA:** `/opt/AdminAntizapret`
 
-Текущая готовность: **~70–75%**. План разбит на **20 фаз** — каждая закрывает один модуль или узкий срез работ. Одна фаза = один PR (или пара последовательных PR: backend → frontend).
+**Фазы 0–20** (релиз **1.0.0**) закрыты. Оставшиеся 🟡-модули — **фазы 21–29** (релизы **1.1.x–1.3.x**). Каждая фаза = один PR (или пара последовательных PR: backend → frontend).
 
 ---
 
@@ -81,6 +81,15 @@ flowchart LR
 | 18 | Global rate limit + security | 0.7.2 | Plan → Agent | 2–3 д |
 | 19 | Ops CLI + backup UI + docs | 0.7.3 | Agent | 2–3 д |
 | 20 | Final parity audit → 1.0.0 | 1.0.0 | Ask → Agent | 3–5 д |
+| 21 | AdminNotify hooks (ban/user/TG) | 1.1.0 | Agent | 2–3 д |
+| 22 | Временный IP whitelist UI | 1.1.0 | Agent | 1 д |
+| 23 | CIDR presets CRUD | 1.1.1 | Plan → Agent | 3–4 д |
+| 24 | QR max downloads + maintenance toggle | 1.1.2 | Agent | 1–2 д |
+| 25 | Diff-подсветка в редакторе файлов | 1.2.0 | Plan → Agent | 2–3 д |
+| 26 | Test suite — волна 2 | 1.2.1 | Agent → Debug | 4–5 д |
+| 27 | CI / pre-commit parity | 1.2.2 | Agent | 1–2 д |
+| 28 | VPN-сеть + firewall runtime | 1.3.0 | Plan → Agent → Debug | 5–7 д |
+| 29 | Ops console menu (optional) | 1.3.x | Agent | 2–3 д |
 
 ```mermaid
 flowchart TB
@@ -104,6 +113,15 @@ flowchart TB
   P17 --> P18[Ф18_RateLimit]
   P18 --> P19[Ф19_CLI]
   P19 --> P20[Ф20_Release]
+  P20 --> P21[Ф21_Notify_hooks]
+  P21 --> P22[Ф22_Temp_whitelist]
+  P22 --> P23[Ф23_Presets_CRUD]
+  P23 --> P24[Ф24_QR_Maint_toggle]
+  P24 --> P25[Ф25_Editor_diff]
+  P25 --> P26[Ф26_Tests_w2]
+  P26 --> P27[Ф27_CI]
+  P27 --> P28[Ф28_VPN_firewall]
+  P28 --> P29[Ф29_Ops_menu]
 ```
 
 ---
@@ -636,6 +654,282 @@ Test count: pytest --collect-only.
 
 ---
 
+## Фазы 21–29 — закрытие 🟡 после 1.0.0
+
+> Источник пробелов: секция «Backlog переноса» и сводная таблица 🟡 в [`MIGRATION.md`](MIGRATION.md).
+
+| Приоритет | Фаза | Effort | Закрывает в MIGRATION.md |
+|-----------|------|--------|--------------------------|
+| Высокий | 21–23 | S–M | AdminNotify, temp whitelist, CIDR presets |
+| Средний | 24–27 | S–L | QR max downloads, FEATURE_MAINTENANCE, editor diff, tests, CI |
+| Низкий | 28–29 | L–S | VPN-сеть mutations, panel_port_firewall, adminpanel menu |
+
+**Рекомендуемый первый спринт (1.1.0):** фазы **21 + 22** (backend для 22 готов; для 21 — только wiring хуков).
+
+---
+
+## Фаза 21 — AdminNotify hooks (ban / user / TG unlink)
+
+**Релиз:** 1.1.0 · **Режим:** **Agent** · **Срок:** 2–3 д
+
+**Задачи:** методы `send_client_ban`, `send_user_create`, `send_user_delete`, `send_tg_login_unlinked` уже есть в `admin_notify.py`, но не вызываются из роутеров.
+
+**Эталон AA:** `core/services/settings/post_handlers/users.py`, `app.py` (event mapping), `routes/auth_routes.py`.
+
+**Промпт:**
+
+```
+Контекст: AdminPanelAZ, фаза 21 — AdminNotify hooks.
+Источник AA: /opt/AdminAntizapret (core/services/admin_notify.py, settings/post_handlers/users.py, app.py)
+Цель: /opt/AdminPanelAZ
+Ограничения: multi-node — передавать node_id/node_name в send_client_ban; не ломать 2FA/NOC/mTLS
+
+1. backend/app/routers/users.py — после create/delete → admin_notify_service.send_user_create / send_user_delete
+2. backend/app/routers/client_access.py — после OVPN/WG temp/permanent block и unblock → send_client_ban (details: срок, тип протокола)
+3. backend/app/routers/auth.py — при отвязке Telegram → send_tg_login_unlinked (mini=false/true)
+4. Учитывать toggles событий из TelegramTab (admin notify settings)
+5. Tests: расширить backend/tests/test_admin_notify_integration.py
+6. MIGRATION.md: Telegram admin-уведомления → ✅
+7. CHANGELOG [1.1.0]
+```
+
+---
+
+## Фаза 22 — Временный IP whitelist UI
+
+**Релиз:** 1.1.0 · **Режим:** **Agent** · **Срок:** 1 д
+
+**Задачи:** API `POST /api/security/temp-whitelist` и тесты уже есть; нет UI в SecurityTab.
+
+**Эталон AA:** `templates/partials/settings/_tab_security.html` (radio 1h/12h/24h, список temp entries).
+
+**Промпт:**
+
+```
+Контекст: AdminPanelAZ, фаза 22 — временный IP whitelist UI.
+Источник AA: templates/partials/settings/_tab_security.html
+Цель: frontend/src/components/settings/SecurityTab.tsx + api/client.ts
+
+Backend готов: POST /api/security/temp-whitelist (security.py).
+
+1. Radio 1h / 12h / 24h + кнопка «Добавить текущий IP» (или поле IP + duration)
+2. Таблица settings.temp_whitelist (IP, срок, hours) — данные из GET security settings
+3. При необходимости — DELETE endpoint для удаления temp IP (минимальный, parity AA remove_temp_ip)
+4. Disabled когда ip_restriction_enabled=false
+5. MIGRATION.md: «Временный whitelist» → ✅
+```
+
+---
+
+## Фаза 23 — CIDR presets CRUD
+
+**Релиз:** 1.1.1 · **Режим:** **Plan** → **Agent** · **Срок:** 3–4 д
+
+**Задачи:** `CidrDbUpdaterService.create/update/delete/reset` в `db_service.py` есть; роутов и UI нет (только apply + seed).
+
+**Эталон AA:** `routes/settings/api_cidr_db.py` (`/api/cidr-presets`), `static/assets/js/routing-page-extra.js`.
+
+**Промпт (Plan):**
+
+```
+Сравни AA /api/cidr-presets (GET/POST/PUT/DELETE/reset) с AZ backend/app/services/cidr/pipeline/db_service.py.
+Спроектируй REST в cidr_db.py, Pydantic-схемы, feature guard routing.
+PR1: backend + tests; PR2: PresetsTab.tsx CRUD UI.
+```
+
+**Промпт (Agent):**
+
+```
+Контекст: фаза 23 — CIDR presets CRUD.
+Источник AA: routes/settings/api_cidr_db.py, routing-page-extra.js
+Цель: backend/app/routers/cidr_db.py, frontend/src/components/routing/PresetsTab.tsx
+
+1. GET/POST /api/cidr-db/presets, PUT/DELETE /presets/{id}, POST /presets/{id}/reset
+2. PresetsTab: create/edit modal, delete custom, reset builtin, multi-select providers
+3. Tests: порт test_settings_api_cidr_games.py (presets часть)
+4. MIGRATION.md: «Пресеты CIDR», «Маршрутизация / CIDR» → ✅
+5. CHANGELOG [1.1.1]
+```
+
+---
+
+## Фаза 24 — QR max downloads + FEATURE_MAINTENANCE
+
+**Релиз:** 1.1.2 · **Режим:** **Agent** · **Срок:** 1–2 д
+
+**Задачи:** `qr_download_max_downloads` сохраняется через API, но input в SecurityTab отсутствует; нет toggle `FEATURE_MAINTENANCE_ENABLED`.
+
+**Эталон AA:** `_tab_security.html` (max downloads), `feature_toggles.py` (FEATURE_MAINTENANCE_ENABLED).
+
+**Промпт:**
+
+```
+Контекст: фаза 24 — QR max downloads + maintenance toggle.
+Источник AA: env_defaults.sh, core/services/feature_toggles.py
+Цель: /opt/AdminPanelAZ
+
+24a — SecurityTab.tsx: поле «Макс. скачиваний» для qr_download_max_downloads (backend уже принимает)
+
+24b — FEATURE_MAINTENANCE_ENABLED:
+- backend/app/services/feature_toggles.py — definition + env_defaults.sh
+- feature_guards.py — guard MaintenanceTab routes (/api/maintenance/*)
+- FeatureTogglesTab если не подхватится автоматически
+- test_feature_guards.py
+
+MIGRATION.md: QR-настройки → ✅, FEATURE_MAINTENANCE → ✅, Feature toggles → ✅
+CHANGELOG [1.1.2]
+```
+
+---
+
+## Фаза 25 — Diff-подсветка в редакторе файлов
+
+**Релиз:** 1.2.0 · **Режим:** **Plan** → **Agent** · **Срок:** 2–3 д
+
+**Задачи:** React-редактор без diff; AA использует `edit_files/diff.js`.
+
+**Промпт (Plan):**
+
+```
+Изучи AA static edit_files/diff.js и EditFilesPage.tsx в AZ.
+Выбери подход: react-diff-viewer / Monaco diff / inline highlight.
+Backend изменений не требуется, если файл уже читается через file_editor.py.
+```
+
+**Промпт (Agent):**
+
+```
+Контекст: фаза 25 — diff в редакторе файлов.
+Источник AA: edit_files/diff.js
+Цель: frontend/src/pages/EditFilesPage.tsx
+
+1. Кнопка «Сравнить с диском» — diff между textarea и содержимым с node
+2. Подсветка добавленных/удалённых строк перед Apply
+3. MIGRATION.md: «Diff-подсветка» → ✅
+CHANGELOG [1.2.0]
+```
+
+---
+
+## Фаза 26 — Test suite — волна 2
+
+**Релиз:** 1.2.1 · **Режим:** **Agent** → **Debug** · **Срок:** 4–5 д
+
+**Задачи:** 40 модулей / 240 тестов в AZ vs 53 в AA; часть AA-тестов Jinja-specific и не портируется.
+
+**Не портируем:** `test_jinja_templates_compile.py`, `test_*_page_context.py`, `test_script_executor.py`.
+
+**Портировать (~10 модулей):**
+
+| AA | AZ действие |
+|----|-------------|
+| `test_settings_api_cidr_games.py` | фаза 23 |
+| `test_cidr_db_updater_service.py` | новый |
+| `test_cidr_list_updater.py` | новый |
+| `test_config_routes_openvpn_block.py` | client_access + notify |
+| `test_panel_port_firewall.py` | фаза 28 или отдельно |
+| `test_ip_restriction_whitelist_firewall_gating.py` | security router |
+| `test_settings_post_handlers.py` | users + notify (фаза 21) |
+| `test_access_remaining.py` | access_policy |
+| `test_maintenance_scheduler_backup.py` | backup_scheduler |
+| `test_db_migration_service.py` | database migrations |
+| `test_system_preflight.py` | install/preflight scripts |
+
+**Промпт:**
+
+```
+Контекст: фаза 26 — test suite wave 2.
+Источник: /opt/AdminAntizapret/tests/
+Цель: backend/tests/
+
+1. pytest --collect-only в AA и AZ — список gap
+2. Портировать критичные модули из таблицы фазы 26 (пропустить Jinja-specific)
+3. Цель: ~48–50 pytest modules (не 53 — часть AA не применима к FastAPI/React)
+4. CI green
+5. MIGRATION.md: In-panel pytest → 🟡 с обновлённым count или ✅ если ≥48 modules
+CHANGELOG [1.2.1]
+```
+
+---
+
+## Фаза 27 — CI / pre-commit parity
+
+**Релиз:** 1.2.2 · **Режим:** **Agent** · **Срок:** 1–2 д
+
+**Задачи:** AZ CI — pytest, ruff, shellcheck, build; нет eslint, pip-audit, bandit (advisory как в AA).
+
+**Эталон AA:** `.github/workflows/ci.yml`, `.pre-commit-config.yaml`.
+
+**Промпт:**
+
+```
+Контекст: фаза 27 — CI и pre-commit parity.
+Источник AA: .github/workflows/ci.yml, .pre-commit-config.yaml
+Цель: /opt/AdminPanelAZ
+
+1. CI: npm run lint (eslint) во frontend/
+2. CI: pip-audit, bandit — continue-on-error (advisory, как в AA)
+3. pre-commit: eslint + bandit hooks (optional, non-blocking)
+4. MIGRATION.md: CI/CD, pre-commit → ✅
+CHANGELOG [1.2.2]
+```
+
+---
+
+## Фаза 28 — VPN-сеть + firewall runtime
+
+**Релиз:** 1.3.0 · **Режим:** **Plan** → **Agent** → **Debug** · **Срок:** 5–7 д
+
+**Задачи:** VpnNetworkTab read-only; мутации порта/nginx через `install.sh` / `nginx-setup.sh`; нет runtime `panel_port_firewall.py`.
+
+**Риск:** высокий на production — начинать с Plan.
+
+**Промпт (Plan):**
+
+```
+Сравни AA _tab_vpn_network.html + post handlers с AZ VpnNetworkTab (read-only).
+Сравни AA panel_port_firewall.py с AZ scripts/firewall-setup.sh.
+Решение: full parity vs guided wizard (background task → nginx-setup.sh) vs ops-only (документировать).
+Multi-node: мутации только на controller.
+```
+
+**Промпт (Agent):**
+
+```
+Контекст: фаза 28 — VPN network + firewall runtime (по Plan).
+Источник AA: _tab_vpn_network.html, panel_port_firewall.py
+Цель: settings router, VpnNetworkTab, ip_restriction/security
+
+28a — VPN network: guided wizard или editable fields + confirm + BackgroundTaskService
+28b — panel_port_firewall parity: runtime iptables/ipset для whitelist порта панели
+28c — Tests: test_panel_port_firewall.py, test_vpn_network_settings.py
+MIGRATION.md: VPN-сеть, firewall panel port → ✅ или 🟡 с явным ops-only решением
+CHANGELOG [1.3.0]
+```
+
+---
+
+## Фаза 29 — Ops console menu (optional)
+
+**Релиз:** 1.3.x · **Режим:** **Agent** · **Срок:** 2–3 д · **Приоритет:** низкий
+
+**Задачи:** AA `adminpanel.sh` — интерактивное меню restart/update/backup/tests; AZ — `install.sh` + systemd.
+
+**Промпт:**
+
+```
+Контекст: фаза 29 — ops console menu (optional).
+Источник AA: script_sh/adminpanel.sh
+Цель: scripts/adminpanel-menu.sh
+
+Обёртка: restart panel, run backup, run pytest, git update — через start.sh, systemd, существующие scripts.
+Не дублировать install.sh wizard.
+MIGRATION.md: adminpanel.sh menu → ✅ или оставить 🟡 «ops-only via systemd»
+CHANGELOG [1.3.x]
+```
+
+---
+
 ## Дорожная карта релизов
 
 | Версия | Фазы | Фокус |
@@ -656,6 +950,14 @@ Test count: pytest --collect-only.
 | **0.7.2** | 18 | Rate limit + security |
 | **0.7.3** | 19 | Ops CLI, docs |
 | **1.0.0** | 20 | Parity audit, release |
+| **1.1.0** | 21–22 | AdminNotify hooks, temp whitelist UI |
+| **1.1.1** | 23 | CIDR presets CRUD |
+| **1.1.2** | 24 | QR max downloads, FEATURE_MAINTENANCE |
+| **1.2.0** | 25 | Editor diff |
+| **1.2.1** | 26 | Test suite wave 2 |
+| **1.2.2** | 27 | CI / pre-commit parity |
+| **1.3.0** | 28 | VPN network + firewall runtime |
+| **1.3.x** | 29 | Ops console menu (optional) |
 
 ---
 
@@ -679,6 +981,7 @@ Test count: pytest --collect-only.
 | JWT vs session AA | Фазы 16/18 — только Plan сначала |
 | Multi-node | В каждом промпте: node_adapter, node_id |
 | Регрессия 🆕 | После фазы 20 — smoke: 2FA, NodesPage, MonitoringPage |
+| VPN/nginx из UI (фаза 28) | Начинать с Plan; guided wizard + confirm; rollback; ops-only допустим |
 
 ---
 
@@ -687,7 +990,7 @@ Test count: pytest --collect-only.
 - Flask monolith `app.py` → FastAPI routers
 - Jinja2 templates → React SPA
 - `client.sh` в репозитории → AntiZapret на сервере
-- Полная копия `adminpanel.sh` → `install.sh` + systemd + optional CLI
+- Полная копия `adminpanel.sh` → `install.sh` + systemd + optional CLI (фаза 29)
 
 ---
 

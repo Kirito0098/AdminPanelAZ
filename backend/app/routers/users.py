@@ -7,7 +7,9 @@ from app.database import get_db
 from app.models import User, UserRole
 from app.schemas import MessageResponse, UserCreate, UserResponse, UserUpdate
 from app.services.action_log import log_action
+from app.services.admin_notify import admin_notify_service
 from app.services.ip_restriction import ip_restriction_service
+from app.services.notify_time import get_client_timezone_from_request
 from app.services.password_policy import validate_password
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -48,6 +50,13 @@ def create_user(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"created={payload.username}, role={payload.role.value}",
         )
+    admin_notify_service.send_user_create(
+        db,
+        actor_username=admin.username,
+        target_name=user.username,
+        details=f"role={payload.role.value}",
+        client_timezone=get_client_timezone_from_request(request),
+    )
     return user
 
 
@@ -121,4 +130,10 @@ def delete_user(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"deleted={deleted_username}",
         )
+    admin_notify_service.send_user_delete(
+        db,
+        actor_username=current_user.username,
+        target_name=deleted_username,
+        client_timezone=get_client_timezone_from_request(request),
+    )
     return MessageResponse(message="Пользователь удалён")

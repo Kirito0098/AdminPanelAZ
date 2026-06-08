@@ -12,5 +12,11 @@ httpx==0.28.1
 # Linter (matches CI and pre-commit).
 ruff>=0.11,<1.0
 
+# Security static analysis (CI/pre-commit: advisory).
+bandit>=1.7,<2.0
+
+# Dependency vulnerability audit (CI: advisory via continue-on-error).
+pip-audit>=2.7,<3.0
+
 # Git hook runner.
 pre-commit>=4.0,<5.0

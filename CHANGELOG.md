@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-06-08
+
+### Added
+- **CI / pre-commit parity (фаза 27)** — ESLint (`npm run lint`) во `frontend/`; `pip-audit` и `bandit` в CI с `continue-on-error` (advisory, как в AA); pre-commit hooks eslint + bandit (non-blocking).
+- **`frontend/eslint.config.js`** — flat config (typescript-eslint, react-hooks, react-refresh).
+
+### Changed
+- **`backend/requirements-dev.txt`** — `bandit`, `pip-audit`.
+- **`MIGRATION.md`**, **`README.md`** — CI/CD, pre-commit → ✅.
+
+## [1.2.1] - 2026-06-08
+
+### Added
+- **Test suite wave 2 (фаза 26)** — порт критичных AA-модулей: `test_cidr_db_updater_service`, `test_cidr_list_updater`, `test_access_remaining`, `test_db_migration_service`, `test_backup_scheduler`, `test_client_access_openvpn_block`, `test_settings_post_handlers`; сервис `access_remaining.py`, shim `cidr_list_updater.py`.
+- **385 pytest** в 48 модулях (AA: 53; Jinja/Flask-only и phase-28 тесты не портируются).
+
+### Changed
+- **`pipeline_facade` / `facade_compat`** — `PROVIDER_SOURCES` и fallback на `cidr_list_updater` для file pipeline и тестов.
+- **`games.py`** — regex чтения saved game keys поддерживает маркеры AdminPanelAZ.
+- **`MIGRATION.md`**, **`README.md`** — In-panel pytest → ✅.
+
+## [1.2.0] - 2026-06-08
+
+### Added
+- **Diff-подсветка в редакторе файлов (фаза 25)** — порт AA `buildLightDiff` (Myers + indexed fallback); live diff относительно сохранённой версии; кнопка «Сравнить с диском» (re-fetch с узла); preview diff в диалоге «Сохранить и применить».
+
+### Changed
+- **`MIGRATION.md`** — Diff-подсветка → ✅.
+
+## [1.1.2] - 2026-06-08
+
+### Added
+- **QR max downloads (фаза 24a)** — поле «Макс. скачиваний» (1 / 3 / 5) в `SecurityTab` для `qr_download_max_downloads`.
+- **`FEATURE_MAINTENANCE_ENABLED` (фаза 24b)** — toggle `maintenance` в `feature_toggles.py` и `env_defaults.sh`; guard `/api/maintenance/*` и maintenance API под `/api/settings/*`; скрытие вкладки «Обслуживание» в `SettingsNav`.
+- **Тесты** — `test_feature_guards.py`: run-doall, restart-service, recreate-profiles, session-stats при отключённом maintenance.
+
+### Changed
+- **`MIGRATION.md`** — QR-настройки → ✅, `FEATURE_MAINTENANCE` → ✅, Feature toggles → ✅.
+
+## [1.1.1] - 2026-06-08
+
+### Added
+- **CIDR presets CRUD (фаза 23)** — REST API `GET/POST /api/routing/cidr-db/presets`, `PUT/DELETE /presets/{id}`, `POST /presets/{id}/reset`; Pydantic-схемы; audit `log_action`.
+- **`PresetsTab`** — создание/редактирование/удаление пользовательских пресетов, сброс встроенных, multi-select провайдеров, применение из БД.
+- **Тесты** — `test_cidr_db_presets.py` (12 cases), feature guard для `/presets`.
+
+### Changed
+- **`MIGRATION.md`** — «Пресеты CIDR», «Маршрутизация / CIDR» → ✅.
+
+## [1.1.0] - 2026-06-08
+
+### Added
+- **AdminNotify hooks (фаза 21)** — Telegram-уведомления при создании/удалении пользователя, блокировке/разблокировке OVPN/WG-клиента (с `node_id`/`node_name`) и входе с непривязанным TG ID (web + mini app).
+- **Интеграционные тесты** — `test_admin_notify_integration.py`: user create/delete, client ban/unban, TG mini unlink, проверка toggles событий.
+
+### Changed
+- **Telegram Login / Mini App** — вход только для пользователей с привязанным `telegram_id` (без автосоздания `tg_*` аккаунта); при непривязанном ID — `send_tg_login_unlinked`.
+- **`MIGRATION.md`** — Telegram admin-уведомления → ✅.
+
 ## [1.0.0] - 2026-06-08
 
 Релиз после **фазы 20** (final parity audit). Baseline переноса: AdminAntizapret **1.9.0** → AdminPanelAZ **1.0.0**.

@@ -161,7 +161,6 @@ export default function RoutingPage() {
 
         <TabsContent value="presets">
           <PresetsTab
-            presets={data.presets}
             providers={data.providers}
             isAdmin={isAdmin}
             actionLoading={actionLoading}

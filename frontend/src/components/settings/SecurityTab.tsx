@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Ban, Shield, ShieldOff } from 'lucide-react'
+import { Ban, Clock, Shield, ShieldOff } from 'lucide-react'
 import {
   ApiError,
+  addTempWhitelist,
+  getClientIp,
   getScannerBans,
   getSecuritySettings,
+  removeTempWhitelist,
   unbanScannerIp,
   updateSecuritySettings,
 } from '@/api/client'
@@ -31,14 +34,20 @@ export default function SecurityTab() {
   const [bans, setBans] = useState<ScannerBan[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [clientIp, setClientIp] = useState<string | null>(null)
+  const [tempHours, setTempHours] = useState<1 | 12 | 24>(1)
+  const [tempIpInput, setTempIpInput] = useState('')
+  const [addingTemp, setAddingTemp] = useState(false)
+  const [removingTempIp, setRemovingTempIp] = useState<string | null>(null)
 
   const load = async () => {
     try {
       const s = await getSecuritySettings()
       setSettings(s)
       setAllowedIps(s.allowed_ips.join(', '))
-      const b = await getScannerBans()
+      const [b, ipInfo] = await Promise.all([getScannerBans(), getClientIp()])
       setBans(b.active_bans || [])
+      setClientIp(ipInfo.client_ip)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки')
     }
@@ -83,6 +92,40 @@ export default function SecurityTab() {
     }
   }
 
+  const handleAddTempWhitelist = async (ip?: string) => {
+    const targetIp = (ip ?? (tempIpInput.trim() || clientIp))?.trim()
+    if (!targetIp) {
+      notifyError('Не удалось определить IP-адрес')
+      return
+    }
+    setAddingTemp(true)
+    try {
+      const updated = await addTempWhitelist(targetIp, tempHours)
+      setSettings(updated)
+      setTempIpInput('')
+      success(`IP ${targetIp} добавлен на ${tempHours} ч.`)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка добавления IP')
+    } finally {
+      setAddingTemp(false)
+    }
+  }
+
+  const handleRemoveTempWhitelist = async (ip: string) => {
+    setRemovingTempIp(ip)
+    try {
+      const updated = await removeTempWhitelist(ip)
+      setSettings(updated)
+      success(`IP ${ip} удалён из временного whitelist`)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка удаления IP')
+    } finally {
+      setRemovingTempIp(null)
+    }
+  }
+
+  const ipRestrictionActive = settings?.ip_restriction_enabled ?? false
+
   if (loading) {
     return <Spinner label="Загрузка настроек безопасности..." className="py-12" />
   }
@@ -121,6 +164,101 @@ export default function SecurityTab() {
                 placeholder="192.168.1.0/24, 10.0.0.1"
               />
               <p className="text-xs text-muted-foreground">Оставьте пустым при выключенном ограничении</p>
+            </div>
+
+            <div className={`space-y-4 rounded-md border p-4 ${!ipRestrictionActive ? 'opacity-60' : ''}`}>
+              <h4 className="flex items-center gap-2 text-sm font-medium">
+                <Clock size={16} />
+                Временный whitelist
+              </h4>
+              <p className="text-xs text-muted-foreground">
+                Временно разрешить доступ с IP, не добавляя его в постоянный список.
+                {!ipRestrictionActive && ' Доступно при включённом ограничении по IP.'}
+              </p>
+
+              <fieldset disabled={!ipRestrictionActive || addingTemp} className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Срок доступа</Label>
+                  <div className="flex flex-wrap gap-4">
+                    {([1, 12, 24] as const).map((h) => (
+                      <label key={h} className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="radio"
+                          name="temp-whitelist-hours"
+                          checked={tempHours === h}
+                          onChange={() => setTempHours(h)}
+                          className="h-4 w-4"
+                        />
+                        {h} ч.
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>IP-адрес (необязательно)</Label>
+                  <Input
+                    value={tempIpInput}
+                    onChange={(e) => setTempIpInput(e.target.value)}
+                    placeholder={clientIp ? `Пусто = ${clientIp}` : '192.168.1.100'}
+                    className="font-mono"
+                  />
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!clientIp}
+                    onClick={() => handleAddTempWhitelist(clientIp ?? undefined)}
+                  >
+                    {addingTemp ? 'Добавление...' : 'Добавить текущий IP'}
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!tempIpInput.trim()}
+                    onClick={() => handleAddTempWhitelist()}
+                  >
+                    Добавить указанный IP
+                  </Button>
+                </div>
+              </fieldset>
+
+              {settings.temp_whitelist.length > 0 && (
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>IP</TableHead>
+                        <TableHead>Истекает</TableHead>
+                        <TableHead>Срок (ч)</TableHead>
+                        <TableHead />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {settings.temp_whitelist.map((entry) => (
+                        <TableRow key={entry.ip}>
+                          <TableCell className="font-mono">{entry.ip}</TableCell>
+                          <TableCell>
+                            {new Date(entry.expires_at).toLocaleString('ru-RU')}
+                          </TableCell>
+                          <TableCell>{entry.hours}</TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={!ipRestrictionActive || removingTempIp === entry.ip}
+                              onClick={() => handleRemoveTempWhitelist(entry.ip)}
+                            >
+                              {removingTempIp === entry.ip ? 'Удаление...' : 'Удалить'}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </div>
           </div>
 
@@ -192,6 +330,23 @@ export default function SecurityTab() {
                 />
               </div>
               <div className="space-y-2">
+                <Label>Макс. скачиваний</Label>
+                <div className="flex flex-wrap gap-4">
+                  {([1, 3, 5] as const).map((n) => (
+                    <label key={n} className="flex cursor-pointer items-center gap-2 text-sm">
+                      <input
+                        type="radio"
+                        name="qr-download-max-downloads"
+                        checked={settings.qr_download_max_downloads === n}
+                        onChange={() => setSettings({ ...settings, qr_download_max_downloads: n })}
+                        className="h-4 w-4"
+                      />
+                      {n}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2 md:col-span-2">
                 <Label>PIN для скачивания</Label>
                 <Input
                   type="password"

@@ -29,7 +29,7 @@ const workflowSteps = [
 export default function CidrPipelineTab({
   cidrDb,
   antifilter,
-  pipelineTask,
+  pipelineTask: _pipelineTask,
   filterAntifilter,
   pipelineBusy,
   onFilterAntifilterChange,

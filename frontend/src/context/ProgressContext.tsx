@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
 import BackgroundTaskProgress from '@/components/ui/BackgroundTaskProgress'
-import { GlobalProgressBar, InlineProgressBar } from '@/components/ui/ProgressBar'
+import { GlobalProgressBar } from '@/components/ui/ProgressBar'
 import { useBackgroundTaskPoll, type BackgroundTaskPollOptions } from '@/hooks/useBackgroundTaskPoll'
 import type { BackgroundTask } from '@/types'
 

@@ -32,7 +32,7 @@ interface NavItem {
   label: string
   icon: LucideIcon
   description: string
-  settingsTab?: 'backup' | 'telegram' | 'security' | 'tests' | 'users' | 'updates' | 'vpn_network'
+  settingsTab?: 'backup' | 'maintenance' | 'telegram' | 'security' | 'tests' | 'users' | 'updates' | 'vpn_network'
 }
 
 interface NavGroup {
@@ -69,6 +69,7 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
         label: 'Обслуживание',
         icon: Wrench,
         description: 'Профили клиентов и перезапуск VPN',
+        settingsTab: 'maintenance',
       },
       {
         id: 'backup',
@@ -204,7 +205,7 @@ export default function SettingsNav({ active, onChange, isAdmin, isTabEnabled }:
   )
 }
 
-export function getDefaultSection(isAdmin: boolean): SettingsSection {
+export function getDefaultSection(_isAdmin: boolean): SettingsSection {
   return 'personal'
 }
 

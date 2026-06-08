@@ -99,12 +99,9 @@ export function buildAccessMeta(
   const isBlocked = policy?.is_blocked ?? false
   let tone: 'active' | 'expiring' | 'expired' = 'active'
 
-  let accessExpiresAt: string | null | undefined
   if (config.vpn_type === 'openvpn') {
     lines.push({ text: `Сертификат: ${config.cert_expire_days ?? '—'} дн.` })
-    accessExpiresAt = null
   } else if (policy?.expires_at) {
-    accessExpiresAt = policy.expires_at
     lines.push({ text: `Отключение: ${formatDateShort(policy.expires_at)}` })
     const remaining = formatAccessRemaining(policy.expires_at)
     lines.push({ text: `Осталось: ${remaining || 'неизвестно'}` })

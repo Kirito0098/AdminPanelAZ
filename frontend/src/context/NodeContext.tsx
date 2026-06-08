@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import * as api from '@/api/client'
 import { useAuth } from '@/context/AuthContext'
-import type { ActiveNode, Node } from '@/types'
+import type { Node } from '@/types'
 
 interface NodeContextValue {
   activeNode: Node | null

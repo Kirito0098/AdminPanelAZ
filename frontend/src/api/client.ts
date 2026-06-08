@@ -469,6 +469,52 @@ export async function applyRouting() {
   return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/routing/apply', { method: 'POST' })
 }
 
+export async function getCidrDbPresets() {
+  return apiFetch<{ success: boolean; presets: import('../types').CidrDbPresetInfo[] }>(
+    '/routing/cidr-db/presets',
+  )
+}
+
+export async function createCidrDbPreset(data: {
+  name: string
+  description?: string
+  providers: string[]
+  settings?: import('../types').CidrPresetSettings
+}) {
+  return apiFetch<{ success: boolean; preset: import('../types').CidrDbPresetInfo }>(
+    '/routing/cidr-db/presets',
+    { method: 'POST', body: JSON.stringify(data) },
+  )
+}
+
+export async function updateCidrDbPreset(
+  id: number,
+  data: {
+    name?: string
+    description?: string
+    providers?: string[]
+    settings?: import('../types').CidrPresetSettings
+  },
+) {
+  return apiFetch<{ success: boolean; preset: import('../types').CidrDbPresetInfo }>(
+    `/routing/cidr-db/presets/${id}`,
+    { method: 'PUT', body: JSON.stringify(data) },
+  )
+}
+
+export async function deleteCidrDbPreset(id: number) {
+  return apiFetch<{ success: boolean; message: string }>(`/routing/cidr-db/presets/${id}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function resetCidrDbPreset(id: number) {
+  return apiFetch<{ success: boolean; preset: import('../types').CidrDbPresetInfo }>(
+    `/routing/cidr-db/presets/${id}/reset`,
+    { method: 'POST' },
+  )
+}
+
 export async function getCidrDbStatus() {
   return apiFetch<import('../types').CidrDbStatus>('/routing/cidr-db/status')
 }
@@ -711,6 +757,24 @@ export async function updateSecuritySettings(
     method: 'PATCH',
     body: JSON.stringify(data),
   })
+}
+
+export async function addTempWhitelist(ip: string, hours: number) {
+  return apiFetch<import('../types').SecuritySettings>('/security/temp-whitelist', {
+    method: 'POST',
+    body: JSON.stringify({ ip, hours }),
+  })
+}
+
+export async function removeTempWhitelist(ip: string) {
+  return apiFetch<import('../types').SecuritySettings>(
+    `/security/temp-whitelist/${encodeURIComponent(ip)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export async function getClientIp() {
+  return apiFetch<{ client_ip: string; allowed: boolean }>('/security/check-ip')
 }
 
 export async function togglePublicDownload(enabled?: boolean) {

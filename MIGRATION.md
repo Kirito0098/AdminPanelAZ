@@ -36,24 +36,24 @@ AdminPanelAZ — порт веб-панели AdminAntizapret на FastAPI + Rea
 | Политики доступа (блок, срок, лимиты) | ✅ | OpenVPN + WG/AWG |
 | Синхронизация и графики трафика | ✅ | Фоновый collector + страница «Мониторинг трафика» |
 | Лимиты трафика (reconcile) | ✅ | Reconcile + TG notify при превышении |
-| Маршрутизация / CIDR | 🟡 | Pipeline, провайдеры, games, AntiZapret config ✅; presets — только apply встроенных (без CRUD) |
+| Маршрутизация / CIDR | ✅ | Pipeline, провайдеры, games, AntiZapret config, presets CRUD |
 | Редактор файлов AntiZapret | ✅ | Мультифайловый редактор + apply |
 | Мониторинг сервера (CPU/RAM/vnstat/WS) | ✅ | Страница «Сервер» |
 | NOC / подключённые клиенты / логи | ✅ | Monitoring + Logs |
 | Безопасность (IP whitelist, scanner, rate limit, headers) | ✅ | `security.py`, global API rate limit, robots/security.txt (фаза 18) |
 | QR / одноразовые ссылки | ✅ | Настройки в SecurityTab (не отдельная вкладка) |
 | Бэкапы (ручные + авто + TG) | ✅ | + опция `client.sh 8` в BackupTab (ручной и авто) |
-| Feature toggles | 🟡 | 22 toggles (parity ~95%); нет `FEATURE_MAINTENANCE_ENABLED` |
+| Feature toggles | ✅ | 23 toggles (parity AA + `NIGHTLY_IDLE_RESTART` в AZ) |
 | Telegram Login + Mini App | ✅ | |
-| Telegram admin-уведомления | 🟡 | Login, config ops, settings, CPU/RAM, traffic limits ✅; ban/unban клиента и user create/delete — без TG-хуков |
+| Telegram admin-уведомления | ✅ | Login, config ops, settings, CPU/RAM, traffic limits, ban/unban клиента, user create/delete, TG unlink |
 | Auth (login, captcha, роли) | ✅ | + 🆕 2FA/TOTP, refresh tokens |
 | Viewer role | ✅ | API, ограничения и UI назначения доступа в UsersTab |
 | Журнал действий | ✅ | Просмотр и экспорт CSV |
 | Обновление системы (git) | ✅ | Панель + 🆕 node agent / AntiZapret на узлах |
-| In-panel pytest | 🟡 | 40 модулей / 240 тестов vs 53 модуля в AA |
+| In-panel pytest | ✅ | 48 модулей / 385 тестов (AA: 53; ~5 Jinja/Flask-only не портируются) |
 | Установка / ops | 🟡 | `install.sh` + scripts; diagnostics/safe-browsing CLI ✅; нет `adminpanel.sh` menu |
 | Multi-node | 🆕 | Controller + Node Agent |
-| CI/CD | 🟡 | CI: pytest + ruff + shellcheck + frontend build; нет eslint/pip-audit/bandit как в AA |
+| CI/CD | ✅ | pytest + ruff + shellcheck + frontend build + eslint; pip-audit/bandit advisory |
 
 ---
 
@@ -133,7 +133,7 @@ flowchart LR
 | Провайдеры CIDR | cidr routes | `ProvidersTab`, `cidr/ip_manager.py` | ✅ |
 | CIDR DB pipeline (refresh/generate) | cidr_db APIs | `cidr_db.py`, `CidrPipelineTab` | ✅ |
 | Antifilter.net sync | antifilter API | `cidr_db.py` | ✅ |
-| Пресеты CIDR | presets API (CRUD) | `PresetsTab` (apply встроенных) | 🟡 |
+| Пресеты CIDR | presets API (CRUD) | `PresetsTab` | ✅ |
 | Game filters | полный `GAME_FILTER_CATALOG` | `game_catalog.py` (~75 игр, AA 1.9.0) | ✅ |
 | Route-файлы (include/exclude IPs) | routing files | `FilesTab` | ✅ |
 | run-doall / apply | `/run-doall` | `POST /api/routing/apply` | ✅ |
@@ -149,7 +149,7 @@ flowchart LR
 | Adblock hosts | то же | то же | ✅ |
 | Security allow/deny IPs | то же | то же | ✅ |
 | Apply + doall | POST handlers | `edit_files.py` | ✅ |
-| Diff-подсветка | JS diff module | React editor (без diff) | 🟡 |
+| Diff-подсветка | JS diff module | `EditFilesPage.tsx`, `buildLightDiff.ts` | ✅ |
 
 ### 6. Безопасность и доступ
 
@@ -158,7 +158,7 @@ flowchart LR
 | Роли admin / viewer | `auth_manager.py` | `UserRole`, JWT | ✅ (+ 🆕 role `user`) |
 | Captcha на login | captcha routes | `auth.py` | ✅ |
 | IP allow-list (permanent) | `ip_restriction.py` | `security.py` | ✅ |
-| Временный whitelist (1h/12h/24h) | temporary whitelist store | `security.py` + API; UI в SecurityTab — нет | 🟡 |
+| Временный whitelist (1h/12h/24h) | temporary whitelist store | `security.py` + API + SecurityTab | ✅ |
 | Scanner auto-block (ipset/iptables) | scanner store | `scanner_firewall_store.py` | ✅ |
 | CSRF / CSP / security headers | `http_security.py` | middleware + robots/security.txt | ✅ |
 | Rate limit login | Flask-Limiter (+ Redis) | auth rate limit (+ Redis для workers) | ✅ |
@@ -203,12 +203,12 @@ flowchart LR
 | Управление пользователями | settings users tab | `UsersTab.tsx` | ✅ |
 | Viewer config access UI | users tab | `UsersTab.tsx` + `/api/system/viewer-access` | ✅ |
 | Feature toggles UI | settings tab | `FeatureTogglesTab.tsx` | ✅ |
-| QR-настройки (TTL, PIN, max downloads) | отдельная вкладка | `SecurityTab.tsx` | 🟡 |
+| QR-настройки (TTL, PIN, max downloads) | отдельная вкладка | `SecurityTab.tsx` | ✅ |
 | VPN-сеть (порт, HTTPS, Nginx из UI) | `_tab_vpn_network.html` | `VpnNetworkTab.tsx` (read-only) + `GET /api/settings/vpn-network`; мутации — `install.sh` / `nginx-setup.sh` | 🟡 |
 | Журнал действий (просмотр) | action logs | `LogsPage.tsx` | ✅ |
 | Экспорт action logs CSV | `/api/settings/action-logs/export` | `GET /api/logs/action-logs/export` | ✅ |
 | Обновление панели (git) | `/update_system` | `UpdatesTab.tsx`, `system.py` | ✅ |
-| In-panel pytest | `api_tests.py` | `TestsTab.tsx`, `tests.py`, `backend/tests/` (40 модулей) | 🟡 |
+| In-panel pytest | `api_tests.py` | `TestsTab.tsx`, `tests.py`, `backend/tests/` (48 модулей) | ✅ |
 | Обновление node agent + AntiZapret | — | `NodeUpdateDialog`, `nodes.py` | 🆕 |
 
 ### 10. Feature toggles (сравнение)
@@ -237,9 +237,9 @@ flowchart LR
 | `ACTIVE_SESSION_TRACKING` (background) | `active_web_session.py` | `active_web_session.py` + toggle | ✅ |
 | `NIGHTLY_IDLE_RESTART` (background) | `nightly_idle_restart.py` (без env-toggle) | `nightly_idle_restart_worker.py` + toggle | 🆕 |
 | `RUNTIME_BACKUP_CLEANUP` (background) | cron | `backup_scheduler.py` worker | ✅ |
-| `FEATURE_MAINTENANCE_ENABLED` | maintenance tab | MaintenanceTab (без toggle) | 🟡 |
+| `FEATURE_MAINTENANCE_ENABLED` | maintenance tab | `MaintenanceTab` + guard `/api/maintenance/*`, maintenance settings API | ✅ |
 
-> **Feature toggles (1.0.0):** 22 env-keys в AZ vs 22 в AA; UI parity для app_module ✅; нет `FEATURE_MAINTENANCE`; в AZ добавлен toggle `NIGHTLY_IDLE_RESTART` (в AA — без отдельного env).
+> **Feature toggles (1.1.2):** parity AA для app_module ✅; в AZ добавлен toggle `NIGHTLY_IDLE_RESTART` (в AA — без отдельного env).
 
 ### 11. Установка и ops
 
@@ -254,8 +254,8 @@ flowchart LR
 | Site diagnostics CLI | `site_diagnostics.sh` | `scripts/site-diagnostics.sh` + CLI | ✅ |
 | Safe Browsing status CLI | `safe_browsing_status_cli.py` | `scripts/safe-browsing-status.py` | ✅ |
 | env defaults | `env_defaults.sh` | `scripts/env_defaults.sh` (sync AA 1.9.0) | ✅ |
-| CI (pytest, ruff, shellcheck, eslint) | `.github/workflows/ci.yml` | `.github/workflows/ci.yml` (без eslint) | 🟡 |
-| pre-commit hooks | `.pre-commit-config.yaml` | `.pre-commit-config.yaml` (ruff, shellcheck) | 🟡 |
+| CI (pytest, ruff, shellcheck, eslint) | `.github/workflows/ci.yml` | `.github/workflows/ci.yml` | ✅ |
+| pre-commit hooks | `.pre-commit-config.yaml` | `.pre-commit-config.yaml` (ruff, shellcheck, eslint/bandit advisory) | ✅ |
 
 ### 12. UI / UX
 
@@ -333,16 +333,16 @@ flowchart LR
 
 ### Высокий приоритет
 
-1. **AdminNotify hooks** — `send_client_ban` при ban/unban; `send_user_create` / `send_user_delete`; `send_tg_login_unlinked`
+1. ~~**AdminNotify hooks**~~ ✅ — `send_client_ban`, `send_user_create` / `send_user_delete`, `send_tg_login_unlinked`
 2. **Временный IP whitelist UI** — radio 1h/12h/24h в SecurityTab (API уже есть)
-3. **CIDR presets CRUD** — create/update/delete как в AA `/api/cidr-presets`
+3. ~~**CIDR presets CRUD**~~ ✅ — `GET/POST/PUT/DELETE/reset` в `cidr_db.py`, `PresetsTab`
 
 ### Средний приоритет
 
-4. **Diff-подсветка** в редакторе файлов (parity `edit_files/diff.js`)
-5. **QR max downloads** — поле в SecurityTab (сохранение есть, input нет)
-6. **`FEATURE_MAINTENANCE_ENABLED`** toggle (вкладка Maintenance без guard)
-7. **CI parity** — eslint для JS, pip-audit/bandit (advisory как в AA)
+4. ~~**Diff-подсветка**~~ ✅ — `buildLightDiff.ts`, `DiffPanel`, live diff + «Сравнить с диском» в `EditFilesPage`
+5. ~~**QR max downloads**~~ ✅ — поле «Макс. скачиваний» в SecurityTab (1, 3, 5)
+6. ~~**`FEATURE_MAINTENANCE_ENABLED`**~~ ✅ — toggle + guard maintenance API и вкладки
+7. ~~**CI parity**~~ ✅ — eslint для frontend, pip-audit/bandit (advisory как в AA)
 
 ### Низкий приоритет
 

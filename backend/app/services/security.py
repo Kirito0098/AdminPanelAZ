@@ -99,6 +99,18 @@ class SecurityService:
         db.commit()
         return self.get_settings(db)
 
+    def remove_temp_whitelist(self, db: Session, ip: str) -> dict:
+        ip = ip.strip()
+        temp_raw = _get(db, "security_temp_whitelist", "[]")
+        try:
+            temp_list = json.loads(temp_raw)
+        except json.JSONDecodeError:
+            temp_list = []
+        temp_list = [e for e in temp_list if e.get("ip") != ip]
+        _set(db, "security_temp_whitelist", json.dumps(temp_list))
+        db.commit()
+        return self.get_settings(db)
+
     def is_ip_allowed(self, db: Session, client_ip: str) -> bool:
         settings = self.get_settings(db)
         if not settings["ip_restriction_enabled"]:

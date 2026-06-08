@@ -52,3 +52,16 @@ def test_clear_settings_removes_temporary(tmp_path):
     settings = service.get_settings(session)
     assert settings["temp_whitelist"] == []
     session.close()
+
+
+def test_remove_temp_whitelist_entry(tmp_path):
+    session = _make_session(tmp_path)
+    service = SecurityService()
+    service.add_temp_whitelist(session, "203.0.113.10", hours=1)
+    service.add_temp_whitelist(session, "203.0.113.11", hours=12)
+    settings = service.remove_temp_whitelist(session, "203.0.113.10")
+    assert len(settings["temp_whitelist"]) == 1
+    assert settings["temp_whitelist"][0]["ip"] == "203.0.113.11"
+    assert service.is_ip_allowed(session, "203.0.113.10") is False
+    assert service.is_ip_allowed(session, "203.0.113.11") is True
+    session.close()

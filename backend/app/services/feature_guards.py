@@ -124,6 +124,15 @@ def _is_always_allowed(path: str) -> bool:
     return any(path.startswith(prefix) for prefix in ALWAYS_ALLOWED_PREFIXES)
 
 
+def _module_guard_under_always_allowed(path: str, *, service: FeatureToggleService) -> tuple[str, str] | None:
+    """Modules whose API paths sit under broad always-allowed prefixes (e.g. /api/settings)."""
+    maintenance = FEATURE_TOGGLE_BY_KEY.get("maintenance")
+    if maintenance is not None and not service.is_enabled("maintenance"):
+        if path in maintenance.api_paths or any(path.startswith(prefix) for prefix in maintenance.api_prefixes):
+            return "maintenance", module_disabled_message("maintenance")
+    return None
+
+
 def _all_required_modules(path: str) -> tuple[str, ...] | None:
     for prefix, modules in ALL_REQUIRED_PREFIXES.items():
         if path.startswith(prefix):
@@ -133,6 +142,10 @@ def _all_required_modules(path: str) -> tuple[str, ...] | None:
 
 def check_path_access(path: str, *, service: FeatureToggleService) -> tuple[str, str] | None:
     """Return (module_key, message) when access must be denied, else None."""
+    blocked_under_allow = _module_guard_under_always_allowed(path, service=service)
+    if blocked_under_allow is not None:
+        return blocked_under_allow
+
     if _is_always_allowed(path):
         return None
 

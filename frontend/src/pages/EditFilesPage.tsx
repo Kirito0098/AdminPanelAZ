@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Ban,
   FileEdit,
+  GitCompare,
   Globe,
   Loader2,
   Network,
@@ -22,6 +23,7 @@ import {
   saveEditFile,
   saveEditFilesBatch,
 } from '@/api/client'
+import DiffPanel from '@/components/edit-files/DiffPanel'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import { NodeBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -45,6 +47,11 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import {
+  buildLightDiff,
+  countDiffOps,
+  formatDiffSummary,
+} from '@/lib/buildLightDiff'
 import { cn } from '@/lib/utils'
 import type { EditFileEntry } from '@/types'
 
@@ -147,6 +154,10 @@ export default function EditFilesPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
   const [confirmApply, setConfirmApply] = useState(false)
+  const [diffOpen, setDiffOpen] = useState(false)
+  const [diffBaseline, setDiffBaseline] = useState<'saved' | 'disk'>('saved')
+  const [diskContent, setDiskContent] = useState<string | null>(null)
+  const [diskCompareLoading, setDiskCompareLoading] = useState(false)
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
@@ -170,6 +181,31 @@ export default function EditFilesPage() {
     const bytes = new TextEncoder().encode(content).length
     return { lines: lineCount(content), bytes }
   }, [content])
+
+  const liveDiff = useMemo(() => buildLightDiff(savedContent, content), [savedContent, content])
+  const diskDiff = useMemo(
+    () => (diskContent != null ? buildLightDiff(diskContent, content) : null),
+    [diskContent, content],
+  )
+  const activeDiff =
+    diffBaseline === 'disk' && diskDiff != null ? diskDiff : liveDiff
+  const liveDiffCounts = useMemo(() => countDiffOps(liveDiff.ops), [liveDiff.ops])
+  const activeDiffCounts = useMemo(() => countDiffOps(activeDiff.ops), [activeDiff.ops])
+
+  const diffSummaryText = useMemo(() => {
+    if (diffBaseline === 'disk' && diskContent != null) {
+      if (!activeDiffCounts.added && !activeDiffCounts.removed) {
+        return 'Нет отличий от версии на узле'
+      }
+      return `Относительно узла: добавлено ${activeDiffCounts.added}, удалено ${activeDiffCounts.removed}`
+    }
+    return formatDiffSummary(liveDiffCounts)
+  }, [activeDiffCounts, diffBaseline, diskContent, liveDiffCounts])
+
+  const resetDiffBaseline = useCallback(() => {
+    setDiffBaseline('saved')
+    setDiskContent(null)
+  }, [])
 
   const loadFileList = useCallback(async () => {
     setLoading(true)
@@ -203,6 +239,8 @@ export default function EditFilesPage() {
         const result = await getEditFileContent(key)
         setContent(result.content)
         setSavedContent(result.content)
+        setDiffOpen(false)
+        resetDiffBaseline()
       } catch (err) {
         const message = err instanceof ApiError ? err.message : 'Ошибка чтения файла'
         setFileError(message)
@@ -213,7 +251,7 @@ export default function EditFilesPage() {
         setFileLoading(false)
       }
     },
-    [notifyError],
+    [notifyError, resetDiffBaseline],
   )
 
   useEffect(() => {
@@ -270,6 +308,7 @@ export default function EditFilesPage() {
         'Сохранение файла...',
       )
       setSavedContent(content)
+      resetDiffBaseline()
       success('Файл сохранён на узле (без doall.sh)')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
@@ -285,6 +324,7 @@ export default function EditFilesPage() {
     try {
       await withInline(() => saveEditFile(activeKey, content), 'Сохранение и doall.sh...')
       setSavedContent(content)
+      resetDiffBaseline()
       success('Файл сохранён и применён (doall.sh)')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
@@ -295,7 +335,23 @@ export default function EditFilesPage() {
 
   const handleRevert = () => {
     setContent(savedContent)
+    resetDiffBaseline()
     success('Изменения отменены')
+  }
+
+  const handleCompareWithDisk = async () => {
+    if (!activeKey || nodeOffline || fileLoading) return
+    setDiskCompareLoading(true)
+    try {
+      const result = await getEditFileContent(activeKey)
+      setDiskContent(result.content)
+      setDiffBaseline('disk')
+      setDiffOpen(true)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка чтения файла с узла')
+    } finally {
+      setDiskCompareLoading(false)
+    }
   }
 
   if (user?.role === 'viewer') {
@@ -533,6 +589,42 @@ export default function EditFilesPage() {
                 />
               )}
 
+              {!fileLoading && !fileError && (
+                <div className="space-y-3" aria-live="polite">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-expanded={diffOpen}
+                      onClick={() => setDiffOpen((open) => !open)}
+                    >
+                      {diffOpen ? 'Скрыть diff' : 'Показать diff'}
+                    </Button>
+                    {isAdmin && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleCompareWithDisk()}
+                        disabled={diskCompareLoading || nodeOffline}
+                      >
+                        {diskCompareLoading ? (
+                          <Loader2 size={16} className="animate-spin" />
+                        ) : (
+                          <GitCompare size={16} />
+                        )}
+                        Сравнить с диском
+                      </Button>
+                    )}
+                    <span className="text-xs text-muted-foreground">{diffSummaryText}</span>
+                  </div>
+                  {diffOpen && (
+                    <DiffPanel ops={activeDiff.ops} mode={activeDiff.mode} />
+                  )}
+                </div>
+              )}
+
               {isAdmin && !fileLoading && !fileError && (
                 <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                   <p className="text-xs text-muted-foreground">
@@ -588,6 +680,12 @@ export default function EditFilesPage() {
           <>
             Файл <strong>{active?.filename}</strong> будет записан на узел{' '}
             <strong>{activeNode?.name ?? 'активный'}</strong>, затем выполнен doall.sh.
+            {liveDiffCounts.added > 0 || liveDiffCounts.removed > 0 ? (
+              <>
+                {' '}
+                Будет добавлено {liveDiffCounts.added} строк, удалено {liveDiffCounts.removed}.
+              </>
+            ) : null}
           </>
         }
         alert={{
@@ -600,7 +698,12 @@ export default function EditFilesPage() {
         destructive
         loading={saving}
         onConfirm={handleSaveApply}
-      />
+        className="max-w-2xl"
+      >
+        {(liveDiffCounts.added > 0 || liveDiffCounts.removed > 0) && (
+          <DiffPanel ops={liveDiff.ops} mode={liveDiff.mode} compact maxLines={20} />
+        )}
+      </ConfirmDialog>
     </div>
   )
 }

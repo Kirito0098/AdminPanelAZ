@@ -85,6 +85,26 @@ def add_temp_whitelist(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.delete("/temp-whitelist/{ip}")
+def remove_temp_whitelist(
+    ip: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    result = SecurityService().remove_temp_whitelist(db, ip)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="security_temp_whitelist_remove",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"ip={ip.strip()}",
+        )
+    return result
+
+
 @router.post("/public-download")
 def toggle_public_download(
     payload: PublicDownloadToggle,

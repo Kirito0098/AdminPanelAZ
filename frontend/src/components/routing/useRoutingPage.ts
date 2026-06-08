@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ApiError,
   applyRouting,
-  applyRoutingPreset,
   generateCidrFromDb,
   getAntifilterStatus,
   getCidrDbStatus,
@@ -18,7 +17,14 @@ import {
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
-import type { AntifilterStatus, CidrDbStatus, CidrPipelineTask, GameFilterItem, RoutingOverview } from '@/types'
+import type {
+  AntifilterStatus,
+  CidrDbPresetInfo,
+  CidrDbStatus,
+  CidrPipelineTask,
+  GameFilterItem,
+  RoutingOverview,
+} from '@/types'
 
 export const REFRESH_INTERVAL = 60
 
@@ -273,8 +279,15 @@ export function useRoutingPage() {
         enabled ? `${name} включён` : `${name} отключён`,
         enabled ? `Включение ${name}...` : `Отключение ${name}...`,
       ),
-    applyPreset: (key: string, name: string) =>
-      withAction(() => applyRoutingPreset(key), `Пресет «${name}» применён`, `Применение пресета «${name}»...`),
+    applyPreset: (preset: CidrDbPresetInfo) =>
+      withAction(async () => {
+        if (!data) throw new Error('Нет данных маршрутизации')
+        const targetProviders = new Set(preset.providers)
+        const toggles = data.providers
+          .filter((provider) => provider.enabled !== targetProviders.has(provider.filename))
+          .map((provider) => toggleRoutingProvider(provider.filename, targetProviders.has(provider.filename)))
+        await Promise.all(toggles)
+      }, `Пресет «${preset.name}» применён`, `Применение пресета «${preset.name}»...`),
     syncGames: () =>
       withAction(() => syncGameFilters(gameModes), 'Игровые фильтры синхронизированы', 'Синхронизация игровых фильтров...'),
     inline,

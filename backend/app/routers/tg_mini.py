@@ -8,7 +8,7 @@ from datetime import datetime
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -17,7 +17,10 @@ from app.auth import create_access_token, get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, User, VpnConfig, VpnType
+from app.services.admin_notify import admin_notify_service
+from app.services.ip_restriction import ip_restriction_service
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.notify_time import get_client_timezone_from_request
 
 router = APIRouter(prefix="/tg-mini", tags=["tg-mini"])
 settings = get_settings()
@@ -271,7 +274,7 @@ def mini_app_page():
 
 
 @router.post("/auth")
-def tg_auth(payload: TelegramAuthRequest, db: Session = Depends(get_db)):
+def tg_auth(payload: TelegramAuthRequest, request: Request, db: Session = Depends(get_db)):
     token = _get_bot_token(db)
     if not token:
         raise HTTPException(status_code=503, detail="Telegram bot не настроен")
@@ -280,14 +283,24 @@ def tg_auth(payload: TelegramAuthRequest, db: Session = Depends(get_db)):
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     tg_id = str(tg_user.get("id", ""))
-    user = db.query(User).filter(User.username == f"tg_{tg_id}").first()
+    user = db.query(User).filter(User.telegram_id == tg_id).first()
     if not user:
-        from app.auth import get_password_hash
-        from app.models import UserRole
-        user = User(username=f"tg_{tg_id}", password_hash=get_password_hash(tg_id), role=UserRole.user, is_active=True)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        user = db.query(User).filter(User.username == f"tg_{tg_id}").first()
+        if user and not user.telegram_id:
+            user.telegram_id = tg_id
+            db.commit()
+    if not user:
+        admin_notify_service.send_tg_login_unlinked(
+            db,
+            telegram_id=tg_id,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            mini=True,
+            client_timezone=get_client_timezone_from_request(request),
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Этот Telegram аккаунт не привязан ни к одному пользователю панели",
+        )
     access_token = create_access_token({"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer", "telegram_id": tg_id}
 

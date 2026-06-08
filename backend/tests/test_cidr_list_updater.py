@@ -1,0 +1,1506 @@
+import ipaddress
+import json
+import os
+import shutil
+import tempfile
+import time
+import unittest
+from unittest.mock import patch
+
+from app.services.cidr import cidr_list_updater
+
+# Успешный ответ sync_game_hosts_filter для update_cidr_files / db_pipeline
+# (на CI нет доступа к /root/antizapret — без заглушки update падает до загрузки провайдеров).
+_GAME_SYNC_STUB = {
+    "success": True,
+    "message": "test-stub",
+    "game_hosts_filter": {"success": True, "changed": False},
+    "game_ips_filter": {"success": True, "changed": False},
+}
+
+
+class CidrListUpdaterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._tmpdir = tempfile.mkdtemp(prefix="cidr-list-updater-")
+        cls._config_dir = os.path.join(cls._tmpdir, "config")
+        os.makedirs(cls._config_dir, exist_ok=True)
+        cls._game_path_values = {
+            "AZ_GAME_INCLUDE_IPS_FILE": os.path.join(cls._config_dir, "AZ-Game-include-ips.txt"),
+            "AZ_GAME_INCLUDE_HOSTS_FILE": os.path.join(cls._config_dir, "AZ-Game-include-hosts.txt"),
+            "AZ_GAME_EXCLUDE_IPS_FILE": os.path.join(cls._config_dir, "AZ-Game-exclude-ips.txt"),
+            "AZ_GAME_EXCLUDE_HOSTS_FILE": os.path.join(cls._config_dir, "AZ-Game-exclude-hosts.txt"),
+            "GAME_INCLUDE_IPS_FILE": os.path.join(cls._config_dir, "AZ-Game-include-ips.txt"),
+            "GAME_INCLUDE_HOSTS_FILE": os.path.join(cls._config_dir, "AZ-Game-include-hosts.txt"),
+            "LEGACY_GAME_INCLUDE_IPS_FILE": os.path.join(cls._config_dir, "include-ips.txt"),
+            "LEGACY_GAME_INCLUDE_HOSTS_FILE": os.path.join(cls._config_dir, "include-hosts.txt"),
+        }
+        for path in cls._game_path_values.values():
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("# test baseline\n")
+
+        cls._path_patchers = [
+            patch.object(cidr_list_updater, key, value)
+            for key, value in cls._game_path_values.items()
+        ]
+        cls._sync_patchers = [
+            patch(
+                "app.services.cidr.pipeline.file_pipeline.sync_game_hosts_filter",
+                return_value=dict(_GAME_SYNC_STUB),
+            ),
+            patch(
+                "app.services.cidr.pipeline.db_pipeline.sync_game_hosts_filter",
+                return_value=dict(_GAME_SYNC_STUB),
+            ),
+        ]
+        for patcher in cls._path_patchers + cls._sync_patchers:
+            patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        for patcher in getattr(cls, "_sync_patchers", []) + getattr(cls, "_path_patchers", []):
+            patcher.stop()
+        shutil.rmtree(getattr(cls, "_tmpdir", ""), ignore_errors=True)
+
+    def test_extract_cidrs_from_bgp_tools_raw_allocations_section(self):
+        payload = """
+        # de.hetzner Announced Allocations
+        | Has a valid RPKI cert | 203.0.113.0/24 | Example |
+
+        # de.hetzner Raw Allocations
+        [ipv4] -- 5.9.0.0/16
+        [ipv4] -- [54.36.0.0/15 54.38.0.0/16]
+        ## Additional Links
+        """
+
+        extracted = cidr_list_updater._extract_cidrs(
+            payload,
+            "cidr_text_scan",
+            region_scopes=["all"],
+        )
+
+        self.assertEqual(extracted, ["5.9.0.0/16", "54.36.0.0/15", "54.38.0.0/16"])
+
+    def test_extract_cidrs_from_ripe_json(self):
+        payload = {
+            "status": "ok",
+            "data": {
+                "prefixes": [
+                    {"prefix": "1.1.1.0/24"},
+                    {"prefix": "2001:db8::/32"},
+                    {"prefix": "2.2.2.0/24"},
+                ]
+            },
+        }
+
+        extracted = cidr_list_updater._extract_cidrs(
+            json.dumps(payload),
+            "ripe_json",
+        )
+
+        self.assertEqual(extracted, ["1.1.1.0/24", "2.2.2.0/24"])
+
+    def test_extract_cidrs_from_ripe_geo_json(self):
+        payload = {
+            "status": "ok",
+            "data": {
+                "located_resources": [
+                    {
+                        "resource": "5.9.0.0/16",
+                        "locations": [
+                            {
+                                "country": "DE",
+                                "resources": ["5.9.0.0/24", "5.9.1.0/24"],
+                            },
+                            {
+                                "country": "US",
+                                "resources": ["5.9.2.0/24"],
+                            },
+                        ],
+                    }
+                ]
+            },
+        }
+
+        europe_only = cidr_list_updater._extract_cidrs(
+            json.dumps(payload),
+            "ripe_geo_json",
+            region_scopes=["europe"],
+        )
+        self.assertEqual(europe_only, ["5.9.0.0/24", "5.9.1.0/24"])
+
+        north_america_only = cidr_list_updater._extract_cidrs(
+            json.dumps(payload),
+            "ripe_geo_json",
+            region_scopes=["north-america"],
+        )
+        self.assertEqual(north_america_only, ["5.9.2.0/24"])
+
+    def test_extract_cidrs_from_ripe_geo_json_strict_mode_excludes_ambiguous(self):
+        payload = {
+            "status": "ok",
+            "data": {
+                "located_resources": [
+                    {
+                        "locations": [
+                            {
+                                "country": "DE",
+                                "resources": ["7.7.7.0/24", "8.8.8.0/24"],
+                            },
+                            {
+                                "country": "US",
+                                "resources": ["8.8.8.0/24"],
+                            },
+                        ],
+                    }
+                ]
+            },
+        }
+
+        non_strict = cidr_list_updater._extract_cidrs(
+            json.dumps(payload),
+            "ripe_geo_json",
+            region_scopes=["europe"],
+            strict_geo_filter=False,
+        )
+        self.assertEqual(non_strict, ["7.7.7.0/24", "8.8.8.0/24"])
+
+        strict = cidr_list_updater._extract_cidrs(
+            json.dumps(payload),
+            "ripe_geo_json",
+            region_scopes=["europe"],
+            strict_geo_filter=True,
+        )
+        self.assertEqual(strict, ["7.7.7.0/24"])
+
+    def test_extract_cidrs_from_google_json_strict_mode_excludes_ambiguous_scope(self):
+        payload = {
+            "syncToken": "t",
+            "creationTime": "now",
+            "prefixes": [
+                {"scope": "asia", "ipv4Prefix": "10.0.0.0/24"},
+                {"scope": "asia-east1", "ipv4Prefix": "10.0.1.0/24"},
+                {"scope": "global", "ipv4Prefix": "10.0.2.0/24"},
+            ],
+        }
+
+        non_strict = cidr_list_updater._extract_cidrs(
+            json.dumps(payload),
+            "google_json",
+            region_scopes=["asia-pacific"],
+            strict_geo_filter=False,
+        )
+        self.assertEqual(non_strict, ["10.0.0.0/24", "10.0.1.0/24"])
+
+        strict = cidr_list_updater._extract_cidrs(
+            json.dumps(payload),
+            "google_json",
+            region_scopes=["asia-pacific"],
+            strict_geo_filter=True,
+        )
+        self.assertEqual(strict, ["10.0.1.0/24"])
+
+        strict_all = cidr_list_updater._extract_cidrs(
+            json.dumps(payload),
+            "google_json",
+            region_scopes=["all"],
+            strict_geo_filter=True,
+        )
+        self.assertEqual(strict_all, ["10.0.0.0/24", "10.0.1.0/24", "10.0.2.0/24"])
+
+    def test_estimate_cidr_matches(self):
+        payload = {
+            "status": "ok",
+            "data": {
+                "located_resources": [
+                    {
+                        "locations": [
+                            {
+                                "country": "DE",
+                                "resources": ["10.10.0.0/24", "10.10.1.0/24"],
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+
+        with patch("app.services.cidr.pipeline_facade.PROVIDER_SOURCES",
+            {
+                "amazon-ips.txt": [
+                    {
+                        "name": "ripe-test",
+                        "url": "https://example.test/ripe",
+                        "format": "ripe_geo_json",
+                    }
+                ]
+            },
+        ), patch("app.services.cidr.pipeline_facade._download_text", return_value=json.dumps(payload)):
+            result = cidr_list_updater.estimate_cidr_matches(
+                ["amazon-ips.txt"],
+                region_scopes=["europe"],
+                strict_geo_filter=True,
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(len(result["estimated"]), 1)
+        self.assertEqual(result["estimated"][0]["file"], "amazon-ips.txt")
+        self.assertEqual(result["estimated"][0]["cidr_count"], 2)
+        self.assertEqual(result["estimated"][0]["raw_cidr_count"], 2)
+        self.assertEqual(result["estimated"][0]["cidr_count_after_limit"], 2)
+
+    def test_prune_runtime_backups_removes_directories_older_than_12_hours(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            old_dir = os.path.join(tmp_dir, "old-backup")
+            new_dir = os.path.join(tmp_dir, "new-backup")
+            os.makedirs(old_dir, exist_ok=True)
+            os.makedirs(new_dir, exist_ok=True)
+
+            now_ts = 1_700_000_000
+            old_ts = now_ts - (13 * 60 * 60)
+            new_ts = now_ts - (2 * 60 * 60)
+            os.utime(old_dir, (old_ts, old_ts))
+            os.utime(new_dir, (new_ts, new_ts))
+
+            with patch("app.services.cidr.pipeline_facade.RUNTIME_BACKUP_ROOT", tmp_dir):
+                removed = cidr_list_updater._prune_runtime_backups(now_ts=now_ts)
+
+            self.assertIn("old-backup", removed)
+            self.assertFalse(os.path.exists(old_dir))
+            self.assertTrue(os.path.exists(new_dir))
+
+    def test_update_selected_and_rollback_to_baseline(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            list_dir = os.path.join(tmp_dir, "list")
+            baseline_dir = os.path.join(list_dir, "_baseline")
+            backup_dir = os.path.join(tmp_dir, "runtime_backups")
+            include_hosts_path = os.path.join(tmp_dir, "include-hosts.txt")
+            include_ips_path = os.path.join(tmp_dir, "include-ips.txt")
+            os.makedirs(list_dir, exist_ok=True)
+
+            target_file = "amazon-ips.txt"
+            target_path = os.path.join(list_dir, target_file)
+            with open(target_path, "w", encoding="utf-8") as handle:
+                handle.write("# baseline\n10.0.0.0/24\n")
+
+            with patch("app.services.cidr.pipeline_facade.LIST_DIR", list_dir), patch.object(
+                cidr_list_updater, "BASELINE_DIR", baseline_dir
+            ), patch("app.services.cidr.pipeline_facade.RUNTIME_BACKUP_ROOT", backup_dir), patch.object(
+                cidr_list_updater, "GAME_INCLUDE_HOSTS_FILE", include_hosts_path
+            ), patch.object(
+                cidr_list_updater, "GAME_INCLUDE_IPS_FILE", include_ips_path
+            ), patch("app.services.cidr.pipeline_facade.PROVIDER_SOURCES",
+                {
+                    target_file: [
+                        {
+                            "name": "mock-source",
+                            "url": "https://example.test/amazon.txt",
+                            "format": "cidr_text",
+                        }
+                    ]
+                },
+            ), patch("app.services.cidr.pipeline_facade._download_text",
+                return_value="1.1.1.1/32\n2.2.2.0/24\n",
+            ):
+                update_result = cidr_list_updater.update_cidr_files([target_file])
+                self.assertTrue(update_result["success"])
+                self.assertEqual(len(update_result["updated"]), 1)
+
+                with open(target_path, "r", encoding="utf-8") as handle:
+                    updated_text = handle.read()
+
+                self.assertIn("1.1.1.1/32", updated_text)
+                self.assertIn("2.2.2.0/24", updated_text)
+
+                rollback_result = cidr_list_updater.rollback_to_baseline([target_file])
+                self.assertTrue(rollback_result["success"])
+                self.assertEqual(rollback_result["restored"], [target_file])
+
+                with open(target_path, "r", encoding="utf-8") as handle:
+                    rolled_back_text = handle.read()
+
+                self.assertIn("10.0.0.0/24", rolled_back_text)
+                self.assertNotIn("2.2.2.0/24", rolled_back_text)
+
+    def test_non_geo_provider_can_be_included_with_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            list_dir = os.path.join(tmp_dir, "list")
+            baseline_dir = os.path.join(list_dir, "_baseline")
+            backup_dir = os.path.join(tmp_dir, "runtime_backups")
+            include_hosts_path = os.path.join(tmp_dir, "include-hosts.txt")
+            include_ips_path = os.path.join(tmp_dir, "include-ips.txt")
+            os.makedirs(list_dir, exist_ok=True)
+
+            target_file = "akamai-ips.txt"
+            target_path = os.path.join(list_dir, target_file)
+            with open(target_path, "w", encoding="utf-8") as handle:
+                handle.write("# baseline\n10.0.0.0/24\n")
+
+            with patch("app.services.cidr.pipeline_facade.LIST_DIR", list_dir), patch.object(
+                cidr_list_updater, "BASELINE_DIR", baseline_dir
+            ), patch("app.services.cidr.pipeline_facade.RUNTIME_BACKUP_ROOT", backup_dir), patch.object(
+                cidr_list_updater, "GAME_INCLUDE_HOSTS_FILE", include_hosts_path
+            ), patch.object(
+                cidr_list_updater, "GAME_INCLUDE_IPS_FILE", include_ips_path
+            ), patch("app.services.cidr.pipeline_facade.PROVIDER_SOURCES",
+                {
+                    target_file: [
+                        {
+                            "name": "plain-list",
+                            "url": "https://example.test/plain.txt",
+                            "format": "cidr_text",
+                        }
+                    ]
+                },
+            ), patch("app.services.cidr.pipeline_facade._download_text",
+                return_value="1.1.1.0/24\n2.2.2.0/24\n",
+            ):
+                result_skip = cidr_list_updater.update_cidr_files(
+                    [target_file],
+                    region_scopes=["europe", "asia-pacific"],
+                    include_non_geo_fallback=False,
+                )
+                self.assertFalse(result_skip["updated"])
+                self.assertEqual(result_skip["skipped"][0]["reason"], "geo_scope_not_supported")
+
+                result_fallback = cidr_list_updater.update_cidr_files(
+                    [target_file],
+                    region_scopes=["europe", "asia-pacific"],
+                    include_non_geo_fallback=True,
+                )
+                self.assertTrue(result_fallback["updated"])
+
+                with open(target_path, "r", encoding="utf-8") as handle:
+                    updated_text = handle.read()
+
+                self.assertIn("1.1.1.0/24", updated_text)
+                self.assertIn("2.2.2.0/24", updated_text)
+
+    def test_collect_cidrs_skips_geo_source_when_all_scope_has_non_geo_results(self):
+        sources = [
+            {
+                "name": "bgp-tools-source",
+                "url": "https://example.test/non-geo",
+                "format": "cidr_text_scan",
+            },
+            {
+                "name": "ripe-geo-source",
+                "url": "https://example.test/geo",
+                "format": "ripe_geo_json",
+            },
+        ]
+
+        non_geo_payload = """
+        # Raw Allocations
+        [ipv4] -- 5.9.0.0/16
+        ## Additional Links
+        """
+
+        with patch("app.services.cidr.pipeline_facade._download_text", side_effect=[non_geo_payload]) as mocked_download:
+            cidrs, source_name, error = cidr_list_updater._collect_cidrs_from_sources(
+                sources,
+                ["all"],
+            )
+
+        self.assertEqual(cidrs, ["5.9.0.0/16"])
+        self.assertEqual(source_name, "bgp-tools-source")
+        self.assertIsNone(error)
+        self.assertEqual(mocked_download.call_count, 1)
+
+    def test_analyze_dpi_log_builds_priority_files(self):
+        dpi_log = "\n".join(
+            [
+                "[03:38:47.119] DPI checking(#US.CDN77-01)/INFO: tcp 16-20: detected❗️, method: 1",
+                "[03:38:47.165] DPI checking(#DE.HE-01)/INFO: tcp 16-20: possible detected ⚠️, reqtime: 180.8 ms",
+                "[03:38:47.257] DPI checking(#SE.AKM-01)/INFO: tcp 16-20: unlikely ⚠️, reqtime: 220.0 ms",
+                "[03:38:47.631] DPI checking(#US.GH-HPRN)/INFO: tcp 16-20: not detected ✅, reqtime: 100.0 ms",
+            ]
+        )
+
+        result = cidr_list_updater.analyze_dpi_log(dpi_log)
+
+        self.assertTrue(result["success"])
+        self.assertIn("cdn77-ips.txt", result["priority_files"])
+        self.assertIn("hetzner-ips.txt", result["priority_files"])
+        self.assertIn("akamai-ips.txt", result["priority_files"])
+        self.assertIn("cdn77-ips.txt", result["critical_files"])
+        self.assertIn("hetzner-ips.txt", result["critical_files"])
+        self.assertNotIn("akamai-ips.txt", result["critical_files"])
+        self.assertIn("cdn77-ips.txt", result["detected_files"])
+        self.assertNotIn("hetzner-ips.txt", result["detected_files"])
+
+    def test_analyze_dpi_log_supports_dpi_detector_table_format(self):
+        dpi_log = "\n".join(
+            [
+                "│ ID     │ ASN      │ Провайдер       │ Alive │  Статус  │ Детали                   │",
+                "│ OR-01  │ AS31898  │ Oracle Cloud    │  Да   │ DETECTED │ Read Timeout at 20KB     │",
+                "│ HE-01  │ AS24940  │ Hetzner         │  Нет  │ REFUSED  │ TCP соединение отклонено │",
+                "│ HE-02  │ AS24940  │ Hetzner         │  Да   │ DETECTED │ Read Timeout at 20KB     │",
+                "│ GC-01  │ AS396982 │ Google Cloud    │  Да   │    OK    │                          │",
+            ]
+        )
+
+        result = cidr_list_updater.analyze_dpi_log(dpi_log)
+
+        self.assertTrue(result["success"])
+        self.assertIn("oracle-ips.txt", result["detected_files"])
+        self.assertIn("hetzner-ips.txt", result["detected_files"])
+        self.assertIn("google-ips.txt", result["all_seen_files"])
+        self.assertNotIn("google-ips.txt", result["priority_files"])
+
+    def test_apply_total_route_limit_with_dpi_priority_reserve(self):
+        entries = [
+            {
+                "file": "google-ips.txt",
+                "cidrs": [f"10.10.{index}.0/24" for index in range(30)],
+            },
+            {
+                "file": "ovh-ips.txt",
+                "cidrs": [f"10.20.{index}.0/24" for index in range(30)],
+            },
+        ]
+
+        with patch(
+            "app.services.cidr.pipeline.games.is_game_filter_config_route_limit_enforced",
+            return_value=True,
+        ):
+            adjusted, meta = cidr_list_updater._apply_total_route_limit(
+                entries,
+                10,
+                dpi_priority_files=["google-ips.txt"],
+                dpi_priority_min_budget=6,
+            )
+
+        self.assertIsNotNone(meta)
+        self.assertIn("dpi_priority", meta)
+        self.assertLessEqual(sum(len(item["cidrs"]) for item in adjusted), 10)
+        google_entry = next(item for item in adjusted if item["file"] == "google-ips.txt")
+        self.assertGreaterEqual(len(google_entry["cidrs"]), 6)
+
+    def test_apply_total_route_limit_keeps_mandatory_detected_file(self):
+        entries = [
+            {
+                "file": "google-ips.txt",
+                "cidrs": [f"10.10.{index}.0/24" for index in range(40)],
+            },
+            {
+                "file": "ovh-ips.txt",
+                "cidrs": [f"10.20.{index}.0/24" for index in range(40)],
+            },
+            {
+                "file": "cdn77-ips.txt",
+                "cidrs": ["10.30.0.0/24", "10.30.1.0/24"],
+            },
+        ]
+
+        with patch(
+            "app.services.cidr.pipeline.games.is_game_filter_config_route_limit_enforced",
+            return_value=True,
+        ):
+            adjusted, meta = cidr_list_updater._apply_total_route_limit(
+                entries,
+                2,
+                dpi_mandatory_files=["cdn77-ips.txt"],
+            )
+
+        self.assertIsNotNone(meta)
+        self.assertIn("dpi_mandatory", meta)
+        self.assertFalse(meta["dpi_mandatory"]["dropped_mandatory_files"])
+        kept_cdn77 = next(item for item in adjusted if item["file"] == "cdn77-ips.txt")
+        self.assertGreaterEqual(len(kept_cdn77["cidrs"]), 1)
+
+    def test_estimate_applies_route_optimization_for_large_geo_result(self):
+        target_file = "ovh-ips.txt"
+        sources = [
+            {
+                "name": "bgp-tools-fr-ovh",
+                "url": "https://example.test/non-geo",
+                "format": "cidr_text_scan",
+            },
+            {
+                "name": "ripe-as16276-geo",
+                "url": "https://example.test/geo",
+                "format": "ripe_geo_json",
+            },
+        ]
+
+        large_geo = [f"10.0.{idx // 256}.{idx % 256}/32" for idx in range(5000)]
+        compact_non_geo = ["57.128.0.0/14", "54.36.0.0/15", "54.38.0.0/16"]
+
+        with patch("app.services.cidr.pipeline_facade.PROVIDER_SOURCES",
+            {target_file: sources},
+        ), patch.object(
+            cidr_list_updater,
+            "_collect_cidrs_from_sources",
+            side_effect=[
+                (large_geo, "ripe-as16276-geo", None),
+                (compact_non_geo, "bgp-tools-fr-ovh", None),
+            ],
+        ) as mocked_collect:
+            result = cidr_list_updater.estimate_cidr_matches(
+                [target_file],
+                region_scopes=["europe"],
+                include_non_geo_fallback=False,
+                strict_geo_filter=False,
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(len(result["estimated"]), 1)
+        estimated_item = result["estimated"][0]
+        self.assertEqual(estimated_item["file"], target_file)
+        self.assertEqual(estimated_item["cidr_count"], len(compact_non_geo))
+        self.assertIn("route_optimization", estimated_item)
+        self.assertEqual(
+            estimated_item["route_optimization"]["strategy"],
+            "route_limit_non_geo_fallback",
+        )
+        self.assertEqual(mocked_collect.call_count, 2)
+
+    def test_estimate_excludes_ru_cidrs_for_all_scope(self):
+        target_file = "akamai-ips.txt"
+        with patch("app.services.cidr.pipeline_facade.PROVIDER_SOURCES",
+            {
+                target_file: [
+                    {
+                        "name": "plain-list",
+                        "url": "https://example.test/plain.txt",
+                        "format": "cidr_text",
+                    }
+                ]
+            },
+        ), patch("app.services.cidr.pipeline_facade._download_text",
+            return_value="5.255.0.0/16\n8.8.8.0/24\n",
+        ), patch.object(
+            cidr_list_updater,
+            "_get_ru_cidr_index",
+            return_value=(cidr_list_updater._build_antifilter_overlap_index(["5.0.0.0/8"]), None),
+        ):
+            result = cidr_list_updater.estimate_cidr_matches(
+                [target_file],
+                region_scopes=["all"],
+                exclude_ru_cidrs=True,
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(len(result["estimated"]), 1)
+
+        estimated_item = result["estimated"][0]
+        self.assertEqual(estimated_item["file"], target_file)
+        self.assertEqual(estimated_item["cidr_count"], 1)
+        self.assertIn("country_exclusion", estimated_item)
+        self.assertEqual(
+            estimated_item["country_exclusion"]["strategy"],
+            "exclude_ru_country",
+        )
+        self.assertEqual(
+            estimated_item["country_exclusion"]["removed_cidr_count"],
+            1,
+        )
+
+    def test_update_applies_global_total_route_limit(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            list_dir = os.path.join(tmp_dir, "list")
+            baseline_dir = os.path.join(list_dir, "_baseline")
+            backup_dir = os.path.join(tmp_dir, "runtime_backups")
+            include_hosts_path = os.path.join(tmp_dir, "include-hosts.txt")
+            include_ips_path = os.path.join(tmp_dir, "include-ips.txt")
+            os.makedirs(list_dir, exist_ok=True)
+
+            selected_files = ["amazon-ips.txt", "google-ips.txt"]
+            for file_name in selected_files:
+                with open(os.path.join(list_dir, file_name), "w", encoding="utf-8") as handle:
+                    handle.write("# baseline\n10.0.0.0/24\n")
+
+            payload_a = "\n".join([f"10.10.{idx}.0/24" for idx in range(40)]) + "\n"
+            payload_b = "\n".join([f"10.20.{idx}.0/24" for idx in range(40)]) + "\n"
+
+            with patch("app.services.cidr.pipeline_facade.LIST_DIR", list_dir), patch.object(
+                cidr_list_updater, "BASELINE_DIR", baseline_dir
+            ), patch("app.services.cidr.pipeline_facade.RUNTIME_BACKUP_ROOT", backup_dir), patch.object(
+                cidr_list_updater, "GAME_INCLUDE_HOSTS_FILE", include_hosts_path
+            ), patch.object(
+                cidr_list_updater, "GAME_INCLUDE_IPS_FILE", include_ips_path
+            ), patch("app.services.cidr.pipeline_facade.PROVIDER_SOURCES",
+                {
+                    "amazon-ips.txt": [
+                        {
+                            "name": "amazon-source",
+                            "url": "https://example.test/amazon",
+                            "format": "cidr_text",
+                        }
+                    ],
+                    "google-ips.txt": [
+                        {
+                            "name": "google-source",
+                            "url": "https://example.test/google",
+                            "format": "cidr_text",
+                        }
+                    ],
+                },
+            ), patch.object(
+                cidr_list_updater,
+                "_get_openvpn_route_total_cidr_limit",
+                return_value=12,
+            ), patch.object(
+                cidr_list_updater,
+                "OPENVPN_ROUTE_TOTAL_CIDR_LIMIT",
+                12,
+            ), patch.object(
+                cidr_list_updater,
+                "OPENVPN_ROUTE_CIDR_LIMIT",
+                10_000,
+            ), patch("app.services.cidr.pipeline_facade._download_text",
+                side_effect=[payload_a, payload_b],
+            ), patch(
+                "app.services.cidr.pipeline.games.is_game_filter_config_route_limit_enforced",
+                return_value=True,
+            ):
+                result = cidr_list_updater.update_cidr_files(
+                    selected_files=selected_files,
+                    region_scopes=["all"],
+                    include_non_geo_fallback=False,
+                    strict_geo_filter=False,
+                )
+
+            self.assertTrue(result["success"])
+            self.assertEqual(len(result["updated"]), 2)
+            self.assertIn("global_route_optimization", result)
+            self.assertEqual(result["global_route_optimization"]["limit"], 12)
+
+            total_cidrs = sum(item["cidr_count"] for item in result["updated"])
+            self.assertLessEqual(total_cidrs, 12)
+
+    def test_apply_total_route_limit_with_budget_smaller_than_file_count(self):
+        entries = [
+            {"file": "amazon-ips.txt", "cidrs": ["10.10.0.0/24"]},
+            {"file": "google-ips.txt", "cidrs": ["10.20.0.0/24"]},
+        ]
+
+        with patch(
+            "app.services.cidr.pipeline.games.is_game_filter_config_route_limit_enforced",
+            return_value=True,
+        ):
+            adjusted, meta = cidr_list_updater._apply_total_route_limit(entries, 1)
+
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta["limit"], 1)
+        self.assertLessEqual(sum(len(item["cidrs"]) for item in adjusted), 1)
+
+    def test_compress_cidrs_to_limit_never_returns_default_route(self):
+        cidrs = [
+            "10.0.0.0/24",
+            "11.0.0.0/24",
+            "12.0.0.0/24",
+            "13.0.0.0/24",
+        ]
+
+        with patch.object(cidr_list_updater, "OPENVPN_ROUTE_MIN_PREFIXLEN", 8):
+            compressed, meta = cidr_list_updater._compress_cidrs_to_limit(cidrs, 1)
+
+        self.assertIsNotNone(meta)
+        self.assertEqual(len(compressed), 1)
+        self.assertNotIn("0.0.0.0/0", compressed)
+
+    def test_compress_cidrs_to_limit_does_not_overcompress_far_below_budget(self):
+        cidrs = [
+            f"10.{index // 256}.{index % 256}.0/24"
+            for index in range(1024)
+        ]
+
+        compressed, meta = cidr_list_updater._compress_cidrs_to_limit(cidrs, 900)
+
+        self.assertIsNotNone(meta)
+        self.assertEqual(len(compressed), 900)
+        self.assertEqual(meta["target_limit"], 900)
+
+    def test_total_limit_reads_from_env_file_runtime(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env_file = os.path.join(tmp_dir, ".env")
+            with open(env_file, "w", encoding="utf-8") as handle:
+                handle.write("OPENVPN_ROUTE_TOTAL_CIDR_LIMIT=777\n")
+
+            with patch("app.services.cidr.pipeline_facade.ENV_FILE_PATH", env_file):
+                self.assertEqual(cidr_list_updater._get_openvpn_route_total_cidr_limit(), 777)
+
+    def test_sync_games_include_hosts_enable_and_disable(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            include_hosts_path = os.path.join(tmp_dir, "AZ-Game-include-hosts.txt")
+            with open(include_hosts_path, "w", encoding="utf-8") as handle:
+                handle.write("custom.example\n")
+
+            with patch.object(cidr_list_updater, "AZ_GAME_INCLUDE_HOSTS_FILE", include_hosts_path):
+                enabled = cidr_list_updater._sync_games_include_hosts(
+                    ["lol", "dota2", "csgo", "faceit"],
+                    include_game_domains=True,
+                )
+
+                self.assertTrue(enabled["success"])
+                self.assertTrue(enabled["changed"])
+
+                with open(include_hosts_path, "r", encoding="utf-8") as handle:
+                    enabled_content = handle.read()
+
+                self.assertIn(cidr_list_updater.GAME_FILTER_BLOCK_START, enabled_content)
+                self.assertIn("riotgames.com", enabled_content)
+                self.assertIn("dota2.com", enabled_content)
+                self.assertIn("counter-strike.net", enabled_content)
+                self.assertIn("faceit.com", enabled_content)
+
+                disabled = cidr_list_updater._sync_games_include_hosts([], include_game_domains=False)
+                self.assertTrue(disabled["success"])
+
+                with open(include_hosts_path, "r", encoding="utf-8") as handle:
+                    disabled_content = handle.read()
+
+                self.assertIn("custom.example", disabled_content)
+                self.assertNotIn(cidr_list_updater.GAME_FILTER_BLOCK_START, disabled_content)
+                self.assertNotIn("faceit.com", disabled_content)
+
+    def test_sync_game_hosts_filter_runs_without_cidr_update(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            include_hosts_path = os.path.join(tmp_dir, "AZ-Game-include-hosts.txt")
+            include_ips_path = os.path.join(tmp_dir, "AZ-Game-include-ips.txt")
+            with open(include_hosts_path, "w", encoding="utf-8") as handle:
+                handle.write("custom.example\n")
+
+            with patch.object(cidr_list_updater, "AZ_GAME_INCLUDE_HOSTS_FILE", include_hosts_path), patch.object(
+                cidr_list_updater, "AZ_GAME_INCLUDE_IPS_FILE", include_ips_path
+            ), patch(
+                "app.services.cidr.pipeline.games._collect_item_cidrs",
+                side_effect=lambda item, **kwargs: (
+                    (["203.0.113.10/32", "203.0.113.11/32"], True, [])
+                    if item.get("key") in {"lol", "faceit"}
+                    else ([], True, [])
+                ),
+            ), patch(
+                "app.services.cidr.pipeline.games._build_overlap_index",
+                return_value=([], []),
+            ):
+                result = cidr_list_updater.sync_game_hosts_filter(include_game_keys=["lol", "faceit"])
+
+            self.assertTrue(result["success"])
+            self.assertIn("game_hosts_filter", result)
+            self.assertIn("game_ips_filter", result)
+            self.assertFalse(result["game_hosts_filter"]["enabled"])
+            self.assertEqual(result["game_hosts_filter"]["domain_count"], 0)
+            self.assertEqual(result["game_ips_filter"]["cidr_count"], 2)
+
+            with open(include_hosts_path, "r", encoding="utf-8") as handle:
+                content = handle.read()
+
+            self.assertEqual(content.strip(), "custom.example")
+
+            with open(include_ips_path, "r", encoding="utf-8") as handle:
+                ips_content = handle.read()
+
+            self.assertIn(cidr_list_updater.GAME_FILTER_IP_BLOCK_START, ips_content)
+            self.assertIn("203.0.113.10/32", ips_content)
+            self.assertIn("203.0.113.11/32", ips_content)
+
+    def test_sync_game_hosts_filter_includes_domains_only_when_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            include_hosts_path = os.path.join(tmp_dir, "AZ-Game-include-hosts.txt")
+            include_ips_path = os.path.join(tmp_dir, "AZ-Game-include-ips.txt")
+
+            with patch.object(cidr_list_updater, "AZ_GAME_INCLUDE_HOSTS_FILE", include_hosts_path), patch.object(
+                cidr_list_updater, "AZ_GAME_INCLUDE_IPS_FILE", include_ips_path
+            ), patch.object(
+                cidr_list_updater,
+                "_resolve_game_domains_ipv4_cidrs",
+                return_value=(["203.0.113.10/32"], []),
+            ):
+                result = cidr_list_updater.sync_game_hosts_filter(
+                    include_game_keys=["lol"],
+                    include_game_domains=True,
+                )
+
+            self.assertTrue(result["success"])
+            with open(include_hosts_path, "r", encoding="utf-8") as handle:
+                content = handle.read()
+            self.assertIn(cidr_list_updater.GAME_FILTER_BLOCK_START, content)
+            self.assertIn("riotgames.com", content)
+
+    def test_sync_game_exclude_filter_writes_only_az_exclude_files(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            exclude_hosts_path = os.path.join(tmp_dir, "AZ-Game-exclude-hosts.txt")
+            exclude_ips_path = os.path.join(tmp_dir, "AZ-Game-exclude-ips.txt")
+
+            with open(exclude_hosts_path, "w", encoding="utf-8") as handle:
+                handle.write("keep.exclude.local\n")
+            with open(exclude_ips_path, "w", encoding="utf-8") as handle:
+                handle.write("10.10.10.0/24\n")
+
+            with patch.object(cidr_list_updater, "AZ_GAME_EXCLUDE_HOSTS_FILE", exclude_hosts_path), patch.object(
+                cidr_list_updater, "AZ_GAME_EXCLUDE_IPS_FILE", exclude_ips_path
+            ), patch(
+                "app.services.cidr.pipeline.games._collect_item_cidrs",
+                side_effect=lambda item, **kwargs: (["203.0.113.10/32"], True, []),
+            ), patch(
+                "app.services.cidr.pipeline.games._build_overlap_index",
+                return_value=([], []),
+            ):
+                result = cidr_list_updater.sync_game_exclude_filter(
+                    include_game_keys=["lol"],
+                    include_game_domains=True,
+                )
+
+            self.assertTrue(result["success"])
+            with open(exclude_hosts_path, "r", encoding="utf-8") as handle:
+                hosts_content = handle.read()
+            with open(exclude_ips_path, "r", encoding="utf-8") as handle:
+                ips_content = handle.read()
+
+            self.assertIn(cidr_list_updater.GAME_FILTER_EXCLUDE_BLOCK_START, hosts_content)
+            self.assertIn("riotgames.com", hosts_content)
+            self.assertIn("keep.exclude.local", hosts_content)
+            self.assertIn(cidr_list_updater.GAME_FILTER_EXCLUDE_IP_BLOCK_START, ips_content)
+            self.assertIn("203.0.113.10/32", ips_content)
+            self.assertIn("10.10.10.0/24", ips_content)
+
+    def test_sync_game_exclude_filter_clears_managed_blocks_on_empty_selection(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            exclude_hosts_path = os.path.join(tmp_dir, "AZ-Game-exclude-hosts.txt")
+            exclude_ips_path = os.path.join(tmp_dir, "AZ-Game-exclude-ips.txt")
+            managed_hosts_block = (
+                f"{cidr_list_updater.GAME_FILTER_EXCLUDE_BLOCK_START}\n"
+                "# games: lol\n"
+                "riotgames.com\n"
+                f"{cidr_list_updater.GAME_FILTER_EXCLUDE_BLOCK_END}\n"
+            )
+            managed_ips_block = (
+                f"{cidr_list_updater.GAME_FILTER_EXCLUDE_IP_BLOCK_START}\n"
+                "# games: lol\n"
+                "203.0.113.10/32\n"
+                f"{cidr_list_updater.GAME_FILTER_EXCLUDE_IP_BLOCK_END}\n"
+            )
+            with open(exclude_hosts_path, "w", encoding="utf-8") as handle:
+                handle.write("keep.exclude.local\n\n" + managed_hosts_block)
+            with open(exclude_ips_path, "w", encoding="utf-8") as handle:
+                handle.write("10.10.10.0/24\n\n" + managed_ips_block)
+
+            with patch.object(cidr_list_updater, "AZ_GAME_EXCLUDE_HOSTS_FILE", exclude_hosts_path), patch.object(
+                cidr_list_updater, "AZ_GAME_EXCLUDE_IPS_FILE", exclude_ips_path
+            ):
+                result = cidr_list_updater.sync_game_exclude_filter(
+                    include_game_keys=[],
+                    include_game_domains=False,
+                )
+
+            self.assertTrue(result["success"])
+            with open(exclude_hosts_path, "r", encoding="utf-8") as handle:
+                hosts_content = handle.read()
+            with open(exclude_ips_path, "r", encoding="utf-8") as handle:
+                ips_content = handle.read()
+
+            self.assertIn("keep.exclude.local", hosts_content)
+            self.assertNotIn(cidr_list_updater.GAME_FILTER_EXCLUDE_BLOCK_START, hosts_content)
+            self.assertIn("10.10.10.0/24", ips_content)
+            self.assertNotIn(cidr_list_updater.GAME_FILTER_EXCLUDE_IP_BLOCK_START, ips_content)
+
+    def test_preview_game_exclude_filter_includes_domains_only_when_enabled(self):
+        with patch.object(
+            cidr_list_updater,
+            "_resolve_game_domains_ipv4_cidrs",
+            return_value=(["198.51.100.10/32"], []),
+        ):
+            with_domains = cidr_list_updater.preview_game_exclude_filter(
+                include_game_keys=["lol"],
+                include_game_domains=True,
+            )
+            without_domains = cidr_list_updater.preview_game_exclude_filter(
+                include_game_keys=["lol"],
+                include_game_domains=False,
+            )
+        self.assertTrue(with_domains["success"])
+        self.assertGreaterEqual(len(with_domains["preview"]["domains_to_add"]), 1)
+        self.assertEqual(without_domains["preview"]["domains_to_add"], [])
+        self.assertIn("per_game_stats", with_domains["preview"])
+        self.assertIn("riot_games", with_domains["preview"]["per_game_stats"])
+
+    def test_get_available_game_filters_contains_provider_and_source_metadata(self):
+        filters = cidr_list_updater.get_available_game_filters()
+        self.assertTrue(filters)
+        sample = filters[0]
+        self.assertIn("provider", sample)
+        self.assertIn("source_type", sample)
+        self.assertIn("asn_count", sample)
+        self.assertIn("server_ip_count", sample)
+        self.assertIn("tags", sample)
+        lol = next(item for item in filters if item["key"] == "lol")
+        self.assertEqual(lol["source_type"], "servers")
+        self.assertGreater(lol["server_ip_count"], 0)
+        self.assertEqual(lol["network"], "Riot Direct")
+
+    def test_render_games_ips_block_lol_uses_server_ips_not_dns(self):
+        ripe_payload = {
+            "status": "ok",
+            "data": {"prefixes": [{"prefix": "104.160.0.0/16"}]},
+        }
+        with patch("app.services.cidr.pipeline_facade._download_text",
+            return_value=json.dumps(ripe_payload),
+        ) as download_mock, patch.object(
+            cidr_list_updater,
+            "_resolve_game_domains_ipv4_cidrs",
+        ) as dns_mock, patch(
+            "app.services.cidr.pipeline.games._build_overlap_index",
+            return_value=([], []),
+        ):
+            cidr_list_updater._GAME_ASN_CIDRS_CACHE.clear()
+            block, _, _, cidrs, _, _, _, _ = cidr_list_updater._render_games_ips_block(["riot_games"])
+
+        dns_mock.assert_not_called()
+        download_mock.assert_called_once()
+        self.assertEqual(download_mock.call_args.kwargs.get("timeout"), 10)
+        self.assertIn("104.160.141.3/32", cidrs)
+        self.assertIn("# Keys: riot_games", block)
+        self.assertIn("# Games: lol,valorant,wild_rift", block)
+        self.assertIn("# Game servers:", block)
+        self.assertIn("# Sources (ASN via RIPE):", block)
+
+    def test_render_games_ips_block_deduplicates_asn_fetches(self):
+        ripe_payload = {
+            "status": "ok",
+            "data": {"prefixes": [{"prefix": "104.160.0.0/16"}]},
+        }
+        with patch("app.services.cidr.pipeline_facade._download_text",
+            return_value=json.dumps(ripe_payload),
+        ) as download_mock, patch(
+            "app.services.cidr.pipeline.games._build_overlap_index",
+            return_value=([], []),
+        ):
+            cidr_list_updater._GAME_ASN_CIDRS_CACHE.clear()
+            _, _, _, cidrs, _, per_provider, _, _ = cidr_list_updater._render_games_ips_block(["lol", "valorant"])
+
+        self.assertEqual(download_mock.call_count, 1)
+        self.assertIn("104.160.141.3/32", cidrs)
+        self.assertIn("riot_games", per_provider)
+        self.assertNotIn("valorant", per_provider)
+
+    def test_preview_games_batch_stats_returns_per_game_counts(self):
+        ripe_payload = {
+            "status": "ok",
+            "data": {"prefixes": [{"prefix": "104.160.0.0/16"}]},
+        }
+        with patch("app.services.cidr.pipeline_facade._download_text",
+            return_value=json.dumps(ripe_payload),
+        ):
+            cidr_list_updater._GAME_ASN_CIDRS_CACHE.clear()
+            result = cidr_list_updater.preview_games_batch_stats(include_game_keys=["lol", "valorant"])
+
+        self.assertTrue(result["success"])
+        stats = result["preview"]["per_game_stats"]
+        self.assertGreaterEqual(stats["riot_games"]["cidr_count"], 1)
+        self.assertIn("per_provider_stats", result["preview"])
+        self.assertGreaterEqual(result["preview"]["per_provider_stats"]["riot_games"]["cidr_count"], 1)
+
+    def test_normalize_server_ips_to_cidrs_adds_host_mask(self):
+        cidrs = cidr_list_updater._normalize_server_ips_to_cidrs(["104.160.141.3", "128.116.0.0/17"])
+        self.assertIn("104.160.141.3/32", cidrs)
+        self.assertIn("128.116.0.0/17", cidrs)
+
+    def test_validate_game_filter_keys_returns_invalid_items(self):
+        result = cidr_list_updater.validate_game_filter_keys(["lol", "steam", "does_not_exist"])
+        self.assertIn("lol", result["normalized_keys"])
+        self.assertIn("steam_platform", result["normalized_keys"])
+        self.assertIn("does_not_exist", result["invalid_keys"])
+
+    def test_validate_provider_filter_keys_migrates_legacy_game_keys(self):
+        result = cidr_list_updater.validate_provider_filter_keys(["lol", "battlefield", "does_not_exist"])
+        self.assertEqual(result["normalized_keys"], ["ea", "riot_games"])
+        self.assertIn("does_not_exist", result["invalid_keys"])
+
+    def test_normalize_provider_filter_keys_expands_to_game_keys(self):
+        game_keys = cidr_list_updater._expand_provider_keys_to_game_keys(["riot_games"])
+        self.assertIn("lol", game_keys)
+        self.assertIn("valorant", game_keys)
+
+    def test_get_available_provider_filters_groups_games(self):
+        providers = cidr_list_updater.get_available_provider_filters()
+        riot = next(item for item in providers if item["key"] == "riot_games")
+        self.assertGreaterEqual(riot["game_count"], 2)
+        self.assertIn("lol", riot["game_keys"])
+
+    def test_get_saved_exclude_game_keys_reads_az_game_exclude_files(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            exclude_hosts_path = os.path.join(tmp_dir, "AZ-Game-exclude-hosts.txt")
+            exclude_ips_path = os.path.join(tmp_dir, "AZ-Game-exclude-ips.txt")
+            with open(exclude_ips_path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    f"{cidr_list_updater.GAME_FILTER_EXCLUDE_IP_BLOCK_START}\n"
+                    "# Keys: lol,steam_platform\n"
+                    "# Games: 2\n"
+                    "# --- League of Legends (lol) ---\n"
+                    "203.0.113.10/32\n"
+                    f"{cidr_list_updater.GAME_FILTER_EXCLUDE_IP_BLOCK_END}\n"
+                )
+            with open(exclude_hosts_path, "w", encoding="utf-8") as handle:
+                handle.write("")
+
+            with patch.object(cidr_list_updater, "AZ_GAME_EXCLUDE_IPS_FILE", exclude_ips_path), patch.object(
+                cidr_list_updater, "AZ_GAME_EXCLUDE_HOSTS_FILE", exclude_hosts_path
+            ):
+                saved = cidr_list_updater.get_saved_exclude_game_keys()
+
+            self.assertEqual(saved, ["riot_games", "valve"])
+
+    def test_preview_game_hosts_filter_returns_counts(self):
+        with patch.object(
+            cidr_list_updater,
+            "_resolve_game_domains_ipv4_cidrs",
+            return_value=(["198.51.100.10/32"], []),
+        ):
+            preview = cidr_list_updater.preview_game_hosts_filter(include_game_keys=["lol"])
+        self.assertTrue(preview["success"])
+        self.assertIn("preview", preview)
+        self.assertEqual(preview["preview"]["selected_game_count"], 1)
+        self.assertEqual(preview["preview"]["domain_count"], 0)
+        self.assertGreaterEqual(preview["preview"]["cidr_count"], 1)
+        self.assertIn("overlap_summary", preview["preview"])
+        self.assertIn("per_game_stats", preview["preview"])
+        self.assertIn("riot_games", preview["preview"]["per_game_stats"])
+        self.assertEqual(preview["preview"]["selected_provider_keys"], ["riot_games"])
+        self.assertEqual(preview["preview"]["domains_to_add"], [])
+
+    def test_preview_game_hosts_filter_includes_domains_only_when_enabled(self):
+        with patch.object(
+            cidr_list_updater,
+            "_resolve_game_domains_ipv4_cidrs",
+            return_value=(["198.51.100.10/32"], []),
+        ):
+            with_domains = cidr_list_updater.preview_game_hosts_filter(
+                include_game_keys=["lol"],
+                include_game_domains=True,
+            )
+            without_domains = cidr_list_updater.preview_game_hosts_filter(
+                include_game_keys=["lol"],
+                include_game_domains=False,
+            )
+        self.assertTrue(with_domains["success"])
+        self.assertGreaterEqual(len(with_domains["preview"]["domains_to_add"]), 1)
+        self.assertEqual(without_domains["preview"]["domains_to_add"], [])
+
+    def _reset_overlap_cache(self):
+        cidr_list_updater._OVERLAP_INDEX_CACHE.update(
+            {"signature": None, "entries": None, "starts": None}
+        )
+
+    def _build_test_overlap_index(self, cidrs, file_path="/tmp/include-ips.txt"):
+        entries = []
+        for cidr in cidrs:
+            network = ipaddress.ip_network(cidr, strict=False)
+            entries.append(
+                {
+                    "cidr": cidr,
+                    "file": file_path,
+                    "start": int(network.network_address),
+                    "end": int(network.broadcast_address),
+                }
+            )
+        entries.sort(key=lambda item: item["start"])
+        starts = [entry["start"] for entry in entries]
+        return entries, starts
+
+    def test_trim_cidr_against_vpn_routes_full_cover(self):
+        entries, starts = self._build_test_overlap_index(["10.0.0.0/24"])
+        result = cidr_list_updater._trim_cidr_against_vpn_routes("10.0.0.5/32", entries, starts)
+        self.assertEqual(result["status"], "full")
+        self.assertEqual(result["write_cidrs"], [])
+        self.assertIn("уже идёт через VPN", result["comment"])
+
+    def test_trim_cidr_against_vpn_routes_partial_cover(self):
+        entries, starts = self._build_test_overlap_index(["10.0.0.0/25"])
+        result = cidr_list_updater._trim_cidr_against_vpn_routes("10.0.0.0/24", entries, starts)
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["write_cidrs"], ["10.0.0.128/25"])
+        self.assertIn("частично покрыто", result["comment"])
+
+    def test_trim_cidr_against_vpn_routes_no_overlap(self):
+        entries, starts = self._build_test_overlap_index(["10.0.0.0/24"])
+        result = cidr_list_updater._trim_cidr_against_vpn_routes("203.0.113.10/32", entries, starts)
+        self.assertEqual(result["status"], "none")
+        self.assertEqual(result["write_cidrs"], ["203.0.113.10/32"])
+
+    def test_render_games_ips_block_trims_against_existing_vpn_routes(self):
+        self._reset_overlap_cache()
+        overlap_index = self._build_test_overlap_index(["10.0.0.0/24"])
+        per_game = {"lol": ["10.0.0.5/32", "203.0.113.10/32"]}
+        with patch(
+            "app.services.cidr.pipeline.games._collect_item_cidrs",
+            side_effect=lambda item, **kwargs: (per_game.get(item["key"], []), True, []),
+        ), patch(
+            "app.services.cidr.pipeline.games._build_overlap_index",
+            return_value=overlap_index,
+        ):
+            block, _, _, cidrs, _, _, summary, _ = cidr_list_updater._render_games_ips_block(["lol"])
+
+        self.assertIn("уже идёт через VPN", block)
+        self.assertIn("203.0.113.10/32", block)
+        self.assertNotIn("\n10.0.0.5/32\n", f"\n{block}\n")
+        self.assertEqual(cidrs, ["203.0.113.10/32"])
+        self.assertEqual(summary["fully_covered_count"], 1)
+        self.assertEqual(summary["routes_written_count"], 1)
+        self.assertEqual(summary["original_cidr_count"], 2)
+
+    def test_sync_games_include_ips_writes_trimmed_routes_only(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            include_ips_path = os.path.join(tmp_dir, "include-ips.txt")
+            az_game_ips_path = os.path.join(tmp_dir, "AZ-Game-include-ips.txt")
+            with open(include_ips_path, "w", encoding="utf-8") as handle:
+                handle.write("10.0.0.0/24\n")
+
+            self._reset_overlap_cache()
+            overlap_index = self._build_test_overlap_index(["10.0.0.0/24"], include_ips_path)
+            per_game = {"lol": ["10.0.0.5/32", "203.0.113.10/32"]}
+
+            with patch.object(cidr_list_updater, "AZ_GAME_INCLUDE_IPS_FILE", az_game_ips_path), patch(
+                "app.services.cidr.pipeline.games._collect_item_cidrs",
+                side_effect=lambda item, **kwargs: (per_game.get(item["key"], []), True, []),
+            ), patch(
+                "app.services.cidr.pipeline.games._build_overlap_index",
+                return_value=overlap_index,
+            ):
+                result = cidr_list_updater._sync_games_include_ips(["lol"])
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["changed"])
+            self.assertEqual(result["cidr_count"], 1)
+            self.assertEqual(result["original_cidr_count"], 2)
+            with open(az_game_ips_path, "r", encoding="utf-8") as handle:
+                content = handle.read()
+            self.assertIn("203.0.113.10/32", content)
+            self.assertIn("уже идёт через VPN", content)
+            self.assertNotIn("\n10.0.0.5/32\n", f"\n{content}\n")
+
+    def test_trim_exclude_cidr_against_include_routes_full_cover(self):
+        entries, starts = self._build_test_overlap_index(["10.0.0.0/24"])
+        result = cidr_list_updater._trim_exclude_cidr_against_include_routes(
+            "10.0.0.5/32", entries, starts
+        )
+        self.assertEqual(result["status"], "full")
+        self.assertEqual(result["write_cidrs"], ["10.0.0.5/32"])
+        self.assertEqual(len(result["include_patches"]), 1)
+        self.assertNotIn("10.0.0.5/32", result["include_patches"][0]["new_cidrs"])
+
+    def test_trim_exclude_cidr_against_include_routes_partial_cover(self):
+        entries, starts = self._build_test_overlap_index(["10.0.0.0/25"])
+        result = cidr_list_updater._trim_exclude_cidr_against_include_routes(
+            "10.0.0.0/24", entries, starts
+        )
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["write_cidrs"], ["10.0.0.128/25"])
+        self.assertEqual(result["include_patches"][0]["new_cidrs"], [])
+
+    def test_trim_exclude_cidr_against_include_routes_no_overlap(self):
+        entries, starts = self._build_test_overlap_index(["10.0.0.0/24"])
+        result = cidr_list_updater._trim_exclude_cidr_against_include_routes(
+            "203.0.113.10/32", entries, starts
+        )
+        self.assertEqual(result["status"], "none")
+        self.assertEqual(result["write_cidrs"], ["203.0.113.10/32"])
+        self.assertEqual(result["include_patches"], [])
+
+    def test_render_games_exclude_ips_block_punches_include_routes(self):
+        self._reset_overlap_cache()
+        overlap_index = self._build_test_overlap_index(["10.0.0.0/24"])
+        per_game = {"lol": ["10.0.0.5/32", "203.0.113.10/32"]}
+        with patch(
+            "app.services.cidr.pipeline.games._collect_item_cidrs",
+            side_effect=lambda item, **kwargs: (per_game.get(item["key"], []), True, []),
+        ), patch(
+            "app.services.cidr.pipeline.games._build_overlap_index",
+            return_value=overlap_index,
+        ):
+            block, _, _, cidrs, _, _, summary, _ = cidr_list_updater._render_games_ips_block(
+                ["lol"],
+                block_start=cidr_list_updater.GAME_FILTER_EXCLUDE_IP_BLOCK_START,
+                block_end=cidr_list_updater.GAME_FILTER_EXCLUDE_IP_BLOCK_END,
+            )
+
+        self.assertIn("10.0.0.5/32", block)
+        self.assertIn("203.0.113.10/32", block)
+        self.assertIn("Include split:", block)
+        self.assertEqual(cidrs, ["10.0.0.5/32", "203.0.113.10/32"])
+        self.assertEqual(summary["include_patches_count"], 1)
+        self.assertEqual(summary["routes_written_count"], 2)
+
+    def test_sync_games_exclude_ips_applies_include_patch_and_trimmed_exclude(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            include_ips_path = os.path.join(tmp_dir, "include-ips.txt")
+            exclude_ips_path = os.path.join(tmp_dir, "AZ-Game-exclude-ips.txt")
+            with open(include_ips_path, "w", encoding="utf-8") as handle:
+                handle.write("10.0.0.0/24\n")
+
+            self._reset_overlap_cache()
+            overlap_index = self._build_test_overlap_index(["10.0.0.0/24"], include_ips_path)
+            per_game = {"lol": ["10.0.0.5/32", "203.0.113.10/32"]}
+
+            with patch.object(cidr_list_updater, "AZ_GAME_EXCLUDE_IPS_FILE", exclude_ips_path), patch(
+                "app.services.cidr.pipeline.games._collect_item_cidrs",
+                side_effect=lambda item, **kwargs: (per_game.get(item["key"], []), True, []),
+            ), patch(
+                "app.services.cidr.pipeline.games._build_overlap_index",
+                return_value=overlap_index,
+            ):
+                result = cidr_list_updater._sync_games_exclude_ips(["lol"])
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["changed"])
+            self.assertEqual(result["cidr_count"], 2)
+            with open(exclude_ips_path, "r", encoding="utf-8") as handle:
+                exclude_content = handle.read()
+            with open(include_ips_path, "r", encoding="utf-8") as handle:
+                include_content = handle.read()
+            self.assertIn("10.0.0.5/32", exclude_content)
+            self.assertIn("203.0.113.10/32", exclude_content)
+            self.assertNotIn("10.0.0.0/24\n", include_content)
+            self.assertNotIn("\n10.0.0.5/32\n", f"\n{include_content}\n")
+
+    def test_subtract_cidrs_from_default_route_completes_fast(self):
+        started = time.time()
+        result = cidr_list_updater._subtract_cidrs("0.0.0.0/0", ["10.0.0.5/32"])
+        elapsed = time.time() - started
+        self.assertIsNotNone(result)
+        self.assertLess(elapsed, 1.0)
+        self.assertLessEqual(len(result), int(getattr(cidr_list_updater, "EXCLUDE_PUNCH_MAX_RESULT_CIDRS", 64)))
+        self.assertNotIn("10.0.0.5/32", result)
+
+    def test_exclude_punch_skips_broad_include_routes(self):
+        entries, starts = self._build_test_overlap_index(["0.0.0.0/0"])
+        result = cidr_list_updater._trim_exclude_cidr_against_include_routes(
+            "10.0.0.5/32", entries, starts
+        )
+        self.assertEqual(result["status"], "full")
+        self.assertEqual(result["write_cidrs"], ["10.0.0.5/32"])
+        self.assertEqual(result["include_patches"], [])
+        self.assertGreaterEqual(int(result.get("include_patches_skipped") or 0), 1)
+
+    def test_preview_game_exclude_filter_with_broad_overlap(self):
+        self._reset_overlap_cache()
+        overlap_index = self._build_test_overlap_index(["10.0.0.0/8", "0.0.0.0/0"])
+        per_game = {"apex_legends": [f"23.79.{i}.0/24" for i in range(25)]}
+        started = time.time()
+        with patch(
+            "app.services.cidr.pipeline.games._collect_item_cidrs",
+            side_effect=lambda item, **kwargs: (set(per_game.get(item["key"], [])), True, []),
+        ), patch(
+            "app.services.cidr.pipeline.games._build_overlap_index",
+            return_value=overlap_index,
+        ):
+            result = cidr_list_updater.preview_game_exclude_filter(include_game_keys=["apex_legends"])
+        elapsed = time.time() - started
+        self.assertTrue(result["success"])
+        self.assertLess(elapsed, 2.0)
+        summary = result["preview"]["overlap_summary"]
+        self.assertGreaterEqual(int(summary.get("include_patches_skipped_count") or 0), 1)
+        self.assertEqual(int(summary.get("routes_written_count") or 0), 25)
+
+    def test_overlap_index_excludes_ips_list_catalog_files(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            list_dir = os.path.join(tmp_dir, "list")
+            config_dir = os.path.join(tmp_dir, "config")
+            os.makedirs(list_dir)
+            os.makedirs(config_dir)
+            list_file = os.path.join(list_dir, "akamai-ips.txt")
+            config_file = os.path.join(config_dir, "AP-akamai-include-ips.txt")
+            with open(list_file, "w", encoding="utf-8") as handle:
+                handle.write("10.0.0.0/24\n")
+            with open(config_file, "w", encoding="utf-8") as handle:
+                handle.write("10.0.0.0/24\n")
+
+            self._reset_overlap_cache()
+            with patch("app.services.cidr.pipeline_facade.LIST_DIR", list_dir), patch.object(
+                cidr_list_updater, "AZ_GAME_INCLUDE_IPS_FILE", os.path.join(config_dir, "AZ-Game-include-ips.txt")
+            ), patch.object(
+                cidr_list_updater, "AZ_GAME_INCLUDE_HOSTS_FILE", os.path.join(config_dir, "AZ-Game-include-hosts.txt")
+            ):
+                files = cidr_list_updater._iter_overlap_source_files()
+
+            self.assertIn(config_file, files)
+            self.assertNotIn(list_file, files)
+
+    def test_apply_include_patches_skips_ips_list_catalog_files(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            list_file = os.path.join(tmp_dir, "akamai-ips.txt")
+            with open(list_file, "w", encoding="utf-8") as handle:
+                handle.write("10.0.0.0/24\n")
+
+            with patch("app.services.cidr.pipeline_facade.LIST_DIR", tmp_dir):
+                result = cidr_list_updater._apply_include_patches_to_files(
+                    [{"file": list_file, "old_cidr": "10.0.0.0/24", "new_cidrs": ["10.0.0.1/24"]}]
+                )
+
+            self.assertTrue(result["success"])
+            self.assertFalse(result["changed"])
+            with open(list_file, "r", encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), "10.0.0.0/24\n")
+
+
+    def test_preview_exclude_filter_includes_full_change_log(self):
+        self._reset_overlap_cache()
+        overlap_index = self._build_test_overlap_index(["10.0.0.0/24"], "/tmp/AP-test-include-ips.txt")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            exclude_ips_path = os.path.join(tmp_dir, "AZ-Game-exclude-ips.txt")
+            with open(
+                exclude_ips_path,
+                "w",
+                encoding="utf-8",
+            ) as handle:
+                handle.write(
+                    f"{cidr_list_updater.GAME_FILTER_EXCLUDE_IP_BLOCK_START}\n"
+                    "10.0.1.0/24\n"
+                    f"{cidr_list_updater.GAME_FILTER_EXCLUDE_IP_BLOCK_END}\n"
+                )
+            with patch.object(cidr_list_updater, "AZ_GAME_EXCLUDE_IPS_FILE", exclude_ips_path), patch(
+                "app.services.cidr.pipeline.games._build_overlap_index",
+                return_value=overlap_index,
+            ), patch(
+                "app.services.cidr.pipeline.games._collect_item_cidrs",
+                return_value=({"10.0.0.5/32", "10.0.2.0/24"}, True, []),
+            ):
+                result = cidr_list_updater.preview_game_exclude_filter(include_game_keys=["apex_legends"])
+
+        self.assertTrue(result["success"])
+        change_log = result["preview"].get("change_log") or {}
+        self.assertEqual(change_log.get("filter_kind"), "exclude")
+        self.assertIn("10.0.1.0/24", change_log.get("current_cidrs") or [])
+        self.assertIn("10.0.0.5/32", change_log.get("planned_cidrs") or [])
+        self.assertIn("10.0.2.0/24", change_log.get("added_cidrs") or [])
+        lines = change_log.get("lines") or []
+        self.assertTrue(any("Сейчас" in line for line in lines))
+        self.assertTrue(any("Итог" in line for line in lines))
+        self.assertTrue(any("Изменения include-файлов" in line for line in lines))
+        trim_details = (result["preview"].get("overlap_summary") or {}).get("trim_details") or []
+        self.assertGreaterEqual(len(trim_details), 2)
+
+
+    def test_preview_exclude_filter_warns_on_broad_include_routes(self):
+        self._reset_overlap_cache()
+        overlap_index = self._build_test_overlap_index(
+            ["104.64.0.0/10"],
+            "/tmp/AP-akamai-include-ips.txt",
+        )
+        with patch(
+            "app.services.cidr.pipeline.games._build_overlap_index",
+            return_value=overlap_index,
+        ), patch(
+            "app.services.cidr.pipeline.games._collect_item_cidrs",
+            return_value=({"104.64.10.0/24", "104.64.20.0/24"}, True, []),
+        ):
+            result = cidr_list_updater.preview_game_exclude_filter(include_game_keys=["apex_legends"])
+
+        self.assertTrue(result["success"])
+        summary = result["preview"].get("overlap_summary") or {}
+        skip_summary = summary.get("include_patches_skip_summary") or []
+        self.assertEqual(len(skip_summary), 1)
+        self.assertEqual(skip_summary[0]["old_cidr"], "104.64.0.0/10")
+        self.assertEqual(skip_summary[0]["reason"], "include_route_too_broad")
+        self.assertEqual(skip_summary[0]["overlap_count"], 2)
+        self.assertIn("reason_label", skip_summary[0])
+
+        warnings = result["preview"].get("punch_warnings") or summary.get("punch_warnings") or []
+        self.assertTrue(any("504" in warning for warning in warnings))
+        self.assertTrue(any("/16" in warning for warning in warnings))
+
+        lines = (result["preview"].get("change_log") or {}).get("lines") or []
+        self.assertTrue(any("ВНИМАНИЕ: punch не выполнен" in line for line in lines))
+        self.assertTrue(any("104.64.0.0/10" in line for line in lines))
+        self.assertIn("предупреждения", result.get("message") or "")
+
+    def test_get_config_include_ips_route_stats_counts_config_files(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            include_ips_path = os.path.join(tmp_dir, "include-ips.txt")
+            az_game_ips_path = os.path.join(tmp_dir, "AZ-Game-include-ips.txt")
+            with open(include_ips_path, "w", encoding="utf-8") as handle:
+                handle.write("10.0.0.0/24\n")
+            with open(az_game_ips_path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    f"{cidr_list_updater.GAME_FILTER_IP_BLOCK_START}\n"
+                    "# Keys: riot_games\n"
+                    "10.0.1.0/24\n"
+                    f"{cidr_list_updater.GAME_FILTER_IP_BLOCK_END}\n"
+                )
+            with patch.object(cidr_list_updater, "AZ_GAME_INCLUDE_IPS_FILE", az_game_ips_path):
+                stats = cidr_list_updater.get_config_include_ips_route_stats()
+            self.assertEqual(stats["non_game_routes"], 1)
+            self.assertEqual(stats["game_routes"], 1)
+            self.assertEqual(stats["total_routes"], 2)
+            self.assertEqual(stats["game_budget"], stats["limit"] - 1)
+
+    def test_apply_config_route_budget_collapses_provider_without_overlaps(self):
+        per_provider = {
+            "riot_games": ["10.0.0.0/31", "10.0.0.2/31"],
+        }
+        with patch(
+            "app.services.cidr.pipeline.games.get_config_include_ips_route_stats",
+            return_value={
+                "limit": 900,
+                "non_game_routes": 899,
+                "game_budget": 1,
+            },
+        ):
+            result, meta = cidr_list_updater._apply_config_route_budget_to_providers(
+                per_provider,
+                ["riot_games"],
+            )
+        self.assertEqual(sum(len(value) for value in result.values()), 1)
+        self.assertEqual(result["riot_games"], ["10.0.0.0/30"])
+        self.assertTrue(meta.get("compression_applied"))
+        self.assertLessEqual(meta.get("total_routes_planned"), 900)
+
+    def test_apply_config_route_budget_skips_when_limit_disabled(self):
+        per_provider = {
+            "riot_games": ["10.0.0.0/31", "10.0.0.2/31"],
+        }
+        with patch(
+            "app.services.cidr.pipeline.games.get_config_include_ips_route_stats",
+            return_value={
+                "limit": 900,
+                "non_game_routes": 899,
+                "game_budget": 1,
+                "limit_enforced": False,
+            },
+        ):
+            result, meta = cidr_list_updater._apply_config_route_budget_to_providers(
+                per_provider,
+                ["riot_games"],
+            )
+        self.assertEqual(result["riot_games"], ["10.0.0.0/31", "10.0.0.2/31"])
+        self.assertFalse(meta.get("compression_applied"))
+        self.assertFalse(meta.get("limit_enforced"))
+
+    def test_apply_total_route_limit_skips_when_limit_disabled(self):
+        entries = [
+            {"file": "cloudflare.txt", "cidrs": ["10.0.0.0/24", "10.0.1.0/24"]},
+            {"file": "google.txt", "cidrs": ["10.0.2.0/24", "10.0.3.0/24"]},
+        ]
+        with patch(
+            "app.services.cidr.pipeline.games.is_game_filter_config_route_limit_enforced",
+            return_value=False,
+        ):
+            adjusted, meta = cidr_list_updater._apply_total_route_limit(entries, 2)
+        self.assertEqual(len(adjusted[0]["cidrs"]), 2)
+        self.assertEqual(len(adjusted[1]["cidrs"]), 2)
+        self.assertFalse(meta.get("limit_enforced"))
+        self.assertEqual(meta.get("compressed_total_cidr_count"), 4)
+
+    def test_get_game_filter_route_limit_settings_requires_both_flags(self):
+        with patch.dict(os.environ, {}, clear=True):
+            settings = cidr_list_updater.get_game_filter_route_limit_settings()
+            self.assertTrue(settings["route_limit_enforced"])
+
+        with patch.dict(
+            os.environ,
+            {
+                cidr_list_updater.AZ_GAME_DISABLE_CONFIG_ROUTE_LIMIT_ENV: "true",
+                cidr_list_updater.AZ_GAME_CONFIG_ROUTE_LIMIT_RISK_ACK_ENV: "true",
+            },
+            clear=True,
+        ):
+            settings = cidr_list_updater.get_game_filter_route_limit_settings()
+            self.assertFalse(settings["route_limit_enforced"])
+            self.assertTrue(settings["disable_route_limit"])
+            self.assertTrue(settings["route_limit_risk_ack"])
+
+
+if __name__ == "__main__":
+    unittest.main()

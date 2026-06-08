@@ -33,6 +33,7 @@ ensure_env_defaults() {
     _ensure_env_default "FEATURE_EDIT_FILES_ENABLED" "true"
     _ensure_env_default "FEATURE_TELEGRAM_ENABLED" "true"
     _ensure_env_default "FEATURE_BACKUPS_ENABLED" "true"
+    _ensure_env_default "FEATURE_MAINTENANCE_ENABLED" "true"
     _ensure_env_default "FEATURE_SECURITY_ENABLED" "true"
     _ensure_env_default "FEATURE_DIAGNOSTICS_TESTS_ENABLED" "true"
     _ensure_env_default "FEATURE_USER_MANAGEMENT_ENABLED" "true"

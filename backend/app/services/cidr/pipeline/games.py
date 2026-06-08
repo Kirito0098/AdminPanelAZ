@@ -2046,7 +2046,7 @@ def _collect_overlap_summary(candidate_cidrs, selected_game_keys=None, _overlap_
 
 def _read_saved_game_keys(filepaths, block_keyword="games"):
     keys_pattern = re.compile(
-        rf"# BEGIN AdminAntizapret CIDR {re.escape(str(block_keyword))}.*?\n# Keys: ([^\n]+)",
+        rf"# BEGIN Admin(?:Antizapret|PanelAZ) CIDR {re.escape(str(block_keyword))}.*?\n# Keys: ([^\n]+)",
         re.DOTALL,
     )
     for filepath in filepaths:

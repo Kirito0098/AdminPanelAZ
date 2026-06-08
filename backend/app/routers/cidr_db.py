@@ -8,6 +8,8 @@ from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
+from app.schemas import CidrPresetCreateRequest, CidrPresetUpdateRequest
+from app.services.action_log import log_action
 from app.services.cidr.cidr_tasks import (
     create_cidr_task,
     find_active_cidr_task,
@@ -66,6 +68,20 @@ def _enrich_providers(status: dict) -> dict:
         }
     status["providers"] = providers
     return status
+
+
+def _enrich_preset_providers_meta(presets: list[dict]) -> list[dict]:
+    for preset in presets:
+        meta = {}
+        for prov_key in preset.get("providers", []):
+            ip_meta = IP_FILES.get(prov_key, {})
+            meta[prov_key] = {
+                "name": ip_meta.get("name", prov_key),
+                "category": ip_meta.get("category", ""),
+                "tags": ip_meta.get("tags", []),
+            }
+        preset["providers_meta"] = meta
+    return presets
 
 
 @router.get("/status")
@@ -252,3 +268,103 @@ def antifilter_refresh(user: User = Depends(require_admin), db: Session = Depend
 def seed_presets(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     _svc(db).seed_builtin_presets()
     return {"success": True, "message": "Встроенные пресеты обновлены"}
+
+
+@router.get("/presets")
+def list_presets(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    presets = _enrich_preset_providers_meta(_svc(db).get_presets())
+    return {"success": True, "presets": presets}
+
+
+@router.post("/presets", status_code=status.HTTP_201_CREATED)
+def create_preset(
+    payload: CidrPresetCreateRequest,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Необходимо указать имя пресета")
+    if not payload.providers:
+        raise HTTPException(status_code=400, detail="Необходимо указать список провайдеров")
+
+    settings = payload.settings.model_dump() if payload.settings else None
+    preset = _svc(db).create_preset(
+        name=name,
+        description=payload.description,
+        providers=payload.providers,
+        settings=settings,
+    )
+    log_action(
+        db,
+        action="settings_cidr_preset_create",
+        user_id=user.id,
+        username=user.username,
+        details=name,
+    )
+    return {"success": True, "preset": preset}
+
+
+@router.put("/presets/{preset_id}")
+def update_preset(
+    preset_id: int,
+    payload: CidrPresetUpdateRequest,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    settings = payload.settings.model_dump() if payload.settings is not None else None
+    preset = _svc(db).update_preset(
+        preset_id,
+        name=payload.name.strip() if payload.name is not None else None,
+        description=payload.description if payload.description is not None else None,
+        providers=payload.providers,
+        settings=settings,
+    )
+    if not preset:
+        raise HTTPException(status_code=404, detail="Пресет не найден")
+    log_action(
+        db,
+        action="settings_cidr_preset_update",
+        user_id=user.id,
+        username=user.username,
+        details=str(preset_id),
+    )
+    return {"success": True, "preset": preset}
+
+
+@router.delete("/presets/{preset_id}")
+def delete_preset(
+    preset_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    ok, msg = _svc(db).delete_preset(preset_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    log_action(
+        db,
+        action="settings_cidr_preset_delete",
+        user_id=user.id,
+        username=user.username,
+        details=str(preset_id),
+    )
+    return {"success": True, "message": msg}
+
+
+@router.post("/presets/{preset_id}/reset")
+def reset_preset(
+    preset_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    preset = _svc(db).reset_builtin_preset(preset_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail="Встроенный пресет не найден")
+    log_action(
+        db,
+        action="settings_cidr_preset_reset",
+        user_id=user.id,
+        username=user.username,
+        details=str(preset_id),
+    )
+    return {"success": True, "preset": preset}
