@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-06-08
+
+Релиз после **фазы 20** (final parity audit). Baseline переноса: AdminAntizapret **1.9.0** → AdminPanelAZ **1.0.0**.
+
+### Added
+- **Test suite wave 2** — 5 модулей из AA: `test_antizapret_backup.py`, `test_backup_manager.py`, `test_firewall_tools_check.py`, `test_site_diagnostics.py`, `test_tg_mini_init_data.py` (итого **40 modules / 240 tests**).
+- **README** — секция «Production readiness»: чеклист готовности, известные пробелы, таблица 🆕 возможностей сверх AA.
+
+### Changed
+- **`MIGRATION.md`** — parity audit: исправлены завышенные/заниженные статусы (presets CRUD 🟡, diff 🟡, temp whitelist 🟡, AdminNotify 🟡); baseline **1.0.0**; backlog актуализирован; test count 40/240.
+- **Оценка готовности** в README: ~85–90% функциональности AA 1.9.0.
+
+### Documented gaps (backlog 1.0.0+)
+- AdminNotify TG-хуки: client ban/unban, user create/delete
+- Временный IP whitelist UI; CIDR presets CRUD; diff в редакторе файлов
+- `FEATURE_MAINTENANCE_ENABLED`; CI eslint/pip-audit advisory
+
 ## [0.7.3] - 2026-06-08
 
 ### Added
