@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
 import Toast from '@/components/ui/Toast'
+import { randomId } from '@/lib/randomId'
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info'
 
@@ -38,7 +39,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   const notify = useCallback(
     (type: ToastType, message: string, duration = DEFAULT_DURATION) => {
-      const id = crypto.randomUUID()
+      const id = randomId()
       setToasts((prev) => [...prev, { id, type, message, duration }])
 
       const timer = setTimeout(() => dismiss(id), duration)

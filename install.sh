@@ -595,6 +595,7 @@ ensure_executable_scripts() {
   chmod +x "$ROOT_DIR/start.sh" "$ROOT_DIR/start_node_agent.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/nginx-setup.sh" "$ROOT_DIR/scripts/nginx-common.sh" "$ROOT_DIR/scripts/firewall-setup.sh" 2>/dev/null || true
+  chmod +x "$ROOT_DIR/scripts/seed-admin-user.py" "$ROOT_DIR/scripts/seed-wizard-db.py" 2>/dev/null || true
 }
 
 env_get() {
@@ -863,6 +864,19 @@ setup_backend() {
   pip install -q -r "$BACKEND_DIR/requirements.txt"
   mkdir -p "$BACKEND_DIR/data"
   ui_progress_done "Backend (Python venv)"
+}
+
+seed_admin_user_from_env() {
+  if ! install_controller_selected; then
+    return 0
+  fi
+  if [[ "$WIZARD_RAN" != true ]] && ! wiz_env_exported; then
+    return 0
+  fi
+
+  log "Синхронизация учётной записи администратора (мастер → БД)..."
+  "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/seed-admin-user.py" \
+    || die "Не удалось создать/обновить администратора в БД"
 }
 
 seed_wizard_db_settings() {
@@ -1399,6 +1413,7 @@ run_install_flow() {
   setup_env
   setup_node_env
   setup_backend
+  seed_admin_user_from_env
   seed_wizard_db_settings
   setup_frontend
   setup_runtime_dirs

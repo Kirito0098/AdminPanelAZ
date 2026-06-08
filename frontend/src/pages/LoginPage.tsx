@@ -28,8 +28,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [captchaText, setCaptchaText] = useState('')
   const [captchaId, setCaptchaId] = useState('')
+  const [captchaImageUrl, setCaptchaImageUrl] = useState('')
   const [captchaRequired, setCaptchaRequired] = useState(false)
-  const [captchaKey, setCaptchaKey] = useState(0)
   const [tgBot, setTgBot] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [needs2FA, setNeeds2FA] = useState(false)
@@ -48,9 +48,25 @@ export default function LoginPage() {
     }
   }, [searchParams, setToken])
 
+  const refreshCaptcha = async () => {
+    const resp = await fetch(`${API_BASE}/auth/captcha`)
+    const id = resp.headers.get('X-Captcha-Id') || ''
+    const blob = await resp.blob()
+    setCaptchaId(id)
+    setCaptchaImageUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return URL.createObjectURL(blob)
+    })
+    setCaptchaText('')
+    setCaptchaRequired(true)
+  }
+
   useEffect(() => {
     getCaptchaRequired()
-      .then((d) => setCaptchaRequired(d.required))
+      .then((d) => {
+        setCaptchaRequired(d.required)
+        if (d.required) return refreshCaptcha()
+      })
       .catch(() => {})
     Promise.all([getFeatureModules().catch(() => null), getTelegramLoginConfig().catch(() => null)])
       .then(([modules, tgConfig]) => {
@@ -61,13 +77,11 @@ export default function LoginPage() {
       })
   }, [])
 
-  const refreshCaptcha = async () => {
-    const resp = await fetch(`${API_BASE}/auth/captcha`)
-    const id = resp.headers.get('X-Captcha-Id') || ''
-    setCaptchaId(id)
-    setCaptchaKey((k) => k + 1)
-    setCaptchaRequired(true)
-  }
+  useEffect(() => {
+    return () => {
+      if (captchaImageUrl) URL.revokeObjectURL(captchaImageUrl)
+    }
+  }, [captchaImageUrl])
 
   if (loading) {
     return (
@@ -105,10 +119,17 @@ export default function LoginPage() {
       }
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Ошибка входа'
-      notifyError(msg)
-      if (msg.includes('капч')) {
-        await refreshCaptcha()
+      const needsCaptcha =
+        err instanceof ApiError &&
+        (err.status === 400 || msg.toLowerCase().includes('капч'))
+      try {
+        notifyError(msg)
+      } catch {
+        console.error('Login failed:', msg)
+      }
+      if (needsCaptcha) {
         setCaptchaRequired(true)
+        await refreshCaptcha()
       }
     } finally {
       setSubmitting(false)
@@ -168,28 +189,9 @@ export default function LoginPage() {
                 <Label>Капча</Label>
                 <div className="flex items-center gap-2">
                   <img
-                    key={captchaKey}
-                    src={`${API_BASE}/auth/captcha?${captchaKey}`}
+                    src={captchaImageUrl || undefined}
                     alt="captcha"
                     className="h-12 rounded border"
-                    onLoad={(e) => {
-                      const id = (e.target as HTMLImageElement).getAttribute('data-captcha-id')
-                      if (!captchaId && id) setCaptchaId(id)
-                    }}
-                    ref={(img) => {
-                      if (img && !captchaId) {
-                        fetch(`${API_BASE}/auth/captcha`)
-                          .then((r) => {
-                            const id = r.headers.get('X-Captcha-Id') || ''
-                            setCaptchaId(id)
-                            return r.blob()
-                          })
-                          .then((b) => {
-                            if (img) img.src = URL.createObjectURL(b)
-                          })
-                          .catch(() => {})
-                      }
-                    }}
                   />
                   <Button type="button" variant="outline" size="sm" onClick={refreshCaptcha}>
                     ↻
