@@ -22,6 +22,9 @@ class SecuritySettingsUpdate(BaseModel):
     block_scanners: bool | None = None
     scanner_max_attempts: int | None = Field(default=None, ge=1, le=20)
     scanner_ban_seconds: int | None = Field(default=None, ge=60, le=86400)
+    scanner_window_seconds: int | None = Field(default=None, ge=10, le=3600)
+    block_ip_blocked_dwell: bool | None = None
+    ip_blocked_dwell_seconds: int | None = Field(default=None, ge=30, le=3600)
     qr_download_ttl_seconds: int | None = Field(default=None, ge=60, le=3600)
     qr_download_max_downloads: int | None = None
     qr_download_pin: str | None = None

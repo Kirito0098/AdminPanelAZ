@@ -64,6 +64,22 @@ class IpRestrictionService:
     def get_settings(self, db: Session) -> dict:
         return self._security.get_settings(db)
 
+    def _scanner_runtime_settings(self, db: Session) -> dict:
+        settings = self.get_settings(db)
+        return {
+            "scanner_window_seconds": max(
+                10,
+                min(3600, int(settings.get("scanner_window_seconds") or self.scanner_window_seconds)),
+            ),
+            "block_ip_blocked_dwell": bool(
+                settings.get("block_ip_blocked_dwell", self.block_ip_blocked_dwell)
+            ),
+            "ip_blocked_dwell_seconds": max(
+                30,
+                min(3600, int(settings.get("ip_blocked_dwell_seconds") or self.ip_blocked_dwell_seconds)),
+            ),
+        }
+
     def is_scanner_banned(self, db: Session, client_ip: str) -> bool:
         if self.is_ip_allowed(db, client_ip):
             return False
@@ -87,6 +103,7 @@ class IpRestrictionService:
         settings = self.get_settings(db)
         if not settings.get("block_scanners"):
             return False
+        scanner_settings = self._scanner_runtime_settings(db)
         ip_key = self._normalize_ip(client_ip)
         if not ip_key or self._firewall.is_in_unban_grace(ip_key):
             return False
@@ -94,7 +111,11 @@ class IpRestrictionService:
         with self._scanner_lock:
             if self._firewall.is_banned(ip_key, now=now):
                 return True
-            attempt_count = self._firewall.record_attempt(ip_key, self.scanner_window_seconds, now=now)
+            attempt_count = self._firewall.record_attempt(
+                ip_key,
+                scanner_settings["scanner_window_seconds"],
+                now=now,
+            )
             if attempt_count >= int(settings.get("scanner_max_attempts") or 5):
                 ban_info = self._firewall.register_ban(
                     ip_key,
@@ -107,7 +128,8 @@ class IpRestrictionService:
 
     def touch_ip_blocked_presence(self, db: Session, client_ip: str) -> dict:
         settings = self.get_settings(db)
-        if not settings.get("ip_restriction_enabled") or not self.block_ip_blocked_dwell:
+        scanner_settings = self._scanner_runtime_settings(db)
+        if not settings.get("ip_restriction_enabled") or not scanner_settings["block_ip_blocked_dwell"]:
             return {"banned": False, "tracking": False}
         ip_key = self._normalize_ip(client_ip)
         if not ip_key:
@@ -131,10 +153,10 @@ class IpRestrictionService:
                     "tracking": True,
                     "grace": True,
                     "elapsed_seconds": int(now - first_seen),
-                    "dwell_seconds": self.ip_blocked_dwell_seconds,
+                    "dwell_seconds": scanner_settings["ip_blocked_dwell_seconds"],
                 }
             elapsed = now - first_seen
-            limit = self.ip_blocked_dwell_seconds
+            limit = scanner_settings["ip_blocked_dwell_seconds"]
             if elapsed >= limit:
                 ban_info = self._firewall.register_ban(
                     ip_key,

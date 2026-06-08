@@ -20,7 +20,7 @@
 
 Сравнение с upstream [AdminAntizapret](https://github.com/Kirito0098/AdminAntizapret) **1.9.0** (Flask + Jinja2). AdminPanelAZ **1.0.0** — релиз после фазы 20 (parity audit). Полные таблицы, карта файлов и backlog — в [`MIGRATION.md`](MIGRATION.md). Поэтапный план (20 фаз) — в [`MIGRATION_PLAN.md`](MIGRATION_PLAN.md).
 
-**Оценка готовности:** ~**85–90%** функциональности AA 1.9.0 перенесено или покрыто эквивалентами; оставшиеся пробелы — в backlog [`MIGRATION.md`](MIGRATION.md#backlog-переноса-приоритеты).
+**Оценка готовности:** ~**92–95%** функциональности AA 1.9.0 перенесено или покрыто эквивалентами; оставшиеся пробелы — в backlog [`MIGRATION.md`](MIGRATION.md#backlog-переноса-приоритеты).
 
 | Маркер | Значение |
 |--------|----------|
@@ -36,20 +36,20 @@
 | VPN-клиенты (OpenVPN, WireGuard, AmneziaWG) | ✅ | CRUD, sync, download, QR |
 | Политики доступа (блок, срок, лимиты) | ✅ | OpenVPN + WG/AWG + TG notify |
 | Синхронизация и графики трафика | ✅ | Collector + «Мониторинг трафика» |
-| Маршрутизация / CIDR | 🟡 | Pipeline, games, AntiZapret config ✅; presets без CRUD |
-| Редактор файлов AntiZapret | 🟡 | Редактор + apply ✅; diff-подсветка — нет |
+| Маршрутизация / CIDR | ✅ | Pipeline, presets CRUD, AntiZapret config, game filters include/exclude |
+| Редактор файлов AntiZapret | ✅ | Мультифайловый редактор + apply + diff-подсветка |
 | Мониторинг сервера (CPU/RAM/vnstat) | ✅ | Страница «Сервер» |
 | NOC / клиенты / логи | ✅ | Monitoring + Logs + экспорт action logs |
-| Безопасность | ✅ | IP whitelist, scanner, rate limit, headers |
-| QR / одноразовые ссылки | 🟡 | SecurityTab (не отдельная вкладка; max downloads UI — нет) |
+| Безопасность | ✅ | IP whitelist, temp whitelist, scanner (вкл. dwell/window), rate limit |
+| QR / одноразовые ссылки | ✅ | SecurityTab (TTL, PIN, max downloads 1/3/5) |
 | Бэкапы (ручные + авто + TG) | ✅ | + `client.sh 8` в BackupTab |
-| Feature toggles | 🟡 | 22 toggles; нет `FEATURE_MAINTENANCE` |
+| Feature toggles | ✅ | 23 toggles (parity AA + `NIGHTLY_IDLE_RESTART`) |
 | Telegram Login + Mini App | ✅ | |
-| Telegram admin-уведомления | 🟡 | Большинство событий ✅; ban/unban клиента и user ops — без TG |
+| Telegram admin-уведомления | ✅ | Login, config ops, settings, CPU/RAM, traffic limits, ban/unban, user ops |
 | Auth (login, captcha, роли) | ✅ | + 🆕 2FA/TOTP, refresh tokens |
 | Viewer role | ✅ | API + UI назначения доступа в UsersTab |
 | Обновление системы (git) | ✅ | + 🆕 node agent / AntiZapret на узлах |
-| In-panel pytest | ✅ | 48 модулей / 385 тестов vs 53 в AA |
+| In-panel pytest | ✅ | 53 модуля / 414 тестов; parity audit (`test_aa_parity_audit.py`) |
 | Установка / ops | ✅ | `install.sh` + `scripts/adminpanel-menu.sh`; diagnostics/safe-browsing CLI ✅ |
 | Multi-node | 🆕 | Controller + Node Agent |
 | CI/CD | ✅ | pytest + ruff + build + shellcheck + eslint; pip-audit/bandit advisory |
@@ -64,14 +64,14 @@
 
 - [x] VPN-клиенты OpenVPN / WireGuard / AmneziaWG (CRUD, sync, download, QR, public routes)
 - [x] Политики доступа, лимиты трафика, reconcile + TG notify
-- [x] Маршрутизация / CIDR pipeline, game filters (~75), вкладка «Конфиг AntiZapret»
+- [x] Маршрутизация / CIDR pipeline, game filters include (~75), presets CRUD, вкладка «Конфиг AntiZapret»
 - [x] Мониторинг: трафик, подключённые клиенты, CPU/RAM, vnstat, WebSocket
-- [x] Безопасность: JWT, captcha, 2FA/TOTP, IP whitelist, scanner ipset/iptables, global API rate limit
+- [x] Безопасность: JWT, captcha, 2FA/TOTP, IP whitelist (+ temp 1h/12h/24h UI), scanner ipset/iptables, global API rate limit
 - [x] Бэкапы панели + AntiZapret (`client.sh 8`), авто-бэкап, TG-доставка
-- [x] Telegram Login, Mini App, AdminNotify (основные события)
+- [x] Telegram Login, Mini App, AdminNotify (все основные события, включая ban/unban и user ops)
 - [x] Multi-node: local + remote через Node Agent (mTLS)
 - [x] Установка: `install.sh`, nginx, firewall scripts, site-diagnostics CLI
-- [x] CI: pytest (240), ruff, frontend build, shellcheck
+- [x] CI: pytest (414), ruff, frontend build, shellcheck, eslint
 - [x] Документация: [`MIGRATION.md`](MIGRATION.md), [`SECURITY.md`](SECURITY.md), [`docs/Telegram.md`](docs/Telegram.md)
 
 ### Перед production — проверить вручную
@@ -81,17 +81,12 @@
 - [ ] **Nginx + TLS** — `scripts/nginx-setup.sh`, `BEHIND_NGINX`, сертификаты
 - [ ] **Firewall** — `scripts/firewall-setup.sh`; backend на `127.0.0.1` за reverse proxy
 - [ ] **Telegram** — Login Widget, Mini App, AdminNotify на реальный `telegram_id`
-- [x] **In-panel pytest** — вкладка «Тесты» в настройках (или `cd backend && pytest`); 48 модулей / 385 тестов
+- [x] **In-panel pytest** — вкладка «Тесты» в настройках (или `cd backend && pytest`); 53 модуля / 414 тестов
 
 ### Известные пробелы vs AdminAntizapret 1.9.0
 
 | Пробел | Обходной путь |
 |--------|----------------|
-| AdminNotify при ban/unban клиента | Журнал действий; TG-хуки — в backlog |
-| Временный whitelist UI (1h/12h/24h) | API `POST /api/security/temp-whitelist` |
-| CIDR presets CRUD | Apply встроенных пресетов; кастомные — вручную на узле |
-| Diff в редакторе файлов | Сравнение вне панели |
-| `adminpanel.sh` console menu | `sudo ./scripts/adminpanel-menu.sh` (или `systemctl`, `start.sh`) |
 | Custom SSL certs в VPN wizard | `sudo ./scripts/nginx-setup.sh` (интерактивно) |
 
 ### 🆕 Только в AdminPanelAZ (сверх AA 1.9.0)

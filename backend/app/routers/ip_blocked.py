@@ -66,11 +66,12 @@ def ip_blocked_page(request: Request, db: Session = Depends(get_db)):
     dwell = ip_restriction_service.touch_ip_blocked_presence(db, client_ip)
     if dwell.get("banned"):
         return JSONResponse(status_code=403, content={"detail": "Доступ заблокирован"})
+    scanner_settings = ip_restriction_service._scanner_runtime_settings(db)
     html = BLOCKED_HTML.format(
         client_ip=client_ip,
         current_time=time.strftime("%Y-%m-%d %H:%M:%S"),
-        dwell_enabled="true" if ip_restriction_service.block_ip_blocked_dwell else "false",
-        dwell_seconds=ip_restriction_service.ip_blocked_dwell_seconds,
+        dwell_enabled="true" if scanner_settings["block_ip_blocked_dwell"] else "false",
+        dwell_seconds=scanner_settings["ip_blocked_dwell_seconds"],
     )
     return HTMLResponse(html)
 

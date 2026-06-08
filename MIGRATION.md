@@ -4,7 +4,7 @@
 > **Обновлено:** 2026-06-08
 > **Источник для сравнения:** `/opt/AdminAntizapret` (Flask + Jinja2) · **Цель:** `/opt/AdminPanelAZ` (FastAPI + React)
 
-AdminPanelAZ — порт веб-панели AdminAntizapret на FastAPI + React. Релиз **1.0.0** закрывает фазы 0–20 плана переноса: основная функциональность AA 1.9.0 перенесена или покрыта эквивалентами; оставшиеся пробелы — в секции backlog и чеклисте production readiness в [`README.md`](README.md).
+AdminPanelAZ — порт веб-панели AdminAntizapret на FastAPI + React. Релиз **1.0.0** закрывает фазы 0–20 плана переноса: **~92–95%** функциональности AA 1.9.0 перенесено или покрыто эквивалентами. Оставшиеся пробелы — упрощённые порты (🟡) в секциях ниже, backlog и чеклист production readiness в [`README.md`](README.md).
 
 ---
 
@@ -36,11 +36,11 @@ AdminPanelAZ — порт веб-панели AdminAntizapret на FastAPI + Rea
 | Политики доступа (блок, срок, лимиты) | ✅ | OpenVPN + WG/AWG |
 | Синхронизация и графики трафика | ✅ | Фоновый collector + страница «Мониторинг трафика» |
 | Лимиты трафика (reconcile) | ✅ | Reconcile + TG notify при превышении |
-| Маршрутизация / CIDR | ✅ | Pipeline, провайдеры, games, AntiZapret config, presets CRUD |
+| Маршрутизация / CIDR | ✅ | Pipeline, провайдеры, presets CRUD, AntiZapret config, game filters include/exclude |
 | Редактор файлов AntiZapret | ✅ | Мультифайловый редактор + apply |
 | Мониторинг сервера (CPU/RAM/vnstat/WS) | ✅ | Страница «Сервер» |
 | NOC / подключённые клиенты / логи | ✅ | Monitoring + Logs |
-| Безопасность (IP whitelist, scanner, rate limit, headers) | ✅ | `security.py`, global API rate limit, robots/security.txt (фаза 18) |
+| Безопасность (IP whitelist, scanner, rate limit, headers) | ✅ | Whitelist, temp whitelist, scanner ban/unban, dwell/window UI, iptables port |
 | QR / одноразовые ссылки | ✅ | Настройки в SecurityTab (не отдельная вкладка) |
 | Бэкапы (ручные + авто + TG) | ✅ | + опция `client.sh 8` в BackupTab (ручной и авто) |
 | Feature toggles | ✅ | 23 toggles (parity AA + `NIGHTLY_IDLE_RESTART` в AZ) |
@@ -50,7 +50,7 @@ AdminPanelAZ — порт веб-панели AdminAntizapret на FastAPI + Rea
 | Viewer role | ✅ | API, ограничения и UI назначения доступа в UsersTab |
 | Журнал действий | ✅ | Просмотр и экспорт CSV |
 | Обновление системы (git) | ✅ | Панель + 🆕 node agent / AntiZapret на узлах |
-| In-panel pytest | ✅ | 48 модулей / 385 тестов (AA: 53; ~5 Jinja/Flask-only не портируются) |
+| In-panel pytest | ✅ | 53 модуля / 414 тестов; parity audit (`test_aa_parity_audit.py`); 9 AA-модулей N/A (Jinja/Flask/CLI) |
 | Установка / ops | ✅ | `install.sh` + `scripts/adminpanel-menu.sh`; diagnostics/safe-browsing CLI ✅ |
 | Multi-node | 🆕 | Controller + Node Agent |
 | CI/CD | ✅ | pytest + ruff + shellcheck + frontend build + eslint; pip-audit/bandit advisory |
@@ -134,7 +134,8 @@ flowchart LR
 | CIDR DB pipeline (refresh/generate) | cidr_db APIs | `cidr_db.py`, `CidrPipelineTab` | ✅ |
 | Antifilter.net sync | antifilter API | `cidr_db.py` | ✅ |
 | Пресеты CIDR | presets API (CRUD) | `PresetsTab` | ✅ |
-| Game filters | полный `GAME_FILTER_CATALOG` | `game_catalog.py` (~75 игр, AA 1.9.0) | ✅ |
+| Game filters (каталог + include) | полный `GAME_FILTER_CATALOG` | `game_catalog.py` (~75 игр), `GameFiltersTab` | ✅ |
+| Game filters (exclude + punch) | `cidr/games.py` → `AZ-Game-exclude-*` | `game_filter_sync.py` + `pipeline/games.py` через `node_adapter` | ✅ |
 | Route-файлы (include/exclude IPs) | routing files | `FilesTab` | ✅ |
 | run-doall / apply | `/run-doall` | `POST /api/routing/apply` | ✅ |
 | Вкладка «Конфиг AntiZapret» | `get/update_antizapret_settings`, schema | `AntizapretConfigTab`, `GET/PUT /api/routing/antizapret-settings` | ✅ |
@@ -160,6 +161,7 @@ flowchart LR
 | IP allow-list (permanent) | `ip_restriction.py` | `security.py` | ✅ |
 | Временный whitelist (1h/12h/24h) | temporary whitelist store | `security.py` + API + SecurityTab | ✅ |
 | Scanner auto-block (ipset/iptables) | scanner store | `scanner_firewall_store.py` | ✅ |
+| Scanner window / dwell (настройки UI) | Security tab | `security.py`, `ip_restriction.py`, `SecurityTab` | ✅ |
 | CSRF / CSP / security headers | `http_security.py` | middleware + robots/security.txt | ✅ |
 | Rate limit login | Flask-Limiter (+ Redis) | auth rate limit (+ Redis для workers) | ✅ |
 | Глобальный rate limit API | per-route only (нет default_limits) | middleware `/api/*` (+ Redis) | ✅ 🆕 |
@@ -190,7 +192,7 @@ flowchart LR
 | Telegram Login Widget | auth routes | `auth.py` | ✅ |
 | Telegram Mini App | `tg_mini/` | `tg_mini.py`, static assets | ✅ |
 | Отправка конфига в TG (Mini App) | tg_mini API | `tg_mini.py` | ✅ |
-| AdminNotify (login, client ops, settings) | `admin_notify.py` | `admin_notify.py` | 🟡 |
+| AdminNotify (login, client ops, settings) | `admin_notify.py` | `admin_notify.py` | ✅ |
 | CPU/RAM alerts в TG | AdminNotify | `admin_notify.py` + metrics workers | ✅ |
 | Traffic limit alerts в TG | `traffic_limit_notify.py` | `traffic_limit_notify.py` | ✅ |
 | Тест TG-сообщения | settings API | `maintenance.py` | ✅ |
@@ -208,7 +210,7 @@ flowchart LR
 | Журнал действий (просмотр) | action logs | `LogsPage.tsx` | ✅ |
 | Экспорт action logs CSV | `/api/settings/action-logs/export` | `GET /api/logs/action-logs/export` | ✅ |
 | Обновление панели (git) | `/update_system` | `UpdatesTab.tsx`, `system.py` | ✅ |
-| In-panel pytest | `api_tests.py` | `TestsTab.tsx`, `tests.py`, `backend/tests/` (48 модулей) | ✅ |
+| In-panel pytest | `api_tests.py` | `TestsTab.tsx`, `tests.py`, `backend/tests/` (53 модуля / 414 тестов) | ✅ |
 | Обновление node agent + AntiZapret | — | `NodeUpdateDialog`, `nodes.py` | 🆕 |
 
 ### 10. Feature toggles (сравнение)
@@ -300,7 +302,8 @@ flowchart LR
 | `core/services/feature_guards.py` | `backend/app/services/feature_guards.py` | parity 1.9.0 |
 | `core/services/ip_restriction.py` | `backend/app/services/ip_restriction.py` | ported |
 | `core/services/scanner_firewall_store.py` | `backend/app/services/scanner_firewall_store.py` | ported |
-| `core/services/security.py` | `backend/app/services/security.py` | simplified |
+| `core/services/security.py` | `backend/app/services/security.py` | ported (scanner dwell/window in AppSetting + SecurityTab) |
+| `core/services/cidr/games.py` | `backend/app/services/cidr/pipeline/games.py` + `game_filter_sync.py` | pipeline + router sync через node_adapter (local + remote agent) |
 | `core/services/server_monitor.py` | `backend/app/services/server_monitor.py` | ported |
 | `core/services/openvpn_management.py` | `backend/app/services/openvpn_management.py` | ported |
 | `core/services/wg_awg_runtime_enforcer.py` | `backend/app/services/wg_runtime.py` | ported (syncconf fallback) |
@@ -317,7 +320,7 @@ flowchart LR
 | `script_sh/ssl_setup.sh` | `scripts/nginx-setup.sh`, `nginx-common.sh` | patterned |
 | `app.py` (Flask monolith) | `backend/app/main.py` + routers | restructured |
 | `templates/` + `static/` | `frontend/src/` | full rewrite React |
-| `core/services/admin_notify.py` | `backend/app/services/admin_notify.py` | ported; TG-хуки client_ban / user ops — pending |
+| `core/services/admin_notify.py` | `backend/app/services/admin_notify.py` | ported 1.9.0 + client_ban / user ops / tg_unlinked |
 | `routes/settings/antizapret.py` | `routing.py` + `AntizapretConfigTab` | ported (фаза 5) |
 | `utils/nightly_idle_restart.py` | `nightly_idle_restart_worker.py` | ported (async worker) |
 | `utils/wg_awg_runtime_apply.py` | `wg_runtime.py` + `wg_policy_sync_worker.py` | inline, no standalone CLI |
@@ -333,23 +336,25 @@ flowchart LR
 
 ### Высокий приоритет
 
-1. ~~**AdminNotify hooks**~~ ✅ — `send_client_ban`, `send_user_create` / `send_user_delete`, `send_tg_login_unlinked`
-2. **Временный IP whitelist UI** — radio 1h/12h/24h в SecurityTab (API уже есть)
-3. ~~**CIDR presets CRUD**~~ ✅ — `GET/POST/PUT/DELETE/reset` в `cidr_db.py`, `PresetsTab`
+1. ~~**Game filters exclude**~~ ✅ — `/routing/game-filters/sync` → `game_filter_sync.py` + `pipeline/games.py` (local + node agent)
+2. ~~**AdminNotify hooks**~~ ✅ — `send_client_ban`, `send_user_create` / `send_user_delete`, `send_tg_login_unlinked`
+3. ~~**Временный IP whitelist UI**~~ ✅ — radio 1h/12h/24h в `SecurityTab.tsx`
+4. ~~**CIDR presets CRUD**~~ ✅ — `GET/POST/PUT/DELETE/reset` в `cidr_db.py`, `PresetsTab`
 
 ### Средний приоритет
 
-4. ~~**Diff-подсветка**~~ ✅ — `buildLightDiff.ts`, `DiffPanel`, live diff + «Сравнить с диском» в `EditFilesPage`
-5. ~~**QR max downloads**~~ ✅ — поле «Макс. скачиваний» в SecurityTab (1, 3, 5)
-6. ~~**`FEATURE_MAINTENANCE_ENABLED`**~~ ✅ — toggle + guard maintenance API и вкладки
-7. ~~**CI parity**~~ ✅ — eslint для frontend, pip-audit/bandit (advisory как в AA)
+5. ~~**Scanner dwell/window UI**~~ ✅ — `scanner_window_seconds`, `block_ip_blocked_dwell`, `ip_blocked_dwell_seconds` в API + SecurityTab
+6. ~~**Diff-подсветка**~~ ✅ — `buildLightDiff.ts`, `DiffPanel`, live diff + «Сравнить с диском» в `EditFilesPage`
+7. ~~**QR max downloads**~~ ✅ — поле «Макс. скачиваний» в SecurityTab (1, 3, 5)
+8. ~~**`FEATURE_MAINTENANCE_ENABLED`**~~ ✅ — toggle + guard maintenance API и вкладки
+9. ~~**CI parity**~~ ✅ — eslint для frontend, pip-audit/bandit (advisory как в AA)
 
 ### Низкий приоритет
 
-8. ~~**adminpanel.sh**-style console menu~~ ✅ — `scripts/adminpanel-menu.sh` + `backup-cli.py`
-9. ~~**iptables whitelist port** runtime (`panel_port_firewall.py`)~~ ✅ — `panel_port_firewall.py` + Security tab; `firewall-setup.sh` остаётся install-time
-10. Расширение test suite до полного паритета с AA (~53 модуля; сейчас 40+)
-11. ~~**VPN-сеть** guided wizard~~ ✅ — `POST /api/settings/vpn-network/publish` → `nginx-setup.sh` (custom certs — ops-only)
+10. ~~**Test suite parity**~~ ✅ — 53 модуля / 414 тестов; `test_aa_parity_audit.py` (матрица AA→AZ + captcha/traffic/wg tests)
+11. ~~**adminpanel.sh**-style console menu~~ ✅ — `scripts/adminpanel-menu.sh` + `backup-cli.py`
+12. ~~**iptables whitelist port** runtime (`panel_port_firewall.py`)~~ ✅ — `panel_port_firewall.py` + Security tab; `firewall-setup.sh` остаётся install-time
+13. ~~**VPN-сеть** guided wizard~~ ✅ — `POST /api/settings/vpn-network/publish` → `nginx-setup.sh` (custom certs — ops-only)
 
 ### Закрыто в 0.5.x–1.0.0
 
@@ -358,6 +363,7 @@ flowchart LR
 - Feature toggles UI, WG policy worker, action logs CSV, public route-files, OpenVPN UDP/TCP group
 - BackgroundTaskService, sessions/heartbeat, VPN network read-only UI, global API rate limit
 - Ops CLI (site-diagnostics, safe-browsing), backup client.sh 8, `docs/Telegram.md`, CI baseline
+- AdminNotify hooks (client ban, user create/delete, TG unlink), temp whitelist UI, CIDR presets CRUD, diff editor, QR max downloads, `FEATURE_MAINTENANCE`, adminpanel-menu
 
 ---
 
@@ -365,11 +371,15 @@ flowchart LR
 
 | Область | AA tests | AZ tests | Статус |
 |---------|----------|----------|--------|
-| Общее покрытие | ~53 pytest modules | 40 modules / 240 tests | 🟡 |
+| Общее покрытие | 53 pytest modules | 53 modules / 414 tests | ✅ |
+| AA parity audit | — | `test_aa_parity_audit.py` | ✅ |
 | Node adapter local/remote | — | `test_node_adapter_parity.py` | 🆕 |
 | Feature guards | `test_feature_toggles.py` | `test_feature_guards.py` | ✅ |
-| Security / IP restriction | `test_http_security.py` + multiple | `test_security.py`, `test_http_security.py`, `test_api_rate_limit.py` | ✅ |
+| Security / IP restriction | `test_http_security.py` + multiple | `test_security.py`, `test_http_security.py`, `test_api_rate_limit.py`, `test_ip_restriction_temporary.py`, `test_security_scanner_settings.py` | ✅ |
+| Game exclude pipeline | `test_cidr_list_updater.py` (exclude) | `test_cidr_list_updater.py`, `test_game_filters_sync.py` | ✅ |
 | Node scoping | — | `test_node_scoping.py` | 🆕 |
+
+> **Не портируются из AA (9 модулей, задокументировано в `test_aa_parity_audit.py`):** Jinja/Flask page-context и template compile (`test_jinja_templates_compile.py`, `test_*_page_context.py`, `test_audit_view_presenter_*`), `test_script_executor.py`, `test_catalog_data.py`, `test_system_preflight.py`. **Заменены эквивалентами:** `traffic_sync` CLI → worker `traffic/collector.py`; `wg_awg_runtime_apply` CLI → `wg_policy_sync_worker.py`; Flask sessions → JWT (`test_active_web_session.py`).
 
 ---
 

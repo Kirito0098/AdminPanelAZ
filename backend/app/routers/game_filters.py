@@ -9,8 +9,9 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, User
 from app.schemas import MessageResponse
-from app.services.cidr.game_filters import get_game_filters_state, sync_game_filters_via_adapter
-from app.services.node_manager import get_active_adapter, get_node_antizapret_path
+from app.services.cidr.game_filter_sync import sync_game_routes_filter_via_adapter
+from app.services.cidr.game_filters import get_game_filters_state
+from app.services.node_manager import get_active_adapter
 
 router = APIRouter(prefix="/routing/game-filters", tags=["game-filters"])
 settings = get_settings()
@@ -54,13 +55,19 @@ def sync_filters(payload: GameFiltersUpdate, db: Session = Depends(get_db), _: U
     include_keys = [k for k, m in payload.modes.items() if m == "include"]
     exclude_keys = [k for k, m in payload.modes.items() if m == "exclude"]
     adapter = get_active_adapter(db)
-    result = sync_game_filters_via_adapter(
+    result = sync_game_routes_filter_via_adapter(
         adapter,
-        include_keys=include_keys,
-        exclude_keys=exclude_keys,
-        include_domains=payload.include_domains,
+        include_game_keys=include_keys,
+        exclude_game_keys=exclude_keys,
+        include_game_domains=payload.include_domains,
     )
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail=result.get("message") or "Не удалось синхронизировать игровые фильтры",
+        )
     output = None
-    if payload.run_doall and (result["hosts_changed"] or result["ips_changed"]):
+    if payload.run_doall and result.get("changed"):
         output = adapter.apply_config_changes()
-    return MessageResponse(message="Игровые фильтры синхронизированы", detail={**result, "doall": output})
+    message = result.get("message") or "Игровые фильтры синхронизированы"
+    return MessageResponse(message=message, detail={**result, "doall": output})

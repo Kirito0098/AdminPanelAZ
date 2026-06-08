@@ -438,6 +438,9 @@ export interface SecuritySettings {
   block_scanners: boolean
   scanner_max_attempts: number
   scanner_ban_seconds: number
+  scanner_window_seconds: number
+  block_ip_blocked_dwell: boolean
+  ip_blocked_dwell_seconds: number
   temp_whitelist: Array<{ ip: string; expires_at: string; hours: number }>
   qr_download_ttl_seconds: number
   qr_download_max_downloads: number

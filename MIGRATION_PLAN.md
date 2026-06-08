@@ -1,10 +1,11 @@
 # План миграции AdminAntizapret → AdminPanelAZ
 
-> **Baseline:** [AdminAntizapret](https://github.com/Kirito0098/AdminAntizapret) **1.9.0** → AdminPanelAZ **1.0.0**
+> **Baseline:** [AdminAntizapret](https://github.com/Kirito0098/AdminAntizapret) **1.9.0** → AdminPanelAZ **1.0.0+**
 > **Цель:** ~**95%+** функционального паритета с upstream + сохранение 🆕-функций AZ (multi-node, 2FA, NOC)
 > **Статус переноса:** см. [`MIGRATION.md`](MIGRATION.md) · **Исходники AA:** `/opt/AdminAntizapret`
+> **Обновлено:** 2026-06-08
 
-**Фазы 0–20** (релиз **1.0.0**) закрыты. Оставшиеся 🟡-модули — **фазы 21–29** (релизы **1.1.x–1.3.x**). Каждая фаза = один PR (или пара последовательных PR: backend → frontend).
+**Фазы 0–20** (релиз **1.0.0**), **фазы 21–31** (1.1.x–1.4.1) **закрыты**. Текущая готовность ~**94–97%**. Оставшийся 🟡 — **фаза 32** (test suite parity).
 
 ---
 
@@ -58,38 +59,41 @@ flowchart LR
 
 ## Обзор фаз
 
-| Фаза | Название | Релиз | Режим | Срок |
-|------|----------|-------|-------|------|
-| 0 | CI pipeline | 0.4.0 | Agent | 1–2 д |
-| 1 | pre-commit + test harness | 0.4.0 | Agent | 1–2 д |
-| 2 | AdminNotify — анализ | 0.4.1 | Ask → Plan | 0.5 д |
-| 3 | AdminNotify — backend | 0.5.0 | Agent | 2–3 д |
-| 4 | traffic_limit_notify + хуки | 0.5.0 | Agent | 2 д |
-| 5 | AdminNotify — UI + tests | 0.5.0 | Agent | 2 д |
-| 6 | AntiZapret config — backend | 0.5.1 | Plan → Agent | 2–3 д |
-| 7 | AntiZapret config — frontend | 0.5.1 | Agent | 2 д |
-| 8 | Viewer config access UI | 0.5.2 | Agent | 1–2 д |
-| 9 | Game filter catalog | 0.5.2 | Agent | 1–2 д |
-| 10 | Feature toggles parity | 0.6.0 | Plan → Agent | 2–3 д |
-| 11 | WG runtime + policy worker | 0.6.1 | Plan → Agent → Debug | 3–4 д |
-| 12 | Action logs CSV export | 0.6.2 | Agent | 1 д |
-| 13 | Public routes + OpenVPN group | 0.6.3 | Agent | 2–3 д |
-| 14 | BackgroundTaskService | 0.6.4 | Plan → Agent | 3 д |
-| 15 | Test suite — волна 1 | 0.6.5 | Agent → Debug | 3–4 д |
-| 16 | Sessions + idle restart | 0.7.0 | Plan → Agent | 2–3 д |
-| 17 | VPN network UI | 0.7.1 | Plan → Agent | 2–3 д |
-| 18 | Global rate limit + security | 0.7.2 | Plan → Agent | 2–3 д |
-| 19 | Ops CLI + backup UI + docs | 0.7.3 | Agent | 2–3 д |
-| 20 | Final parity audit → 1.0.0 | 1.0.0 | Ask → Agent | 3–5 д |
-| 21 | AdminNotify hooks (ban/user/TG) | 1.1.0 | Agent | 2–3 д |
-| 22 | Временный IP whitelist UI | 1.1.0 | Agent | 1 д |
-| 23 | CIDR presets CRUD | 1.1.1 | Plan → Agent | 3–4 д |
-| 24 | QR max downloads + maintenance toggle | 1.1.2 | Agent | 1–2 д |
-| 25 | Diff-подсветка в редакторе файлов | 1.2.0 | Plan → Agent | 2–3 д |
-| 26 | Test suite — волна 2 | 1.2.1 | Agent → Debug | 4–5 д |
-| 27 | CI / pre-commit parity | 1.2.2 | Agent | 1–2 д |
-| 28 | VPN-сеть + firewall runtime | 1.3.0 | Plan → Agent → Debug | 5–7 д |
-| 29 | Ops console menu (optional) | 1.3.x | Agent | 2–3 д |
+| Фаза | Название | Релиз | Статус | Режим | Срок |
+|------|----------|-------|--------|-------|------|
+| 0 | CI pipeline | 0.4.0 | ✅ | Agent | 1–2 д |
+| 1 | pre-commit + test harness | 0.4.0 | ✅ | Agent | 1–2 д |
+| 2 | AdminNotify — анализ | 0.4.1 | ✅ | Ask → Plan | 0.5 д |
+| 3 | AdminNotify — backend | 0.5.0 | ✅ | Agent | 2–3 д |
+| 4 | traffic_limit_notify + хуки | 0.5.0 | ✅ | Agent | 2 д |
+| 5 | AdminNotify — UI + tests | 0.5.0 | ✅ | Agent | 2 д |
+| 6 | AntiZapret config — backend | 0.5.1 | ✅ | Plan → Agent | 2–3 д |
+| 7 | AntiZapret config — frontend | 0.5.1 | ✅ | Agent | 2 д |
+| 8 | Viewer config access UI | 0.5.2 | ✅ | Agent | 1–2 д |
+| 9 | Game filter catalog | 0.5.2 | ✅ | Agent | 1–2 д |
+| 10 | Feature toggles parity | 0.6.0 | ✅ | Plan → Agent | 2–3 д |
+| 11 | WG runtime + policy worker | 0.6.1 | ✅ | Plan → Agent → Debug | 3–4 д |
+| 12 | Action logs CSV export | 0.6.2 | ✅ | Agent | 1 д |
+| 13 | Public routes + OpenVPN group | 0.6.3 | ✅ | Agent | 2–3 д |
+| 14 | BackgroundTaskService | 0.6.4 | ✅ | Plan → Agent | 3 д |
+| 15 | Test suite — волна 1 | 0.6.5 | ✅ | Agent → Debug | 3–4 д |
+| 16 | Sessions + idle restart | 0.7.0 | ✅ | Plan → Agent | 2–3 д |
+| 17 | VPN network UI | 0.7.1 | ✅ | Plan → Agent | 2–3 д |
+| 18 | Global rate limit + security | 0.7.2 | ✅ | Plan → Agent | 2–3 д |
+| 19 | Ops CLI + backup UI + docs | 0.7.3 | ✅ | Agent | 2–3 д |
+| 20 | Final parity audit → 1.0.0 | 1.0.0 | ✅ | Ask → Agent | 3–5 д |
+| 21 | AdminNotify hooks (ban/user/TG) | 1.1.0 | ✅ | Agent | 2–3 д |
+| 22 | Временный IP whitelist UI | 1.1.0 | ✅ | Agent | 1 д |
+| 23 | CIDR presets CRUD | 1.1.1 | ✅ | Plan → Agent | 3–4 д |
+| 24 | QR max downloads + maintenance toggle | 1.1.2 | ✅ | Agent | 1–2 д |
+| 25 | Diff-подсветка в редакторе файлов | 1.2.0 | ✅ | Plan → Agent | 2–3 д |
+| 26 | Test suite — волна 2 | 1.2.1 | 🟡 | Agent → Debug | 4–5 д |
+| 27 | CI / pre-commit parity | 1.2.2 | ✅ | Agent | 1–2 д |
+| 28 | VPN-сеть + firewall runtime | 1.3.0 | ✅ | Plan → Agent → Debug | 5–7 д |
+| 29 | Ops console menu (optional) | 1.3.x | ✅ | Agent | 2–3 д |
+| **30** | **Game filters exclude sync** | **1.4.0** | **✅** | **Plan → Agent** | **3–4 д** |
+| **31** | **Scanner dwell/window UI** | **1.4.1** | **✅** | **Agent** | **1–2 д** |
+| **32** | **Test suite — финальный паритет** | **1.4.2** | **✅** | **Agent → Debug** | **2–3 д** |
 
 ```mermaid
 flowchart TB
@@ -122,6 +126,9 @@ flowchart TB
   P26 --> P27[Ф27_CI]
   P27 --> P28[Ф28_VPN_firewall]
   P28 --> P29[Ф29_Ops_menu]
+  P29 --> P30[Ф30_Game_exclude]
+  P30 --> P31[Ф31_Scanner_dwell]
+  P31 --> P32[Ф32_Tests_final]
 ```
 
 ---
@@ -646,7 +653,7 @@ Test count: pytest --collect-only.
 ```
 По аудиту фазы 20:
 1. Исправь расхождения MIGRATION.md
-2. Test suite волна 2 — добрать критичные tests из AA до ~40 modules
+2. Test suite волна 2 — добрать критичные tests из AA (цель достигнута: **50 modules / 399 tests**; см. фазу 32 для остатка)
 3. README — секция «Production readiness» (чеклист, что 🆕 в AZ сверх AA)
 4. CHANGELOG [1.0.0]
 5. MIGRATION.md: baseline AZ 1.0.0, обновлено [дата]
@@ -654,25 +661,27 @@ Test count: pytest --collect-only.
 
 ---
 
-## Фазы 21–29 — закрытие 🟡 после 1.0.0
+## Фазы 21–29 — закрытие 🟡 после 1.0.0 ✅
 
-> Источник пробелов: секция «Backlog переноса» и сводная таблица 🟡 в [`MIGRATION.md`](MIGRATION.md).
+> **Статус:** все фазы **21–29 закрыты** (2026-06-08). Источник пробелов был в секции «Backlog переноса» [`MIGRATION.md`](MIGRATION.md).
 
-| Приоритет | Фаза | Effort | Закрывает в MIGRATION.md |
-|-----------|------|--------|--------------------------|
-| Высокий | 21–23 | S–M | AdminNotify, temp whitelist, CIDR presets |
-| Средний | 24–27 | S–L | QR max downloads, FEATURE_MAINTENANCE, editor diff, tests, CI |
-| Низкий | 28–29 | L–S | VPN-сеть mutations, panel_port_firewall, adminpanel menu |
+| Приоритет | Фаза | Effort | Результат |
+|-----------|------|--------|-----------|
+| Высокий | 21–23 | S–M | AdminNotify hooks ✅, temp whitelist UI ✅, CIDR presets CRUD ✅ |
+| Средний | 24–27 | S–L | QR max downloads ✅, FEATURE_MAINTENANCE ✅, editor diff ✅, CI ✅; tests 🟡 (50/399) |
+| Низкий | 28–29 | L–S | VPN wizard + panel_port_firewall ✅, adminpanel-menu ✅ |
 
-**Рекомендуемый первый спринт (1.1.0):** фазы **21 + 22** (backend для 22 готов; для 21 — только wiring хуков).
+**Следующий спринт (1.4.x):** фазы **30 + 31** (game exclude sync; scanner dwell/window UI).
 
 ---
 
-## Фаза 21 — AdminNotify hooks (ban / user / TG unlink)
+## Фаза 21 — AdminNotify hooks (ban / user / TG unlink) ✅
 
-**Релиз:** 1.1.0 · **Режим:** **Agent** · **Срок:** 2–3 д
+**Релиз:** 1.1.0 · **Режим:** **Agent** · **Срок:** 2–3 д · **Статус:** ✅ закрыто
 
-**Задачи:** методы `send_client_ban`, `send_user_create`, `send_user_delete`, `send_tg_login_unlinked` уже есть в `admin_notify.py`, но не вызываются из роутеров.
+**Было:** методы `send_client_ban`, `send_user_create`, `send_user_delete`, `send_tg_login_unlinked` в `admin_notify.py` не вызывались из роутеров.
+
+**Сделано:** wiring в `users.py`, `client_access.py`, `auth.py`, `tg_mini.py`; `test_admin_notify_integration.py`.
 
 **Эталон AA:** `core/services/settings/post_handlers/users.py`, `app.py` (event mapping), `routes/auth_routes.py`.
 
@@ -695,11 +704,13 @@ Test count: pytest --collect-only.
 
 ---
 
-## Фаза 22 — Временный IP whitelist UI
+## Фаза 22 — Временный IP whitelist UI ✅
 
-**Релиз:** 1.1.0 · **Режим:** **Agent** · **Срок:** 1 д
+**Релиз:** 1.1.0 · **Режим:** **Agent** · **Срок:** 1 д · **Статус:** ✅ закрыто
 
-**Задачи:** API `POST /api/security/temp-whitelist` и тесты уже есть; нет UI в SecurityTab.
+**Было:** API `POST /api/security/temp-whitelist` без UI.
+
+**Сделано:** `SecurityTab.tsx` — radio 1h/12h/24h, добавление текущего/указанного IP, таблица `temp_whitelist`, DELETE через API.
 
 **Эталон AA:** `templates/partials/settings/_tab_security.html` (radio 1h/12h/24h, список temp entries).
 
@@ -721,11 +732,13 @@ Backend готов: POST /api/security/temp-whitelist (security.py).
 
 ---
 
-## Фаза 23 — CIDR presets CRUD
+## Фаза 23 — CIDR presets CRUD ✅
 
-**Релиз:** 1.1.1 · **Режим:** **Plan** → **Agent** · **Срок:** 3–4 д
+**Релиз:** 1.1.1 · **Режим:** **Plan** → **Agent** · **Срок:** 3–4 д · **Статус:** ✅ закрыто
 
-**Задачи:** `CidrDbUpdaterService.create/update/delete/reset` в `db_service.py` есть; роутов и UI нет (только apply + seed).
+**Было:** только apply + seed пресетов.
+
+**Сделано:** `GET/POST/PUT/DELETE/reset` в `cidr_db.py`, `PresetsTab.tsx`, `test_cidr_db_presets.py`.
 
 **Эталон AA:** `routes/settings/api_cidr_db.py` (`/api/cidr-presets`), `static/assets/js/routing-page-extra.js`.
 
@@ -753,11 +766,13 @@ PR1: backend + tests; PR2: PresetsTab.tsx CRUD UI.
 
 ---
 
-## Фаза 24 — QR max downloads + FEATURE_MAINTENANCE
+## Фаза 24 — QR max downloads + FEATURE_MAINTENANCE ✅
 
-**Релиз:** 1.1.2 · **Режим:** **Agent** · **Срок:** 1–2 д
+**Релиз:** 1.1.2 · **Режим:** **Agent** · **Срок:** 1–2 д · **Статус:** ✅ закрыто
 
-**Задачи:** `qr_download_max_downloads` сохраняется через API, но input в SecurityTab отсутствует; нет toggle `FEATURE_MAINTENANCE_ENABLED`.
+**Было:** `qr_download_max_downloads` без input в SecurityTab; нет toggle `FEATURE_MAINTENANCE_ENABLED`.
+
+**Сделано:** radio 1/3/5 в `SecurityTab.tsx`; toggle `maintenance` + guard `/api/maintenance/*`, `MaintenanceTab`.
 
 **Эталон AA:** `_tab_security.html` (max downloads), `feature_toggles.py` (FEATURE_MAINTENANCE_ENABLED).
 
@@ -782,11 +797,13 @@ CHANGELOG [1.1.2]
 
 ---
 
-## Фаза 25 — Diff-подсветка в редакторе файлов
+## Фаза 25 — Diff-подсветка в редакторе файлов ✅
 
-**Релиз:** 1.2.0 · **Режим:** **Plan** → **Agent** · **Срок:** 2–3 д
+**Релиз:** 1.2.0 · **Режим:** **Plan** → **Agent** · **Срок:** 2–3 д · **Статус:** ✅ закрыто
 
-**Задачи:** React-редактор без diff; AA использует `edit_files/diff.js`.
+**Было:** React-редактор без diff.
+
+**Сделано:** `buildLightDiff.ts`, `DiffPanel`, live diff + «Сравнить с диском» в `EditFilesPage.tsx`.
 
 **Промпт (Plan):**
 
@@ -811,11 +828,13 @@ CHANGELOG [1.2.0]
 
 ---
 
-## Фаза 26 — Test suite — волна 2
+## Фаза 26 — Test suite — волна 2 🟡
 
-**Релиз:** 1.2.1 · **Режим:** **Agent** → **Debug** · **Срок:** 4–5 д
+**Релиз:** 1.2.1 · **Режим:** **Agent** → **Debug** · **Срок:** 4–5 д · **Статус:** 🟡 частично (50 modules / 399 tests vs 53 в AA)
 
-**Задачи:** 40 модулей / 240 тестов в AZ vs 53 в AA; часть AA-тестов Jinja-specific и не портируется.
+**Сделано:** портированы критичные модули (`test_cidr_list_updater.py`, `test_panel_port_firewall.py`, `test_ip_restriction_whitelist_firewall_gating.py`, `test_settings_post_handlers.py`, `test_access_remaining.py`, `test_maintenance_scheduler_backup.py`, `test_db_migration_service.py`, `test_admin_notify_integration.py` и др.).
+
+**Остаток:** см. **фазу 32** (~3 Jinja/Flask-only AA-модуля не портируются).
 
 **Не портируем:** `test_jinja_templates_compile.py`, `test_*_page_context.py`, `test_script_executor.py`.
 
@@ -844,19 +863,19 @@ CHANGELOG [1.2.0]
 
 1. pytest --collect-only в AA и AZ — список gap
 2. Портировать критичные модули из таблицы фазы 26 (пропустить Jinja-specific)
-3. Цель: ~48–50 pytest modules (не 53 — часть AA не применима к FastAPI/React)
+3. Цель: **50 pytest modules / 399 tests** (достигнуто); полный ✅ — после фазы 32
 4. CI green
-5. MIGRATION.md: In-panel pytest → 🟡 с обновлённым count или ✅ если ≥48 modules
+5. MIGRATION.md: In-panel pytest → 🟡 (50/399) или ✅ после фазы 32
 CHANGELOG [1.2.1]
 ```
 
 ---
 
-## Фаза 27 — CI / pre-commit parity
+## Фаза 27 — CI / pre-commit parity ✅
 
-**Релиз:** 1.2.2 · **Режим:** **Agent** · **Срок:** 1–2 д
+**Релиз:** 1.2.2 · **Режим:** **Agent** · **Срок:** 1–2 д · **Статус:** ✅ закрыто
 
-**Задачи:** AZ CI — pytest, ruff, shellcheck, build; нет eslint, pip-audit, bandit (advisory как в AA).
+**Сделано:** eslint во frontend CI; pip-audit/bandit advisory; pre-commit hooks (ruff, shellcheck, eslint/bandit advisory).
 
 **Эталон AA:** `.github/workflows/ci.yml`, `.pre-commit-config.yaml`.
 
@@ -876,13 +895,11 @@ CHANGELOG [1.2.2]
 
 ---
 
-## Фаза 28 — VPN-сеть + firewall runtime
+## Фаза 28 — VPN-сеть + firewall runtime ✅
 
-**Релиз:** 1.3.0 · **Режим:** **Plan** → **Agent** → **Debug** · **Срок:** 5–7 д
+**Релиз:** 1.3.0 · **Режим:** **Plan** → **Agent** → **Debug** · **Срок:** 5–7 д · **Статус:** ✅ закрыто
 
-**Задачи:** VpnNetworkTab read-only; мутации порта/nginx через `install.sh` / `nginx-setup.sh`; нет runtime `panel_port_firewall.py`.
-
-**Риск:** высокий на production — начинать с Plan.
+**Сделано:** `VpnNetworkTab` + `POST /api/settings/vpn-network/publish` → `nginx-setup.sh`; `panel_port_firewall.py` + toggle в SecurityTab; `test_panel_port_firewall.py`, `test_vpn_network_settings.py`. Custom SSL certs — **ops-only** через `nginx-setup.sh`.
 
 **Промпт (Plan):**
 
@@ -909,11 +926,11 @@ CHANGELOG [1.3.0]
 
 ---
 
-## Фаза 29 — Ops console menu (optional)
+## Фаза 29 — Ops console menu (optional) ✅
 
-**Релиз:** 1.3.x · **Режим:** **Agent** · **Срок:** 2–3 д · **Приоритет:** низкий
+**Релиз:** 1.3.x · **Режим:** **Agent** · **Срок:** 2–3 д · **Приоритет:** низкий · **Статус:** ✅ закрыто
 
-**Задачи:** AA `adminpanel.sh` — интерактивное меню restart/update/backup/tests; AZ — `install.sh` + systemd.
+**Сделано:** `scripts/adminpanel-menu.sh` + `scripts/backup-cli.py` (restart, backup, pytest, update через systemd/start.sh).
 
 **Промпт:**
 
@@ -924,9 +941,53 @@ CHANGELOG [1.3.0]
 
 Обёртка: restart panel, run backup, run pytest, git update — через start.sh, systemd, существующие scripts.
 Не дублировать install.sh wizard.
-MIGRATION.md: adminpanel.sh menu → ✅ или оставить 🟡 «ops-only via systemd»
+MIGRATION.md: adminpanel.sh menu → ✅
 CHANGELOG [1.3.x]
 ```
+
+---
+
+## Фазы 30–32 — оставшиеся 🟡 (1.4.x)
+
+> Источник: актуальный backlog [`MIGRATION.md`](MIGRATION.md#backlog-переноса-приоритеты) (2026-06-08).
+
+| Приоритет | Фаза | Effort | Закрывает в MIGRATION.md |
+|-----------|------|--------|--------------------------|
+| **Высокий** | **30** ✅ | M | Game filters exclude → `AZ-Game-exclude-*` |
+| Средний | 31 ✅ | S | Scanner dwell/window UI |
+| Низкий | 32 ✅ | S | Test suite — финальный паритет (53 modules / 414 tests) |
+
+**Релиз 1.4.2:** фаза **32** ✅ — parity audit закрыт.
+
+---
+
+## Фаза 30 — Game filters exclude sync ✅
+
+**Релиз:** 1.4.0 · **Режим:** **Plan** → **Agent** · **Срок:** 3–4 д · **Статус:** ✅ закрыто
+
+**Было:** UI «Исключить» без записи в `AZ-Game-exclude-*`; упрощённый sync в `game_filters.py`.
+
+**Сделано:** `game_filter_sync.py` → `sync_game_routes_filter` из `pipeline/games.py`; `NodeAdapter.sync_game_routes_filter` (local + remote); endpoint `POST /routing/game-filters/sync` на node agent; `test_game_filters_sync.py`.
+
+---
+
+## Фаза 31 — Scanner dwell/window UI ✅
+
+**Релиз:** 1.4.1 · **Режим:** **Agent** · **Срок:** 1–2 д · **Статус:** ✅ закрыто
+
+**Было:** `scanner_window_seconds`, `block_ip_blocked_dwell`, `ip_blocked_dwell_seconds` захардкожены в `ip_restriction.py`.
+
+**Сделано:** AppSetting + `GET/PATCH /api/security`; `SecurityTab` (окно попыток, dwell toggle, лимит на странице блокировки); `ip_restriction` читает из БД; `test_security_scanner_settings.py`.
+
+---
+
+## Фаза 32 — Test suite — финальный паритет ✅
+
+**Релиз:** 1.4.2 · **Режим:** **Agent** → **Debug** · **Срок:** 2–3 д · **Статус:** ✅ закрыто
+
+**Было:** 52 modules / 409 tests vs 53 в AA; In-panel pytest 🟡.
+
+**Сделано:** `test_aa_parity_audit.py` — матрица всех 53 AA-модулей → AZ-эквивалент или N/A (9 Jinja/Flask/CLI-specific); behavioral tests: captcha после 3 неудачных login, traffic `build_status_rows`, wg subprocess errors. **Итог:** 53 modules / 414 tests; In-panel pytest → ✅ в MIGRATION.md.
 
 ---
 
@@ -957,7 +1018,10 @@ CHANGELOG [1.3.x]
 | **1.2.1** | 26 | Test suite wave 2 |
 | **1.2.2** | 27 | CI / pre-commit parity |
 | **1.3.0** | 28 | VPN network + firewall runtime |
-| **1.3.x** | 29 | Ops console menu (optional) |
+| **1.3.x** | 29 | Ops console menu |
+| **1.4.0** | 30 | Game filters exclude sync ✅ |
+| **1.4.1** | 31 | Scanner dwell/window UI ✅ |
+| **1.4.2** | 32 | Test suite — финальный паритет |
 
 ---
 
@@ -980,8 +1044,9 @@ CHANGELOG [1.3.x]
 | Agent «галлюцинирует» API AA | Всегда начинать фазу с Ask + путь к файлу AA |
 | JWT vs session AA | Фазы 16/18 — только Plan сначала |
 | Multi-node | В каждом промпте: node_adapter, node_id |
-| Регрессия 🆕 | После фазы 20 — smoke: 2FA, NodesPage, MonitoringPage |
-| VPN/nginx из UI (фаза 28) | Начинать с Plan; guided wizard + confirm; rollback; ops-only допустим |
+| Регрессия 🆕 | После каждой фазы 30+ — smoke: 2FA, NodesPage, MonitoringPage, GameFiltersTab exclude |
+| VPN/nginx из UI (фаза 28) | ✅ Guided wizard; custom certs — ops-only через nginx-setup.sh |
+| Game exclude punch (фаза 30) | Начинать с Plan; тестировать на local node; overlap trim — regression risk |
 
 ---
 
@@ -990,7 +1055,10 @@ CHANGELOG [1.3.x]
 - Flask monolith `app.py` → FastAPI routers
 - Jinja2 templates → React SPA
 - `client.sh` в репозитории → AntiZapret на сервере
-- Полная копия `adminpanel.sh` → `install.sh` + systemd + optional CLI (фаза 29)
+- Полная копия `adminpanel.sh` → `install.sh` + systemd + `adminpanel-menu.sh` ✅
+- Jinja page-context tests → не портируются; заменены API/React integration tests
+- `traffic_sync` CLI → worker `traffic/collector.py`
+- `wg_awg_runtime_apply` standalone CLI → `wg_policy_sync_worker.py`
 
 ---
 

@@ -68,6 +68,9 @@ export default function SecurityTab() {
         block_scanners: settings?.block_scanners,
         scanner_max_attempts: settings?.scanner_max_attempts,
         scanner_ban_seconds: settings?.scanner_ban_seconds,
+        scanner_window_seconds: settings?.scanner_window_seconds,
+        block_ip_blocked_dwell: settings?.block_ip_blocked_dwell,
+        ip_blocked_dwell_seconds: settings?.ip_blocked_dwell_seconds,
         qr_download_ttl_seconds: settings?.qr_download_ttl_seconds,
         qr_download_max_downloads: settings?.qr_download_max_downloads,
         qr_download_pin: qrPin || undefined,
@@ -304,11 +307,25 @@ export default function SecurityTab() {
               />
               Блокировать сканеры (iptables/ipset при root)
             </label>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={settings.block_ip_blocked_dwell}
+                disabled={!settings.ip_restriction_enabled}
+                onChange={(e) =>
+                  setSettings({ ...settings, block_ip_blocked_dwell: e.target.checked })
+                }
+                className="h-4 w-4 rounded border"
+              />
+              Бан за пребывание на странице «Доступ ограничен»
+            </label>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Макс. попыток</Label>
                 <Input
                   type="number"
+                  min={1}
+                  max={20}
                   value={settings.scanner_max_attempts}
                   onChange={(e) => setSettings({ ...settings, scanner_max_attempts: Number(e.target.value) })}
                 />
@@ -317,8 +334,35 @@ export default function SecurityTab() {
                 <Label>Бан (сек)</Label>
                 <Input
                   type="number"
+                  min={60}
+                  max={86400}
                   value={settings.scanner_ban_seconds}
                   onChange={(e) => setSettings({ ...settings, scanner_ban_seconds: Number(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Окно попыток (сек)</Label>
+                <Input
+                  type="number"
+                  min={10}
+                  max={3600}
+                  value={settings.scanner_window_seconds}
+                  onChange={(e) =>
+                    setSettings({ ...settings, scanner_window_seconds: Number(e.target.value) })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Лимит на странице блокировки (сек)</Label>
+                <Input
+                  type="number"
+                  min={30}
+                  max={3600}
+                  disabled={!settings.block_ip_blocked_dwell}
+                  value={settings.ip_blocked_dwell_seconds}
+                  onChange={(e) =>
+                    setSettings({ ...settings, ip_blocked_dwell_seconds: Number(e.target.value) })
+                  }
                 />
               </div>
             </div>

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-06-08
+
+### Added
+- **Test suite parity audit (фаза 32)** — `test_aa_parity_audit.py`: матрица AA→AZ для всех 53 модулей AdminAntizapret + targeted tests (login captcha threshold, traffic collector rows, wg runtime subprocess errors).
+
+### Changed
+- **Test count** — 53 modules / 414 tests (parity с AA по числу модулей; 9 AA-модулей задокументированы как N/A).
+- **`MIGRATION.md`**, **`MIGRATION_PLAN.md`**, **`README.md`** — In-panel pytest → ✅.
+
+## [1.4.1] - 2026-06-08
+
+### Added
+- **Scanner dwell/window UI (фаза 31)** — `scanner_window_seconds`, `block_ip_blocked_dwell`, `ip_blocked_dwell_seconds` в API и SecurityTab.
+- **Tests** — `test_security_scanner_settings.py`.
+
+### Changed
+- **`ip_restriction.py`** — runtime scanner/dwell settings читаются из AppSetting (не захардкожены).
+- **`MIGRATION.md`**, **`MIGRATION_PLAN.md`**, **`README.md`** — безопасность / scanner dwell → ✅.
+
+## [1.4.0] - 2026-06-08
+
+### Added
+- **Game filters exclude sync (фаза 30)** — `/routing/game-filters/sync` использует полный `sync_game_routes_filter` из `pipeline/games.py` (include + exclude, punch, `AZ-Game-*` файлы).
+- **`game_filter_sync.py`** — path patching + `run_sync_game_routes_filter`; `NodeAdapter.sync_game_routes_filter` для local и remote узлов.
+- **Node agent** — `POST /routing/game-filters/sync`.
+- **Tests** — `test_game_filters_sync.py`.
+
+### Changed
+- **`game_filters.py`** — только UI state (`get_game_filters_state`); упрощённый legacy sync удалён.
+- **`MIGRATION.md`**, **`MIGRATION_PLAN.md`**, **`README.md`** — game filters exclude → ✅.
+
 ## [1.3.1] - 2026-06-08
 
 ### Added

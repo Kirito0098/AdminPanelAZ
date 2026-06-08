@@ -1,4 +1,4 @@
-"""IP whitelist and scanner blocking settings (simplified port from AdminAntizapret)."""
+"""IP whitelist and scanner blocking settings (ported from AdminAntizapret)."""
 
 import ipaddress
 import json
@@ -77,6 +77,9 @@ class SecurityService:
             "block_scanners": _get(db, "security_block_scanners", "false") == "true",
             "scanner_max_attempts": int(_get(db, "security_scanner_max_attempts", "5") or "5"),
             "scanner_ban_seconds": int(_get(db, "security_scanner_ban_seconds", "3600") or "3600"),
+            "scanner_window_seconds": int(_get(db, "security_scanner_window_seconds", "60") or "60"),
+            "block_ip_blocked_dwell": _get(db, "security_block_ip_blocked_dwell", "true") == "true",
+            "ip_blocked_dwell_seconds": int(_get(db, "security_ip_blocked_dwell_seconds", "120") or "120"),
             "temp_whitelist": active_temp,
             "qr_download_ttl_seconds": int(_get(db, "qr_download_ttl_seconds", "600") or "600"),
             "qr_download_max_downloads": int(_get(db, "qr_download_max_downloads", "1") or "1"),
@@ -116,6 +119,20 @@ class SecurityService:
             _set(db, "security_scanner_max_attempts", str(max(1, min(20, int(payload["scanner_max_attempts"])))))
         if "scanner_ban_seconds" in payload:
             _set(db, "security_scanner_ban_seconds", str(max(60, min(86400, int(payload["scanner_ban_seconds"])))))
+        if "scanner_window_seconds" in payload:
+            _set(
+                db,
+                "security_scanner_window_seconds",
+                str(max(10, min(3600, int(payload["scanner_window_seconds"])))),
+            )
+        if "block_ip_blocked_dwell" in payload:
+            _set(db, "security_block_ip_blocked_dwell", "true" if payload["block_ip_blocked_dwell"] else "false")
+        if "ip_blocked_dwell_seconds" in payload:
+            _set(
+                db,
+                "security_ip_blocked_dwell_seconds",
+                str(max(30, min(3600, int(payload["ip_blocked_dwell_seconds"])))),
+            )
         if "qr_download_ttl_seconds" in payload:
             _set(db, "qr_download_ttl_seconds", str(max(60, min(3600, int(payload["qr_download_ttl_seconds"])))))
         if "qr_download_max_downloads" in payload:

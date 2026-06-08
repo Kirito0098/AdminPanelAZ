@@ -119,6 +119,15 @@ class NodeAdapter(ABC):
     def get_route_result_files(self) -> dict: ...
 
     @abstractmethod
+    def sync_game_routes_filter(
+        self,
+        *,
+        include_game_keys: list[str] | None = None,
+        exclude_game_keys: list[str] | None = None,
+        include_game_domains: bool = True,
+    ) -> dict: ...
+
+    @abstractmethod
     def get_route_result_content(self, key: str) -> dict: ...
 
     @abstractmethod
@@ -255,6 +264,22 @@ class LocalNodeAdapter(NodeAdapter):
 
     def write_route_file(self, file_key: str, content: str) -> dict:
         return self._cidr.write_route_file(file_key, content)
+
+    def sync_game_routes_filter(
+        self,
+        *,
+        include_game_keys: list[str] | None = None,
+        exclude_game_keys: list[str] | None = None,
+        include_game_domains: bool = True,
+    ) -> dict:
+        from app.services.cidr.game_filter_sync import run_sync_game_routes_filter
+
+        return run_sync_game_routes_filter(
+            self._service.config_dir,
+            include_game_keys=include_game_keys,
+            exclude_game_keys=exclude_game_keys,
+            include_game_domains=include_game_domains,
+        )
 
     def get_route_result_files(self) -> dict:
         return self._cidr.get_result_files()
@@ -493,6 +518,27 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def write_route_file(self, file_key: str, content: str) -> dict:
         return self._request("PUT", f"/routing/files/{file_key}", json={"content": content})
+
+    def sync_game_routes_filter(
+        self,
+        *,
+        include_game_keys: list[str] | None = None,
+        exclude_game_keys: list[str] | None = None,
+        include_game_domains: bool = True,
+    ) -> dict:
+        from app.services.cidr.game_filter_sync import normalize_game_filter_sync_result
+
+        data = self._request(
+            "POST",
+            "/routing/game-filters/sync",
+            json={
+                "include_game_keys": list(include_game_keys or []),
+                "exclude_game_keys": list(exclude_game_keys or []),
+                "include_game_domains": bool(include_game_domains),
+            },
+            timeout=300.0,
+        )
+        return normalize_game_filter_sync_result(data)
 
     def get_route_result_files(self) -> dict:
         return self._request("GET", "/routing/results")
