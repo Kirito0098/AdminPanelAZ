@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     default_admin_password: str = "admin"
     default_admin_must_change_password: bool = True
     allow_internal_nodes: bool = False
+    local_antizapret_enabled: bool = True
     node_agent_port: int = 9100
     backup_root: Path = Path("/var/backups/adminpanelaz")
     cidr_list_dir: Path = Path("data/cidr/list")

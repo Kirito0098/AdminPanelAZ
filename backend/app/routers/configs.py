@@ -10,6 +10,7 @@ from app.schemas import MessageResponse, VpnConfigCreate, VpnConfigResponse, Vpn
 from app.services.admin_notify import admin_notify_service
 from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.openvpn_cert import resolve_openvpn_cert_days_remaining
 from app.services.openvpn_group import (
     filter_openvpn_profile_files,
     get_user_openvpn_group,
@@ -52,6 +53,20 @@ def _can_access_config(user: User, config: VpnConfig, db: Session | None = None)
     return config.owner_id == user.id
 
 
+def _fill_missing_cert_expire_days(configs: list[VpnConfig], db: Session) -> None:
+    adapter = get_active_adapter(db)
+    dirty = False
+    for config in configs:
+        if config.vpn_type != VpnType.openvpn or config.cert_expire_days is not None:
+            continue
+        days = resolve_openvpn_cert_days_remaining(adapter, config.client_name)
+        if days is not None:
+            config.cert_expire_days = days
+            dirty = True
+    if dirty:
+        db.commit()
+
+
 def _to_response(
     config: VpnConfig,
     db: Session,
@@ -91,10 +106,12 @@ def list_configs(
             return []
         configs = query.order_by(VpnConfig.created_at.desc()).all()
         configs = [c for c in configs if _can_access_config(current_user, c, db)]
+        _fill_missing_cert_expire_days(configs, db)
         return [_to_response(c, db, openvpn_group=openvpn_group) for c in configs]
     if current_user.role != UserRole.admin:
         query = query.filter(VpnConfig.owner_id == current_user.id)
     configs = query.order_by(VpnConfig.created_at.desc()).all()
+    _fill_missing_cert_expire_days(configs, db)
     return [_to_response(c, db, openvpn_group=openvpn_group) for c in configs]
 
 
@@ -350,6 +367,7 @@ def sync_from_antizapret(db: Session = Depends(get_db), _: User = Depends(requir
             )
             .first()
         )
+        cert_days = resolve_openvpn_cert_days_remaining(adapter, client_name)
         if not exists:
             db.add(
                 VpnConfig(
@@ -357,9 +375,12 @@ def sync_from_antizapret(db: Session = Depends(get_db), _: User = Depends(requir
                     client_name=client_name,
                     vpn_type=VpnType.openvpn,
                     owner_id=admin.id,
+                    cert_expire_days=cert_days,
                 )
             )
             imported += 1
+        elif exists.cert_expire_days is None and cert_days is not None:
+            exists.cert_expire_days = cert_days
 
     for client_name in adapter.list_wireguard_clients():
         exists = (

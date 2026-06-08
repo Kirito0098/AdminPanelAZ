@@ -7,8 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-06-09
+
+### Added
+- **`LOCAL_ANTIZAPRET_ENABLED`** — режим «только панель» в мастере не создаёт локальный узел; `sync_local_node()` синхронизирует запись при старте.
+- **`openvpn_cert.py`** — чтение срока OpenVPN-сертификата с node agent (блок `<cert>` в `.ovpn`); автозаполнение `cert_expire_days` при списке конфигов и синхронизации.
+- **Тесты** — `test_openvpn_cert.py`.
+
+### Fixed
+- **Удалённые узлы** — живой health-check на `GET /api/nodes/active`; автообновление статуса в шапке (poll + visibility); предупреждение при добавлении offline-узла; подсказки в мастере/node agent.
+- **Карточки клиентов** — трафик с ноды для импортированных клиентов без строки политики; срок сертификата с узла вместо «не в панели».
+- **Страница `/traffic`** — падение React #130 (`EmptyState` без `icon`); таймаут загрузки 25 с; fallback статистики из БД при недоступной ноде; безопасный рендер графиков.
+- **Установка** — `seed-admin-user.py` / `seed-wizard-db.py` и `install.sh` запускают seed из `backend/` (корректный путь к SQLite); исправлен subshell в `seed_wizard_db_settings`.
+- **HTTP LAN** — `COOP` только по HTTPS; удалены Google Fonts из `index.html` (конфликт с CSP); иконка по умолчанию в `EmptyState`.
+
 ### Changed
 - **`TRAFFIC_SYNC_INTERVAL_SECONDS`** — значение по умолчанию `30` → `60` (prod-баланс: учёт лимитов трафика и нагрузка на SQLite/worker).
+- **Мастер установки** — уточнён текст режима «только панель (управление удалёнными узлами)».
 
 ## [1.4.2] - 2026-06-08
 

@@ -59,4 +59,5 @@ ensure_env_defaults() {
     _ensure_env_default "API_RATE_LIMIT_BACKEND" "memory"
     _ensure_env_default "SECURITY_HEADERS_ENABLED" "true"
     _ensure_env_default "AUDIT_LOG_ENABLED" "true"
+    _ensure_env_default "LOCAL_ANTIZAPRET_ENABLED" "true"
 }

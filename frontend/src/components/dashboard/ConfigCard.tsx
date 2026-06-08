@@ -77,7 +77,7 @@ export default function ConfigCard({
   const canDelete = isAdmin || userRole === 'user'
   const isBlocked = policy?.is_blocked ?? false
   const showMeta = Boolean(policy) || config.vpn_type === 'openvpn'
-  const keyMeta = lines.slice(0, 2)
+  const keyMeta = config.vpn_type === 'openvpn' ? lines.slice(1, 3) : lines.slice(0, 2)
 
   const runPrimary = (action: 'download' | 'qr', fn: (path: string, filename: string) => void) => {
     if (!primaryFile) return

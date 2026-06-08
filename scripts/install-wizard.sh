@@ -285,7 +285,7 @@ wizard_ask_install_type() {
   WIZ_TOTAL_STEPS="?"
   wiz_step "Тип установки"
   wiz_prompt_choice "Какой компонент устанавливаем?" \
-    "Только панель (без локального AntiZapret)" \
+    "Только панель (управление удалёнными узлами, без локального AntiZapret)" \
     "Панель + локальный AntiZapret (AntiZapret уже установлен в /root/antizapret)" \
     "Только Node agent (удалённый VPN-сервер)"
 

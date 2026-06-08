@@ -97,7 +97,7 @@ def test_security_headers_on_health(async_client):
     assert response.headers.get("X-Frame-Options") == "SAMEORIGIN"
     assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
     assert response.headers.get("Cross-Origin-Resource-Policy") == "same-origin"
-    assert response.headers.get("Cross-Origin-Opener-Policy") == "same-origin"
+    assert response.headers.get("Cross-Origin-Opener-Policy") is None
     assert "Content-Security-Policy" in response.headers
     assert response.headers.get("X-Robots-Tag") == "noindex, nofollow, noarchive"
 

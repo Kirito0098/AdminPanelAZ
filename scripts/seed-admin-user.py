@@ -2,11 +2,14 @@
 """Upsert default admin user from backend/.env (called by install.sh after wizard)."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
+os.chdir(BACKEND_DIR)
 sys.path.insert(0, str(BACKEND_DIR))
+(BACKEND_DIR / "data").mkdir(parents=True, exist_ok=True)
 
 from app.auth import get_password_hash  # noqa: E402
 from app.config import get_settings  # noqa: E402

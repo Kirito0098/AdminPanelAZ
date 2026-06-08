@@ -756,6 +756,13 @@ apply_wiz_env_settings() {
     && { [[ "$WIZARD_RAN" == true ]] || [[ -n "${WIZ_NODE_API_KEY_ROTATION_DAYS:-}" ]]; }; then
     env_set NODE_API_KEY_ROTATION_DAYS "$WIZ_NODE_API_KEY_ROTATION_DAYS"
   fi
+  if [[ "$WIZARD_RAN" == true && "${WIZ_INSTALL_TYPE:-controller}" == "controller" ]]; then
+    if [[ "${WIZ_REQUIRE_ANTIZAPRET:-false}" == "true" ]]; then
+      env_set LOCAL_ANTIZAPRET_ENABLED "true"
+    else
+      env_set LOCAL_ANTIZAPRET_ENABLED "false"
+    fi
+  fi
 }
 
 setup_env() {
@@ -875,7 +882,8 @@ seed_admin_user_from_env() {
   fi
 
   log "Синхронизация учётной записи администратора (мастер → БД)..."
-  "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/seed-admin-user.py" \
+  mkdir -p "$BACKEND_DIR/data"
+  (cd "$BACKEND_DIR" && "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/seed-admin-user.py") \
     || die "Не удалось создать/обновить администратора в БД"
 }
 
@@ -888,12 +896,15 @@ seed_wizard_db_settings() {
   fi
 
   log "Применение настроек мастера в БД (Telegram, auto-backup)..."
-  WIZ_TELEGRAM_ENABLED="$WIZ_TELEGRAM_ENABLED" \
-  WIZ_TELEGRAM_BOT_TOKEN="$WIZ_TELEGRAM_BOT_TOKEN" \
-  WIZ_TELEGRAM_CHAT_ID="$WIZ_TELEGRAM_CHAT_ID" \
-  WIZ_AUTO_BACKUP_ENABLED="$WIZ_AUTO_BACKUP_ENABLED" \
-  WIZ_AUTO_BACKUP_DAYS="$WIZ_AUTO_BACKUP_DAYS" \
-    "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/seed-wizard-db.py" || warn "Не удалось записать настройки в БД"
+  (
+    cd "$BACKEND_DIR" || exit 1
+    WIZ_TELEGRAM_ENABLED="$WIZ_TELEGRAM_ENABLED" \
+    WIZ_TELEGRAM_BOT_TOKEN="$WIZ_TELEGRAM_BOT_TOKEN" \
+    WIZ_TELEGRAM_CHAT_ID="$WIZ_TELEGRAM_CHAT_ID" \
+    WIZ_AUTO_BACKUP_ENABLED="$WIZ_AUTO_BACKUP_ENABLED" \
+    WIZ_AUTO_BACKUP_DAYS="$WIZ_AUTO_BACKUP_DAYS" \
+      "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/seed-wizard-db.py"
+  ) || warn "Не удалось записать настройки в БД"
 }
 
 setup_frontend() {

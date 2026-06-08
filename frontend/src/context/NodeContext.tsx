@@ -62,6 +62,25 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
     refreshNodes()
   }, [refreshNodes])
 
+  useEffect(() => {
+    if (!user) return
+
+    const interval = window.setInterval(() => {
+      void refresh()
+      if (user.role === 'admin') void refreshNodes()
+    }, 45_000)
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [user, refresh, refreshNodes])
+
   const value = useMemo(
     () => ({ activeNode, nodes, loading, refresh, refreshNodes, activate }),
     [activeNode, nodes, loading, refresh, refreshNodes, activate],

@@ -7,7 +7,9 @@ import sys
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
+os.chdir(BACKEND_DIR)
 sys.path.insert(0, str(BACKEND_DIR))
+(BACKEND_DIR / "data").mkdir(parents=True, exist_ok=True)
 
 from app.database import Base, SessionLocal, engine  # noqa: E402
 from app.models import AppSetting  # noqa: E402

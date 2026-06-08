@@ -44,7 +44,7 @@ from app.services.cidr.cidr_scheduler import run_cidr_db_scheduler_loop
 from app.services.wg_policy_sync_worker import run_wg_policy_sync_loop
 from app.services.nightly_idle_restart_worker import run_nightly_idle_restart_loop
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
-from app.services.node_manager import ensure_local_node, get_active_adapter, get_active_node
+from app.services.node_manager import get_active_adapter, get_active_node, sync_local_node
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_health_worker import run_node_health_loop
 from app.services.panel_resource_metrics_worker import run_panel_resource_metrics_loop
@@ -74,7 +74,7 @@ def seed_database():
             db.commit()
             db.refresh(admin)
 
-        ensure_local_node(db)
+        sync_local_node(db)
 
         try:
             CidrDbUpdaterService(db=db).seed_builtin_presets()

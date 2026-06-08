@@ -10,7 +10,18 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_password_hash, verify_password
 from app.config import get_settings
-from app.models import AppSetting, Node, NodeStatus
+from app.models import (
+    AppSetting,
+    Node,
+    NodeResourceSample,
+    NodeStatus,
+    OpenVpnAccessPolicy,
+    TrafficSessionState,
+    UserTrafficSample,
+    UserTrafficStatProtocol,
+    VpnConfig,
+    WgAccessPolicy,
+)
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.antizapret import AntiZapretService
 from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
@@ -107,18 +118,38 @@ def set_active_node_id(db: Session, node_id: int) -> None:
     _set_setting(db, ACTIVE_NODE_KEY, str(node_id))
 
 
+def clear_active_node_id(db: Session) -> None:
+    _set_setting(db, ACTIVE_NODE_KEY, "")
+
+
 def get_active_node(db: Session) -> Node:
     node_id = get_active_node_id(db)
     if node_id:
         node = db.query(Node).filter(Node.id == node_id).first()
         if node:
-            return node
-    local = db.query(Node).filter(Node.is_local.is_(True)).first()
-    if local:
-        set_active_node_id(db, local.id)
+            if node.is_local and not settings.local_antizapret_enabled:
+                _set_setting(db, ACTIVE_NODE_KEY, "")
+                db.commit()
+            else:
+                return node
+
+    if settings.local_antizapret_enabled:
+        local = db.query(Node).filter(Node.is_local.is_(True)).first()
+        if local:
+            set_active_node_id(db, local.id)
+            db.commit()
+            return local
+
+    remote = db.query(Node).filter(Node.is_local.is_(False)).order_by(Node.id).first()
+    if remote:
+        set_active_node_id(db, remote.id)
         db.commit()
-        return local
-    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Активный узел не настроен")
+        return remote
+
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Нет активного узла. Добавьте удалённый VPN-узел (node agent).",
+    )
 
 
 def get_adapter_for_node(node: Node) -> NodeAdapter:
@@ -149,6 +180,34 @@ def get_node_antizapret_path(db: Session) -> Path:
     return settings.antizapret_path
 
 
+def _purge_node_related(db: Session, node_id: int) -> None:
+    for model in (
+        VpnConfig,
+        TrafficSessionState,
+        UserTrafficStatProtocol,
+        WgAccessPolicy,
+        OpenVpnAccessPolicy,
+        NodeResourceSample,
+        UserTrafficSample,
+    ):
+        db.query(model).filter(model.node_id == node_id).delete(synchronize_session=False)
+
+
+def _remove_local_node(db: Session, local: Node) -> None:
+    active_id = get_active_node_id(db)
+    node_id = local.id
+    _purge_node_related(db, node_id)
+    db.delete(local)
+    db.commit()
+    if active_id == node_id:
+        remote = db.query(Node).filter(Node.is_local.is_(False)).order_by(Node.id).first()
+        if remote:
+            set_active_node_id(db, remote.id)
+        else:
+            _set_setting(db, ACTIVE_NODE_KEY, "")
+        db.commit()
+
+
 def ensure_local_node(db: Session) -> Node:
     local = db.query(Node).filter(Node.is_local.is_(True)).first()
     if local:
@@ -173,6 +232,17 @@ def ensure_local_node(db: Session) -> Node:
         set_active_node_id(db, local.id)
         db.commit()
     return local
+
+
+def sync_local_node(db: Session) -> Node | None:
+    """Создать или удалить локальный узел в соответствии с LOCAL_ANTIZAPRET_ENABLED."""
+    local = db.query(Node).filter(Node.is_local.is_(True)).first()
+    if settings.local_antizapret_enabled:
+        return local if local else ensure_local_node(db)
+
+    if local:
+        _remove_local_node(db, local)
+    return None
 
 
 def check_node_health(node: Node, api_key_override: str | None = None) -> dict:

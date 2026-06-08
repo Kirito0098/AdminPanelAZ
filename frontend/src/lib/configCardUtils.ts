@@ -124,7 +124,11 @@ export function buildAccessMeta(
       tone = 'expired'
     }
   } else if (!isBlocked) {
-    lines.push({ text: 'Трафик · Лимит не задан' })
+    const consumed = policy?.traffic_consumed_human
+    const hasTraffic = Boolean(consumed && (policy?.traffic_consumed_bytes ?? 0) > 0)
+    lines.push({
+      text: hasTraffic ? `Трафик: ${consumed} · лимит не задан` : 'Трафик · Лимит не задан',
+    })
   }
 
   if (blockMode === 'traffic_limit' || policy?.traffic_limit_exceeded) {

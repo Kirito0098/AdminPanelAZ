@@ -272,7 +272,12 @@ export default function TrafficPage() {
       }
       if (manual) setRefreshing(true)
       try {
-        const overview = await getTrafficOverview()
+        const overview = await Promise.race([
+          getTrafficOverview(),
+          new Promise<never>((_, reject) => {
+            window.setTimeout(() => reject(new Error('Таймаут загрузки трафика (25 с)')), 25_000)
+          }),
+        ])
         setData(overview)
         setLoadError(null)
         setSelectedClient((current) => {
@@ -281,7 +286,12 @@ export default function TrafficPage() {
         })
         setCountdown(REFRESH_INTERVAL)
       } catch (err) {
-        const message = err instanceof ApiError ? err.message : 'Ошибка загрузки трафика'
+        const message =
+          err instanceof ApiError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'Ошибка загрузки трафика'
         setLoadError(message)
         notifyError(message)
       } finally {
@@ -399,11 +409,11 @@ export default function TrafficPage() {
   )
 
   const chartPoints =
-    chartData?.labels.map((label, i) => ({
+    chartData?.labels?.map((label, i) => ({
       label,
-      vpn: chartData.vpn_bytes[i] ?? 0,
-      antizapret: chartData.antizapret_bytes[i] ?? 0,
-      total: (chartData.vpn_bytes[i] ?? 0) + (chartData.antizapret_bytes[i] ?? 0),
+      vpn: chartData.vpn_bytes?.[i] ?? 0,
+      antizapret: chartData.antizapret_bytes?.[i] ?? 0,
+      total: (chartData.vpn_bytes?.[i] ?? 0) + (chartData.antizapret_bytes?.[i] ?? 0),
     })) ?? []
 
   const handleRefresh = () => load(false, true)
@@ -955,7 +965,12 @@ export default function TrafficPage() {
                     <strong>{formatBytes(deletedSummary?.total_bytes ?? 0)}</strong>
                   </p>
                   {deletedRows.length === 0 ? (
-                    <EmptyState title="Нет осиротевшей статистики" description="Все записи соответствуют активным конфигам" className="py-6" />
+                    <EmptyState
+                      icon={Database}
+                      title="Нет осиротевшей статистики"
+                      description="Все записи соответствуют активным конфигам"
+                      className="py-6"
+                    />
                   ) : (
                     <div className="overflow-x-auto rounded-md border">
                       <Table>

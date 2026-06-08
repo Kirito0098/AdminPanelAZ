@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import AppSetting, User
+from app.models import AppSetting, TrafficSessionState, User
 from app.schemas import MessageResponse, TrafficOverview
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.traffic.chart import fetch_traffic_chart
@@ -55,15 +55,33 @@ def _set_setting(db: Session, key: str, value: str) -> None:
         db.add(AppSetting(key=key, value=value))
 
 
+def _active_traffic_client_names(db: Session, node_id: int) -> set[str]:
+    active_names: set[str] = set()
+    try:
+        adapter = get_active_adapter(db)
+        ovpn = adapter.parse_openvpn_status()
+        wg = adapter.parse_wireguard_status()
+        active_names = {c.common_name for c in ovpn}
+        active_names.update(p.client_name for p in wg if p.client_name)
+    except Exception:
+        active_names = set()
+
+    if not active_names:
+        rows = (
+            db.query(TrafficSessionState.common_name)
+            .filter(TrafficSessionState.node_id == node_id, TrafficSessionState.is_active.is_(True))
+            .distinct()
+            .all()
+        )
+        active_names = {name for (name,) in rows if name}
+
+    return active_names
+
+
 @router.get("/overview", response_model=TrafficOverview)
 def traffic_overview(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
     node = get_active_node(db)
-    adapter = get_active_adapter(db)
-
-    ovpn = adapter.parse_openvpn_status()
-    wg = adapter.parse_wireguard_status()
-    active_names = {c.common_name for c in ovpn}
-    active_names.update(p.client_name for p in wg if p.client_name)
+    active_names = _active_traffic_client_names(db, node.id)
 
     collector = TrafficCollectorService(db, node.id)
     rows, summary = collector.get_summary(active_names, settings.traffic_db_stale_seconds)

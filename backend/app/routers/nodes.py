@@ -25,7 +25,8 @@ from app.services.resource_metrics import VALID_PERIODS, query_history
 from app.services.node_key_rotation import rotate_node_api_key
 from app.services.node_manager import (
     check_node_health,
-    ensure_local_node,
+    clear_active_node_id,
+    sync_local_node,
     get_active_node,
     get_active_node_id,
     get_adapter_for_node,
@@ -60,7 +61,7 @@ def _to_response(node: Node) -> NodeResponse:
 
 @router.get("", response_model=list[NodeResponse])
 def list_nodes(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    ensure_local_node(db)
+    sync_local_node(db)
     nodes = db.query(Node).order_by(Node.is_local.desc(), Node.name).all()
     return [_to_response(n) for n in nodes]
 
@@ -91,6 +92,10 @@ def create_node(
     db.commit()
     db.refresh(node)
 
+    if not get_active_node_id(db):
+        set_active_node_id(db, node.id)
+        db.commit()
+
     health = check_node_health(node, api_key_override=payload.api_key)
     update_node_from_health(node, health, db)
     if settings.audit_log_enabled:
@@ -107,8 +112,11 @@ def create_node(
 
 @router.get("/active", response_model=ActiveNodeResponse)
 def get_active(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    ensure_local_node(db)
+    sync_local_node(db)
     node = get_active_node(db)
+    health = check_node_health(node)
+    update_node_from_health(node, health, db)
+    db.refresh(node)
     return ActiveNodeResponse(node=_to_response(node))
 
 
@@ -176,8 +184,15 @@ def delete_node(
     db.commit()
 
     if active_id == node_id:
-        local = ensure_local_node(db)
-        set_active_node_id(db, local.id)
+        fallback = sync_local_node(db)
+        if fallback:
+            set_active_node_id(db, fallback.id)
+        else:
+            other = db.query(Node).filter(Node.is_local.is_(False)).order_by(Node.id).first()
+            if other:
+                set_active_node_id(db, other.id)
+            else:
+                clear_active_node_id(db)
         db.commit()
 
     if settings.audit_log_enabled:

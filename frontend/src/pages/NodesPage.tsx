@@ -290,7 +290,7 @@ function NodeCard({
 export default function NodesPage() {
   const { user } = useAuth()
   const { activeNode, refresh, refreshNodes, activate } = useNode()
-  const { success, error: notifyError } = useNotifications()
+  const { success, warning, error: notifyError } = useNotifications()
   const [nodes, setNodes] = useState<Node[]>([])
   const [loading, setLoading] = useState(true)
   const [showDialog, setShowDialog] = useState(false)
@@ -312,6 +312,7 @@ export default function NodesPage() {
     try {
       setNodes(await getNodes())
       await refreshNodes()
+      await refresh()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки узлов')
     } finally {
@@ -392,11 +393,21 @@ export default function NodesPage() {
         await refresh()
         success('Узел обновлён')
       } else {
-        await createNode({ name: trimmedName, host: trimmedHost, port, api_key: apiKey })
+        const created = await createNode({ name: trimmedName, host: trimmedHost, port, api_key: apiKey })
         closeDialog()
         await load()
         await refresh()
-        success('Узел добавлен')
+        if (created.status === 'offline') {
+          const lastError =
+            typeof created.metadata?.last_error === 'string' ? created.metadata.last_error : null
+          warning(
+            lastError
+              ? `Узел добавлен, но агент недоступен: ${lastError}. Запустите node agent на сервере и нажмите «Здоровье».`
+              : 'Узел добавлен, но агент недоступен. Запустите node agent на сервере и нажмите «Здоровье».',
+          )
+        } else {
+          success('Узел добавлен и доступен')
+        }
       }
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
@@ -701,8 +712,10 @@ export default function NodesPage() {
             <div className="space-y-4">
               {!editing && (
                 <SettingsAlert variant="info">
-                  Удалённый узел должен запускать <strong>node agent</strong> с тем же API-ключом, что указан
-                  ниже. Порт по умолчанию — <strong>9100</strong>.
+                  Сначала на VPN-сервере запустите <strong>node agent</strong> (
+                  <code className="text-xs">./start_node_agent.sh daemon</code>), затем укажите его{' '}
+                  <strong>публичный IP или домен</strong> (не 127.0.0.1) и тот же API-ключ. Порт —{' '}
+                  <strong>9100</strong>.
                 </SettingsAlert>
               )}
               {editing && !editing.is_local && (

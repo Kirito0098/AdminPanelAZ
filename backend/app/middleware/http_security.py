@@ -100,7 +100,7 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         if settings.security_headers_enabled:
-            self._apply_headers(response, settings, request.url.path or "")
+            self._apply_headers(response, settings, request.url.path or "", request)
 
         return response
 
@@ -112,12 +112,13 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
         return proto == "https"
 
     @staticmethod
-    def _apply_headers(response: Response, settings, path: str) -> None:
+    def _apply_headers(response: Response, settings, path: str, request: Request | None = None) -> None:
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
-        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        if request is not None and HttpSecurityMiddleware._is_secure(request):
+            response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
         response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
         response.headers.setdefault(
             "Permissions-Policy",

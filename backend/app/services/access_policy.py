@@ -58,12 +58,14 @@ class AccessPolicyService:
             normalize_identity=lambda name: (name or "").strip().lower(),
         )
 
-    def _ovpn_traffic_state(self, row: OpenVpnAccessPolicy | None) -> dict:
+    def _ovpn_traffic_state(self, row: OpenVpnAccessPolicy | None, *, client_name: str | None = None) -> dict:
         if row is None:
+            name = (client_name or "").strip()
+            consumed = self._consumed_bytes(name, period_days=None) if name else 0
             return resolve_traffic_limit_state(
                 traffic_limit_bytes=None,
                 traffic_limit_period_days=None,
-                consumed_bytes=0,
+                consumed_bytes=consumed,
             )
         consumed = self._consumed_bytes(row.client_name, period_days=row.traffic_limit_period_days)
         return resolve_traffic_limit_state(
@@ -72,12 +74,14 @@ class AccessPolicyService:
             consumed_bytes=consumed,
         )
 
-    def _wg_traffic_state(self, row: WgAccessPolicy | None) -> dict:
+    def _wg_traffic_state(self, row: WgAccessPolicy | None, *, client_name: str | None = None) -> dict:
         if row is None:
+            name = (client_name or "").strip().lower()
+            consumed = self._consumed_bytes(name, period_days=None) if name else 0
             return resolve_traffic_limit_state(
                 traffic_limit_bytes=None,
                 traffic_limit_period_days=None,
-                consumed_bytes=0,
+                consumed_bytes=consumed,
             )
         consumed = self._consumed_bytes(row.client_name, period_days=row.traffic_limit_period_days)
         return resolve_traffic_limit_state(
@@ -85,6 +89,13 @@ class AccessPolicyService:
             traffic_limit_period_days=row.traffic_limit_period_days,
             consumed_bytes=consumed,
         )
+
+    def _traffic_human_fields(self, traffic_state: dict) -> dict:
+        return {
+            **traffic_state,
+            "traffic_consumed_human": human_bytes(traffic_state.get("traffic_consumed_bytes")),
+            "traffic_bytes_left_human": human_bytes(traffic_state.get("traffic_bytes_left")),
+        }
 
     def read_banned_clients(self) -> set[str]:
         if self._adapter is not None:
@@ -153,9 +164,7 @@ class AccessPolicyService:
             "block_duration_days": row.block_days,
             "block_until": block_until.strftime("%Y-%m-%d %H:%M:%S") if block_until else None,
             "traffic_limit_exceeded": traffic_exceeded,
-            **traffic_state,
-            "traffic_consumed_human": human_bytes(traffic_state.get("traffic_consumed_bytes")),
-            "traffic_bytes_left_human": human_bytes(traffic_state.get("traffic_bytes_left")),
+            **self._traffic_human_fields(traffic_state),
         }
 
     def _cleanup_ovpn_temp_block(self, row: OpenVpnAccessPolicy, now: datetime) -> bool:
@@ -309,10 +318,11 @@ class AccessPolicyService:
             .first()
         )
         if row is None:
+            traffic_state = self._ovpn_traffic_state(None, client_name=client_name)
             return {
                 "is_blocked": client_name in self.read_banned_clients(),
                 "block_mode": "none",
-                **self._ovpn_traffic_state(None),
+                **self._traffic_human_fields(traffic_state),
             }
         return self._ovpn_state(row)
 
@@ -416,9 +426,7 @@ class AccessPolicyService:
             "block_until": block_until.strftime("%Y-%m-%d %H:%M:%S") if block_until else None,
             "expires_at": expires.isoformat() if expires else None,
             "traffic_limit_exceeded": traffic_exceeded,
-            **traffic_state,
-            "traffic_consumed_human": human_bytes(traffic_state.get("traffic_consumed_bytes")),
-            "traffic_bytes_left_human": human_bytes(traffic_state.get("traffic_bytes_left")),
+            **self._traffic_human_fields(traffic_state),
         }
 
     def reconcile_wg(
@@ -566,10 +574,11 @@ class AccessPolicyService:
             .first()
         )
         if row is None:
+            traffic_state = self._wg_traffic_state(None, client_name=normalized)
             return {
                 "is_blocked": False,
                 "block_mode": "none",
-                **self._wg_traffic_state(None),
+                **self._traffic_human_fields(traffic_state),
             }
         return self._wg_state(row)
 
