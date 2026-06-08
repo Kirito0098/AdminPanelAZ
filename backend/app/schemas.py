@@ -292,6 +292,24 @@ class TelegramSettingsUpdate(BaseModel):
     notify_on_backup: bool | None = None
 
 
+class AdminNotifyEventItem(BaseModel):
+    key: str
+    label: str
+    enabled: bool
+
+
+class AdminNotifySettingsResponse(BaseModel):
+    telegram_id: str = ""
+    notify_enabled: bool = False
+    bot_token_set: bool = False
+    events: list[AdminNotifyEventItem]
+
+
+class AdminNotifySettingsUpdate(BaseModel):
+    telegram_id: str | None = None
+    events: dict[str, bool] | None = None
+
+
 class ServiceRestartRequest(BaseModel):
     service_name: str
 

@@ -139,6 +139,9 @@ async def lifespan(_: FastAPI):
     )
     cidr_task = asyncio.create_task(run_cidr_db_scheduler_loop())
     key_rotation_task = asyncio.create_task(run_node_key_rotation_loop())
+    from app.services.admin_notify import admin_notify_service
+
+    admin_notify_service.start_monitor()
     try:
         ip_restriction_service.sync_firewall()
     except Exception:

@@ -46,7 +46,7 @@
 | Бэкапы (ручные + авто + TG) | ✅ | Без `client.sh 8` как отдельной опции в UI |
 | Feature toggles | 🟡 | ~12 toggles vs больше в AA 1.9.0 |
 | Telegram Login + Mini App | ✅ | |
-| Telegram admin-уведомления | 🟡 | Бэкапы + тест; нет полного AdminNotify |
+| Telegram admin-уведомления | ✅ | AdminNotify + UI подписок в TelegramTab |
 | Auth (login, captcha, роли) | ✅ | + 🆕 2FA/TOTP, refresh tokens |
 | Viewer role | 🟡 | API есть, UI назначения доступа — нет |
 | Журнал действий | 🟡 | Просмотр есть, экспорт CSV — нет |
@@ -58,7 +58,7 @@
 
 ### Основные пробелы (backlog)
 
-**Высокий приоритет:** AdminNotify (TG-алерты login/client/settings/CPU/RAM), вкладка «Конфиг AntiZapret», UI viewer config access, traffic limit notify, полный каталог game filters (~75 игр в AA vs 15 в AZ).
+**Высокий приоритет:** вкладка «Конфиг AntiZapret», UI viewer config access, полный каталог game filters (~75 игр в AA vs 15 в AZ).
 
 **Средний приоритет:** parity feature toggles и background jobs, экспорт action logs CSV, публичные route-файлы для роутеров (Keenetic/MikroTik/TP-Link), OpenVPN UDP/TCP group switching, CI pipeline.
 

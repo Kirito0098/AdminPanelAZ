@@ -48,6 +48,8 @@ from app.services.refresh_token import (
     revoke_refresh_token,
     rotate_refresh_token,
 )
+from app.services.admin_notify import admin_notify_service
+from app.services.notify_time import get_client_timezone_from_request
 from app.services.totp_service import (
     encrypt_backup_codes,
     encrypt_totp_secret,
@@ -151,6 +153,12 @@ def _login_with_checks(
                 remote_addr=client_ip,
                 details="invalid credentials",
             )
+        admin_notify_service.send_login_failed(
+            db,
+            actor_username=username,
+            remote_addr=client_ip,
+            client_timezone=get_client_timezone_from_request(request),
+        )
         detail = "Неверный логин или пароль"
         if attempts > 2:
             detail += " (требуется капча)"
@@ -168,6 +176,13 @@ def _login_with_checks(
             user_id=user.id,
             username=user.username,
             remote_addr=client_ip,
+        )
+    if user.role != UserRole.viewer:
+        admin_notify_service.send_login_success(
+            db,
+            actor_username=user.username,
+            remote_addr=client_ip,
+            client_timezone=get_client_timezone_from_request(request),
         )
     return _issue_token_pair(user, db, response)
 
@@ -215,10 +230,22 @@ def telegram_login_callback(request: Request, db: Session = Depends(get_db)):
             password_hash=get_password_hash(tg_id),
             role=UserRole.user,
             is_active=True,
+            telegram_id=tg_id,
         )
         db.add(user)
         db.commit()
         db.refresh(user)
+    elif not user.telegram_id:
+        user.telegram_id = tg_id
+        db.commit()
+    client_ip = ip_restriction_service.get_client_ip(request)
+    if user.role != UserRole.viewer:
+        admin_notify_service.send_login_success(
+            db,
+            actor_username=user.username,
+            remote_addr=client_ip,
+            client_timezone=get_client_timezone_from_request(request),
+        )
     access = create_access_token(
         data={"sub": user.username, "role": user.role.value},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
@@ -280,6 +307,13 @@ def login_2fa(payload: Login2FARequest, request: Request, response: Response, db
             username=user.username,
             remote_addr=client_ip,
             details="2fa",
+        )
+    if user.role != UserRole.viewer:
+        admin_notify_service.send_login_success(
+            db,
+            actor_username=user.username,
+            remote_addr=client_ip,
+            client_timezone=get_client_timezone_from_request(request),
         )
     db.commit()
     return _issue_token_pair(user, db, response)

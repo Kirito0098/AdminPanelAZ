@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     panel_resource_metrics_enabled: bool = True
     panel_resource_metrics_interval_seconds: int = 60
     panel_resource_metrics_retention_days: int = 30
+    monitor_cpu_threshold: int = 90
+    monitor_ram_threshold: int = 90
+    monitor_check_interval_seconds: int = 60
+    monitor_cooldown_minutes: int = 30
     traffic_db_stale_seconds: int = 600
     openvpn_socket_dir: Path = Path("/run/openvpn-server")
     openvpn_socket_timeout: float = 2.5

@@ -6,8 +6,10 @@ from app.auth import get_current_user, require_admin
 from app.database import get_db
 from app.models import AppSetting, User, UserRole, ViewerConfigAccess, VpnConfig, VpnType
 from app.schemas import MessageResponse, VpnConfigCreate, VpnConfigResponse, VpnConfigUpdate
+from app.services.admin_notify import admin_notify_service
 from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.notify_time import get_client_timezone_from_request
 from app.services.qr_download import QrDownloadService
 from app.services.qr_generator import generate_qr_png
 from app.services.security import SecurityService
@@ -83,6 +85,7 @@ def list_configs(
 @router.post("", response_model=VpnConfigResponse, status_code=status.HTTP_201_CREATED)
 def create_config(
     payload: VpnConfigCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -123,6 +126,16 @@ def create_config(
     db.add(config)
     db.commit()
     db.refresh(config)
+    node = get_active_node(db)
+    admin_notify_service.send_config_create(
+        db,
+        actor_username=current_user.username,
+        target_name=config.client_name,
+        target_type=config.vpn_type.value,
+        node_id=node.id,
+        node_name=node.name,
+        client_timezone=get_client_timezone_from_request(request),
+    )
     return _to_response(config, db)
 
 
@@ -174,6 +187,7 @@ def update_config(
 @router.delete("/{config_id}", response_model=MessageResponse)
 def delete_config(
     config_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -189,9 +203,21 @@ def delete_config(
     else:
         adapter.delete_wireguard_client(config.client_name)
 
+    client_name = config.client_name
+    vpn_type = config.vpn_type.value
+    node = get_active_node(db)
     db.delete(config)
     db.commit()
-    return MessageResponse(message=f"Клиент '{config.client_name}' удалён")
+    admin_notify_service.send_config_delete(
+        db,
+        actor_username=current_user.username,
+        target_name=client_name,
+        target_type=vpn_type,
+        node_id=node.id,
+        node_name=node.name,
+        client_timezone=get_client_timezone_from_request(request),
+    )
+    return MessageResponse(message=f"Клиент '{client_name}' удалён")
 
 
 @router.get("/{config_id}/download")

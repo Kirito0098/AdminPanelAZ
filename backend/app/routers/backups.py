@@ -18,8 +18,10 @@ from app.schemas import (
     BackupSettingsUpdate,
     MessageResponse,
 )
+from app.services.admin_notify import admin_notify_service
 from app.services.backup_manager import BackupManager
 from app.services.node_manager import get_active_adapter
+from app.services.notify_time import get_client_timezone_from_request
 from app.services.telegram import send_tg_document, send_tg_message
 
 router = APIRouter(prefix="/backups", tags=["backups"])
@@ -97,8 +99,9 @@ def update_backup_settings(
 @router.post("/create", response_model=BackupEntry)
 def create_backup(
     payload: BackupCreateRequest,
+    request: Request,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
 ):
     manager = _get_backup_manager()
     config_contents: dict[str, str] | None = None
@@ -126,6 +129,13 @@ def create_backup(
                 caption=f"Бэкап AdminPanelAZ: {result['file_name']}",
             )
 
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_backup_create",
+        subject_name=result["file_name"],
+        client_timezone=get_client_timezone_from_request(request),
+    )
     return BackupEntry(**result)
 
 
@@ -146,6 +156,13 @@ def restore_backup(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=payload.file_name,
         )
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_backup_restore",
+        subject_name=payload.file_name,
+        client_timezone=get_client_timezone_from_request(request),
+    )
     return MessageResponse(
         message="Восстановление выполнено. Перезапустите панель для применения БД.",
         detail=result,

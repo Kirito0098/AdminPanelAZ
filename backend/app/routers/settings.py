@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
@@ -6,7 +6,9 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, User
 from app.schemas import AppSettingsResponse, AppSettingsUpdate, MessageResponse
+from app.services.admin_notify import admin_notify_service
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
+from app.services.notify_time import get_client_timezone_from_request
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 settings = get_settings()
@@ -59,6 +61,7 @@ def get_settings(current_user: User = Depends(get_current_user), db: Session = D
 @router.patch("", response_model=AppSettingsResponse)
 def update_settings(
     payload: AppSettingsUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -96,6 +99,15 @@ def update_settings(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Ошибка применения настроек: {exc}",
                 ) from exc
+            node = get_active_node(db)
+            admin_notify_service.send_settings_change(
+                db,
+                actor_username=current_user.username,
+                settings_key="settings_run_doall",
+                node_id=node.id,
+                node_name=node.name,
+                client_timezone=get_client_timezone_from_request(request),
+            )
     elif any(
         v is not None
         for v in [payload.include_hosts, payload.exclude_hosts, payload.include_ips, payload.exclude_ips, payload.allow_ips]
@@ -108,6 +120,20 @@ def update_settings(
 
 
 @router.post("/recreate-profiles", response_model=MessageResponse)
-def recreate_profiles(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def recreate_profiles(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
     output = get_active_adapter(db).recreate_profiles()
+    node = get_active_node(db)
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_run_doall",
+        details="recreate_profiles",
+        node_id=node.id,
+        node_name=node.name,
+        client_timezone=get_client_timezone_from_request(request),
+    )
     return MessageResponse(message="Профили пересозданы", detail=output)

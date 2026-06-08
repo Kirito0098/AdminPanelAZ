@@ -321,6 +321,8 @@ def run_db_migrations() -> None:
             ("totp_secret_encrypted", "VARCHAR(512)"),
             ("totp_enabled", "INTEGER DEFAULT 0"),
             ("totp_backup_codes_encrypted", "VARCHAR(1024)"),
+            ("telegram_id", "VARCHAR(32)"),
+            ("tg_notify_events", "TEXT"),
         ],
     }
     with engine.begin() as conn:
@@ -333,6 +335,36 @@ def run_db_migrations() -> None:
                     continue
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}"))
                 logger.info("DB migration: added %s.%s", table, name)
+
+    _migrate_user_telegram_backfill()
+
+
+def _migrate_user_telegram_backfill() -> None:
+    """Backfill telegram_id from tg_* usernames for existing Telegram-login users."""
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("users")}
+    if "telegram_id" not in cols:
+        return
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text("SELECT id, username, telegram_id FROM users WHERE username LIKE 'tg_%'")
+        ).mappings().all()
+        for row in rows:
+            if row["telegram_id"]:
+                continue
+            username = str(row["username"] or "")
+            if not username.startswith("tg_"):
+                continue
+            tg_id = username[3:].strip()
+            if not tg_id:
+                continue
+            conn.execute(
+                text("UPDATE users SET telegram_id = :tg_id WHERE id = :id"),
+                {"tg_id": tg_id, "id": row["id"]},
+            )
+            logger.info("DB migration: backfilled telegram_id for user id=%s", row["id"])
 
 
 def get_db():

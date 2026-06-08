@@ -1,7 +1,7 @@
 # Статус переноса из AdminAntizapret
 
 > **Baseline:** [AdminAntizapret](https://github.com/Kirito0098/AdminAntizapret) **1.9.0** → AdminPanelAZ **0.3.0**
-> **Обновлено:** 2026-06-07
+> **Обновлено:** 2026-06-08
 > **Источник для сравнения:** `/opt/AdminAntizapret` (Flask + Jinja2) · **Цель:** `/opt/AdminPanelAZ` (FastAPI + React)
 
 AdminPanelAZ — экспериментальный порт веб-панели AdminAntizapret. На данный момент для production по-прежнему рекомендуется upstream **AdminAntizapret**. Этот документ фиксирует, что уже перенесено, что перенесено частично и что ещё предстоит перенести.
@@ -45,7 +45,7 @@ AdminPanelAZ — экспериментальный порт веб-панели
 | Бэкапы (ручные + авто + TG) | ✅ | Без AntiZapret `client.sh 8` как отдельной опции в UI |
 | Feature toggles | 🟡 | ~12 toggles vs больше в AA 1.9.0 |
 | Telegram Login + Mini App | ✅ | |
-| Telegram admin-уведомления | 🟡 | Только бэкапы + тест; нет полного AdminNotify |
+| Telegram admin-уведомления | ✅ | AdminNotify + traffic_limit + CPU/RAM; UI подписок в TelegramTab |
 | Auth (login, captcha, роли) | ✅ | + 🆕 2FA/TOTP, refresh tokens |
 | Viewer role | 🟡 | API и ограничения есть, UI назначения доступа — нет |
 | Журнал действий | 🟡 | Просмотр есть, экспорт CSV — нет |
@@ -53,7 +53,7 @@ AdminPanelAZ — экспериментальный порт веб-панели
 | In-panel pytest | ✅ | 9 модулей vs 53 в AA |
 | Установка / ops | 🟡 | `install.sh` + scripts; нет `adminpanel.sh`, diagnostics CLI |
 | Multi-node | 🆕 | Controller + Node Agent |
-| CI/CD | 🟡 | `.github/workflows/ci.yml`; pre-commit — нет |
+| CI/CD | 🟡 | `.github/workflows/ci.yml`; `.pre-commit-config.yaml` (ruff, shellcheck) |
 
 ---
 
@@ -108,7 +108,7 @@ flowchart LR
 | Срок действия WG | WG policy | `client_access.py` | ✅ |
 | Лимиты трафика (1/7/30 дней) | `traffic_limit.py` | `traffic_limit.py` | ✅ |
 | Reconcile после sync | `traffic_limit_reconcile.py` | `traffic_limit_reconcile.py` | ✅ |
-| TG-уведомление при превышении лимита | `traffic_limit_notify.py` | — | ❌ |
+| TG-уведомление при превышении лимита | `traffic_limit_notify.py` | `traffic_limit_notify.py` | ✅ |
 | OpenVPN banlist (`banned_clients`) | `OpenVPNBanlistService` | `openvpn_management.py` | ✅ |
 
 ### 3. Трафик и мониторинг
@@ -121,7 +121,7 @@ flowchart LR
 | OpenVPN events / sockets | logs routes | `LogsPage.tsx`, `logs.py` | ✅ |
 | Сброс / очистка трафика | logs dashboard POST | `traffic.py` | ✅ |
 | CPU/RAM + vnstat + WebSocket | `server_monitor/` | `server_monitor.py`, `ServerMonitorPage.tsx` | ✅ |
-| TG-алерты CPU/RAM | AdminNotify | — | ❌ |
+| TG-алерты CPU/RAM | AdminNotify | `admin_notify.py` + metrics workers | ✅ |
 | NOC: метрики узла + панели | — | `MonitoringPage.tsx`, resource samples | 🆕 |
 | История CPU/RAM (node + panel) | — | `node_resource_sample`, `panel_resource_sample` | 🆕 |
 
@@ -190,9 +190,9 @@ flowchart LR
 | Telegram Login Widget | auth routes | `auth.py` | ✅ |
 | Telegram Mini App | `tg_mini/` | `tg_mini.py`, static assets | ✅ |
 | Отправка конфига в TG (Mini App) | tg_mini API | `tg_mini.py` | ✅ |
-| AdminNotify (login, client ops, settings) | `admin_notify.py` | — | ❌ |
-| CPU/RAM alerts в TG | AdminNotify | — | ❌ |
-| Traffic limit alerts в TG | `traffic_limit_notify.py` | — | ❌ |
+| AdminNotify (login, client ops, settings) | `admin_notify.py` | `admin_notify.py` | ✅ |
+| CPU/RAM alerts в TG | AdminNotify | `admin_notify.py` + metrics workers | ✅ |
+| Traffic limit alerts в TG | `traffic_limit_notify.py` | `traffic_limit_notify.py` | ✅ |
 | Тест TG-сообщения | settings API | `maintenance.py` | ✅ |
 | `Telegram.md` (документация) | отдельный файл | частично в README | 🟡 |
 
@@ -252,7 +252,7 @@ flowchart LR
 | Safe Browsing status CLI | `safe_browsing_status_cli.py` | — | ❌ |
 | env defaults | `env_defaults.sh` | `scripts/env_defaults.sh` (sync AA 1.9.0) | ✅ |
 | CI (pytest, ruff, shellcheck, eslint) | `.github/workflows/ci.yml` | `.github/workflows/ci.yml` (без eslint) | 🟡 |
-| pre-commit hooks | `.pre-commit-config.yaml` | — | ❌ |
+| pre-commit hooks | `.pre-commit-config.yaml` | `.pre-commit-config.yaml` (ruff, shellcheck) | 🟡 |
 
 ### 12. UI / UX
 
@@ -313,7 +313,7 @@ flowchart LR
 | `script_sh/ssl_setup.sh` | `scripts/nginx-setup.sh`, `nginx-common.sh` | patterned |
 | `app.py` (Flask monolith) | `backend/app/main.py` + routers | restructured |
 | `templates/` + `static/` | `frontend/src/` | full rewrite React |
-| `core/services/admin_notify.py` | — | not ported |
+| `core/services/admin_notify.py` | `backend/app/services/admin_notify.py` | service ported (hooks pending) |
 | `routes/settings/antizapret.py` | — | not ported |
 | `utils/nightly_idle_restart.py` | — | not ported |
 | `utils/wg_awg_runtime_apply.py` | inline in workers | no standalone CLI |
@@ -325,11 +325,11 @@ flowchart LR
 
 ### Высокий приоритет
 
-1. **AdminNotify** — TG-уведомления: login, client ops, settings, CPU/RAM, traffic limits
-2. **Вкладка «Конфиг AntiZapret»** на маршрутизации (`get/update_antizapret_settings`)
-3. **UI viewer config access** — назначение групп конфигов для роли viewer
-4. **Traffic limit notify** — алерты при превышении лимита
-5. **Полный game filter catalog** + тест покрытия
+1. **Вкладка «Конфиг AntiZapret»** на маршрутизации (`get/update_antizapret_settings`)
+2. **UI viewer config access** — назначение групп конфигов для роли viewer
+3. **Полный game filter catalog** + тест покрытия
+
+**Сделано (0.5.0):** AdminNotify (login, client ops, settings, CPU/RAM, traffic limits) + UI подписок в TelegramTab.
 
 ### Средний приоритет
 

@@ -93,6 +93,11 @@ def format_traffic_limit_period_label(period_days: int | None) -> str:
     return f"{period_days} дн."
 
 
+def get_traffic_limit_period_start(period_days: int, now=None):
+    start, _end = get_traffic_limit_period_bounds(period_days, now=now)
+    return start
+
+
 def get_traffic_limit_period_bounds(period_days: int, now=None):
     if period_days not in TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED:
         return None, None

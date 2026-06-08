@@ -148,6 +148,19 @@ export interface TelegramSettings {
   notify_on_backup: boolean
 }
 
+export interface AdminNotifyEventItem {
+  key: string
+  label: string
+  enabled: boolean
+}
+
+export interface AdminNotifySettings {
+  telegram_id: string
+  notify_enabled: boolean
+  bot_token_set: boolean
+  events: AdminNotifyEventItem[]
+}
+
 export interface CidrProviderInfo {
   filename: string
   name: string

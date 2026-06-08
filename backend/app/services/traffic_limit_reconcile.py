@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.models import Node
 from app.services.access_policy import AccessPolicyService
 from app.services.node_manager import get_adapter_for_node, node_metadata_dict
+from app.services.traffic_limit_notify import traffic_limit_notify_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -37,7 +38,12 @@ def _reconcile_for_node(db: Session, node: Node) -> dict:
         node_id=node.id,
         adapter=get_adapter_for_node(node),
     )
-    return svc.reconcile_all_traffic_limits(node_id=node.id)
+    result = svc.reconcile_all_traffic_limits(node_id=node.id)
+    try:
+        traffic_limit_notify_service.process_node(db, node, svc)
+    except Exception as exc:
+        logger.warning("Traffic limit notify failed for node %s: %s", node.id, exc)
+    return result
 
 
 def reconcile_traffic_limit_policies_safe(db: Session, *, node_id: int | None = None) -> dict:

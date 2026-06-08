@@ -396,6 +396,24 @@ export async function testTelegram() {
   return apiFetch('/settings/telegram/test', { method: 'POST' })
 }
 
+export async function getAdminNotifySettings() {
+  return apiFetch<import('../types').AdminNotifySettings>('/settings/admin-notify')
+}
+
+export async function updateAdminNotifySettings(data: {
+  telegram_id?: string
+  events?: Record<string, boolean>
+}) {
+  return apiFetch<import('../types').AdminNotifySettings>('/settings/admin-notify', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function testAdminNotify() {
+  return apiFetch('/settings/admin-notify/test', { method: 'POST' })
+}
+
 export function getQrUrl(configId: number, path: string) {
   const token = getToken()
   const params = new URLSearchParams({ path })

@@ -1,11 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
 from app.database import get_db
-from app.models import AppSetting, User
-from app.schemas import MessageResponse, ServiceRestartRequest, TelegramSettingsResponse, TelegramSettingsUpdate
-from app.services.node_manager import get_active_adapter
+import json
+
+from app.models import DEFAULT_TG_NOTIFY_EVENTS, AppSetting, User
+from app.schemas import (
+    AdminNotifyEventItem,
+    AdminNotifySettingsResponse,
+    AdminNotifySettingsUpdate,
+    MessageResponse,
+    ServiceRestartRequest,
+    TelegramSettingsResponse,
+    TelegramSettingsUpdate,
+)
+from app.services.admin_notify import TG_NOTIFY_EVENT_LABELS, admin_notify_service
+from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.notify_time import get_client_timezone_from_request
 from app.services.telegram import send_tg_message
 
 router = APIRouter(tags=["maintenance"])
@@ -25,18 +37,42 @@ def _set_setting(db: Session, key: str, value: str) -> None:
 
 
 @router.post("/settings/run-doall", response_model=MessageResponse)
-def run_doall(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def run_doall(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
     output = get_active_adapter(db).apply_config_changes()
+    node = get_active_node(db)
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_run_doall",
+        node_id=node.id,
+        node_name=node.name,
+        client_timezone=get_client_timezone_from_request(request),
+    )
     return MessageResponse(message="doall.sh выполнен", detail=output)
 
 
 @router.post("/settings/restart-service", response_model=MessageResponse)
 def restart_service(
     payload: ServiceRestartRequest,
+    request: Request,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
 ):
     output = get_active_adapter(db).restart_service(payload.service_name)
+    node = get_active_node(db)
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_restart_service",
+        subject_name=payload.service_name,
+        node_id=node.id,
+        node_name=node.name,
+        client_timezone=get_client_timezone_from_request(request),
+    )
     return MessageResponse(message=f"Служба {payload.service_name} перезапущена", detail=output)
 
 
@@ -71,6 +107,77 @@ def update_telegram_settings(
         notify_on_backup=_get_setting(db, "backup_telegram_enabled", "false") == "true",
         notify_enabled=_get_setting(db, "telegram_notify_enabled", "false") == "true",
     )
+
+
+def _admin_notify_settings_response(db: Session, user: User) -> AdminNotifySettingsResponse:
+    merged = user.merged_tg_notify_events()
+    return AdminNotifySettingsResponse(
+        telegram_id=user.telegram_id or "",
+        notify_enabled=_get_setting(db, "telegram_notify_enabled", "false") == "true",
+        bot_token_set=bool(_get_setting(db, "telegram_bot_token")),
+        events=[
+            AdminNotifyEventItem(key=key, label=label, enabled=merged.get(key, False))
+            for key, label in TG_NOTIFY_EVENT_LABELS
+        ],
+    )
+
+
+@router.get("/settings/admin-notify", response_model=AdminNotifySettingsResponse)
+def get_admin_notify_settings(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return _admin_notify_settings_response(db, admin)
+
+
+@router.patch("/settings/admin-notify", response_model=AdminNotifySettingsResponse)
+def update_admin_notify_settings(
+    payload: AdminNotifySettingsUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    if payload.telegram_id is not None:
+        tg_id = payload.telegram_id.strip()
+        if tg_id:
+            existing = db.query(User).filter(User.telegram_id == tg_id, User.id != admin.id).first()
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Этот Telegram ID уже привязан к другому пользователю",
+                )
+            admin.telegram_id = tg_id
+        else:
+            admin.telegram_id = None
+    if payload.events is not None:
+        merged = admin.merged_tg_notify_events()
+        for key in DEFAULT_TG_NOTIFY_EVENTS:
+            if key in payload.events:
+                merged[key] = bool(payload.events[key])
+        admin.tg_notify_events = json.dumps(merged)
+    db.commit()
+    db.refresh(admin)
+    return _admin_notify_settings_response(db, admin)
+
+
+@router.post("/settings/admin-notify/test", response_model=MessageResponse)
+def test_admin_notify(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    if not admin.telegram_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите Telegram ID в настройках уведомлений")
+    bot_token = _get_setting(db, "telegram_bot_token")
+    if not bot_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
+    merged = admin.merged_tg_notify_events()
+    enabled = [label for key, label in TG_NOTIFY_EVENT_LABELS if merged.get(key)]
+    events_text = "\n".join(f"  ✓ {item}" for item in enabled) if enabled else "  (нет включённых событий)"
+    text = (
+        "🔔 <b>Тест уведомлений AdminPanelAZ</b>\n\n"
+        f"Аккаунт: <code>{admin.username}</code>\n\n"
+        f"Включённые события:\n{events_text}"
+    )
+    ok = send_tg_message(bot_token, admin.telegram_id, text, run_async=False)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
+    return MessageResponse(message="Тестовое сообщение отправлено")
 
 
 @router.post("/settings/telegram/test", response_model=MessageResponse)

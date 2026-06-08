@@ -5,6 +5,7 @@ import logging
 
 from app.config import get_settings
 from app.database import SessionLocal
+from app.services.admin_notify import admin_notify_service
 from app.services.panel_resource_metrics import persist_sample, purge_old_samples
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,16 @@ async def run_panel_resource_metrics_loop():
 def _collect_sample():
     db = SessionLocal()
     try:
-        persist_sample(db)
+        from app.services.panel_resource_collector import collect_panel_metrics
+
+        metrics = collect_panel_metrics()
+        persist_sample(db, metrics)
         purge_old_samples(db)
+        admin_notify_service.maybe_send_resource_alert(
+            db,
+            cpu_percent=float(metrics.get("backend_cpu_percent") or 0),
+            ram_percent=None,
+            node_name="Panel",
+        )
     finally:
         db.close()

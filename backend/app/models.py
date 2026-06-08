@@ -1,4 +1,5 @@
 import enum
+import json
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -18,6 +19,22 @@ class VpnType(str, enum.Enum):
     wireguard = "wireguard"
 
 
+DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
+    "login_success": True,
+    "login_failed": True,
+    "tg_unlinked": True,
+    "config_create": True,
+    "config_delete": True,
+    "user_create": True,
+    "user_delete": True,
+    "client_ban": True,
+    "traffic_limit": True,
+    "settings_change": True,
+    "high_cpu": True,
+    "high_ram": True,
+}
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -31,10 +48,32 @@ class User(Base):
     totp_secret_encrypted: Mapped[str | None] = mapped_column(String(512), nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     totp_backup_codes_encrypted: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    telegram_id: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True, index=True)
+    tg_notify_events: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     vpn_configs: Mapped[list["VpnConfig"]] = relationship(back_populates="owner")
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user")
+
+    def get_tg_notify_events(self) -> dict[str, bool]:
+        try:
+            return json.loads(self.tg_notify_events or "{}")
+        except (ValueError, TypeError):
+            return {}
+
+    def has_tg_notify_event(self, event_type: str) -> bool:
+        events = self.get_tg_notify_events()
+        if not self.tg_notify_events or not events:
+            return bool(DEFAULT_TG_NOTIFY_EVENTS.get(event_type, False))
+        if event_type in events:
+            return bool(events[event_type])
+        return bool(DEFAULT_TG_NOTIFY_EVENTS.get(event_type, False))
+
+    def merged_tg_notify_events(self) -> dict[str, bool]:
+        stored = self.get_tg_notify_events()
+        if not self.tg_notify_events or not stored:
+            return dict(DEFAULT_TG_NOTIFY_EVENTS)
+        return {key: bool(stored.get(key, DEFAULT_TG_NOTIFY_EVENTS.get(key, False))) for key in DEFAULT_TG_NOTIFY_EVENTS}
 
 
 class RefreshToken(Base):
