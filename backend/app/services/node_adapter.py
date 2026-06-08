@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
+import time
 from typing import Any
 
 import httpx
@@ -333,6 +334,26 @@ class RemoteNodeAdapter(NodeAdapter):
         self.base_url = f"{scheme}://{host}:{port}"
         self.api_key = api_key
         self._verify = build_node_agent_ssl_context()
+        self._monitoring_overview_cache: dict[str, Any] | None = None
+        self._monitoring_overview_cache_expires: float = 0.0
+
+    def _get_monitoring_overview(self) -> dict[str, Any]:
+        ttl = max(0, int(_settings.monitoring_overview_cache_ttl_seconds))
+        now = time.monotonic()
+        if (
+            ttl > 0
+            and self._monitoring_overview_cache is not None
+            and now < self._monitoring_overview_cache_expires
+        ):
+            return self._monitoring_overview_cache
+        overview = self._request("GET", "/monitoring/overview")
+        if ttl > 0:
+            self._monitoring_overview_cache = overview
+            self._monitoring_overview_cache_expires = now + ttl
+        else:
+            self._monitoring_overview_cache = None
+            self._monitoring_overview_cache_expires = 0.0
+        return overview
 
     def _headers(self) -> dict[str, str]:
         return {"X-Node-Key": self.api_key}
@@ -463,7 +484,7 @@ class RemoteNodeAdapter(NodeAdapter):
         return data.get("server_ip")
 
     def get_service_status(self) -> list[MonitoringService]:
-        overview = self._request("GET", "/monitoring/overview")
+        overview = self._get_monitoring_overview()
         return [MonitoringService(**s) for s in overview.get("services", [])]
 
     def parse_openvpn_status(self) -> list[OpenVpnClient]:
@@ -471,7 +492,7 @@ class RemoteNodeAdapter(NodeAdapter):
         return clients
 
     def get_openvpn_status_snapshot(self) -> tuple[list[OpenVpnClient], str]:
-        overview = self._request("GET", "/monitoring/overview")
+        overview = self._get_monitoring_overview()
         clients = [OpenVpnClient(**c) for c in overview.get("openvpn_clients", [])]
         return clients, overview.get("openvpn_data_source", "status_log")
 
@@ -488,7 +509,7 @@ class RemoteNodeAdapter(NodeAdapter):
         return data.get("sockets", [])
 
     def parse_wireguard_status(self) -> list[WireGuardPeer]:
-        overview = self._request("GET", "/monitoring/overview")
+        overview = self._get_monitoring_overview()
         return [WireGuardPeer(**p) for p in overview.get("wireguard_peers", [])]
 
     def restart_service(self, service_name: str) -> str:

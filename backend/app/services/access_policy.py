@@ -42,6 +42,7 @@ class AccessPolicyService:
         self.node_id = node_id
         self._adapter = adapter
         self.banned_clients_file = antizapret_path / "config" / "banned_clients"
+        self.wg_runtime_calls = 0
 
     def _require_node_id(self) -> int:
         if self.node_id is None:
@@ -357,6 +358,7 @@ class AccessPolicyService:
         return False
 
     def _apply_wg_client_runtime(self, client_name: str, *, is_blocked: bool) -> dict | None:
+        self.wg_runtime_calls += 1
         normalized = client_name.strip().lower()
         if self._adapter is not None:
             if is_blocked:
@@ -366,11 +368,14 @@ class AccessPolicyService:
             return block_client_runtime(normalized)
         return unblock_client_runtime(normalized)
 
-    def _reapply_all_blocked_runtime(self) -> list[dict]:
+    def _reapply_all_blocked_runtime(self, *, exclude_client: str | None = None) -> list[dict]:
         now = _now()
         node_id = self._require_node_id()
+        excluded = (exclude_client or "").strip().lower()
         results: list[dict] = []
         for row in self.db.query(WgAccessPolicy).filter_by(node_id=node_id).all():
+            if excluded and row.client_name == excluded:
+                continue
             state = self._wg_state(row, now)
             if not state["is_blocked"]:
                 continue
@@ -416,7 +421,14 @@ class AccessPolicyService:
             "traffic_bytes_left_human": human_bytes(traffic_state.get("traffic_bytes_left")),
         }
 
-    def reconcile_wg(self, client_name: str, *, apply_runtime: bool = True, traffic_limit_changed: bool = False) -> None:
+    def reconcile_wg(
+        self,
+        client_name: str,
+        *,
+        apply_runtime: bool = True,
+        force_runtime: bool = False,
+        traffic_limit_changed: bool = False,
+    ) -> None:
         normalized = client_name.strip().lower()
         node_id = self._require_node_id()
         row = (
@@ -427,6 +439,8 @@ class AccessPolicyService:
         if row is None:
             return
         now = _now()
+        before_blocked = bool(self._wg_state(row, now)["is_blocked"])
+        before_reason = row.block_reason
         self._cleanup_wg_temp_block(row, now)
         traffic_state = self._wg_traffic_state(row)
         if row.block_reason == "traffic_limit" and not traffic_state.get("traffic_limit_exceeded"):
@@ -443,11 +457,13 @@ class AccessPolicyService:
         target_reason = self._wg_target_reason(state)
         if row.block_reason != target_reason:
             row.block_reason = target_reason
-        if apply_runtime:
-            is_blocked = bool(state["is_blocked"])
-            self._apply_wg_client_runtime(normalized, is_blocked=is_blocked)
-            if not is_blocked:
-                self._reapply_all_blocked_runtime()
+        after_blocked = bool(state["is_blocked"])
+        after_reason = row.block_reason
+        runtime_changed = before_blocked != after_blocked or before_reason != after_reason
+        if apply_runtime and (runtime_changed or force_runtime):
+            self._apply_wg_client_runtime(normalized, is_blocked=after_blocked)
+            if not after_blocked:
+                self._reapply_all_blocked_runtime(exclude_client=normalized)
         self.db.commit()
 
     def wg_set_expiry(self, client_name: str, days: int, *, extend: bool = False, actor: str | None = None) -> dict:
@@ -460,7 +476,7 @@ class AccessPolicyService:
         row.expires_at = base + timedelta(days=days)
         row.updated_by = actor
         self.db.commit()
-        self.reconcile_wg(client_name)
+        self.reconcile_wg(client_name, force_runtime=True)
         return self._wg_state(row)
 
     def wg_temp_block(self, client_name: str, days: int, *, actor: str | None = None) -> dict:
@@ -474,7 +490,7 @@ class AccessPolicyService:
         row.block_until = now + timedelta(days=days)
         row.updated_by = actor
         self.db.commit()
-        self.reconcile_wg(client_name)
+        self.reconcile_wg(client_name, force_runtime=True)
         return self._wg_state(row)
 
     def wg_permanent_block(self, client_name: str, *, actor: str | None = None) -> dict:
@@ -488,7 +504,7 @@ class AccessPolicyService:
         row.block_until = None
         row.updated_by = actor
         self.db.commit()
-        self.reconcile_wg(client_name)
+        self.reconcile_wg(client_name, force_runtime=True)
         return self._wg_state(row)
 
     def wg_unblock(self, client_name: str, *, actor: str | None = None) -> dict:
@@ -506,7 +522,7 @@ class AccessPolicyService:
         row.block_until = None
         row.updated_by = actor
         self.db.commit()
-        self.reconcile_wg(client_name)
+        self.reconcile_wg(client_name, force_runtime=True)
         return self._wg_state(row)
 
     def wg_set_traffic_limit(
@@ -529,7 +545,7 @@ class AccessPolicyService:
             row.traffic_limit_period_days = None
         row.updated_by = actor
         self.db.commit()
-        self.reconcile_wg(client_name, traffic_limit_changed=True)
+        self.reconcile_wg(client_name, traffic_limit_changed=True, force_runtime=True)
         return self._wg_state(row)
 
     def wg_clear_traffic_limit(self, client_name: str, *, actor: str | None = None) -> dict:
@@ -538,7 +554,7 @@ class AccessPolicyService:
         row.traffic_limit_period_days = None
         row.updated_by = actor
         self.db.commit()
-        self.reconcile_wg(client_name, traffic_limit_changed=True)
+        self.reconcile_wg(client_name, traffic_limit_changed=True, force_runtime=True)
         return self._wg_state(row)
 
     def get_wg_policy(self, client_name: str) -> dict:
@@ -565,7 +581,13 @@ class AccessPolicyService:
             result[name] = {"openvpn": ovpn, "wireguard": wg}
         return result
 
-    def reconcile_all_wg_policies(self, *, apply_runtime: bool = True, node_id: int | None = None) -> dict:
+    def reconcile_all_wg_policies(
+        self,
+        *,
+        apply_runtime: bool = True,
+        node_id: int | None = None,
+        sync_all_runtime: bool = False,
+    ) -> dict:
         target_node = node_id if node_id is not None else self.node_id
         if target_node is None:
             return {
@@ -573,6 +595,10 @@ class AccessPolicyService:
                 "node_id": None,
                 "blocked_clients": [],
                 "unblocked_clients": [],
+                "changed_clients": [],
+                "clients_total": 0,
+                "clients_changed": 0,
+                "wg_runtime_calls": 0,
                 "runtime": {"blocked": [], "unblocked": []},
             }
 
@@ -580,8 +606,13 @@ class AccessPolicyService:
         changed = False
         blocked_clients: list[str] = []
         unblocked_clients: list[str] = []
+        changed_runtime_clients: list[tuple[str, bool]] = []
 
-        for row in self.db.query(WgAccessPolicy).filter_by(node_id=target_node).all():
+        self.wg_runtime_calls = 0
+        rows = self.db.query(WgAccessPolicy).filter_by(node_id=target_node).all()
+        for row in rows:
+            before_blocked = bool(self._wg_state(row, now)["is_blocked"])
+            before_reason = row.block_reason
             if self._cleanup_wg_temp_block(row, now):
                 changed = True
             traffic_state = self._wg_traffic_state(row)
@@ -593,7 +624,11 @@ class AccessPolicyService:
             if row.block_reason != target_reason:
                 row.block_reason = target_reason
                 changed = True
-            if state["is_blocked"]:
+            after_blocked = bool(state["is_blocked"])
+            after_reason = row.block_reason
+            if before_blocked != after_blocked or before_reason != after_reason:
+                changed_runtime_clients.append((row.client_name, after_blocked))
+            if after_blocked:
                 blocked_clients.append(row.client_name)
             else:
                 unblocked_clients.append(row.client_name)
@@ -602,36 +637,54 @@ class AccessPolicyService:
             self.db.commit()
 
         runtime: dict[str, list] = {"blocked": [], "unblocked": []}
+        runtime_targets: list[tuple[str, bool]] = []
         if apply_runtime:
-            for client_name in unblocked_clients:
-                runtime["unblocked"].append(
-                    {
-                        "client_name": client_name,
-                        "result": self._apply_wg_client_runtime(client_name, is_blocked=False),
-                    }
-                )
-            for client_name in blocked_clients:
-                runtime["blocked"].append(
-                    {
-                        "client_name": client_name,
-                        "result": self._apply_wg_client_runtime(client_name, is_blocked=True),
-                    }
-                )
+            if sync_all_runtime:
+                runtime_targets = [(name, False) for name in unblocked_clients]
+                runtime_targets.extend((name, True) for name in blocked_clients)
+            else:
+                runtime_targets = list(changed_runtime_clients)
+
+        applied_unblock = False
+        for client_name, is_blocked in runtime_targets:
+            result = self._apply_wg_client_runtime(client_name, is_blocked=is_blocked)
+            bucket = "blocked" if is_blocked else "unblocked"
+            runtime[bucket].append({"client_name": client_name, "result": result})
+            if not is_blocked:
+                applied_unblock = True
+
+        if apply_runtime and applied_unblock and not sync_all_runtime:
+            for item in self._reapply_all_blocked_runtime():
+                runtime["blocked"].append(item)
 
         return {
             "wg_policy_reconcile": "ok",
             "node_id": target_node,
             "blocked_clients": blocked_clients,
             "unblocked_clients": unblocked_clients,
+            "changed_clients": [name for name, _ in changed_runtime_clients],
+            "clients_total": len(rows),
+            "clients_changed": len(changed_runtime_clients),
+            "wg_runtime_calls": self.wg_runtime_calls,
             "runtime": runtime,
         }
 
     def reconcile_all_traffic_limits(self, *, node_id: int | None = None) -> dict:
         target_node = node_id if node_id is not None else self.node_id
         if target_node is None:
-            return {"traffic_limit_reconcile": "skipped", "changed": 0, "node_id": None}
+            return {
+                "traffic_limit_reconcile": "skipped",
+                "changed": 0,
+                "node_id": None,
+                "clients_total": 0,
+                "clients_changed": 0,
+                "wg_runtime_calls": 0,
+            }
+        self.wg_runtime_calls = 0
         changed = 0
-        for row in self.db.query(OpenVpnAccessPolicy).filter_by(node_id=target_node).all():
+        wg_rows = self.db.query(WgAccessPolicy).filter_by(node_id=target_node).all()
+        ovpn_rows = self.db.query(OpenVpnAccessPolicy).filter_by(node_id=target_node).all()
+        for row in ovpn_rows:
             before = row.block_reason
             self.reconcile_openvpn(row.client_name)
             after_row = (
@@ -641,7 +694,7 @@ class AccessPolicyService:
             )
             if after_row and after_row.block_reason != before:
                 changed += 1
-        for row in self.db.query(WgAccessPolicy).filter_by(node_id=target_node).all():
+        for row in wg_rows:
             before = row.block_reason
             self.reconcile_wg(row.client_name, apply_runtime=True)
             after_row = (
@@ -651,4 +704,11 @@ class AccessPolicyService:
             )
             if after_row and after_row.block_reason != before:
                 changed += 1
-        return {"traffic_limit_reconcile": "ok", "changed": changed, "node_id": target_node}
+        return {
+            "traffic_limit_reconcile": "ok",
+            "changed": changed,
+            "node_id": target_node,
+            "clients_total": len(ovpn_rows) + len(wg_rows),
+            "clients_changed": changed,
+            "wg_runtime_calls": self.wg_runtime_calls,
+        }

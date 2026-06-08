@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
@@ -5,13 +8,15 @@ from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, User
-from app.schemas import AppSettingsResponse, AppSettingsUpdate, MessageResponse
+from app.schemas import AppSettingsResponse, AppSettingsUpdate, MessageResponse, MonitorSettingsResponse, MonitorSettingsUpdate
 from app.services.admin_notify import admin_notify_service
+from app.services.env_file import EnvFileService
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 from app.services.notify_time import get_client_timezone_from_request
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 settings = get_settings()
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 def _get_setting(db: Session, key: str, default: str = "") -> str:
@@ -137,3 +142,54 @@ def recreate_profiles(
         client_timezone=get_client_timezone_from_request(request),
     )
     return MessageResponse(message="Профили пересозданы", detail=output)
+
+
+@router.get("/monitor", response_model=MonitorSettingsResponse)
+def get_monitor_settings(_: User = Depends(require_admin)):
+    cfg = get_settings()
+    return MonitorSettingsResponse(
+        cpu_threshold=cfg.monitor_cpu_threshold,
+        ram_threshold=cfg.monitor_ram_threshold,
+        interval_seconds=cfg.monitor_check_interval_seconds,
+        cooldown_minutes=cfg.monitor_cooldown_minutes,
+    )
+
+
+@router.patch("/monitor", response_model=MonitorSettingsResponse)
+def update_monitor_settings(
+    payload: MonitorSettingsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    env_service = EnvFileService(ENV_FILE)
+    cfg = get_settings()
+    cpu = payload.cpu_threshold if payload.cpu_threshold is not None else cfg.monitor_cpu_threshold
+    ram = payload.ram_threshold if payload.ram_threshold is not None else cfg.monitor_ram_threshold
+    interval = payload.interval_seconds if payload.interval_seconds is not None else cfg.monitor_check_interval_seconds
+    cooldown = payload.cooldown_minutes if payload.cooldown_minutes is not None else cfg.monitor_cooldown_minutes
+
+    env_service.set_env_value("MONITOR_CPU_THRESHOLD", str(cpu))
+    env_service.set_env_value("MONITOR_RAM_THRESHOLD", str(ram))
+    env_service.set_env_value("MONITOR_CHECK_INTERVAL_SECONDS", str(interval))
+    env_service.set_env_value("MONITOR_COOLDOWN_MINUTES", str(cooldown))
+    os.environ["MONITOR_CPU_THRESHOLD"] = str(cpu)
+    os.environ["MONITOR_RAM_THRESHOLD"] = str(ram)
+    os.environ["MONITOR_CHECK_INTERVAL_SECONDS"] = str(interval)
+    os.environ["MONITOR_COOLDOWN_MINUTES"] = str(cooldown)
+    get_settings.cache_clear()
+
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_monitor_update",
+        details=f"cpu={cpu}% ram={ram}% interval={interval}s cooldown={cooldown}min",
+        client_timezone=get_client_timezone_from_request(request),
+    )
+    updated = get_settings()
+    return MonitorSettingsResponse(
+        cpu_threshold=updated.monitor_cpu_threshold,
+        ram_threshold=updated.monitor_ram_threshold,
+        interval_seconds=updated.monitor_check_interval_seconds,
+        cooldown_minutes=updated.monitor_cooldown_minutes,
+    )

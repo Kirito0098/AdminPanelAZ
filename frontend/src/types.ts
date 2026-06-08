@@ -142,6 +142,26 @@ export interface BackupSettings {
   retention_count: number
 }
 
+export interface MonitorSettings {
+  cpu_threshold: number
+  ram_threshold: number
+  interval_seconds: number
+  cooldown_minutes: number
+}
+
+export interface ChangelogSection {
+  title: string
+  items: string[]
+}
+
+export interface LatestChangelog {
+  success: boolean
+  version?: string
+  date?: string
+  sections?: ChangelogSection[]
+  message?: string
+}
+
 export interface TelegramSettings {
   bot_token_set: boolean
   chat_id: string

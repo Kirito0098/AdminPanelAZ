@@ -582,6 +582,65 @@ export async function resetTraffic(scope: 'all' | 'openvpn' | 'wireguard' = 'all
   return apiFetch('/traffic/reset', { method: 'POST', body: JSON.stringify({ scope }) })
 }
 
+export async function getDeletedClientTraffic() {
+  return apiFetch<{
+    rows: Array<{
+      common_name: string
+      protocol_type: string
+      total_received: number
+      total_sent: number
+      total_bytes: number
+      last_seen_at?: string | null
+    }>
+    summary: { users_count: number; rows_count: number; total_bytes: number }
+  }>('/traffic/deleted-clients')
+}
+
+export async function deleteDeletedClientTraffic(clientName: string) {
+  return apiFetch('/traffic/delete-deleted-client', {
+    method: 'POST',
+    body: JSON.stringify({ client_name: clientName }),
+  })
+}
+
+export async function cleanupTrafficStatusLogs() {
+  return apiFetch<{ message: string }>('/traffic/cleanup-status-logs', { method: 'POST' })
+}
+
+export async function getTrafficCleanupSchedule() {
+  return apiFetch<{ period: string; label: string; available_periods: Record<string, string> }>(
+    '/traffic/cleanup-status-schedule',
+  )
+}
+
+export async function setTrafficCleanupSchedule(period: string) {
+  return apiFetch<{ message: string }>('/traffic/cleanup-status-schedule', {
+    method: 'POST',
+    body: JSON.stringify({ period }),
+  })
+}
+
+export async function getMonitorSettings() {
+  return apiFetch<import('../types').MonitorSettings>('/settings/monitor')
+}
+
+export async function updateMonitorSettings(data: Partial<import('../types').MonitorSettings>) {
+  return apiFetch<import('../types').MonitorSettings>('/settings/monitor', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getLatestChangelog() {
+  return apiFetch<import('../types').LatestChangelog>('/system/latest-changelog')
+}
+
+export async function testBackupTelegram() {
+  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/backups/test-telegram', {
+    method: 'POST',
+  })
+}
+
 export async function createOneTimeLink(configId: number, path: string) {
   const params = new URLSearchParams({ path })
   return apiFetch<import('../types').OneTimeLinkResponse>(

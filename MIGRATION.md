@@ -1,10 +1,10 @@
 # Статус переноса из AdminAntizapret
 
 > **Baseline:** [AdminAntizapret](https://github.com/Kirito0098/AdminAntizapret) **1.9.0** → AdminPanelAZ **1.0.0**
-> **Обновлено:** 2026-06-08
+> **Обновлено:** 2026-06-08 (аудит полноты + фазы 33–34)
 > **Источник для сравнения:** `/opt/AdminAntizapret` (Flask + Jinja2) · **Цель:** `/opt/AdminPanelAZ` (FastAPI + React)
 
-AdminPanelAZ — порт веб-панели AdminAntizapret на FastAPI + React. Релиз **1.0.0** закрывает фазы 0–20 плана переноса: **~92–95%** функциональности AA 1.9.0 перенесено или покрыто эквивалентами. Оставшиеся пробелы — упрощённые порты (🟡) в секциях ниже, backlog и чеклист production readiness в [`README.md`](README.md).
+AdminPanelAZ — порт веб-панели AdminAntizapret на FastAPI + React. Релиз **1.0.0** закрывает фазы 0–20 плана переноса; **фазы 33–34** (аудит 2026-06-08) закрыли оставшиеся пробелы traffic maintenance, monitor settings, changelog и backup test-TG. **~97%** функциональности AA 1.9.0 перенесено или покрыто эквивалентами.
 
 ---
 
@@ -50,7 +50,7 @@ AdminPanelAZ — порт веб-панели AdminAntizapret на FastAPI + Rea
 | Viewer role | ✅ | API, ограничения и UI назначения доступа в UsersTab |
 | Журнал действий | ✅ | Просмотр и экспорт CSV |
 | Обновление системы (git) | ✅ | Панель + 🆕 node agent / AntiZapret на узлах |
-| In-panel pytest | ✅ | 53 модуля / 414 тестов; parity audit (`test_aa_parity_audit.py`); 9 AA-модулей N/A (Jinja/Flask/CLI) |
+| In-panel pytest | ✅ | 54 модуля / 418 тестов; parity audit (`test_aa_parity_audit.py`); 9 AA-модулей N/A (Jinja/Flask/CLI) |
 | Установка / ops | ✅ | `install.sh` + `scripts/adminpanel-menu.sh`; diagnostics/safe-browsing CLI ✅ |
 | Multi-node | 🆕 | Controller + Node Agent |
 | CI/CD | ✅ | pytest + ruff + shellcheck + frontend build + eslint; pip-audit/bandit advisory |
@@ -119,7 +119,12 @@ flowchart LR
 | Графики per-client | traffic chart | `traffic/chart.py`, `TrafficPage.tsx` | ✅ |
 | Подключённые клиенты (live) | `logs_dashboard/` | `MonitoringPage.tsx` | ✅ |
 | OpenVPN events / sockets | logs routes | `LogsPage.tsx`, `logs.py` | ✅ |
-| Сброс / очистка трафика | logs dashboard POST | `traffic.py` | ✅ |
+| Сброс / очистка трафика | logs dashboard POST | `traffic.py`, `traffic/maintenance.py`, `TrafficPage.tsx` | ✅ |
+| Удалённые клиенты (осиротевшая статистика) | logs_dashboard | `GET /api/traffic/deleted-clients`, `TrafficPage.tsx` | ✅ |
+| Очистка OpenVPN *.log (кроме *-status.log) | `cleanup_status_*` | `POST /api/traffic/cleanup-status-logs` + schedule в AppSetting | ✅ |
+| Настройки порогов CPU/RAM (runtime) | `POST /api/monitor-settings` | `GET/PATCH /api/settings/monitor`, `MonitorSettingsCard` | ✅ |
+| Changelog preview перед update | `GET /api/latest-changelog` | `GET /api/system/latest-changelog`, `UpdatesTab.tsx` | ✅ |
+| Тест бэкапа в Telegram | `POST /api/backups/test-telegram` | `POST /api/backups/test-telegram`, `BackupTab.tsx` | ✅ |
 | CPU/RAM + vnstat + WebSocket | `server_monitor/` | `server_monitor.py`, `ServerMonitorPage.tsx` | ✅ |
 | TG-алерты CPU/RAM | AdminNotify | `admin_notify.py` + metrics workers | ✅ |
 | NOC: метрики узла + панели | — | `MonitoringPage.tsx`, resource samples | 🆕 |
@@ -296,6 +301,7 @@ flowchart LR
 | `core/services/traffic_limit.py` | `backend/app/services/traffic_limit.py` | ported 1.9.0 |
 | `utils/traffic_limit_reconcile.py` | `backend/app/services/traffic_limit_reconcile.py` | ported 1.9.0 |
 | `utils/traffic_sync.py` | `backend/app/services/traffic/collector.py` | ported |
+| `core/services/traffic_maintenance.py` | `backend/app/services/traffic/maintenance.py` | ported (phase 33 audit) |
 | `core/services/file_editor.py` | `backend/app/services/file_editor.py` | ported |
 | `core/services/env_file.py` | `backend/app/services/env_file.py` | ported |
 | `core/services/feature_toggles.py` | `backend/app/services/feature_toggles.py` | ported 1.9.0 |
@@ -356,6 +362,25 @@ flowchart LR
 12. ~~**iptables whitelist port** runtime (`panel_port_firewall.py`)~~ ✅ — `panel_port_firewall.py` + Security tab; `firewall-setup.sh` остаётся install-time
 13. ~~**VPN-сеть** guided wizard~~ ✅ — `POST /api/settings/vpn-network/publish` → `nginx-setup.sh` (custom certs — ops-only)
 
+### Закрыто в аудите 2026-06-08 (фазы 33–34)
+
+14. ~~**Traffic maintenance**~~ ✅ — `traffic/maintenance.py`, reset по scope, deleted clients, cleanup status logs
+15. ~~**Monitor settings UI**~~ ✅ — `GET/PATCH /api/settings/monitor`, `MonitorSettingsCard` в UsersTab
+16. ~~**Changelog preview**~~ ✅ — `GET /api/system/latest-changelog`, блок в `UpdatesTab`
+17. ~~**Backup test-telegram**~~ ✅ — `POST /api/backups/test-telegram`, кнопка в `BackupTab`
+
+---
+
+## Оставшиеся отличия (🟡, низкий приоритет)
+
+| Область | AA | AZ | Комментарий |
+|---------|----|----|-------------|
+| Ops shell-скрипты | `monitoring.sh`, `fix_vnstat.sh`, `user_management.sh`, `ip_whitelist*.sh` | — | Частично заменены Python workers / SecurityTab / `panel_port_firewall.py` |
+| Расписание cleanup *.log | crontab в AA | AppSetting `traffic_status_log_cleanup_period` | Период сохраняется; cron-исполнитель — ops (нет AA-style crontab writer) |
+| Feature-disabled page | HTML `/feature-disabled` | JSON 403 | React SPA — отдельная страница не требуется |
+| Bulk IP-files API | `/api/antizapret/ip-files` | per-provider `/api/routing/providers/{filename}/enabled` | Эквивалент через UI провайдеров |
+| `audit_view_presenter.py` | rich audit rows | flat CSV export | CSV export ✅ |
+
 ### Закрыто в 0.5.x–1.0.0
 
 - Game filter catalog (~75 игр), AntiZapret config tab, viewer config access UI
@@ -371,7 +396,7 @@ flowchart LR
 
 | Область | AA tests | AZ tests | Статус |
 |---------|----------|----------|--------|
-| Общее покрытие | 53 pytest modules | 53 modules / 414 tests | ✅ |
+| Общее покрытие | 53 pytest modules | 54 modules / 418 tests | ✅ |
 | AA parity audit | — | `test_aa_parity_audit.py` | ✅ |
 | Node adapter local/remote | — | `test_node_adapter_parity.py` | 🆕 |
 | Feature guards | `test_feature_toggles.py` | `test_feature_guards.py` | ✅ |
@@ -380,6 +405,10 @@ flowchart LR
 | Node scoping | — | `test_node_scoping.py` | 🆕 |
 
 > **Не портируются из AA (9 модулей, задокументировано в `test_aa_parity_audit.py`):** Jinja/Flask page-context и template compile (`test_jinja_templates_compile.py`, `test_*_page_context.py`, `test_audit_view_presenter_*`), `test_script_executor.py`, `test_catalog_data.py`, `test_system_preflight.py`. **Заменены эквивалентами:** `traffic_sync` CLI → worker `traffic/collector.py`; `wg_awg_runtime_apply` CLI → `wg_policy_sync_worker.py`; Flask sessions → JWT (`test_active_web_session.py`).
+
+### Производительность (vs AA PR #38)
+
+PR #38 AA (лёгкие CLI без импорта `app.py`) **не портируется** — в AZ workers уже in-process. Дополнительно в AZ: WG runtime только при изменении политики; полный runtime sync один раз при старте `wg_policy_sync`; кэш WG client map по mtime; TTL кэш `monitoring/overview` на remote node. Env-переменные интервалов — см. [`README.md`](README.md) § «Производительность фоновых задач».
 
 ---
 

@@ -43,7 +43,11 @@ def _reconcile_for_node(db: Session, node: Node) -> dict:
         traffic_limit_notify_service.process_node(db, node, svc)
     except Exception as exc:
         logger.warning("Traffic limit notify failed for node %s: %s", node.id, exc)
-    return result
+    return {
+        **result,
+        "wg_runtime_calls": svc.wg_runtime_calls,
+        "clients_changed": int(result.get("changed") or 0),
+    }
 
 
 def reconcile_traffic_limit_policies_safe(db: Session, *, node_id: int | None = None) -> dict:

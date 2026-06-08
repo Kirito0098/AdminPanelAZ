@@ -1,8 +1,8 @@
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
@@ -20,6 +20,7 @@ from app.schemas import (
     MessageResponse,
 )
 from app.services.admin_notify import admin_notify_service
+from app.services.background_tasks import background_task_service
 from app.services.backup_manager import BackupManager
 from app.services.node_manager import get_active_adapter
 from app.services.notify_time import get_client_timezone_from_request
@@ -216,3 +217,84 @@ def delete_backup(file_name: str, _: User = Depends(require_admin)):
 def download_backup(file_name: str, _: User = Depends(require_admin)):
     path = _get_backup_manager().get_backup_path(file_name)
     return FileResponse(path, filename=file_name, media_type="application/gzip")
+
+
+@router.post("/test-telegram", status_code=status.HTTP_202_ACCEPTED)
+def test_backup_telegram(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    bot_token = _get_setting(db, "telegram_bot_token")
+    chat_id = _get_setting(db, "telegram_chat_id")
+    if not bot_token or not chat_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Укажите токен бота и chat_id в настройках Telegram",
+        )
+
+    active = background_task_service.find_active_task("app_backup_test_tg")
+    if active:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": "Тестовая отправка бэкапа уже выполняется", "active_task_id": active.id},
+        )
+
+    include_az = _get_setting(db, "backup_az_enabled", "true") == "true"
+
+    def _task(progress_updater=None):
+        from app.database import SessionLocal
+
+        if progress_updater:
+            progress_updater(10, "Создание архива панели…")
+        manager = _get_backup_manager()
+        result = manager.create_backup(include_configs=False, config_contents=None)
+        if progress_updater:
+            progress_updater(50, "Отправка бэкапа панели в Telegram…")
+        archive_path = manager.get_backup_path(result["file_name"])
+        send_tg_document(
+            bot_token,
+            chat_id,
+            str(archive_path),
+            caption=f"Тест бэкапа AdminPanelAZ: {result['file_name']}",
+        )
+        az_summary = ""
+        if include_az:
+            if progress_updater:
+                progress_updater(75, "Создание бэкапа AntiZapret…")
+            task_db = SessionLocal()
+            try:
+                adapter = get_active_adapter(task_db)
+                az_result = adapter.create_antizapret_backup()
+                if az_result.get("archive_path"):
+                    send_tg_document(
+                        bot_token,
+                        chat_id,
+                        az_result["archive_path"],
+                        caption=f"Тест бэкапа AntiZapret: {az_result.get('archive_name', 'archive')}",
+                    )
+                    az_summary = f"; AZ: {az_result.get('archive_name', 'ok')}"
+            except Exception as exc:
+                az_summary = f"; AZ error: {exc}"
+            finally:
+                task_db.close()
+        return {
+            "message": f"Бэкап отправлен в Telegram: {result['file_name']}{az_summary}",
+            "file_name": result["file_name"],
+        }
+
+    task = background_task_service.enqueue_background_task(
+        "app_backup_test_tg",
+        _task,
+        created_by_username=admin.username,
+        queued_message="Создание бэкапа и отправка в Telegram поставлены в очередь",
+    )
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_backup_test_telegram",
+        subject_name="test_telegram",
+    )
+    return background_task_service.build_accepted_payload(
+        task,
+        "Создание бэкапа и отправка в Telegram запущены в фоне.",
+    )

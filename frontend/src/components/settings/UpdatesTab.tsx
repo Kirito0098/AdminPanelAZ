@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Download, RefreshCw } from 'lucide-react'
-import { ApiError, applySystemUpdate, checkSystemUpdates } from '@/api/client'
+import { ApiError, applySystemUpdate, checkSystemUpdates, getLatestChangelog } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
-import { useProgress } from '@/context/ProgressContext'
+import type { LatestChangelog } from '@/types'
 
 export default function UpdatesTab() {
   const { success, error: notifyError } = useNotifications()
@@ -24,13 +24,24 @@ export default function UpdatesTab() {
     remote_hash?: string
     error?: string
   } | null>(null)
+  const [changelog, setChangelog] = useState<LatestChangelog | null>(null)
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
 
   const load = async () => {
     setLoading(true)
     try {
-      setInfo(await checkSystemUpdates())
+      const updates = await checkSystemUpdates()
+      setInfo(updates)
+      if (updates.updates_available) {
+        try {
+          setChangelog(await getLatestChangelog())
+        } catch {
+          setChangelog(null)
+        }
+      } else {
+        setChangelog(null)
+      }
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка проверки обновлений')
     } finally {
@@ -131,6 +142,25 @@ export default function UpdatesTab() {
             <CardDescription>Загрузит и применит изменения из удалённого репозитория</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {changelog?.success && changelog.version && (
+              <div className="rounded-md border bg-muted/30 p-4 text-sm">
+                <p className="font-medium">
+                  CHANGELOG [{changelog.version}] — {changelog.date}
+                </p>
+                <div className="mt-3 space-y-3">
+                  {(changelog.sections ?? []).map((section) => (
+                    <div key={section.title}>
+                      <p className="font-medium text-muted-foreground">{section.title}</p>
+                      <ul className="mt-1 list-inside list-disc space-y-0.5">
+                        {section.items.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <SettingsAlert variant="warning" title="Перед обновлением">
               Рекомендуется создать бэкап. После git pull может потребоваться перезапуск панели и применение миграций.
             </SettingsAlert>

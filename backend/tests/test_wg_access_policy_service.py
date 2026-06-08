@@ -175,13 +175,40 @@ def test_reconcile_all_wg_policies_batches_runtime(wg_policy_env):
     )
     session.commit()
 
-    result = svc.reconcile_all_wg_policies(apply_runtime=True)
+    result = svc.reconcile_all_wg_policies(apply_runtime=True, sync_all_runtime=True)
 
     assert result["wg_policy_reconcile"] == "ok"
     assert "blocked-a" in result["blocked_clients"]
     assert "open-b" in result["unblocked_clients"]
     adapter.block_wireguard_client_runtime.assert_called_with("blocked-a")
     adapter.unblock_wireguard_client_runtime.assert_called_with("open-b")
+
+
+def test_reconcile_all_wg_policies_skips_runtime_when_unchanged(wg_policy_env):
+    session, _node, svc, _consumed, adapter = wg_policy_env
+    session.add_all(
+        [
+            WgAccessPolicy(
+                node_id=svc.node_id,
+                client_name="blocked-a",
+                is_permanent_blocked=True,
+                block_reason="manual_permanent",
+            ),
+            WgAccessPolicy(node_id=svc.node_id, client_name="open-b"),
+        ]
+    )
+    session.commit()
+
+    svc.reconcile_all_wg_policies(apply_runtime=True, sync_all_runtime=True)
+    adapter.reset_mock()
+    svc.wg_runtime_calls = 0
+
+    result = svc.reconcile_all_wg_policies(apply_runtime=True, sync_all_runtime=False)
+
+    assert result["clients_changed"] == 0
+    assert result["wg_runtime_calls"] == 0
+    adapter.block_wireguard_client_runtime.assert_not_called()
+    adapter.unblock_wireguard_client_runtime.assert_not_called()
 
 
 def test_reapply_blocked_after_unblock(wg_policy_env):
@@ -198,9 +225,10 @@ def test_reapply_blocked_after_unblock(wg_policy_env):
         ]
     )
     session.commit()
+    svc.wg_permanent_block("open-a", actor="admin")
     adapter.reset_mock()
 
-    svc.reconcile_wg("open-a", apply_runtime=True)
+    svc.wg_unblock("open-a", actor="admin")
 
     adapter.unblock_wireguard_client_runtime.assert_called_once_with("open-a")
     adapter.block_wireguard_client_runtime.assert_called_once_with("blocked-b")

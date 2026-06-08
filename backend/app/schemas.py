@@ -282,6 +282,33 @@ class BackupSettingsUpdate(BaseModel):
     retention_count: int | None = Field(default=None, ge=1, le=30)
 
 
+class MonitorSettingsResponse(BaseModel):
+    cpu_threshold: int = 90
+    ram_threshold: int = 90
+    interval_seconds: int = 60
+    cooldown_minutes: int = 30
+
+
+class MonitorSettingsUpdate(BaseModel):
+    cpu_threshold: int | None = Field(default=None, ge=1, le=100)
+    ram_threshold: int | None = Field(default=None, ge=1, le=100)
+    interval_seconds: int | None = Field(default=None, ge=10, le=3600)
+    cooldown_minutes: int | None = Field(default=None, ge=1, le=1440)
+
+
+class ChangelogSection(BaseModel):
+    title: str
+    items: list[str]
+
+
+class LatestChangelogResponse(BaseModel):
+    success: bool = True
+    version: str = ""
+    date: str = ""
+    sections: list[ChangelogSection] = []
+    message: str = ""
+
+
 class TelegramSettingsResponse(BaseModel):
     bot_token_set: bool = False
     chat_id: str = ""

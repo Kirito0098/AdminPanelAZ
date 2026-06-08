@@ -370,6 +370,30 @@ sudo ./install.sh --reinstall                  # переустановка че
 
 ---
 
+## Производительность фоновых задач
+
+Фоновые workers (traffic sync, WG policy sync, health, metrics) работают **внутри процесса uvicorn**, без отдельных cron-скриптов как в AdminAntizapret. WG runtime (`wg set` / HTTP к node agent) применяется **только при изменении политики**, кроме первого запуска `wg_policy_sync` после старта панели (полная синхронизация runtime).
+
+Настройка через `backend/.env`:
+
+| Переменная | По умолчанию | Назначение |
+|------------|--------------|------------|
+| `TRAFFIC_SYNC_ENABLED` | `true` | Сбор трафика в SQLite |
+| `TRAFFIC_SYNC_INTERVAL_SECONDS` | `30` | Интервал traffic worker |
+| `TRAFFIC_LIMIT_RECONCILE_AFTER_SYNC` | `true` | Reconcile лимитов после каждого сбора |
+| `WG_POLICY_SYNC_ENABLED` | `true` | Фоновый reconcile WG/AWG политик |
+| `WG_POLICY_SYNC_INTERVAL_SECONDS` | `120` | Интервал wg policy worker |
+| `NODE_HEALTH_SYNC_INTERVAL_SECONDS` | `60` | Опрос статуса узлов |
+| `RESOURCE_METRICS_INTERVAL_SECONDS` | `60` | Сбор CPU/RAM узлов |
+| `PANEL_RESOURCE_METRICS_INTERVAL_SECONDS` | `60` | Метрики самой панели |
+| `MONITORING_OVERVIEW_CACHE_TTL_SECONDS` | `20` | TTL кэша `GET /monitoring/overview` на remote node (0 = выкл.) |
+
+На слабом VPS или при большом числе клиентов имеет смысл увеличить `TRAFFIC_SYNC_INTERVAL_SECONDS` и `WG_POLICY_SYNC_INTERVAL_SECONDS`. Отключать `TRAFFIC_LIMIT_RECONCILE_AFTER_SYNC` стоит только если понимаете задержку применения лимитов (до следующего wg policy sync).
+
+В логах backend ищите строки `Traffic collect` и `WG policy sync` — поля `duration_ms`, `wg_runtime_calls`, `clients_changed` помогают оценить нагрузку.
+
+---
+
 ## Работа с узлами и конфигурациями
 
 Панель может управлять несколькими VPN-серверами (узлами). Список клиентов на странице **Конфигурации** всегда привязан к **активному узлу** — при переключении узла список обновляется автоматически.

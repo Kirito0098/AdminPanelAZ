@@ -394,8 +394,17 @@ class AntiZapretService:
         return peers
 
     def _load_wg_client_map(self) -> dict[str, str]:
+        conf_paths = [Path("/etc/wireguard/antizapret.conf"), Path("/etc/wireguard/vpn.conf")]
+        signature = tuple(
+            (str(conf), conf.stat().st_mtime_ns if conf.exists() else None)
+            for conf in conf_paths
+        )
+        cached = getattr(self, "_wg_client_map_cache", None)
+        if cached and cached.get("signature") == signature:
+            return dict(cached.get("mapping") or {})
+
         mapping: dict[str, str] = {}
-        for conf in [Path("/etc/wireguard/antizapret.conf"), Path("/etc/wireguard/vpn.conf")]:
+        for conf in conf_paths:
             if not conf.exists():
                 continue
             current_client: str | None = None
@@ -405,6 +414,7 @@ class AntiZapretService:
                 elif line.strip().startswith("PublicKey =") and current_client:
                     pub = line.split("=", 1)[1].strip()
                     mapping[pub] = current_client
+        self._wg_client_map_cache = {"signature": signature, "mapping": mapping}
         return mapping
 
 

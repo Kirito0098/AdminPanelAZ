@@ -1,4 +1,7 @@
+import re
 import subprocess
+import time
+import urllib.request
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,12 +12,14 @@ from sqlalchemy.orm import Session
 from app.auth import require_admin
 from app.database import get_db
 from app.models import User
-from app.schemas import MessageResponse
+from app.schemas import LatestChangelogResponse, MessageResponse
 from app.services.action_log import log_action
 from app.services.background_tasks import background_task_service
 
 router = APIRouter(prefix="/system", tags=["system"])
 APP_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = APP_ROOT.parent
+_CHANGELOG_CACHE: dict = {"data": None, "expires": 0.0}
 
 
 class ViewerAccessUpdate(BaseModel):
@@ -45,6 +50,56 @@ def check_updates(_: User = Depends(require_admin)):
         }
     except Exception as exc:
         return {"error": str(exc), "updates_available": False}
+
+
+@router.get("/latest-changelog", response_model=LatestChangelogResponse)
+def latest_changelog(_: User = Depends(require_admin)):
+    now = time.monotonic()
+    if _CHANGELOG_CACHE["data"] is not None and now < _CHANGELOG_CACHE["expires"]:
+        return _CHANGELOG_CACHE["data"]
+
+    changelog_path = PROJECT_ROOT / "CHANGELOG.md"
+    content = ""
+    if changelog_path.is_file():
+        content = changelog_path.read_text(encoding="utf-8")
+    else:
+        url = "https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/main/CHANGELOG.md"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "AdminPanelAZ/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                content = resp.read().decode("utf-8")
+        except Exception as exc:
+            return LatestChangelogResponse(success=False, message=f"Не удалось загрузить CHANGELOG: {exc}")
+
+    version_pattern = re.compile(r"^## \[(.+?)\]\s*[–\-]\s*(.+)$", re.MULTILINE)
+    matches = list(version_pattern.finditer(content))
+    if not matches:
+        return LatestChangelogResponse(success=False, message="CHANGELOG не содержит версий")
+
+    first = matches[0]
+    end = matches[1].start() if len(matches) > 1 else len(content)
+    block = content[first.start():end].strip()
+    version = first.group(1).strip()
+    date = first.group(2).strip()
+
+    sections = []
+    section_pattern = re.compile(r"^#{3,4}\s+(.+)$", re.MULTILINE)
+    sec_matches = list(section_pattern.finditer(block))
+    for i, sm in enumerate(sec_matches):
+        sec_end = sec_matches[i + 1].start() if i + 1 < len(sec_matches) else len(block)
+        sec_text = block[sm.end():sec_end].strip()
+        items = [
+            line.lstrip("-* \t").strip()
+            for line in sec_text.splitlines()
+            if line.strip().startswith(("-", "*"))
+        ]
+        if items:
+            sections.append({"title": sm.group(1).strip(), "items": items})
+
+    result = LatestChangelogResponse(success=True, version=version, date=date, sections=sections)
+    _CHANGELOG_CACHE["data"] = result
+    _CHANGELOG_CACHE["expires"] = now + 600
+    return result
 
 
 @router.post("/update", status_code=status.HTTP_202_ACCEPTED)

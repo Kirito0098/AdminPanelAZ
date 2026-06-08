@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     monitor_check_interval_seconds: int = 60
     monitor_cooldown_minutes: int = 30
     traffic_db_stale_seconds: int = 600
+    monitoring_overview_cache_ttl_seconds: int = 20
     openvpn_socket_dir: Path = Path("/run/openvpn-server")
     openvpn_socket_timeout: float = 2.5
     openvpn_socket_idle_timeout: float = 0.12

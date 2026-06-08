@@ -13,6 +13,7 @@ import {
   Search,
   TrendingUp,
   Users,
+  Trash2,
 } from 'lucide-react'
 import {
   Area,
@@ -29,9 +30,14 @@ import {
 } from 'recharts'
 import {
   ApiError,
+  cleanupTrafficStatusLogs,
+  deleteDeletedClientTraffic,
+  getDeletedClientTraffic,
   getTrafficChart,
+  getTrafficCleanupSchedule,
   getTrafficOverview,
   resetTraffic,
+  setTrafficCleanupSchedule,
 } from '@/api/client'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
@@ -44,6 +50,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -244,6 +251,18 @@ export default function TrafficPage() {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('total_bytes')
   const [resetting, setResetting] = useState(false)
+  const [resetScope, setResetScope] = useState<'all' | 'openvpn' | 'wireguard'>('all')
+  const [deletedRows, setDeletedRows] = useState<
+    Array<{
+      common_name: string
+      protocol_type: string
+      total_bytes: number
+      last_seen_at?: string | null
+    }>
+  >([])
+  const [deletedSummary, setDeletedSummary] = useState<{ users_count: number; total_bytes: number } | null>(null)
+  const [cleanupPeriod, setCleanupPeriod] = useState('none')
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false)
 
   const load = useCallback(
     async (initial = false, manual = false) => {
@@ -289,6 +308,33 @@ export default function TrafficPage() {
   useEffect(() => {
     load(true)
   }, [load, activeNode?.id])
+
+  const loadDeletedClients = useCallback(async () => {
+    if (!isAdmin) return
+    try {
+      const result = await getDeletedClientTraffic()
+      setDeletedRows(result.rows)
+      setDeletedSummary(result.summary)
+    } catch {
+      setDeletedRows([])
+      setDeletedSummary(null)
+    }
+  }, [isAdmin])
+
+  const loadCleanupSchedule = useCallback(async () => {
+    if (!isAdmin) return
+    try {
+      const schedule = await getTrafficCleanupSchedule()
+      setCleanupPeriod(schedule.period)
+    } catch {
+      setCleanupPeriod('none')
+    }
+  }, [isAdmin])
+
+  useEffect(() => {
+    void loadDeletedClients()
+    void loadCleanupSchedule()
+  }, [loadDeletedClients, loadCleanupSchedule, activeNode?.id])
 
   useEffect(() => {
     loadChart()
@@ -366,14 +412,54 @@ export default function TrafficPage() {
     setResetting(true)
     try {
       await withInline(async () => {
-        await resetTraffic('all')
+        await resetTraffic(resetScope)
         await load(false, true)
+        await loadDeletedClients()
       }, 'Сброс статистики трафика...')
-      success('Статистика сброшена')
+      success(`Статистика сброшена (${resetScope})`)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сброса')
     } finally {
       setResetting(false)
+    }
+  }
+
+  const handleDeleteDeletedClient = async (clientName: string) => {
+    setMaintenanceLoading(true)
+    try {
+      await deleteDeletedClientTraffic(clientName)
+      success(`Статистика «${clientName}» удалена`)
+      await load(false, true)
+      await loadDeletedClients()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка удаления')
+    } finally {
+      setMaintenanceLoading(false)
+    }
+  }
+
+  const handleCleanupLogs = async () => {
+    setMaintenanceLoading(true)
+    try {
+      const resp = await cleanupTrafficStatusLogs()
+      success(resp.message)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка очистки логов')
+    } finally {
+      setMaintenanceLoading(false)
+    }
+  }
+
+  const handleCleanupScheduleChange = async (period: string) => {
+    setMaintenanceLoading(true)
+    try {
+      const resp = await setTrafficCleanupSchedule(period)
+      setCleanupPeriod(period)
+      success(resp.message)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка расписания')
+    } finally {
+      setMaintenanceLoading(false)
     }
   }
 
@@ -419,10 +505,22 @@ export default function TrafficPage() {
             onManualRefresh={handleRefresh}
           />
           {isAdmin && (
-            <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting}>
-              {resetting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-              Сбросить
-            </Button>
+            <>
+              <Select value={resetScope} onValueChange={(v) => setResetScope(v as typeof resetScope)}>
+                <SelectTrigger className="h-9 w-[160px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Сброс: всё</SelectItem>
+                  <SelectItem value="openvpn">Сброс: OpenVPN</SelectItem>
+                  <SelectItem value="wireguard">Сброс: WG/AWG</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting}>
+                {resetting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                Сбросить
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -817,6 +915,85 @@ export default function TrafficPage() {
               )}
             </CardContent>
           </Card>
+
+          {isAdmin && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Обслуживание БД трафика</CardTitle>
+                <CardDescription>
+                  Удалённые клиенты, очистка OpenVPN-логов (кроме *-status.log)
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Расписание очистки .log</Label>
+                    <Select
+                      value={cleanupPeriod}
+                      onValueChange={(v) => void handleCleanupScheduleChange(v)}
+                      disabled={maintenanceLoading}
+                    >
+                      <SelectTrigger className="h-9 w-[180px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Выключено</SelectItem>
+                        <SelectItem value="daily">Ежедневно</SelectItem>
+                        <SelectItem value="weekly">Еженедельно</SelectItem>
+                        <SelectItem value="monthly">Ежемесячно</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => void handleCleanupLogs()} disabled={maintenanceLoading}>
+                    Очистить .log сейчас
+                  </Button>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-sm text-muted-foreground">
+                    Клиенты без конфигов: <strong>{deletedSummary?.users_count ?? 0}</strong>, суммарный трафик:{' '}
+                    <strong>{formatBytes(deletedSummary?.total_bytes ?? 0)}</strong>
+                  </p>
+                  {deletedRows.length === 0 ? (
+                    <EmptyState title="Нет осиротевшей статистики" description="Все записи соответствуют активным конфигам" className="py-6" />
+                  ) : (
+                    <div className="overflow-x-auto rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Клиент</TableHead>
+                            <TableHead>Протокол</TableHead>
+                            <TableHead className="text-right">Всего</TableHead>
+                            <TableHead className="w-[100px]" />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {deletedRows.map((row) => (
+                            <TableRow key={`${row.common_name}-${row.protocol_type}`}>
+                              <TableCell>{row.common_name}</TableCell>
+                              <TableCell>{getProtocolLabel(row.protocol_type)}</TableCell>
+                              <TableCell className="text-right font-mono text-xs">{formatBytes(row.total_bytes)}</TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-destructive"
+                                  disabled={maintenanceLoading}
+                                  onClick={() => void handleDeleteDeletedClient(row.common_name)}
+                                >
+                                  <Trash2 size={14} />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </>
       )}
     </div>

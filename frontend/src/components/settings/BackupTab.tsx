@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Archive, ArchiveX, Download, Trash2 } from 'lucide-react'
+import { Archive, ArchiveX, Download, Send, Trash2 } from 'lucide-react'
 import {
   ApiError,
   createBackup,
@@ -8,6 +8,7 @@ import {
   getBackupSettings,
   getBackups,
   restoreBackup,
+  testBackupTelegram,
   updateBackupSettings,
 } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
@@ -34,7 +35,7 @@ function formatSize(bytes: number) {
 
 export default function BackupTab() {
   const { success, error: notifyError } = useNotifications()
-  const { inline, withInline } = useProgress()
+  const { inline, withInline, trackBackgroundTask, backgroundTaskPolling } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
   const [backups, setBackups] = useState<BackupEntry[]>([])
   const [settings, setSettings] = useState<BackupSettings | null>(null)
@@ -54,6 +55,18 @@ export default function BackupTab() {
       .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки бэкапов'))
       .finally(() => setLoading(false))
   }, [])
+
+  const handleTestTelegram = async () => {
+    try {
+      const resp = await testBackupTelegram()
+      trackBackgroundTask(resp.task_id, {
+        onComplete: () => success(resp.message || 'Бэкап отправлен в Telegram'),
+        onError: (task, message) => notifyError(task?.error || task?.message || message),
+      })
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка тестовой отправки')
+    }
+  }
 
   const handleCreate = async () => {
     try {
@@ -128,7 +141,7 @@ export default function BackupTab() {
   return (
     <div className="space-y-4">
       <ConfirmDialogHost dialogProps={dialogProps} />
-      <InlineProgressBar active={inline.active} label={inline.label} />
+      <InlineProgressBar active={inline.active || backgroundTaskPolling} label={inline.label} />
 
       <Card>
         <CardHeader>
@@ -173,6 +186,10 @@ export default function BackupTab() {
             )}
             <Button onClick={handleCreate} className="sm:ml-auto">
               Создать бэкап
+            </Button>
+            <Button variant="outline" onClick={() => void handleTestTelegram()}>
+              <Send size={16} />
+              Создать и отправить в TG
             </Button>
           </div>
         </CardContent>
