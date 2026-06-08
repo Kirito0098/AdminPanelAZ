@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -26,6 +27,7 @@ from app.services.telegram import send_tg_document, send_tg_message
 
 router = APIRouter(prefix="/backups", tags=["backups"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 def _get_backup_manager() -> BackupManager:
@@ -69,6 +71,7 @@ def get_backup_settings(db: Session = Depends(get_db), _: User = Depends(require
         auto_backup_enabled=_get_setting(db, "backup_auto_enabled", "false") == "true",
         auto_backup_days=int(_get_setting(db, "backup_auto_days", "7") or "7"),
         telegram_on_backup=_get_setting(db, "backup_telegram_enabled", "false") == "true",
+        backup_az_enabled=_get_setting(db, "backup_az_enabled", "true") == "true",
         retention_count=int(_get_setting(db, "backup_retention", "5") or "5"),
     )
 
@@ -85,6 +88,8 @@ def update_backup_settings(
         _set_setting(db, "backup_auto_days", str(payload.auto_backup_days))
     if payload.telegram_on_backup is not None:
         _set_setting(db, "backup_telegram_enabled", "true" if payload.telegram_on_backup else "false")
+    if payload.backup_az_enabled is not None:
+        _set_setting(db, "backup_az_enabled", "true" if payload.backup_az_enabled else "false")
     if payload.retention_count is not None:
         _set_setting(db, "backup_retention", str(payload.retention_count))
     db.commit()
@@ -92,7 +97,31 @@ def update_backup_settings(
         auto_backup_enabled=_get_setting(db, "backup_auto_enabled", "false") == "true",
         auto_backup_days=int(_get_setting(db, "backup_auto_days", "7") or "7"),
         telegram_on_backup=_get_setting(db, "backup_telegram_enabled", "false") == "true",
+        backup_az_enabled=_get_setting(db, "backup_az_enabled", "true") == "true",
         retention_count=int(_get_setting(db, "backup_retention", "5") or "5"),
+    )
+
+
+def _maybe_send_az_backup_telegram(
+    db: Session,
+    *,
+    az_result: dict[str, str] | None,
+    caption_prefix: str,
+) -> None:
+    if not az_result or not az_result.get("archive_path"):
+        return
+    if _get_setting(db, "backup_telegram_enabled", "false") != "true":
+        return
+    bot_token = _get_setting(db, "telegram_bot_token")
+    chat_id = _get_setting(db, "telegram_chat_id")
+    if not bot_token or not chat_id:
+        return
+    archive_name = az_result.get("archive_name") or Path(az_result["archive_path"]).name
+    send_tg_document(
+        bot_token,
+        chat_id,
+        az_result["archive_path"],
+        caption=f"{caption_prefix}: {archive_name}",
     )
 
 
@@ -128,6 +157,14 @@ def create_backup(
                 str(archive_path),
                 caption=f"Бэкап AdminPanelAZ: {result['file_name']}",
             )
+
+    if payload.include_antizapret_backup:
+        try:
+            adapter = get_active_adapter(db)
+            az_result = adapter.create_antizapret_backup()
+            _maybe_send_az_backup_telegram(db, az_result=az_result, caption_prefix="Бэкап AntiZapret")
+        except Exception as exc:
+            logger.warning("AntiZapret backup (client.sh 8) failed: %s", exc)
 
     admin_notify_service.send_settings_change(
         db,

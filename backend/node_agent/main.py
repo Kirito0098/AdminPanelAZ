@@ -258,6 +258,15 @@ def recreate_profiles(_: None = Depends(verify_api_key)):
     return {"message": "Профили пересозданы", "detail": output}
 
 
+@app.post("/backups/antizapret")
+def create_antizapret_backup(_: None = Depends(verify_api_key)):
+    result = service.create_antizapret_backup()
+    return {
+        "message": "Бэкап AntiZapret создан",
+        **result,
+    }
+
+
 @app.post("/services/restart")
 def restart_service(payload: ServiceRestartRequest, _: None = Depends(verify_api_key)):
     output = service.restart_service(payload.service_name)

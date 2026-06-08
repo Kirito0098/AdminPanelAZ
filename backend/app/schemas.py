@@ -259,6 +259,7 @@ class BackupEntry(BaseModel):
 
 class BackupCreateRequest(BaseModel):
     include_configs: bool = False
+    include_antizapret_backup: bool = False
 
 
 class BackupRestoreRequest(BaseModel):
@@ -269,6 +270,7 @@ class BackupSettingsResponse(BaseModel):
     auto_backup_enabled: bool = False
     auto_backup_days: int = 7
     telegram_on_backup: bool = False
+    backup_az_enabled: bool = True
     retention_count: int = 5
 
 
@@ -276,6 +278,7 @@ class BackupSettingsUpdate(BaseModel):
     auto_backup_enabled: bool | None = None
     auto_backup_days: int | None = Field(default=None, ge=1, le=90)
     telegram_on_backup: bool | None = None
+    backup_az_enabled: bool | None = None
     retention_count: int | None = Field(default=None, ge=1, le=30)
 
 
@@ -309,6 +312,23 @@ class AdminNotifySettingsResponse(BaseModel):
 class AdminNotifySettingsUpdate(BaseModel):
     telegram_id: str | None = None
     events: dict[str, bool] | None = None
+
+
+class VpnNetworkEnvRow(BaseModel):
+    label: str
+    value: str
+    mono: bool = True
+
+
+class VpnNetworkSettingsResponse(BaseModel):
+    mode_key: str
+    mode_title: str
+    bullet_points: list[str]
+    internal_url: str
+    primary_urls: list[dict[str, str]]
+    env_rows: list[VpnNetworkEnvRow]
+    backend_port: str
+    nginx_setup_hint: str = "scripts/nginx-setup.sh"
 
 
 class ServiceRestartRequest(BaseModel):

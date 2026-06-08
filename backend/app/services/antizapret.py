@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 from app.config import get_settings
 from app.models import VpnType
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
+from app.services.antizapret_backup import AntizapretBackupService
 from app.services.openvpn_management import openvpn_management_service
 
 settings = get_settings()
@@ -102,6 +103,9 @@ class AntiZapretService:
 
     def recreate_profiles(self) -> str:
         return self._run_client_script("7", timeout=300)
+
+    def create_antizapret_backup(self) -> dict[str, str]:
+        return AntizapretBackupService(install_dir=self.base_path).create_backup()
 
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]:
         files: list[dict[str, str]] = []

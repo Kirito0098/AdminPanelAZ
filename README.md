@@ -62,7 +62,7 @@
 
 **Средний приоритет:** parity feature toggles и background jobs, экспорт action logs CSV, публичные route-файлы для роутеров (Keenetic/MikroTik/TP-Link), OpenVPN UDP/TCP group switching, CI pipeline.
 
-**Низкий приоритет:** session heartbeat, active session tracking, nightly idle restart, diagnostics CLI, global API rate limiting.
+**Низкий приоритет:** diagnostics CLI, site-diagnostics, Safe Browsing status CLI.
 
 ### Новое только в AdminPanelAZ
 

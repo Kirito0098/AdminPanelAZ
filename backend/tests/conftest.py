@@ -87,6 +87,7 @@ def api_test_env(tmp_path, monkeypatch):
         app_env="development",
         enforce_password_policy=False,
         auth_rate_limit_enabled=False,
+        api_rate_limit_enabled=False,
         audit_log_enabled=False,
         security_headers_enabled=True,
     )
@@ -108,7 +109,8 @@ def api_test_env(tmp_path, monkeypatch):
 
     patches = (
         patch("app.config.get_settings", return_value=test_settings),
-        patch("app.services.auth_rate_limit.get_settings", return_value=test_settings),
+        patch("app.services.api_rate_limit.get_settings", return_value=test_settings),
+        patch("app.services.public_download_rate_limit.get_settings", return_value=test_settings),
         patch("app.services.ip_restriction.ip_restriction_service.login_needs_captcha", return_value=False),
         patch("app.services.ip_restriction.ip_restriction_service.record_login_attempt", return_value=0),
         patch("app.services.auth_rate_limit.auth_rate_limit_service.check", return_value=None),

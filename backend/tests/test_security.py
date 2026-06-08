@@ -10,7 +10,9 @@ from fastapi.testclient import TestClient
 from app.auth import create_2fa_pending_token, decode_2fa_pending_token
 from app.config import Settings
 from app.models import User, UserRole, ViewerConfigAccess, VpnConfig
-from app.services.auth_rate_limit import AuthRateLimitService, MemoryRateLimitBackend
+from app.services.auth_rate_limit import AuthRateLimitService
+from app.services.rate_limit.backends import MemoryRateLimitBackend
+from app.services.rate_limit.sliding_window import SlidingWindowLimiter
 from app.services.password_policy import effective_min_password_length, validate_password
 from app.services.refresh_token import create_refresh_token, revoke_refresh_token, validate_refresh_token
 from app.services.security_bootstrap import validate_node_agent_key, validate_panel_settings
@@ -59,7 +61,7 @@ def test_node_agent_key_validation_in_production():
 
 def test_auth_rate_limit_blocks_after_threshold():
     service = AuthRateLimitService()
-    service._backend = MemoryRateLimitBackend()
+    service._limiter = SlidingWindowLimiter(MemoryRateLimitBackend())
     settings = Settings(auth_rate_limit_enabled=True, auth_rate_limit_max_attempts=3, auth_rate_limit_window_seconds=60)
     with patch("app.services.auth_rate_limit.get_settings", return_value=settings):
         service.check("10.0.0.1")

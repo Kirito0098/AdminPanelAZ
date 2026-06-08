@@ -138,6 +138,7 @@ export interface BackupSettings {
   auto_backup_enabled: boolean
   auto_backup_days: number
   telegram_on_backup: boolean
+  backup_az_enabled: boolean
   retention_count: number
 }
 
@@ -159,6 +160,23 @@ export interface AdminNotifySettings {
   notify_enabled: boolean
   bot_token_set: boolean
   events: AdminNotifyEventItem[]
+}
+
+export interface VpnNetworkEnvRow {
+  label: string
+  value: string
+  mono: boolean
+}
+
+export interface VpnNetworkSettings {
+  mode_key: string
+  mode_title: string
+  bullet_points: string[]
+  internal_url: string
+  primary_urls: Array<{ label: string; url: string }>
+  env_rows: VpnNetworkEnvRow[]
+  backend_port: string
+  nginx_setup_hint: string
 }
 
 export interface CidrProviderInfo {

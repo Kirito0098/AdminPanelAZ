@@ -40,9 +40,9 @@ AdminPanelAZ — экспериментальный порт веб-панели
 | Редактор файлов AntiZapret | ✅ | Мультифайловый редактор + apply |
 | Мониторинг сервера (CPU/RAM/vnstat/WS) | ✅ | Страница «Сервер» |
 | NOC / подключённые клиенты / логи | ✅ | Monitoring + Logs |
-| Безопасность (IP whitelist, scanner) | 🟡 | Упрощённый `security.py` |
+| Безопасность (IP whitelist, scanner, rate limit, headers) | ✅ | `security.py`, global API rate limit, robots/security.txt (фаза 18) |
 | QR / одноразовые ссылки | ✅ | Настройки в SecurityTab (не отдельная вкладка) |
-| Бэкапы (ручные + авто + TG) | ✅ | Без AntiZapret `client.sh 8` как отдельной опции в UI |
+| Бэкапы (ручные + авто + TG) | ✅ | + опция `client.sh 8` в BackupTab (ручной и авто) |
 | Feature toggles | 🟡 | ~12 toggles vs больше в AA 1.9.0 |
 | Telegram Login + Mini App | ✅ | |
 | Telegram admin-уведомления | ✅ | AdminNotify + traffic_limit + CPU/RAM; UI подписок в TelegramTab |
@@ -50,8 +50,8 @@ AdminPanelAZ — экспериментальный порт веб-панели
 | Viewer role | ✅ | API, ограничения и UI назначения доступа в UsersTab |
 | Журнал действий | ✅ | Просмотр и экспорт CSV |
 | Обновление системы (git) | ✅ | Панель + 🆕 node agent / AntiZapret на узлах |
-| In-panel pytest | 🟡 | 28 модулей vs 53 в AA |
-| Установка / ops | 🟡 | `install.sh` + scripts; нет `adminpanel.sh`, diagnostics CLI |
+| In-panel pytest | 🟡 | 34 модуля vs 53 в AA |
+| Установка / ops | 🟡 | `install.sh` + scripts; diagnostics/safe-browsing CLI ✅; нет `adminpanel.sh` menu |
 | Multi-node | 🆕 | Controller + Node Agent |
 | CI/CD | 🟡 | `.github/workflows/ci.yml`; `.pre-commit-config.yaml` (ruff, shellcheck) |
 
@@ -160,9 +160,9 @@ flowchart LR
 | IP allow-list (permanent) | `ip_restriction.py` | `security.py` | ✅ |
 | Временный whitelist (1h/12h/24h) | temporary whitelist store | `ip_restriction.py` | ✅ |
 | Scanner auto-block (ipset/iptables) | scanner store | `scanner_firewall_store.py` | ✅ |
-| CSRF / CSP / security headers | `http_security.py` | middleware | ✅ |
-| Rate limit login | Flask-Limiter (+ Redis) | auth rate limit (+ Redis для workers) | 🟡 |
-| Глобальный rate limit API | Flask-Limiter | — | ❌ |
+| CSRF / CSP / security headers | `http_security.py` | middleware + robots/security.txt | ✅ |
+| Rate limit login | Flask-Limiter (+ Redis) | auth rate limit (+ Redis для workers) | ✅ |
+| Глобальный rate limit API | per-route only (нет default_limits) | middleware `/api/*` (+ Redis) | ✅ 🆕 |
 | 2FA / TOTP | — | `TwoFactorTab`, TOTP columns | 🆕 |
 | IP blocked dwell page | `ip_blocked/` | `ip_blocked.py` | ✅ |
 | Session heartbeat | `/api/session-heartbeat` | `session.py` + `useSessionHeartbeat` | ✅ |
@@ -177,11 +177,11 @@ flowchart LR
 | Авто-бэкап по расписанию | `app_auto_backup.py` | `backup_scheduler.py` | ✅ |
 | Restore / retention / delete | backup API | `backups.py` | ✅ |
 | TG-доставка архивов | `backup_telegram_job.py` | `backup_scheduler.py`, `backups.py` | ✅ |
-| Бэкап AntiZapret (`client.sh 8`) | `AntizapretBackupService` | опционально через lists на узле | 🟡 |
+| Бэкап AntiZapret (`client.sh 8`) | `AntizapretBackupService` | `antizapret_backup.py` + `node_adapter` + BackupTab | ✅ |
 | run-doall | maintenance | `maintenance.py` | ✅ |
 | recreate profiles (`client.sh 7`) | settings | `settings.py` | ✅ |
 | Restart service | admin routes | `maintenance.py` | ✅ |
-| Runtime backup cleanup cron | cron job | — | ❌ |
+| Runtime backup cleanup cron | cron job | `backup_scheduler.py` worker + toggle | ✅ |
 
 ### 8. Telegram
 
@@ -194,7 +194,7 @@ flowchart LR
 | CPU/RAM alerts в TG | AdminNotify | `admin_notify.py` + metrics workers | ✅ |
 | Traffic limit alerts в TG | `traffic_limit_notify.py` | `traffic_limit_notify.py` | ✅ |
 | Тест TG-сообщения | settings API | `maintenance.py` | ✅ |
-| `Telegram.md` (документация) | отдельный файл | частично в README | 🟡 |
+| `Telegram.md` (документация) | отдельный файл | `docs/Telegram.md` (Login, Mini App, AdminNotify, backups) | ✅ |
 
 ### 9. Настройки и администрирование
 
@@ -204,7 +204,7 @@ flowchart LR
 | Viewer config access UI | users tab | `UsersTab.tsx` + `/api/system/viewer-access` | ✅ |
 | Feature toggles UI | settings tab | `FeatureTogglesTab.tsx` | 🟡 |
 | QR-настройки (TTL, PIN, max downloads) | отдельная вкладка | `SecurityTab.tsx` | 🟡 |
-| VPN-сеть (порт, HTTPS, Nginx из UI) | `_tab_vpn_network.html` | nginx через `install.sh` / `nginx-setup.sh` | 🟡 |
+| VPN-сеть (порт, HTTPS, Nginx из UI) | `_tab_vpn_network.html` | `VpnNetworkTab.tsx` (read-only) + `GET /api/settings/vpn-network`; мутации — `install.sh` / `nginx-setup.sh` | 🟡 |
 | Журнал действий (просмотр) | action logs | `LogsPage.tsx` | ✅ |
 | Экспорт action logs CSV | `/api/settings/action-logs/export` | `GET /api/logs/action-logs/export` | ✅ |
 | Обновление панели (git) | `/update_system` | `UpdatesTab.tsx`, `system.py` | ✅ |
@@ -232,13 +232,13 @@ flowchart LR
 | `FEATURE_SYSTEM_UPDATES_ENABLED` | `system_updates` | ✅ |
 | `FEATURE_DIAGNOSTICS_TESTS_ENABLED` | `diagnostics_tests` | ✅ |
 | `FEATURE_QR_DOWNLOADS_ENABLED` | `qr_downloads` | ✅ |
-| `FEATURE_VPN_NETWORK_ENABLED` | `vpn_network` (stub UI) | 🟡 |
+| `FEATURE_VPN_NETWORK_ENABLED` | `vpn_network` | 🟡 |
 | `WG_POLICY_SYNC` (background) | cron `wg_awg_policy_sync.py` | `wg_policy_sync_worker.py` (async loop) | ✅ |
 | `ACTIVE_SESSION_TRACKING` (background) | `active_web_session.py` | `active_web_session.py` + toggle | ✅ |
 | `NIGHTLY_IDLE_RESTART` (background) | `nightly_idle_restart.py` | `nightly_idle_restart_worker.py` | ✅ |
-| `RUNTIME_BACKUP_CLEANUP` (background) | — | ❌ |
+| `RUNTIME_BACKUP_CLEANUP` (background) | cron | `backup_scheduler.py` worker | ✅ |
 
-> **Feature toggles (фаза 10):** UI parity для app_module toggles ✅; фоновые workers WG_POLICY_SYNC ✅; ACTIVE_SESSION_TRACKING / NIGHTLY_IDLE_RESTART ✅ (фаза 16); RUNTIME_BACKUP_CLEANUP — фаза 19.
+> **Feature toggles (фаза 10):** UI parity для app_module toggles ✅; фоновые workers WG_POLICY_SYNC ✅; ACTIVE_SESSION_TRACKING / NIGHTLY_IDLE_RESTART ✅ (фаза 16); RUNTIME_BACKUP_CLEANUP ✅ (фаза 19).
 
 ### 11. Установка и ops
 
@@ -250,8 +250,8 @@ flowchart LR
 | SSL / Nginx setup | `ssl_setup.sh` | `scripts/nginx-setup.sh` | ✅ |
 | Firewall panel port | `panel_port_firewall.py` | `scripts/firewall-setup.sh` | 🟡 |
 | Uninstall / reinstall | `uninstall.sh` | `scripts/uninstall.sh` + menu | ✅ |
-| Site diagnostics CLI | `site_diagnostics.sh` | — | ❌ |
-| Safe Browsing status CLI | `safe_browsing_status_cli.py` | — | ❌ |
+| Site diagnostics CLI | `site_diagnostics.sh` | `scripts/site-diagnostics.sh` + CLI | ✅ |
+| Safe Browsing status CLI | `safe_browsing_status_cli.py` | `scripts/safe-browsing-status.py` | ✅ |
 | env defaults | `env_defaults.sh` | `scripts/env_defaults.sh` (sync AA 1.9.0) | ✅ |
 | CI (pytest, ruff, shellcheck, eslint) | `.github/workflows/ci.yml` | `.github/workflows/ci.yml` (без eslint) | 🟡 |
 | pre-commit hooks | `.pre-commit-config.yaml` | `.pre-commit-config.yaml` (ruff, shellcheck) | 🟡 |
@@ -321,6 +321,10 @@ flowchart LR
 | `utils/nightly_idle_restart.py` | `nightly_idle_restart_worker.py` | ported (async worker) |
 | `utils/wg_awg_runtime_apply.py` | `wg_runtime.py` + `wg_policy_sync_worker.py` | inline, no standalone CLI |
 | `script_sh/adminpanel.sh` | `install.sh`, `start.sh`, systemd | different UX |
+| `script_sh/site_diagnostics.sh` | `scripts/site-diagnostics.sh` | AZ paths (backend/.env, uvicorn) |
+| `script_sh/safe_browsing_status_cli.py` | `scripts/safe-browsing-status.py` | AZ User-Agent |
+| `core/services/antizapret_backup.py` | `backend/app/services/antizapret_backup.py` | via node_adapter |
+| `Telegram.md` | `docs/Telegram.md` | + AdminNotify, backups |
 
 ---
 
@@ -348,12 +352,12 @@ flowchart LR
 ### Низкий приоритет
 
 12. ~~Session heartbeat + active session tracking + nightly idle restart~~ — **Сделано (0.7.0):** фаза 16
-13. **VPN-сеть** — управление HTTPS/Nginx из UI (сейчас через scripts)
-14. **Site diagnostics CLI** и **Safe Browsing status CLI**
+13. ~~**VPN-сеть** — read-only UI (фаза 17)~~; смена порта/nginx из UI — через `scripts/nginx-setup.sh` (не как AA POST)
+14. ~~**Site diagnostics CLI** и **Safe Browsing status CLI**~~ — **Сделано (0.7.3)**
 15. **adminpanel.sh**-style console menu (опционально)
-16. **Telegram.md** — отдельная документация
+16. ~~**Telegram.md** — отдельная документация~~ — **Сделано (0.7.3):** `docs/Telegram.md`
 17. Расширение test suite до паритета с AA (~53 модуля)
-18. Global API rate limiting (Flask-Limiter equivalent)
+18. ~~Global API rate limiting (Flask-Limiter equivalent)~~ ✅ (0.7.2): global `/api/*` middleware; AA upstream не имел global default
 19. ~~**BackgroundTaskService** — единый прогресс для doall/update/restart~~ ✅ (0.6.4)
 
 ---
@@ -362,10 +366,10 @@ flowchart LR
 
 | Область | AA tests | AZ tests | Статус |
 |---------|----------|----------|--------|
-| Общее покрытие | ~53 pytest modules | 28 modules | 🟡 |
+| Общее покрытие | ~53 pytest modules | 34 modules | 🟡 |
 | Node adapter local/remote | — | `test_node_adapter_parity.py` | 🆕 |
 | Feature guards | `test_feature_toggles.py` | `test_feature_guards.py` | ✅ |
-| Security / IP restriction | multiple | `test_security.py` | 🟡 |
+| Security / IP restriction | `test_http_security.py` + multiple | `test_security.py`, `test_http_security.py`, `test_api_rate_limit.py` | ✅ |
 | Node scoping | — | `test_node_scoping.py` | 🆕 |
 
 ---

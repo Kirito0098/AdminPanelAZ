@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     auth_rate_limit_max_attempts: int = 10
     auth_rate_limit_window_seconds: int = 300
     auth_rate_limit_backend: str = "memory"
+    api_rate_limit_enabled: bool = True
+    api_rate_limit_max_requests: int = 120
+    api_rate_limit_window_seconds: int = 60
+    api_rate_limit_backend: str = "memory"
     redis_url: str = ""
     security_headers_enabled: bool = True
     enforce_https: bool = False
@@ -98,12 +102,12 @@ class Settings(BaseSettings):
     nightly_idle_restart_cron: str = "0 4 * * *"
     admin_panel_az_service_name: str = "admin-panel-az.service"
 
-    @field_validator("auth_rate_limit_backend")
+    @field_validator("auth_rate_limit_backend", "api_rate_limit_backend")
     @classmethod
     def normalize_rate_limit_backend(cls, value: str) -> str:
         normalized = (value or "memory").strip().lower()
         if normalized not in {"memory", "redis"}:
-            raise ValueError("AUTH_RATE_LIMIT_BACKEND must be 'memory' or 'redis'")
+            raise ValueError("Rate limit backend must be 'memory' or 'redis'")
         return normalized
 
     @field_validator("refresh_token_cookie_samesite")

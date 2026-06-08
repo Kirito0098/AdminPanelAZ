@@ -6,7 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth import get_password_hash
 from app.config import get_settings
-from app.middleware.http_security import HttpSecurityMiddleware
+from app.middleware.api_rate_limit import ApiRateLimitMiddleware
+from app.middleware.http_security import HttpSecurityMiddleware, build_robots_txt, build_security_txt, get_panel_branding
 from app.middleware.active_session import ActiveSessionMiddleware
 from app.services.security_bootstrap import validate_panel_settings
 from app.database import Base, SessionLocal, engine, run_db_migrations
@@ -38,7 +39,7 @@ from app.routers import (
 )
 from app.routers import settings as settings_router
 from app.routers import users
-from app.services.backup_scheduler import run_backup_scheduler_loop
+from app.services.backup_scheduler import run_backup_scheduler_loop, run_runtime_backup_cleanup_loop
 from app.services.cidr.cidr_scheduler import run_cidr_db_scheduler_loop
 from app.services.wg_policy_sync_worker import run_wg_policy_sync_loop
 from app.services.nightly_idle_restart_worker import run_nightly_idle_restart_loop
@@ -134,13 +135,17 @@ async def lifespan(_: FastAPI):
     health_task = asyncio.create_task(run_node_health_loop())
     resource_metrics_task = asyncio.create_task(run_resource_metrics_loop())
     panel_resource_metrics_task = asyncio.create_task(run_panel_resource_metrics_loop())
+    env_path = app_root / ".env"
     backup_task = asyncio.create_task(
         run_backup_scheduler_loop(
             app_root=app_root,
             backup_root=Path(settings.backup_root),
             db_path=db_path,
-            env_path=app_root / ".env",
+            env_path=env_path,
         )
+    )
+    runtime_backup_cleanup_task = asyncio.create_task(
+        run_runtime_backup_cleanup_loop(env_path=env_path)
     )
     cidr_task = asyncio.create_task(run_cidr_db_scheduler_loop())
     wg_policy_sync_task = asyncio.create_task(run_wg_policy_sync_loop())
@@ -160,6 +165,7 @@ async def lifespan(_: FastAPI):
         resource_metrics_task,
         panel_resource_metrics_task,
         backup_task,
+        runtime_backup_cleanup_task,
         cidr_task,
         wg_policy_sync_task,
         nightly_idle_restart_task,
@@ -182,6 +188,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Captcha-Id", "X-Web-Session-Id", "Accept"],
 )
+app.add_middleware(ApiRateLimitMiddleware)
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(session.router, prefix="/api")
@@ -265,6 +272,20 @@ async def ip_restriction_middleware(request, call_next):
 @app.get("/api/health")
 def health():
     return {"status": "ok", "app": settings.app_name}
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def robots_txt():
+    from fastapi.responses import PlainTextResponse
+
+    return PlainTextResponse(build_robots_txt(), media_type="text/plain")
+
+
+@app.get("/.well-known/security.txt", include_in_schema=False)
+def security_txt():
+    from fastapi.responses import PlainTextResponse
+
+    return PlainTextResponse(build_security_txt(get_panel_branding()), media_type="text/plain")
 
 
 def _mount_frontend(app: FastAPI) -> None:

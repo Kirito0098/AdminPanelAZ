@@ -12,6 +12,7 @@ from app.services.feature_guards import require_openvpn_and_security
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_manager import get_active_adapter
 from app.services.public_download_settings import is_public_download_enabled
+from app.services.public_download_rate_limit import public_download_rate_limit_service
 from app.services.qr_download import QrDownloadService
 from app.services.security import SecurityService
 
@@ -60,6 +61,9 @@ def public_route_download(router: str, request: Request, db: Session = Depends(g
     if not is_public_download_enabled(db):
         raise HTTPException(status_code=404, detail="Not found")
 
+    client_ip = ip_restriction_service.get_client_ip(request)
+    public_download_rate_limit_service.consume(client_ip)
+
     result_key = PUBLIC_ROUTE_ROUTERS.get(router)
     if not result_key:
         raise HTTPException(status_code=404, detail="Not found")
@@ -73,7 +77,6 @@ def public_route_download(router: str, request: Request, db: Session = Depends(g
 
     filename = payload["filename"]
     content = payload["content"]
-    client_ip = ip_restriction_service.get_client_ip(request)
     if settings.audit_log_enabled:
         log_action(
             db,

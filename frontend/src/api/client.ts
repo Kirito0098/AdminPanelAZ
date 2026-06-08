@@ -366,10 +366,13 @@ export async function getBackups() {
   return apiFetch<import('../types').BackupEntry[]>('/backups')
 }
 
-export async function createBackup(includeConfigs = false) {
+export async function createBackup(includeConfigs = false, includeAntizapretBackup = false) {
   return apiFetch<import('../types').BackupEntry>('/backups/create', {
     method: 'POST',
-    body: JSON.stringify({ include_configs: includeConfigs }),
+    body: JSON.stringify({
+      include_configs: includeConfigs,
+      include_antizapret_backup: includeAntizapretBackup,
+    }),
   })
 }
 
@@ -393,6 +396,10 @@ export async function updateBackupSettings(data: Partial<import('../types').Back
     method: 'PATCH',
     body: JSON.stringify(data),
   })
+}
+
+export async function getVpnNetworkSettings() {
+  return apiFetch<import('../types').VpnNetworkSettings>('/settings/vpn-network')
 }
 
 export async function getTelegramSettings() {

@@ -45,11 +45,16 @@ ensure_env_defaults() {
     _ensure_env_default "ACTIVE_WEB_SESSION_TOUCH_INTERVAL_SECONDS" "30"
     _ensure_env_default "NIGHTLY_IDLE_RESTART_ENABLED" "true"
     _ensure_env_default "NIGHTLY_IDLE_RESTART_CRON" "0 4 * * *"
+    _ensure_env_default "RUNTIME_BACKUP_CLEANUP_ENABLED" "true"
     _ensure_env_default "ADMIN_PANEL_AZ_SERVICE_NAME" "admin-panel-az.service"
     # Публикация (nginx-setup.sh задаёт DOMAIN, BEHIND_NGINX, TRUSTED_PROXY_IPS)
     _ensure_env_default "BEHIND_NGINX" "false"
     _ensure_env_default "APP_ENV" "development"
     _ensure_env_default "AUTH_RATE_LIMIT_ENABLED" "true"
+    _ensure_env_default "API_RATE_LIMIT_ENABLED" "true"
+    _ensure_env_default "API_RATE_LIMIT_MAX_REQUESTS" "120"
+    _ensure_env_default "API_RATE_LIMIT_WINDOW_SECONDS" "60"
+    _ensure_env_default "API_RATE_LIMIT_BACKEND" "memory"
     _ensure_env_default "SECURITY_HEADERS_ENABLED" "true"
     _ensure_env_default "AUDIT_LOG_ENABLED" "true"
 }

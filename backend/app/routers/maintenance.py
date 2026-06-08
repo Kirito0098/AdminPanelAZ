@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -15,6 +17,8 @@ from app.schemas import (
     ServiceRestartRequest,
     TelegramSettingsResponse,
     TelegramSettingsUpdate,
+    VpnNetworkEnvRow,
+    VpnNetworkSettingsResponse,
 )
 from app.services.admin_notify import TG_NOTIFY_EVENT_LABELS, admin_notify_service
 from app.services.background_tasks import background_task_service
@@ -22,6 +26,9 @@ from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.notify_time import get_client_timezone_from_request
 from app.config import get_settings
 from app.services.active_web_session import active_web_session_service
+from app.services.env_file import EnvFileService
+from app.services.feature_guards import get_feature_service, module_disabled_message
+from app.services.panel_publish_info import build_panel_publish_context, resolve_request_url_root
 from app.services.telegram import send_tg_message
 
 router = APIRouter(tags=["maintenance"])
@@ -227,6 +234,35 @@ def test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin
     if not ok:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
     return MessageResponse(message="Тестовое сообщение отправлено")
+
+
+@router.get("/settings/vpn-network", response_model=VpnNetworkSettingsResponse)
+def get_vpn_network_settings(
+    request: Request,
+    _: User = Depends(require_admin),
+):
+    if not get_feature_service().is_enabled("vpn_network"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("vpn_network"),
+        )
+    settings = get_settings()
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    env = EnvFileService(env_path)
+    ctx = build_panel_publish_context(
+        get_env_value=env.get_env_value,
+        request_url=resolve_request_url_root(request, behind_nginx=settings.behind_nginx),
+        settings=settings,
+    )
+    return VpnNetworkSettingsResponse(
+        mode_key=ctx["mode_key"],
+        mode_title=ctx["mode_title"],
+        bullet_points=ctx["bullet_points"],
+        internal_url=ctx["internal_url"],
+        primary_urls=ctx["primary_urls"],
+        env_rows=[VpnNetworkEnvRow(**row) for row in ctx["env_rows"]],
+        backend_port=ctx["backend_port"],
+    )
 
 
 @router.get("/maintenance/session-stats")

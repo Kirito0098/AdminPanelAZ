@@ -50,6 +50,9 @@ class NodeAdapter(ABC):
     def recreate_profiles(self) -> str: ...
 
     @abstractmethod
+    def create_antizapret_backup(self) -> dict[str, str]: ...
+
+    @abstractmethod
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]: ...
 
     @abstractmethod
@@ -181,6 +184,9 @@ class LocalNodeAdapter(NodeAdapter):
 
     def recreate_profiles(self) -> str:
         return self._service.recreate_profiles()
+
+    def create_antizapret_backup(self) -> dict[str, str]:
+        return self._service.create_antizapret_backup()
 
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]:
         return self._service.get_profile_files(client_name, vpn_type)
@@ -396,6 +402,13 @@ class RemoteNodeAdapter(NodeAdapter):
     def recreate_profiles(self) -> str:
         data = self._request("POST", "/configs/recreate-profiles", timeout=300.0)
         return data.get("detail") or data.get("message", "ok")
+
+    def create_antizapret_backup(self) -> dict[str, str]:
+        data = self._request("POST", "/backups/antizapret", timeout=600.0)
+        return {
+            "archive_path": data.get("archive_path", ""),
+            "archive_name": data.get("archive_name", ""),
+        }
 
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]:
         data = self._request(

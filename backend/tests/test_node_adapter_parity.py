@@ -24,6 +24,7 @@ REMOTE_ADAPTER_ENDPOINTS: dict[str, str] = {
     "delete_wireguard_client": "DELETE /clients/wireguard/{client_name}",
     "list_wireguard_clients": "GET /clients/wireguard",
     "recreate_profiles": "POST /configs/recreate-profiles",
+    "create_antizapret_backup": "POST /backups/antizapret",
     "get_profile_files": "GET /profiles/files",
     "read_profile_file": "GET /profiles/download",
     "read_config_file": "GET /configs/files/{filename}",

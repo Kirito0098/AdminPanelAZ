@@ -43,6 +43,10 @@
 | `AUTH_RATE_LIMIT_WINDOW_SECONDS` | `300` | Окно лимита (сек) |
 | `AUTH_RATE_LIMIT_BACKEND` | `memory` | `memory` или `redis` (для нескольких uvicorn workers) |
 | `REDIS_URL` | *(пусто)* | URL Redis при `AUTH_RATE_LIMIT_BACKEND=redis` |
+| `API_RATE_LIMIT_ENABLED` | `true` | Глобальный лимит запросов к `/api/*` по IP |
+| `API_RATE_LIMIT_MAX_REQUESTS` | `120` | Запросов за окно на IP |
+| `API_RATE_LIMIT_WINDOW_SECONDS` | `60` | Окно глобального лимита (сек) |
+| `API_RATE_LIMIT_BACKEND` | `memory` | `memory` или `redis` (для нескольких uvicorn workers) |
 | `SECURITY_HEADERS_ENABLED` | `true` | X-Frame-Options, CSP, HSTS (за nginx) |
 | `ENFORCE_HTTPS` | `false` | Редирект HTTP→HTTPS (если `X-Forwarded-Proto` не https) |
 | `HSTS_MAX_AGE` | `31536000` | Заголовок Strict-Transport-Security |
@@ -76,6 +80,8 @@
 - JWT access + refresh-токены (httpOnly cookie, ротация при refresh)
 - TOTP 2FA для администраторов (настройка, резервные коды)
 - Rate limit auth: in-memory или Redis (fallback на memory)
+- Global API rate limit: per-IP sliding window на `/api/*` (исключения: health, ip-blocked); public route download — 30/min
+- robots.txt и security.txt (RFC 9116), X-Robots-Tag noindex для чувствительных путей
 - mTLS панель ↔ node agent (опционально)
 - Ротация `NODE_AGENT_API_KEY` (вручную на странице Узлы, автоматически по расписанию)
 - JWT (bcrypt пароли, роли admin/user/viewer)
@@ -102,7 +108,7 @@ sudo ./scripts/generate-mtls-certs.sh /etc/adminpanelaz/mtls
 
 ## Rate limit при нескольких uvicorn workers
 
-По умолчанию лимит попыток входа (`AUTH_RATE_LIMIT`) хранит счётчик **в памяти процесса** (`AUTH_RATE_LIMIT_BACKEND=memory`). Это нормально, если uvicorn запущен с **одним worker** (`UVICORN_WORKERS=1`).
+По умолчанию лимиты (**auth** и **global API**) хранят счётчики **в памяти процесса** (`*_RATE_LIMIT_BACKEND=memory`). Это нормально, если uvicorn запущен с **одним worker** (`UVICORN_WORKERS=1`).
 
 **Workers** — это отдельные процессы uvicorn, которые параллельно принимают HTTP-запросы. При `--workers N > 1` каждый процесс имеет **свой** in-memory счётчик. Злоумышленник может обойти лимит, отправляя запросы так, чтобы они попадали на разные workers (round-robin балансировка на уровне ОС).
 
@@ -110,14 +116,15 @@ sudo ./scripts/generate-mtls-certs.sh /etc/adminpanelaz/mtls
 
 | Ситуация | Что использовать |
 |----------|------------------|
-| 1 worker (по умолчанию) | `AUTH_RATE_LIMIT_BACKEND=memory` — достаточно |
-| workers > 1 (systemd / prod) | `AUTH_RATE_LIMIT_BACKEND=redis` и `REDIS_URL=redis://127.0.0.1:6379/0` |
+| 1 worker (по умолчанию) | `AUTH_RATE_LIMIT_BACKEND=memory`, `API_RATE_LIMIT_BACKEND=memory` — достаточно |
+| workers > 1 (systemd / prod) | `AUTH_RATE_LIMIT_BACKEND=redis`, `API_RATE_LIMIT_BACKEND=redis` и `REDIS_URL=redis://127.0.0.1:6379/0` |
 
 Пример для production с несколькими workers в `backend/.env`:
 
 ```env
 UVICORN_WORKERS=4
 AUTH_RATE_LIMIT_BACKEND=redis
+API_RATE_LIMIT_BACKEND=redis
 REDIS_URL=redis://127.0.0.1:6379/0
 ```
 
@@ -129,4 +136,4 @@ REDIS_URL=redis://127.0.0.1:6379/0
 2. Firewall: закрыть порты backend и node agent с интернета; открыть HTTPS и HTTP для ACME (порты задаются в мастере установки).
 3. Регулярные бэкапы БД (`/var/backups/adminpanelaz`).
 4. Включите IP allowlist в настройках безопасности для админ-доступа.
-5. При `UVICORN_WORKERS > 1` используйте `AUTH_RATE_LIMIT_BACKEND=redis` (см. раздел выше).
+5. При `UVICORN_WORKERS > 1` используйте `AUTH_RATE_LIMIT_BACKEND=redis` и `API_RATE_LIMIT_BACKEND=redis` (см. раздел выше).

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-06-08
+
+### Added
+- **Ops CLI** — `scripts/site-diagnostics.sh` + `site-diagnostics-cli.py` (systemd, uvicorn, nginx; пути AdminPanelAZ).
+- **Safe Browsing CLI** — `scripts/safe-browsing-status.py`; тест `test_safe_browsing_status_cli.py`.
+- **AntiZapret backup (client.sh 8)** — `antizapret_backup.py`, `node_adapter.create_antizapret_backup`, node agent `POST /backups/antizapret`, опции в `BackupTab`.
+- **Runtime backup cleanup worker** — почасовая очистка `data/cidr/runtime_backups`; toggle `RUNTIME_BACKUP_CLEANUP_ENABLED`.
+- **Документация** — `docs/Telegram.md` (Login, Mini App, AdminNotify, backups).
+
+### Changed
+- **`backup_scheduler.py`** — авто-бэкап AntiZapret + TG-доставка второго архива; worker runtime cleanup.
+- **`MIGRATION.md`** — ops CLI ✅, backup client.sh 8 ✅, Telegram.md ✅, RUNTIME_BACKUP_CLEANUP ✅.
+
+## [0.7.2] - 2026-06-08
+
+### Added
+- **Global API rate limiting** — `ApiRateLimitMiddleware` для `/api/*` (per-IP sliding window, memory/Redis); исключения `/api/health`, `/api/ip-blocked*`.
+- **Public download rate limit** — 30 req/min per IP на `/api/public/route-download/*` (паритет AA).
+- **HTTP security parity** — CORP/COOP/X-Permitted-Cross-Domain-Policies, `X-Robots-Tag` noindex, `/robots.txt`, `/.well-known/security.txt`.
+- **Shared rate limit module** — `app/services/rate_limit/` (backends + `SlidingWindowLimiter`); auth/API/public-download используют общую инфраструктуру.
+- **Тесты** — `test_api_rate_limit.py`; расширен `test_http_security.py` (порт AA cases).
+
+### Changed
+- **`auth_rate_limit.py`** — рефакторинг на shared sliding-window backends (поведение без изменений).
+- **`MIGRATION.md`** — rate limit login ✅, global API rate limit ✅ 🆕.
+
 ## [0.6.0] - 2026-06-08
 
 ### Added

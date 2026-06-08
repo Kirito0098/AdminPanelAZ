@@ -39,6 +39,7 @@ export default function BackupTab() {
   const [backups, setBackups] = useState<BackupEntry[]>([])
   const [settings, setSettings] = useState<BackupSettings | null>(null)
   const [includeConfigs, setIncludeConfigs] = useState(false)
+  const [includeAntizapretBackup, setIncludeAntizapretBackup] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const load = async () => {
@@ -57,7 +58,7 @@ export default function BackupTab() {
   const handleCreate = async () => {
     try {
       await withInline(async () => {
-        await createBackup(includeConfigs)
+        await createBackup(includeConfigs, includeAntizapretBackup)
         await load()
       }, 'Создание бэкапа...')
       success('Бэкап создан')
@@ -135,7 +136,9 @@ export default function BackupTab() {
             <Archive size={18} />
             Создание бэкапа
           </CardTitle>
-          <CardDescription>Бэкап БД панели, .env и опционально списков AntiZapret с активного узла</CardDescription>
+          <CardDescription>
+            Бэкап БД панели, .env, списков AntiZapret и опционально полного архива VPN (client.sh 8) на активном узле
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center">
@@ -147,6 +150,15 @@ export default function BackupTab() {
                 className="h-4 w-4 rounded border"
               />
               Включить списки AntiZapret
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={includeAntizapretBackup}
+                onChange={(e) => setIncludeAntizapretBackup(e.target.checked)}
+                className="h-4 w-4 rounded border"
+              />
+              Бэкап AntiZapret (client.sh 8)
             </label>
             {settings && (
               <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -185,6 +197,18 @@ export default function BackupTab() {
                   className="h-4 w-4 rounded border"
                 />
                 Авто-бэкап
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={settings.backup_az_enabled}
+                  onChange={async () => {
+                    const updated = await updateBackupSettings({ backup_az_enabled: !settings.backup_az_enabled })
+                    setSettings(updated)
+                  }}
+                  className="h-4 w-4 rounded border"
+                />
+                AntiZapret (client.sh 8) при авто-бэкапе
               </label>
               <div className="space-y-2">
                 <Label htmlFor="backup-days">Интервал (дней)</Label>

@@ -318,6 +318,18 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         default=True,
         group="background",
     ),
+    FeatureToggleDefinition(
+        key="runtime_backup_cleanup",
+        env_key="RUNTIME_BACKUP_CLEANUP_ENABLED",
+        label="Очистка runtime-бэкапов CIDR",
+        description="Удаление устаревших каталогов runtime_backups после pipeline CIDR (retention 12 ч).",
+        icon="🧹",
+        disable_hint="Старые runtime-бэкапы списков не будут удаляться автоматически.",
+        resource_impact_level="low",
+        resource_savings="Почасовая очистка каталогов в data/cidr/runtime_backups.",
+        default=True,
+        group="background",
+    ),
 )
 
 FEATURE_TOGGLE_BY_KEY = {item.key: item for item in FEATURE_TOGGLES}
