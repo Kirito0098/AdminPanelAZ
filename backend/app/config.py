@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     backup_root: Path = Path("/var/backups/adminpanelaz")
     cidr_list_dir: Path = Path("data/cidr/list")
     traffic_sync_enabled: bool = True
-    traffic_sync_interval_seconds: int = 30
+    traffic_sync_interval_seconds: int = 60
     traffic_limit_reconcile_after_sync: bool = True
     wg_policy_sync_enabled: bool = True
     wg_policy_sync_interval_seconds: int = 120

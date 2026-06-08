@@ -14,6 +14,7 @@ _ensure_env_default() {
 
 ensure_env_defaults() {
     _ensure_env_default "TRAFFIC_SYNC_ENABLED" "true"
+    _ensure_env_default "TRAFFIC_SYNC_INTERVAL_SECONDS" "60"
     _ensure_env_default "TRAFFIC_LIMIT_RECONCILE_AFTER_SYNC" "true"
     _ensure_env_default "WG_POLICY_SYNC_ENABLED" "true"
     _ensure_env_default "WG_POLICY_SYNC_INTERVAL_SECONDS" "120"

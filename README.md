@@ -379,7 +379,7 @@ sudo ./install.sh --reinstall                  # переустановка че
 | Переменная | По умолчанию | Назначение |
 |------------|--------------|------------|
 | `TRAFFIC_SYNC_ENABLED` | `true` | Сбор трафика в SQLite |
-| `TRAFFIC_SYNC_INTERVAL_SECONDS` | `30` | Интервал traffic worker |
+| `TRAFFIC_SYNC_INTERVAL_SECONDS` | `60` | Интервал traffic worker |
 | `TRAFFIC_LIMIT_RECONCILE_AFTER_SYNC` | `true` | Reconcile лимитов после каждого сбора |
 | `WG_POLICY_SYNC_ENABLED` | `true` | Фоновый reconcile WG/AWG политик |
 | `WG_POLICY_SYNC_INTERVAL_SECONDS` | `120` | Интервал wg policy worker |
@@ -388,7 +388,7 @@ sudo ./install.sh --reinstall                  # переустановка че
 | `PANEL_RESOURCE_METRICS_INTERVAL_SECONDS` | `60` | Метрики самой панели |
 | `MONITORING_OVERVIEW_CACHE_TTL_SECONDS` | `20` | TTL кэша `GET /monitoring/overview` на remote node (0 = выкл.) |
 
-На слабом VPS или при большом числе клиентов имеет смысл увеличить `TRAFFIC_SYNC_INTERVAL_SECONDS` и `WG_POLICY_SYNC_INTERVAL_SECONDS`. Отключать `TRAFFIC_LIMIT_RECONCILE_AFTER_SYNC` стоит только если понимаете задержку применения лимитов (до следующего wg policy sync).
+По умолчанию `TRAFFIC_SYNC_INTERVAL_SECONDS=60` — баланс для prod с лимитами трафика (задержка блокировки до ~60 с при `TRAFFIC_LIMIT_RECONCILE_AFTER_SYNC=true`). На слабом VPS или при очень большом числе клиентов можно увеличить до `90–120`; для жёстких лимитов — `30`. Отключать `TRAFFIC_LIMIT_RECONCILE_AFTER_SYNC` стоит только если понимаете задержку применения лимитов (до следующего wg policy sync).
 
 В логах backend ищите строки `Traffic collect` и `WG policy sync` — поля `duration_ms`, `wg_runtime_calls`, `clients_changed` помогают оценить нагрузку.
 

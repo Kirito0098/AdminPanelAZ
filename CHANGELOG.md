@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`TRAFFIC_SYNC_INTERVAL_SECONDS`** — значение по умолчанию `30` → `60` (prod-баланс: учёт лимитов трафика и нагрузка на SQLite/worker).
+
 ## [1.4.2] - 2026-06-08
 
 ### Added
