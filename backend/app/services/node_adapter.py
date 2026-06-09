@@ -9,6 +9,7 @@ from app.models import VpnType
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.config import get_settings
 from app.services.node_mtls import build_node_agent_ssl_context, node_agent_base_scheme, node_agent_mtls_enabled
+from app.services.node_mtls_certs import MtlsProvisionBundle
 from app.services.antizapret import AntiZapretService
 from app.services.antizapret_settings import read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
@@ -329,11 +330,21 @@ class LocalNodeAdapter(NodeAdapter):
 
 
 class RemoteNodeAdapter(NodeAdapter):
-    def __init__(self, host: str, port: int, api_key: str):
-        scheme = node_agent_base_scheme()
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        api_key: str,
+        *,
+        mtls_enabled: bool | None = None,
+    ):
+        if mtls_enabled is None:
+            mtls_enabled = node_agent_mtls_enabled()
+        self._mtls_enabled = mtls_enabled
+        scheme = node_agent_base_scheme(mtls_enabled=mtls_enabled)
         self.base_url = f"{scheme}://{host}:{port}"
         self.api_key = api_key
-        self._verify = build_node_agent_ssl_context()
+        self._verify = build_node_agent_ssl_context(mtls_enabled=mtls_enabled)
         self._overview_cache_key = monitoring_overview_cache_key(host, port)
         self._http_client: httpx.Client | None = None
 
@@ -364,20 +375,84 @@ class RemoteNodeAdapter(NodeAdapter):
             kwargs["verify"] = self._verify
         return kwargs
 
-    @staticmethod
-    def _format_connection_error(exc: httpx.RequestError) -> str:
+    def _format_ssl_error(self, msg: str) -> str | None:
+        if "wrong version number" in msg or "wrong_version_number" in msg:
+            if self._mtls_enabled:
+                return (
+                    "Ошибка SSL (WRONG_VERSION_NUMBER): узел, вероятно, отвечает по HTTP, "
+                    "а панель подключается по HTTPS. Отключите mTLS для узла или настройте "
+                    "HTTPS на node agent."
+                )
+            return (
+                "Ошибка SSL (WRONG_VERSION_NUMBER): узел, вероятно, отвечает по HTTPS (mTLS), "
+                "а панель подключается по HTTP. Включите mTLS для узла на странице «Узлы»."
+            )
+        if "certificate verify failed" in msg or "certificate_verify_failed" in msg:
+            return (
+                "Ошибка проверки сертификата node agent. Проверьте CA и клиентский сертификат панели "
+                "(NODE_AGENT_MTLS_CA_CERT, NODE_AGENT_MTLS_CLIENT_CERT, NODE_AGENT_MTLS_CLIENT_KEY) "
+                "или повторно включите mTLS для узла в панели."
+            )
+        if (
+            "certificate has expired" in msg
+            or "certificate expired" in msg
+            or "certificate_expired" in msg
+        ):
+            return (
+                "Сертификат mTLS истёк. Повторно включите mTLS для узла на странице «Узлы» "
+                "или обновите сертификаты вручную."
+            )
+        if "self signed certificate" in msg or "self-signed certificate" in msg:
+            return (
+                "Node agent использует самоподписанный или неизвестный сертификат. "
+                "Убедитесь, что CA панели совпадает с CA на узле (включите mTLS через панель)."
+            )
+        if "unknown ca" in msg or "tlsv1_alert_unknown_ca" in msg:
+            return (
+                "Node agent не доверяет клиентскому сертификату панели (unknown CA). "
+                "Повторно включите mTLS для узла или проверьте NODE_AGENT_MTLS_CA_CERT на агенте."
+            )
+        if (
+            "handshake failure" in msg
+            or "sslv3_alert_handshake_failure" in msg
+            or "alert handshake failure" in msg
+        ):
+            if self._mtls_enabled:
+                return (
+                    "Ошибка TLS handshake с node agent. Проверьте, что на узле включён mTLS, "
+                    "сертификаты панели и агента выданы одним CA, и порт 9100 доступен с IP панели."
+                )
+            return (
+                "Ошибка TLS handshake: узел, вероятно, ожидает mTLS. "
+                "Включите mTLS для узла на странице «Узлы»."
+            )
+        if "ssl" in msg or "tls" in msg:
+            if self._mtls_enabled:
+                return (
+                    "Ошибка SSL/mTLS при подключении к node agent. Проверьте сертификаты панели, "
+                    "что узел отвечает по HTTPS и NODE_AGENT_ALLOWED_IPS не блокирует панель."
+                )
+            return (
+                "Ошибка SSL при подключении по HTTP — узел, вероятно, отвечает по HTTPS (mTLS). "
+                "Включите mTLS для узла на странице «Узлы»."
+            )
+        return None
+
+    def _format_connection_error(self, exc: httpx.RequestError) -> str:
         msg = str(exc).lower()
         if isinstance(exc, httpx.TimeoutException):
             return "Таймаут подключения к node agent — проверьте firewall и доступность порта"
+        ssl_hint = self._format_ssl_error(msg)
+        if ssl_hint is not None:
+            return ssl_hint
         if isinstance(exc, httpx.ConnectError):
             return f"Не удалось подключиться к node agent: {exc}"
         if isinstance(exc, httpx.RemoteProtocolError) or "disconnected without sending a response" in msg:
-            if not node_agent_mtls_enabled():
+            if not self._mtls_enabled:
                 return (
                     "Сервер закрыл соединение без ответа. Вероятно, на узле включён mTLS (HTTPS), "
-                    "а панель обращается по HTTP. Включите NODE_AGENT_MTLS_ENABLED=true на панели "
-                    "и скопируйте сертификаты из scripts/generate-mtls-certs.sh, "
-                    "либо отключите mTLS на узле (NODE_AGENT_MTLS_ENABLED=false)."
+                    "а панель обращается по HTTP. Включите mTLS для узла на странице «Узлы» "
+                    "или отключите mTLS на node agent."
                 )
             return (
                 "Сервер закрыл соединение без ответа. Проверьте mTLS-сертификаты панели "
@@ -651,4 +726,16 @@ class RemoteNodeAdapter(NodeAdapter):
             "/system/rotate-api-key",
             json={"new_api_key": new_api_key},
             timeout=30.0,
+        )
+
+    def provision_mtls(self, bundle: MtlsProvisionBundle) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/system/provision-mtls",
+            json={
+                "ca_pem": bundle.ca_pem,
+                "agent_cert_pem": bundle.agent_cert_pem,
+                "agent_key_pem": bundle.agent_key_pem,
+            },
+            timeout=120.0,
         )

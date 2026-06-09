@@ -748,8 +748,8 @@ apply_wiz_env_settings() {
   if _wiz_should_apply WIZ_REDIS_URL; then
     env_set REDIS_URL "$WIZ_REDIS_URL"
   fi
-  if [[ "$WIZARD_RAN" == true && "${WIZ_NODE_AGENT_MTLS_ENABLED:-false}" == "true" ]] \
-    || [[ "${WIZ_NODE_AGENT_MTLS_ENABLED:-}" == "true" ]]; then
+  if [[ "${WIZ_NODE_AGENT_MTLS_ENABLED:-false}" == "true" ]] \
+    && { [[ "$WIZARD_RAN" == true ]] || _wiz_should_apply WIZ_NODE_AGENT_MTLS_ENABLED; }; then
     env_set NODE_AGENT_MTLS_ENABLED "true"
   fi
   if [[ "${WIZ_NODE_API_KEY_ROTATION_DAYS:-0}" != "0" ]] \

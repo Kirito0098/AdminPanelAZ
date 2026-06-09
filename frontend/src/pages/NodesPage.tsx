@@ -12,6 +12,7 @@ import {
   Power,
   RefreshCw,
   Server,
+  Shield,
   Trash2,
 } from 'lucide-react'
 import {
@@ -19,6 +20,8 @@ import {
   checkNodeHealth,
   createNode,
   deleteNode,
+  enableNodeMtls,
+  getNodeMtlsStatus,
   getNodes,
   rotateNodeApiKey,
   updateNode,
@@ -55,10 +58,78 @@ import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { cn } from '@/lib/utils'
-import type { Node } from '@/types'
+import type { Node, NodeMtlsStatus } from '@/types'
 import { Navigate } from 'react-router-dom'
 
-type ConfirmAction = 'delete' | 'rotate-key' | null
+type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | null
+
+function isWrongVersionSslError(error: string) {
+  return /WRONG_VERSION_NUMBER|wrong version number/i.test(error)
+}
+
+function NodeTransportBadge({ node }: { node: Node }) {
+  if (node.is_local) {
+    return <span className="text-muted-foreground">—</span>
+  }
+  return node.mtls_enabled ? (
+    <Badge variant="default">mTLS</Badge>
+  ) : (
+    <Badge variant="outline">HTTP</Badge>
+  )
+}
+
+function MtlsCaStatusAlert({ status }: { status: NodeMtlsStatus }) {
+  if (!status.writable) {
+    return (
+      <SettingsAlert variant="warning" title="mTLS: нет прав на каталог сертификатов">
+        Панель не может записывать в <code className="text-xs">{status.mtls_dir}</code>. Запустите
+        панель с правами на <code className="text-xs">/etc/adminpanelaz</code> или выдайте доступ
+        до первого включения mTLS на узле.
+      </SettingsAlert>
+    )
+  }
+  if (status.ready) {
+    return (
+      <SettingsAlert variant="info" title="mTLS: CA готов">
+        CA и клиентский сертификат панели созданы
+        {status.agent_certs_count > 0 ? ` · сертификатов узлов: ${status.agent_certs_count}` : ''}.
+        Каталог: <code className="text-xs">{status.mtls_dir}</code>
+      </SettingsAlert>
+    )
+  }
+  return (
+    <SettingsAlert variant="info" title="mTLS: CA ещё не создан">
+      При первом «Включить mTLS» на удалённом узле панель автоматически создаст CA и сертификаты в{' '}
+      <code className="text-xs">{status.mtls_dir}</code>.
+    </SettingsAlert>
+  )
+}
+
+function NodeConnectionErrorAlert({ node, lastError }: { node: Node; lastError: string }) {
+  if (isWrongVersionSslError(lastError)) {
+    return (
+      <SettingsAlert variant="warning" title="Несовпадение протокола (SSL)">
+        {node.mtls_enabled ? (
+          <>
+            Панель подключается по HTTPS, а узел отвечает по HTTP. Временно отключите глобальный{' '}
+            <code className="text-xs">NODE_AGENT_MTLS_ENABLED</code> в <code className="text-xs">.env</code>{' '}
+            или сбросьте флаг mTLS для узла вручную.
+          </>
+        ) : (
+          <>
+            Узел отвечает по HTTPS (mTLS), а панель — по HTTP. Нажмите{' '}
+            <strong>«Включить mTLS»</strong> в меню узла или отключите mTLS на node agent.
+          </>
+        )}
+      </SettingsAlert>
+    )
+  }
+  return (
+    <SettingsAlert variant="danger" title="Ошибка связи">
+      {lastError}
+    </SettingsAlert>
+  )
+}
 
 function getNodeMeta(node: Node) {
   const meta = node.metadata ?? {}
@@ -87,6 +158,7 @@ type NodeActionsProps = {
   onHealth: () => void
   onUpdate: () => void
   onRotateKey: () => void
+  onEnableMtls: () => void
   onEdit: () => void
   onDelete: () => void
   compact?: boolean
@@ -101,6 +173,7 @@ function NodeActions({
   onHealth,
   onUpdate,
   onRotateKey,
+  onEnableMtls,
   onEdit,
   onDelete,
   compact = false,
@@ -151,6 +224,17 @@ function NodeActions({
       </Button>
       {!node.is_local && (
         <>
+          {!node.mtls_enabled && (
+            <Button
+              variant={compact ? 'ghost' : 'outline'}
+              size={btnSize}
+              title="Включить mTLS"
+              onClick={onEnableMtls}
+            >
+              <Shield size={iconSize} />
+              {!compact && 'Включить mTLS'}
+            </Button>
+          )}
           <Button
             variant={compact ? 'ghost' : 'outline'}
             size={btnSize}
@@ -194,6 +278,7 @@ type NodeCardProps = {
   onHealth: () => void
   onUpdate: () => void
   onRotateKey: () => void
+  onEnableMtls: () => void
   onEdit: () => void
   onDelete: () => void
 }
@@ -207,6 +292,7 @@ function NodeCard({
   onHealth,
   onUpdate,
   onRotateKey,
+  onEnableMtls,
   onEdit,
   onDelete,
 }: NodeCardProps) {
@@ -258,12 +344,11 @@ function NodeCard({
               Удалённый
             </Badge>
           )}
+          <NodeTransportBadge node={node} />
           {lastSeen && <span>Последняя проверка: {lastSeen}</span>}
         </div>
         {node.status === 'offline' && meta.lastError && (
-          <SettingsAlert variant="danger" title="Ошибка связи">
-            {meta.lastError}
-          </SettingsAlert>
+          <NodeConnectionErrorAlert node={node} lastError={meta.lastError} />
         )}
         <NodeActions
           node={node}
@@ -274,6 +359,7 @@ function NodeCard({
           onHealth={onHealth}
           onUpdate={onUpdate}
           onRotateKey={onRotateKey}
+          onEnableMtls={onEnableMtls}
           onEdit={onEdit}
           onDelete={onDelete}
         />
@@ -301,11 +387,14 @@ export default function NodesPage() {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
   const [confirmTarget, setConfirmTarget] = useState<Node | null>(null)
   const [confirmLoading, setConfirmLoading] = useState(false)
+  const [mtlsStatus, setMtlsStatus] = useState<NodeMtlsStatus | null>(null)
 
   const load = async () => {
     setLoading(true)
     try {
-      setNodes(await getNodes())
+      const [nodesList, status] = await Promise.all([getNodes(), getNodeMtlsStatus()])
+      setNodes(nodesList)
+      setMtlsStatus(status)
       await refreshNodes()
       await refresh()
     } catch (err) {
@@ -429,6 +518,10 @@ export default function NodesPage() {
     openConfirm('rotate-key', node)
   }
 
+  const handleEnableMtls = (node: Node) => {
+    openConfirm('enable-mtls', node)
+  }
+
   const handleConfirm = async () => {
     const action = confirmAction
     const target = confirmTarget
@@ -448,6 +541,33 @@ export default function NodesPage() {
         success(`API-ключ узла «${target.name}» обновлён`)
         await load()
         await refresh()
+      } else if (action === 'enable-mtls') {
+        const result = await enableNodeMtls(target.id)
+        closeConfirm()
+        success(result.message || `mTLS включён для узла «${target.name}»`)
+        await load()
+        await refresh()
+        setHealthLoading(target.id)
+        try {
+          const health = await checkNodeHealth(target.id)
+          const label = statusLabels[health.status] ?? health.status
+          if (health.status === 'online') {
+            success(`Узел «${target.name}»: ${label}`)
+          } else {
+            const errDetail =
+              typeof health.health?.error === 'string' ? health.health.error : null
+            notifyError(
+              errDetail
+                ? `Узел «${target.name}»: ${errDetail}`
+                : `Узел «${target.name}»: ${label}`,
+            )
+          }
+          await load()
+        } catch (err) {
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка проверки здоровья')
+        } finally {
+          setHealthLoading(null)
+        }
       }
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка операции')
@@ -492,6 +612,10 @@ export default function NodesPage() {
   }
 
   const onlineCount = nodes.filter((n) => n.status === 'online').length
+  const hasRemoteNodes = nodes.some((n) => !n.is_local)
+  const showMtlsStatus =
+    mtlsStatus &&
+    (hasRemoteNodes || mtlsStatus.ready || !mtlsStatus.writable)
 
   return (
     <div className="space-y-6">
@@ -527,6 +651,8 @@ export default function NodesPage() {
         <strong>{activeNode?.name ?? 'не выбранном узле'}</strong>. Переключите активный узел кнопкой
         «Активировать» или через селектор в шапке.
       </SettingsAlert>
+
+      {showMtlsStatus && <MtlsCaStatusAlert status={mtlsStatus} />}
 
       <InlineProgressBar
         active={loading || healthLoading !== null || confirmLoading || submitting}
@@ -587,6 +713,7 @@ export default function NodesPage() {
                     onHealth={() => handleHealth(node)}
                     onUpdate={() => setUpdateNodeTarget(node)}
                     onRotateKey={() => handleRotateKey(node)}
+                    onEnableMtls={() => handleEnableMtls(node)}
                     onEdit={() => openEdit(node)}
                     onDelete={() => handleDelete(node)}
                   />
@@ -604,6 +731,7 @@ export default function NodesPage() {
                       <TableHead>Службы</TableHead>
                       <TableHead>Статус</TableHead>
                       <TableHead>Тип</TableHead>
+                      <TableHead>Транспорт</TableHead>
                       <TableHead className="text-right">Действия</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -641,7 +769,9 @@ export default function NodesPage() {
                                 className="mt-1 max-w-xs text-[10px] text-destructive"
                                 title={meta.lastError}
                               >
-                                {meta.lastError}
+                                {isWrongVersionSslError(meta.lastError)
+                                  ? 'Несовпадение протокола HTTP/HTTPS — см. подсказку при раскрытии карточки'
+                                  : meta.lastError}
                               </div>
                             )}
                           </TableCell>
@@ -656,6 +786,9 @@ export default function NodesPage() {
                             )}
                           </TableCell>
                           <TableCell>
+                            <NodeTransportBadge node={node} />
+                          </TableCell>
+                          <TableCell>
                             <NodeActions
                               node={node}
                               isActive={isActive}
@@ -665,6 +798,7 @@ export default function NodesPage() {
                               onHealth={() => handleHealth(node)}
                               onUpdate={() => setUpdateNodeTarget(node)}
                               onRotateKey={() => handleRotateKey(node)}
+                              onEnableMtls={() => handleEnableMtls(node)}
                               onEdit={() => openEdit(node)}
                               onDelete={() => handleDelete(node)}
                               compact
@@ -796,7 +930,15 @@ export default function NodesPage() {
         onOpenChange={(open) => {
           if (!open && !confirmLoading) closeConfirm()
         }}
-        title={confirmAction === 'delete' ? 'Удалить узел?' : 'Ротация API-ключа?'}
+        title={
+          confirmAction === 'delete'
+            ? 'Удалить узел?'
+            : confirmAction === 'rotate-key'
+              ? 'Ротация API-ключа?'
+              : confirmAction === 'enable-mtls'
+                ? 'Включить mTLS?'
+                : ''
+        }
         description={
           confirmTarget ? (
             <>
@@ -818,9 +960,24 @@ export default function NodesPage() {
                   children:
                     'Будет сгенерирован новый API-ключ. Обновите его в конфигурации node agent на сервере, иначе связь с панелью прервётся.',
                 }
-              : undefined
+              : confirmAction === 'enable-mtls'
+                ? {
+                    variant: 'warning',
+                    title: 'Перезапуск node agent',
+                    children:
+                      'Будет сгенерирован сертификат, node agent перезапустится ~5–30 сек. Связь может кратковременно прерваться.',
+                  }
+                : undefined
         }
-        confirmLabel={confirmAction === 'delete' ? 'Удалить' : 'Сгенерировать ключ'}
+        confirmLabel={
+          confirmAction === 'delete'
+            ? 'Удалить'
+            : confirmAction === 'rotate-key'
+              ? 'Сгенерировать ключ'
+              : confirmAction === 'enable-mtls'
+                ? 'Включить mTLS'
+                : 'Подтвердить'
+        }
         destructive
         loading={confirmLoading}
         onConfirm={handleConfirm}

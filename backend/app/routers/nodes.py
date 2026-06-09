@@ -13,6 +13,9 @@ from app.schemas import (
     MessageResponse,
     NodeCreate,
     NodeHealthResponse,
+    NodeMtlsDisableResponse,
+    NodeMtlsEnableResponse,
+    NodeMtlsStatusResponse,
     NodeResponse,
     NodeRotateKeyResponse,
     NodeUpdate,
@@ -24,6 +27,8 @@ from app.schemas import (
 )
 from app.services.resource_metrics import VALID_PERIODS, query_history
 from app.services.node_key_rotation import rotate_node_api_key
+from app.services.node_mtls_certs import get_panel_mtls_status
+from app.services.node_mtls_provision import disable_mtls, enable_mtls
 from app.services.node_manager import (
     check_node_health,
     clear_active_node_id,
@@ -53,6 +58,7 @@ def _to_response(node: Node) -> NodeResponse:
         port=node.port,
         status=node.status,
         is_local=node.is_local,
+        mtls_enabled=False if node.is_local else bool(node.mtls_enabled),
         last_seen_at=node.last_seen_at,
         metadata=node_metadata_dict(node),
         created_at=node.created_at,
@@ -134,6 +140,11 @@ def get_active(
         update_node_from_health(node, health, db)
         db.refresh(node)
     return ActiveNodeResponse(node=_to_response(node))
+
+
+@router.get("/mtls/status", response_model=NodeMtlsStatusResponse)
+def node_mtls_status(_: User = Depends(require_admin)):
+    return NodeMtlsStatusResponse(**get_panel_mtls_status())
 
 
 @router.get("/{node_id}", response_model=NodeResponse)
@@ -236,6 +247,57 @@ def health_check(node_id: int, _: User = Depends(require_admin), db: Session = D
         status=node.status,
         health=health,
         last_seen_at=node.last_seen_at,
+    )
+
+
+@router.post("/{node_id}/enable-mtls", response_model=NodeMtlsEnableResponse)
+def enable_node_mtls(
+    node_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    try:
+        node = enable_mtls(db, node, admin)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Не удалось включить mTLS на узле: {exc}",
+        ) from exc
+    return NodeMtlsEnableResponse(
+        message="mTLS успешно включён",
+        node_id=node.id,
+        mtls_enabled=True,
+    )
+
+
+@router.post("/{node_id}/disable-mtls", response_model=NodeMtlsDisableResponse)
+def disable_node_mtls(
+    node_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    try:
+        node = disable_mtls(db, node)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return NodeMtlsDisableResponse(
+        message="Флаг mTLS в панели сброшен",
+        node_id=node.id,
+        mtls_enabled=False,
+        warning=(
+            "Node agent по-прежнему работает с mTLS. Для полного отключения настройте узел вручную "
+            "или переустановите node agent без mTLS."
+        ),
     )
 
 

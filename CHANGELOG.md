@@ -7,11 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Per-node mTLS** — включение mTLS для каждого удалённого узла отдельно из панели (страница «Узлы» → «Включить mTLS»): генерация CA и сертификатов на панели, доставка на node agent (`POST /system/provision-mtls`), health по HTTPS; смешанный режим HTTP + mTLS.
+- **API** — `POST /api/nodes/{id}/enable-mtls`, `GET /api/nodes/mtls/status` (готовность CA, пути, права на каталог), поле `mtls_enabled` в `NodeResponse`.
+- **Тесты** — `test_node_mtls_migration.py`, `test_node_mtls_adapter.py`, `test_node_mtls_certs.py`, `test_node_agent_provision_mtls.py`, `test_node_mtls_provision.py`.
+
 ### Fixed
 - **Обновление узла** — перезапуск node agent после git pull через `systemctl restart adminpanelaz-node`, если unit установлен; лог в `update-restart.log`.
 
 ### Changed
 - **Узлы** — обновление узла только для node agent: убраны AntiZapret из `NodeUpdateDialog`, API `GET/POST /api/nodes/{id}/updates|update` и колонка `az` на странице «Узлы».
+- **mTLS** — `NODE_AGENT_MTLS_ENABLED` в `.env` панели deprecated; режим соединения задаётся per-node (`nodes.mtls_enabled` в БД). Улучшены сообщения об ошибках SSL при несовпадении HTTP/HTTPS.
 
 ## [1.4.3] - 2026-06-09
 

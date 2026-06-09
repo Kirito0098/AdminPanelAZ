@@ -9,16 +9,17 @@ from app.config import get_settings
 
 
 def node_agent_mtls_enabled() -> bool:
+    """Deprecated global flag; prefer per-node ``Node.mtls_enabled``."""
     settings = get_settings()
     return settings.node_agent_mtls_enabled
 
 
-def build_node_agent_ssl_context() -> ssl.SSLContext | bool | None:
-    """Return SSL verify argument for httpx, or None if mTLS disabled."""
-    settings = get_settings()
-    if not settings.node_agent_mtls_enabled:
+def build_node_agent_ssl_context(*, mtls_enabled: bool) -> ssl.SSLContext | bool | None:
+    """Return SSL verify argument for httpx, or None if mTLS disabled for this node."""
+    if not mtls_enabled:
         return None
 
+    settings = get_settings()
     ca = Path(settings.node_agent_mtls_ca_cert)
     cert = Path(settings.node_agent_mtls_client_cert)
     key = Path(settings.node_agent_mtls_client_key)
@@ -34,5 +35,5 @@ def build_node_agent_ssl_context() -> ssl.SSLContext | bool | None:
     return ctx
 
 
-def node_agent_base_scheme() -> str:
-    return "https" if node_agent_mtls_enabled() else "http"
+def node_agent_base_scheme(*, mtls_enabled: bool) -> str:
+    return "https" if mtls_enabled else "http"

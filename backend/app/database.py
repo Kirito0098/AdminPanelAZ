@@ -49,7 +49,12 @@ def _migrate_vpn_configs_node_scope() -> None:
             if not api_key:
                 continue
             try:
-                adapter = RemoteNodeAdapter(host=node.host, port=node.port, api_key=api_key)
+                adapter = RemoteNodeAdapter(
+                    host=node.host,
+                    port=node.port,
+                    api_key=api_key,
+                    mtls_enabled=bool(node.mtls_enabled),
+                )
                 node_clients[node.id] = (
                     set(adapter.list_openvpn_clients()),
                     set(adapter.list_wireguard_clients()),
@@ -371,6 +376,24 @@ def run_db_migrations() -> None:
                 logger.info("DB migration: added %s.%s", table, name)
 
     _migrate_user_telegram_backfill()
+    _migrate_nodes_mtls_enabled()
+
+
+def _migrate_nodes_mtls_enabled() -> None:
+    """Add per-node mTLS flag and backfill from deprecated global NODE_AGENT_MTLS_ENABLED."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    with engine.begin() as conn:
+        if "mtls_enabled" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN mtls_enabled INTEGER DEFAULT 0"))
+            logger.info("DB migration: added nodes.mtls_enabled")
+        if get_settings().node_agent_mtls_enabled:
+            conn.execute(
+                text("UPDATE nodes SET mtls_enabled = 1 WHERE is_local = 0")
+            )
+            logger.info("DB migration: backfilled nodes.mtls_enabled for remote nodes")
 
 
 def _migrate_user_telegram_backfill() -> None:

@@ -95,6 +95,7 @@ class Settings(BaseSettings):
     forwarded_allow_ips: str = "127.0.0.1,::1"
     node_agent_allowed_ips: str = ""
     node_agent_mtls_enabled: bool = False
+    node_agent_mtls_dir: Path = Path("/etc/adminpanelaz/mtls")
     node_agent_mtls_ca_cert: str = "/etc/adminpanelaz/mtls/ca.crt"
     node_agent_mtls_client_cert: str = "/etc/adminpanelaz/mtls/panel.crt"
     node_agent_mtls_client_key: str = "/etc/adminpanelaz/mtls/panel.key"

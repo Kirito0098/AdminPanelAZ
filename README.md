@@ -97,7 +97,7 @@
 | **NOC-мониторинг** — метрики VPN-узла и панели, история CPU/RAM | [`MonitoringPage`](frontend/src/pages/MonitoringPage.tsx) |
 | **2FA/TOTP** + refresh tokens | [`TwoFactorTab`](frontend/src/components/settings/TwoFactorTab.tsx), [`auth.py`](backend/app/routers/auth.py) |
 | **Обновление node agent и AntiZapret** с панели | [`NodeUpdateDialog`](frontend/src/components/NodeUpdateDialog.tsx) |
-| **mTLS** panel ↔ agent | [`scripts/generate-mtls-certs.sh`](scripts/generate-mtls-certs.sh) |
+| **Per-node mTLS** panel ↔ agent (кнопка в UI) | [`NodesPage`](frontend/src/pages/NodesPage.tsx), [`node_mtls_provision.py`](backend/app/services/node_mtls_provision.py) |
 | **DDNS timer** (DuckDNS / No-IP) | `systemd/adminpanelaz-ddns.*`, `scripts/ddns-update.sh` |
 | **Роль `user`** (между admin и viewer) | [`models.py`](backend/app/models.py) |
 | **Глобальный rate limit** `/api/*` | [`api_rate_limit.py`](backend/app/middleware/api_rate_limit.py) |
@@ -355,7 +355,7 @@ CIDR DB refresh, сбор трафика, Telegram, автобэкапы.
 2. **Войдите** — логин/пароль из вывода установщика (по умолчанию `admin` / сгенерированный)
 3. **Смените пароль** — если включена принудительная смена
 4. **Включите 2FA** — Настройки → безопасность (TOTP)
-5. **Добавьте узлы** — страница «Узлы», укажите IP node agent и API-ключ
+5. **Добавьте узлы** — страница «Узлы», укажите IP node agent и API-ключ (сначала **HTTP** + API-ключ). Опционально для каждого удалённого узла: меню → **«Включить mTLS»** — панель сгенерирует и доставит сертификаты автоматически (см. [`SECURITY.md`](SECURITY.md#mtls-per-node-включение-из-панели))
 
 Управление (не установка; команды из `/opt/AdminPanelAZ` или вашего `INSTALL_TARGET`):
 

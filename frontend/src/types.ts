@@ -9,6 +9,7 @@ export interface Node {
   port: number
   status: NodeStatus
   is_local: boolean
+  mtls_enabled: boolean
   last_seen_at?: string | null
   metadata: Record<string, unknown>
   created_at: string
@@ -18,6 +19,16 @@ export interface Node {
 export interface ActiveNode {
   node: Node
   active: boolean
+}
+
+export interface NodeMtlsStatus {
+  ready: boolean
+  writable: boolean
+  mtls_dir: string
+  ca_cert: string
+  panel_cert: string
+  panel_key: string
+  agent_certs_count: number
 }
 
 export interface User {

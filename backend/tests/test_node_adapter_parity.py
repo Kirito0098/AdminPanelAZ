@@ -143,6 +143,12 @@ def test_remote_adapter_rotate_api_key_not_in_abstract_interface():
     assert hasattr(RemoteNodeAdapter, "rotate_api_key")
 
 
+def test_remote_adapter_provision_mtls_not_in_abstract_interface():
+    """provision_mtls is remote-only (bootstrap mTLS on node agent)."""
+    assert "provision_mtls" not in _abstract_adapter_methods()
+    assert hasattr(RemoteNodeAdapter, "provision_mtls")
+
+
 def test_node_agent_main_imports_without_invalid_key(monkeypatch):
     monkeypatch.setenv("NODE_AGENT_MODE", "dev")
     monkeypatch.setenv("NODE_AGENT_API_KEY", "x" * 32)

@@ -590,6 +590,8 @@ wizard_ask_node_agent() {
 
 wizard_ask_security_hardening() {
   wiz_step "Дополнительная безопасность"
+  # Сброс: mTLS только при явном «да» на этом шаге (не наследуем pre-export из окружения).
+  WIZ_NODE_AGENT_MTLS_ENABLED="false"
 
   if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
     wiz_prompt_yesno "Включить mTLS для node agent (требует scripts/generate-mtls-certs.sh)?" "n"

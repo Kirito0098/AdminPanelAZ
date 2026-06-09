@@ -57,6 +57,29 @@ class NodeRotateKeyResponse(BaseModel):
     node_id: int
 
 
+class NodeMtlsEnableResponse(BaseModel):
+    message: str
+    node_id: int
+    mtls_enabled: bool = True
+
+
+class NodeMtlsDisableResponse(BaseModel):
+    message: str
+    node_id: int
+    mtls_enabled: bool = False
+    warning: str | None = None
+
+
+class NodeMtlsStatusResponse(BaseModel):
+    ready: bool
+    writable: bool
+    mtls_dir: str
+    ca_cert: str
+    panel_cert: str
+    panel_key: str
+    agent_certs_count: int = 0
+
+
 class UserBase(BaseModel):
     username: str
     role: UserRole = UserRole.user
@@ -425,6 +448,7 @@ class NodeResponse(NodeBase):
     id: int
     status: NodeStatus
     is_local: bool
+    mtls_enabled: bool = False
     last_seen_at: datetime | None = None
     metadata: dict[str, Any] = {}
     created_at: datetime

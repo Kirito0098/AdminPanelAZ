@@ -16,6 +16,7 @@ from app.services.antizapret import AntiZapretService
 from app.services.antizapret_settings import build_schema, filter_known_keys, read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import build_health_payload
+from app.services.node_agent_provision import provision_mtls
 from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
@@ -113,6 +114,13 @@ class ServiceRestartRequest(BaseModel):
 
 class RotateApiKeyRequest(BaseModel):
     new_api_key: str = Field(min_length=24)
+
+
+class ProvisionMtlsRequest(BaseModel):
+    ca_pem: str = Field(min_length=64)
+    agent_cert_pem: str = Field(min_length=64)
+    agent_key_pem: str = Field(min_length=64)
+    restart: bool = True
 
 
 def _persist_api_key(new_key: str) -> None:
@@ -404,6 +412,27 @@ def system_ensure_openvpn_ban_check(_: None = Depends(verify_api_key)):
 def rotate_api_key(payload: RotateApiKeyRequest, _: None = Depends(verify_api_key)):
     _persist_api_key(payload.new_api_key)
     return {"message": "API-ключ обновлён", "success": True}
+
+
+@app.post("/system/provision-mtls")
+def system_provision_mtls(payload: ProvisionMtlsRequest, _: None = Depends(verify_api_key)):
+    try:
+        result = provision_mtls(
+            ca_pem=payload.ca_pem,
+            agent_cert_pem=payload.agent_cert_pem,
+            agent_key_pem=payload.agent_key_pem,
+            restart=payload.restart,
+            repo_root=resolve_repo_root(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if not result["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.get("message", "Ошибка provision mTLS"),
+        )
+    return result
 
 
 @app.post("/system/update")

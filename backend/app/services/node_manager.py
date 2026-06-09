@@ -164,7 +164,12 @@ def get_adapter_for_node(node: Node) -> NodeAdapter:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"API-ключ узла '{node.name}' недоступен",
         )
-    return RemoteNodeAdapter(host=node.host, port=node.port, api_key=api_key)
+    return RemoteNodeAdapter(
+        host=node.host,
+        port=node.port,
+        api_key=api_key,
+        mtls_enabled=bool(node.mtls_enabled),
+    )
 
 
 def get_active_adapter(db: Session) -> NodeAdapter:
@@ -253,7 +258,12 @@ def check_node_health(node: Node, api_key_override: str | None = None) -> dict:
             api_key = api_key_override or get_api_key_plain(node)
             if not api_key:
                 return {"status": "offline", "error": "API-ключ не задан"}
-            adapter = RemoteNodeAdapter(host=node.host, port=node.port, api_key=api_key)
+            adapter = RemoteNodeAdapter(
+                host=node.host,
+                port=node.port,
+                api_key=api_key,
+                mtls_enabled=bool(node.mtls_enabled),
+            )
         health = adapter.health_check()
         health["status"] = "online"
         return health

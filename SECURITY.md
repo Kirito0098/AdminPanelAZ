@@ -55,8 +55,8 @@
 | `CORS_ORIGINS` | localhost | Список origin через запятую |
 | `BEHIND_NGINX` | `false` | Доверять `X-Forwarded-For` от `TRUSTED_PROXY_IPS` |
 | `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | IP reverse proxy |
-| `NODE_AGENT_MTLS_ENABLED` | `false` | mTLS при вызовах панели к node agent |
-| `NODE_AGENT_MTLS_CA_CERT` | `/etc/adminpanelaz/mtls/ca.crt` | CA для проверки сертификата агента |
+| `NODE_AGENT_MTLS_ENABLED` | `false` | **Deprecated** — режим mTLS задаётся per-node (`nodes.mtls_enabled` в БД). Глобальный флаг оставлен только для legacy backfill при миграции |
+| `NODE_AGENT_MTLS_CA_CERT` | `/etc/adminpanelaz/mtls/ca.crt` | CA для проверки сертификата агента (создаётся панелью при первом включении mTLS) |
 | `NODE_AGENT_MTLS_CLIENT_CERT` | `/etc/adminpanelaz/mtls/panel.crt` | Клиентский сертификат панели |
 | `NODE_AGENT_MTLS_CLIENT_KEY` | `/etc/adminpanelaz/mtls/panel.key` | Ключ клиентского сертификата |
 | `NODE_API_KEY_ROTATION_DAYS` | `0` | Автоматическая ротация ключей узлов (0 = выкл) |
@@ -82,7 +82,7 @@
 - Rate limit auth: in-memory или Redis (fallback на memory)
 - Global API rate limit: per-IP sliding window на `/api/*` (исключения: health, ip-blocked); public route download — 30/min
 - robots.txt и security.txt (RFC 9116), X-Robots-Tag noindex для чувствительных путей
-- mTLS панель ↔ node agent (опционально)
+- Per-node mTLS панель ↔ node agent (включение из UI «Узлы» → «Включить mTLS»)
 - Ротация `NODE_AGENT_API_KEY` (вручную на странице Узлы, автоматически по расписанию)
 - JWT (bcrypt пароли, роли admin/user/viewer)
 - IP-ограничение и блокировка сканеров (настройки → Безопасность)
@@ -97,14 +97,35 @@
 - Автообновление access-токена перед истечением и при 401
 - Telegram OAuth: токен передаётся в URL hash (`#token=`), не в query string
 
-## mTLS: генерация сертификатов
+## mTLS: per-node включение из панели
+
+По умолчанию панель и node agent работают по **HTTP** + `X-Node-Key`. Для каждого удалённого узла mTLS включается отдельно:
+
+1. Добавьте узел на странице **«Узлы»** (IP, порт, API-ключ) — соединение по HTTP.
+2. Убедитесь, что health **online**.
+3. В меню узла выберите **«Включить mTLS»** — панель сгенерирует CA (один раз), клиентский сертификат панели и серверный сертификат узла, доставит bundle на node agent по HTTP (bootstrap) и перезапустит агент.
+4. После перезапуска панель проверяет health по **HTTPS** с клиентским сертификатом.
+
+Смешанный режим поддерживается: узел 1 на mTLS, узел 2 на HTTP — оба работают одновременно.
+
+| Настройка | Назначение |
+|-----------|------------|
+| `nodes.mtls_enabled` (БД) | HTTP или HTTPS для **конкретного** узла |
+| `NODE_AGENT_MTLS_*_CERT/KEY` в `.env` панели | Пути к CA и клиентскому сертификату панели (после первого включения mTLS) |
+| `NODE_AGENT_MTLS_ENABLED` в `.env` | **Deprecated** — только legacy backfill при миграции |
+
+Сертификаты на панели: `/etc/adminpanelaz/mtls/` (`ca.crt`, `panel.crt`, `panel.key`, `nodes/{id}/agent.crt`).
+
+### Ручная генерация (legacy / отладка)
+
+> Ручная настройка через `scripts/generate-mtls-certs.sh` устарела — используйте кнопку в UI.
 
 ```bash
 sudo chmod +x scripts/generate-mtls-certs.sh
 sudo ./scripts/generate-mtls-certs.sh /etc/adminpanelaz/mtls
 ```
 
-Затем включите переменные в `backend/.env` и `backend/node_agent.env` (см. вывод скрипта) и перезапустите панель и node agent.
+Затем включите переменные в `backend/.env` и `backend/node_agent.env` (см. вывод скрипта) и перезапустите панель и node agent. Для новых установок предпочтительнее per-node включение из панели.
 
 ## Rate limit при нескольких uvicorn workers
 

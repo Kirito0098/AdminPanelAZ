@@ -32,7 +32,12 @@ def rotate_node_api_key(db: Session, node: Node, *, actor_username: str | None =
         raise ValueError("API-ключ узла недоступен")
 
     new_key = generate_api_key()
-    adapter = RemoteNodeAdapter(host=node.host, port=node.port, api_key=old_key)
+    adapter = RemoteNodeAdapter(
+        host=node.host,
+        port=node.port,
+        api_key=old_key,
+        mtls_enabled=bool(node.mtls_enabled),
+    )
     adapter.rotate_api_key(new_key)
 
     key_hash, key_encrypted = store_api_key("", new_key)

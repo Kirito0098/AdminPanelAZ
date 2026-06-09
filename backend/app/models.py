@@ -136,6 +136,7 @@ class Node(Base):
     status: Mapped[NodeStatus] = mapped_column(Enum(NodeStatus), default=NodeStatus.unknown)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_local: Mapped[bool] = mapped_column(Boolean, default=False)
+    mtls_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     node_metadata: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

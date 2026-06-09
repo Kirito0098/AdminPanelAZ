@@ -143,6 +143,17 @@ export async function rotateNodeApiKey(nodeId: number) {
   })
 }
 
+export async function enableNodeMtls(nodeId: number) {
+  return apiFetch<{ message: string; node_id: number; mtls_enabled: boolean }>(
+    `/nodes/${nodeId}/enable-mtls`,
+    { method: 'POST' },
+  )
+}
+
+export async function getNodeMtlsStatus() {
+  return apiFetch<import('../types').NodeMtlsStatus>('/nodes/mtls/status')
+}
+
 export async function getCaptchaRequired() {
   return apiFetch<{ required: boolean }>('/auth/captcha/required')
 }
