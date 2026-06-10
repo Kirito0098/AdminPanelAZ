@@ -4,7 +4,16 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, get_password_hash, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import User, UserRole
+from app.models import (
+    QrDownloadAuditLog,
+    QrDownloadToken,
+    RefreshToken,
+    User,
+    UserActionLog,
+    UserRole,
+    ViewerConfigAccess,
+    VpnConfig,
+)
 from app.schemas import MessageResponse, UserCreate, UserResponse, UserUpdate
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
@@ -18,6 +27,27 @@ from app.services.password_policy import validate_password
 
 router = APIRouter(prefix="/users", tags=["users"])
 settings = get_settings()
+
+
+def _purge_user_before_delete(db: Session, user: User, successor: User) -> None:
+    db.query(RefreshToken).filter(RefreshToken.user_id == user.id).delete(synchronize_session=False)
+    db.query(ViewerConfigAccess).filter(ViewerConfigAccess.user_id == user.id).delete(synchronize_session=False)
+    db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).update(
+        {VpnConfig.owner_id: successor.id},
+        synchronize_session=False,
+    )
+    db.query(QrDownloadToken).filter(QrDownloadToken.created_by_user_id == user.id).update(
+        {QrDownloadToken.created_by_user_id: None},
+        synchronize_session=False,
+    )
+    db.query(QrDownloadAuditLog).filter(QrDownloadAuditLog.actor_user_id == user.id).update(
+        {QrDownloadAuditLog.actor_user_id: None},
+        synchronize_session=False,
+    )
+    db.query(UserActionLog).filter(UserActionLog.user_id == user.id).update(
+        {UserActionLog.user_id: None},
+        synchronize_session=False,
+    )
 
 
 @router.get("", response_model=list[UserResponse])
@@ -124,7 +154,19 @@ def delete_user(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    if user.role == UserRole.admin:
+        other_admins = (
+            db.query(User)
+            .filter(User.role == UserRole.admin, User.id != user.id, User.is_active.is_(True))
+            .count()
+        )
+        if other_admins == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Нельзя удалить последнего администратора",
+            )
     deleted_username = user.username
+    _purge_user_before_delete(db, user, current_user)
     db.delete(user)
     db.commit()
     if settings.audit_log_enabled:

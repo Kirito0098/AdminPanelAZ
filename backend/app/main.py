@@ -315,6 +315,18 @@ def _mount_frontend(app: FastAPI) -> None:
 
     index_file = dist / "index.html"
 
+    # Fallback for stale backends: without this, POST to a missing /api/* route matches the
+    # GET-only SPA catch-all below and surfaces misleading "Method Not Allowed" (405).
+    @app.api_route(
+        "/api/{rest:path}",
+        methods=["POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        include_in_schema=False,
+    )
+    async def api_route_not_found(rest: str):
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="API endpoint not found — перезапустите панель после обновления")
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
         if full_path.startswith("api/") or full_path == "api":
