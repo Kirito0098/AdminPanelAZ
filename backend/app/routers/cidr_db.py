@@ -13,17 +13,23 @@ from app.services.action_log import log_action
 from app.services.cidr.cidr_tasks import (
     create_cidr_task,
     find_active_cidr_task,
+    find_last_completed_cidr_task,
     get_cidr_task,
     serialize_cidr_task,
     start_cidr_task,
 )
 from app.services.cidr.constants import IP_FILES
-from app.services.cidr.pipeline.db_pipeline import (
-    estimate_cidr_matches_from_db,
-    update_cidr_files_from_db,
-)
+from app.services.cidr.pipeline.db_pipeline import estimate_cidr_matches_from_db
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
-from app.services.node_manager import get_active_adapter
+from app.models import Node
+from app.services.cidr.pipeline.orchestrator import (
+    run_apply,
+    run_compile,
+    run_deploy,
+    run_ingest,
+    run_multi_deploy,
+)
+from app.services.node_manager import get_active_adapter, get_adapter_for_node
 
 router = APIRouter(prefix="/routing/cidr-db", tags=["cidr-db"])
 
@@ -46,6 +52,17 @@ class CidrDbGenerateRequest(BaseModel):
     filter_by_antifilter: bool = False
     apply_after: bool = False
     sync_after: bool = True
+    deploy_after: bool = True
+    target_node_id: int | None = None
+
+
+class CidrDbDeployRequest(BaseModel):
+    target_node_id: int | None = None
+    target_node_ids: list[int] | None = None
+    all_online: bool = False
+    sync_after: bool = True
+    apply_after: bool = False
+    selected_files: list[str] | None = None
 
 
 class CidrDbClearRequest(BaseModel):
@@ -68,6 +85,53 @@ def _enrich_providers(status: dict) -> dict:
         }
     status["providers"] = providers
     return status
+
+
+def _summarize_last_compile() -> dict | None:
+    task = find_last_completed_cidr_task("cidr_generate_from_db")
+    if not task:
+        return None
+    result = task.get("result") or {}
+    updated = result.get("updated") or []
+    return {
+        "finished_at": task.get("finished_at"),
+        "status": task.get("status"),
+        "files_updated": len(updated),
+        "artifact_stamp": result.get("artifact_stamp"),
+        "message": task.get("message"),
+    }
+
+
+def _summarize_last_deploy() -> dict | None:
+    task = find_last_completed_cidr_task("cidr_deploy")
+    if not task:
+        return None
+    result = task.get("result") or {}
+    deploy = result.get("deploy") or {}
+    per_node = result.get("per_node") or []
+    return {
+        "finished_at": task.get("finished_at"),
+        "status": task.get("status"),
+        "pushed_count": len(deploy.get("pushed") or []),
+        "failed_count": len(deploy.get("failed") or []),
+        "target_node_id": result.get("target_node_id"),
+        "artifact_stamp": result.get("artifact_stamp"),
+        "nodes_deployed": result.get("nodes_deployed", len([n for n in per_node if n.get("status") == "success"])),
+        "nodes_failed": result.get("nodes_failed", len([n for n in per_node if n.get("status") == "failed"])),
+        "nodes_skipped": result.get("nodes_skipped", len([n for n in per_node if n.get("status") == "skipped"])),
+        "per_node": per_node,
+        "message": task.get("message"),
+    }
+
+
+def _deploy_target_label(payload: CidrDbDeployRequest) -> str:
+    if payload.all_online:
+        return "all_online"
+    if payload.target_node_ids:
+        return ",".join(str(node_id) for node_id in payload.target_node_ids)
+    if payload.target_node_id is not None:
+        return str(payload.target_node_id)
+    return "active"
 
 
 def _enrich_preset_providers_meta(presets: list[dict]) -> list[dict]:
@@ -99,7 +163,18 @@ def cidr_db_status(_: User = Depends(get_current_user), db: Session = Depends(ge
         "providers": status_data.get("providers"),
         "alerts": status_data.get("alerts", []),
         "history": history,
+        "last_compile_at": _summarize_last_compile(),
+        "last_deploy": _summarize_last_deploy(),
     }
+
+
+@router.get("/deploy/status")
+def cidr_deploy_status(_: User = Depends(get_current_user)):
+    """Last completed CIDR deploy with per-node results."""
+    summary = _summarize_last_deploy()
+    if not summary:
+        return {"success": True, "last_deploy": None}
+    return {"success": True, "last_deploy": summary}
 
 
 @router.get("/tasks/{task_id}")
@@ -138,8 +213,8 @@ def cidr_db_refresh(
 
         inner_db = SessionLocal()
         try:
-            svc_inner = CidrDbUpdaterService(db=inner_db)
-            return svc_inner.refresh_all_providers(
+            return run_ingest(
+                inner_db,
                 triggered_by=triggered_by,
                 selected_files=selected_files,
                 progress_callback=progress_callback,
@@ -201,21 +276,101 @@ def cidr_db_generate(
     def _generate_runner(progress_callback):
         from app.database import SessionLocal
 
-        result = update_cidr_files_from_db(progress_callback=progress_callback, **common_kwargs)
-        if (result.get("success") or result.get("updated")) and payload.sync_after:
-            inner_db = SessionLocal()
-            try:
+        result = run_compile(progress_callback=progress_callback, **common_kwargs)
+        if not (result.get("success") or result.get("updated")):
+            return result
+
+        inner_db = SessionLocal()
+        try:
+            if payload.target_node_id is not None:
+                node = inner_db.query(Node).filter(Node.id == payload.target_node_id).first()
+                if not node:
+                    result["deploy"] = {
+                        "pushed": [],
+                        "failed": [{"file": "*", "error": f"Узел {payload.target_node_id} не найден"}],
+                    }
+                    return result
+                adapter = get_adapter_for_node(node)
+            else:
                 adapter = get_active_adapter(inner_db)
-                sync_result = adapter.sync_cidr_providers()
-                result["sync"] = sync_result
-                if payload.apply_after:
-                    result["doall_output"] = adapter.apply_config_changes()
-            finally:
-                inner_db.close()
+
+            if payload.deploy_after:
+                deploy_result = run_deploy(adapter, files=result.get("updated"))
+                result["deploy"] = {
+                    "pushed": deploy_result.get("pushed", []),
+                    "failed": deploy_result.get("failed", []),
+                }
+                if deploy_result.get("sync") is not None:
+                    result["sync"] = deploy_result["sync"]
+
+            if payload.sync_after:
+                apply_result = run_apply(
+                    adapter,
+                    sync_after=not payload.deploy_after,
+                    apply_after=payload.apply_after,
+                )
+                result.update(apply_result)
+        finally:
+            inner_db.close()
         return result
 
     start_cidr_task(task_id, _generate_runner)
     return {"success": True, "queued": True, "task_id": task_id, "message": "Генерация CIDR-файлов из БД запущена"}
+
+
+@router.post("/deploy", status_code=status.HTTP_202_ACCEPTED)
+def cidr_db_deploy(
+    payload: CidrDbDeployRequest,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    active = find_active_cidr_task("cidr_deploy")
+    if active:
+        return {
+            "success": True,
+            "queued": True,
+            "task_id": active["task_id"],
+            "message": "Развёртывание CIDR уже выполняется",
+        }
+
+    triggered_by = f"manual:{user.username}"
+    task_id = create_cidr_task("cidr_deploy", "Развёртывание CIDR-файлов на ноду запущено")
+
+    def _deploy_runner(progress_callback):
+        from app.database import SessionLocal
+
+        inner_db = SessionLocal()
+        try:
+            result = run_multi_deploy(
+                inner_db,
+                target_node_ids=payload.target_node_ids,
+                all_online=payload.all_online,
+                target_node_id=payload.target_node_id,
+                files=payload.selected_files,
+                sync_after=payload.sync_after,
+                apply_after=payload.apply_after,
+                triggered_by=triggered_by,
+            )
+            if payload.target_node_id is not None and not payload.target_node_ids and not payload.all_online:
+                result["target_node_id"] = payload.target_node_id
+            return result
+        finally:
+            inner_db.close()
+
+    start_cidr_task(task_id, _deploy_runner)
+    log_action(
+        db,
+        action="settings_cidr_deploy",
+        user_id=user.id,
+        username=user.username,
+        details=_deploy_target_label(payload),
+    )
+    return {
+        "success": True,
+        "queued": True,
+        "task_id": task_id,
+        "message": "Развёртывание CIDR-файлов на ноду запущено",
+    }
 
 
 @router.post("/clear")

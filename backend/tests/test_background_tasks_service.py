@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -44,6 +45,77 @@ def bg_service():
 
     with patch("app.services.background_tasks.SessionLocal", TestingSessionLocal):
         yield service, TestingSessionLocal
+
+
+def test_commit_with_retry_succeeds_after_transient_lock(bg_service):
+    service, SessionLocal = bg_service
+    db = SessionLocal()
+    task = BackgroundTask(id="retry-task", task_type="demo", status="queued", message="old")
+    db.add(task)
+    db.commit()
+    db.close()
+
+    attempts = {"count": 0}
+
+    def flaky_session_local():
+        session = SessionLocal()
+        original_commit = session.commit
+
+        def patched_commit():
+            attempts["count"] += 1
+            if attempts["count"] < 3:
+                raise OperationalError("commit", {}, Exception("database is locked"))
+            original_commit()
+
+        session.commit = patched_commit  # type: ignore[method-assign]
+        return session
+
+    with patch("app.services.background_tasks.SessionLocal", flaky_session_local):
+        with patch("app.services.background_tasks.time.sleep"):
+            service.update_background_task("retry-task", message="new")
+
+    db = SessionLocal()
+    saved = db.get(BackgroundTask, "retry-task")
+    assert saved is not None
+    assert saved.message == "new"
+    assert attempts["count"] == 3
+    db.close()
+
+
+def test_commit_with_retry_raises_after_max_attempts(bg_service):
+    service, SessionLocal = bg_service
+    db = SessionLocal()
+    task = BackgroundTask(id="fail-task", task_type="demo", status="queued")
+    db.add(task)
+
+    def always_locked():
+        raise OperationalError("commit", {}, Exception("database is locked"))
+
+    with patch.object(db, "commit", side_effect=always_locked):
+        with pytest.raises(OperationalError, match="database is locked"):
+            service._commit_with_retry(db)
+
+    db.close()
+
+
+def test_commit_with_retry_does_not_retry_other_operational_errors(bg_service):
+    service, SessionLocal = bg_service
+    db = SessionLocal()
+    task = BackgroundTask(id="other-error", task_type="demo", status="queued")
+    db.add(task)
+
+    attempts = {"count": 0}
+
+    def other_error():
+        attempts["count"] += 1
+        raise OperationalError("commit", {}, Exception("disk I/O error"))
+
+    with patch.object(db, "commit", side_effect=other_error):
+        with pytest.raises(OperationalError, match="disk I/O error"):
+            service._commit_with_retry(db)
+
+    assert attempts["count"] == 1
+    db.close()
 
 
 def test_enqueue_background_task_creates_record_and_submits_executor(bg_service):

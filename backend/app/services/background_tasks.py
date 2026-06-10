@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from fastapi import HTTPException
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 APP_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = APP_ROOT.parent
 MAX_OUTPUT_CHARS = 50_000
+_COMMIT_RETRY_ATTEMPTS = 5
+_COMMIT_RETRY_DELAY_SEC = 0.1
 _EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="bg-task")
 
 _PIPELINE_TASK_TYPES = {
@@ -34,6 +37,7 @@ _PIPELINE_TASK_TYPES = {
     "cidr_db_refresh_dry_run",
     "cidr_estimate_from_db",
     "cidr_generate_from_db",
+    "cidr_deploy",
     "antifilter_refresh",
 }
 
@@ -47,6 +51,7 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "cidr_db_refresh_dry_run": ("Пробный прогон CIDR БД…", "Подготовка обновления провайдеров…", 3),
     "cidr_estimate_from_db": ("Оценка CIDR из БД…", "Подготовка оценки…", 3),
     "cidr_generate_from_db": ("Генерация CIDR из БД…", "Подготовка генерации…", 3),
+    "cidr_deploy": ("Развёртывание CIDR на ноду…", "Подготовка развёртывания…", 3),
     "antifilter_refresh": ("Обновление Antifilter…", "Подготовка Antifilter…", 3),
     "vpn_network_publish": ("Публикация панели…", "Запуск nginx-setup.sh…", 5),
 }
@@ -61,6 +66,7 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "cidr_db_refresh_dry_run": "Пробный прогон завершён",
     "cidr_estimate_from_db": "Оценка завершена",
     "cidr_generate_from_db": "Генерация завершена",
+    "cidr_deploy": "Развёртывание завершено",
     "antifilter_refresh": "Antifilter обновлён",
     "vpn_network_publish": "Публикация панели завершена",
 }
@@ -72,6 +78,16 @@ class BackgroundTaskCallable(Protocol):
 
 
 class BackgroundTaskService:
+    def _commit_with_retry(self, db: Session) -> None:
+        for attempt in range(_COMMIT_RETRY_ATTEMPTS):
+            try:
+                db.commit()
+                return
+            except OperationalError as exc:
+                if "database is locked" not in str(exc).lower() or attempt == _COMMIT_RETRY_ATTEMPTS - 1:
+                    raise
+                time.sleep(_COMMIT_RETRY_DELAY_SEC * (attempt + 1))
+
     def trim_background_task_text(self, value: str | None) -> str:
         text = (value or "").strip()
         if len(text) <= MAX_OUTPUT_CHARS:
@@ -130,7 +146,7 @@ class BackgroundTaskService:
                 if key == "progress_stage" and isinstance(value, str):
                     value = value[:255]
                 setattr(task, key, value)
-            db.commit()
+            self._commit_with_retry(db)
         finally:
             db.close()
 
@@ -156,6 +172,21 @@ class BackgroundTaskService:
         finally:
             db.close()
 
+    def find_last_completed_task(self, task_type: str) -> BackgroundTask | None:
+        db = SessionLocal()
+        try:
+            return (
+                db.query(BackgroundTask)
+                .filter(
+                    BackgroundTask.task_type == task_type,
+                    BackgroundTask.status.in_(["completed", "failed"]),
+                )
+                .order_by(BackgroundTask.finished_at.desc())
+                .first()
+            )
+        finally:
+            db.close()
+
     def create_queued_task(
         self,
         task_type: str,
@@ -176,7 +207,7 @@ class BackgroundTaskService:
                 progress_stage="Ожидание запуска задачи…",
             )
             db.add(task)
-            db.commit()
+            self._commit_with_retry(db)
             return task_id
         finally:
             db.close()

@@ -19,15 +19,21 @@ const confirmMeta: Record<
     confirmLabel: 'Синхронизировать',
   },
   'generate-only': {
-    title: 'Сгенерировать CIDR из БД?',
+    title: 'Собрать CIDR-файлы из БД?',
     description:
-      'Списки AP-*-include-ips.txt будут пересобраны из локальной SQLite БД без обращения к интернету.',
+      'Списки AP-*-include-ips.txt будут сгенерированы на контроллере из локальной SQLite БД. Файлы на ноду не отправляются.',
     confirmLabel: 'Сгенерировать',
   },
-  'generate-doall': {
-    title: 'Сгенерировать и применить?',
+  'deploy-only': {
+    title: 'Развернуть CIDR на ноды?',
     description:
-      'CIDR-файлы будут сгенерированы из БД, затем автоматически выполнен doall.sh. Операция длительная.',
+      'Ранее собранные файлы с контроллера будут отправлены на выбранные online-ноды (или все online) и синхронизированы с AntiZapret. Offline-ноды будут пропущены.',
+    confirmLabel: 'Развернуть',
+  },
+  'generate-doall': {
+    title: 'Полный цикл: сборка, deploy и doall?',
+    description:
+      'CIDR-файлы будут собраны из БД, развёрнуты на ноду и применены через doall.sh. Операция длительная.',
     confirmLabel: 'Сгенерировать + doall',
     destructive: true,
     alertTitle: 'Длительная операция',

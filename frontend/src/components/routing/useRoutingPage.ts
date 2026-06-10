@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ApiError,
   applyRouting,
+  deployCidrToNode,
   generateCidrFromDb,
   getAntifilterStatus,
   getCidrDbStatus,
@@ -28,8 +28,14 @@ import type {
 
 export const REFRESH_INTERVAL = 60
 
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error) return err.message
+  return fallback
+}
+
 export type ConfirmAction =
   | 'apply-doall'
+  | 'deploy-only'
   | 'generate-doall'
   | 'generate-only'
   | 'sync-providers'
@@ -55,6 +61,8 @@ export function useRoutingPage() {
   const [games, setGames] = useState<GameFilterItem[]>([])
   const [gameModes, setGameModes] = useState<Record<string, string>>({})
   const [filterAntifilter, setFilterAntifilter] = useState(false)
+  const [deployAllOnline, setDeployAllOnline] = useState(false)
+  const [deployTargetNodeIds, setDeployTargetNodeIds] = useState<number[]>([])
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
 
   const loadPipelineMeta = useCallback(async () => {
@@ -96,7 +104,7 @@ export function useRoutingPage() {
         setCountdown(REFRESH_INTERVAL)
         if (manual) success('Данные маршрутизации обновлены')
       } catch (err) {
-        notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки маршрутизации')
+        notifyError(errorMessage(err, 'Ошибка загрузки маршрутизации'))
       } finally {
         setLoading(false)
         setRefreshing(false)
@@ -131,7 +139,7 @@ export function useRoutingPage() {
           }
         } catch (err) {
           stopPolling()
-          notifyError(err instanceof ApiError ? err.message : 'Ошибка отслеживания задачи')
+          notifyError(errorMessage(err, 'Ошибка отслеживания задачи'))
         }
       }, 1500)
     },
@@ -139,6 +147,12 @@ export function useRoutingPage() {
   )
 
   useEffect(() => () => stopPolling(), [stopPolling])
+
+  useEffect(() => {
+    if (activeNode?.id && deployTargetNodeIds.length === 0) {
+      setDeployTargetNodeIds([activeNode.id])
+    }
+  }, [activeNode?.id, deployTargetNodeIds.length])
 
   useEffect(() => {
     load({ initial: true })
@@ -175,7 +189,7 @@ export function useRoutingPage() {
       })
       pollTask(resp.task_id, okMsg)
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка операции')
+      notifyError(errorMessage(err, 'Ошибка операции'))
     } finally {
       setActionLoading(false)
     }
@@ -192,7 +206,7 @@ export function useRoutingPage() {
       success(okMsg)
       await load()
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка операции')
+      notifyError(errorMessage(err, 'Ошибка операции'))
     } finally {
       setActionLoading(false)
     }
@@ -215,7 +229,7 @@ export function useRoutingPage() {
         },
       })
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка операции')
+      notifyError(errorMessage(err, 'Ошибка операции'))
     } finally {
       setActionLoading(false)
     }
@@ -235,14 +249,40 @@ export function useRoutingPage() {
         break
       case 'generate-only':
         await withPipelineAction(
-          () => generateCidrFromDb({ filter_by_antifilter: filterAntifilter, apply_after: false }),
-          'CIDR-файлы сгенерированы из БД',
+          () =>
+            generateCidrFromDb({
+              filter_by_antifilter: filterAntifilter,
+              deploy_after: false,
+              sync_after: false,
+              apply_after: false,
+            }),
+          'CIDR-файлы собраны на контроллере',
         )
         break
       case 'generate-doall':
         await withPipelineAction(
-          () => generateCidrFromDb({ filter_by_antifilter: filterAntifilter, apply_after: true }),
-          'Сгенерировано и применено (doall.sh)',
+          () =>
+            generateCidrFromDb({
+              filter_by_antifilter: filterAntifilter,
+              deploy_after: true,
+              sync_after: true,
+              apply_after: true,
+            }),
+          'Сгенерировано, развёрнуто и применено (doall.sh)',
+        )
+        break
+      case 'deploy-only':
+        await withPipelineAction(
+          () =>
+            deployCidrToNode({
+              all_online: deployAllOnline,
+              target_node_ids: deployAllOnline ? null : deployTargetNodeIds.length ? deployTargetNodeIds : null,
+              sync_after: true,
+              apply_after: false,
+            }),
+          deployAllOnline
+            ? 'CIDR-файлы развёрнуты на все online-ноды'
+            : 'CIDR-файлы развёрнуты на выбранные ноды',
         )
         break
     }
@@ -267,6 +307,10 @@ export function useRoutingPage() {
     setGameModes,
     filterAntifilter,
     setFilterAntifilter,
+    deployAllOnline,
+    setDeployAllOnline,
+    deployTargetNodeIds,
+    setDeployTargetNodeIds,
     confirmAction,
     setConfirmAction,
     load,
@@ -293,5 +337,6 @@ export function useRoutingPage() {
     inline,
     refreshCidrDb: () => withPipelineAction(refreshCidrDb, 'CIDR БД обновлена из интернета'),
     refreshAntifilter: () => withPipelineAction(refreshAntifilter, 'Antifilter синхронизирован'),
+    deployCidr: () => setConfirmAction('deploy-only'),
   }
 }

@@ -239,6 +239,55 @@ class TestAdminNotifyText(AdminNotifyTextTests):
         assert "OpenVPN" in lines[1]
         assert "Авторазблокировка:" not in text
 
+    def test_cidr_deploy_failed_with_actor(self):
+        text = self._build(
+            self.service,
+            "cidr_deploy_failed",
+            actor_username="admin1",
+            details="Ошибки на 1 узел(ов): node-a: connection refused",
+        )
+        assert text is not None
+        lines = self._lines(text)
+        assert "Ошибка развёртывания CIDR" in lines[0]
+        assert "<code>admin1</code>" in lines[1]
+        assert "connection refused" in lines[2]
+
+    def test_cidr_deploy_failed_without_actor(self):
+        text = self._build(
+            self.service,
+            "cidr_deploy_failed",
+            details="Нет online-узлов для развёртывания",
+        )
+        assert text is not None
+        lines = self._lines(text)
+        assert len(lines) == 3
+        assert "Ошибка развёртывания CIDR" in lines[0]
+        assert "online-узлов" in lines[1]
+
+    def test_cidr_ingest_partial_with_actor(self):
+        text = self._build(
+            self.service,
+            "cidr_ingest_partial",
+            actor_username="admin1",
+            details="Обновлено: 5, ошибок: 1 · Проблемные: aws.txt",
+        )
+        assert text is not None
+        lines = self._lines(text)
+        assert "Частичное обновление CIDR БД" in lines[0]
+        assert "<code>admin1</code>" in lines[1]
+        assert "aws.txt" in lines[2]
+
+    def test_cidr_ingest_partial_without_actor(self):
+        text = self._build(
+            self.service,
+            "cidr_ingest_partial",
+            details="Обновлено: 3, ошибок: 2",
+        )
+        assert text is not None
+        lines = self._lines(text)
+        assert "Частичное обновление CIDR БД" in lines[0]
+        assert "ошибок: 2" in lines[1]
+
 
 def _seed_notify_settings(db_session):
     db_session.add(AppSetting(key="telegram_bot_token", value="test-token"))

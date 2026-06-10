@@ -8,14 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **CIDR Pipeline (вариант A, controller-centric)** — полный цикл ingest → compile → deploy → apply: тяжёлая работа на панели, ноды принимают артефакты через `PUT /routing/providers/{file}`.
+- **Orchestrator** — `run_ingest`, `run_compile`, `run_deploy`, `run_apply`, `run_multi_deploy`; модули `orchestrator.py`, `deploy.py`, `cidr_notify.py`.
+- **API** — `POST /api/routing/cidr-db/deploy` (фоновая задача `cidr_deploy`); `GET /api/routing/cidr-db/deploy/status`; в `generate` — `deploy_after`, `target_node_id`; в `deploy` — `target_node_ids`, `all_online`, `selected_files`.
+- **Мульти-нода deploy** — push на выбранные online-узлы или все online; offline пропускаются; `per_node` в result задачи; audit log `settings_cidr_deploy`.
+- **Ночной cron** — опционально compile/deploy после refresh (`CIDR_DB_COMPILE_AFTER_REFRESH`, `CIDR_DB_DEPLOY_AFTER_COMPILE`, `CIDR_DB_DEPLOY_TARGET`); `artifact_stamp` в refresh log.
+- **Наблюдаемость** — `last_compile_at`, `last_deploy` в `GET /api/routing/cidr-db/status`; `PipelineStatusBar`, `PipelineTaskProgress` с результатом по нодам; Telegram `cidr_deploy_failed`, `cidr_ingest_partial`.
+- **UI** — вкладка CIDR Pipeline: три этапа (обновить БД / собрать файлы / развернуть на ноду), выбор нод, «Сгенерировать + doall».
+- **Документация** — `docs/CIDR_PIPELINE_VARIANT_A.md` (спецификация pipeline, фазы 0–6).
+- **Тесты** — `test_cidr_pipeline_orchestrator.py`, `test_cidr_pipeline_deploy.py`, `test_cidr_db_deploy.py`, `test_cidr_multi_deploy.py`, `test_cidr_scheduler.py`, `test_cidr_notify.py`; retry commit в `test_background_tasks_service.py`.
 - **Per-node mTLS** — включение mTLS для каждого удалённого узла отдельно из панели (страница «Узлы» → «Включить mTLS»): генерация CA и сертификатов на панели, доставка на node agent (`POST /system/provision-mtls`), health по HTTPS; смешанный режим HTTP + mTLS.
 - **API** — `POST /api/nodes/{id}/enable-mtls`, `GET /api/nodes/mtls/status` (готовность CA, пути, права на каталог), поле `mtls_enabled` в `NodeResponse`.
 - **Тесты** — `test_node_mtls_migration.py`, `test_node_mtls_adapter.py`, `test_node_mtls_certs.py`, `test_node_agent_provision_mtls.py`, `test_node_mtls_provision.py`.
 
 ### Fixed
+- **CIDR refresh** — SQLite WAL + `busy_timeout` + retry commit при `database is locked`; устранены 500 при «Обновить из интернета».
 - **Обновление узла** — перезапуск node agent после git pull через `systemctl restart adminpanelaz-node`, если unit установлен; лог в `update-restart.log`.
 
 ### Changed
+- **CIDR generate** — compile всегда на контроллере; `artifact_stamp` (hash артефактов) в result задачи; deploy на удалённые ноды через `RemoteNodeAdapter.save_provider_content`.
 - **Узлы** — обновление узла только для node agent: убраны AntiZapret из `NodeUpdateDialog`, API `GET/POST /api/nodes/{id}/updates|update` и колонка `az` на странице «Узлы».
 - **mTLS** — `NODE_AGENT_MTLS_ENABLED` в `.env` панели deprecated; режим соединения задаётся per-node (`nodes.mtls_enabled` в БД). Улучшены сообщения об ошибках SSL при несовпадении HTTP/HTTPS.
 

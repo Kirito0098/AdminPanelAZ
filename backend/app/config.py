@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     cidr_db_refresh_enabled: bool = True
     cidr_db_refresh_hour: int = 2
     cidr_db_refresh_minute: int = 30
+    cidr_db_compile_after_refresh: bool = False
+    cidr_db_deploy_after_compile: bool = False
+    cidr_db_deploy_target: str = "active"
+    cidr_db_deploy_target_node_ids: str = ""
     antifilter_url: str = "https://antifilter.download/list/allyouneed.lst"
     serve_frontend: bool = False
     frontend_dist_path: Path = Path("../frontend/dist")
@@ -132,6 +136,14 @@ class Settings(BaseSettings):
             raise ValueError("APP_ENV must be 'development' or 'production'")
         return normalized
 
+    @field_validator("cidr_db_deploy_target")
+    @classmethod
+    def normalize_cidr_db_deploy_target(cls, value: str) -> str:
+        normalized = (value or "active").strip().lower()
+        if normalized not in {"active", "all_online", "node_ids"}:
+            raise ValueError("CIDR_DB_DEPLOY_TARGET must be active, all_online, or node_ids")
+        return normalized
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
@@ -147,6 +159,19 @@ class Settings(BaseSettings):
     @property
     def node_agent_allowed_ip_list(self) -> list[str]:
         return [ip.strip() for ip in self.node_agent_allowed_ips.split(",") if ip.strip()]
+
+    @property
+    def cidr_db_deploy_target_node_id_list(self) -> list[int]:
+        ids: list[int] = []
+        for part in self.cidr_db_deploy_target_node_ids.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ids.append(int(part))
+            except ValueError:
+                continue
+        return ids
 
 
 @lru_cache

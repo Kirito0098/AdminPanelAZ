@@ -610,6 +610,7 @@ class CidrDbUpdaterService:
             "total_cidrs": total_cidrs,
             "per_provider": per_provider,
             "dry_run": bool(dry_run),
+            "log_id": log_entry.id if log_entry is not None else None,
         }
 
     def get_db_status(self):
@@ -697,6 +698,29 @@ class CidrDbUpdaterService:
             "alerts": alerts,
         }
 
+    def append_refresh_log_pipeline_details(self, log_id: int, pipeline: dict) -> None:
+        """Merge cron pipeline metadata (compile/deploy) into refresh log details_json."""
+        m = _get_models()
+        log_entry = self.db.query(m.CidrDbRefreshLog).filter(m.CidrDbRefreshLog.id == log_id).first()
+        if not log_entry:
+            logger.warning("CIDR refresh log %s not found — pipeline details not saved", log_id)
+            return
+
+        try:
+            details = json.loads(log_entry.details_json or "{}")
+        except (TypeError, ValueError):
+            details = {}
+        if not isinstance(details, dict):
+            details = {}
+
+        existing = details.get("_pipeline")
+        if not isinstance(existing, dict):
+            existing = {}
+        existing.update(pipeline)
+        details["_pipeline"] = existing
+        log_entry.details_json = json.dumps(details, ensure_ascii=False)
+        self.db.commit()
+
     def get_refresh_history(self, limit=10):
         """Return last N refresh log entries."""
         m = _get_models()
@@ -742,6 +766,8 @@ class CidrDbUpdaterService:
 
         failed = []
         for provider_key, provider_info in details.items():
+            if str(provider_key).startswith("_"):
+                continue
             if not isinstance(provider_info, dict):
                 continue
             if str(provider_info.get("status") or "") == "error":

@@ -307,6 +307,14 @@ export interface CidrDbRefreshHistoryItem {
   triggered_by?: string | null
 }
 
+export interface CidrLastCompileSummary {
+  finished_at?: string | null
+  status?: string | null
+  files_updated?: number
+  artifact_stamp?: string | null
+  message?: string | null
+}
+
 export interface CidrDbStatus {
   success: boolean
   last_refresh_started?: string | null
@@ -317,6 +325,8 @@ export interface CidrDbStatus {
   providers: Record<string, CidrDbProviderMeta>
   alerts?: string[]
   history?: CidrDbRefreshHistoryItem[]
+  last_compile_at?: CidrLastCompileSummary | null
+  last_deploy?: CidrLastDeploySummary | null
 }
 
 export interface AntifilterStatus {
@@ -327,6 +337,34 @@ export interface AntifilterStatus {
   refresh_error?: string | null
 }
 
+export interface CidrDeployResult {
+  pushed: string[]
+  failed: Array<{ file: string; error: string }>
+}
+
+export interface CidrDeployPerNodeResult {
+  node_id: number
+  node_name?: string | null
+  status: 'success' | 'failed' | 'skipped'
+  pushed_files?: string[]
+  failed?: Array<{ file: string; error: string }>
+  error?: string | null
+}
+
+export interface CidrLastDeploySummary {
+  finished_at?: string | null
+  status?: string | null
+  pushed_count?: number
+  failed_count?: number
+  target_node_id?: number | null
+  artifact_stamp?: string | null
+  nodes_deployed?: number
+  nodes_failed?: number
+  nodes_skipped?: number
+  per_node?: CidrDeployPerNodeResult[]
+  message?: string | null
+}
+
 export interface CidrPipelineTask {
   task_id: string
   task_type: string
@@ -335,7 +373,15 @@ export interface CidrPipelineTask {
   progress_percent: number
   progress_stage: string
   error?: string | null
-  result?: unknown
+  result?: {
+    deploy?: CidrDeployResult
+    per_node?: CidrDeployPerNodeResult[]
+    artifact_stamp?: string | null
+    nodes_deployed?: number
+    nodes_failed?: number
+    nodes_skipped?: number
+    [key: string]: unknown
+  }
   created_at?: string | null
   started_at?: string | null
   finished_at?: string | null

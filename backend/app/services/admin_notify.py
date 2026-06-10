@@ -39,6 +39,8 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("settings_change", "Изменение настроек"),
     ("high_cpu", "Высокая нагрузка CPU"),
     ("high_ram", "Высокая нагрузка RAM"),
+    ("cidr_deploy_failed", "Ошибка развёртывания CIDR"),
+    ("cidr_ingest_partial", "Частичное обновление CIDR БД"),
 ]
 
 CLIENT_BLOCK_NOTIFY_EVENTS = frozenset({
@@ -680,6 +682,34 @@ class AdminNotifyService:
             node_name=node_name,
         )
 
+    def send_cidr_deploy_failed(
+        self,
+        db: Session,
+        *,
+        details: str | None = None,
+        actor_username: str | None = None,
+    ) -> None:
+        self.send(
+            db,
+            "cidr_deploy_failed",
+            actor_username=actor_username,
+            details=details,
+        )
+
+    def send_cidr_ingest_partial(
+        self,
+        db: Session,
+        *,
+        details: str | None = None,
+        actor_username: str | None = None,
+    ) -> None:
+        self.send(
+            db,
+            "cidr_ingest_partial",
+            actor_username=actor_username,
+            details=details,
+        )
+
     def maybe_send_resource_alert(
         self,
         db: Session,
@@ -864,6 +894,34 @@ class AdminNotifyService:
             return _format_notify_system(
                 "💾 <b>Высокая нагрузка памяти</b>",
                 f"📊 {metric}",
+                when,
+            )
+        if event_type == "cidr_deploy_failed":
+            action = details or "Развёртывание CIDR завершилось с ошибкой"
+            if actor_username:
+                return _format_notify(
+                    "❌ <b>Ошибка развёртывания CIDR</b>",
+                    _fmt_actor(actor_username, as_admin=True),
+                    action,
+                    when,
+                )
+            return _format_notify_system(
+                "❌ <b>Ошибка развёртывания CIDR</b>",
+                action,
+                when,
+            )
+        if event_type == "cidr_ingest_partial":
+            action = details or "Обновление CIDR БД завершилось частично"
+            if actor_username:
+                return _format_notify(
+                    "⚠️ <b>Частичное обновление CIDR БД</b>",
+                    _fmt_actor(actor_username, as_admin=True),
+                    action,
+                    when,
+                )
+            return _format_notify_system(
+                "⚠️ <b>Частичное обновление CIDR БД</b>",
+                action,
                 when,
             )
         return None

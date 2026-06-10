@@ -92,6 +92,33 @@ def find_active_cidr_task(task_type: str) -> dict[str, Any] | None:
     return background_task_service.serialize_background_task(task) if task else None
 
 
+def find_last_completed_cidr_task(task_type: str) -> dict[str, Any] | None:
+    if _use_memory_backend():
+        candidates = [
+            dict(task)
+            for task in _CIDR_TASKS.values()
+            if str(task.get("task_type") or "") == str(task_type or "")
+            and str(task.get("status") or "") in {"completed", "failed"}
+        ]
+        if not candidates:
+            return None
+
+        def _sort_key(item: dict[str, Any]) -> float:
+            value = item.get("finished_at") or item.get("created_at")
+            if isinstance(value, datetime):
+                return value.timestamp()
+            if isinstance(value, str):
+                try:
+                    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+                except ValueError:
+                    return 0.0
+            return 0.0
+
+        return max(candidates, key=_sort_key)
+    task = background_task_service.find_last_completed_task(task_type)
+    return background_task_service.serialize_background_task(task) if task else None
+
+
 def serialize_cidr_task(task: dict[str, Any]) -> dict[str, Any]:
     return background_task_service.serialize_background_task(task)
 

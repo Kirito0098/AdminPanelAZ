@@ -32,6 +32,8 @@ DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
     "settings_change": True,
     "high_cpu": True,
     "high_ram": True,
+    "cidr_deploy_failed": True,
+    "cidr_ingest_partial": True,
 }
 
 

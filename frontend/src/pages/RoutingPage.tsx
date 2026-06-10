@@ -27,7 +27,7 @@ import { useAuth } from '@/context/AuthContext'
 
 export default function RoutingPage() {
   const { user } = useAuth()
-  const { activeNode } = useNode()
+  const { activeNode, nodes } = useNode()
   const isAdmin = user?.role === 'admin'
 
   const {
@@ -47,6 +47,10 @@ export default function RoutingPage() {
     setGameModes,
     filterAntifilter,
     setFilterAntifilter,
+    deployAllOnline,
+    setDeployAllOnline,
+    deployTargetNodeIds,
+    setDeployTargetNodeIds,
     confirmAction,
     setConfirmAction,
     load,
@@ -56,6 +60,7 @@ export default function RoutingPage() {
     syncGames,
     refreshCidrDb,
     refreshAntifilter,
+    deployCidr,
     inline,
   } = useRoutingPage()
 
@@ -148,12 +153,18 @@ export default function RoutingPage() {
               cidrDb={cidrDb}
               antifilter={antifilter}
               pipelineTask={pipelineTask}
+              nodes={nodes}
+              deployAllOnline={deployAllOnline}
+              deployTargetNodeIds={deployTargetNodeIds}
               filterAntifilter={filterAntifilter}
               pipelineBusy={pipelineBusy}
               onFilterAntifilterChange={setFilterAntifilter}
+              onDeployAllOnlineChange={setDeployAllOnline}
+              onDeployTargetNodeIdsChange={setDeployTargetNodeIds}
               onRefreshDb={refreshCidrDb}
               onRefreshAntifilter={refreshAntifilter}
               onGenerate={() => setConfirmAction('generate-only')}
+              onDeploy={deployCidr}
               onGenerateDoall={() => setConfirmAction('generate-doall')}
             />
           </TabsContent>

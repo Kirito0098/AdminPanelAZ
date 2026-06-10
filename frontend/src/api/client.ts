@@ -592,6 +592,9 @@ export async function generateCidrFromDb(options?: {
   filter_by_antifilter?: boolean
   exclude_ru_cidrs?: boolean
   apply_after?: boolean
+  deploy_after?: boolean
+  target_node_id?: number | null
+  sync_after?: boolean
 }) {
   return apiFetch<{ success: boolean; task_id: string; message: string }>('/routing/cidr-db/generate', {
     method: 'POST',
@@ -600,9 +603,38 @@ export async function generateCidrFromDb(options?: {
       filter_by_antifilter: options?.filter_by_antifilter ?? false,
       exclude_ru_cidrs: options?.exclude_ru_cidrs ?? false,
       apply_after: options?.apply_after ?? false,
-      sync_after: true,
+      deploy_after: options?.deploy_after ?? false,
+      target_node_id: options?.target_node_id ?? null,
+      sync_after: options?.sync_after ?? false,
     }),
   })
+}
+
+export async function deployCidrToNode(options?: {
+  target_node_id?: number | null
+  target_node_ids?: number[] | null
+  all_online?: boolean
+  sync_after?: boolean
+  apply_after?: boolean
+  selected_files?: string[] | null
+}) {
+  return apiFetch<{ success: boolean; task_id: string; message: string }>('/routing/cidr-db/deploy', {
+    method: 'POST',
+    body: JSON.stringify({
+      target_node_id: options?.target_node_id ?? null,
+      target_node_ids: options?.target_node_ids ?? null,
+      all_online: options?.all_online ?? false,
+      sync_after: options?.sync_after ?? true,
+      apply_after: options?.apply_after ?? false,
+      selected_files: options?.selected_files ?? null,
+    }),
+  })
+}
+
+export async function getCidrDeployStatus() {
+  return apiFetch<{ success: boolean; last_deploy: import('../types').CidrLastDeploySummary | null }>(
+    '/routing/cidr-db/deploy/status',
+  )
 }
 
 export async function getCidrPipelineTask(taskId: string) {
