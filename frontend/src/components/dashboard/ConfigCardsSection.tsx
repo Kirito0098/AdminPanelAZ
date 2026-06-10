@@ -30,13 +30,14 @@ import {
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
-import type { ClientAccessPolicy, OpenVpnGroupOption, UserRole, VpnConfig } from '@/types'
+import type { ClientAccessPolicy, OpenVpnGroupOption, User, UserRole, VpnConfig } from '@/types'
 import { FileKey, Filter, Search, Shield, X } from 'lucide-react'
 
 interface ConfigCardsSectionProps {
   configs: VpnConfig[]
   policies: Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
   userRole: UserRole
+  ownerCandidates?: User[]
   filesLoading?: boolean
   onRefresh: () => Promise<void>
   onQr: (config: VpnConfig, path: string, filename: string) => Promise<void>
@@ -63,6 +64,7 @@ export default function ConfigCardsSection({
   configs,
   policies,
   userRole,
+  ownerCandidates = [],
   filesLoading = false,
   onRefresh,
   onQr,
@@ -422,6 +424,7 @@ export default function ConfigCardsSection({
         tab={selectedTab}
         policy={selectedConfig ? getPolicyForConfig(selectedConfig, policies) : undefined}
         userRole={userRole}
+        ownerCandidates={ownerCandidates}
         open={!!selectedConfig}
         onOpenChange={(open) => !open && setSelectedConfig(null)}
         onRefresh={onRefresh}

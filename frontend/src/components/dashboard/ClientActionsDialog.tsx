@@ -32,6 +32,7 @@ import {
   wgTempBlock,
   wgUnblock,
 } from '@/api/client'
+import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -56,13 +57,14 @@ import {
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
-import type { ClientAccessPolicy, UserRole, VpnConfig } from '@/types'
+import type { ClientAccessPolicy, User, UserRole, VpnConfig } from '@/types'
 
 interface ClientActionsDialogProps {
   config: VpnConfig | null
   tab: ProtocolTab
   policy?: ClientAccessPolicy
   userRole: UserRole
+  ownerCandidates?: User[]
   open: boolean
   onOpenChange: (open: boolean) => void
   onRefresh: () => Promise<void>
@@ -141,6 +143,7 @@ export default function ClientActionsDialog({
   tab,
   policy,
   userRole,
+  ownerCandidates = [],
   open,
   onOpenChange,
   onRefresh,
@@ -265,6 +268,19 @@ export default function ClientActionsDialog({
       `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(target.getDate()).padStart(2, '0')}`,
     )
     setPromptMode('renew')
+  }
+
+  const handleOwnerChange = async (nextOwnerId: number) => {
+    if (nextOwnerId === config.owner_id) return
+    await runAction('change-owner', async () => {
+      await updateConfig(config.id, { owner_id: nextOwnerId })
+      const nextOwner = ownerCandidates.find((user) => user.id === nextOwnerId)
+      onNotifySuccess(
+        nextOwner
+          ? `Владелец изменён на «${nextOwner.username}»`
+          : 'Владелец конфигурации изменён',
+      )
+    })
   }
 
   const submitRenew = async () => {
@@ -573,6 +589,25 @@ export default function ClientActionsDialog({
           </DialogHeader>
 
           <div className="space-y-5 px-6 py-5">
+            {isAdmin && ownerCandidates.length > 0 && (
+              <section className="space-y-3">
+                <SectionTitle>Владелец</SectionTitle>
+                <ConfigOwnerSelect
+                  id={`owner-${config.id}`}
+                  users={ownerCandidates}
+                  value={config.owner_id}
+                  onChange={(ownerId) => void handleOwnerChange(ownerId)}
+                  disabled={busyAction !== null}
+                  currentOwner={
+                    config.owner_username
+                      ? { id: config.owner_id, username: config.owner_username }
+                      : undefined
+                  }
+                  description="Назначьте пользователя, который будет видеть этот конфиг в своём списке."
+                />
+              </section>
+            )}
+
             {visibleManagement.length > 0 && (
               <section className="space-y-3">
                 <SectionTitle>Управление</SectionTitle>

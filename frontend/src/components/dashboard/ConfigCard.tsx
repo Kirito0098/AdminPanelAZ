@@ -11,6 +11,7 @@ import {
   Shield,
   Trash2,
   Unlock,
+  UserRound,
 } from 'lucide-react'
 import type { ClientAccessPolicy, UserRole, VpnConfig } from '@/types'
 import {
@@ -149,6 +150,15 @@ export default function ConfigCard({
             <div>
               <p className="text-xs text-muted-foreground">Сертификат</p>
               <p className="text-xs">{config.cert_expire_days ?? '—'} дн.</p>
+            </div>
+          )}
+          {isAdmin && config.owner_username && (
+            <div>
+              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                <UserRound size={12} />
+                Владелец
+              </p>
+              <p className="text-xs">{config.owner_username}</p>
             </div>
           )}
           {showMeta &&

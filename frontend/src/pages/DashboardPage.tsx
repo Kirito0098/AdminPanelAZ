@@ -17,9 +17,11 @@ import {
   getConfigProfileFiles,
   getConfigs,
   getDashboardSummary,
+  getUsers,
   syncConfigs,
 } from '@/api/client'
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
+import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import MetricCard from '@/components/noc/MetricCard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
@@ -50,7 +52,7 @@ import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
-import type { ClientAccessPolicy, DashboardSummary, VpnConfig, VpnType } from '@/types'
+import type { ClientAccessPolicy, DashboardSummary, User, VpnConfig, VpnType } from '@/types'
 
 export default function DashboardPage() {
   const { user } = useAuth()
@@ -77,6 +79,9 @@ export default function DashboardPage() {
   const [policies, setPolicies] = useState<
     Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
   >({})
+  const [panelUsers, setPanelUsers] = useState<User[]>([])
+  const [ownerId, setOwnerId] = useState<number | null>(null)
+  const isAdmin = user?.role === 'admin'
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
@@ -140,11 +145,30 @@ export default function DashboardPage() {
     load()
   }, [activeNode?.id])
 
+  useEffect(() => {
+    if (!isAdmin) {
+      setPanelUsers([])
+      return
+    }
+    let cancelled = false
+    void getUsers()
+      .then((users) => {
+        if (!cancelled) setPanelUsers(users)
+      })
+      .catch(() => {
+        if (!cancelled) setPanelUsers([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isAdmin])
+
   const resetForm = () => {
     setClientName('')
     setDescription('')
     setVpnType('openvpn')
     setCertDays(3650)
+    setOwnerId(user?.id ?? null)
   }
 
   const closeForm = () => {
@@ -178,6 +202,7 @@ export default function DashboardPage() {
           vpn_type: vpnType,
           cert_expire_days: vpnType === 'openvpn' ? certDays : undefined,
           description: description || undefined,
+          owner_id: isAdmin && ownerId ? ownerId : undefined,
         })
         closeForm()
         await load({ silent: true })
@@ -261,7 +286,12 @@ export default function DashboardPage() {
             </Button>
           )}
           {user?.role !== 'viewer' && canCreateClient && (
-            <Button onClick={() => setShowForm(true)}>
+            <Button
+              onClick={() => {
+                setOwnerId(user?.id ?? null)
+                setShowForm(true)
+              }}
+            >
               <Plus size={16} />
               Новый клиент
             </Button>
@@ -392,6 +422,16 @@ export default function DashboardPage() {
                 placeholder="Необязательно"
               />
             </div>
+            {isAdmin && (
+              <ConfigOwnerSelect
+                id="createConfigOwner"
+                users={panelUsers}
+                value={ownerId}
+                onChange={setOwnerId}
+                disabled={submitting}
+                description="Пользователь с ролью «Пользователь» увидит этот конфиг в своём списке."
+              />
+            )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeForm} disabled={submitting}>
                 Отмена
@@ -461,7 +501,12 @@ export default function DashboardPage() {
                     </Button>
                   )}
                   {user?.role !== 'viewer' && canCreateClient && (
-                    <Button onClick={() => setShowForm(true)}>
+                    <Button
+                      onClick={() => {
+                        setOwnerId(user?.id ?? null)
+                        setShowForm(true)
+                      }}
+                    >
                       <Plus size={16} />
                       Создать клиента
                     </Button>
@@ -477,6 +522,7 @@ export default function DashboardPage() {
           configs={configs}
           policies={policies}
           userRole={user.role}
+          ownerCandidates={panelUsers}
           filesLoading={loadingFiles}
           onRefresh={() => load({ silent: true })}
           onQr={handleQr}
