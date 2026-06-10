@@ -729,7 +729,20 @@ class RemoteNodeAdapter(NodeAdapter):
             timeout=30.0,
         )
 
-    def provision_mtls(self, bundle: MtlsProvisionBundle) -> dict[str, Any]:
+    @staticmethod
+    def _is_agent_restart_disconnect(detail: object) -> bool:
+        msg = str(detail).lower()
+        return (
+            "закрыл соединение без ответа" in msg
+            or "disconnected without sending a response" in msg
+        )
+
+    def _provision_mtls_request(
+        self,
+        bundle: MtlsProvisionBundle,
+        *,
+        restart: bool,
+    ) -> dict[str, Any]:
         return self._request(
             "POST",
             "/system/provision-mtls",
@@ -737,6 +750,37 @@ class RemoteNodeAdapter(NodeAdapter):
                 "ca_pem": bundle.ca_pem,
                 "agent_cert_pem": bundle.agent_cert_pem,
                 "agent_key_pem": bundle.agent_key_pem,
+                "restart": restart,
             },
             timeout=120.0,
         )
+
+    def restart_agent_after_mtls(self) -> dict[str, Any]:
+        return self._request("POST", "/system/restart-agent", json={}, timeout=30.0)
+
+    def provision_mtls(self, bundle: MtlsProvisionBundle) -> dict[str, Any]:
+        """Write mTLS materials on the node, then restart without dropping the HTTP response."""
+        result = self._provision_mtls_request(bundle, restart=False)
+        if not result.get("success"):
+            return result
+
+        restart_result: dict[str, Any] | None = None
+        try:
+            restart_result = self.restart_agent_after_mtls()
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                try:
+                    self._provision_mtls_request(bundle, restart=True)
+                    restart_result = {"method": "legacy", "success": True}
+                except HTTPException as legacy_exc:
+                    if not self._is_agent_restart_disconnect(legacy_exc.detail):
+                        raise
+                    restart_result = {"method": "legacy", "success": True}
+            elif self._is_agent_restart_disconnect(exc.detail):
+                restart_result = {"method": "in-request", "success": True}
+            else:
+                raise
+
+        if restart_result is not None:
+            result = {**result, "restart": restart_result}
+        return result

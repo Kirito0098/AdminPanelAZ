@@ -17,7 +17,13 @@ from app.services.antizapret_settings import build_schema, filter_known_keys, re
 from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import build_health_payload
 from app.services.node_agent_provision import provision_mtls
-from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
+from app.services.node_agent_env import resolve_node_agent_env_file
+from app.services.node_update import (
+    apply_node_update,
+    check_agent_updates,
+    resolve_repo_root,
+    schedule_agent_restart,
+)
 from app.services.openvpn_management import openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.server_monitor import ServerMonitorService
@@ -38,7 +44,7 @@ NODE_AGENT_MTLS_ENABLED = os.environ.get("NODE_AGENT_MTLS_ENABLED", "false").str
 NODE_AGENT_MTLS_SERVER_CERT = os.environ.get("NODE_AGENT_MTLS_SERVER_CERT", "/etc/adminpanelaz/mtls/agent.crt")
 NODE_AGENT_MTLS_SERVER_KEY = os.environ.get("NODE_AGENT_MTLS_SERVER_KEY", "/etc/adminpanelaz/mtls/agent.key")
 NODE_AGENT_MTLS_CA_CERT = os.environ.get("NODE_AGENT_MTLS_CA_CERT", "/etc/adminpanelaz/mtls/ca.crt")
-NODE_AGENT_ENV_FILE = Path(os.environ.get("NODE_AGENT_ENV_FILE", "/etc/adminpanelaz/node_agent.env"))
+NODE_AGENT_ENV_FILE = resolve_node_agent_env_file()
 
 from app.services.security_bootstrap import validate_node_agent_key
 
@@ -411,6 +417,22 @@ def system_ensure_openvpn_ban_check(_: None = Depends(verify_api_key)):
 def rotate_api_key(payload: RotateApiKeyRequest, _: None = Depends(verify_api_key)):
     _persist_api_key(payload.new_api_key)
     return {"message": "API-ключ обновлён", "success": True}
+
+
+@app.post("/system/restart-agent")
+def system_restart_agent(_: None = Depends(verify_api_key)):
+    repo_root = resolve_repo_root()
+    if repo_root is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Репозиторий node agent не найден для перезапуска",
+        )
+    schedule_agent_restart(repo_root)
+    return {
+        "success": True,
+        "message": "Перезапуск node agent запланирован",
+        "restarting": True,
+    }
 
 
 @app.post("/system/provision-mtls")

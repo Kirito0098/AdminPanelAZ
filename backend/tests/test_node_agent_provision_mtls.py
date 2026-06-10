@@ -86,9 +86,36 @@ def test_persist_node_agent_env_mtls_updates_flags(node_paths):
     assert "NODE_AGENT_API_KEY=old" in content
 
 
-@patch("app.services.node_agent_provision.restart_node_agent")
+def test_persist_node_agent_env_mtls_writes_backend_and_legacy_env(tmp_path, monkeypatch):
+    repo = tmp_path / "AdminPanelAZ"
+    backend_env = repo / "backend" / "node_agent.env"
+    backend_env.parent.mkdir(parents=True)
+    backend_env.write_text("NODE_AGENT_API_KEY=old\n", encoding="utf-8")
+    (repo / ".git").mkdir()
+    legacy_env = tmp_path / "etc" / "adminpanelaz" / "node_agent.env"
+    legacy_env.parent.mkdir(parents=True)
+
+    monkeypatch.setenv("NODE_AGENT_ENV_FILE", str(legacy_env))
+    monkeypatch.setenv("NODE_AGENT_MTLS_CA_CERT", str(tmp_path / "mtls" / "ca.crt"))
+    monkeypatch.setenv("NODE_AGENT_MTLS_SERVER_CERT", str(tmp_path / "mtls" / "agent.crt"))
+    monkeypatch.setenv("NODE_AGENT_MTLS_SERVER_KEY", str(tmp_path / "mtls" / "agent.key"))
+
+    paths = {
+        "ca_cert": str(tmp_path / "mtls" / "ca.crt"),
+        "server_cert": str(tmp_path / "mtls" / "agent.crt"),
+        "server_key": str(tmp_path / "mtls" / "agent.key"),
+    }
+    with patch("app.services.node_agent_env.resolve_repo_root", return_value=repo):
+        persist_node_agent_env_mtls(paths)
+
+    for env_file in (backend_env, legacy_env):
+        content = env_file.read_text(encoding="utf-8")
+        assert "NODE_AGENT_MTLS_ENABLED=true" in content
+        assert f"NODE_AGENT_MTLS_CA_CERT={paths['ca_cert']}" in content
+
+
+@patch("app.services.node_agent_provision.schedule_agent_restart")
 def test_provision_mtls_with_restart(mock_restart, mtls_bundle, node_paths, tmp_path):
-    mock_restart.return_value = {"method": "script", "success": True, "output": "ok", "error": None}
     (tmp_path / ".git").mkdir()
 
     result = provision_mtls(
@@ -101,12 +128,13 @@ def test_provision_mtls_with_restart(mock_restart, mtls_bundle, node_paths, tmp_
 
     assert result["success"] is True
     assert result["mtls_enabled"] is True
+    assert result["restart"]["method"] == "scheduled"
     assert (node_paths["mtls_dir"] / "agent.crt").is_file()
     assert "NODE_AGENT_MTLS_ENABLED=true" in node_paths["env_file"].read_text(encoding="utf-8")
     mock_restart.assert_called_once_with(tmp_path)
 
 
-@patch("app.services.node_agent_provision.restart_node_agent")
+@patch("app.services.node_agent_provision.schedule_agent_restart")
 def test_provision_mtls_skips_restart_when_disabled(mock_restart, mtls_bundle, node_paths, tmp_path):
     result = provision_mtls(
         ca_pem=mtls_bundle.ca_pem,
@@ -140,14 +168,13 @@ def _node_agent_test_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, st
     return TestClient(main_mod.app), api_key
 
 
-@patch("app.services.node_agent_provision.restart_node_agent")
+@patch("app.services.node_agent_provision.schedule_agent_restart")
 def test_provision_mtls_endpoint_writes_files(
     mock_restart,
     mtls_bundle,
     tmp_path,
     monkeypatch,
 ):
-    mock_restart.return_value = {"method": "script", "success": True, "output": "", "error": None}
     (tmp_path / ".git").mkdir()
     client, api_key = _node_agent_test_client(tmp_path, monkeypatch)
 

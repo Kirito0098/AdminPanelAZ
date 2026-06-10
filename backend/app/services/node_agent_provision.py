@@ -7,7 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from app.services.node_update import resolve_repo_root, restart_node_agent
+from app.services.node_agent_env import node_agent_env_targets
+from app.services.node_update import resolve_repo_root, schedule_agent_restart
 
 _DIR_MODE = 0o700
 _KEY_MODE = 0o600
@@ -35,7 +36,9 @@ def _mtls_paths() -> dict[str, Path]:
 
 
 def _node_agent_env_file() -> Path:
-    return Path(os.environ.get("NODE_AGENT_ENV_FILE", "/etc/adminpanelaz/node_agent.env"))
+    from app.services.node_agent_env import resolve_node_agent_env_file
+
+    return resolve_node_agent_env_file()
 
 
 def _validate_pem(name: str, content: str, *, marker_pairs: tuple[tuple[str, str], ...]) -> None:
@@ -75,16 +78,7 @@ def _env_set_line(key: str, value: str) -> str:
     return f"{key}={value}"
 
 
-def persist_node_agent_env_mtls(paths: dict[str, str]) -> None:
-    """Enable mTLS in node_agent.env and persist cert paths."""
-    env_file = _node_agent_env_file()
-    updates = {
-        "NODE_AGENT_MTLS_ENABLED": "true",
-        "NODE_AGENT_MTLS_CA_CERT": paths["ca_cert"],
-        "NODE_AGENT_MTLS_SERVER_CERT": paths["server_cert"],
-        "NODE_AGENT_MTLS_SERVER_KEY": paths["server_key"],
-    }
-
+def _write_env_updates(env_file: Path, updates: dict[str, str]) -> None:
     lines: list[str] = []
     if env_file.is_file():
         lines = env_file.read_text(encoding="utf-8").splitlines()
@@ -110,6 +104,19 @@ def persist_node_agent_env_mtls(paths: dict[str, str]) -> None:
     env_file.write_text("\n".join(result) + "\n", encoding="utf-8")
 
 
+def persist_node_agent_env_mtls(paths: dict[str, str]) -> None:
+    """Enable mTLS in node_agent.env and persist cert paths."""
+    updates = {
+        "NODE_AGENT_MTLS_ENABLED": "true",
+        "NODE_AGENT_MTLS_CA_CERT": paths["ca_cert"],
+        "NODE_AGENT_MTLS_SERVER_CERT": paths["server_cert"],
+        "NODE_AGENT_MTLS_SERVER_KEY": paths["server_key"],
+    }
+
+    for env_file in node_agent_env_targets():
+        _write_env_updates(env_file, updates)
+
+
 def provision_mtls(
     *,
     ca_pem: str,
@@ -133,13 +140,23 @@ def provision_mtls(
                 "error": "Репозиторий node agent не найден для перезапуска",
             }
         else:
-            restart_result = restart_node_agent(root)
+            schedule_agent_restart(root)
+            restart_result = {
+                "method": "scheduled",
+                "success": True,
+                "output": "",
+                "error": None,
+            }
 
     success = restart_result is None or restart_result.get("success", False)
     message = "mTLS материалы записаны"
     if restart_result is not None:
         if restart_result.get("success"):
-            message += f", перезапуск ({restart_result.get('method', 'unknown')})"
+            method = restart_result.get("method", "unknown")
+            if method == "scheduled":
+                message += ", перезапуск запланирован"
+            else:
+                message += f", перезапуск ({method})"
         else:
             message += f", перезапуск не выполнен: {restart_result.get('error', 'ошибка')}"
 

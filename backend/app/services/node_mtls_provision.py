@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 
 from fastapi import HTTPException, status
@@ -23,6 +24,21 @@ from app.services.node_mtls_certs import (
     generate_agent_cert_for_node,
     read_agent_bundle_for_node,
 )
+
+_MTLS_HEALTH_ATTEMPTS = 12
+_MTLS_HEALTH_DELAY_SECONDS = 2.0
+
+
+def _wait_for_mtls_health(node: Node) -> dict:
+    """Poll HTTPS health after node agent restart (mTLS bootstrap)."""
+    last: dict = {"status": "offline", "error": "Таймаут ожидания node agent по HTTPS"}
+    for attempt in range(_MTLS_HEALTH_ATTEMPTS):
+        if attempt > 0:
+            time.sleep(_MTLS_HEALTH_DELAY_SECONDS)
+        last = check_node_health(node)
+        if last.get("status") == "online":
+            return last
+    return last
 
 
 def enable_mtls(db: Session, node: Node, actor: User) -> Node:
@@ -73,7 +89,7 @@ def enable_mtls(db: Session, node: Node, actor: User) -> Node:
     db.commit()
     db.refresh(node)
 
-    post_health = check_node_health(node)
+    post_health = _wait_for_mtls_health(node)
     if post_health.get("status") != "online":
         node.mtls_enabled = False
         node.updated_at = datetime.utcnow()

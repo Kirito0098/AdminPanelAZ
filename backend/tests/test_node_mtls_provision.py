@@ -115,12 +115,12 @@ def test_enable_mtls_rolls_back_on_https_health_failure(db_with_nodes, mtls_env)
     mock_adapter.provision_mtls.return_value = {"success": True, "message": "ok", "mtls_enabled": True}
 
     with patch("app.services.node_mtls_provision.check_node_health") as health_mock, patch(
+        "app.services.node_mtls_provision._wait_for_mtls_health",
+        return_value={"status": "offline", "error": "SSL handshake failed"},
+    ), patch(
         "app.services.node_mtls_provision.RemoteNodeAdapter", return_value=mock_adapter
     ):
-        health_mock.side_effect = [
-            {"status": "online"},
-            {"status": "offline", "error": "SSL handshake failed"},
-        ]
+        health_mock.return_value = {"status": "online"}
         with pytest.raises(HTTPException) as exc_info:
             enable_mtls(session, remote, admin)
 
@@ -244,19 +244,29 @@ def test_remote_adapter_provision_mtls_calls_endpoint():
 
     adapter = RemoteNodeAdapter("10.0.0.1", 9100, "k" * 32, mtls_enabled=False)
     bundle = _sample_bundle()
-    expected = {"success": True, "message": "ok", "mtls_enabled": True}
+    provision_result = {"success": True, "message": "ok", "mtls_enabled": True}
+    restart_result = {"success": True, "message": "scheduled", "restarting": True}
 
-    with patch.object(adapter, "_request", return_value=expected) as request_mock:
+    with patch.object(adapter, "_request", side_effect=[provision_result, restart_result]) as request_mock:
         result = adapter.provision_mtls(bundle)
 
-    assert result == expected
-    request_mock.assert_called_once_with(
+    assert result["success"] is True
+    assert result["restart"] == restart_result
+    assert request_mock.call_count == 2
+    request_mock.assert_any_call(
         "POST",
         "/system/provision-mtls",
         json={
             "ca_pem": bundle.ca_pem,
             "agent_cert_pem": bundle.agent_cert_pem,
             "agent_key_pem": bundle.agent_key_pem,
+            "restart": False,
         },
         timeout=120.0,
+    )
+    request_mock.assert_any_call(
+        "POST",
+        "/system/restart-agent",
+        json={},
+        timeout=30.0,
     )
