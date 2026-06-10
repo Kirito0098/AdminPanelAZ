@@ -228,9 +228,11 @@ sudo ./install.sh --reinstall --non-interactive --with-systemd -y
 **Полное удаление** (для чистой переустановки или снятия панели с сервера):
 
 ```bash
+sudo ./install.sh                          # меню: п.3 — удаление сервисов, п.4 — без следов
 sudo ./install.sh --uninstall              # интерактивно, с подтверждением
-sudo ./install.sh --uninstall -y           # сервисы + состояние + nginx + ddns
-sudo ./install.sh --uninstall --purge -y   # то же + удаление /opt/AdminPanelAZ
+sudo ./install.sh --uninstall -y           # сервисы + состояние + nginx + firewall
+sudo ./install.sh --purge-all -y           # всё без следов (проект, БД, бэкапы)
+sudo ./install.sh --uninstall --purge -y   # то же через флаги uninstall + purge
 sudo ./scripts/uninstall.sh --purge-state --remove-nginx -y
 ```
 
@@ -242,10 +244,11 @@ sudo ./scripts/uninstall.sh --purge-state --remove-nginx -y
 | daemon / watchdog (`start.sh`, `start_node_agent.sh`) | Да | — |
 | Каталоги состояния (`/var/lib/adminpanelaz`, `.runtime`) | Интерактивно (по умолчанию да) / да с `-y` | `--purge-state` в uninstall.sh |
 | nginx-сайт панели | Интерактивно / да с `-y` | `--remove-nginx` |
-| Правила firewall (ufw) | Нет | `--remove-firewall` |
+| Правила firewall (ufw / iptables) | Интерактивно / да с `-y` | `--remove-firewall` |
 | `backend/.env`, `node_agent.env` | Нет | `--remove-env` |
 | `/etc/adminpanelaz/ddns.env` | Да (через install.sh) | `--remove-system-config` |
-| Каталог проекта `/opt/AdminPanelAZ` | **Нет** | `--purge` |
+| Каталог проекта `/opt/AdminPanelAZ` | **Нет** (п.4 меню / `--purge-all`) | `--purge` |
+| Бэкапы (`/var/backups/adminpanelaz`) | **Нет** (п.4 меню / `--purge-all`) | `--remove-backups` |
 | AntiZapret (`/root/antizapret`) | **Никогда** | — |
 
 Подтверждение: в интерактивном режиме нужно ввести `yes` или `AdminPanelAZ`.

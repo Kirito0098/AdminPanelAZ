@@ -202,10 +202,8 @@ firewall_apply_iptables_rules() {
     fi
   fi
 
-  if command -v netfilter-persistent >/dev/null 2>&1; then
-    netfilter-persistent save >/dev/null 2>&1 || true
-  elif [[ -d /etc/iptables ]]; then
-    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+  if command -v netfilter-persistent >/dev/null 2>&1 || [[ -d /etc/iptables ]]; then
+    firewall_persist_iptables_rules
   else
     firewall_warn "Сохраните правила iptables вручную (iptables-save > /etc/iptables/rules.v4)"
   fi
@@ -247,4 +245,176 @@ firewall_apply_rules() {
       ;;
   esac
   return 0
+}
+
+firewall_env_get() {
+  local env_file="$1"
+  local key="$2"
+  local default="${3:-}"
+
+  if [[ ! -f "$env_file" ]]; then
+    printf '%s' "$default"
+    return 0
+  fi
+
+  local value
+  value="$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ' || true)"
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "$default"
+  fi
+}
+
+firewall_env_bool() {
+  local value="${1,,}"
+  [[ "$value" == "true" || "$value" == "1" || "$value" == "yes" ]]
+}
+
+firewall_resolve_uninstall_params() {
+  local root_dir="$1"
+  local backend_env="$root_dir/backend/.env"
+  local node_env="$root_dir/backend/node_agent.env"
+
+  FIREWALL_UNINSTALL_BACKEND_PORT="$(firewall_env_get "$backend_env" BACKEND_PORT "8000")"
+  FIREWALL_UNINSTALL_NODE_PORT="$(firewall_env_get "$node_env" NODE_AGENT_PORT "")"
+  if [[ -z "$FIREWALL_UNINSTALL_NODE_PORT" ]]; then
+    FIREWALL_UNINSTALL_NODE_PORT="$(firewall_env_get "$backend_env" NODE_AGENT_PORT "9100")"
+  fi
+  FIREWALL_UNINSTALL_HTTPS_PORT="$(firewall_env_get "$backend_env" HTTPS_PUBLIC_PORT "443")"
+  FIREWALL_UNINSTALL_HTTP_PORT="$(firewall_env_get "$backend_env" HTTP_ACME_PORT "80")"
+
+  local behind_nginx
+  behind_nginx="$(firewall_env_get "$backend_env" BEHIND_NGINX "false")"
+  local domain
+  domain="$(firewall_env_get "$backend_env" DOMAIN "")"
+  FIREWALL_UNINSTALL_HAS_NGINX=false
+  if firewall_env_bool "$behind_nginx" || [[ -n "$domain" ]]; then
+    FIREWALL_UNINSTALL_HAS_NGINX=true
+  fi
+
+  FIREWALL_UNINSTALL_HAS_NODE=false
+  if [[ -f "$node_env" ]] || [[ -n "$(firewall_env_get "$backend_env" NODE_AGENT_PORT "")" ]]; then
+    FIREWALL_UNINSTALL_HAS_NODE=true
+  fi
+
+  FIREWALL_UNINSTALL_HAS_CONTROLLER=false
+  if [[ -f "$backend_env" ]] && [[ -n "$(firewall_env_get "$backend_env" BACKEND_PORT "")" ]]; then
+    FIREWALL_UNINSTALL_HAS_CONTROLLER=true
+  fi
+  if [[ "$FIREWALL_UNINSTALL_HAS_NODE" == true && "$FIREWALL_UNINSTALL_HAS_CONTROLLER" != true ]]; then
+    FIREWALL_UNINSTALL_BACKEND_PORT="0"
+  fi
+
+  local allowed_ips
+  allowed_ips="$(firewall_env_get "$node_env" NODE_AGENT_ALLOWED_IPS "")"
+  FIREWALL_UNINSTALL_PANEL_IP="${allowed_ips%%,*}"
+  FIREWALL_UNINSTALL_PANEL_IP="${FIREWALL_UNINSTALL_PANEL_IP%%/*}"
+}
+
+firewall_persist_iptables_rules() {
+  if command -v netfilter-persistent >/dev/null 2>&1; then
+    netfilter-persistent save >/dev/null 2>&1 || true
+  elif [[ -d /etc/iptables ]]; then
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+  fi
+}
+
+firewall_iptables_delete_if_present() {
+  if iptables -C INPUT "$@" 2>/dev/null; then
+    iptables -D INPUT "$@"
+    return 0
+  fi
+  return 1
+}
+
+firewall_remove_iptables_rules() {
+  local backend_port="$1"
+  local node_port="$2"
+  local https_port="$3"
+  local http_port="$4"
+  local has_node="$5"
+  local has_nginx="$6"
+  local panel_ip="${7:-}"
+
+  if ! command -v iptables >/dev/null 2>&1; then
+    firewall_log "iptables не найден — пропуск удаления правил iptables"
+    return 0
+  fi
+
+  local removed=0
+
+  if [[ "$backend_port" != "0" ]]; then
+    if firewall_iptables_delete_if_present -p tcp --dport "$backend_port" ! -s 127.0.0.1 -j DROP; then
+      firewall_log "Удалено правило iptables: DROP backend ${backend_port}/tcp (не localhost)"
+      removed=1
+    fi
+  fi
+
+  if [[ "$has_node" == true ]]; then
+    if [[ -n "$panel_ip" ]]; then
+      if firewall_iptables_delete_if_present -p tcp --dport "$node_port" ! -s "$panel_ip" -j DROP; then
+        firewall_log "Удалено правило iptables: DROP node ${node_port}/tcp (не ${panel_ip})"
+        removed=1
+      fi
+    fi
+    if firewall_iptables_delete_if_present -p tcp --dport "$node_port" -j DROP; then
+      firewall_log "Удалено правило iptables: DROP node ${node_port}/tcp"
+      removed=1
+    fi
+  fi
+
+  if [[ "$has_nginx" == true ]]; then
+    if firewall_iptables_delete_if_present -p tcp --dport "$https_port" -j ACCEPT; then
+      firewall_log "Удалено правило iptables: ACCEPT HTTPS ${https_port}/tcp"
+      removed=1
+    fi
+    if firewall_iptables_delete_if_present -p tcp --dport "$http_port" -j ACCEPT; then
+      firewall_log "Удалено правило iptables: ACCEPT HTTP ${http_port}/tcp"
+      removed=1
+    fi
+  fi
+
+  if [[ "$removed" -eq 1 ]]; then
+    firewall_persist_iptables_rules
+    firewall_log "Правила iptables AdminPanelAZ удалены."
+  else
+    firewall_log "Правила iptables AdminPanelAZ не найдены."
+  fi
+}
+
+firewall_remove_ufw_rules() {
+  if ! command -v ufw >/dev/null 2>&1; then
+    firewall_log "ufw не найден — пропуск удаления правил ufw"
+    return 0
+  fi
+
+  firewall_log "Удаление правил ufw AdminPanelAZ..."
+  local nums
+  nums=$(ufw status numbered 2>/dev/null | grep -i 'AdminPanelAZ' | sed -n 's/^\[\([0-9]*\)\].*/\1/p' | sort -rn || true)
+  if [[ -n "$nums" ]]; then
+    while IFS= read -r num; do
+      [[ -n "$num" ]] || continue
+      ufw --force delete "$num" >/dev/null 2>&1 || true
+    done <<<"$nums"
+    ufw reload >/dev/null 2>&1 || true
+    firewall_log "Правила ufw AdminPanelAZ удалены."
+  else
+    firewall_log "Правила ufw AdminPanelAZ не найдены."
+  fi
+}
+
+firewall_remove_rules_from_env() {
+  local root_dir="$1"
+
+  firewall_resolve_uninstall_params "$root_dir"
+  firewall_remove_ufw_rules
+  firewall_remove_iptables_rules \
+    "$FIREWALL_UNINSTALL_BACKEND_PORT" \
+    "$FIREWALL_UNINSTALL_NODE_PORT" \
+    "$FIREWALL_UNINSTALL_HTTPS_PORT" \
+    "$FIREWALL_UNINSTALL_HTTP_PORT" \
+    "$FIREWALL_UNINSTALL_HAS_NODE" \
+    "$FIREWALL_UNINSTALL_HAS_NGINX" \
+    "$FIREWALL_UNINSTALL_PANEL_IP"
 }

@@ -92,6 +92,7 @@ INSTALL_TARGET="${INSTALL_TARGET:-$DEFAULT_INSTALL_TARGET}"
 GENERATED_NODE_KEY=""
 WIZARD_RAN=false
 ACTION="install"
+FULL_PURGE=false
 PURGE_REPO=false
 ENV_BACKUP_DIR=""
 RESTORE_ENV_AFTER_INSTALL=false
@@ -198,6 +199,10 @@ parse_args() {
       --uninstall)
         ACTION="uninstall"
         ;;
+      --purge-all)
+        ACTION="purge-all"
+        FULL_PURGE=true
+        ;;
       --purge)
         PURGE_REPO=true
         if [[ "$ACTION" == "install" ]]; then
@@ -258,6 +263,10 @@ show_main_menu() {
         exit $?
         ;;
       4)
+        run_full_purge_action
+        exit $?
+        ;;
+      5)
         usage
         exit 0
         ;;
@@ -273,7 +282,7 @@ collect_uninstall_options() {
   _out_args=(--remove-system-config)
 
   if [[ "$NON_INTERACTIVE" == true ]]; then
-    _out_args+=(--purge-state --remove-nginx --yes)
+    _out_args+=(--purge-state --remove-nginx --remove-firewall --yes)
     if [[ "$PURGE_REPO" == true ]]; then
       _out_args+=(--purge)
     fi
@@ -281,7 +290,7 @@ collect_uninstall_options() {
   fi
 
   if [[ "$ACCEPT_DEFAULTS" == true ]]; then
-    _out_args+=(--purge-state --remove-nginx --yes)
+    _out_args+=(--purge-state --remove-nginx --remove-firewall --yes)
     if [[ "$PURGE_REPO" == true ]]; then
       _out_args+=(--purge)
     fi
@@ -301,7 +310,7 @@ collect_uninstall_options() {
   if ui_confirm "Удалить конфигурацию nginx сайта панели?" "y"; then
     _out_args+=(--remove-nginx)
   fi
-  if ui_confirm "Удалить правила firewall AdminPanelAZ (ufw)?" "n"; then
+  if ui_confirm "Удалить правила firewall AdminPanelAZ (ufw/iptables)?" "y"; then
     _out_args+=(--remove-firewall)
   fi
   if ui_confirm "Удалить backend/.env и node_agent.env?" "n" "true"; then
@@ -321,6 +330,46 @@ run_uninstall_action() {
   collect_uninstall_options uninstall_args
 
   log "Запуск удаления..."
+  "$ROOT_DIR/scripts/uninstall.sh" "${uninstall_args[@]}"
+}
+
+collect_full_purge_uninstall_args() {
+  local -n _out_args=$1
+  _out_args=(
+    --remove-system-config
+    --purge-state
+    --remove-nginx
+    --remove-firewall
+    --remove-backups
+    --remove-env
+    --purge
+    --skip-confirm
+  )
+}
+
+run_full_purge_action() {
+  resolve_project_dir
+  ensure_executable_scripts
+
+  if [[ "$NON_INTERACTIVE" != true && "$ACCEPT_DEFAULTS" != true ]]; then
+    ui_show_banner
+    ui_section "Удалить всё без следов"
+    ui_warn_box "Внимание — необратимо" \
+      "Будут удалены systemd-сервисы, state dirs, nginx, firewall," \
+      "backend/.env, /etc/adminpanelaz, каталог бэкапов," \
+      "каталог проекта $ROOT_DIR (код, БД, CIDR)." \
+      "Данные AntiZapret (/root/antizapret и др.) НЕ удаляются."
+    echo
+    if ! ui_confirm "Продолжить полное удаление без следов?" "n" "true"; then
+      print_info "Удаление отменено."
+      exit 0
+    fi
+  fi
+
+  local -a uninstall_args=()
+  collect_full_purge_uninstall_args uninstall_args
+
+  log "Запуск полного удаления без следов..."
   "$ROOT_DIR/scripts/uninstall.sh" "${uninstall_args[@]}"
 }
 
@@ -1395,6 +1444,11 @@ main() {
 
   if [[ "$ACTION" == "uninstall" ]]; then
     run_uninstall_action
+    exit 0
+  fi
+
+  if [[ "$ACTION" == "purge-all" ]]; then
+    run_full_purge_action
     exit 0
   fi
 

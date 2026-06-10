@@ -10,6 +10,7 @@ PURGE_REPO=false
 REMOVE_NGINX=false
 REMOVE_FIREWALL=false
 REMOVE_ENV=false
+REMOVE_BACKUPS=false
 REMOVE_SYSTEM_CONFIG=false
 YES=false
 SKIP_CONFIRM=false
@@ -30,9 +31,10 @@ usage() {
   --purge-state         Удалить каталоги состояния (/var/lib/adminpanelaz, /var/lib/adminpanelaz-node, .runtime)
   --purge               Удалить каталог проекта ($ROOT_DIR) — необратимо
   --remove-nginx        Удалить конфигурацию nginx сайта (по DOMAIN из backend/.env)
-  --remove-firewall     Удалить правила ufw с комментарием AdminPanelAZ
+  --remove-firewall     Удалить правила firewall AdminPanelAZ (ufw и iptables)
   --remove-env          Удалить backend/.env и backend/node_agent.env
-  --remove-system-config  Удалить /etc/adminpanelaz/ddns.env и mtls (не трогает AntiZapret)
+  --remove-backups      Удалить каталог бэкапов (BACKUP_ROOT из backend/.env)
+  --remove-system-config  Удалить /etc/adminpanelaz (ddns.env, mtls, node_agent.env)
   -y, --yes             Без интерактивных подтверждений
   --skip-confirm        Не спрашивать подтверждение (вызывается из install.sh после своего диалога)
   --help                Показать справку
@@ -64,6 +66,9 @@ parse_args() {
         ;;
       --remove-env)
         REMOVE_ENV=true
+        ;;
+      --remove-backups)
+        REMOVE_BACKUPS=true
         ;;
       --remove-system-config)
         REMOVE_SYSTEM_CONFIG=true
@@ -109,7 +114,10 @@ confirm_destructive() {
     warn "Будут удалены backend/.env и backend/node_agent.env."
   fi
   if [[ "$REMOVE_SYSTEM_CONFIG" == true ]]; then
-    warn "Будет удалён /etc/adminpanelaz/ddns.env (и mtls при наличии)."
+    warn "Будет удалён /etc/adminpanelaz (ddns.env, mtls, node_agent.env)."
+  fi
+  if [[ "$REMOVE_BACKUPS" == true ]]; then
+    warn "Будет удалён каталог бэкапов панели."
   fi
   if [[ "$PURGE_REPO" == true ]]; then
     warn "Будет удалён каталог проекта: $ROOT_DIR"
@@ -218,24 +226,14 @@ remove_firewall_rules() {
     return 0
   fi
 
-  if command -v ufw >/dev/null 2>&1; then
-    log "Удаление правил ufw AdminPanelAZ..."
-    local nums
-    nums=$(ufw status numbered 2>/dev/null | grep -i 'AdminPanelAZ' | sed -n 's/^\[\([0-9]*\)\].*/\1/p' | sort -rn || true)
-    if [[ -n "$nums" ]]; then
-      while IFS= read -r num; do
-        [[ -n "$num" ]] || continue
-        ufw --force delete "$num" >/dev/null 2>&1 || true
-      done <<<"$nums"
-      ufw reload >/dev/null 2>&1 || true
-      log "Правила ufw AdminPanelAZ удалены"
-    else
-      log "Правила ufw AdminPanelAZ не найдены"
-    fi
+  if [[ ! -f "$ROOT_DIR/scripts/firewall-setup.sh" ]]; then
+    warn "scripts/firewall-setup.sh не найден — пропуск удаления firewall"
     return 0
   fi
 
-  warn "Автоматическое удаление правил iptables не поддерживается — проверьте правила вручную (см. SECURITY.md)"
+  # shellcheck source=scripts/firewall-setup.sh
+  source "$ROOT_DIR/scripts/firewall-setup.sh"
+  firewall_remove_rules_from_env "$ROOT_DIR"
 }
 
 remove_system_config() {
@@ -252,8 +250,36 @@ remove_system_config() {
     rm -rf "$config_dir/mtls"
     log "Удалён $config_dir/mtls"
   fi
+  if [[ -f "$config_dir/node_agent.env" ]]; then
+    rm -f "$config_dir/node_agent.env"
+    log "Удалён $config_dir/node_agent.env"
+  fi
   if [[ -d "$config_dir" ]] && [[ -z "$(ls -A "$config_dir" 2>/dev/null || true)" ]]; then
     rmdir "$config_dir" 2>/dev/null || true
+  fi
+}
+
+remove_backup_dir() {
+  if [[ "$REMOVE_BACKUPS" != true ]]; then
+    return 0
+  fi
+
+  local env_file="$ROOT_DIR/backend/.env"
+  local backup_root="/var/backups/adminpanelaz"
+  if [[ -f "$env_file" ]]; then
+    local custom
+    custom=$(grep -E '^BACKUP_ROOT=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ' || true)
+    if [[ -n "$custom" ]]; then
+      backup_root="$custom"
+    fi
+  fi
+
+  if [[ -d "$backup_root" ]]; then
+    log "Удаление каталога бэкапов $backup_root..."
+    rm -rf "$backup_root"
+    log "Каталог бэкапов удалён"
+  else
+    log "Каталог бэкапов не найден: $backup_root"
   fi
 }
 
@@ -343,6 +369,7 @@ main() {
     purge_state_dirs
   fi
 
+  remove_backup_dir
   remove_env_files
 
   # Каталог проекта удаляем последним (скрипт перестанет существовать)
