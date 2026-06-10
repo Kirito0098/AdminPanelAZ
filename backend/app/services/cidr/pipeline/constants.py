@@ -5,15 +5,14 @@ import time
 from pathlib import Path
 
 from app.config import get_settings
+from app.paths import get_cidr_list_dir, resolve_backend_path
 
 _settings = get_settings()
-_BACKEND_ROOT = Path(__file__).resolve().parents[3]
-BASE_DIR = Path(os.environ.get("ADMIN_PANEL_AZ_ROOT", str(_BACKEND_ROOT)))
-LIST_DIR = str((_BACKEND_ROOT / _settings.cidr_list_dir).resolve())
+LIST_DIR = str(get_cidr_list_dir())
 BASELINE_DIR = os.path.join(LIST_DIR, "_baseline")
-RUNTIME_BACKUP_ROOT = str((_BACKEND_ROOT / "data/cidr/runtime_backups").resolve())
+RUNTIME_BACKUP_ROOT = str(resolve_backend_path("data/cidr/runtime_backups"))
 RUNTIME_BACKUP_RETENTION_SECONDS = 12 * 60 * 60
-ENV_FILE_PATH = str((_BACKEND_ROOT / ".env").resolve())
+ENV_FILE_PATH = str(resolve_backend_path(".env"))
 
 CIDR_V4_SCAN_PATTERN = re.compile(
     r"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}/(?:[0-9]|[12][0-9]|3[0-2])\b"

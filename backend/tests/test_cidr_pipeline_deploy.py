@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.services.cidr.pipeline.deploy import push_cidr_artifacts
+from app.services.cidr.pipeline.deploy import list_compile_artifacts, push_cidr_artifacts
 from app.services.cidr.pipeline.orchestrator import run_deploy
 from app.services.node_adapter import RemoteNodeAdapter
 
@@ -13,6 +13,19 @@ from app.services.node_adapter import RemoteNodeAdapter
 def list_dir(tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.cidr.pipeline.deploy.LIST_DIR", str(tmp_path))
     return tmp_path
+
+
+def test_list_compile_artifacts_counts_non_comment_lines(list_dir):
+    (list_dir / "aws.txt").write_text(
+        "# header\n10.0.0.0/8\n172.16.0.0/12\n",
+        encoding="utf-8",
+    )
+    (list_dir / "_baseline").mkdir()
+    (list_dir / "_baseline" / "aws.txt").write_text("ignored\n", encoding="utf-8")
+
+    artifacts = list_compile_artifacts()
+
+    assert artifacts == {"aws.txt": {"cidr_count": 2, "exists": True}}
 
 
 def test_push_cidr_artifacts_calls_save_for_each_file(list_dir):

@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.models import VpnType
-from app.config import get_settings
+from app.paths import get_cidr_list_dir
 from app.services.antizapret import AntiZapretService
 from app.services.antizapret_settings import build_schema, filter_known_keys, read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
@@ -44,9 +44,8 @@ from app.services.security_bootstrap import validate_node_agent_key
 
 validate_node_agent_key(NODE_AGENT_API_KEY, production=NODE_AGENT_MODE == "prod")
 
-_settings = get_settings()
 service = AntiZapretService(base_path=ANTIZAPRET_PATH)
-cidr_service = CidrRoutingService(ANTIZAPRET_PATH, _settings.cidr_list_dir)
+cidr_service = CidrRoutingService(ANTIZAPRET_PATH, get_cidr_list_dir())
 monitor = ServerMonitorService()
 app = FastAPI(title="AntiZapret Node Agent", version="1.1.0")
 

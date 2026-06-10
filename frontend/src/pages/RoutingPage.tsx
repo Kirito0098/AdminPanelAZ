@@ -35,6 +35,7 @@ export default function RoutingPage() {
     cidrDb,
     antifilter,
     pipelineTask,
+    pendingPipelineAction,
     loading,
     refreshing,
     actionLoading,
@@ -141,6 +142,7 @@ export default function RoutingPage() {
           <ProvidersTab
             providers={data.providers}
             cidrDb={cidrDb}
+            activeNode={activeNode}
             isAdmin={isAdmin}
             actionLoading={actionLoading}
             onToggle={toggleProvider}
@@ -153,6 +155,7 @@ export default function RoutingPage() {
               cidrDb={cidrDb}
               antifilter={antifilter}
               pipelineTask={pipelineTask}
+              pendingPipelineAction={pendingPipelineAction}
               nodes={nodes}
               deployAllOnline={deployAllOnline}
               deployTargetNodeIds={deployTargetNodeIds}

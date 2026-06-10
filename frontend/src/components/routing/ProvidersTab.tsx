@@ -14,20 +14,33 @@ import {
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import type { CidrDbStatus, CidrProviderInfo } from '@/types'
+import type { CidrDbStatus, CidrProviderInfo, Node } from '@/types'
 import { formatDt, statusBadgeVariant, statusLabel } from './utils'
 
 interface ProvidersTabProps {
   providers: CidrProviderInfo[]
   cidrDb: CidrDbStatus | null
+  activeNode: Node | null
   isAdmin: boolean
   actionLoading: boolean
   onToggle: (filename: string, enabled: boolean, name: string) => void
 }
 
+function hasControllerArtifact(cidrDb: CidrDbStatus | null, filename: string): boolean {
+  const artifact = cidrDb?.compile_artifacts?.[filename]
+  return Boolean(artifact?.exists && (artifact.cidr_count ?? 0) > 0)
+}
+
+function controllerCidrCount(cidrDb: CidrDbStatus | null, filename: string): number | null {
+  const artifact = cidrDb?.compile_artifacts?.[filename]
+  if (!artifact?.exists) return null
+  return artifact.cidr_count ?? 0
+}
+
 export default function ProvidersTab({
   providers,
   cidrDb,
+  activeNode,
   isAdmin,
   actionLoading,
   onToggle,
@@ -39,6 +52,30 @@ export default function ProvidersTab({
   const categories = useMemo(
     () => [...new Set(providers.map((p) => p.category))].sort(),
     [providers],
+  )
+
+  const needsCompile = useMemo(
+    () =>
+      providers.some((p) => {
+        const dbMeta = cidrDb?.providers?.[p.filename]
+        const hasDb =
+          (dbMeta?.cidr_count ?? 0) > 0 &&
+          (dbMeta?.refresh_status === 'ok' || dbMeta?.refresh_status === 'partial')
+        return hasDb && !hasControllerArtifact(cidrDb, p.filename)
+      }),
+    [providers, cidrDb],
+  )
+
+  const needsDeploy = useMemo(
+    () =>
+      providers.some((p) => {
+        const dbMeta = cidrDb?.providers?.[p.filename]
+        const hasDb =
+          (dbMeta?.cidr_count ?? 0) > 0 &&
+          (dbMeta?.refresh_status === 'ok' || dbMeta?.refresh_status === 'partial')
+        return hasDb && hasControllerArtifact(cidrDb, p.filename) && !p.has_source
+      }),
+    [providers, cidrDb],
   )
 
   const filtered = useMemo(() => {
@@ -67,9 +104,24 @@ export default function ProvidersTab({
     )
   }
 
+  const nodeLabel = activeNode?.name ?? 'активной ноде'
+
   return (
     <StatusPanel title="CIDR-провайдеры" icon={Route}>
       <div className="space-y-4">
+        {needsCompile && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
+            Данные провайдеров уже в БД (этап 1), но файлы списков ещё не собраны на контроллере.
+            Сначала выполните <strong>Этап 2 — Сборка списков</strong> на вкладке «Pipeline».
+          </div>
+        )}
+        {needsDeploy && !needsCompile && (
+          <div className="rounded-md border border-sky-500/40 bg-sky-500/10 px-4 py-3 text-sm text-sky-950 dark:text-sky-100">
+            Списки собраны на контроллере. Выполните <strong>Этап 3 — Deploy</strong> на вкладке
+            «Pipeline» для ноды <strong>{nodeLabel}</strong>, затем включите нужных провайдеров для
+            маршрутизации AntiZapret.
+          </div>
+        )}
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -115,7 +167,8 @@ export default function ProvidersTab({
                 <TableRow>
                   <TableHead>Провайдер</TableHead>
                   <TableHead>Категория</TableHead>
-                  <TableHead className="text-right">CIDR (файл)</TableHead>
+                  <TableHead className="text-right">CIDR (контроллер)</TableHead>
+                  <TableHead className="text-right">CIDR (нода)</TableHead>
                   <TableHead className="text-right">CIDR (БД)</TableHead>
                   <TableHead>БД refresh</TableHead>
                   <TableHead>Статус</TableHead>
@@ -125,6 +178,16 @@ export default function ProvidersTab({
               <TableBody>
                 {filtered.map((p, idx) => {
                   const dbMeta = cidrDb?.providers?.[p.filename]
+                  const onController = hasControllerArtifact(cidrDb, p.filename)
+                  const enableBlocked = !p.has_source && !p.enabled
+                  const rowHint = !p.has_source
+                    ? onController
+                      ? 'нет на ноде — нужен deploy'
+                      : (dbMeta?.cidr_count ?? 0) > 0
+                        ? 'нет файла — нужен этап 2'
+                        : 'нет источника'
+                    : null
+
                   return (
                     <TableRow
                       key={p.filename}
@@ -136,6 +199,9 @@ export default function ProvidersTab({
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline">{p.category}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-mono tabular-nums">
+                        {controllerCidrCount(cidrDb, p.filename) ?? '—'}
                       </TableCell>
                       <TableCell className="text-right font-mono tabular-nums">{p.cidr_count}</TableCell>
                       <TableCell className="text-right font-mono tabular-nums">
@@ -153,9 +219,9 @@ export default function ProvidersTab({
                         <Badge variant={p.enabled ? 'default' : 'secondary'}>
                           {p.enabled ? 'Включён' : 'Выключен'}
                         </Badge>
-                        {!p.has_source && (
+                        {rowHint && (
                           <span className="ml-2 text-xs text-amber-600 dark:text-amber-400">
-                            нет источника
+                            {rowHint}
                           </span>
                         )}
                       </TableCell>
@@ -164,7 +230,14 @@ export default function ProvidersTab({
                           <Button
                             size="sm"
                             variant={p.enabled ? 'outline' : 'default'}
-                            disabled={actionLoading || (!p.has_source && !p.enabled)}
+                            disabled={actionLoading || enableBlocked}
+                            title={
+                              enableBlocked && onController
+                                ? 'Сначала выполните Deploy на активную ноду'
+                                : enableBlocked
+                                  ? 'Сначала соберите списки на контроллере (этап 2)'
+                                  : undefined
+                            }
                             onClick={() => onToggle(p.filename, !p.enabled, p.name)}
                           >
                             {p.enabled ? 'Отключить' : 'Включить'}

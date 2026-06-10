@@ -5,7 +5,6 @@ import {
   generateCidrFromDb,
   getAntifilterStatus,
   getCidrDbStatus,
-  getCidrPipelineTask,
   getGameFilters,
   getRoutingOverview,
   refreshAntifilter,
@@ -13,10 +12,12 @@ import {
   syncGameFilters,
   syncRoutingProviders,
   toggleRoutingProvider,
+  ApiError,
 } from '@/api/client'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { usePipelineTaskPoll } from '@/components/routing/usePipelineTaskPoll'
 import type {
   AntifilterStatus,
   CidrDbPresetInfo,
@@ -25,6 +26,8 @@ import type {
   GameFilterItem,
   RoutingOverview,
 } from '@/types'
+import type { PipelinePendingAction, PipelineStage, IngestKind } from '@/components/routing/utils'
+import { getIngestKind, getPipelineStage, isPipelineRunning } from '@/components/routing/utils'
 
 export const REFRESH_INTERVAL = 60
 
@@ -44,13 +47,23 @@ export type ConfirmAction =
 export function useRoutingPage() {
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
-  const { startGlobal, doneGlobal, inline, withInline, trackBackgroundTask } = useProgress()
+  const {
+    startGlobal,
+    doneGlobal,
+    inline,
+    withInline,
+    trackBackgroundTask,
+  } = useProgress()
+  const {
+    pipelineTask,
+    pipelinePolling,
+    startPipelinePoll,
+  } = usePipelineTaskPoll()
 
   const [data, setData] = useState<RoutingOverview | null>(null)
   const [cidrDb, setCidrDb] = useState<CidrDbStatus | null>(null)
   const [antifilter, setAntifilter] = useState<AntifilterStatus | null>(null)
-  const [pipelineTask, setPipelineTask] = useState<CidrPipelineTask | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [pendingPipelineAction, setPendingPipelineAction] = useState<PipelinePendingAction | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -64,16 +77,90 @@ export function useRoutingPage() {
   const [deployAllOnline, setDeployAllOnline] = useState(false)
   const [deployTargetNodeIds, setDeployTargetNodeIds] = useState<number[]>([])
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
+  const trackedTaskIdRef = useRef<string | null>(null)
+  const pipelinePollingRef = useRef(false)
+  const loadRef = useRef<(opts?: { initial?: boolean; manual?: boolean }) => Promise<void>>(async () => {})
+  const loadPipelineMetaRef = useRef<() => Promise<void>>(async () => {})
+  const rateLimitNotifiedRef = useRef(false)
+
+  useEffect(() => {
+    pipelinePollingRef.current = pipelinePolling
+  }, [pipelinePolling])
+
+  const notifyLoadError = useCallback(
+    (err: unknown, fallback: string) => {
+      if (err instanceof ApiError && err.status === 429) {
+        if (!rateLimitNotifiedRef.current) {
+          rateLimitNotifiedRef.current = true
+          notifyError('Слишком много запросов. Подождите минуту и обновите страницу.')
+        }
+        return
+      }
+      notifyError(errorMessage(err, fallback))
+    },
+    [notifyError],
+  )
+
+  const attachPipelineTask = useCallback(
+    (
+      taskId: string,
+      stage: PipelineStage,
+      okMsg: string,
+      opts: { force?: boolean; initialTask?: CidrPipelineTask; ingestKind?: IngestKind } = {},
+    ) => {
+      const { force = false, initialTask, ingestKind } = opts
+      if (!force && trackedTaskIdRef.current === taskId && pipelinePollingRef.current) return
+      trackedTaskIdRef.current = taskId
+      setPendingPipelineAction({ stage, ingestKind })
+      startPipelinePoll(taskId, {
+        initialTask,
+        onComplete: () => {
+          trackedTaskIdRef.current = null
+          setPendingPipelineAction(null)
+          success(okMsg)
+          void loadRef.current()
+        },
+        onError: (task, message) => {
+          trackedTaskIdRef.current = null
+          setPendingPipelineAction(null)
+          if (!message.includes('Слишком много запросов')) {
+            notifyError(task?.error || task?.message || message)
+          }
+          void loadPipelineMetaRef.current()
+        },
+      })
+    },
+    [startPipelinePoll, success, notifyError],
+  )
+
+  const resumeActivePipelineTask = useCallback(
+    (activeTask: NonNullable<CidrDbStatus['active_task']>) => {
+      if (!isPipelineRunning(activeTask)) return
+      const stage = getPipelineStage(activeTask.task_type) ?? 1
+      const ingestKind = getIngestKind(activeTask.task_type) ?? undefined
+      attachPipelineTask(activeTask.task_id, stage, 'Операция pipeline завершена', {
+        initialTask: activeTask,
+        ingestKind,
+      })
+    },
+    [attachPipelineTask],
+  )
 
   const loadPipelineMeta = useCallback(async () => {
     try {
       const [dbStatus, afStatus] = await Promise.all([getCidrDbStatus(), getAntifilterStatus()])
       setCidrDb(dbStatus)
       setAntifilter(afStatus)
+      if (dbStatus.active_task) {
+        const active = dbStatus.active_task
+        if (trackedTaskIdRef.current !== active.task_id || !pipelinePollingRef.current) {
+          resumeActivePipelineTask(active)
+        }
+      }
     } catch {
       /* optional panel */
     }
-  }, [])
+  }, [resumeActivePipelineTask])
 
   const loadGames = useCallback(async () => {
     try {
@@ -104,49 +191,20 @@ export function useRoutingPage() {
         setCountdown(REFRESH_INTERVAL)
         if (manual) success('Данные маршрутизации обновлены')
       } catch (err) {
-        notifyError(errorMessage(err, 'Ошибка загрузки маршрутизации'))
+        notifyLoadError(err, 'Ошибка загрузки маршрутизации')
       } finally {
         setLoading(false)
         setRefreshing(false)
         if (initial) doneGlobal()
       }
     },
-    [startGlobal, doneGlobal, notifyError, loadPipelineMeta, loadGames, success],
+    [startGlobal, doneGlobal, notifyLoadError, loadPipelineMeta, loadGames, success],
   )
 
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current)
-      pollRef.current = null
-    }
-  }, [])
-
-  const pollTask = useCallback(
-    (taskId: string, okMsg: string) => {
-      stopPolling()
-      pollRef.current = setInterval(async () => {
-        try {
-          const { task } = await getCidrPipelineTask(taskId)
-          setPipelineTask(task)
-          if (task.status === 'completed') {
-            stopPolling()
-            success(okMsg)
-            await load()
-          } else if (task.status === 'failed') {
-            stopPolling()
-            notifyError(task.error || task.message || 'Ошибка pipeline')
-            await loadPipelineMeta()
-          }
-        } catch (err) {
-          stopPolling()
-          notifyError(errorMessage(err, 'Ошибка отслеживания задачи'))
-        }
-      }, 1500)
-    },
-    [load, loadPipelineMeta, notifyError, stopPolling, success],
-  )
-
-  useEffect(() => () => stopPolling(), [stopPolling])
+  useEffect(() => {
+    loadRef.current = load
+    loadPipelineMetaRef.current = loadPipelineMeta
+  }, [load, loadPipelineMeta])
 
   useEffect(() => {
     if (activeNode?.id && deployTargetNodeIds.length === 0) {
@@ -155,8 +213,10 @@ export function useRoutingPage() {
   }, [activeNode?.id, deployTargetNodeIds.length])
 
   useEffect(() => {
-    load({ initial: true })
-  }, [load, activeNode?.id])
+    void load({ initial: true })
+    // Reload only when active node changes, not when load callback identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeNode?.id])
 
   useEffect(() => {
     if (!autoRefresh) return
@@ -175,19 +235,13 @@ export function useRoutingPage() {
   const withPipelineAction = async (
     fn: () => Promise<{ task_id: string; message: string }>,
     okMsg: string,
+    stage: PipelineStage,
+    ingestKind?: IngestKind,
   ) => {
     setActionLoading(true)
     try {
       const resp = await fn()
-      setPipelineTask({
-        task_id: resp.task_id,
-        task_type: '',
-        status: 'queued',
-        message: resp.message,
-        progress_percent: 0,
-        progress_stage: resp.message,
-      })
-      pollTask(resp.task_id, okMsg)
+      attachPipelineTask(resp.task_id, stage, okMsg, { force: true, ingestKind })
     } catch (err) {
       notifyError(errorMessage(err, 'Ошибка операции'))
     } finally {
@@ -257,6 +311,7 @@ export function useRoutingPage() {
               apply_after: false,
             }),
           'CIDR-файлы собраны на контроллере',
+          2,
         )
         break
       case 'generate-doall':
@@ -269,6 +324,7 @@ export function useRoutingPage() {
               apply_after: true,
             }),
           'Сгенерировано, развёрнуто и применено (doall.sh)',
+          2,
         )
         break
       case 'deploy-only':
@@ -283,18 +339,23 @@ export function useRoutingPage() {
           deployAllOnline
             ? 'CIDR-файлы развёрнуты на все online-ноды'
             : 'CIDR-файлы развёрнуты на выбранные ноды',
+          3,
         )
         break
     }
   }
 
-  const pipelineBusy = actionLoading || (!!pipelineTask && ['queued', 'running'].includes(pipelineTask.status))
+  const pipelineBusy =
+    actionLoading ||
+    pendingPipelineAction != null ||
+    (!!pipelineTask && ['queued', 'running'].includes(pipelineTask.status))
 
   return {
     data,
     cidrDb,
     antifilter,
     pipelineTask,
+    pendingPipelineAction,
     loading,
     refreshing,
     actionLoading,
@@ -335,8 +396,8 @@ export function useRoutingPage() {
     syncGames: () =>
       withAction(() => syncGameFilters(gameModes), 'Игровые фильтры синхронизированы', 'Синхронизация игровых фильтров...'),
     inline,
-    refreshCidrDb: () => withPipelineAction(refreshCidrDb, 'CIDR БД обновлена из интернета'),
-    refreshAntifilter: () => withPipelineAction(refreshAntifilter, 'Antifilter синхронизирован'),
+    refreshCidrDb: () => withPipelineAction(refreshCidrDb, 'CIDR БД обновлена из интернета', 1, 'providers'),
+    refreshAntifilter: () => withPipelineAction(refreshAntifilter, 'Antifilter синхронизирован', 1, 'antifilter'),
     deployCidr: () => setConfirmAction('deploy-only'),
   }
 }

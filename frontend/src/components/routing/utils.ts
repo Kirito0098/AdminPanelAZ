@@ -32,3 +32,78 @@ export function statusLabel(status?: string | null) {
 export function isPipelineRunning(task: { status: string } | null) {
   return !!task && ['queued', 'running'].includes(task.status)
 }
+
+export type PipelineStage = 1 | 2 | 3
+
+export type IngestKind = 'providers' | 'antifilter'
+
+export type PipelinePendingAction = {
+  stage: PipelineStage
+  ingestKind?: IngestKind
+}
+
+const STAGE_TASK_TYPES: Record<PipelineStage, readonly string[]> = {
+  1: ['cidr_db_refresh', 'cidr_db_refresh_dry_run', 'antifilter_refresh'],
+  2: ['cidr_generate_from_db', 'cidr_estimate_from_db'],
+  3: ['cidr_deploy'],
+}
+
+const INGEST_TASK_TYPES: Record<IngestKind, readonly string[]> = {
+  providers: ['cidr_db_refresh', 'cidr_db_refresh_dry_run'],
+  antifilter: ['antifilter_refresh'],
+}
+
+export function getIngestKind(taskType: string | undefined | null): IngestKind | null {
+  const normalized = String(taskType || '').trim()
+  for (const [kind, types] of Object.entries(INGEST_TASK_TYPES) as [IngestKind, readonly string[]][]) {
+    if (types.includes(normalized)) return kind
+  }
+  return null
+}
+
+export function getPipelineStage(taskType: string | undefined | null): PipelineStage | null {
+  const normalized = String(taskType || '').trim()
+  if (!normalized) return null
+  for (const [stage, types] of Object.entries(STAGE_TASK_TYPES) as [PipelineStage, readonly string[]][]) {
+    if (types.includes(normalized)) return stage
+  }
+  return null
+}
+
+export function taskBelongsToStage(
+  task: { task_type?: string | null } | null,
+  stage: PipelineStage,
+  ingestKind?: IngestKind,
+): boolean {
+  if (!task) return false
+  if (getPipelineStage(task.task_type) !== stage) return false
+  if (stage === 1 && ingestKind) {
+    return getIngestKind(task.task_type) === ingestKind
+  }
+  return true
+}
+
+export function pendingMatchesStage(
+  pending: PipelinePendingAction | null,
+  stage: PipelineStage,
+  ingestKind?: IngestKind,
+): boolean {
+  if (!pending || pending.stage !== stage) return false
+  if (stage === 1 && ingestKind) return pending.ingestKind === ingestKind
+  return true
+}
+
+export function pipelineTaskStatusLabel(status: string): string {
+  switch (status) {
+    case 'queued':
+      return 'В очереди'
+    case 'running':
+      return 'Выполняется'
+    case 'completed':
+      return 'Завершено'
+    case 'failed':
+      return 'Ошибка'
+    default:
+      return status
+  }
+}

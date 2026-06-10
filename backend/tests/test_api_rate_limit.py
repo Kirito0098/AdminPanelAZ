@@ -16,6 +16,10 @@ def test_is_api_rate_limit_exempt():
     assert is_api_rate_limit_exempt("/api/health") is True
     assert is_api_rate_limit_exempt("/api/ip-blocked") is True
     assert is_api_rate_limit_exempt("/api/ip-blocked/ping") is True
+    assert is_api_rate_limit_exempt("/api/routing/cidr-db/tasks/abc123") is True
+    assert is_api_rate_limit_exempt("/api/routing/overview") is True
+    assert is_api_rate_limit_exempt("/api/routing/game-filters") is True
+    assert is_api_rate_limit_exempt("/api/tasks/abc123") is True
     assert is_api_rate_limit_exempt("/assets/app.js") is True
     assert is_api_rate_limit_exempt("/api/auth/login") is False
 
@@ -49,6 +53,7 @@ def test_api_rate_limit_middleware_returns_429():
         api_rate_limit_max_requests=2,
         api_rate_limit_window_seconds=60,
         security_headers_enabled=False,
+        enforce_https=False,
     )
     service = ApiRateLimitService()
     service._limiter = SlidingWindowLimiter(MemoryRateLimitBackend())
@@ -58,7 +63,7 @@ def test_api_rate_limit_middleware_returns_429():
     async def _call():
         with patch("app.services.api_rate_limit.get_settings", return_value=settings):
             with patch("app.services.api_rate_limit.api_rate_limit_service", service):
-                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                async with AsyncClient(transport=transport, base_url="https://test") as client:
                     first = await client.get("/api/auth/captcha/required")
                     second = await client.get("/api/auth/captcha/required")
                     third = await client.get("/api/auth/captcha/required")

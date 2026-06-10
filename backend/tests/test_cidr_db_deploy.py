@@ -83,6 +83,19 @@ def test_status_includes_last_deploy(deploy_env):
     assert last_deploy["status"] == "completed"
 
 
+def test_status_includes_compile_artifacts(deploy_env, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.cidr.pipeline.deploy.LIST_DIR", str(tmp_path))
+    (tmp_path / "aws.txt").write_text("10.0.0.0/8\n", encoding="utf-8")
+
+    client = _client(deploy_env)
+    resp = client.get("/api/routing/cidr-db/status", headers=deploy_env["admin_headers"])
+    assert resp.status_code == 200
+    artifacts = resp.json().get("compile_artifacts")
+    assert artifacts is not None
+    assert artifacts["aws.txt"]["cidr_count"] == 1
+    assert artifacts["aws.txt"]["exists"] is True
+
+
 def test_status_includes_last_compile_at(deploy_env):
     from datetime import datetime, timezone
 

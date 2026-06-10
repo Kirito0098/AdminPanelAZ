@@ -1,7 +1,16 @@
 import { AlertTriangle, CloudDownload, Database, FileOutput, Rocket, Shield } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import type { AntifilterStatus, CidrDbStatus } from '@/types'
+import type { AntifilterStatus, CidrDbStatus, CidrDegradationAlert } from '@/types'
 import { formatDt, statusBadgeVariant, statusLabel } from './utils'
+
+function alertKey(alert: CidrDegradationAlert, index: number): string {
+  return `${alert.scope}-${alert.provider_key ?? 'global'}-${alert.level}-${index}`
+}
+
+function alertLabel(alert: CidrDegradationAlert): string {
+  const provider = alert.provider_key ? `${alert.provider_key}: ` : ''
+  return `${provider}${alert.message}`
+}
 
 interface PipelineStatusBarProps {
   cidrDb: CidrDbStatus | null
@@ -140,8 +149,8 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
 
       {hasAlerts && (
         <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200 space-y-1">
-          {cidrDb?.alerts?.map((a) => (
-            <div key={a}>{a}</div>
+          {cidrDb?.alerts?.map((alert, index) => (
+            <div key={alertKey(alert, index)}>{alertLabel(alert)}</div>
           ))}
         </div>
       )}

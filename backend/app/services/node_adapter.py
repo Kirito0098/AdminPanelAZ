@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 from app.models import VpnType
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.config import get_settings
+from app.paths import get_cidr_list_dir
 from app.services.node_mtls import build_node_agent_ssl_context, node_agent_base_scheme, node_agent_mtls_enabled
 from app.services.node_mtls_certs import MtlsProvisionBundle
 from app.services.antizapret import AntiZapretService
@@ -175,7 +176,7 @@ class NodeAdapter(ABC):
 class LocalNodeAdapter(NodeAdapter):
     def __init__(self, service: AntiZapretService | None = None):
         self._service = service or AntiZapretService()
-        self._cidr = CidrRoutingService(self._service.base_path, _settings.cidr_list_dir)
+        self._cidr = CidrRoutingService(self._service.base_path, get_cidr_list_dir())
         self._monitor = ServerMonitorService()
 
     def health_check(self) -> dict[str, Any]:

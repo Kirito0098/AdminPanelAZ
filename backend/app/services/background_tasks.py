@@ -29,7 +29,7 @@ PROJECT_ROOT = APP_ROOT.parent
 MAX_OUTPUT_CHARS = 50_000
 _COMMIT_RETRY_ATTEMPTS = 5
 _COMMIT_RETRY_DELAY_SEC = 0.1
-_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="bg-task")
+_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="bg-task")
 
 _PIPELINE_TASK_TYPES = {
     "pytest_run",
@@ -169,6 +169,30 @@ class BackgroundTaskService:
                 .order_by(BackgroundTask.created_at.desc())
                 .first()
             )
+        finally:
+            db.close()
+
+    def recover_stale_running_tasks(self) -> int:
+        """Mark orphaned running/queued tasks as failed after process restart."""
+        db = SessionLocal()
+        try:
+            stale = (
+                db.query(BackgroundTask)
+                .filter(BackgroundTask.status.in_(["queued", "running"]))
+                .all()
+            )
+            if not stale:
+                return 0
+            now = datetime.now(timezone.utc)
+            for task in stale:
+                task.status = "failed"
+                task.finished_at = now
+                task.progress_percent = 100
+                task.progress_stage = "Прервано перезапуском панели"
+                task.message = "Задача прервана перезапуском панели"
+                task.error = "Задача прервана перезапуском панели"
+            self._commit_with_retry(db)
+            return len(stale)
         finally:
             db.close()
 
@@ -531,6 +555,13 @@ class BackgroundTaskService:
                     finished_at=datetime.now(timezone.utc),
                 )
 
+        self.update_background_task(
+            task_id,
+            status="running",
+            progress_percent=1,
+            progress_stage="Запуск фоновой задачи…",
+            started_at=datetime.now(timezone.utc),
+        )
         _EXECUTOR.submit(_worker)
 
     def build_accepted_payload(self, task: BackgroundTask, message: str) -> dict[str, Any]:

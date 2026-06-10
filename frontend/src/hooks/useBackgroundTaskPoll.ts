@@ -6,9 +6,13 @@ const DEFAULT_INTERVAL_MS = 1500
 const DEFAULT_TIMEOUT_MS = 900_000
 const MAX_CONSECUTIVE_ERRORS = 3
 
+export type BackgroundTaskFetcher = (taskId: string) => Promise<BackgroundTask>
+
 export interface BackgroundTaskPollOptions {
   intervalMs?: number
   timeoutMs?: number
+  fetchTask?: BackgroundTaskFetcher
+  initialTask?: BackgroundTask
   onProgress?: (task: BackgroundTask) => void
   onComplete?: (task: BackgroundTask) => void
   onError?: (task: BackgroundTask | null, message: string) => void
@@ -21,6 +25,9 @@ export function useBackgroundTaskPoll() {
   const startedAtRef = useRef<number>(0)
   const errorCountRef = useRef(0)
   const optionsRef = useRef<BackgroundTaskPollOptions>({})
+  const taskRef = useRef<BackgroundTask | null>(null)
+  const pollOnceRef = useRef<(taskId: string) => Promise<void>>(async () => {})
+  const errorNotifiedRef = useRef(false)
 
   const stopPoll = useCallback(() => {
     if (pollRef.current) {
@@ -35,13 +42,18 @@ export function useBackgroundTaskPoll() {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     if (Date.now() - startedAtRef.current > timeoutMs) {
       stopPoll()
-      opts.onError?.(task, 'Превышено время ожидания задачи')
+      opts.onError?.(taskRef.current, 'Превышено время ожидания задачи')
       return
     }
 
     try {
-      const current = await getBackgroundTask(taskId)
+      const fetchTask = opts.fetchTask ?? getBackgroundTask
+      const current = await fetchTask(taskId)
+      if (!current?.task_id) {
+        throw new ApiError('Некорректный ответ сервера о статусе задачи', 500)
+      }
       errorCountRef.current = 0
+      taskRef.current = current
       setTask(current)
       opts.onProgress?.(current)
       if (current.status === 'completed') {
@@ -52,14 +64,34 @@ export function useBackgroundTaskPoll() {
         opts.onError?.(current, current.error || current.message || 'Задача завершилась с ошибкой')
       }
     } catch (err) {
+      const isRateLimit = err instanceof ApiError && err.status === 429
+      const message = err instanceof ApiError ? err.message : 'Ошибка отслеживания задачи'
+      setTask((prev) =>
+        prev
+          ? {
+              ...prev,
+              progress_stage: isRateLimit
+                ? 'Слишком много запросов, повтор через несколько секунд…'
+                : `Ошибка опроса: ${message}`,
+              message: isRateLimit ? 'Слишком много запросов' : message,
+            }
+          : prev,
+      )
+      if (isRateLimit) {
+        return
+      }
       errorCountRef.current += 1
       if (errorCountRef.current >= MAX_CONSECUTIVE_ERRORS) {
         stopPoll()
-        const message = err instanceof ApiError ? err.message : 'Ошибка отслеживания задачи'
-        opts.onError?.(task, message)
+        if (!errorNotifiedRef.current) {
+          errorNotifiedRef.current = true
+          opts.onError?.(taskRef.current, message)
+        }
       }
     }
-  }, [stopPoll, task])
+  }, [stopPoll])
+
+  pollOnceRef.current = pollOnce
 
   const startPoll = useCallback(
     (taskId: string, options: BackgroundTaskPollOptions = {}) => {
@@ -67,21 +99,25 @@ export function useBackgroundTaskPoll() {
       optionsRef.current = options
       startedAtRef.current = Date.now()
       errorCountRef.current = 0
+      errorNotifiedRef.current = false
       setPolling(true)
-      setTask({
-        task_id: taskId,
-        task_type: '',
-        status: 'queued',
-        message: 'Задача поставлена в очередь',
-        progress_percent: 0,
-        progress_stage: 'Ожидание запуска...',
-      })
-      void pollOnce(taskId)
-      pollRef.current = setInterval(() => {
-        void pollOnce(taskId)
-      }, options.intervalMs ?? DEFAULT_INTERVAL_MS)
+      setTask(
+        options.initialTask ?? {
+          task_id: taskId,
+          task_type: '',
+          status: 'queued',
+          message: 'Запрос статуса задачи…',
+          progress_percent: 0,
+          progress_stage: 'Подключение к серверу…',
+        },
+      )
+      const tick = () => {
+        void pollOnceRef.current(taskId)
+      }
+      tick()
+      pollRef.current = setInterval(tick, options.intervalMs ?? DEFAULT_INTERVAL_MS)
     },
-    [pollOnce, stopPoll],
+    [stopPoll],
   )
 
   useEffect(() => () => stopPoll(), [stopPoll])

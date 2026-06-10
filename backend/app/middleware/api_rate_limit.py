@@ -13,6 +13,8 @@ from app.services.rate_limit.sliding_window import RateLimitExceeded
 _EXEMPT_PREFIXES = (
     "/api/health",
     "/api/ip-blocked",
+    "/api/routing",
+    "/api/tasks",
 )
 
 

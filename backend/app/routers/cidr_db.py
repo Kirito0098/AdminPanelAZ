@@ -13,6 +13,7 @@ from app.services.action_log import log_action
 from app.services.cidr.cidr_tasks import (
     create_cidr_task,
     find_active_cidr_task,
+    find_any_active_pipeline_task,
     find_last_completed_cidr_task,
     get_cidr_task,
     serialize_cidr_task,
@@ -29,6 +30,7 @@ from app.services.cidr.pipeline.orchestrator import (
     run_ingest,
     run_multi_deploy,
 )
+from app.services.cidr.pipeline.deploy import list_compile_artifacts
 from app.services.node_manager import get_active_adapter, get_adapter_for_node
 
 router = APIRouter(prefix="/routing/cidr-db", tags=["cidr-db"])
@@ -165,6 +167,8 @@ def cidr_db_status(_: User = Depends(get_current_user), db: Session = Depends(ge
         "history": history,
         "last_compile_at": _summarize_last_compile(),
         "last_deploy": _summarize_last_deploy(),
+        "compile_artifacts": list_compile_artifacts(),
+        "active_task": find_any_active_pipeline_task(),
     }
 
 
@@ -206,6 +210,16 @@ def cidr_db_refresh(
     triggered_by = f"manual:{user.username}"
     task_type = "cidr_db_refresh_dry_run" if payload.dry_run else "cidr_db_refresh"
     message = "Dry-run CIDR БД запущен в фоне" if payload.dry_run else "Обновление CIDR БД запущено в фоне"
+
+    active = find_active_cidr_task(task_type)
+    if active:
+        return {
+            "success": True,
+            "queued": True,
+            "task_id": active["task_id"],
+            "message": "Обновление CIDR БД уже выполняется",
+        }
+
     task_id = create_cidr_task(task_type, message)
 
     def _runner(progress_callback):
@@ -395,6 +409,15 @@ def antifilter_status(_: User = Depends(get_current_user), db: Session = Depends
 
 @router.post("/antifilter/refresh", status_code=status.HTTP_202_ACCEPTED)
 def antifilter_refresh(user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    active = find_active_cidr_task("antifilter_refresh")
+    if active:
+        return {
+            "success": True,
+            "queued": True,
+            "task_id": active["task_id"],
+            "message": "Обновление антифильтра уже выполняется (~3–5 минут)",
+        }
+
     task_id = create_cidr_task("antifilter_refresh", "Обновление антифильтра запущено в фоне")
     triggered_by = f"manual:{user.username}"
 
@@ -415,7 +438,7 @@ def antifilter_refresh(user: User = Depends(require_admin), db: Session = Depend
         "success": True,
         "queued": True,
         "task_id": task_id,
-        "message": "Обновление антифильтра запущено в фоне (~1–2 минуты)",
+        "message": "Обновление антифильтра запущено в фоне (~1–3 минуты)",
     }
 
 

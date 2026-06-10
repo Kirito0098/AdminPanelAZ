@@ -4,8 +4,16 @@ backend/data/
 backend/__pycache__/
 **/__pycache__/
 *.pyc
+.pytest_cache/
+**/.pytest_cache/
 .env
+backend/.env
 backend/node_agent.env
+
+# CIDR pipeline (generated lists, baselines, runtime backups)
+# Correct path is backend/data/cidr/ (already under backend/data/)
+# Legacy compile path before paths.py fix:
+backend/app/data/
 
 # Node
 frontend/node_modules/

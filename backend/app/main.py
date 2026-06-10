@@ -1,10 +1,13 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 from app.middleware.api_rate_limit import ApiRateLimitMiddleware
 from app.middleware.http_security import HttpSecurityMiddleware, build_robots_txt, build_security_txt, get_panel_branding
 from app.middleware.active_session import ActiveSessionMiddleware
@@ -150,6 +153,22 @@ async def lifespan(_: FastAPI):
     from app.services.admin_notify import admin_notify_service
 
     admin_notify_service.start_monitor()
+    try:
+        from app.services.background_tasks import background_task_service
+
+        recovered = background_task_service.recover_stale_running_tasks()
+        if recovered:
+            logger.info("Recovered %d stale background task(s) after restart", recovered)
+    except Exception:
+        pass
+    try:
+        from app.services.cidr.pipeline.list_migration import migrate_legacy_cidr_list_dir
+
+        migrated = migrate_legacy_cidr_list_dir()
+        if migrated:
+            logger.info("Migrated %d legacy CIDR list file(s) on startup", migrated)
+    except Exception:
+        logger.debug("Legacy CIDR list migration skipped", exc_info=True)
     try:
         ip_restriction_service.sync_firewall()
     except Exception:

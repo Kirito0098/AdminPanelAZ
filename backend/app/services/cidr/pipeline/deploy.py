@@ -32,6 +32,31 @@ def _list_artifact_filenames() -> list[str]:
     )
 
 
+def _count_cidr_lines(path: str) -> int:
+    count = 0
+    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                count += 1
+    return count
+
+
+def list_compile_artifacts() -> dict[str, dict[str, int | bool]]:
+    """Return per-file artifact stats from controller LIST_DIR."""
+    artifacts: dict[str, dict[str, int | bool]] = {}
+    if not os.path.isdir(LIST_DIR):
+        return artifacts
+    for filename in _list_artifact_filenames():
+        file_path = os.path.join(LIST_DIR, filename)
+        try:
+            cidr_count = _count_cidr_lines(file_path)
+        except OSError:
+            cidr_count = 0
+        artifacts[filename] = {"cidr_count": cidr_count, "exists": True}
+    return artifacts
+
+
 def push_cidr_artifacts(
     adapter: NodeAdapter,
     filenames: list[str] | list[dict] | None = None,

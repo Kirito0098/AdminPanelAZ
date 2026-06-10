@@ -1588,15 +1588,30 @@ class CidrDbUpdaterService:
             except ValueError:
                 pass
 
-        emit(45, f"Сохранение {len(cidrs)} CIDR в БД…")
-        self.db.query(m.AntifilterCidr).delete()
-        batch_size = 2000
-        for i in range(0, max(len(cidrs), 1), batch_size):
-            batch = cidrs[i:i + batch_size]
-            if batch:
+        total = len(cidrs)
+        existing_count = self.db.query(m.AntifilterCidr).count()
+        if existing_count:
+            emit(42, f"Очистка {existing_count} старых записей…")
+            self.db.query(m.AntifilterCidr).delete(synchronize_session=False)
+            self.db.commit()
+
+        if total == 0:
+            emit(90, "Нет CIDR для сохранения")
+        else:
+            emit(45, f"Сохранение {total} CIDR в БД…")
+            batch_size = 1000
+            for i in range(0, total, batch_size):
+                batch = cidrs[i:i + batch_size]
                 self.db.bulk_insert_mappings(m.AntifilterCidr, [{"cidr": c} for c in batch])
-            pct = 45 + int(45 * min(1.0, (i + batch_size) / max(len(cidrs), 1)))
-            emit(pct, f"Сохранено {min(i + batch_size, len(cidrs))}/{len(cidrs)}")
+                self.db.commit()
+                saved = min(i + len(batch), total)
+                pct = 45 + int(50 * saved / total)
+                emit(pct, f"Сохранено {saved}/{total}")
+
+        from app.services.cidr.pipeline.constants import _ANTIFILTER_INDEX_CACHE
+
+        _ANTIFILTER_INDEX_CACHE["index"] = None
+        _ANTIFILTER_INDEX_CACHE["expires_at"] = 0.0
 
         meta = self.db.query(m.AntifilterMeta).first() or m.AntifilterMeta()
         meta.cidr_count = len(cidrs)

@@ -631,15 +631,13 @@ export async function deployCidrToNode(options?: {
   })
 }
 
-export async function getCidrDeployStatus() {
-  return apiFetch<{ success: boolean; last_deploy: import('../types').CidrLastDeploySummary | null }>(
-    '/routing/cidr-db/deploy/status',
-  )
-}
-
-export async function getCidrPipelineTask(taskId: string) {
-  const task = await getBackgroundTask(taskId)
-  return { success: true, task }
+export async function getCidrBackgroundTask(taskId: string) {
+  const resp = await apiFetch<
+    { success?: boolean; task?: import('../types').BackgroundTask } & import('../types').BackgroundTask
+  >(`/routing/cidr-db/tasks/${encodeURIComponent(taskId)}`)
+  if (resp?.task?.task_id) return resp.task
+  if (resp?.task_id) return resp as import('../types').BackgroundTask
+  throw new ApiError('Некорректный ответ сервера о статусе задачи', 500)
 }
 
 export async function getBackgroundTask(taskId: string) {

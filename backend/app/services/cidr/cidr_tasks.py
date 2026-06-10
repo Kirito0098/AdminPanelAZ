@@ -7,6 +7,24 @@ from app.services.background_tasks import background_task_service
 
 CIDR_TASK_RETENTION = timedelta(hours=2)
 
+ACTIVE_PIPELINE_TASK_TYPES = (
+    "cidr_db_refresh",
+    "cidr_db_refresh_dry_run",
+    "antifilter_refresh",
+    "cidr_generate_from_db",
+    "cidr_estimate_from_db",
+    "cidr_deploy",
+)
+
+CIDR_TASK_STALE_SECONDS: dict[str, int] = {
+    "antifilter_refresh": 720,
+    "cidr_db_refresh": 3600,
+    "cidr_db_refresh_dry_run": 3600,
+    "cidr_generate_from_db": 1800,
+    "cidr_estimate_from_db": 900,
+    "cidr_deploy": 1800,
+}
+
 # In-memory fallback for unit tests without DB wiring
 _CIDR_TASKS: dict[str, dict[str, Any]] = {}
 _USE_MEMORY = False
@@ -80,16 +98,80 @@ def get_cidr_task(task_id: str) -> dict[str, Any] | None:
     return background_task_service.serialize_background_task(task) if task else None
 
 
+def find_any_active_pipeline_task() -> dict[str, Any] | None:
+    for task_type in ACTIVE_PIPELINE_TASK_TYPES:
+        task = find_active_cidr_task(task_type)
+        if task:
+            return task
+    return None
+
+
+def _parse_task_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+def _task_age_seconds(task: dict[str, Any]) -> float | None:
+    started = _parse_task_datetime(task.get("started_at")) or _parse_task_datetime(task.get("created_at"))
+    if not started:
+        return None
+    return max(0.0, (_now_utc() - started).total_seconds())
+
+
+def fail_stale_cidr_task(task: dict[str, Any], *, max_age_seconds: int) -> bool:
+    """Mark an active task as failed if it exceeded max_age_seconds."""
+    status = str(task.get("status") or "")
+    if status not in {"queued", "running"}:
+        return False
+    age = _task_age_seconds(task)
+    if age is None or age <= max_age_seconds:
+        return False
+    task_id = str(task.get("task_id") or task.get("id") or "")
+    if not task_id:
+        return False
+    update_cidr_task(
+        task_id,
+        status="failed",
+        progress_percent=100,
+        progress_stage="Задача прервана по таймауту",
+        message="Задача прервана по таймауту",
+        error="Превышено время выполнения",
+        finished_at=_now_utc(),
+    )
+    return True
+
+
 def find_active_cidr_task(task_type: str) -> dict[str, Any] | None:
     if _use_memory_backend():
         for task in _CIDR_TASKS.values():
             if str(task.get("task_type") or "") != str(task_type or ""):
                 continue
             if str(task.get("status") or "") in {"queued", "running"}:
-                return dict(task)
+                active = dict(task)
+                if fail_stale_cidr_task(
+                    active,
+                    max_age_seconds=CIDR_TASK_STALE_SECONDS.get(task_type, 3600),
+                ):
+                    return None
+                return active
         return None
     task = background_task_service.find_active_task(task_type)
-    return background_task_service.serialize_background_task(task) if task else None
+    if not task:
+        return None
+    serialized = background_task_service.serialize_background_task(task)
+    if fail_stale_cidr_task(
+        serialized,
+        max_age_seconds=CIDR_TASK_STALE_SECONDS.get(task_type, 3600),
+    ):
+        return None
+    return serialized
 
 
 def find_last_completed_cidr_task(task_type: str) -> dict[str, Any] | None:

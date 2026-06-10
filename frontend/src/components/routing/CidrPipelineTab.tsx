@@ -1,16 +1,20 @@
 import { ArrowRight, CloudDownload, Info, Play, Rocket, Shield, Sparkles } from 'lucide-react'
+import { useMemo } from 'react'
 import StatusPanel from '@/components/noc/StatusPanel'
+import PipelineStageProgress from '@/components/routing/PipelineStageProgress'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { cn } from '@/lib/utils'
 import type { AntifilterStatus, CidrDbStatus, CidrPipelineTask, Node } from '@/types'
-import { formatDt, statusBadgeVariant, statusLabel } from './utils'
+import { formatDt, getPipelineStage, isPipelineRunning, pendingMatchesStage, statusBadgeVariant, statusLabel, type PipelinePendingAction } from './utils'
 
 interface CidrPipelineTabProps {
   cidrDb: CidrDbStatus | null
   antifilter: AntifilterStatus | null
   pipelineTask: CidrPipelineTask | null
+  pendingPipelineAction: PipelinePendingAction | null
   nodes: Node[]
   deployAllOnline: boolean
   deployTargetNodeIds: number[]
@@ -27,9 +31,9 @@ interface CidrPipelineTabProps {
 }
 
 const workflowSteps = [
-  { num: 1, text: 'Обновить БД из интернета' },
-  { num: 2, text: 'Собрать CIDR-файлы на контроллере' },
-  { num: 3, text: 'Развернуть файлы на ноду' },
+  { num: 1, text: 'Данные на контроллер (SQLite)' },
+  { num: 2, text: 'Списки на контроллере' },
+  { num: 3, text: 'Списки на ноду' },
 ]
 
 function nodeCheckboxLabel(node: Node): string {
@@ -41,7 +45,8 @@ function nodeCheckboxLabel(node: Node): string {
 export default function CidrPipelineTab({
   cidrDb,
   antifilter,
-  pipelineTask: _pipelineTask,
+  pipelineTask,
+  pendingPipelineAction,
   nodes,
   deployAllOnline,
   deployTargetNodeIds,
@@ -60,6 +65,10 @@ export default function CidrPipelineTab({
   const deployDisabled =
     pipelineBusy || (!deployAllOnline && deployTargetNodeIds.length === 0 && onlineNodes.length === 0)
 
+  const activeStage =
+    pipelineTask && isPipelineRunning(pipelineTask) ? getPipelineStage(pipelineTask.task_type) : null
+  const highlightedStage = activeStage ?? pendingPipelineAction?.stage ?? null
+
   const toggleNode = (nodeId: number, checked: boolean) => {
     if (checked) {
       onDeployTargetNodeIdsChange([...new Set([...deployTargetNodeIds, nodeId])])
@@ -67,75 +76,153 @@ export default function CidrPipelineTab({
       onDeployTargetNodeIdsChange(deployTargetNodeIds.filter((id) => id !== nodeId))
     }
   }
+
+  const needsDeployHint = useMemo(() => {
+    const compile = cidrDb?.last_compile_at
+    if (!compile?.finished_at || compile.status !== 'completed') return false
+    const deploy = cidrDb?.last_deploy
+    if (!deploy?.finished_at) return true
+    const compileAt = Date.parse(compile.finished_at)
+    const deployAt = Date.parse(deploy.finished_at)
+    if (!Number.isNaN(compileAt) && !Number.isNaN(deployAt) && compileAt > deployAt) return true
+    if (
+      compile.artifact_stamp &&
+      deploy.artifact_stamp &&
+      compile.artifact_stamp !== deploy.artifact_stamp
+    ) {
+      return true
+    }
+    return false
+  }, [cidrDb?.last_compile_at, cidrDb?.last_deploy])
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-4 text-sm">
-        {workflowSteps.map((step, i) => (
-          <div key={step.num} className="flex items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-              {step.num}
-            </span>
-            <span>{step.text}</span>
-            {i < workflowSteps.length - 1 && (
-              <ArrowRight size={14} className="mx-1 text-muted-foreground" />
-            )}
-          </div>
-        ))}
+        {workflowSteps.map((step, i) => {
+          const isActive = highlightedStage === step.num
+          const isPast = highlightedStage != null && step.num < highlightedStage
+          return (
+            <div key={step.num} className="flex items-center gap-2">
+              <span
+                className={cn(
+                  'flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold transition-colors',
+                  isActive
+                    ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-offset-2 ring-offset-background animate-pulse'
+                    : isPast
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-muted-foreground/30 text-muted-foreground',
+                )}
+              >
+                {step.num}
+              </span>
+              <span className={cn(isActive && 'font-medium text-foreground')}>{step.text}</span>
+              {i < workflowSteps.length - 1 && (
+                <ArrowRight size={14} className="mx-1 text-muted-foreground" />
+              )}
+            </div>
+          )
+        })}
       </div>
 
-      <StatusPanel title="Этап 1 — Обновление БД (ingest)" icon={CloudDownload}>
+      <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">
+        <Info size={16} className="mt-0.5 shrink-0 text-primary" />
+        <div className="space-y-1 text-muted-foreground">
+          <p>
+            <strong className="text-foreground">Контроллер → нода:</strong> сначала все данные сохраняются на
+            основном сервере (SQLite и файлы списков), затем на этапе 3 готовые списки отправляются на ноды
+            AntiZapret. До deploy файлы маршрутизации на нодах не меняются.
+          </p>
+        </div>
+      </div>
+
+      <StatusPanel title="Этап 1 — Данные на контроллере (ingest)" icon={CloudDownload}>
         <p className="mb-4 text-sm text-muted-foreground">
-          Загрузка CIDR провайдеров из интернета в SQLite на контроллере. Не затрагивает файлы
-          маршрутизации на нодах — только локальную базу данных.
+          Загрузка из интернета в SQLite на контроллере. Ноды не затрагиваются — только локальная база панели.
         </p>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 text-sm mb-6">
-          <div className="rounded-md border p-3">
-            <div className="text-xs text-muted-foreground">Последнее обновление БД</div>
-            <div className="font-medium">{formatDt(cidrDb?.last_refresh_finished)}</div>
-            <Badge variant={statusBadgeVariant(cidrDb?.last_refresh_status)} className="mt-1">
-              {statusLabel(cidrDb?.last_refresh_status)}
-            </Badge>
+        <div className="space-y-4 mb-6">
+          <div className="rounded-lg border p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-medium">CIDR провайдеров</div>
+                <div className="text-xs text-muted-foreground">RIPE, BGP и др. → таблицы cidr_* в SQLite</div>
+              </div>
+              <Button size="sm" disabled={pipelineBusy} onClick={onRefreshDb}>
+                <CloudDownload size={14} className="mr-1.5" />
+                Обновить из интернета
+              </Button>
+            </div>
+            <PipelineStageProgress
+              task={pipelineTask}
+              stage={1}
+              ingestKind="providers"
+              starting={pendingMatchesStage(pendingPipelineAction, 1, 'providers')}
+            />
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 text-sm">
+              <div className="rounded-md border bg-muted/20 p-3">
+                <div className="text-xs text-muted-foreground">Последнее обновление</div>
+                <div className="font-medium">{formatDt(cidrDb?.last_refresh_finished)}</div>
+                <Badge variant={statusBadgeVariant(cidrDb?.last_refresh_status)} className="mt-1">
+                  {statusLabel(cidrDb?.last_refresh_status)}
+                </Badge>
+              </div>
+              <div className="rounded-md border bg-muted/20 p-3">
+                <div className="text-xs text-muted-foreground">CIDR в БД</div>
+                <div className="mono text-xl font-bold">{cidrDb?.total_cidrs ?? 0}</div>
+              </div>
+              <div className="rounded-md border bg-muted/20 p-3">
+                <div className="text-xs text-muted-foreground">Инициатор</div>
+                <div className="text-xs break-all">{cidrDb?.last_refresh_triggered_by ?? '—'}</div>
+              </div>
+            </div>
           </div>
-          <div className="rounded-md border p-3">
-            <div className="text-xs text-muted-foreground">CIDR в БД</div>
-            <div className="mono text-xl font-bold">{cidrDb?.total_cidrs ?? 0}</div>
-          </div>
-          <div className="rounded-md border p-3">
-            <div className="text-xs text-muted-foreground">Antifilter</div>
-            <div className="mono text-xl font-bold">{antifilter?.cidr_count ?? 0}</div>
-            <div className="text-xs text-muted-foreground mt-1">{formatDt(antifilter?.last_refreshed_at)}</div>
-          </div>
-          <div className="rounded-md border p-3">
-            <div className="text-xs text-muted-foreground">Инициатор</div>
-            <div className="text-xs break-all">{cidrDb?.last_refresh_triggered_by ?? '—'}</div>
-          </div>
-        </div>
 
-        <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
-          <Button size="sm" disabled={pipelineBusy} onClick={onRefreshDb}>
-            <CloudDownload size={14} className="mr-1.5" />
-            Обновить из интернета
-          </Button>
-          <Button size="sm" variant="outline" disabled={pipelineBusy} onClick={onRefreshAntifilter}>
-            <Shield size={14} className="mr-1.5" />
-            Обновить antifilter
-          </Button>
-        </div>
-
-        <div className="mt-3 flex items-start gap-2 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-          <Info size={14} className="mt-0.5 shrink-0" />
-          <span>
-            <strong className="text-foreground">Antifilter.download</strong> — список заблокированных подсетей.
-            При включении фильтра на этапе 2 сгенерированные CIDR исключают адреса из этого списка.
-          </span>
+          <div className="rounded-lg border p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-medium">Antifilter.download</div>
+                <div className="text-xs text-muted-foreground">
+                  Заблокированные подсети → SQLite; применяются при сборке списков (этап 2)
+                </div>
+              </div>
+              <Button size="sm" variant="outline" disabled={pipelineBusy} onClick={onRefreshAntifilter}>
+                <Shield size={14} className="mr-1.5" />
+                Обновить antifilter
+              </Button>
+            </div>
+            <PipelineStageProgress
+              task={pipelineTask}
+              stage={1}
+              ingestKind="antifilter"
+              starting={pendingMatchesStage(pendingPipelineAction, 1, 'antifilter')}
+            />
+            <div className="grid gap-4 sm:grid-cols-2 text-sm">
+              <div className="rounded-md border bg-muted/20 p-3">
+                <div className="text-xs text-muted-foreground">Подсетей в БД</div>
+                <div className="mono text-xl font-bold">{antifilter?.cidr_count ?? 0}</div>
+              </div>
+              <div className="rounded-md border bg-muted/20 p-3">
+                <div className="text-xs text-muted-foreground">Последнее обновление</div>
+                <div className="font-medium">{formatDt(antifilter?.last_refreshed_at)}</div>
+                <Badge variant={statusBadgeVariant(antifilter?.refresh_status)} className="mt-1">
+                  {statusLabel(antifilter?.refresh_status)}
+                </Badge>
+              </div>
+            </div>
+          </div>
         </div>
       </StatusPanel>
 
-      <StatusPanel title="Этап 2 — Сборка файлов (compile)" icon={Sparkles}>
+      <StatusPanel title="Этап 2 — Сборка списков на контроллере (compile)" icon={Sparkles}>
+        <PipelineStageProgress
+          task={pipelineTask}
+          stage={2}
+          starting={pendingMatchesStage(pendingPipelineAction, 2)}
+        />
         <p className="mb-4 text-sm text-muted-foreground">
-          Генерация AP-*-include-ips.txt из локальной БД на контроллере. Файлы сохраняются в{' '}
-          <code className="text-xs">backend/data/cidr/list</code> и не отправляются на ноду автоматически.
+          Формирование AP-*-include-ips.txt из локальной БД. Файлы сохраняются в{' '}
+          <code className="text-xs">backend/data/cidr/list</code> на контроллере. На ноду не отправляются
+          автоматически — только после этапа 3.
         </p>
 
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
@@ -161,11 +248,26 @@ export default function CidrPipelineTab({
         </div>
       </StatusPanel>
 
-      <StatusPanel title="Этап 3 — Развёртывание на ноду (deploy)" icon={Rocket}>
+      <StatusPanel title="Этап 3 — Списки на ноду (deploy)" icon={Rocket}>
+        <PipelineStageProgress
+          task={pipelineTask}
+          stage={3}
+          starting={pendingMatchesStage(pendingPipelineAction, 3)}
+        />
         <p className="mb-4 text-sm text-muted-foreground">
-          Отправка ранее собранных CIDR-файлов с контроллера на выбранные ноды AntiZapret и синхронизация
-          провайдеров. Offline-ноды пропускаются. Можно запускать отдельно, без повторной генерации.
+          Отправка готовых списков с контроллера на выбранные ноды AntiZapret и синхронизация провайдеров.
+          Offline-ноды пропускаются. Можно запускать отдельно, без повторной сборки на этапе 2.
         </p>
+
+        {needsDeployHint && (
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-sky-500/40 bg-sky-500/10 px-4 py-3 text-sm text-sky-950 dark:text-sky-100">
+            <Info size={16} className="mt-0.5 shrink-0" />
+            <span>
+              Списки уже собраны на контроллере. Следующий шаг — <strong>Deploy</strong> на выбранные
+              ноды, затем включение провайдеров на вкладке «CIDR-провайдеры».
+            </span>
+          </div>
+        )}
 
         <div className="mb-4 space-y-3 rounded-md border p-4">
           <div className="flex items-center gap-2">

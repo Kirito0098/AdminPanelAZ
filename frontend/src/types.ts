@@ -315,6 +315,18 @@ export interface CidrLastCompileSummary {
   message?: string | null
 }
 
+export interface CidrDegradationAlert {
+  scope: 'provider' | 'global' | string
+  provider_key?: string | null
+  level: 'critical' | 'warning' | 'info' | 'none' | string
+  message: string
+}
+
+export interface CidrCompileArtifact {
+  cidr_count: number
+  exists: boolean
+}
+
 export interface CidrDbStatus {
   success: boolean
   last_refresh_started?: string | null
@@ -323,10 +335,12 @@ export interface CidrDbStatus {
   last_refresh_triggered_by?: string | null
   total_cidrs?: number
   providers: Record<string, CidrDbProviderMeta>
-  alerts?: string[]
+  alerts?: CidrDegradationAlert[]
   history?: CidrDbRefreshHistoryItem[]
   last_compile_at?: CidrLastCompileSummary | null
   last_deploy?: CidrLastDeploySummary | null
+  compile_artifacts?: Record<string, CidrCompileArtifact>
+  active_task?: CidrPipelineTask | null
 }
 
 export interface AntifilterStatus {

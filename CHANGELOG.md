@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-10
+
 ### Added
 - **CIDR Pipeline (вариант A, controller-centric)** — полный цикл ingest → compile → deploy → apply: тяжёлая работа на панели, ноды принимают артефакты через `PUT /routing/providers/{file}`.
 - **Orchestrator** — `run_ingest`, `run_compile`, `run_deploy`, `run_apply`, `run_multi_deploy`; модули `orchestrator.py`, `deploy.py`, `cidr_notify.py`.
@@ -14,7 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Мульти-нода deploy** — push на выбранные online-узлы или все online; offline пропускаются; `per_node` в result задачи; audit log `settings_cidr_deploy`.
 - **Ночной cron** — опционально compile/deploy после refresh (`CIDR_DB_COMPILE_AFTER_REFRESH`, `CIDR_DB_DEPLOY_AFTER_COMPILE`, `CIDR_DB_DEPLOY_TARGET`); `artifact_stamp` в refresh log.
 - **Наблюдаемость** — `last_compile_at`, `last_deploy` в `GET /api/routing/cidr-db/status`; `PipelineStatusBar`, `PipelineTaskProgress` с результатом по нодам; Telegram `cidr_deploy_failed`, `cidr_ingest_partial`.
-- **UI** — вкладка CIDR Pipeline: три этапа (обновить БД / собрать файлы / развернуть на ноду), выбор нод, «Сгенерировать + doall».
+- **UI** — вкладка CIDR Pipeline: три этапа (обновить БД / собрать файлы / развернуть на ноду), выбор нод, «Сгенерировать + doall»; прогресс по этапам (`PipelineStageProgress`, `usePipelineTaskPoll`).
+- **UI — CIDR-провайдеры** — колонки «контроллер / нода / БД», баннеры «нужен compile» и «нужен deploy»; подсказка Deploy после успешного compile.
+- **API** — `compile_artifacts` в `GET /api/routing/cidr-db/status` (файлы на контроллере после этапа 2).
+- **Пути** — `app/paths.py`: единый `LIST_DIR` (`backend/data/cidr/list`); миграция legacy-артефактов из `backend/app/data/cidr/list` при старте.
+- **Зависимости** — `netaddr` для агрегации CIDR при compile.
 - **Документация** — `docs/CIDR_PIPELINE_VARIANT_A.md` (спецификация pipeline, фазы 0–6).
 - **Тесты** — `test_cidr_pipeline_orchestrator.py`, `test_cidr_pipeline_deploy.py`, `test_cidr_db_deploy.py`, `test_cidr_multi_deploy.py`, `test_cidr_scheduler.py`, `test_cidr_notify.py`; retry commit в `test_background_tasks_service.py`.
 - **Per-node mTLS** — включение mTLS для каждого удалённого узла отдельно из панели (страница «Узлы» → «Включить mTLS»): генерация CA и сертификатов на панели, доставка на node agent (`POST /system/provision-mtls`), health по HTTPS; смешанный режим HTTP + mTLS.
@@ -23,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **CIDR refresh** — SQLite WAL + `busy_timeout` + retry commit при `database is locked`; устранены 500 при «Обновить из интернета».
+- **CIDR compile** — исправлен путь `LIST_DIR` (файлы писались в `backend/app/data/…`, UI читал `backend/data/…`); добавлен `netaddr` (ошибка «netaddr package is required»).
+- **Antifilter refresh** — batch commit при сохранении ~15k CIDR; прогресс по батчам; авто-сброс зависших задач по таймауту.
+- **CIDR pipeline UI** — polling задач изолирован от глобального ProgressContext; exempt rate limit для `/api/routing` и `/api/tasks`; корректное возобновление `active_task` после перезагрузки страницы.
 - **Обновление узла** — перезапуск node agent после git pull через `systemctl restart adminpanelaz-node`, если unit установлен; лог в `update-restart.log`.
 
 ### Changed
@@ -314,7 +323,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Production-развёртывание: `install.sh`, daemon/watchdog, systemd, раздача UI из backend в prod-режиме.
 - OpenVPN management sockets, vnStat, WebSocket-мониторинг, Telegram Mini App, in-panel pytest.
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.4.3...v1.5.0
+[1.4.3]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.4.2...v1.4.3
 [0.3.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Kirito0098/AdminPanelAZ/releases/tag/v0.1.0
