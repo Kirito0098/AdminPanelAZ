@@ -22,6 +22,7 @@ import {
   buildAccessMeta,
   formatCreatedAt,
   getConfigStatus,
+  getDownloadFilename,
   hasAzProfiles,
   hasVpnProfiles,
   pickAzFile,
@@ -262,11 +263,11 @@ export default function ConfigCard({
   const actionBusy = loadingAction != null
 
   const runFileAction = (
-    file: { path: string; filename: string } | undefined,
+    file: VpnConfig['profile_files'][number] | undefined,
     fn: (path: string, filename: string) => void,
   ) => {
     if (!file) return
-    fn(file.path, file.filename)
+    fn(file.path, getDownloadFilename(config, file))
   }
 
   const statusBadgeVariant =
@@ -364,14 +365,14 @@ export default function ConfigCard({
                 <div className="flex gap-1.5">
                   <DownloadButton
                     label="VPN"
-                    filename={vpnFile!.filename}
+                    filename={getDownloadFilename(config, vpnFile!)}
                     disabled={actionBusy}
                     loading={loadingAction === 'download'}
                     onClick={() => runFileAction(vpnFile, onDownload)}
                   />
                   <DownloadButton
                     label="AZ"
-                    filename={azFile!.filename}
+                    filename={getDownloadFilename(config, azFile!)}
                     disabled={actionBusy}
                     loading={loadingAction === 'download'}
                     accent="amber"
@@ -381,7 +382,7 @@ export default function ConfigCard({
               ) : (
                 <DownloadButton
                   label="Скачать"
-                  filename={primaryFile.filename}
+                  filename={getDownloadFilename(config, primaryFile)}
                   disabled={actionBusy}
                   loading={loadingAction === 'download'}
                   className="w-full"
@@ -397,7 +398,7 @@ export default function ConfigCard({
                 {hasBothProfiles ? (
                   <>
                     <IconActionButton
-                      title={`QR VPN: ${vpnFile!.filename}`}
+                      title={`QR VPN: ${getDownloadFilename(config, vpnFile!)}`}
                       disabled={actionBusy}
                       loading={loadingAction === 'qr'}
                       onClick={() => runFileAction(vpnFile, onQr)}
@@ -405,7 +406,7 @@ export default function ConfigCard({
                       <QrCode size={14} />
                     </IconActionButton>
                     <IconActionButton
-                      title={`QR AntiZapret: ${azFile!.filename}`}
+                      title={`QR AntiZapret: ${getDownloadFilename(config, azFile!)}`}
                       disabled={actionBusy}
                       loading={loadingAction === 'qr'}
                       className="border-amber-500/40 text-amber-600 dark:text-amber-400"
@@ -416,7 +417,7 @@ export default function ConfigCard({
                   </>
                 ) : (
                   <IconActionButton
-                    title={`QR: ${primaryFile.filename}`}
+                    title={`QR: ${getDownloadFilename(config, primaryFile)}`}
                     disabled={actionBusy}
                     loading={loadingAction === 'qr'}
                     onClick={() => runFileAction(primaryFile, onQr)}

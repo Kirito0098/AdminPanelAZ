@@ -38,6 +38,7 @@ def send_tg_document(
     file_path: str,
     caption: str = "",
     *,
+    filename: str | None = None,
     run_async: bool = True,
     timeout_seconds: int = 120,
 ) -> bool:
@@ -61,11 +62,11 @@ def send_tg_document(
             if caption:
                 _add_field("caption", caption)
 
-            filename = (file_path or "").strip().split("/")[-1] or "backup.tar.gz"
+            upload_name = (filename or "").strip() or (file_path or "").strip().split("/")[-1] or "backup.tar.gz"
             body.extend(f"--{boundary}\r\n".encode("utf-8"))
             body.extend(
                 (
-                    f'Content-Disposition: form-data; name="document"; filename="{filename}"\r\n'
+                    f'Content-Disposition: form-data; name="document"; filename="{upload_name}"\r\n'
                     "Content-Type: application/gzip\r\n\r\n"
                 ).encode("utf-8")
             )

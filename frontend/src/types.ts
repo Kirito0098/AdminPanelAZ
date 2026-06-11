@@ -52,7 +52,13 @@ export interface VpnConfig {
   description?: string | null
   created_at: string
   updated_at: string
-  profile_files: Array<{ protocol: string; variant: string; filename: string; path: string }>
+  profile_files: Array<{
+    protocol: string
+    variant: string
+    filename: string
+    path: string
+    download_filename?: string
+  }>
 }
 
 export interface MonitoringService {

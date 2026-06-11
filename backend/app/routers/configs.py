@@ -21,6 +21,7 @@ from app.services.openvpn_group import (
     set_user_openvpn_group,
 )
 from app.services.notify_time import get_client_timezone_from_request
+from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
 from app.services.qr_download import QrDownloadService
 from app.services.qr_generator import generate_qr_png
 from app.services.security import SecurityService
@@ -91,6 +92,8 @@ def _to_response(
             files = node_adapter.get_profile_files(config.client_name, config.vpn_type)
         if config.vpn_type == VpnType.openvpn and openvpn_group:
             files = filter_openvpn_profile_files(files, openvpn_group)
+        if files:
+            files = enrich_profile_files(config.client_name, files)
     return VpnConfigResponse(
         id=config.id,
         client_name=config.client_name,
@@ -153,7 +156,7 @@ def _fetch_profile_files_map(
         files = list(files_by_name.get(config.client_name, []))
         if config.vpn_type == VpnType.openvpn and openvpn_group:
             files = filter_openvpn_profile_files(files, openvpn_group)
-        result[config.id] = files
+        result[config.id] = enrich_profile_files(config.client_name, files)
     return result
 
 
@@ -380,7 +383,7 @@ def download_profile(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
     content = get_active_adapter(db).read_profile_file(path)
-    filename = path.split("/")[-1]
+    filename = build_profile_download_filename(config.client_name, path=path)
     return PlainTextResponse(content, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
@@ -431,7 +434,7 @@ def create_one_time_link(
     return svc.create_token(
         file_path=path,
         config_type=config.vpn_type.value,
-        config_name=path.split("/")[-1],
+        config_name=build_profile_download_filename(config.client_name, path=path),
         creator_id=current_user.id,
         creator_username=current_user.username,
         remote_addr=request.client.host if request.client else None,

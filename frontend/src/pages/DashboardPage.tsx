@@ -21,6 +21,7 @@ import {
   syncConfigs,
 } from '@/api/client'
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
+import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import MetricCard from '@/components/noc/MetricCard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -217,18 +218,21 @@ export default function DashboardPage() {
 
   const handleDownload = async (config: VpnConfig, path: string, filename: string) => {
     try {
+      let downloadName = filename
       await withInline(async () => {
         const res = await downloadProfile(config.id, path)
         if (!res.ok) throw new Error('Ошибка скачивания')
         const blob = await res.blob()
+        downloadName =
+          parseContentDispositionFilename(res.headers.get('Content-Disposition')) ?? filename
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = filename
+        a.download = downloadName
         a.click()
         URL.revokeObjectURL(url)
       }, 'Скачивание файла...')
-      success(`Файл «${filename}» скачан`)
+      success(`Файл «${downloadName}» скачан`)
     } catch {
       notifyError('Ошибка скачивания файла')
     }

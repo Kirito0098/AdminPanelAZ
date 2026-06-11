@@ -389,16 +389,23 @@ def send_config(payload: SendConfigRequest, current_user: User = Depends(get_cur
     chat_id = chat_row.value if chat_row else ""
     if not chat_id:
         raise HTTPException(status_code=503, detail="Telegram chat_id не настроен")
+    from app.services.profile_download_name import build_profile_download_filename
     from app.services.telegram import send_tg_document
     import os
     import tempfile
 
-    suffix = ".ovpn" if config.vpn_type.value == "openvpn" else ".conf"
-    with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as f:
+    selected = next((item for item in files if item.get("path") == path), files[0])
+    download_name = selected.get("download_filename") or build_profile_download_filename(
+        config.client_name,
+        protocol=selected.get("protocol", ""),
+        variant=selected.get("variant", ""),
+        path=selected.get("path", path),
+    )
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".tmp", delete=False) as f:
         f.write(content)
         tmp = f.name
     try:
-        send_tg_document(token, chat_id, tmp, caption=f"Конфиг: {config.client_name}")
+        send_tg_document(token, chat_id, tmp, caption=f"Конфиг: {config.client_name}", filename=download_name)
     finally:
         os.unlink(tmp)
     return {"message": "Конфиг отправлен в Telegram"}

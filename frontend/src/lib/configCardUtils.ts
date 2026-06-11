@@ -1,4 +1,5 @@
 import type { ClientAccessPolicy, VpnConfig } from '@/types'
+import { getProfileDownloadFilename } from '@/lib/profileDownloadName'
 
 export type ProtocolTab = 'openvpn' | 'wireguard' | 'amneziawg'
 export type ClientFilter = 'all' | 'active' | 'expiring' | 'expired'
@@ -229,6 +230,10 @@ export function formatCreatedAt(value?: string | null): string {
 
 export function pickPrimaryFile(config: VpnConfig) {
   return pickVpnFile(config) ?? pickAzFile(config) ?? config.profile_files[0]
+}
+
+export function getDownloadFilename(config: VpnConfig, file: ProfileFile): string {
+  return getProfileDownloadFilename(config.client_name, file)
 }
 
 export function getProtocolBadgeVariant(tab: ProtocolTab): 'default' | 'secondary' | 'outline' {

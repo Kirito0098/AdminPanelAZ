@@ -48,6 +48,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   getConfigStatus,
+  getDownloadFilename,
   getProtocolBadgeVariant,
   hasAzProfiles,
   hasVpnProfiles,
@@ -513,7 +514,7 @@ export default function ClientActionsDialog({
       key: 'vpn',
       label: isOpenVpn ? 'VPN профиль' : 'Конфигурация',
       path: vpnFile.path,
-      filename: vpnFile.filename,
+      filename: getDownloadFilename(config, vpnFile),
     })
   }
   if (azFile) {
@@ -521,7 +522,7 @@ export default function ClientActionsDialog({
       key: 'az',
       label: 'AntiZapret',
       path: azFile.path,
-      filename: azFile.filename,
+      filename: getDownloadFilename(config, azFile),
     })
   }
 
