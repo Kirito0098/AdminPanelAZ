@@ -21,7 +21,9 @@ import {
   getProtocolBadgeVariant,
   hasAzProfiles,
   hasVpnProfiles,
+  pickAzFile,
   pickPrimaryFile,
+  pickVpnFile,
   protocolLabel,
   type ProtocolTab,
 } from '@/lib/configCardUtils'
@@ -75,16 +77,22 @@ export default function ConfigCard({
   const status = getConfigStatus(config, tab, policy)
   const StatusIcon = statusIcons[status.variant]
   const { lines, tone } = buildAccessMeta(config, tab, policy)
+  const vpnFile = pickVpnFile(config)
+  const azFile = pickAzFile(config)
   const primaryFile = pickPrimaryFile(config)
+  const hasBothProfiles = Boolean(vpnFile && azFile)
   const isAdmin = userRole === 'admin'
   const canDelete = isAdmin || userRole === 'user'
   const isBlocked = policy?.is_blocked ?? false
   const showMeta = Boolean(policy) || config.vpn_type === 'openvpn'
   const keyMeta = config.vpn_type === 'openvpn' ? lines.slice(1, 3) : lines.slice(0, 2)
 
-  const runPrimary = (action: 'download' | 'qr', fn: (path: string, filename: string) => void) => {
-    if (!primaryFile) return
-    fn(primaryFile.path, primaryFile.filename)
+  const runFileAction = (
+    file: { path: string; filename: string } | undefined,
+    fn: (path: string, filename: string) => void,
+  ) => {
+    if (!file) return
+    fn(file.path, file.filename)
   }
 
   return (
@@ -192,34 +200,84 @@ export default function ConfigCard({
           )}
           {primaryFile && showQrDownloads && (
             <>
-              <Button
-                variant="outline"
-                size="sm"
-                title="Скачать профиль"
-                disabled={!!loadingAction}
-                onClick={() => runPrimary('download', onDownload)}
-              >
-                {loadingAction === 'download' ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Download size={14} />
-                )}
-                Скачать
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                title="QR-код"
-                disabled={!!loadingAction}
-                onClick={() => runPrimary('qr', onQr)}
-              >
-                {loadingAction === 'qr' ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <QrCode size={14} />
-                )}
-                QR
-              </Button>
+              {hasBothProfiles ? (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    title={`Скачать VPN: ${vpnFile!.filename}`}
+                    disabled={!!loadingAction}
+                    onClick={() => runFileAction(vpnFile, onDownload)}
+                  >
+                    {loadingAction === 'download' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                    VPN
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-amber-500/40 text-amber-600 dark:text-amber-400"
+                    title={`Скачать AntiZapret: ${azFile!.filename}`}
+                    disabled={!!loadingAction}
+                    onClick={() => runFileAction(azFile, onDownload)}
+                  >
+                    {loadingAction === 'download' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                    AZ
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    title={`QR VPN: ${vpnFile!.filename}`}
+                    disabled={!!loadingAction}
+                    onClick={() => runFileAction(vpnFile, onQr)}
+                  >
+                    {loadingAction === 'qr' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <QrCode size={14} />
+                    )}
+                    QR
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    title={`Скачать: ${primaryFile.filename}`}
+                    disabled={!!loadingAction}
+                    onClick={() => runFileAction(primaryFile, onDownload)}
+                  >
+                    {loadingAction === 'download' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                    Скачать
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    title={`QR: ${primaryFile.filename}`}
+                    disabled={!!loadingAction}
+                    onClick={() => runFileAction(primaryFile, onQr)}
+                  >
+                    {loadingAction === 'qr' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <QrCode size={14} />
+                    )}
+                    QR
+                  </Button>
+                </>
+              )}
             </>
           )}
           <Button variant="outline" size="sm" title="Все действия" onClick={onOpenDetails}>
