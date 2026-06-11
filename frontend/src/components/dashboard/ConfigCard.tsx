@@ -252,9 +252,9 @@ export default function ConfigCard({
   const status = getConfigStatus(config, tab, policy)
   const StatusIcon = statusIcons[status.variant]
   const { tone } = buildAccessMeta(config, tab, policy)
-  const vpnFile = pickVpnFile(config)
-  const azFile = pickAzFile(config)
-  const primaryFile = pickPrimaryFile(config)
+  const vpnFile = pickVpnFile(config, tab)
+  const azFile = pickAzFile(config, tab)
+  const primaryFile = pickPrimaryFile(config, tab)
   const hasBothProfiles = Boolean(vpnFile && azFile)
   const isAdmin = userRole === 'admin'
   const canDelete = isAdmin || userRole === 'user'
@@ -314,14 +314,14 @@ export default function ConfigCard({
           </Badge>
         </div>
 
-        {(hasVpnProfiles(config) || hasAzProfiles(config)) && (
+        {(hasVpnProfiles(config, tab) || hasAzProfiles(config, tab)) && (
           <div className="flex flex-wrap gap-1">
-            {hasVpnProfiles(config) && (
+            {hasVpnProfiles(config, tab) && (
               <span className="inline-flex items-center rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
                 VPN
               </span>
             )}
-            {hasAzProfiles(config) && (
+            {hasAzProfiles(config, tab) && (
               <span className="inline-flex items-center rounded-md border border-amber-500/35 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
                 AntiZapret
               </span>

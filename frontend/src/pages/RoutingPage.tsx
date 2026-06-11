@@ -20,7 +20,6 @@ import RoutingOverviewTab from '@/components/routing/RoutingOverviewTab'
 import RoutingPageHeader from '@/components/routing/RoutingPageHeader'
 import RoutingPageSkeleton from '@/components/routing/RoutingPageSkeleton'
 import { useRoutingPage } from '@/components/routing/useRoutingPage'
-import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNode } from '@/context/NodeContext'
 import { useAuth } from '@/context/AuthContext'
@@ -62,7 +61,6 @@ export default function RoutingPage() {
     refreshCidrDb,
     refreshAntifilter,
     deployCidr,
-    inline,
   } = useRoutingPage()
 
   if (loading && !data) {
@@ -93,7 +91,6 @@ export default function RoutingPage() {
         onApplyDoall={() => setConfirmAction('apply-doall')}
       />
 
-      <InlineProgressBar active={inline.active} label={inline.label} />
       <PipelineTaskProgress task={pipelineTask} />
 
       <PipelineStatusBar cidrDb={cidrDb} antifilter={antifilter} />

@@ -22,6 +22,7 @@ from app.services.openvpn_group import (
 )
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.profile_files import profile_files_batch_key
 from app.services.qr_download import QrDownloadService
 from app.services.qr_generator import generate_qr_png
 from app.services.security import SecurityService
@@ -131,13 +132,17 @@ def _fetch_profile_files_map(
         return {}
 
     clients = [(c.client_name, c.vpn_type) for c in configs]
-    files_by_name: dict[str, list[dict[str, str]]] = {}
+    files_by_key: dict[str, list[dict[str, str]]] = {}
     try:
-        files_by_name = adapter.get_profile_files_batch(clients)
+        files_by_key = adapter.get_profile_files_batch(clients)
     except Exception:
-        files_by_name = {}
+        files_by_key = {}
 
-    missing = [c for c in configs if c.client_name not in files_by_name]
+    missing = [
+        c
+        for c in configs
+        if profile_files_batch_key(c.client_name, c.vpn_type) not in files_by_key
+    ]
     if missing:
         with ThreadPoolExecutor(max_workers=PROFILE_FILES_MAX_WORKERS) as pool:
             futures = {
@@ -146,14 +151,16 @@ def _fetch_profile_files_map(
             }
             for future in as_completed(futures):
                 config = futures[future]
+                key = profile_files_batch_key(config.client_name, config.vpn_type)
                 try:
-                    files_by_name[config.client_name] = future.result()
+                    files_by_key[key] = future.result()
                 except Exception:
-                    files_by_name[config.client_name] = []
+                    files_by_key[key] = []
 
     result: dict[int, list[dict[str, str]]] = {}
     for config in configs:
-        files = list(files_by_name.get(config.client_name, []))
+        key = profile_files_batch_key(config.client_name, config.vpn_type)
+        files = list(files_by_key.get(key, []))
         if config.vpn_type == VpnType.openvpn and openvpn_group:
             files = filter_openvpn_profile_files(files, openvpn_group)
         result[config.id] = enrich_profile_files(config.client_name, files)

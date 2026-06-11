@@ -12,6 +12,7 @@ from app.models import VpnType
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.services.antizapret_backup import AntizapretBackupService
 from app.services.openvpn_management import openvpn_management_service
+from app.services.profile_files import iter_client_profile_paths, profile_filename_matches_client
 
 settings = get_settings()
 CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
@@ -124,6 +125,8 @@ class AntiZapretService:
                 if not directory.exists():
                     continue
                 for path in directory.glob(f"*{client_name}*{suffix}"):
+                    if not profile_filename_matches_client(path.name, client_name, suffix=suffix):
+                        continue
                     files.append({
                         "protocol": "openvpn",
                         "variant": label,
@@ -131,7 +134,9 @@ class AntiZapretService:
                         "path": str(path),
                     })
                 for path in directory.glob(f"{prefix}-*{suffix}"):
-                    if client_name in path.name and not any(f["path"] == str(path) for f in files):
+                    if profile_filename_matches_client(path.name, client_name, suffix=suffix) and not any(
+                        f["path"] == str(path) for f in files
+                    ):
                         files.append({
                             "protocol": "openvpn",
                             "variant": label,
@@ -146,9 +151,7 @@ class AntiZapretService:
                 ("amneziawg", "vpn", "-am.conf"),
             ]:
                 directory = self.client_dir / proto / variant
-                if not directory.exists():
-                    continue
-                for path in directory.glob(f"*{client_name}*{suffix}"):
+                for path in iter_client_profile_paths(directory, client_name, suffix):
                     files.append({
                         "protocol": proto,
                         "variant": variant,

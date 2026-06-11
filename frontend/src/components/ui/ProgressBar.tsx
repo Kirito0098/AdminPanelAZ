@@ -1,4 +1,5 @@
 import { Loader2 } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { Progress } from './progress'
 
@@ -90,14 +91,39 @@ export interface InlineProgressBarProps {
 }
 
 export function InlineProgressBar({ active, label, value }: InlineProgressBarProps) {
-  if (!active) return null
-  return (
-    <AppProgress
-      value={value}
-      label={label || 'Выполнение...'}
-      showPercent={value != null}
-      icon
-      className="mb-4"
-    />
+  if (!active || typeof document === 'undefined') return null
+
+  const isDeterminate = value != null && value >= 0
+  const clampedValue = isDeterminate ? Math.min(100, Math.max(0, value)) : undefined
+  const statusLabel = label || 'Выполнение...'
+
+  return createPortal(
+    <div
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-[100] border-t border-primary/20 bg-background/95 px-4 py-3 shadow-[0_-8px_30px_rgba(0,0,0,0.12)] backdrop-blur-md supports-[backdrop-filter]:bg-background/85"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      aria-label={statusLabel}
+    >
+      <div className="mx-auto flex w-full max-w-4xl items-center gap-3">
+        <Loader2 size={16} className="shrink-0 animate-spin text-primary" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">{statusLabel}</p>
+          <div className="mt-2">
+            {isDeterminate ? (
+              <Progress value={clampedValue} className="h-1.5" />
+            ) : (
+              <IndeterminateBar size="sm" />
+            )}
+          </div>
+        </div>
+        {isDeterminate && (
+          <span className="shrink-0 text-sm font-medium tabular-nums text-muted-foreground">
+            {clampedValue}%
+          </span>
+        )}
+      </div>
+    </div>,
+    document.body,
   )
 }

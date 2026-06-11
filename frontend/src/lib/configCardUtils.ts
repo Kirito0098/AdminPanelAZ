@@ -21,20 +21,38 @@ export function isVpnProfile(file: ProfileFile): boolean {
   return VPN_PROFILE_DIR.test(file.path)
 }
 
-export function hasAzProfiles(config: VpnConfig): boolean {
-  return config.profile_files.some(isAzProfile)
+export function profileProtocolForTab(tab: ProtocolTab): ProfileFile['protocol'] {
+  if (tab === 'openvpn') return 'openvpn'
+  if (tab === 'amneziawg') return 'amneziawg'
+  return 'wireguard'
 }
 
-export function hasVpnProfiles(config: VpnConfig): boolean {
-  return config.profile_files.some(isVpnProfile)
+export function profileFilesForTab(config: VpnConfig, tab: ProtocolTab): ProfileFile[] {
+  if (tab === 'openvpn') {
+    return config.profile_files.filter((file) => file.protocol === 'openvpn')
+  }
+  const protocol = profileProtocolForTab(tab)
+  return config.profile_files.filter((file) => file.protocol === protocol)
 }
 
-export function pickAzFile(config: VpnConfig): ProfileFile | undefined {
-  return config.profile_files.find(isAzProfile)
+export function hasAzProfiles(config: VpnConfig, tab?: ProtocolTab): boolean {
+  const files = tab ? profileFilesForTab(config, tab) : config.profile_files
+  return files.some(isAzProfile)
 }
 
-export function pickVpnFile(config: VpnConfig): ProfileFile | undefined {
-  return config.profile_files.find(isVpnProfile)
+export function hasVpnProfiles(config: VpnConfig, tab?: ProtocolTab): boolean {
+  const files = tab ? profileFilesForTab(config, tab) : config.profile_files
+  return files.some(isVpnProfile)
+}
+
+export function pickAzFile(config: VpnConfig, tab?: ProtocolTab): ProfileFile | undefined {
+  const files = tab ? profileFilesForTab(config, tab) : config.profile_files
+  return files.find(isAzProfile)
+}
+
+export function pickVpnFile(config: VpnConfig, tab?: ProtocolTab): ProfileFile | undefined {
+  const files = tab ? profileFilesForTab(config, tab) : config.profile_files
+  return files.find(isVpnProfile)
 }
 
 export function protocolLabel(tab: ProtocolTab): string {
@@ -45,13 +63,7 @@ export function protocolLabel(tab: ProtocolTab): string {
 
 export function configMatchesTab(config: VpnConfig, tab: ProtocolTab): boolean {
   if (tab === 'openvpn') return config.vpn_type === 'openvpn'
-  if (config.vpn_type !== 'wireguard') return false
-
-  const hasWg = config.profile_files.some((f) => f.protocol === 'wireguard')
-  const hasAm = config.profile_files.some((f) => f.protocol === 'amneziawg')
-  if (!hasWg && !hasAm) return tab === 'wireguard'
-  if (tab === 'wireguard') return hasWg
-  return hasAm
+  return config.vpn_type === 'wireguard'
 }
 
 export function parseAccessExpiresAt(value?: string | null): Date | null {
@@ -228,8 +240,9 @@ export function formatCreatedAt(value?: string | null): string {
   return new Date(value).toLocaleDateString('ru-RU')
 }
 
-export function pickPrimaryFile(config: VpnConfig) {
-  return pickVpnFile(config) ?? pickAzFile(config) ?? config.profile_files[0]
+export function pickPrimaryFile(config: VpnConfig, tab?: ProtocolTab) {
+  const scoped = tab ? profileFilesForTab(config, tab) : config.profile_files
+  return pickVpnFile(config, tab) ?? pickAzFile(config, tab) ?? scoped[0]
 }
 
 export function getDownloadFilename(config: VpnConfig, file: ProfileFile): string {

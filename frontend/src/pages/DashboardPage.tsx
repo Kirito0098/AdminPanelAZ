@@ -21,13 +21,12 @@ import {
   syncConfigs,
 } from '@/api/client'
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
-import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
+import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
 import MetricCard from '@/components/noc/MetricCard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
-import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -63,7 +62,7 @@ export default function DashboardPage() {
   const canCreateClient = openvpnEnabled || wireguardEnabled
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
-  const { startGlobal, doneGlobal, inline, withInline } = useProgress()
+  const { startGlobal, doneGlobal, withInline } = useProgress()
   const [configs, setConfigs] = useState<VpnConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingFiles, setLoadingFiles] = useState(false)
@@ -321,8 +320,6 @@ export default function DashboardPage() {
           Связь с узлом не подтверждена. Запустите проверку здоровья на странице «Узлы».
         </SettingsAlert>
       )}
-
-      <InlineProgressBar active={inline.active} label={inline.label} />
 
       {summaryLoading && !summary && (
         <Card>

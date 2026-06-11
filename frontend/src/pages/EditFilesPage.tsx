@@ -29,7 +29,6 @@ import { NodeBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import ConfirmDialog, { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import EmptyState from '@/components/ui/EmptyState'
-import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -140,7 +139,7 @@ export default function EditFilesPage() {
   const { user } = useAuth()
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
-  const { startGlobal, doneGlobal, inline, withInline } = useProgress()
+  const { startGlobal, doneGlobal, withInline } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
   const [searchParams] = useSearchParams()
 
@@ -418,8 +417,6 @@ export default function EditFilesPage() {
           сохранением изменений.
         </SettingsAlert>
       )}
-
-      <InlineProgressBar active={inline.active} label={inline.label} />
 
       {loadError && files.length === 0 ? (
         <Card>

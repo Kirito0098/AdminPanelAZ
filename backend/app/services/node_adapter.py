@@ -6,6 +6,7 @@ import httpx
 from fastapi import HTTPException, status
 
 from app.models import VpnType
+from app.services.profile_files import profile_files_batch_key
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.config import get_settings
 from app.paths import get_cidr_list_dir
@@ -62,7 +63,10 @@ class NodeAdapter(ABC):
         self,
         clients: list[tuple[str, VpnType]],
     ) -> dict[str, list[dict[str, str]]]:
-        return {name: self.get_profile_files(name, vpn_type) for name, vpn_type in clients}
+        return {
+            profile_files_batch_key(name, vpn_type): self.get_profile_files(name, vpn_type)
+            for name, vpn_type in clients
+        }
 
     @abstractmethod
     def read_profile_file(self, path: str) -> str: ...

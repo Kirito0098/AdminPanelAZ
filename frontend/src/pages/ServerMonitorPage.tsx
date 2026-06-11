@@ -365,10 +365,9 @@ export default function ServerMonitorPage() {
       )}
 
       <InlineProgressBar
-        active={inline.active || refreshing || bwLoading}
+        active={refreshing || bwLoading}
         label={
-          inline.label ||
-          (refreshing ? 'Обновление метрик...' : bwLoading ? 'Загрузка графика vnStat...' : undefined)
+          refreshing ? 'Обновление метрик...' : bwLoading ? 'Загрузка графика vnStat...' : undefined
         }
       />
 

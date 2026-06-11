@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
 import BackgroundTaskProgress from '@/components/ui/BackgroundTaskProgress'
-import { GlobalProgressBar } from '@/components/ui/ProgressBar'
+import { GlobalProgressBar, InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useBackgroundTaskPoll, type BackgroundTaskPollOptions } from '@/hooks/useBackgroundTaskPoll'
 import type { BackgroundTask } from '@/types'
 
@@ -135,6 +135,7 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
   return (
     <ProgressContext.Provider value={value}>
       <GlobalProgressBar active={globalActive} />
+      <InlineProgressBar active={inline.active} label={inline.label} />
       <BackgroundTaskProgress task={backgroundTask} />
       {children}
     </ProgressContext.Provider>

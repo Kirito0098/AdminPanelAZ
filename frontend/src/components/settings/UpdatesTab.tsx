@@ -15,7 +15,7 @@ import type { LatestChangelog } from '@/types'
 
 export default function UpdatesTab() {
   const { success, error: notifyError } = useNotifications()
-  const { inline, trackBackgroundTask, backgroundTaskPolling } = useProgress()
+  const { trackBackgroundTask } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
   const [info, setInfo] = useState<{
     updates_available?: boolean
@@ -93,7 +93,7 @@ export default function UpdatesTab() {
   return (
     <div className="space-y-4">
       <ConfirmDialogHost dialogProps={dialogProps} />
-      <InlineProgressBar active={inline.active || updating || backgroundTaskPolling} label={inline.label || (updating ? 'Применение обновления...' : undefined)} />
+      <InlineProgressBar active={updating} label="Применение обновления..." />
 
       <Card>
         <CardHeader>

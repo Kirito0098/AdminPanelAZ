@@ -15,7 +15,6 @@ import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
-import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -35,7 +34,7 @@ function formatSize(bytes: number) {
 
 export default function BackupTab() {
   const { success, error: notifyError } = useNotifications()
-  const { inline, withInline, trackBackgroundTask, backgroundTaskPolling } = useProgress()
+  const { withInline, trackBackgroundTask } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
   const [backups, setBackups] = useState<BackupEntry[]>([])
   const [settings, setSettings] = useState<BackupSettings | null>(null)
@@ -141,7 +140,6 @@ export default function BackupTab() {
   return (
     <div className="space-y-4">
       <ConfirmDialogHost dialogProps={dialogProps} />
-      <InlineProgressBar active={inline.active || backgroundTaskPolling} label={inline.label} />
 
       <Card>
         <CardHeader>

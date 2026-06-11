@@ -2,7 +2,6 @@ import { FormEvent, useEffect, useState } from 'react'
 import { Settings } from 'lucide-react'
 import { ApiError, changePassword, createUser, deleteUser, getSettings, getUsers } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
-import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import BackupTab from '@/components/settings/BackupTab'
 import ConfigDeliveryTab from '@/components/settings/ConfigDeliveryTab'
 import FeatureTogglesTab from '@/components/settings/FeatureTogglesTab'
@@ -87,7 +86,7 @@ export default function SettingsPage() {
   const { activeNode } = useNode()
   const { theme, setTheme } = useTheme()
   const { success, error: notifyError } = useNotifications()
-  const { startGlobal, doneGlobal, inline } = useProgress()
+  const { startGlobal, doneGlobal } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [users, setUsers] = useState<User[]>([])
@@ -264,8 +263,6 @@ export default function SettingsPage() {
           </p>
         </div>
       </div>
-
-      <InlineProgressBar active={inline.active} label={inline.label} />
 
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
         <aside className="w-full shrink-0 lg:sticky lg:top-4 lg:w-64">

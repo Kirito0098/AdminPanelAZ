@@ -26,6 +26,7 @@ from app.services.node_update import (
 )
 from app.services.openvpn_management import openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
+from app.services.profile_files import profile_files_batch_key
 from app.services.server_monitor import ServerMonitorService
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 
@@ -304,12 +305,13 @@ def profile_files(client_name: str, vpn_type: str, _: None = Depends(verify_api_
 def profile_files_batch(payload: ProfileFilesBatchRequest, _: None = Depends(verify_api_key)):
     files_by_client: dict[str, list] = {}
     for item in payload.clients:
+        key = profile_files_batch_key(item.client_name, item.vpn_type)
         try:
             vt = VpnType(item.vpn_type)
         except ValueError:
-            files_by_client[item.client_name] = []
+            files_by_client[key] = []
             continue
-        files_by_client[item.client_name] = service.get_profile_files(item.client_name, vt)
+        files_by_client[key] = service.get_profile_files(item.client_name, vt)
     return {"files_by_client": files_by_client}
 
 

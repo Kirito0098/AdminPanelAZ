@@ -29,7 +29,7 @@ function modeBadgeVariant(modeKey: string): 'default' | 'secondary' | 'outline' 
 
 export default function VpnNetworkTab() {
   const { success, error: notifyError } = useNotifications()
-  const { inline, trackBackgroundTask, backgroundTaskPolling } = useProgress()
+  const { trackBackgroundTask, backgroundTaskPolling } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
   const [settings, setSettings] = useState<VpnNetworkSettings | null>(null)
   const [loading, setLoading] = useState(true)
@@ -152,7 +152,7 @@ export default function VpnNetworkTab() {
 
   return (
     <div className="space-y-6">
-      <InlineProgressBar active={inline.active || backgroundTaskPolling || publishing} label={inline.label} />
+      <InlineProgressBar active={publishing} label="Применение настроек публикации..." />
       <ConfirmDialogHost {...dialogProps} />
 
       <header>

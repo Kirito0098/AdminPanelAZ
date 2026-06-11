@@ -579,8 +579,8 @@ export default function TrafficPage() {
       )}
 
       <InlineProgressBar
-        active={inline.active || refreshing}
-        label={inline.label || (refreshing ? 'Обновление статистики...' : undefined)}
+        active={refreshing}
+        label={refreshing ? 'Обновление статистики...' : undefined}
       />
 
       {loadError && !hasRows ? (

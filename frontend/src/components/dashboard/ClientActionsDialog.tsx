@@ -172,8 +172,8 @@ export default function ClientActionsDialog({
   const isOwner = userRole === 'user' || isAdmin
   const canManage = isAdmin
   const canDelete = isAdmin || userRole === 'user'
-  const vpnFile = pickVpnFile(config)
-  const azFile = pickAzFile(config)
+  const vpnFile = pickVpnFile(config, tab)
+  const azFile = pickAzFile(config, tab)
   const isOpenVpn = config.vpn_type === 'openvpn'
   const isBlocked = policy?.is_blocked ?? false
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
@@ -573,12 +573,12 @@ export default function ClientActionsDialog({
                 <StatusIcon size={12} />
                 {status.label}
               </Badge>
-              {hasVpnProfiles(config) && (
+              {hasVpnProfiles(config, tab) && (
                 <Badge variant="outline" className="text-[10px]">
                   VPN
                 </Badge>
               )}
-              {hasAzProfiles(config) && (
+              {hasAzProfiles(config, tab) && (
                 <Badge
                   variant="outline"
                   className="border-amber-500/40 text-[10px] text-amber-600 dark:text-amber-400"

@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { FolderOpen, Play, RotateCcw, ServerCrash } from 'lucide-react'
 import { ApiError, recreateProfiles, restartService, runDoall } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
-import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -32,7 +31,7 @@ interface MaintenanceTabProps {
 
 export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
   const { success, error: notifyError } = useNotifications()
-  const { inline, withInline, trackBackgroundTask, backgroundTaskPolling } = useProgress()
+  const { withInline, trackBackgroundTask } = useProgress()
   const [service, setService] = useState(SERVICES[0])
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -50,8 +49,6 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
 
   return (
     <div className="space-y-4">
-      <InlineProgressBar active={inline.active || backgroundTaskPolling} label={inline.label} />
-
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
