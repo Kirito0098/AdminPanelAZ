@@ -604,7 +604,13 @@ install_system_deps() {
     ca-certificates \
     pkg-config \
     libffi-dev \
-    libssl-dev
+    libssl-dev \
+    vnstat
+
+  if [[ -x "$ROOT_DIR/scripts/setup-vnstat.sh" ]]; then
+    chmod +x "$ROOT_DIR/scripts/setup-vnstat.sh"
+    "$ROOT_DIR/scripts/setup-vnstat.sh" || warn "setup-vnstat.sh завершился с ошибкой (можно повторить вручную)"
+  fi
 
   install_nodejs
   ui_progress_done "Системные зависимости"

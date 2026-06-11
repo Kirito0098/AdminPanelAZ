@@ -469,7 +469,11 @@ export default function ServerMonitorPage() {
                 <EmptyState
                   icon={Network}
                   title="vnStat недоступен"
-                  description={bwChart.error}
+                  description={
+                    bwChart.error.includes('vnstat не установлен')
+                      ? `${activeNode?.is_local ? 'На этом сервере' : `На узле «${activeNode?.name ?? metrics?.node_name ?? 'удалённый'}»`} не установлен vnStat. Подключитесь по SSH к VPN-узлу и выполните: apt install -y vnstat && sudo ./scripts/setup-vnstat.sh`
+                      : bwChart.error
+                  }
                   className="py-8"
                 />
               ) : chartData.length > 0 ? (

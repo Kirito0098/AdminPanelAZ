@@ -11,6 +11,26 @@ from datetime import datetime, timezone
 import psutil
 
 
+def vnstat_bin() -> str:
+    return os.environ.get("VNSTAT_BIN", "vnstat")
+
+
+def is_vnstat_available() -> bool:
+    try:
+        proc = subprocess.run(
+            [vnstat_bin(), "--json"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+            check=False,
+        )
+        return proc.returncode == 0
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+
+
 def collect_interface_groups() -> dict[str, list[str]]:
     default_groups = {
         "vpn": ["vpn", "vpn-udp", "vpn-tcp"],
@@ -19,9 +39,9 @@ def collect_interface_groups() -> dict[str, list[str]]:
     candidates: set[str] = set()
     for values in default_groups.values():
         candidates.update(values)
-    vnstat_bin = os.environ.get("VNSTAT_BIN", "vnstat")
+    vnstat = vnstat_bin()
     try:
-        vn_json = subprocess.run([vnstat_bin, "--json"], capture_output=True, text=True, timeout=4, check=False)
+        vn_json = subprocess.run([vnstat, "--json"], capture_output=True, text=True, timeout=4, check=False)
         if vn_json.returncode == 0:
             parsed = json.loads(vn_json.stdout or "{}")
             for item in parsed.get("interfaces") or []:
@@ -117,22 +137,31 @@ class ServerMonitorService:
     def get_bandwidth(self, iface: str = "eth0", range_key: str = "1d") -> dict:
         iface = (iface or "").strip() or "eth0"
         rng = range_key if range_key in ("1d", "7d", "30d") else "1d"
-        vnstat_bin = os.environ.get("VNSTAT_BIN", "vnstat")
+        vnstat = vnstat_bin()
 
         def _run(args: list[str]) -> subprocess.CompletedProcess:
             return subprocess.run(args, capture_output=True, text=True, timeout=10, check=False)
 
+        if not is_vnstat_available():
+            return {
+                "error": "vnstat не установлен на этом узле. Установите: apt install -y vnstat && sudo ./scripts/setup-vnstat.sh",
+                "iface": iface,
+            }
+
         try:
-            data_f = json.loads(_run([vnstat_bin, "--json", "f", "-i", iface]).stdout or "{}")
+            data_f = json.loads(_run([vnstat, "--json", "f", "-i", iface]).stdout or "{}")
         except Exception:
             data_f = {}
         try:
-            proc_d = _run([vnstat_bin, "--json", "d", "-i", iface])
+            proc_d = _run([vnstat, "--json", "d", "-i", iface])
             if proc_d.returncode != 0:
                 return {"error": proc_d.stderr.strip() or "vnstat недоступен", "iface": iface}
             data_d = json.loads(proc_d.stdout or "{}")
         except FileNotFoundError:
-            return {"error": "vnstat не установлен", "iface": iface}
+            return {
+                "error": "vnstat не установлен на этом узле. Установите: apt install -y vnstat && sudo ./scripts/setup-vnstat.sh",
+                "iface": iface,
+            }
         except Exception as exc:
             return {"error": str(exc), "iface": iface}
 
@@ -225,4 +254,4 @@ class ServerMonitorService:
                     all_ifaces.append(iface)
         if not all_ifaces:
             all_ifaces = list(psutil.net_if_stats().keys())[:5] or ["eth0"]
-        return {"interfaces": all_ifaces, "groups": groups}
+        return {"interfaces": all_ifaces, "groups": groups, "vnstat_available": is_vnstat_available()}
