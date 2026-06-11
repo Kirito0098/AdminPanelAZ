@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import {
   AlertTriangle,
   Ban,
@@ -5,6 +6,8 @@ import {
   CheckCircle2,
   Copy,
   Download,
+  Gauge,
+  KeyRound,
   Loader2,
   MoreHorizontal,
   QrCode,
@@ -13,16 +16,17 @@ import {
   Unlock,
   UserRound,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type { ClientAccessPolicy, UserRole, VpnConfig } from '@/types'
 import {
   buildAccessMeta,
   formatCreatedAt,
   getConfigStatus,
-  getProtocolBadgeVariant,
   hasAzProfiles,
   hasVpnProfiles,
+  pickAzFile,
   pickPrimaryFile,
-  protocolLabel,
+  pickVpnFile,
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { Badge } from '@/components/ui/badge'
@@ -56,6 +60,178 @@ const statusIcons = {
   secondary: Shield,
 }
 
+interface MetaRow {
+  key: string
+  icon: LucideIcon
+  text: string
+  tone?: 'default' | 'warning' | 'danger'
+}
+
+function isNoiseMetaLine(text: string, tone: 'active' | 'expiring' | 'expired'): boolean {
+  if (tone === 'active') {
+    if (text.startsWith('Блокировка: нет')) return true
+    if (text.startsWith('Осталось: неизвестно')) return true
+    if (text.startsWith('Отключение: не ограничено')) return true
+    if (text.startsWith('Трафик')) return true
+    if (text.startsWith('Лимит:')) return true
+  }
+  return false
+}
+
+function formatTrafficLine(policy: ClientAccessPolicy | undefined): string {
+  if (!policy) return 'Трафик · —'
+
+  if (policy.traffic_limit_human) {
+    let text = `Трафик · ${policy.traffic_consumed_human || '0 B'} / ${policy.traffic_limit_human}`
+    if (policy.traffic_limit_period_label) {
+      text += ` (${policy.traffic_limit_period_label})`
+    }
+    if (policy.traffic_bytes_left_human) {
+      text += ` · осталось ${policy.traffic_bytes_left_human}`
+    }
+    return text
+  }
+
+  const consumed =
+    policy.traffic_consumed_human &&
+    (policy.traffic_consumed_bytes ?? 0) > 0
+      ? policy.traffic_consumed_human
+      : '0 B'
+  return `Трафик · ${consumed} · лимит не задан`
+}
+
+function buildCompactMeta(
+  config: VpnConfig,
+  tab: ProtocolTab,
+  policy: ClientAccessPolicy | undefined,
+  isAdmin: boolean,
+  tone: 'active' | 'expiring' | 'expired',
+): MetaRow[] {
+  const rows: MetaRow[] = [
+    {
+      key: 'created',
+      icon: Calendar,
+      text: formatCreatedAt(config.created_at),
+    },
+  ]
+
+  if (config.vpn_type === 'openvpn' && config.cert_expire_days != null) {
+    rows.push({
+      key: 'cert',
+      icon: KeyRound,
+      text: `Сертификат · ${config.cert_expire_days} дн.`,
+      tone: tone === 'expired' ? 'danger' : tone === 'expiring' ? 'warning' : 'default',
+    })
+  }
+
+  if (isAdmin && config.owner_username) {
+    rows.push({
+      key: 'owner',
+      icon: UserRound,
+      text: config.owner_username,
+    })
+  }
+
+  if (isAdmin) {
+    rows.push({
+      key: 'traffic',
+      icon: Gauge,
+      text: formatTrafficLine(policy),
+      tone: policy?.traffic_limit_exceeded ? 'danger' : 'default',
+    })
+  }
+
+  const { lines } = buildAccessMeta(config, tab, policy)
+  const keyMeta = config.vpn_type === 'openvpn' ? lines.slice(1) : lines
+
+  for (const line of keyMeta) {
+    if (isNoiseMetaLine(line.text, tone)) continue
+    const value = line.text.includes(':') ? line.text.split(':').slice(1).join(':').trim() : line.text
+    if (!value) continue
+    rows.push({
+      key: line.text,
+      icon: line.text.startsWith('Трафик') || line.text.startsWith('Лимит') ? Gauge : Shield,
+      text: line.text.includes(':') ? line.text : value,
+      tone: tone === 'expired' ? 'danger' : tone === 'expiring' ? 'warning' : 'default',
+    })
+  }
+
+  return rows
+}
+
+function IconActionButton({
+  title,
+  disabled,
+  loading,
+  onClick,
+  destructive,
+  className,
+  children,
+}: {
+  title: string
+  disabled?: boolean
+  loading?: boolean
+  onClick: () => void
+  destructive?: boolean
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="icon"
+      className={cn(
+        'h-8 w-8 shrink-0',
+        destructive && 'text-destructive hover:bg-destructive/10 hover:text-destructive',
+        className,
+      )}
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {loading ? <Loader2 size={14} className="animate-spin" /> : children}
+    </Button>
+  )
+}
+
+function DownloadButton({
+  label,
+  filename,
+  disabled,
+  loading,
+  onClick,
+  accent = 'default',
+  className,
+}: {
+  label: string
+  filename: string
+  disabled?: boolean
+  loading?: boolean
+  onClick: () => void
+  accent?: 'default' | 'amber'
+  className?: string
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className={cn(
+        'h-8 min-w-0 flex-1 gap-1.5 px-2 text-xs',
+        accent === 'amber' && 'border-amber-500/40 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400',
+        className,
+      )}
+      title={`Скачать ${label}: ${filename}`}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {loading ? <Loader2 size={14} className="animate-spin shrink-0" /> : <Download size={14} className="shrink-0" />}
+      <span className="truncate">{label}</span>
+    </Button>
+  )
+}
+
 export default function ConfigCard({
   config,
   tab,
@@ -74,32 +250,46 @@ export default function ConfigCard({
 }: ConfigCardProps) {
   const status = getConfigStatus(config, tab, policy)
   const StatusIcon = statusIcons[status.variant]
-  const { lines, tone } = buildAccessMeta(config, tab, policy)
+  const { tone } = buildAccessMeta(config, tab, policy)
+  const vpnFile = pickVpnFile(config)
+  const azFile = pickAzFile(config)
   const primaryFile = pickPrimaryFile(config)
+  const hasBothProfiles = Boolean(vpnFile && azFile)
   const isAdmin = userRole === 'admin'
   const canDelete = isAdmin || userRole === 'user'
   const isBlocked = policy?.is_blocked ?? false
-  const showMeta = Boolean(policy) || config.vpn_type === 'openvpn'
-  const keyMeta = config.vpn_type === 'openvpn' ? lines.slice(1, 3) : lines.slice(0, 2)
+  const metaRows = buildCompactMeta(config, tab, policy, isAdmin, tone)
+  const actionBusy = loadingAction != null
 
-  const runPrimary = (action: 'download' | 'qr', fn: (path: string, filename: string) => void) => {
-    if (!primaryFile) return
-    fn(primaryFile.path, primaryFile.filename)
+  const runFileAction = (
+    file: { path: string; filename: string } | undefined,
+    fn: (path: string, filename: string) => void,
+  ) => {
+    if (!file) return
+    fn(file.path, file.filename)
   }
+
+  const statusBadgeVariant =
+    status.variant === 'success'
+      ? 'success'
+      : status.variant === 'warning'
+        ? 'warning'
+        : status.variant === 'destructive'
+          ? 'destructive'
+          : 'secondary'
 
   return (
     <Card
       className={cn(
-        'transition-colors hover:border-primary/40 hover:shadow-md',
+        'flex h-full flex-col transition-all hover:border-primary/40 hover:shadow-md',
         tone === 'expired' && 'border-destructive/30',
         tone === 'expiring' && 'border-amber-500/30',
       )}
     >
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1 space-y-1">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Shield size={16} className="shrink-0 text-muted-foreground" />
+      <CardHeader className="space-y-2 pb-2">
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <CardTitle className="flex items-center gap-1.5 text-sm font-semibold leading-tight">
               <span className="truncate">{config.client_name}</span>
               <button
                 type="button"
@@ -110,168 +300,171 @@ export default function ConfigCard({
                 }}
                 className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-primary"
               >
-                <Copy size={14} />
+                <Copy size={13} />
               </button>
             </CardTitle>
             {config.description && (
-              <CardDescription className="line-clamp-2 text-xs">{config.description}</CardDescription>
+              <CardDescription className="mt-1 line-clamp-1 text-[11px]">{config.description}</CardDescription>
             )}
           </div>
-          <Badge variant={status.variant === 'success' ? 'success' : status.variant === 'warning' ? 'warning' : status.variant === 'destructive' ? 'destructive' : 'secondary'}>
-            <StatusIcon size={12} />
+          <Badge variant={statusBadgeVariant} className="shrink-0 gap-1 px-2 py-0 text-[10px]">
+            <StatusIcon size={11} />
             {status.label}
           </Badge>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          <Badge variant={getProtocolBadgeVariant(tab)}>{protocolLabel(tab)}</Badge>
-          {hasVpnProfiles(config) && (
-            <Badge variant="outline" className="text-[10px]">
-              VPN
-            </Badge>
-          )}
-          {hasAzProfiles(config) && (
-            <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-600 dark:text-amber-400">
-              AZ
-            </Badge>
-          )}
-        </div>
+
+        {(hasVpnProfiles(config) || hasAzProfiles(config)) && (
+          <div className="flex flex-wrap gap-1">
+            {hasVpnProfiles(config) && (
+              <span className="inline-flex items-center rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                VPN
+              </span>
+            )}
+            {hasAzProfiles(config) && (
+              <span className="inline-flex items-center rounded-md border border-amber-500/35 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                AntiZapret
+              </span>
+            )}
+          </div>
+        )}
       </CardHeader>
 
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <p className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Calendar size={12} />
-              Создан
-            </p>
-            <p className="text-xs">{formatCreatedAt(config.created_at)}</p>
-          </div>
-          {config.vpn_type === 'openvpn' && (
-            <div>
-              <p className="text-xs text-muted-foreground">Сертификат</p>
-              <p className="text-xs">{config.cert_expire_days ?? '—'} дн.</p>
-            </div>
-          )}
-          {isAdmin && config.owner_username && (
-            <div>
-              <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                <UserRound size={12} />
-                Владелец
-              </p>
-              <p className="text-xs">{config.owner_username}</p>
-            </div>
-          )}
-          {showMeta &&
-            keyMeta.map((line) => {
-              const [label, value] = line.text.includes(':')
-                ? [line.text.split(':')[0], line.text.split(':').slice(1).join(':').trim()]
-                : [line.text, '']
-              return (
-                <div key={line.text}>
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p
-                    className={cn(
-                      'text-xs',
-                      tone === 'expired' && 'text-destructive',
-                      tone === 'expiring' && 'text-amber-600 dark:text-amber-400',
-                    )}
-                  >
-                    {value || label}
-                  </p>
-                </div>
-              )
-            })}
-        </div>
+      <CardContent className="flex flex-1 flex-col gap-3 pt-0">
+        <ul className="space-y-1.5">
+          {metaRows.map((row) => {
+            const Icon = row.icon
+            return (
+              <li key={row.key} className="flex items-start gap-2 text-[11px] leading-snug">
+                <Icon size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
+                <span
+                  className={cn(
+                    'min-w-0 break-words',
+                    row.tone === 'danger' && 'text-destructive',
+                    row.tone === 'warning' && 'text-amber-600 dark:text-amber-400',
+                  )}
+                >
+                  {row.text}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
 
-        <div className="flex flex-wrap items-center gap-1 border-t pt-3">
+        <div className="mt-auto space-y-2 border-t pt-3">
           {filesLoading && !primaryFile && (
-            <div className="flex gap-2">
-              <div className="h-8 w-24 animate-pulse rounded-md bg-muted" />
-              <div className="h-8 w-20 animate-pulse rounded-md bg-muted" />
+            <div className="grid grid-cols-2 gap-1.5">
+              <div className="h-8 animate-pulse rounded-md bg-muted" />
+              <div className="h-8 animate-pulse rounded-md bg-muted" />
             </div>
           )}
+
           {primaryFile && showQrDownloads && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                title="Скачать профиль"
-                disabled={!!loadingAction}
-                onClick={() => runPrimary('download', onDownload)}
-              >
-                {loadingAction === 'download' ? (
-                  <Loader2 size={14} className="animate-spin" />
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-1.5">
+              {hasBothProfiles ? (
+                <div className="flex gap-1.5">
+                  <DownloadButton
+                    label="VPN"
+                    filename={vpnFile!.filename}
+                    disabled={actionBusy}
+                    loading={loadingAction === 'download'}
+                    onClick={() => runFileAction(vpnFile, onDownload)}
+                  />
+                  <DownloadButton
+                    label="AZ"
+                    filename={azFile!.filename}
+                    disabled={actionBusy}
+                    loading={loadingAction === 'download'}
+                    accent="amber"
+                    onClick={() => runFileAction(azFile, onDownload)}
+                  />
+                </div>
+              ) : (
+                <DownloadButton
+                  label="Скачать"
+                  filename={primaryFile.filename}
+                  disabled={actionBusy}
+                  loading={loadingAction === 'download'}
+                  className="w-full"
+                  onClick={() => runFileAction(primaryFile, onDownload)}
+                />
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-1">
+            {primaryFile && showQrDownloads && (
+              <>
+                {hasBothProfiles ? (
+                  <>
+                    <IconActionButton
+                      title={`QR VPN: ${vpnFile!.filename}`}
+                      disabled={actionBusy}
+                      loading={loadingAction === 'qr'}
+                      onClick={() => runFileAction(vpnFile, onQr)}
+                    >
+                      <QrCode size={14} />
+                    </IconActionButton>
+                    <IconActionButton
+                      title={`QR AntiZapret: ${azFile!.filename}`}
+                      disabled={actionBusy}
+                      loading={loadingAction === 'qr'}
+                      className="border-amber-500/40 text-amber-600 dark:text-amber-400"
+                      onClick={() => runFileAction(azFile, onQr)}
+                    >
+                      <QrCode size={14} />
+                    </IconActionButton>
+                  </>
                 ) : (
-                  <Download size={14} />
+                  <IconActionButton
+                    title={`QR: ${primaryFile.filename}`}
+                    disabled={actionBusy}
+                    loading={loadingAction === 'qr'}
+                    onClick={() => runFileAction(primaryFile, onQr)}
+                  >
+                    <QrCode size={14} />
+                  </IconActionButton>
                 )}
-                Скачать
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                title="QR-код"
-                disabled={!!loadingAction}
-                onClick={() => runPrimary('qr', onQr)}
-              >
-                {loadingAction === 'qr' ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <QrCode size={14} />
-                )}
-                QR
-              </Button>
-            </>
-          )}
-          <Button variant="outline" size="sm" title="Все действия" onClick={onOpenDetails}>
-            <MoreHorizontal size={14} />
-            Ещё
-          </Button>
-          {isAdmin && !isBlocked && onBlock && (
-            <Button
-              variant="outline"
-              size="sm"
-              title="Заблокировать"
-              disabled={!!loadingAction}
-              onClick={onBlock}
-            >
-              {loadingAction === 'block' ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Ban size={14} />
+              </>
+            )}
+
+            <IconActionButton title="Все действия" onClick={onOpenDetails}>
+              <MoreHorizontal size={14} />
+            </IconActionButton>
+
+            <div className="ml-auto flex items-center gap-1">
+              {isAdmin && !isBlocked && onBlock && (
+                <IconActionButton
+                  title="Заблокировать"
+                  disabled={actionBusy}
+                  loading={loadingAction === 'block'}
+                  onClick={onBlock}
+                >
+                  <Ban size={14} />
+                </IconActionButton>
               )}
-            </Button>
-          )}
-          {isAdmin && isBlocked && onUnblock && (
-            <Button
-              variant="outline"
-              size="sm"
-              title="Разблокировать"
-              disabled={!!loadingAction}
-              onClick={onUnblock}
-            >
-              {loadingAction === 'unblock' ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Unlock size={14} />
+              {isAdmin && isBlocked && onUnblock && (
+                <IconActionButton
+                  title="Разблокировать"
+                  disabled={actionBusy}
+                  loading={loadingAction === 'unblock'}
+                  onClick={onUnblock}
+                >
+                  <Unlock size={14} />
+                </IconActionButton>
               )}
-            </Button>
-          )}
-          {canDelete && onDelete && (
-            <Button
-              variant="ghost"
-              size="sm"
-              title="Удалить"
-              disabled={!!loadingAction}
-              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={onDelete}
-            >
-              {loadingAction === 'delete' ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Trash2 size={14} />
+              {canDelete && onDelete && (
+                <IconActionButton
+                  title="Удалить"
+                  destructive
+                  disabled={actionBusy}
+                  loading={loadingAction === 'delete'}
+                  onClick={onDelete}
+                >
+                  <Trash2 size={14} />
+                </IconActionButton>
               )}
-            </Button>
-          )}
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>

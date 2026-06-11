@@ -5,13 +5,19 @@ export type ClientFilter = 'all' | 'active' | 'expiring' | 'expired'
 
 type ProfileFile = VpnConfig['profile_files'][number]
 
+/** Profile subdirs under client/ — must not match ANTIZAPRET install root (/root/antizapret/...). */
+const AZ_PROFILE_DIR = /\/(?:openvpn|wireguard|amneziawg)\/antizapret(?:[-/]|$)/
+const VPN_PROFILE_DIR = /\/(?:openvpn|wireguard|amneziawg)\/vpn(?:[-/]|$)/
+
 export function isAzProfile(file: ProfileFile): boolean {
-  return file.variant.includes('antizapret') || file.path.includes('/antizapret')
+  if (file.variant.includes('antizapret')) return true
+  return AZ_PROFILE_DIR.test(file.path)
 }
 
 export function isVpnProfile(file: ProfileFile): boolean {
   if (isAzProfile(file)) return false
-  return file.variant.includes('vpn') || file.path.includes('/vpn/')
+  if (file.variant === 'vpn' || file.variant.startsWith('vpn-')) return true
+  return VPN_PROFILE_DIR.test(file.path)
 }
 
 export function hasAzProfiles(config: VpnConfig): boolean {

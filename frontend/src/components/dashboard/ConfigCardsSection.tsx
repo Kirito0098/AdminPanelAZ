@@ -386,7 +386,7 @@ export default function ConfigCardsSection({
                     className="py-8"
                   />
                 ) : (
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 xl:grid-cols-4">
                     {filteredByTab[tab].map((config) => (
                       <ConfigCard
                         key={`${tab}-${config.id}`}
