@@ -21,29 +21,32 @@ export interface BackgroundTaskPollOptions {
 export function useBackgroundTaskPoll() {
   const [task, setTask] = useState<BackgroundTask | null>(null)
   const [polling, setPolling] = useState(false)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollActiveRef = useRef(false)
+  const inFlightRef = useRef(false)
   const startedAtRef = useRef<number>(0)
   const errorCountRef = useRef(0)
   const optionsRef = useRef<BackgroundTaskPollOptions>({})
   const taskRef = useRef<BackgroundTask | null>(null)
-  const pollOnceRef = useRef<(taskId: string) => Promise<void>>(async () => {})
+  const pollOnceRef = useRef<(taskId: string) => Promise<boolean>>(async () => false)
   const errorNotifiedRef = useRef(false)
 
   const stopPoll = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current)
-      pollRef.current = null
+    pollActiveRef.current = false
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current)
+      pollTimerRef.current = null
     }
     setPolling(false)
   }, [])
 
-  const pollOnce = useCallback(async (taskId: string) => {
+  const pollOnce = useCallback(async (taskId: string): Promise<boolean> => {
     const opts = optionsRef.current
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     if (Date.now() - startedAtRef.current > timeoutMs) {
       stopPoll()
       opts.onError?.(taskRef.current, 'Превышено время ожидания задачи')
-      return
+      return false
     }
 
     try {
@@ -59,10 +62,14 @@ export function useBackgroundTaskPoll() {
       if (current.status === 'completed') {
         stopPoll()
         opts.onComplete?.(current)
-      } else if (current.status === 'failed') {
+        return false
+      }
+      if (current.status === 'failed') {
         stopPoll()
         opts.onError?.(current, current.error || current.message || 'Задача завершилась с ошибкой')
+        return false
       }
+      return true
     } catch (err) {
       const isRateLimit = err instanceof ApiError && err.status === 429
       const message = err instanceof ApiError ? err.message : 'Ошибка отслеживания задачи'
@@ -78,7 +85,7 @@ export function useBackgroundTaskPoll() {
           : prev,
       )
       if (isRateLimit) {
-        return
+        return true
       }
       errorCountRef.current += 1
       if (errorCountRef.current >= MAX_CONSECUTIVE_ERRORS) {
@@ -87,11 +94,35 @@ export function useBackgroundTaskPoll() {
           errorNotifiedRef.current = true
           opts.onError?.(taskRef.current, message)
         }
+        return false
       }
+      return true
     }
   }, [stopPoll])
 
   pollOnceRef.current = pollOnce
+
+  const scheduleNextPoll = useCallback((taskId: string) => {
+    if (!pollActiveRef.current) return
+    const intervalMs = optionsRef.current.intervalMs ?? DEFAULT_INTERVAL_MS
+    pollTimerRef.current = setTimeout(() => {
+      if (!pollActiveRef.current || inFlightRef.current) {
+        scheduleNextPoll(taskId)
+        return
+      }
+      inFlightRef.current = true
+      void pollOnceRef
+        .current(taskId)
+        .then((shouldContinue) => {
+          if (shouldContinue && pollActiveRef.current) {
+            scheduleNextPoll(taskId)
+          }
+        })
+        .finally(() => {
+          inFlightRef.current = false
+        })
+    }, intervalMs)
+  }, [])
 
   const startPoll = useCallback(
     (taskId: string, options: BackgroundTaskPollOptions = {}) => {
@@ -100,6 +131,7 @@ export function useBackgroundTaskPoll() {
       startedAtRef.current = Date.now()
       errorCountRef.current = 0
       errorNotifiedRef.current = false
+      pollActiveRef.current = true
       setPolling(true)
       setTask(
         options.initialTask ?? {
@@ -111,16 +143,29 @@ export function useBackgroundTaskPoll() {
           progress_stage: 'Подключение к серверу…',
         },
       )
-      const tick = () => {
-        void pollOnceRef.current(taskId)
-      }
-      tick()
-      pollRef.current = setInterval(tick, options.intervalMs ?? DEFAULT_INTERVAL_MS)
+
+      inFlightRef.current = true
+      void pollOnceRef
+        .current(taskId)
+        .then((shouldContinue) => {
+          if (shouldContinue && pollActiveRef.current) {
+            scheduleNextPoll(taskId)
+          }
+        })
+        .finally(() => {
+          inFlightRef.current = false
+        })
     },
-    [stopPoll],
+    [stopPoll, scheduleNextPoll],
   )
 
   useEffect(() => () => stopPoll(), [stopPoll])
 
-  return { task, polling, startPoll, stopPoll }
+  const syncTask = useCallback((next: BackgroundTask) => {
+    if (!next?.task_id) return
+    taskRef.current = next
+    setTask(next)
+  }, [])
+
+  return { task, polling, startPoll, stopPoll, syncTask }
 }

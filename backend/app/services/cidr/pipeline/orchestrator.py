@@ -26,12 +26,15 @@ def run_ingest(
 ) -> dict[str, Any]:
     """Download provider CIDRs into SQLite (ingest stage)."""
     svc = CidrDbUpdaterService(db=db)
-    result = svc.refresh_all_providers(
-        triggered_by=triggered_by,
-        selected_files=selected_files,
-        progress_callback=progress_callback,
-        dry_run=dry_run,
-    )
+    try:
+        result = svc.refresh_all_providers(
+            triggered_by=triggered_by,
+            selected_files=selected_files,
+            progress_callback=progress_callback,
+            dry_run=dry_run,
+        )
+    finally:
+        svc.close()
     maybe_notify_ingest_partial(db, result, triggered_by=triggered_by)
     return result
 

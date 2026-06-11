@@ -54,13 +54,16 @@ def update_cidr_files_from_db(
     Unlike update_cidr_files(), this function does NOT download anything —
     it relies on data previously loaded by CidrDbUpdaterService.refresh_all_providers().
     """
+    from app.cidr_database import CidrSessionLocal
     from app.database import SessionLocal
     from app.models import ProviderCidr, ProviderMeta
 
     db = SessionLocal()
+    cidr_db = CidrSessionLocal()
     try:
         return _update_cidr_files_from_db_impl(
             db=db,
+            cidr_db=cidr_db,
             selected_files=selected_files,
             region_scopes=region_scopes,
             include_non_geo_fallback=include_non_geo_fallback,
@@ -76,12 +79,14 @@ def update_cidr_files_from_db(
             progress_callback=progress_callback,
         )
     finally:
+        cidr_db.close()
         db.close()
 
 
 def _update_cidr_files_from_db_impl(
     *,
     db,
+    cidr_db,
     selected_files=None,
     region_scopes=None,
     include_non_geo_fallback=False,
@@ -170,7 +175,7 @@ def _update_cidr_files_from_db_impl(
     _emit_progress(progress_callback, 9, "Загрузка CIDR из БД…")
     all_rows_by_provider: dict = {}
     for row in (
-        db.query(ProviderCidr)
+        cidr_db.query(ProviderCidr)
         .filter(ProviderCidr.provider_key.in_(normalized))
         .with_entities(ProviderCidr.provider_key, ProviderCidr.cidr,
                        ProviderCidr.region_scope, ProviderCidr.country_codes)
@@ -402,13 +407,16 @@ def estimate_cidr_matches_from_db(
     progress_callback=None,
 ):
     """Preview how many CIDRs would be written from DB, without modifying any files."""
+    from app.cidr_database import CidrSessionLocal
     from app.database import SessionLocal
     from app.models import ProviderCidr, ProviderMeta
 
     db = SessionLocal()
+    cidr_db = CidrSessionLocal()
     try:
         return _estimate_cidr_matches_from_db_impl(
             db=db,
+            cidr_db=cidr_db,
             selected_files=selected_files,
             region_scopes=region_scopes,
             include_non_geo_fallback=include_non_geo_fallback,
@@ -424,12 +432,14 @@ def estimate_cidr_matches_from_db(
             progress_callback=progress_callback,
         )
     finally:
+        cidr_db.close()
         db.close()
 
 
 def _estimate_cidr_matches_from_db_impl(
     *,
     db,
+    cidr_db,
     selected_files=None,
     region_scopes=None,
     include_non_geo_fallback=False,
@@ -809,7 +819,7 @@ def _estimate_cidr_matches_from_db_impl(
     _report_progress(8, "Загрузка CIDR из БД...")
     all_rows_by_provider = {}
     for row in (
-        db.query(ProviderCidr)
+        cidr_db.query(ProviderCidr)
         .filter(ProviderCidr.provider_key.in_(normalized))
         .with_entities(ProviderCidr.provider_key, ProviderCidr.cidr, ProviderCidr.region_scope, ProviderCidr.country_codes)
         .all()

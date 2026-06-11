@@ -107,3 +107,33 @@ export function pipelineTaskStatusLabel(status: string): string {
       return status
   }
 }
+
+/** Internal list key, e.g. digitalocean-ips.txt → digitalocean */
+export function providerSlug(filename: string): string {
+  if (filename.endsWith('-ips.txt')) return filename.slice(0, -'-ips.txt'.length)
+  if (filename.endsWith('.txt')) return filename.slice(0, -4)
+  return filename
+}
+
+export function providerCategoryLabel(category: string): string {
+  const map: Record<string, string> = {
+    cdn: 'CDN',
+    cloud: 'Облако',
+    hosting: 'Хостинг',
+  }
+  return map[category] ?? category
+}
+
+export function formatCompactCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+  if (value >= 10_000) return `${Math.round(value / 1000)}k`
+  if (value >= 1_000) return `${(value / 1000).toFixed(1).replace(/\.0$/, '')}k`
+  return value.toLocaleString('ru-RU')
+}
+
+export function providerStatusTone(status?: string | null): 'ok' | 'warn' | 'error' | 'muted' {
+  if (status === 'ok') return 'ok'
+  if (status === 'partial') return 'warn'
+  if (status === 'error') return 'error'
+  return 'muted'
+}

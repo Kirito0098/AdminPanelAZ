@@ -13,6 +13,7 @@ from app.middleware.http_security import HttpSecurityMiddleware, build_robots_tx
 from app.middleware.active_session import ActiveSessionMiddleware
 from app.services.security_bootstrap import validate_panel_settings
 from app.database import Base, SessionLocal, engine, run_db_migrations
+from app.cidr_database import CidrBase, cidr_engine, run_cidr_db_migrations
 from app.models import VpnConfig, VpnType
 from app.routers import (
     auth,
@@ -63,6 +64,7 @@ validate_panel_settings(settings)
 def seed_database():
     Base.metadata.create_all(bind=engine)
     run_db_migrations()
+    run_cidr_db_migrations()
     db = SessionLocal()
     try:
         try:

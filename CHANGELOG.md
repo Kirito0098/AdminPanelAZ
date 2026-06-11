@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-06-11
+
+### Added
+- **CIDR — отдельная БД `cidr.db`** — таблица `provider_cidr` вынесена из `adminpanel.db` в `data/cidr/cidr.db` (`CIDR_DATABASE_URL`); при старте одноразовая миграция через ATTACH + DROP в основной БД.
+- **CIDR — быстрая запись ingest** — CSV-staging и нативный bulk-import в SQLite (`cidr_csv_import.py`); каталог staging `data/cidr/staging`.
+- **CIDR — частичное обновление провайдеров** — `selected_files` в `POST /api/routing/cidr-db/refresh`, `generate` и `deploy`; режим `retry_failed_mode` (`last` / `selected`) для повторной загрузки только ошибочных.
+- **UI — выбор провайдеров** — компонент `ProviderFileSelection`: поиск, фильтры по категории (CDN / Облако / Хостинг), компактная сетка 4–6 колонок, итог «выбрано N · ~X CIDR»; кнопка быстрой загрузки одного провайдера на этапе 1 и во вкладке «Провайдеры».
+- **vnStat на удалённых узлах** — `scripts/setup-vnstat.sh`; подсказки в мониторинге, если на активной VPN-ноде нет vnstat.
+- **VPN-профили** — понятные имена файлов при скачивании (`AZ-client.ovpn`, `VPN-client.ovpn` и т.п.) для OpenVPN, WG, AWG, одноразовых ссылок и Telegram.
+- **Uninstall** — симметричная очистка iptables/ufw; `--purge-all` и `--remove-backups` в меню установщика.
+
+### Fixed
+- **CIDR ingest** — тяжёлая запись CIDR больше не блокирует основную SQLite-панель; прогресс масштабируется по числу выбранных провайдеров (не «застревает» на 5–75 % при полном refresh).
+- **CIDR pipeline UI** — polling фоновых задач: таймаут, счётчик ошибок, корректное завершение при сбоях сети.
+- **AWG/WG профили** — скачивание и бейджи учитывают активную вкладку; batch-загрузка различает OpenVPN и WireGuard с одним именем; точнее сопоставление файлов на узле.
+- **mTLS** — включение per-node без обрыва HTTP: синхронный restart не рвёт provision-ответ; настройки пишутся в `backend/node_agent.env`; ожидание подъёма агента по HTTPS.
+- **ConfigCard** — исправления отображения и работы карточек конфигурации VPN-клиентов.
+- **UI** — глобальный прогресс-бар фоновых задач закреплён внизу экрана.
+
+### Changed
+- **Бэкапы** — `BackupManager` и restore включают `data/cidr/cidr.db` (`components: cidr_db`).
+- **UI — CIDR Pipeline (этап 1)** — перед «Обновить из интернета» выбираются провайдеры; динамическая подпись кнопки («1 провайдер» / «N провайдеров» / «все»); кнопка «Повторить ошибочные».
+- **UI — вкладка «Провайдеры»** — скрыты технические `*-ips.txt`; категории на русском; компактный формат чисел CIDR (`32k`); кнопка «Загрузить» вместо «Ingest».
+- **`.env.example`** — `CIDR_DATABASE_URL`, `CIDR_DB_STAGING_DIR`.
+- **Тесты** — `test_cidr_database_migration.py`, `test_cidr_csv_import.py`; обновлены `test_backup_manager.py`, `test_cidr_db_updater_service.py`.
+
 ## [1.5.0] - 2026-06-10
 
 ### Added
@@ -323,7 +349,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Production-развёртывание: `install.sh`, daemon/watchdog, systemd, раздача UI из backend в prod-режиме.
 - OpenVPN management sockets, vnStat, WebSocket-мониторинг, Telegram Mini App, in-panel pytest.
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.4.2...v1.4.3
 [0.3.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v0.2.0...v0.3.0

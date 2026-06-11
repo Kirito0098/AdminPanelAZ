@@ -1,5 +1,6 @@
 import { ArrowRight, CloudDownload, Info, Play, Rocket, Shield, Sparkles } from 'lucide-react'
 import { useMemo } from 'react'
+import ProviderFileSelection from '@/components/routing/ProviderFileSelection'
 import StatusPanel from '@/components/noc/StatusPanel'
 import PipelineStageProgress from '@/components/routing/PipelineStageProgress'
 import { Badge } from '@/components/ui/badge'
@@ -7,10 +8,11 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import type { AntifilterStatus, CidrDbStatus, CidrPipelineTask, Node } from '@/types'
+import type { AntifilterStatus, CidrDbStatus, CidrPipelineTask, CidrProviderInfo, Node } from '@/types'
 import { formatDt, getPipelineStage, isPipelineRunning, pendingMatchesStage, statusBadgeVariant, statusLabel, type PipelinePendingAction } from './utils'
 
 interface CidrPipelineTabProps {
+  providers: CidrProviderInfo[]
   cidrDb: CidrDbStatus | null
   antifilter: AntifilterStatus | null
   pipelineTask: CidrPipelineTask | null
@@ -18,12 +20,16 @@ interface CidrPipelineTabProps {
   nodes: Node[]
   deployAllOnline: boolean
   deployTargetNodeIds: number[]
+  selectedProviderFiles: string[]
   filterAntifilter: boolean
   pipelineBusy: boolean
   onFilterAntifilterChange: (v: boolean) => void
   onDeployAllOnlineChange: (v: boolean) => void
   onDeployTargetNodeIdsChange: (ids: number[]) => void
+  onSelectedProviderFilesChange: (files: string[]) => void
   onRefreshDb: () => void
+  onRetryFailedProviders: () => void
+  onRefreshOne?: (filename: string) => void
   onRefreshAntifilter: () => void
   onGenerate: () => void
   onDeploy: () => void
@@ -43,6 +49,7 @@ function nodeCheckboxLabel(node: Node): string {
 }
 
 export default function CidrPipelineTab({
+  providers,
   cidrDb,
   antifilter,
   pipelineTask,
@@ -50,12 +57,16 @@ export default function CidrPipelineTab({
   nodes,
   deployAllOnline,
   deployTargetNodeIds,
+  selectedProviderFiles,
   filterAntifilter,
   pipelineBusy,
   onFilterAntifilterChange,
   onDeployAllOnlineChange,
   onDeployTargetNodeIdsChange,
+  onSelectedProviderFilesChange,
   onRefreshDb,
+  onRetryFailedProviders,
+  onRefreshOne,
   onRefreshAntifilter,
   onGenerate,
   onDeploy,
@@ -63,7 +74,17 @@ export default function CidrPipelineTab({
 }: CidrPipelineTabProps) {
   const onlineNodes = nodes.filter((n) => n.status === 'online')
   const deployDisabled =
-    pipelineBusy || (!deployAllOnline && deployTargetNodeIds.length === 0 && onlineNodes.length === 0)
+    pipelineBusy ||
+    selectedProviderFiles.length === 0 ||
+    (!deployAllOnline && deployTargetNodeIds.length === 0 && onlineNodes.length === 0)
+  const refreshDisabled = pipelineBusy || selectedProviderFiles.length === 0
+  const failedProviderCount = providers.filter(
+    (p) => cidrDb?.providers?.[p.filename]?.refresh_status === 'error',
+  ).length
+  const refreshLabel =
+    selectedProviderFiles.length > 0 && selectedProviderFiles.length < providers.length
+      ? `Обновить выбранные (${selectedProviderFiles.length})`
+      : 'Обновить из интернета'
 
   const activeStage =
     pipelineTask && isPipelineRunning(pipelineTask) ? getPipelineStage(pipelineTask.task_type) : null
@@ -137,20 +158,44 @@ export default function CidrPipelineTab({
 
       <StatusPanel title="Этап 1 — Данные на контроллере (ingest)" icon={CloudDownload}>
         <p className="mb-4 text-sm text-muted-foreground">
-          Загрузка из интернета в SQLite на контроллере. Ноды не затрагиваются — только локальная база панели.
+          Загрузка из интернета в SQLite на контроллере. Можно обновить одного или нескольких провайдеров — не
+          обязательно все 12 сразу. Ноды не затрагиваются.
         </p>
 
-        <div className="space-y-4 mb-6">
+        <ProviderFileSelection
+          providers={providers}
+          cidrDb={cidrDb}
+          selectedFiles={selectedProviderFiles}
+          onSelectedFilesChange={onSelectedProviderFilesChange}
+          disabled={pipelineBusy}
+          idPrefix="ingest-provider"
+          onRefreshOne={onRefreshOne}
+          showQuickIngest={Boolean(onRefreshOne)}
+        />
+
+        <div className="space-y-4 mb-6 mt-4">
           <div className="rounded-lg border p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-sm font-medium">CIDR провайдеров</div>
                 <div className="text-xs text-muted-foreground">RIPE, BGP и др. → таблицы cidr_* в SQLite</div>
               </div>
-              <Button size="sm" disabled={pipelineBusy} onClick={onRefreshDb}>
-                <CloudDownload size={14} className="mr-1.5" />
-                Обновить из интернета
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                {failedProviderCount > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={pipelineBusy}
+                    onClick={onRetryFailedProviders}
+                  >
+                    Повторить ошибочные ({failedProviderCount})
+                  </Button>
+                )}
+                <Button size="sm" disabled={refreshDisabled} onClick={onRefreshDb}>
+                  <CloudDownload size={14} className="mr-1.5" />
+                  {refreshLabel}
+                </Button>
+              </div>
             </div>
             <PipelineStageProgress
               task={pipelineTask}
@@ -220,9 +265,8 @@ export default function CidrPipelineTab({
           starting={pendingMatchesStage(pendingPipelineAction, 2)}
         />
         <p className="mb-4 text-sm text-muted-foreground">
-          Формирование AP-*-include-ips.txt из локальной БД. Файлы сохраняются в{' '}
-          <code className="text-xs">backend/data/cidr/list</code> на контроллере. На ноду не отправляются
-          автоматически — только после этапа 3.
+          Формирование AP-*-include-ips.txt из локальной БД. Используется выбор провайдеров с этапа 1 (
+          {selectedProviderFiles.length} из {providers.length}).
         </p>
 
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
@@ -241,9 +285,16 @@ export default function CidrPipelineTab({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" disabled={pipelineBusy} onClick={onGenerate}>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={pipelineBusy || selectedProviderFiles.length === 0}
+            onClick={onGenerate}
+          >
             <Sparkles size={14} className="mr-1.5" />
-            Сгенерировать из БД
+            {selectedProviderFiles.length > 0 && selectedProviderFiles.length < providers.length
+              ? `Сгенерировать (${selectedProviderFiles.length})`
+              : 'Сгенерировать из БД'}
           </Button>
         </div>
       </StatusPanel>
@@ -255,8 +306,8 @@ export default function CidrPipelineTab({
           starting={pendingMatchesStage(pendingPipelineAction, 3)}
         />
         <p className="mb-4 text-sm text-muted-foreground">
-          Отправка готовых списков с контроллера на выбранные ноды AntiZapret и синхронизация провайдеров.
-          Offline-ноды пропускаются. Можно запускать отдельно, без повторной сборки на этапе 2.
+          Отправка готовых списков с контроллера на выбранные ноды AntiZapret. Файлы провайдеров:{' '}
+          {selectedProviderFiles.length} из {providers.length} (выбор на этапе 1).
         </p>
 
         {needsDeployHint && (

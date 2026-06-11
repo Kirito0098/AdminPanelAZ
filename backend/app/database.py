@@ -1,9 +1,12 @@
 import logging
 
+from pathlib import Path
+
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import get_settings
+from app.paths import BACKEND_ROOT
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -25,6 +28,16 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
     pass
+
+
+def resolve_main_db_path() -> Path:
+    db_url = get_settings().database_url
+    if db_url.startswith("sqlite:///"):
+        db_path = Path(db_url.replace("sqlite:///", ""))
+        if not db_path.is_absolute():
+            db_path = BACKEND_ROOT / db_path
+        return db_path.resolve()
+    return (BACKEND_ROOT / "data" / "adminpanel.db").resolve()
 
 
 def _migrate_vpn_configs_node_scope() -> None:

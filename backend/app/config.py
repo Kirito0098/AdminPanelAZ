@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     )
     audit_log_enabled: bool = True
     database_url: str = "sqlite:///./data/adminpanel.db"
+    cidr_database_url: str = "sqlite:///./data/cidr/cidr.db"
     antizapret_path: Path = Path("/root/antizapret")
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
     default_admin_username: str = "admin"
@@ -56,6 +57,10 @@ class Settings(BaseSettings):
     node_agent_port: int = 9100
     backup_root: Path = Path("/var/backups/adminpanelaz")
     cidr_list_dir: Path = Path("data/cidr/list")
+    cidr_db_staging_dir: Path = Path("data/cidr/staging")
+    cidr_db_csv_import_batch: int = 10_000
+    cidr_db_csv_import_chunk_rows: int = 50_000
+    cidr_db_keep_staging_csv: bool = False
     traffic_sync_enabled: bool = True
     traffic_sync_interval_seconds: int = 60
     traffic_limit_reconcile_after_sync: bool = True

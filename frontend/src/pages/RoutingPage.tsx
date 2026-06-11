@@ -51,6 +51,8 @@ export default function RoutingPage() {
     setDeployAllOnline,
     deployTargetNodeIds,
     setDeployTargetNodeIds,
+    selectedProviderFiles,
+    setSelectedProviderFiles,
     confirmAction,
     setConfirmAction,
     load,
@@ -59,6 +61,8 @@ export default function RoutingPage() {
     applyPreset,
     syncGames,
     refreshCidrDb,
+    refreshOneProvider,
+    retryFailedProviders,
     refreshAntifilter,
     deployCidr,
   } = useRoutingPage()
@@ -142,13 +146,16 @@ export default function RoutingPage() {
             activeNode={activeNode}
             isAdmin={isAdmin}
             actionLoading={actionLoading}
+            pipelineBusy={pipelineBusy}
             onToggle={toggleProvider}
+            onRefreshOne={refreshOneProvider}
           />
         </TabsContent>
 
         {isAdmin && (
           <TabsContent value="pipeline">
             <CidrPipelineTab
+              providers={data.providers}
               cidrDb={cidrDb}
               antifilter={antifilter}
               pipelineTask={pipelineTask}
@@ -156,12 +163,16 @@ export default function RoutingPage() {
               nodes={nodes}
               deployAllOnline={deployAllOnline}
               deployTargetNodeIds={deployTargetNodeIds}
+              selectedProviderFiles={selectedProviderFiles}
               filterAntifilter={filterAntifilter}
               pipelineBusy={pipelineBusy}
               onFilterAntifilterChange={setFilterAntifilter}
               onDeployAllOnlineChange={setDeployAllOnline}
               onDeployTargetNodeIdsChange={setDeployTargetNodeIds}
+              onSelectedProviderFilesChange={setSelectedProviderFiles}
               onRefreshDb={refreshCidrDb}
+              onRetryFailedProviders={retryFailedProviders}
+              onRefreshOne={refreshOneProvider}
               onRefreshAntifilter={refreshAntifilter}
               onGenerate={() => setConfirmAction('generate-only')}
               onDeploy={deployCidr}

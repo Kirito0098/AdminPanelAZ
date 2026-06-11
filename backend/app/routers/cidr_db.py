@@ -2,10 +2,12 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
 from app.config import get_settings
+from app.cidr_database import get_cidr_db
 from app.database import get_db
 from app.models import User
 from app.schemas import CidrPresetCreateRequest, CidrPresetUpdateRequest
@@ -22,7 +24,7 @@ from app.services.cidr.cidr_tasks import (
 from app.services.cidr.constants import IP_FILES
 from app.services.cidr.pipeline.db_pipeline import estimate_cidr_matches_from_db
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
-from app.models import Node
+from app.models import Node, ProviderMeta
 from app.services.cidr.pipeline.orchestrator import (
     run_apply,
     run_compile,
@@ -71,8 +73,8 @@ class CidrDbClearRequest(BaseModel):
     selected_files: list[str] | None = None
 
 
-def _svc(db: Session) -> CidrDbUpdaterService:
-    return CidrDbUpdaterService(db=db)
+def _svc(db: Session, cidr_db: Session) -> CidrDbUpdaterService:
+    return CidrDbUpdaterService(db=db, cidr_db=cidr_db)
 
 
 def _enrich_providers(status: dict) -> dict:
@@ -151,8 +153,12 @@ def _enrich_preset_providers_meta(presets: list[dict]) -> list[dict]:
 
 
 @router.get("/status")
-def cidr_db_status(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    svc = _svc(db)
+def cidr_db_status(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    cidr_db: Session = Depends(get_cidr_db),
+):
+    svc = _svc(db, cidr_db)
     status_data = _enrich_providers(svc.get_db_status())
     history = svc.get_refresh_history(limit=5)
     return {
@@ -168,6 +174,17 @@ def cidr_db_status(_: User = Depends(get_current_user), db: Session = Depends(ge
         "last_compile_at": _summarize_last_compile(),
         "last_deploy": _summarize_last_deploy(),
         "compile_artifacts": list_compile_artifacts(),
+        "active_task": find_any_active_pipeline_task(),
+    }
+
+
+@router.get("/status/summary")
+def cidr_db_status_summary(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Lightweight status for pipeline polling (avoids heavy ASN/history queries under SQLite load)."""
+    total_cidrs = int(db.query(func.coalesce(func.sum(ProviderMeta.cidr_count), 0)).scalar() or 0)
+    return {
+        "success": True,
+        "total_cidrs": total_cidrs,
         "active_task": find_any_active_pipeline_task(),
     }
 
@@ -194,8 +211,9 @@ def cidr_db_refresh(
     payload: CidrDbRefreshRequest,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    cidr_db: Session = Depends(get_cidr_db),
 ):
-    svc = _svc(db)
+    svc = _svc(db, cidr_db)
     selected_files = payload.selected_files
     if payload.retry_failed_mode in {"last", "selected"}:
         failed = svc.get_last_failed_providers()
@@ -392,8 +410,9 @@ def cidr_db_clear(
     payload: CidrDbClearRequest,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    cidr_db: Session = Depends(get_cidr_db),
 ):
-    result = _svc(db).clear_provider_data(
+    result = _svc(db, cidr_db).clear_provider_data(
         selected_files=payload.selected_files,
         triggered_by=f"manual:{user.username}",
     )
@@ -403,8 +422,12 @@ def cidr_db_clear(
 
 
 @router.get("/antifilter/status")
-def antifilter_status(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return {"success": True, **_svc(db).get_antifilter_status()}
+def antifilter_status(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    cidr_db: Session = Depends(get_cidr_db),
+):
+    return {"success": True, **_svc(db, cidr_db).get_antifilter_status()}
 
 
 @router.post("/antifilter/refresh", status_code=status.HTTP_202_ACCEPTED)
@@ -425,12 +448,14 @@ def antifilter_refresh(user: User = Depends(require_admin), db: Session = Depend
         from app.database import SessionLocal
 
         inner_db = SessionLocal()
+        svc = CidrDbUpdaterService(db=inner_db)
         try:
-            return CidrDbUpdaterService(db=inner_db).refresh_antifilter(
+            return svc.refresh_antifilter(
                 triggered_by=triggered_by,
                 progress_callback=progress_callback,
             )
         finally:
+            svc.close()
             inner_db.close()
 
     start_cidr_task(task_id, _runner)
@@ -443,14 +468,22 @@ def antifilter_refresh(user: User = Depends(require_admin), db: Session = Depend
 
 
 @router.post("/seed-presets")
-def seed_presets(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    _svc(db).seed_builtin_presets()
+def seed_presets(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+    cidr_db: Session = Depends(get_cidr_db),
+):
+    _svc(db, cidr_db).seed_builtin_presets()
     return {"success": True, "message": "Встроенные пресеты обновлены"}
 
 
 @router.get("/presets")
-def list_presets(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    presets = _enrich_preset_providers_meta(_svc(db).get_presets())
+def list_presets(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    cidr_db: Session = Depends(get_cidr_db),
+):
+    presets = _enrich_preset_providers_meta(_svc(db, cidr_db).get_presets())
     return {"success": True, "presets": presets}
 
 
@@ -459,6 +492,7 @@ def create_preset(
     payload: CidrPresetCreateRequest,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    cidr_db: Session = Depends(get_cidr_db),
 ):
     name = payload.name.strip()
     if not name:
@@ -467,7 +501,7 @@ def create_preset(
         raise HTTPException(status_code=400, detail="Необходимо указать список провайдеров")
 
     settings = payload.settings.model_dump() if payload.settings else None
-    preset = _svc(db).create_preset(
+    preset = _svc(db, cidr_db).create_preset(
         name=name,
         description=payload.description,
         providers=payload.providers,
@@ -489,9 +523,10 @@ def update_preset(
     payload: CidrPresetUpdateRequest,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    cidr_db: Session = Depends(get_cidr_db),
 ):
     settings = payload.settings.model_dump() if payload.settings is not None else None
-    preset = _svc(db).update_preset(
+    preset = _svc(db, cidr_db).update_preset(
         preset_id,
         name=payload.name.strip() if payload.name is not None else None,
         description=payload.description if payload.description is not None else None,
@@ -515,8 +550,9 @@ def delete_preset(
     preset_id: int,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    cidr_db: Session = Depends(get_cidr_db),
 ):
-    ok, msg = _svc(db).delete_preset(preset_id)
+    ok, msg = _svc(db, cidr_db).delete_preset(preset_id)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
     log_action(
@@ -534,8 +570,9 @@ def reset_preset(
     preset_id: int,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    cidr_db: Session = Depends(get_cidr_db),
 ):
-    preset = _svc(db).reset_builtin_preset(preset_id)
+    preset = _svc(db, cidr_db).reset_builtin_preset(preset_id)
     if not preset:
         raise HTTPException(status_code=404, detail="Встроенный пресет не найден")
     log_action(

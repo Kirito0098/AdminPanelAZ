@@ -28,11 +28,13 @@ export default function BackgroundTaskProgress({ task }: BackgroundTaskProgressP
   }
 
   const stageLabel = task.progress_stage || task.message || 'Выполнение задачи...'
-  const label = `${stageLabel} · ${statusLabel(task.status)}`
   const value =
     task.progress_percent != null && task.progress_percent >= 0
       ? Math.min(100, Math.max(0, task.progress_percent))
       : undefined
+  const label = value != null
+    ? `${stageLabel} · ${statusLabel(task.status)} · общий ${value}%`
+    : `${stageLabel} · ${statusLabel(task.status)}`
 
   return createPortal(
     <div

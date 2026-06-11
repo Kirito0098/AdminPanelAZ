@@ -11,6 +11,7 @@ _settings = get_settings()
 LIST_DIR = str(get_cidr_list_dir())
 BASELINE_DIR = os.path.join(LIST_DIR, "_baseline")
 RUNTIME_BACKUP_ROOT = str(resolve_backend_path("data/cidr/runtime_backups"))
+CIDR_DB_STAGING_ROOT = str(resolve_backend_path("data/cidr/staging"))
 RUNTIME_BACKUP_RETENTION_SECONDS = 12 * 60 * 60
 ENV_FILE_PATH = str(resolve_backend_path(".env"))
 

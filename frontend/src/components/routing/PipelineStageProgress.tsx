@@ -30,7 +30,16 @@ export default function PipelineStageProgress({
 
   const stageLabel = task?.progress_stage || task?.message || 'Выполнение операции…'
   const statusSuffix = task ? pipelineTaskStatusLabel(task.status) : 'Запуск…'
-  const label = starting && !activeTask ? 'Запуск задачи…' : `${stageLabel} · ${statusSuffix}`
+  const overallPct =
+    activeTask && task!.progress_percent != null && task!.progress_percent >= 0
+      ? Math.min(100, Math.max(0, task!.progress_percent))
+      : null
+  const label =
+    starting && !activeTask
+      ? 'Запуск задачи…'
+      : overallPct != null
+        ? `${stageLabel} · ${statusSuffix} · общий ${overallPct}%`
+        : `${stageLabel} · ${statusSuffix}`
 
   return (
     <AppProgress

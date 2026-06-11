@@ -5,6 +5,7 @@ import {
   generateCidrFromDb,
   getAntifilterStatus,
   getCidrDbStatus,
+  getCidrDbStatusSummary,
   getGameFilters,
   getRoutingOverview,
   refreshAntifilter,
@@ -58,6 +59,7 @@ export function useRoutingPage() {
     pipelineTask,
     pipelinePolling,
     startPipelinePoll,
+    syncPipelineTask,
   } = usePipelineTaskPoll()
 
   const [data, setData] = useState<RoutingOverview | null>(null)
@@ -76,6 +78,7 @@ export function useRoutingPage() {
   const [filterAntifilter, setFilterAntifilter] = useState(false)
   const [deployAllOnline, setDeployAllOnline] = useState(false)
   const [deployTargetNodeIds, setDeployTargetNodeIds] = useState<number[]>([])
+  const [selectedProviderFiles, setSelectedProviderFiles] = useState<string[] | null>(null)
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
   const trackedTaskIdRef = useRef<string | null>(null)
   const pipelinePollingRef = useRef(false)
@@ -146,8 +149,25 @@ export function useRoutingPage() {
     [attachPipelineTask],
   )
 
-  const loadPipelineMeta = useCallback(async () => {
+  const loadPipelineMeta = useCallback(async (opts: { light?: boolean } = {}) => {
     try {
+      if (opts.light) {
+        const summary = await getCidrDbStatusSummary()
+        setCidrDb((prev) =>
+          prev
+            ? { ...prev, total_cidrs: summary.total_cidrs ?? prev.total_cidrs }
+            : prev,
+        )
+        if (summary.active_task) {
+          const active = summary.active_task
+          if (trackedTaskIdRef.current !== active.task_id || !pipelinePollingRef.current) {
+            resumeActivePipelineTask(active)
+          } else {
+            syncPipelineTask(active)
+          }
+        }
+        return
+      }
       const [dbStatus, afStatus] = await Promise.all([getCidrDbStatus(), getAntifilterStatus()])
       setCidrDb(dbStatus)
       setAntifilter(afStatus)
@@ -155,12 +175,22 @@ export function useRoutingPage() {
         const active = dbStatus.active_task
         if (trackedTaskIdRef.current !== active.task_id || !pipelinePollingRef.current) {
           resumeActivePipelineTask(active)
+        } else {
+          syncPipelineTask(active)
         }
       }
     } catch {
       /* optional panel */
     }
-  }, [resumeActivePipelineTask])
+  }, [resumeActivePipelineTask, syncPipelineTask])
+
+  useEffect(() => {
+    if (!pipelinePolling) return
+    const timer = window.setInterval(() => {
+      void loadPipelineMetaRef.current({ light: true })
+    }, 10000)
+    return () => window.clearInterval(timer)
+  }, [pipelinePolling])
 
   const loadGames = useCallback(async () => {
     try {
@@ -213,6 +243,27 @@ export function useRoutingPage() {
   }, [activeNode?.id, deployTargetNodeIds.length])
 
   useEffect(() => {
+    if (!data?.providers?.length || selectedProviderFiles !== null) return
+    setSelectedProviderFiles(data.providers.map((provider) => provider.filename))
+  }, [data?.providers, selectedProviderFiles])
+
+  const resolveSelectedProviderPayload = useCallback(
+    (files: string[] | null | undefined): string[] | null | undefined => {
+      const allCount = data?.providers.length ?? 0
+      const targets = files ?? selectedProviderFiles ?? []
+      if (targets.length === 0) {
+        notifyError('Выберите хотя бы одного провайдера')
+        return undefined
+      }
+      if (allCount > 0 && targets.length >= allCount) {
+        return null
+      }
+      return targets
+    },
+    [data?.providers.length, notifyError, selectedProviderFiles],
+  )
+
+  useEffect(() => {
     void load({ initial: true })
     // Reload only when active node changes, not when load callback identity changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -247,6 +298,40 @@ export function useRoutingPage() {
     } finally {
       setActionLoading(false)
     }
+  }
+
+  const runRefreshCidrDb = async (
+    files?: string[],
+    opts?: { retryFailedMode?: 'last' | 'selected' },
+  ) => {
+    const payload = resolveSelectedProviderPayload(files)
+    if (payload === undefined) return
+    const count = files?.length ?? selectedProviderFiles?.length ?? 0
+    const okMsg =
+      count === 1
+        ? 'CIDR провайдера обновлён из интернета'
+        : count > 0 && count < (data?.providers.length ?? count)
+          ? `CIDR БД обновлена (${count} провайдеров)`
+          : 'CIDR БД обновлена из интернета'
+    await withPipelineAction(
+      () =>
+        refreshCidrDb({
+          selectedFiles: payload,
+          retryFailedMode: opts?.retryFailedMode,
+        }),
+      okMsg,
+      1,
+      'providers',
+    )
+  }
+
+  const refreshOneProvider = async (filename: string) => {
+    setSelectedProviderFiles((prev) => [...new Set([...prev, filename])])
+    await runRefreshCidrDb([filename])
+  }
+
+  const retryFailedProviders = async () => {
+    await runRefreshCidrDb(undefined, { retryFailedMode: 'last' })
   }
 
   const withAction = async (
@@ -301,23 +386,33 @@ export function useRoutingPage() {
       case 'sync-providers':
         await withAction(syncRoutingProviders, 'Синхронизация выполнена', 'Синхронизация провайдеров...')
         break
-      case 'generate-only':
+      case 'generate-only': {
+        const regions = resolveSelectedProviderPayload()
+        if (regions === undefined) return
+        const count = selectedProviderFiles?.length ?? 0
         await withPipelineAction(
           () =>
             generateCidrFromDb({
+              regions,
               filter_by_antifilter: filterAntifilter,
               deploy_after: false,
               sync_after: false,
               apply_after: false,
             }),
-          'CIDR-файлы собраны на контроллере',
+          count > 0 && count < (data?.providers.length ?? count)
+            ? `CIDR-файлы собраны (${count} провайдеров)`
+            : 'CIDR-файлы собраны на контроллере',
           2,
         )
         break
-      case 'generate-doall':
+      }
+      case 'generate-doall': {
+        const regions = resolveSelectedProviderPayload()
+        if (regions === undefined) return
         await withPipelineAction(
           () =>
             generateCidrFromDb({
+              regions,
               filter_by_antifilter: filterAntifilter,
               deploy_after: true,
               sync_after: true,
@@ -327,7 +422,10 @@ export function useRoutingPage() {
           2,
         )
         break
-      case 'deploy-only':
+      }
+      case 'deploy-only': {
+        const selected_files = resolveSelectedProviderPayload()
+        if (selected_files === undefined) return
         await withPipelineAction(
           () =>
             deployCidrToNode({
@@ -335,6 +433,7 @@ export function useRoutingPage() {
               target_node_ids: deployAllOnline ? null : deployTargetNodeIds.length ? deployTargetNodeIds : null,
               sync_after: true,
               apply_after: false,
+              selected_files,
             }),
           deployAllOnline
             ? 'CIDR-файлы развёрнуты на все online-ноды'
@@ -342,6 +441,7 @@ export function useRoutingPage() {
           3,
         )
         break
+      }
     }
   }
 
@@ -372,6 +472,8 @@ export function useRoutingPage() {
     setDeployAllOnline,
     deployTargetNodeIds,
     setDeployTargetNodeIds,
+    selectedProviderFiles: selectedProviderFiles ?? [],
+    setSelectedProviderFiles,
     confirmAction,
     setConfirmAction,
     load,
@@ -396,7 +498,9 @@ export function useRoutingPage() {
     syncGames: () =>
       withAction(() => syncGameFilters(gameModes), 'Игровые фильтры синхронизированы', 'Синхронизация игровых фильтров...'),
     inline,
-    refreshCidrDb: () => withPipelineAction(refreshCidrDb, 'CIDR БД обновлена из интернета', 1, 'providers'),
+    refreshCidrDb: () => runRefreshCidrDb(),
+    refreshOneProvider,
+    retryFailedProviders,
     refreshAntifilter: () => withPipelineAction(refreshAntifilter, 'Antifilter синхронизирован', 1, 'antifilter'),
     deployCidr: () => setConfirmAction('deploy-only'),
   }

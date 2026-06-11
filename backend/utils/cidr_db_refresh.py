@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 
 def main() -> int:
     db = SessionLocal()
+    svc = CidrDbUpdaterService(db=db)
     try:
-        svc = CidrDbUpdaterService(db=db)
         logger.info("Starting CIDR DB refresh (cron)")
         result = svc.refresh_all_providers(triggered_by="cron")
         logger.info(
@@ -37,6 +37,7 @@ def main() -> int:
         )
         return 0 if result.get("status") in ("ok", "partial") else 1
     finally:
+        svc.close()
         db.close()
 
 

@@ -32,13 +32,17 @@ class BackupManagerTests(unittest.TestCase):
         data_dir = backend / "data"
         data_dir.mkdir(parents=True)
         self.db_path = data_dir / "adminpanel.db"
+        self.cidr_db_path = data_dir / "cidr" / "cidr.db"
+        self.cidr_db_path.parent.mkdir(parents=True, exist_ok=True)
         self.env_path = backend / ".env"
         _write_test_sqlite(self.db_path)
+        _write_test_sqlite(self.cidr_db_path)
         self.env_path.write_text("SECRET_KEY=abc\n", encoding="utf-8")
         self.manager = BackupManager(
             app_root=self.app_root,
             backup_root=self.backup_root,
             db_path=self.db_path,
+            cidr_db_path=self.cidr_db_path,
             env_path=self.env_path,
         )
 
@@ -54,6 +58,8 @@ class BackupManagerTests(unittest.TestCase):
         with tarfile.open(archive_path, "r:gz") as tar:
             names = {m.name for m in tar.getmembers()}
         self.assertIn("data/adminpanel.db", names)
+        self.assertIn("data/cidr/cidr.db", names)
+        self.assertIn("cidr_db", result["components"])
         self.assertIn("env/.env", names)
 
     def test_list_backups_reads_metadata(self):
@@ -72,7 +78,7 @@ class BackupManagerTests(unittest.TestCase):
         self.env_path.write_text("CORRUPT=1\n", encoding="utf-8")
 
         restored = self.manager.restore_backup(created["file_name"])
-        self.assertEqual(set(restored["restored"]), {"db", "env"})
+        self.assertEqual(set(restored["restored"]), {"db", "env", "cidr_db"})
         conn = sqlite3.connect(self.db_path)
         try:
             row = conn.execute("SELECT username FROM user WHERE id=1").fetchone()
@@ -80,6 +86,12 @@ class BackupManagerTests(unittest.TestCase):
             conn.close()
         self.assertEqual(row[0], "testadmin")
         self.assertIn("SECRET_KEY=abc", self.env_path.read_text(encoding="utf-8"))
+        conn = sqlite3.connect(self.cidr_db_path)
+        try:
+            row = conn.execute("SELECT username FROM user WHERE id=1").fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row[0], "testadmin")
 
     def test_delete_backup_removes_archive_and_metadata(self):
         created = self.manager.create_backup()

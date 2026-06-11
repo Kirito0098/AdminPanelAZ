@@ -18,11 +18,20 @@ class BackupManager:
         "allow-ips.txt",
     )
 
-    def __init__(self, *, app_root: Path, backup_root: Path, db_path: Path, env_path: Path):
+    def __init__(
+        self,
+        *,
+        app_root: Path,
+        backup_root: Path,
+        db_path: Path,
+        env_path: Path,
+        cidr_db_path: Path | None = None,
+    ):
         self.app_root = app_root.resolve()
         self.backup_root = backup_root.resolve()
         self.db_path = db_path.resolve()
         self.env_path = env_path.resolve()
+        self.cidr_db_path = cidr_db_path.resolve() if cidr_db_path is not None else None
 
     def list_backups(self) -> list[dict]:
         self.backup_root.mkdir(parents=True, exist_ok=True)
@@ -62,6 +71,11 @@ class BackupManager:
                 tar.add(self.db_path, arcname="data/adminpanel.db")
                 components.append("db")
                 summary_parts.append("DB:1")
+
+            if self.cidr_db_path is not None and self.cidr_db_path.exists():
+                tar.add(self.cidr_db_path, arcname="data/cidr/cidr.db")
+                components.append("cidr_db")
+                summary_parts.append("CIDR_DB:1")
 
             if self.env_path.exists():
                 tar.add(self.env_path, arcname="env/.env")
@@ -111,6 +125,13 @@ class BackupManager:
                 if extracted:
                     self.db_path.write_bytes(extracted.read())
                     restored.append("db")
+
+            if "data/cidr/cidr.db" in members and self.cidr_db_path is not None:
+                self.cidr_db_path.parent.mkdir(parents=True, exist_ok=True)
+                extracted = tar.extractfile(members["data/cidr/cidr.db"])
+                if extracted:
+                    self.cidr_db_path.write_bytes(extracted.read())
+                    restored.append("cidr_db")
 
             if "env/.env" in members:
                 extracted = tar.extractfile(members["env/.env"])

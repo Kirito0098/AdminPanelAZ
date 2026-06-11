@@ -10,8 +10,9 @@ backend/__pycache__/
 backend/.env
 backend/node_agent.env
 
-# CIDR pipeline (generated lists, baselines, runtime backups)
+# CIDR pipeline (generated lists, baselines, runtime backups, ingest staging CSV)
 # Correct path is backend/data/cidr/ (already under backend/data/)
+# Explicit: backend/data/cidr/staging/
 # Legacy compile path before paths.py fix:
 backend/app/data/
 

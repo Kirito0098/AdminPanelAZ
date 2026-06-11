@@ -571,14 +571,30 @@ export async function getCidrDbStatus() {
   return apiFetch<import('../types').CidrDbStatus>('/routing/cidr-db/status')
 }
 
+export async function getCidrDbStatusSummary() {
+  return apiFetch<{
+    success: boolean
+    total_cidrs: number
+    active_task?: import('../types').CidrPipelineTask | null
+  }>('/routing/cidr-db/status/summary')
+}
+
 export async function getAntifilterStatus() {
   return apiFetch<import('../types').AntifilterStatus>('/routing/cidr-db/antifilter/status')
 }
 
-export async function refreshCidrDb(selectedFiles?: string[]) {
+export async function refreshCidrDb(options?: {
+  selectedFiles?: string[] | null
+  retryFailedMode?: 'last' | 'selected'
+  dryRun?: boolean
+}) {
   return apiFetch<{ success: boolean; task_id: string; message: string }>('/routing/cidr-db/refresh', {
     method: 'POST',
-    body: JSON.stringify({ selected_files: selectedFiles ?? null }),
+    body: JSON.stringify({
+      selected_files: options?.selectedFiles ?? null,
+      retry_failed_mode: options?.retryFailedMode ?? null,
+      dry_run: options?.dryRun ?? false,
+    }),
   })
 }
 
@@ -589,6 +605,7 @@ export async function refreshAntifilter() {
 }
 
 export async function generateCidrFromDb(options?: {
+  regions?: string[] | null
   filter_by_antifilter?: boolean
   exclude_ru_cidrs?: boolean
   apply_after?: boolean
@@ -600,6 +617,7 @@ export async function generateCidrFromDb(options?: {
     method: 'POST',
     body: JSON.stringify({
       action: 'generate',
+      regions: options?.regions ?? null,
       filter_by_antifilter: options?.filter_by_antifilter ?? false,
       exclude_ru_cidrs: options?.exclude_ru_cidrs ?? false,
       apply_after: options?.apply_after ?? false,

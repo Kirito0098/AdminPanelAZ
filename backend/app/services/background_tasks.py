@@ -492,24 +492,41 @@ class BackgroundTaskService:
 
     def start_cidr_runner(self, task_id: str, runner: Callable) -> None:
         progress_lock = threading.Lock()
-        progress_state = {"last_at": 0.0, "last_pct": -1}
+        progress_state = {"last_at": 0.0, "last_pct": -1, "last_stage": ""}
 
         def _progress_callback(percent: int, stage: str) -> None:
             pct = max(0, min(99, int(percent)))
             stage_str = str(stage or "Выполняется операция…")
             now = time.monotonic()
+            skip_percent = False
             with progress_lock:
-                if pct < 99 and (now - progress_state["last_at"]) < 0.5 and pct <= progress_state["last_pct"] + 1:
+                stage_changed = stage_str != progress_state["last_stage"]
+                if (
+                    pct < 99
+                    and not stage_changed
+                    and (now - progress_state["last_at"]) < 1.5
+                    and pct <= progress_state["last_pct"] + 1
+                ):
                     return
+                if (
+                    pct < 99
+                    and (now - progress_state["last_at"]) < 1.5
+                    and pct <= progress_state["last_pct"] + 1
+                ):
+                    skip_percent = True
                 progress_state["last_at"] = now
-                progress_state["last_pct"] = pct
-            self.update_background_task(
-                task_id,
-                status="running",
-                progress_percent=pct,
-                progress_stage=stage_str,
-                message=stage_str,
-            )
+                progress_state["last_stage"] = stage_str
+                if not skip_percent:
+                    progress_state["last_pct"] = pct
+
+            fields: dict[str, Any] = {
+                "status": "running",
+                "progress_stage": stage_str,
+                "message": stage_str,
+            }
+            if not skip_percent:
+                fields["progress_percent"] = pct
+            self.update_background_task(task_id, **fields)
 
         def _worker() -> None:
             self.update_background_task(

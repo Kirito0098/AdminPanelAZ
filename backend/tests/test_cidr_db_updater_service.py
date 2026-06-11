@@ -10,6 +10,19 @@ from app.services.cidr.pipeline.db_extract import (
 from app.services.cidr.pipeline.provider_sources import PROVIDER_SOURCES
 
 
+def _mock_cidr_db() -> MagicMock:
+    cidr_db = MagicMock()
+    cidr_db.query.return_value.filter_by.return_value.count.return_value = 0
+    return cidr_db
+
+
+def _make_svc(*, db=None, cidr_db=None) -> CidrDbUpdaterService:
+    return CidrDbUpdaterService(
+        db=db if db is not None else MagicMock(),
+        cidr_db=cidr_db if cidr_db is not None else _mock_cidr_db(),
+    )
+
+
 class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
     def test_helper_parsing_and_workers(self):
         self.assertEqual(CidrDbUpdaterService._resolve_asn_fetch_workers(0, 8), 0)
@@ -66,7 +79,7 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         self.assertIn("Ошибки ASN-источников", reason)
 
     def test_build_degradation_alerts_skips_global_drop_after_cleared_baseline(self):
-        svc = CidrDbUpdaterService(db=MagicMock())
+        svc = _make_svc(db=MagicMock())
         last_log = MagicMock(id=2, total_cidrs=150865)
         prev_log = MagicMock(id=1, total_cidrs=404540, status="cleared")
         meta = MagicMock(anomaly_level="none", anomaly_reason=None, provider_key="amazon-ips.txt")
@@ -81,7 +94,7 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         self.assertEqual(alerts, [])
 
     def test_build_degradation_alerts_keeps_global_drop_without_cleared_baseline(self):
-        svc = CidrDbUpdaterService(db=MagicMock())
+        svc = _make_svc(db=MagicMock())
         last_log = MagicMock(id=2, total_cidrs=150865)
         prev_log = MagicMock(id=1, total_cidrs=404540, status="ok")
         meta = MagicMock(anomaly_level="none", anomaly_reason=None, provider_key="amazon-ips.txt")
@@ -98,7 +111,7 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         self.assertIn("150865", alerts[0]["message"])
 
     def test_download_asn_cidrs_with_meta_retries_after_transient_failure(self):
-        svc = CidrDbUpdaterService(db=None)
+        svc = _make_svc(db=None)
         success = ([{"cidr": "203.0.113.0/24"}], "ripe-as9059-bgpstate")
 
         with patch.object(
@@ -169,7 +182,7 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         )
 
     def test_discover_provider_asns_combines_seed_source_and_scan(self):
-        svc = CidrDbUpdaterService(db=None)
+        svc = _make_svc(db=None)
         sources = [
             {
                 "name": "bgp-tools-as396982",
@@ -192,7 +205,7 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         self.assertFalse(errors)
 
     def test_discover_provider_asns_skips_scan_when_limit_zero(self):
-        svc = CidrDbUpdaterService(db=None)
+        svc = _make_svc(db=None)
         sources = [
             {
                 "name": "bgp-tools-scan-source",
@@ -215,7 +228,7 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         mocked_download.assert_not_called()
 
     def test_download_asn_cidrs_with_meta_uses_bgp_state_fallback(self):
-        svc = CidrDbUpdaterService(db=None)
+        svc = _make_svc(db=None)
 
         empty_announced = '{"data":{"prefixes":[]}}'
         empty_geo = '{"data":{"located_resources":[]}}'
@@ -233,7 +246,7 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         self.assertEqual([item["cidr"] for item in items], ["203.0.113.0/24"])
 
     def test_download_cidrs_with_meta_parallel_keeps_source_order(self):
-        svc = CidrDbUpdaterService(db=None)
+        svc = _make_svc(db=None)
         sources = [
             {
                 "name": "source-a",
@@ -275,7 +288,8 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         mocked_get_models.return_value = models
 
         db = MagicMock()
-        svc = CidrDbUpdaterService(db=db)
+        cidr_db = _mock_cidr_db()
+        svc = CidrDbUpdaterService(db=db, cidr_db=cidr_db)
 
         cloudflare_sources = PROVIDER_SOURCES["cloudflare-ips.txt"]
         self.assertEqual(len(cloudflare_sources), 1)
@@ -326,7 +340,8 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         mocked_get_models.return_value = models
 
         db = MagicMock()
-        svc = CidrDbUpdaterService(db=db)
+        cidr_db = _mock_cidr_db()
+        svc = CidrDbUpdaterService(db=db, cidr_db=cidr_db)
 
         with (
             patch.object(svc, "_discover_provider_asns", return_value=([20940], {"source-meta"}, [])),
@@ -379,7 +394,8 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         mocked_get_models.return_value = models
 
         db = MagicMock()
-        svc = CidrDbUpdaterService(db=db)
+        cidr_db = _mock_cidr_db()
+        svc = CidrDbUpdaterService(db=db, cidr_db=cidr_db)
 
         with (
             patch.object(svc, "_discover_provider_asns", return_value=([14061, 46652], {"source-meta"}, [])),
@@ -456,7 +472,7 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         self.assertEqual(bgp_sources, [])
 
     def test_clear_provider_data_rejects_invalid_targets(self):
-        svc = CidrDbUpdaterService(db=MagicMock())
+        svc = _make_svc(db=MagicMock())
         result = svc.clear_provider_data(selected_files=["unknown-provider.txt"])
         self.assertFalse(result["success"])
         self.assertEqual(result["providers_cleared"], 0)
@@ -477,8 +493,10 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
             return chain
 
         db = MagicMock()
-        db.query.side_effect = [_delete_chain(120), _delete_chain(5), _delete_chain(10), _delete_chain(1)]
-        svc = CidrDbUpdaterService(db=db)
+        db.query.side_effect = [_delete_chain(5), _delete_chain(10), _delete_chain(1)]
+        cidr_db = MagicMock()
+        cidr_db.query.side_effect = [_delete_chain(120)]
+        svc = CidrDbUpdaterService(db=db, cidr_db=cidr_db)
         result = svc.clear_provider_data(selected_files=["amazon-ips.txt"], triggered_by="manual:test")
 
         self.assertTrue(result["success"])
@@ -486,6 +504,7 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         self.assertEqual(result["providers"], ["amazon-ips.txt"])
         self.assertEqual(result["deleted"]["provider_cidr"], 120)
         db.add.assert_called_once()
+        cidr_db.commit.assert_called_once()
         db.commit.assert_called_once()
 
     @patch("app.services.cidr.pipeline.db_service._get_models")
@@ -505,23 +524,25 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
 
         db = MagicMock()
         db.query.side_effect = [
-            _delete_chain(120),
             _delete_chain(5),
             _delete_chain(10),
             _delete_chain(1),
             MagicMock(delete=MagicMock(return_value=3)),
         ]
-        svc = CidrDbUpdaterService(db=db)
+        cidr_db = MagicMock()
+        cidr_db.query.side_effect = [_delete_chain(120)]
+        svc = CidrDbUpdaterService(db=db, cidr_db=cidr_db)
         result = svc.clear_provider_data(selected_files=None, triggered_by="manual:full-clear")
 
         self.assertTrue(result["success"])
         self.assertGreater(result["providers_cleared"], 1)
         self.assertEqual(result["deleted"]["cidr_db_refresh_log"], 3)
         db.add.assert_not_called()
+        cidr_db.commit.assert_called_once()
         db.commit.assert_called_once()
 
     def test_download_cidrs_with_meta_uses_ttl_cache_for_repeated_calls(self):
-        svc = CidrDbUpdaterService(db=None)
+        svc = _make_svc(db=None)
         CidrDbUpdaterService._source_cache = {}
         sources = [{"name": "source-a", "url": "https://example.test/a", "format": "cidr_text"}]
 
@@ -539,7 +560,7 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         self.assertTrue(second_details[0]["cache_hit"])
 
     def test_download_cidrs_with_meta_retries_transient_download_errors(self):
-        svc = CidrDbUpdaterService(db=None)
+        svc = _make_svc(db=None)
         CidrDbUpdaterService._source_cache = {}
         sources = [{"name": "source-a", "url": "https://example.test/a", "format": "cidr_text"}]
 
@@ -575,7 +596,8 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
         mocked_get_models.return_value = models
 
         db = MagicMock()
-        svc = CidrDbUpdaterService(db=db)
+        cidr_db = _mock_cidr_db()
+        svc = CidrDbUpdaterService(db=db, cidr_db=cidr_db)
 
         with (
             patch.object(svc, "_discover_provider_asns", return_value=([], set(), [])),
@@ -620,7 +642,9 @@ class CidrDbUpdaterServiceHelperTests(unittest.TestCase):
             return chain
 
         db.query.side_effect = _query_stub
-        svc = CidrDbUpdaterService(db=db)
+        cidr_db = MagicMock()
+        cidr_db.query.side_effect = _query_stub
+        svc = CidrDbUpdaterService(db=db, cidr_db=cidr_db)
         progress_events = []
 
         def _capture_progress(pct, stage):

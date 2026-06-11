@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_admin
 from app.config import get_settings
-from app.database import get_db
+from app.cidr_database import resolve_cidr_db_path
+from app.database import get_db, resolve_main_db_path
 from app.models import AppSetting, User
 from app.services.action_log import log_action
 from app.services.ip_restriction import ip_restriction_service
@@ -33,17 +34,13 @@ logger = logging.getLogger(__name__)
 
 def _get_backup_manager() -> BackupManager:
     app_root = Path(__file__).resolve().parents[2]
-    db_url = settings.database_url
-    if db_url.startswith("sqlite:///"):
-        db_path = Path(db_url.replace("sqlite:///", ""))
-        if not db_path.is_absolute():
-            db_path = app_root / db_path
-    else:
-        db_path = app_root / "data" / "adminpanel.db"
+    db_path = resolve_main_db_path()
+    cidr_db_path = resolve_cidr_db_path()
     return BackupManager(
         app_root=app_root,
         backup_root=Path(settings.backup_root),
         db_path=db_path,
+        cidr_db_path=cidr_db_path,
         env_path=app_root / ".env",
     )
 
