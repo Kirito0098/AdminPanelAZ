@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Play, RefreshCw, Save, Settings2 } from 'lucide-react'
 import {
   ApiError,
@@ -261,6 +262,13 @@ export default function AntizapretConfigTab() {
                 <h3 className="text-sm font-semibold">{section.title}</h3>
                 {section.description && (
                   <p className="text-xs text-muted-foreground">{section.description}</p>
+                )}
+                {section.title === 'Cloudflare WARP' && (
+                  <p className="mt-1 text-xs">
+                    <Link to="/warper" className="font-medium text-primary underline-offset-4 hover:underline">
+                      Управление AZ-WARP →
+                    </Link>
+                  </p>
                 )}
               </div>
               <div className="grid gap-3 md:grid-cols-2">

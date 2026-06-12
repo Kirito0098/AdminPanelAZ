@@ -914,6 +914,124 @@ export async function updateAntizapretSettings(updates: Record<string, string | 
   })
 }
 
+export async function getWarperHealth() {
+  return apiFetch<import('../types').WarperHealthResponse>('/warper/health')
+}
+
+export async function getWarperStatus() {
+  return apiFetch<import('../types').WarperStatusResponse>('/warper/status')
+}
+
+export async function getWarperDoctor() {
+  return apiFetch<import('../types').WarperDoctorResponse>('/warper/doctor')
+}
+
+export async function postWarperToggle() {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/toggle', { method: 'POST' })
+}
+
+export async function getWarperDomains() {
+  return apiFetch<import('../types').WarperDomainsResponse>('/warper/domains')
+}
+
+export async function addWarperDomain(domain: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/domains', {
+    method: 'POST',
+    body: JSON.stringify({ domain }),
+  })
+}
+
+export async function removeWarperDomain(domain: string) {
+  return apiFetch<import('../types').WarperActionResponse>(
+    `/warper/domains/${encodeURIComponent(domain)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export async function syncWarperDomains() {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/domains/sync', { method: 'POST' })
+}
+
+export async function addWarperDomainsBulk(domains: string[]) {
+  return apiFetch<import('../types').WarperDomainsBulkResponse>('/warper/domains/bulk', {
+    method: 'POST',
+    body: JSON.stringify({ domains }),
+  })
+}
+
+export async function setWarperDomainList(name: string, enable: boolean) {
+  return apiFetch<import('../types').WarperActionResponse>(`/warper/domains/lists/${encodeURIComponent(name)}`, {
+    method: 'POST',
+    body: JSON.stringify({ enable }),
+  })
+}
+
+export async function getWarperIpRanges() {
+  return apiFetch<import('../types').WarperIpRangesResponse>('/warper/ip-ranges')
+}
+
+export async function addWarperIpRange(cidr: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/ip-ranges', {
+    method: 'POST',
+    body: JSON.stringify({ cidr }),
+  })
+}
+
+export async function removeWarperIpRange(cidr: string) {
+  return apiFetch<import('../types').WarperActionResponse>(
+    `/warper/ip-ranges/${encodeURIComponent(cidr)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export async function syncWarperIpRanges() {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/ip-ranges/sync', { method: 'POST' })
+}
+
+export async function setWarperIpRouteMode(mode: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/ip-ranges/mode', {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  })
+}
+
+export async function setWarperIpExport(enable: boolean) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/ip-ranges/export', {
+    method: 'POST',
+    body: JSON.stringify({ enable }),
+  })
+}
+
+export async function getWarperTraffic(period: import('../types').WarperTrafficPeriod = 'today') {
+  return apiFetch<import('../types').WarperTrafficResponse>(`/warper/traffic?period=${encodeURIComponent(period)}`)
+}
+
+export async function getWarperLogs(lines = 200) {
+  return apiFetch<import('../types').WarperLogsResponse>(`/warper/logs?lines=${lines}`)
+}
+
+export async function getWarperMode() {
+  return apiFetch<import('../types').WarperModeResponse>('/warper/settings/mode')
+}
+
+export async function setWarperMtu(mtu: number) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/mtu', {
+    method: 'PUT',
+    body: JSON.stringify({ mtu }),
+  })
+}
+
+export async function setWarperLogLevel(level: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/log-level', {
+    method: 'PUT',
+    body: JSON.stringify({ level }),
+  })
+}
+
+export async function postWarperSingbox(action: 'start' | 'stop' | 'restart') {
+  return apiFetch<import('../types').WarperActionResponse>(`/warper/singbox/${action}`, { method: 'POST' })
+}
+
 export async function getSecuritySettings() {
   return apiFetch<import('../types').SecuritySettings>('/security')
 }

@@ -690,3 +690,104 @@ export interface AntizapretSettingsUpdateResponse {
   changes: number
   needs_apply: boolean
 }
+
+export interface WarperHealthResponse {
+  installed: boolean
+  active: boolean
+  version?: string | null
+  conflict_antizapret_warp: boolean
+  health_error?: string | null
+  warper_bin?: boolean | null
+  warper_script?: boolean | null
+  warper_api?: boolean | null
+  missing_components?: string[]
+  node_id?: number | null
+  node_name?: string | null
+  node_host?: string | null
+}
+
+export interface WarperStatusResponse {
+  status: Record<string, unknown>
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperDomainItem {
+  domain?: string | null
+  name?: string | null
+  type?: string | null
+  status?: string | null
+  [key: string]: unknown
+}
+
+export interface WarperDomainListsStatus {
+  gemini: boolean
+  chatgpt: boolean
+}
+
+export interface WarperDomainsResponse {
+  domains: WarperDomainItem[]
+  lists?: WarperDomainListsStatus
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export type WarperDoctorStatus = 'ok' | 'warn' | 'error' | 'info'
+
+export interface WarperDoctorItem {
+  status?: WarperDoctorStatus | string
+  text?: string
+  check?: string
+  name?: string
+  message?: string
+}
+
+export interface WarperDoctorResponse {
+  items: WarperDoctorItem[]
+  passed?: boolean | null
+  summary?: Record<string, number> | null
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperActionResponse {
+  message?: string | null
+  success?: boolean | null
+  node_id?: number | null
+  node_name?: string | null
+  [key: string]: unknown
+}
+
+export interface WarperDomainsBulkResponse {
+  added: string[]
+  added_count: number
+  errors: Array<{ domain: string; error: string }>
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperIpRangesResponse {
+  ranges: Array<string | Record<string, unknown>>
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperTrafficResponse {
+  data: Record<string, unknown>
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperLogsResponse {
+  lines: string[]
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperModeResponse {
+  mode: Record<string, unknown>
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export type WarperTrafficPeriod = 'today' | 'week' | 'month' | 'all'

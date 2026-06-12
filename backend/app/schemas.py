@@ -590,6 +590,131 @@ class AntizapretSettingsUpdateResponse(BaseModel):
     needs_apply: bool
 
 
+class WarperHealthResponse(BaseModel):
+    installed: bool
+    active: bool = False
+    version: str | None = None
+    conflict_antizapret_warp: bool = False
+    health_error: str | None = None
+    warper_bin: bool | None = None
+    warper_script: bool | None = None
+    warper_api: bool | None = None
+    missing_components: list[str] = Field(default_factory=list)
+    node_id: int | None = None
+    node_name: str | None = None
+    node_host: str | None = None
+
+
+class WarperStatusResponse(BaseModel):
+    status: dict
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperDomainItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    domain: str | None = None
+    name: str | None = None
+    type: str | None = None
+    status: str | None = None
+
+
+class WarperDomainCreate(BaseModel):
+    domain: str = Field(..., min_length=1)
+
+
+class WarperDomainListsStatus(BaseModel):
+    gemini: bool = False
+    chatgpt: bool = False
+
+
+class WarperDomainsResponse(BaseModel):
+    domains: list[WarperDomainItem | dict]
+    lists: WarperDomainListsStatus = Field(default_factory=WarperDomainListsStatus)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperDoctorResponse(BaseModel):
+    items: list[dict]
+    passed: bool | None = None
+    summary: dict[str, int] | None = None
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperActionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    message: str | None = None
+    success: bool | None = None
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperDomainsBulkCreate(BaseModel):
+    domains: list[str] = Field(default_factory=list)
+
+
+class WarperDomainsBulkResponse(BaseModel):
+    added: list[str] = Field(default_factory=list)
+    added_count: int = 0
+    errors: list[dict[str, str]] = Field(default_factory=list)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperDomainListToggle(BaseModel):
+    enable: bool
+
+
+class WarperIpRangeCreate(BaseModel):
+    cidr: str = Field(..., min_length=1)
+
+
+class WarperIpRangesResponse(BaseModel):
+    ranges: list[str | dict]
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperIpRangeModeUpdate(BaseModel):
+    mode: str = Field(..., min_length=1)
+
+
+class WarperIpExportUpdate(BaseModel):
+    enable: bool
+
+
+class WarperTrafficResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    data: dict = Field(default_factory=dict)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperLogsResponse(BaseModel):
+    lines: list[str] = Field(default_factory=list)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperModeResponse(BaseModel):
+    mode: dict = Field(default_factory=dict)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperMtuUpdate(BaseModel):
+    mtu: int = Field(..., ge=1280, le=1500)
+
+
+class WarperLogLevelUpdate(BaseModel):
+    level: str = Field(..., min_length=1)
+
+
 class TrafficClientRow(BaseModel):
     common_name: str
     protocol_type: str

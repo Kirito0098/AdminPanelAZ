@@ -30,6 +30,7 @@ from app.routers import (
     nodes,
     public_download,
     routing,
+    warper,
     security,
     server_monitor,
     system,
@@ -230,6 +231,7 @@ app.include_router(maintenance.router, prefix="/api")
 app.include_router(backups.router, prefix="/api")
 app.include_router(nodes.router, prefix="/api")
 app.include_router(routing.router, prefix="/api")
+app.include_router(warper.router, prefix="/api")
 app.include_router(cidr_db.router, prefix="/api")
 app.include_router(traffic.router, prefix="/api")
 app.include_router(client_access.router, prefix="/api")

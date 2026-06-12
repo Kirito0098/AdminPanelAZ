@@ -22,6 +22,7 @@ from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.server_monitor import ServerMonitorService
 from app.services.node_remote_cache import get_cached_monitoring_overview, monitoring_overview_cache_key
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
+from app.services.warper import WarperService
 
 _settings = get_settings()
 
@@ -176,10 +177,80 @@ class NodeAdapter(ABC):
     @abstractmethod
     def ensure_openvpn_ban_check(self) -> dict: ...
 
+    @abstractmethod
+    def get_warper_health(self) -> dict: ...
+
+    @abstractmethod
+    def get_warper_status(self) -> dict: ...
+
+    @abstractmethod
+    def get_warper_doctor(self) -> list: ...
+
+    @abstractmethod
+    def warper_toggle(self) -> dict: ...
+
+    @abstractmethod
+    def get_warper_domains(self) -> list: ...
+
+    @abstractmethod
+    def get_warper_domain_lists(self) -> dict[str, bool]: ...
+
+    @abstractmethod
+    def add_warper_domain(self, domain: str) -> dict: ...
+
+    @abstractmethod
+    def remove_warper_domain(self, domain: str) -> dict: ...
+
+    @abstractmethod
+    def sync_warper_domains(self) -> dict: ...
+
+    @abstractmethod
+    def add_warper_domains_bulk(self, domains: list[str]) -> dict: ...
+
+    @abstractmethod
+    def set_warper_domain_list(self, name: str, *, enable: bool) -> dict: ...
+
+    @abstractmethod
+    def get_warper_ip_ranges(self) -> list: ...
+
+    @abstractmethod
+    def add_warper_ip_range(self, cidr: str) -> dict: ...
+
+    @abstractmethod
+    def remove_warper_ip_range(self, cidr: str) -> dict: ...
+
+    @abstractmethod
+    def sync_warper_ip_ranges(self) -> dict: ...
+
+    @abstractmethod
+    def set_warper_ip_route_mode(self, mode: str) -> dict: ...
+
+    @abstractmethod
+    def set_warper_ip_export(self, *, enable: bool) -> dict: ...
+
+    @abstractmethod
+    def get_warper_traffic(self, period: str = "today") -> dict: ...
+
+    @abstractmethod
+    def get_warper_logs(self, lines: int = 200) -> list: ...
+
+    @abstractmethod
+    def get_warper_mode(self) -> dict: ...
+
+    @abstractmethod
+    def set_warper_mtu(self, mtu: int) -> dict: ...
+
+    @abstractmethod
+    def set_warper_log_level(self, level: str) -> dict: ...
+
+    @abstractmethod
+    def warper_singbox_action(self, action: str) -> dict: ...
+
 
 class LocalNodeAdapter(NodeAdapter):
-    def __init__(self, service: AntiZapretService | None = None):
+    def __init__(self, service: AntiZapretService | None = None, warper: WarperService | None = None):
         self._service = service or AntiZapretService()
+        self._warper = warper or WarperService()
         self._cidr = CidrRoutingService(self._service.base_path, get_cidr_list_dir())
         self._monitor = ServerMonitorService()
 
@@ -332,6 +403,75 @@ class LocalNodeAdapter(NodeAdapter):
 
     def ensure_openvpn_ban_check(self) -> dict:
         return ensure_openvpn_ban_check(self._service.base_path)
+
+    def get_warper_health(self) -> dict:
+        return self._warper.get_health()
+
+    def get_warper_status(self) -> dict:
+        return self._warper.get_status()
+
+    def get_warper_doctor(self) -> list:
+        return self._warper.doctor()
+
+    def warper_toggle(self) -> dict:
+        return self._warper.toggle()
+
+    def get_warper_domains(self) -> list:
+        return self._warper.list_domains()
+
+    def get_warper_domain_lists(self) -> dict[str, bool]:
+        return self._warper.get_domain_lists_status()
+
+    def add_warper_domain(self, domain: str) -> dict:
+        return self._warper.add_domain(domain)
+
+    def remove_warper_domain(self, domain: str) -> dict:
+        return self._warper.remove_domain(domain)
+
+    def sync_warper_domains(self) -> dict:
+        return self._warper.sync_domains()
+
+    def add_warper_domains_bulk(self, domains: list[str]) -> dict:
+        return self._warper.add_domains_bulk(domains)
+
+    def set_warper_domain_list(self, name: str, *, enable: bool) -> dict:
+        return self._warper.set_domain_list(name, enable=enable)
+
+    def get_warper_ip_ranges(self) -> list:
+        return self._warper.list_ip_ranges()
+
+    def add_warper_ip_range(self, cidr: str) -> dict:
+        return self._warper.add_ip_range(cidr)
+
+    def remove_warper_ip_range(self, cidr: str) -> dict:
+        return self._warper.remove_ip_range(cidr)
+
+    def sync_warper_ip_ranges(self) -> dict:
+        return self._warper.sync_ip_ranges()
+
+    def set_warper_ip_route_mode(self, mode: str) -> dict:
+        return self._warper.set_ip_route_mode(mode)
+
+    def set_warper_ip_export(self, *, enable: bool) -> dict:
+        return self._warper.set_ip_export(enable=enable)
+
+    def get_warper_traffic(self, period: str = "today") -> dict:
+        return self._warper.get_traffic(period)
+
+    def get_warper_logs(self, lines: int = 200) -> list:
+        return self._warper.get_logs(lines)
+
+    def get_warper_mode(self) -> dict:
+        return self._warper.get_mode()
+
+    def set_warper_mtu(self, mtu: int) -> dict:
+        return self._warper.set_mtu(mtu)
+
+    def set_warper_log_level(self, level: str) -> dict:
+        return self._warper.set_log_level(level)
+
+    def warper_singbox_action(self, action: str) -> dict:
+        return self._warper.singbox_action(action)  # type: ignore[arg-type]
 
 
 class RemoteNodeAdapter(NodeAdapter):
@@ -724,6 +864,88 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def ensure_openvpn_ban_check(self) -> dict:
         return self._request("POST", "/system/ensure-openvpn-ban-check", timeout=30.0)
+
+    def get_warper_health(self) -> dict:
+        return self._request("GET", "/warper/health")
+
+    def get_warper_status(self) -> dict:
+        return self._request("GET", "/warper/status")
+
+    def get_warper_doctor(self) -> list:
+        data = self._request("GET", "/warper/doctor")
+        return data.get("items", [])
+
+    def warper_toggle(self) -> dict:
+        return self._request("POST", "/warper/toggle")
+
+    def get_warper_domains(self) -> list:
+        data = self._request("GET", "/warper/domains")
+        return data.get("domains", [])
+
+    def get_warper_domain_lists(self) -> dict[str, bool]:
+        data = self._request("GET", "/warper/domains")
+        lists = data.get("lists", {})
+        return {
+            "gemini": bool(lists.get("gemini")),
+            "chatgpt": bool(lists.get("chatgpt")),
+        }
+
+    def add_warper_domain(self, domain: str) -> dict:
+        return self._request("POST", "/warper/domains", json={"domain": domain})
+
+    def remove_warper_domain(self, domain: str) -> dict:
+        from urllib.parse import quote
+
+        return self._request("DELETE", f"/warper/domains/{quote(domain, safe='')}")
+
+    def sync_warper_domains(self) -> dict:
+        return self._request("POST", "/warper/domains/sync")
+
+    def add_warper_domains_bulk(self, domains: list[str]) -> dict:
+        return self._request("POST", "/warper/domains/bulk", json={"domains": domains})
+
+    def set_warper_domain_list(self, name: str, *, enable: bool) -> dict:
+        return self._request("POST", f"/warper/domains/lists/{name}", json={"enable": enable})
+
+    def get_warper_ip_ranges(self) -> list:
+        data = self._request("GET", "/warper/ip-ranges")
+        return data.get("ranges", [])
+
+    def add_warper_ip_range(self, cidr: str) -> dict:
+        return self._request("POST", "/warper/ip-ranges", json={"cidr": cidr})
+
+    def remove_warper_ip_range(self, cidr: str) -> dict:
+        from urllib.parse import quote
+
+        return self._request("DELETE", f"/warper/ip-ranges/{quote(cidr, safe='')}")
+
+    def sync_warper_ip_ranges(self) -> dict:
+        return self._request("POST", "/warper/ip-ranges/sync")
+
+    def set_warper_ip_route_mode(self, mode: str) -> dict:
+        return self._request("POST", "/warper/ip-ranges/mode", json={"mode": mode})
+
+    def set_warper_ip_export(self, *, enable: bool) -> dict:
+        return self._request("POST", "/warper/ip-ranges/export", json={"enable": enable})
+
+    def get_warper_traffic(self, period: str = "today") -> dict:
+        return self._request("GET", "/warper/traffic", params={"period": period})
+
+    def get_warper_logs(self, lines: int = 200) -> list:
+        data = self._request("GET", "/warper/logs", params={"lines": lines})
+        return data.get("lines", [])
+
+    def get_warper_mode(self) -> dict:
+        return self._request("GET", "/warper/settings/mode")
+
+    def set_warper_mtu(self, mtu: int) -> dict:
+        return self._request("PUT", "/warper/settings/mtu", json={"mtu": mtu})
+
+    def set_warper_log_level(self, level: str) -> dict:
+        return self._request("PUT", "/warper/settings/log-level", json={"level": level})
+
+    def warper_singbox_action(self, action: str) -> dict:
+        return self._request("POST", f"/warper/singbox/{action}")
 
     def rotate_api_key(self, new_api_key: str) -> dict[str, Any]:
         return self._request(

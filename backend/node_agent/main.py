@@ -29,6 +29,7 @@ from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.profile_files import profile_files_batch_key
 from app.services.server_monitor import ServerMonitorService
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
+from app.services.warper import run_warper_action
 
 NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
@@ -403,6 +404,153 @@ def routing_antizapret_settings_put(payload: dict, _: None = Depends(verify_api_
         return update_antizapret_settings(ANTIZAPRET_PATH / "setup", filter_known_keys(payload))
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав на запись") from exc
+
+
+class WarperDomainRequest(BaseModel):
+    domain: str = Field(..., min_length=1)
+
+
+class WarperDomainsBulkRequest(BaseModel):
+    domains: list[str] = Field(default_factory=list)
+
+
+class WarperDomainListRequest(BaseModel):
+    enable: bool
+
+
+class WarperIpRangeRequest(BaseModel):
+    cidr: str = Field(..., min_length=1)
+
+
+class WarperIpRangeModeRequest(BaseModel):
+    mode: str = Field(..., min_length=1)
+
+
+class WarperIpExportRequest(BaseModel):
+    enable: bool
+
+
+class WarperMtuRequest(BaseModel):
+    mtu: int = Field(..., ge=1280, le=1500)
+
+
+class WarperLogLevelRequest(BaseModel):
+    level: str = Field(..., min_length=1)
+
+
+@app.get("/warper/health")
+def warper_health(_: None = Depends(verify_api_key)):
+    return run_warper_action("health")
+
+
+@app.get("/warper/status")
+def warper_status(_: None = Depends(verify_api_key)):
+    return run_warper_action("status")
+
+
+@app.get("/warper/doctor")
+def warper_doctor(_: None = Depends(verify_api_key)):
+    return {"items": run_warper_action("doctor")}
+
+
+@app.post("/warper/toggle")
+def warper_toggle(_: None = Depends(verify_api_key)):
+    return run_warper_action("toggle")
+
+
+@app.get("/warper/domains")
+def warper_domains_list(_: None = Depends(verify_api_key)):
+    return {
+        "domains": run_warper_action("list_domains"),
+        "lists": run_warper_action("domain_lists_status"),
+    }
+
+
+@app.post("/warper/domains")
+def warper_domains_add(payload: WarperDomainRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("add_domain", domain=payload.domain)
+
+
+@app.delete("/warper/domains/{domain:path}")
+def warper_domains_remove(domain: str, _: None = Depends(verify_api_key)):
+    return run_warper_action("remove_domain", domain=domain)
+
+
+@app.post("/warper/domains/sync")
+def warper_domains_sync(_: None = Depends(verify_api_key)):
+    return run_warper_action("sync_domains")
+
+
+@app.post("/warper/domains/bulk")
+def warper_domains_bulk(payload: WarperDomainsBulkRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("add_domains_bulk", domains=payload.domains)
+
+
+@app.post("/warper/domains/lists/{name}")
+def warper_domains_list_toggle(name: str, payload: WarperDomainListRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_domain_list", name=name, enable=payload.enable)
+
+
+@app.get("/warper/ip-ranges")
+def warper_ip_ranges_list(_: None = Depends(verify_api_key)):
+    return {"ranges": run_warper_action("list_ip_ranges")}
+
+
+@app.post("/warper/ip-ranges")
+def warper_ip_ranges_add(payload: WarperIpRangeRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("add_ip_range", cidr=payload.cidr)
+
+
+@app.delete("/warper/ip-ranges/{cidr:path}")
+def warper_ip_ranges_remove(cidr: str, _: None = Depends(verify_api_key)):
+    return run_warper_action("remove_ip_range", cidr=cidr)
+
+
+@app.post("/warper/ip-ranges/sync")
+def warper_ip_ranges_sync(_: None = Depends(verify_api_key)):
+    return run_warper_action("sync_ip_ranges")
+
+
+@app.post("/warper/ip-ranges/mode")
+def warper_ip_ranges_mode(payload: WarperIpRangeModeRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_ip_route_mode", mode=payload.mode)
+
+
+@app.post("/warper/ip-ranges/export")
+def warper_ip_ranges_export(payload: WarperIpExportRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_ip_export", enable=payload.enable)
+
+
+@app.get("/warper/traffic")
+def warper_traffic(period: str = "today", _: None = Depends(verify_api_key)):
+    return run_warper_action("get_traffic", period=period)
+
+
+@app.get("/warper/logs")
+def warper_logs(lines: int = 200, _: None = Depends(verify_api_key)):
+    return {"lines": run_warper_action("get_logs", lines=lines)}
+
+
+@app.get("/warper/settings/mode")
+def warper_settings_mode(_: None = Depends(verify_api_key)):
+    return run_warper_action("get_mode")
+
+
+@app.put("/warper/settings/mtu")
+def warper_settings_mtu(payload: WarperMtuRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_mtu", mtu=payload.mtu)
+
+
+@app.put("/warper/settings/log-level")
+def warper_settings_log_level(payload: WarperLogLevelRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_log_level", level=payload.level)
+
+
+@app.post("/warper/singbox/{action}")
+def warper_singbox_action(action: str, _: None = Depends(verify_api_key)):
+    if action not in {"start", "stop", "restart"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Допустимо: start, stop, restart")
+    return run_warper_action("singbox_action", action=action)
 
 
 @app.get("/system/updates")

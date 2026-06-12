@@ -14,6 +14,7 @@ import LoginPage from './pages/LoginPage'
 import MonitoringPage from './pages/MonitoringPage'
 import NodesPage from './pages/NodesPage'
 import RoutingPage from './pages/RoutingPage'
+import WarperPage from './pages/WarperPage'
 import SettingsPage from './pages/SettingsPage'
 import TrafficPage from './pages/TrafficPage'
 import EditFilesPage from './pages/EditFilesPage'
@@ -44,6 +45,7 @@ export default function App() {
                   <Route path="monitoring" element={<FeatureGuardRoute feature="logs_dashboard"><MonitoringPage /></FeatureGuardRoute>} />
                   <Route path="traffic" element={<FeatureGuardRoute feature="traffic_sync"><TrafficPage /></FeatureGuardRoute>} />
                   <Route path="routing" element={<FeatureGuardRoute feature="routing"><RoutingPage /></FeatureGuardRoute>} />
+                  <Route path="warper" element={<FeatureGuardRoute feature="warper"><WarperPage /></FeatureGuardRoute>} />
                   <Route path="edit-files" element={<FeatureGuardRoute feature="edit_files"><EditFilesPage /></FeatureGuardRoute>} />
                   <Route path="logs" element={<FeatureGuardRoute anyOf={['logs_dashboard', 'action_logs']}><LogsPage /></FeatureGuardRoute>} />
                   <Route path="server-monitor" element={<FeatureGuardRoute feature="server_monitor"><ServerMonitorPage /></FeatureGuardRoute>} />

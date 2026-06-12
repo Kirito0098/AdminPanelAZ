@@ -72,6 +72,21 @@ def test_blocked_routing_api_returns_403(client):
     assert body["feature_disabled"] == "routing"
 
 
+def test_blocked_warper_api_returns_403(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("FEATURE_WARPER_ENABLED=false\n", encoding="utf-8")
+    service_factory = _feature_service_factory(env_file)
+    monkeypatch.setattr("app.services.feature_guards.get_feature_service", service_factory)
+    monkeypatch.setattr("app.routers.feature_toggles.get_feature_service", service_factory)
+
+    from app.main import app as test_app
+
+    client = TestClient(test_app)
+    resp = client.get("/api/warper/health")
+    assert resp.status_code == 403
+    assert resp.json()["feature_disabled"] == "warper"
+
+
 def test_blocked_cidr_db_presets_returns_403(client):
     resp = client.get("/api/routing/cidr-db/presets")
     assert resp.status_code == 403
