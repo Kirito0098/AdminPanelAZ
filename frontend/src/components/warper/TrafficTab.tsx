@@ -21,6 +21,8 @@ type PeriodKey = (typeof PERIODS)[number]['key']
 
 interface TrafficTabProps {
   health: WarperHealthResponse | null
+  embedded?: boolean
+  hideTitle?: boolean
 }
 
 function readTraffic(data: Record<string, unknown>) {
@@ -31,7 +33,7 @@ function readTraffic(data: Record<string, unknown>) {
   }
 }
 
-export default function TrafficTab({ health }: TrafficTabProps) {
+export default function TrafficTab({ health, embedded = false, hideTitle = false }: TrafficTabProps) {
   const { activeNode } = useNode()
   const { error: notifyError } = useNotifications()
   const [period, setPeriod] = useState<PeriodKey>('today')
@@ -62,9 +64,9 @@ export default function TrafficTab({ health }: TrafficTabProps) {
 
   const { rx, tx, summary } = readTraffic(data)
 
-  return (
-    <StatusPanel title="Трафик WARP" icon={BarChart3}>
-      <div className="mb-4 flex flex-wrap gap-2">
+  const body = (
+    <>
+      <div className={`flex flex-wrap gap-2 ${embedded ? 'mb-3' : 'mb-4'}`}>
         {PERIODS.map((item) => (
           <Button
             key={item.key}
@@ -82,20 +84,22 @@ export default function TrafficTab({ health }: TrafficTabProps) {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-10">
+        <div className={`flex justify-center ${embedded ? 'py-6' : 'py-10'}`}>
           <Spinner />
         </div>
       ) : !health?.installed ? (
         <p className="text-sm text-muted-foreground">Трафик доступен после установки AZ-WARP на узле.</p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className={`grid gap-3 ${embedded ? 'grid-cols-1' : 'gap-4 sm:grid-cols-2'}`}>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Исходящий ↑</CardTitle>
               <ArrowUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{tx == null ? '—' : formatBytes(tx)}</div>
+              <div className={`font-bold ${embedded ? 'text-2xl' : 'text-3xl'}`}>
+                {tx == null ? '—' : formatBytes(tx)}
+              </div>
             </CardContent>
           </Card>
           <Card>
@@ -104,14 +108,30 @@ export default function TrafficTab({ health }: TrafficTabProps) {
               <ArrowDown className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{rx == null ? '—' : formatBytes(rx)}</div>
+              <div className={`font-bold ${embedded ? 'text-2xl' : 'text-3xl'}`}>
+                {rx == null ? '—' : formatBytes(rx)}
+              </div>
             </CardContent>
           </Card>
           {summary && (
-            <p className="sm:col-span-2 rounded-lg border bg-muted/30 p-3 font-mono text-sm">{summary}</p>
+            <p
+              className={`rounded-lg border bg-muted/30 p-3 font-mono text-xs ${embedded ? '' : 'sm:col-span-2 text-sm'}`}
+            >
+              {summary}
+            </p>
           )}
         </div>
       )}
+    </>
+  )
+
+  if (embedded) {
+    return <div>{!hideTitle && <h3 className="mb-3 text-sm font-semibold">Трафик WARP</h3>}{body}</div>
+  }
+
+  return (
+    <StatusPanel title="Трафик WARP" icon={BarChart3}>
+      {body}
     </StatusPanel>
   )
 }

@@ -20,6 +20,8 @@ import { formatNodeLabel } from './utils'
 interface DoctorSectionProps {
   health: WarperHealthResponse | null
   activeNode: Node | null
+  embedded?: boolean
+  hideTitle?: boolean
 }
 
 type DoctorStatus = WarperDoctorItem['status']
@@ -66,7 +68,7 @@ function itemText(item: WarperDoctorItem): string {
   return String(item.text ?? item.check ?? item.name ?? item.message ?? '—')
 }
 
-export default function DoctorSection({ health, activeNode }: DoctorSectionProps) {
+export default function DoctorSection({ health, activeNode, embedded = false, hideTitle = false }: DoctorSectionProps) {
   const { error: notifyError } = useNotifications()
   const [items, setItems] = useState<WarperDoctorItem[]>([])
   const [passed, setPassed] = useState<boolean | null>(null)
@@ -115,12 +117,14 @@ export default function DoctorSection({ health, activeNode }: DoctorSectionProps
 
   const disabled = !health?.installed
 
-  return (
-    <StatusPanel title="Диагностика AZ-WARP" icon={Stethoscope}>
-      <p className="mb-4 text-sm text-muted-foreground">
-        Проверка sing-box, kresd и конфигурации на узле{' '}
-        <strong>{formatNodeLabel(health, activeNode)}</strong>.
-      </p>
+  const body = (
+    <>
+      {!embedded && (
+        <p className="mb-4 text-sm text-muted-foreground">
+          Проверка sing-box, kresd и конфигурации на узле{' '}
+          <strong>{formatNodeLabel(health, activeNode)}</strong>.
+        </p>
+      )}
 
       <Button type="button" size="sm" onClick={() => void runDoctor()} disabled={disabled || running}>
         {running ? (
@@ -211,11 +215,26 @@ export default function DoctorSection({ health, activeNode }: DoctorSectionProps
       )}
 
       {!hasRun && !running && !disabled && (
-        <div className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
+        <div className={`flex items-center gap-2 text-sm text-muted-foreground ${embedded ? 'mt-3' : 'mt-6'}`}>
           <Circle className="h-4 w-4" />
           Нажмите «Запустить диагностику», чтобы увидеть результат проверок.
         </div>
       )}
+    </>
+  )
+
+  if (embedded) {
+    return (
+      <div>
+        {!hideTitle && <h3 className="mb-3 text-sm font-semibold">Диагностика</h3>}
+        {body}
+      </div>
+    )
+  }
+
+  return (
+    <StatusPanel title="Диагностика AZ-WARP" icon={Stethoscope}>
+      {body}
     </StatusPanel>
   )
 }

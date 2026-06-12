@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Bot, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react'
+import { Bot, Globe, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react'
 import {
   addWarperDomain,
   addWarperDomainsBulk,
@@ -20,7 +20,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import type { WarperDomainItem, WarperHealthResponse } from '@/types'
-import { isWarperDisabled, parseBulkLines } from './utils'
+import { domainTypeLabel, isWarperDisabled, parseBulkLines } from './utils'
+
+function typeBadgeVariant(type: string | undefined): 'default' | 'secondary' | 'outline' {
+  if (type === 'gemini' || type === 'chatgpt') return 'secondary'
+  return 'outline'
+}
 
 function domainLabel(item: WarperDomainItem | string): string {
   if (typeof item === 'string') return item
@@ -215,28 +220,32 @@ export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps)
         </div>
       </StatusPanel>
 
-      <StatusPanel title="Домены" icon={Search}>
+      <StatusPanel title="Домены" icon={Globe}>
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">Доменов: {domains.length}</Badge>
+          <Badge variant="secondary">Всего: {domains.length}</Badge>
           {search && <Badge variant="outline">Найдено: {filtered.length}</Badge>}
+          {disabled && <Badge variant="warning">Только просмотр</Badge>}
         </div>
 
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row">
-          <Input
-            placeholder="example.com"
-            value={newDomain}
-            onChange={(e) => setNewDomain(e.target.value)}
-            disabled={disabled || adding}
-            onKeyDown={(e) => e.key === 'Enter' && void handleAdd()}
-          />
-          <Button disabled={disabled || adding || !newDomain.trim()} onClick={() => void handleAdd()}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            Добавить
-          </Button>
-          <Button variant="outline" disabled={disabled} onClick={() => setShowBulk((v) => !v)}>
-            <Upload className="mr-1.5 h-4 w-4" />
-            Импорт
-          </Button>
+        <div className="mb-4 rounded-lg border bg-muted/20 p-3">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              className="bg-background"
+              placeholder="example.com"
+              value={newDomain}
+              onChange={(e) => setNewDomain(e.target.value)}
+              disabled={disabled || adding}
+              onKeyDown={(e) => e.key === 'Enter' && void handleAdd()}
+            />
+            <Button disabled={disabled || adding || !newDomain.trim()} onClick={() => void handleAdd()}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              Добавить
+            </Button>
+            <Button variant="outline" disabled={disabled} onClick={() => setShowBulk((v) => !v)}>
+              <Upload className="mr-1.5 h-4 w-4" />
+              Импорт
+            </Button>
+          </div>
         </div>
 
         {showBulk && (
@@ -270,6 +279,7 @@ export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps)
             Обновить
           </Button>
           <Button size="sm" onClick={() => void handleSync()} disabled={disabled || syncing}>
+            <RefreshCw className={`mr-1.5 h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
             Синхронизировать
           </Button>
         </div>
@@ -279,23 +289,28 @@ export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps)
         ) : (
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-left">
+              <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
-                  <th className="px-3 py-2 font-medium">Домен</th>
-                  <th className="px-3 py-2 font-medium">Тип</th>
-                  <th className="px-3 py-2 font-medium">Статус</th>
-                  <th className="w-12 px-3 py-2" />
+                  <th className="px-3 py-2.5 font-medium">Домен</th>
+                  <th className="px-3 py-2.5 font-medium">Тип</th>
+                  <th className="px-3 py-2.5 font-medium">Статус</th>
+                  <th className="w-12 px-3 py-2.5" />
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((item) => {
                   const label = domainLabel(item)
+                  const enabled = item.enabled !== false
                   return (
-                    <tr key={label} className="border-t">
-                      <td className="px-3 py-2 font-mono">{label}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{item.type ?? '—'}</td>
-                      <td className="px-3 py-2 text-muted-foreground">
-                        {item.enabled === false ? 'выкл.' : item.status ?? (item.enabled ? 'вкл.' : '—')}
+                    <tr key={label} className="border-t transition-colors hover:bg-muted/30">
+                      <td className="px-3 py-2.5 font-mono text-sm">{label}</td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant={typeBadgeVariant(item.type)}>{domainTypeLabel(item.type)}</Badge>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant={enabled ? 'success' : 'secondary'}>
+                          {enabled ? 'вкл.' : 'выкл.'}
+                        </Badge>
                       </td>
                       <td className="px-3 py-2">
                         <Button

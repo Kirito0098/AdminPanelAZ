@@ -11,9 +11,11 @@ import type { WarperHealthResponse } from '@/types'
 
 interface LogsTabProps {
   health: WarperHealthResponse | null
+  embedded?: boolean
+  hideTitle?: boolean
 }
 
-export default function LogsTab({ health }: LogsTabProps) {
+export default function LogsTab({ health, embedded = false, hideTitle = false }: LogsTabProps) {
   const { activeNode } = useNode()
   const { error: notifyError } = useNotifications()
   const [lines, setLines] = useState<string[]>([])
@@ -47,9 +49,9 @@ export default function LogsTab({ health }: LogsTabProps) {
     ? lines.filter((line) => line.toLowerCase().includes(filter.trim().toLowerCase()))
     : lines
 
-  return (
-    <StatusPanel title="Логи sing-box" icon={FileText}>
-      <div className="mb-4 flex flex-wrap gap-2">
+  const body = (
+    <>
+      <div className={`flex flex-wrap gap-2 ${embedded ? 'mb-3' : 'mb-4'}`}>
         <Input
           className="w-28"
           type="number"
@@ -72,16 +74,30 @@ export default function LogsTab({ health }: LogsTabProps) {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-10">
+        <div className={`flex justify-center ${embedded ? 'py-6' : 'py-10'}`}>
           <Spinner />
         </div>
       ) : !health?.installed ? (
         <p className="text-sm text-muted-foreground">Логи доступны после установки AZ-WARP.</p>
       ) : (
-        <pre className="max-h-[28rem] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+        <pre
+          className={`overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed ${
+            embedded ? 'max-h-56' : 'max-h-[28rem]'
+          }`}
+        >
           {filtered.length > 0 ? filtered.join('\n') : 'Нет строк логов.'}
         </pre>
       )}
+    </>
+  )
+
+  if (embedded) {
+    return <div>{!hideTitle && <h3 className="mb-3 text-sm font-semibold">Логи sing-box</h3>}{body}</div>
+  }
+
+  return (
+    <StatusPanel title="Логи sing-box" icon={FileText}>
+      {body}
     </StatusPanel>
   )
 }

@@ -21,7 +21,7 @@ import {
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import type { WarperHealthResponse } from '@/types'
-import { isWarperDisabled } from './utils'
+import { formatOutboundMode, isWarperDisabled } from './utils'
 
 const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const
 
@@ -117,13 +117,13 @@ export default function SettingsTab({ health }: SettingsTabProps) {
     <div className="space-y-4">
       <StatusPanel title="Настройки AZ-WARP" icon={Settings2}>
         {outboundMode && (
-          <div className="mb-4">
-            <Badge variant="outline">Текущий режим: {outboundMode}</Badge>
+          <div className="mb-4 rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+            Режим маршрутизации: <strong>{formatOutboundMode(outboundMode)}</strong>
           </div>
         )}
 
         <div className="grid gap-6 md:grid-cols-2">
-          <div className="space-y-2">
+          <div className="space-y-2 rounded-lg border p-4">
             <label className="text-sm font-medium">MTU sing-box</label>
             <div className="flex gap-2">
               <Input
@@ -141,7 +141,7 @@ export default function SettingsTab({ health }: SettingsTabProps) {
             <p className="text-xs text-muted-foreground">Рекомендуется 1280–1500.</p>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2 rounded-lg border p-4">
             <label className="text-sm font-medium">Уровень логов</label>
             <div className="flex gap-2">
               <Select value={logLevel} onValueChange={setLogLevel} disabled={disabled || busy}>
@@ -163,7 +163,7 @@ export default function SettingsTab({ health }: SettingsTabProps) {
           </div>
         </div>
 
-        <div className="mt-6 space-y-2">
+        <div className="mt-6 space-y-2 rounded-lg border p-4">
           <label className="text-sm font-medium">Управление sing-box</label>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="secondary" disabled={disabled || busy} onClick={() => void runSingbox('start')}>

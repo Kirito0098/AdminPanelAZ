@@ -40,3 +40,31 @@ export function cidrLabel(item: string | Record<string, unknown>): string {
   const cidr = item.cidr ?? item.range ?? item.network
   return typeof cidr === 'string' ? cidr : ''
 }
+
+export function formatOutboundMode(mode: string | null | undefined): string {
+  switch (mode) {
+    case 'warp':
+      return 'WARP'
+    case 'slave':
+      return 'Slave'
+    case 'wg':
+      return 'WireGuard'
+    default:
+      return mode ?? '—'
+  }
+}
+
+export function domainTypeLabel(type: string | undefined): string {
+  switch (type) {
+    case 'gemini':
+      return 'Gemini'
+    case 'chatgpt':
+      return 'ChatGPT'
+    case 'user':
+      return 'Свой'
+    default:
+      return type ?? '—'
+  }
+}
+
+export type WarperTab = 'domains' | 'ip-ranges' | 'monitoring' | 'settings'

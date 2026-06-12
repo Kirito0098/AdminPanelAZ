@@ -1,23 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Cloud, RefreshCw } from 'lucide-react'
+import { Activity, Globe, Network, Settings2 } from 'lucide-react'
 import { getWarperDomains, getWarperHealth, getWarperStatus, getWarperTraffic } from '@/api/client'
 import DomainsTab from '@/components/warper/DomainsTab'
-import DoctorSection from '@/components/warper/DoctorSection'
 import IpRangesTab from '@/components/warper/IpRangesTab'
-import LogsTab from '@/components/warper/LogsTab'
+import MonitoringTab from '@/components/warper/MonitoringTab'
 import OverviewCards from '@/components/warper/OverviewCards'
 import SettingsTab from '@/components/warper/SettingsTab'
-import StatusSection from '@/components/warper/StatusSection'
-import TrafficTab from '@/components/warper/TrafficTab'
 import WarperAlerts from '@/components/warper/WarperAlerts'
-import { Button } from '@/components/ui/button'
+import WarperHero from '@/components/warper/WarperHero'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNode } from '@/context/NodeContext'
 import type { WarperHealthResponse, WarperStatusResponse } from '@/types'
-import { formatNodeLabel } from '@/components/warper/utils'
+import { formatNodeLabel, type WarperTab } from '@/components/warper/utils'
 
 export default function WarperPage() {
   const { activeNode } = useNode()
+  const [tab, setTab] = useState<WarperTab>('domains')
   const [health, setHealth] = useState<WarperHealthResponse | null>(null)
   const [status, setStatus] = useState<WarperStatusResponse | null>(null)
   const [domainCount, setDomainCount] = useState<number | null>(null)
@@ -64,23 +62,14 @@ export default function WarperPage() {
   const nodeLabel = formatNodeLabel(health, activeNode)
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <Cloud className="h-7 w-7 text-primary" />
-            AZ-WARP
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Точечная маршрутизация доменов и подсетей через Cloudflare WARP на узле{' '}
-            <strong>{nodeLabel}</strong>. Управление sing-box, fake-IP и списками маршрутизации.
-          </p>
-        </div>
-        <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading} className="shrink-0">
-          <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Обновить всё
-        </Button>
-      </div>
+    <div className="space-y-5">
+      <WarperHero
+        health={health}
+        loading={loading}
+        nodeLabel={nodeLabel}
+        onRefresh={() => void load()}
+        onToggled={() => void load()}
+      />
 
       <WarperAlerts health={health} activeNode={activeNode} loadError={loadError} />
 
@@ -89,33 +78,40 @@ export default function WarperPage() {
         status={status}
         domainCount={domainCount}
         trafficToday={trafficToday}
+        loading={loading}
+        onNavigate={setTab}
       />
 
-      <Tabs defaultValue="domains" className="space-y-4">
-        <TabsList className="flex h-auto flex-wrap justify-start gap-1">
-          <TabsTrigger value="domains">Домены</TabsTrigger>
-          <TabsTrigger value="ip-ranges">IP-подсети</TabsTrigger>
-          <TabsTrigger value="traffic">Трафик</TabsTrigger>
-          <TabsTrigger value="status">Статус</TabsTrigger>
-          <TabsTrigger value="settings">Настройки</TabsTrigger>
-          <TabsTrigger value="logs">Логи</TabsTrigger>
-          <TabsTrigger value="doctor">Диагностика</TabsTrigger>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as WarperTab)} className="space-y-4">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-muted/50 p-1 sm:inline-flex sm:w-auto">
+          <TabsTrigger value="domains" className="gap-1.5 data-[state=active]:shadow-sm">
+            <Globe className="h-4 w-4" />
+            <span>Домены</span>
+          </TabsTrigger>
+          <TabsTrigger value="ip-ranges" className="gap-1.5 data-[state=active]:shadow-sm">
+            <Network className="h-4 w-4" />
+            <span>IP-подсети</span>
+          </TabsTrigger>
+          <TabsTrigger value="monitoring" className="gap-1.5 data-[state=active]:shadow-sm">
+            <Activity className="h-4 w-4" />
+            <span>Мониторинг</span>
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="gap-1.5 data-[state=active]:shadow-sm">
+            <Settings2 className="h-4 w-4" />
+            <span>Настройки</span>
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="domains">
+        <TabsContent value="domains" className="mt-0 focus-visible:outline-none">
           <DomainsTab health={health} onDomainsChange={setDomainCount} />
         </TabsContent>
 
-        <TabsContent value="ip-ranges">
+        <TabsContent value="ip-ranges" className="mt-0 focus-visible:outline-none">
           <IpRangesTab health={health} />
         </TabsContent>
 
-        <TabsContent value="traffic">
-          <TrafficTab health={health} />
-        </TabsContent>
-
-        <TabsContent value="status">
-          <StatusSection
+        <TabsContent value="monitoring" className="mt-0 focus-visible:outline-none">
+          <MonitoringTab
             health={health}
             status={status}
             loading={loading}
@@ -126,16 +122,8 @@ export default function WarperPage() {
           />
         </TabsContent>
 
-        <TabsContent value="settings">
+        <TabsContent value="settings" className="mt-0 focus-visible:outline-none">
           <SettingsTab health={health} />
-        </TabsContent>
-
-        <TabsContent value="logs">
-          <LogsTab health={health} />
-        </TabsContent>
-
-        <TabsContent value="doctor">
-          <DoctorSection health={health} activeNode={activeNode} />
         </TabsContent>
       </Tabs>
     </div>
