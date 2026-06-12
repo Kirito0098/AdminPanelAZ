@@ -8,6 +8,7 @@ import OverviewCards from '@/components/warper/OverviewCards'
 import SettingsTab from '@/components/warper/SettingsTab'
 import WarperAlerts from '@/components/warper/WarperAlerts'
 import WarperHero from '@/components/warper/WarperHero'
+import WarperInstallPrompt from '@/components/warper/WarperInstallPrompt'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNode } from '@/context/NodeContext'
 import type { WarperHealthResponse, WarperStatusResponse } from '@/types'
@@ -60,6 +61,7 @@ export default function WarperPage() {
   }, [load, activeNode?.id])
 
   const nodeLabel = formatNodeLabel(health, activeNode)
+  const warperReady = Boolean(health?.installed)
 
   return (
     <div className="space-y-5">
@@ -73,15 +75,18 @@ export default function WarperPage() {
 
       <WarperAlerts health={health} activeNode={activeNode} loadError={loadError} />
 
-      <OverviewCards
-        health={health}
-        status={status}
-        domainCount={domainCount}
-        trafficToday={trafficToday}
-        loading={loading}
-        onNavigate={setTab}
-      />
+      {warperReady && (
+        <OverviewCards
+          health={health}
+          status={status}
+          domainCount={domainCount}
+          trafficToday={trafficToday}
+          loading={loading}
+          onNavigate={setTab}
+        />
+      )}
 
+      {warperReady ? (
       <Tabs value={tab} onValueChange={(v) => setTab(v as WarperTab)} className="space-y-4">
         <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-muted/50 p-1 sm:inline-flex sm:w-auto">
           <TabsTrigger value="domains" className="gap-1.5 data-[state=active]:shadow-sm">
@@ -126,6 +131,9 @@ export default function WarperPage() {
           <SettingsTab health={health} />
         </TabsContent>
       </Tabs>
+      ) : !loading ? (
+        <WarperInstallPrompt health={health} activeNode={activeNode} />
+      ) : null}
     </div>
   )
 }

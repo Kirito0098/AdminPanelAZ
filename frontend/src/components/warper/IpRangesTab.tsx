@@ -50,6 +50,11 @@ export default function IpRangesTab({ health }: IpRangesTabProps) {
   const [removeTarget, setRemoveTarget] = useState<string | null>(null)
 
   const load = useCallback(async () => {
+    if (!health?.installed) {
+      setRanges([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const data = await getWarperIpRanges()
@@ -59,11 +64,11 @@ export default function IpRangesTab({ health }: IpRangesTabProps) {
     } finally {
       setLoading(false)
     }
-  }, [notifyError])
+  }, [health?.installed, notifyError])
 
   useEffect(() => {
     void load()
-  }, [load, activeNode?.id])
+  }, [load, activeNode?.id, health?.installed])
 
   async function handleAdd() {
     const value = newCidr.trim()

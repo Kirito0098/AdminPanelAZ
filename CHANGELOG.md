@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **AZ-WARP (WARPER)** — интеграция точечной маршрутизации доменов и IPv4-подсетей через Cloudflare WARP на VPN-узлах: `WarperService` → `warper_api`, API `/api/warper/*`, endpoints node agent `/warper/*`, feature toggle `FEATURE_WARPER_ENABLED`.
+- **UI — AZ-WARP** — страница `/warper` (пункт меню «AZ-WARP»): домены (добавление, импорт, синхронизация), встроенные списки Gemini/ChatGPT, IP-подсети, мониторинг (статус, трафик, логи sing-box, диагностика `doctor`), настройки (MTU, уровень логов, sing-box).
+- **UI — AZ-WARP** — шапка со статусом узла и быстрым вкл/выкл; сводные карточки с переходом на вкладки; переключатели встроенных списков вместо пар кнопок «вкл/выкл».
+- **Документация** — `docs/AZ_WARP_INTEGRATION_PLAN.md`, `docs/VPN_FEATURES_BACKLOG.md`.
+- **Тесты** — `test_warper_service.py`, `test_warper_api.py`; parity `get_warper_*` в `test_node_adapter_parity.py`; `test_git_pull_resets_after_diverged_history` в `test_node_update.py`.
+
+### Fixed
+- **AZ-WARP — health** — установка определяется по `warper.sh` и `warper_api`, не только по симлинку `/usr/local/bin/warper`; в алертах — `missing_components` и подсказка переключить активный узел.
+- **AZ-WARP — doctor** — при ошибках проверок API возвращает полный список результатов, а не 502 с обрезанным текстом; UI показывает сводку OK/ошибок и каждую проверку отдельной строкой.
+- **AZ-WARP — настройки / IP-подсети** — `get_mode()` и fallback чтения `ip-ranges.txt` / `domains.txt` при сбое CLI; корректный парсинг встроенных списков по маркерам в `domains.txt`.
+- **AZ-WARP — UI** — если WARPER не установлен на активном узле, вкладки управления скрыты; блок «Управление недоступно» с командой установки и ссылкой на узлы (без лишних API-запросов).
+- **Обновление узла** — после squash/force push на `main` git pull на ноде выполняет `reset --hard origin/main` при чистом working tree; в диалоге обновления — признак расходящейся истории.
+- **API client** — исправлена ошибка `body stream already read` при разборе HTTP-ошибок (однократное чтение тела ответа).
+
+### Changed
+- **UI — AZ-WARP** — вкладки «Трафик», «Статус», «Логи» и «Диагностика» объединены в одну «Мониторинг»; улучшены таблица доменов, настройки и карточки сводки.
+
 ## [1.6.0] - 2026-06-11
 
 ### Added

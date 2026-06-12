@@ -56,13 +56,20 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, retry
   }
   if (!response.ok) {
     let detail = 'Ошибка запроса'
-    try {
-      const data = await response.json()
-      detail = data.detail || detail
-    } catch {
-      detail = await response.text()
+    const body = await response.text()
+    if (body) {
+      try {
+        const data = JSON.parse(body) as { detail?: unknown }
+        if (data.detail != null) {
+          detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
+        } else {
+          detail = body
+        }
+      } catch {
+        detail = body
+      }
     }
-    throw new ApiError(typeof detail === 'string' ? detail : JSON.stringify(detail), response.status)
+    throw new ApiError(detail, response.status)
   }
   if (response.status === 204) return undefined as T
   return response.json()

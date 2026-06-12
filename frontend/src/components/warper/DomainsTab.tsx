@@ -62,6 +62,12 @@ export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps)
   const [removing, setRemoving] = useState(false)
 
   const load = useCallback(async () => {
+    if (!health?.installed) {
+      setDomains([])
+      setLoading(false)
+      setLoadError(null)
+      return
+    }
     setLoading(true)
     setLoadError(null)
     try {
@@ -78,11 +84,11 @@ export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps)
     } finally {
       setLoading(false)
     }
-  }, [onDomainsChange])
+  }, [health?.installed, onDomainsChange])
 
   useEffect(() => {
     void load()
-  }, [load, activeNode?.id])
+  }, [load, activeNode?.id, health?.installed])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
