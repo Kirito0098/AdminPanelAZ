@@ -62,16 +62,31 @@ def check_git_updates(repo_path: Path, *, branch: str = DEFAULT_GIT_BRANCH) -> d
             }
 
         behind = 0
+        ahead = 0
         if local_hash != remote_hash:
-            count = _git_run(["rev-list", "--count", f"{local_hash}..{remote_hash}"], repo_path, timeout=15.0)
-            behind = int(count.stdout.strip() or "0")
+            behind_count = _git_run(
+                ["rev-list", "--count", f"{local_hash}..{remote_hash}"],
+                repo_path,
+                timeout=15.0,
+            )
+            ahead_count = _git_run(
+                ["rev-list", "--count", f"{remote_hash}..{local_hash}"],
+                repo_path,
+                timeout=15.0,
+            )
+            behind = int(behind_count.stdout.strip() or "0")
+            ahead = int(ahead_count.stdout.strip() or "0")
+
+        diverged = ahead > 0 and behind > 0
 
         return {
             "path": str(repo_path),
             "local_hash": local_hash[:12],
             "remote_hash": remote_hash[:12],
-            "updates_available": behind > 0,
+            "updates_available": behind > 0 or diverged,
             "commits_behind": behind,
+            "commits_ahead": ahead,
+            "diverged": diverged,
         }
     except subprocess.TimeoutExpired:
         return {"path": str(repo_path), "error": "Таймаут git", "updates_available": False}
@@ -79,24 +94,47 @@ def check_git_updates(repo_path: Path, *, branch: str = DEFAULT_GIT_BRANCH) -> d
         return {"path": str(repo_path), "error": str(exc), "updates_available": False}
 
 
+def _working_tree_clean(repo_path: Path) -> bool:
+    status = _git_run(["status", "--porcelain"], repo_path, timeout=15.0)
+    return status.returncode == 0 and not status.stdout.strip()
+
+
 def git_pull(repo_path: Path, *, branch: str = DEFAULT_GIT_BRANCH) -> dict[str, Any]:
     if not repo_path.is_dir() or not (repo_path / ".git").is_dir():
         return {"success": False, "output": "", "error": "Не git-репозиторий"}
 
     try:
-        result = subprocess.run(
-            ["git", "pull", "--ff-only", "origin", branch],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            timeout=GIT_TIMEOUT,
-            check=False,
-        )
-        output = (result.stdout or "") + (result.stderr or "")
+        fetch = _git_run(["fetch", "origin"], repo_path, timeout=60.0)
+        if fetch.returncode != 0:
+            output = ((fetch.stdout or "") + (fetch.stderr or "")).strip()
+            return {"success": False, "output": output, "error": output or "git fetch failed"}
+
+        result = _git_run(["pull", "--ff-only", "origin", branch], repo_path)
+        output = ((result.stdout or "") + (result.stderr or "")).strip()
+        if result.returncode == 0:
+            return {"success": True, "output": output, "error": None, "method": "fast-forward"}
+
+        # After force-push on origin the node copy may diverge while the tree is still clean.
+        if _working_tree_clean(repo_path):
+            reset = _git_run(["reset", "--hard", f"origin/{branch}"], repo_path)
+            reset_output = ((reset.stdout or "") + (reset.stderr or "")).strip()
+            if reset.returncode == 0:
+                combined = "\n".join(
+                    part for part in (output, f"История переписана: reset --hard origin/{branch}", reset_output) if part
+                )
+                return {
+                    "success": True,
+                    "output": combined.strip(),
+                    "error": None,
+                    "method": "reset",
+                }
+            output = "\n".join(part for part in (output, reset_output) if part).strip()
+
         return {
-            "success": result.returncode == 0,
-            "output": output.strip(),
-            "error": None if result.returncode == 0 else output.strip() or "git pull failed",
+            "success": False,
+            "output": output,
+            "error": output or "git pull failed",
+            "method": "fast-forward",
         }
     except subprocess.TimeoutExpired:
         return {"success": False, "output": "", "error": "Таймаут git pull"}

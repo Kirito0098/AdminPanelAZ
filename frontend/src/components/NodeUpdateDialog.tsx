@@ -21,6 +21,8 @@ import type { Node } from '@/types'
 type GitStatus = {
   updates_available?: boolean
   commits_behind?: number
+  commits_ahead?: number
+  diverged?: boolean
   local_hash?: string
   remote_hash?: string
   error?: string
@@ -63,6 +65,13 @@ function GitBlock({ title, info }: { title: string; info: GitStatus | null }) {
             <code className="font-mono">{info.remote_hash || '—'}</code>
           </div>
         </div>
+        {info.diverged && !info.error && (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            История расходится с GitHub (часто после squash или force push). Обновление выполнит{' '}
+            <code className="font-mono">git reset --hard origin/main</code>, если на узле нет локальных
+            изменений.
+          </p>
+        )}
         {info.error && <p className="text-xs text-destructive">{info.error}</p>}
       </CardContent>
     </Card>

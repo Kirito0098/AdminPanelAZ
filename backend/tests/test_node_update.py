@@ -36,6 +36,25 @@ def test_check_git_updates_up_to_date(mock_git_run, tmp_path: Path):
     assert result["local_hash"] == "abc123def456"
 
 
+@patch("app.services.node_update._git_run")
+def test_git_pull_resets_after_diverged_history(mock_git_run, tmp_path: Path):
+    from app.services.node_update import git_pull
+
+    (tmp_path / ".git").mkdir()
+    mock_git_run.side_effect = [
+        MagicMock(returncode=0, stdout="", stderr=""),  # fetch
+        MagicMock(returncode=1, stdout="", stderr="fatal: Not possible to fast-forward, aborting."),  # pull
+        MagicMock(returncode=0, stdout="", stderr=""),  # status --porcelain
+        MagicMock(returncode=0, stdout="HEAD is now at 55397db\n", stderr=""),  # reset --hard
+    ]
+
+    result = git_pull(tmp_path)
+
+    assert result["success"] is True
+    assert result["method"] == "reset"
+    assert mock_git_run.call_args_list[-1].args[0] == ["reset", "--hard", "origin/main"]
+
+
 @patch("app.services.node_update.schedule_agent_restart")
 @patch("app.services.node_update.git_pull")
 def test_apply_node_update(mock_pull, mock_restart, tmp_path: Path):
