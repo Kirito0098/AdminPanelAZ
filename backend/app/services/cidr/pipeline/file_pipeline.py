@@ -9,11 +9,6 @@ from app.services.cidr.pipeline.constants import RUNTIME_BACKUP_RETENTION_SECOND
 from app.services.cidr.pipeline.facade_compat import call as _facade_call, get_attr as _cfg
 from app.services.cidr.pipeline.geo import _exclude_ru_country_cidrs, _normalize_region_scopes
 from app.services.cidr.pipeline.parsers import _render_file_content
-from app.services.cidr.pipeline.games import (
-    _collect_game_domains,
-    _resolve_game_filter_selection,
-    sync_game_hosts_filter,
-)
 from app.services.cidr.pipeline.route_limits import (
     _apply_total_route_limit,
     _optimize_cidrs_for_openvpn_routes,
@@ -97,8 +92,6 @@ def update_cidr_files(
     region_scopes=None,
     include_non_geo_fallback=False,
     exclude_ru_cidrs=False,
-    include_game_hosts=False,
-    include_game_keys=None,
     strict_geo_filter=False,
     dpi_priority_files=None,
     dpi_mandatory_files=None,
@@ -125,27 +118,6 @@ def update_cidr_files(
 
     _emit_progress(progress_callback, 8, "Создание резервной копии текущих CIDR-файлов")
     backup_dir, backup_files = _make_runtime_backup(normalized)
-
-    selected_game_keys = _resolve_game_filter_selection(
-        include_game_keys=include_game_keys,
-        include_game_hosts=bool(include_game_hosts),
-    )
-    game_filter_sync_result = sync_game_hosts_filter(include_game_keys=selected_game_keys)
-    game_hosts_filter = game_filter_sync_result.get("game_hosts_filter") or {}
-    game_ips_filter = game_filter_sync_result.get("game_ips_filter") or {}
-    if not game_filter_sync_result.get("success"):
-        _emit_progress(progress_callback, 100, "Ошибка синхронизации игрового фильтра")
-        return {
-            "success": False,
-            "message": "Не удалось синхронизировать игровой фильтр",
-            "updated": [],
-            "failed": [],
-            "skipped": [],
-            "backup_dir": backup_dir,
-            "backup_files": backup_files,
-            "game_hosts_filter": game_hosts_filter,
-            "game_ips_filter": game_ips_filter,
-        }
 
     planned_updates = []
     updated = []
@@ -282,8 +254,6 @@ def update_cidr_files(
         "skipped": skipped,
         "backup_dir": backup_dir,
         "backup_files": backup_files,
-        "game_hosts_filter": game_hosts_filter,
-        "game_ips_filter": game_ips_filter,
     }
 
     if global_route_optimization_meta:
@@ -296,8 +266,6 @@ def estimate_cidr_matches(
     region_scopes=None,
     include_non_geo_fallback=False,
     exclude_ru_cidrs=False,
-    include_game_hosts=False,
-    include_game_keys=None,
     strict_geo_filter=False,
     dpi_priority_files=None,
     dpi_mandatory_files=None,
@@ -409,25 +377,12 @@ def estimate_cidr_matches(
             estimated_item["global_route_optimization"] = item["global_route_optimization"]
         estimated.append(estimated_item)
 
-    selected_game_keys = _resolve_game_filter_selection(
-        include_game_keys=include_game_keys,
-        include_game_hosts=bool(include_game_hosts),
-    )
-    _, selected_game_domains = _collect_game_domains(selected_game_keys)
-
     result = {
         "success": True,
         "message": "Оценка CIDR перед обновлением готова",
         "estimated": estimated,
         "failed": failed,
         "skipped": skipped,
-        "game_hosts_filter": {
-            "enabled": bool(selected_game_keys),
-            "selected_game_keys": selected_game_keys,
-            "selected_game_count": len(selected_game_keys),
-            "domain_count": len(selected_game_domains),
-            "file": _cfg("GAME_INCLUDE_HOSTS_FILE"),
-        },
     }
 
     if global_route_optimization_meta:

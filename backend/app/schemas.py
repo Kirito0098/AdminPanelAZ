@@ -96,12 +96,14 @@ class UserUpdate(BaseModel):
     theme: str | None = None
     is_active: bool | None = None
     password: str | None = Field(default=None, min_length=4)
+    telegram_id: str | None = None
 
 
 class UserResponse(UserBase):
     id: int
     must_change_password: bool
     totp_enabled: bool = False
+    telegram_id: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -334,16 +336,31 @@ class LatestChangelogResponse(BaseModel):
 
 class TelegramSettingsResponse(BaseModel):
     bot_token_set: bool = False
+    bot_username: str = ""
+    auth_max_age_seconds: int = 300
+    mini_app_url: str = ""
     chat_id: str = ""
     notify_enabled: bool = False
     notify_on_backup: bool = False
+    interactive_enabled: bool = False
+    webhook_registered: bool = False
+    webhook_secret_set: bool = False
+    webhook_set_at: str = ""
 
 
 class TelegramSettingsUpdate(BaseModel):
     bot_token: str | None = None
+    bot_username: str | None = None
+    auth_max_age_seconds: int | None = Field(default=None, ge=30, le=86400)
     chat_id: str | None = None
     notify_enabled: bool | None = None
     notify_on_backup: bool | None = None
+    interactive_enabled: bool | None = None
+
+
+class TelegramLinkCodeResponse(BaseModel):
+    code: str
+    expires_in_seconds: int
 
 
 class AdminNotifyEventItem(BaseModel):

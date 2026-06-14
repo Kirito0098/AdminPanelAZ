@@ -172,7 +172,9 @@ export async function getCaptchaRequired() {
 }
 
 export async function getTelegramLoginConfig() {
-  return apiFetch<{ enabled: boolean; bot_username: string }>('/auth/telegram/config')
+  return apiFetch<{ enabled: boolean; bot_username: string; max_age_seconds?: number }>(
+    '/auth/telegram/config',
+  )
 }
 
 export async function getMe() {
@@ -473,14 +475,33 @@ export async function getTelegramSettings() {
 
 export async function updateTelegramSettings(data: {
   bot_token?: string
+  bot_username?: string
+  auth_max_age_seconds?: number
   chat_id?: string
   notify_enabled?: boolean
   notify_on_backup?: boolean
+  interactive_enabled?: boolean
 }) {
   return apiFetch<import('../types').TelegramSettings>('/settings/telegram', {
     method: 'PATCH',
     body: JSON.stringify(data),
   })
+}
+
+export async function registerTelegramWebhook() {
+  return apiFetch<import('../types').TelegramSettings>('/settings/telegram/webhook/register', {
+    method: 'POST',
+  })
+}
+
+export async function deleteTelegramWebhook() {
+  return apiFetch<import('../types').TelegramSettings>('/settings/telegram/webhook', {
+    method: 'DELETE',
+  })
+}
+
+export async function getTelegramLinkCode() {
+  return apiFetch<import('../types').TelegramLinkCode>('/telegram/link-code')
 }
 
 export async function testTelegram() {
@@ -938,17 +959,6 @@ export async function updateFeatureToggles(toggles: Record<string, boolean>) {
   return apiFetch<import('../types').FeatureTogglesResponse>('/feature-toggles', {
     method: 'PUT',
     body: JSON.stringify({ toggles }),
-  })
-}
-
-export async function getGameFilters() {
-  return apiFetch<{ games: import('../types').GameFilterItem[] }>('/routing/game-filters')
-}
-
-export async function syncGameFilters(modes: Record<string, string>, runDoall = true) {
-  return apiFetch('/routing/game-filters/sync', {
-    method: 'POST',
-    body: JSON.stringify({ modes, include_domains: true, run_doall: runDoall }),
   })
 }
 

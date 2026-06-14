@@ -196,7 +196,7 @@ setup_frontend() {
 
 build_frontend() {
   log "Building frontend for production..."
-  (cd "$FRONTEND_DIR" && npm run build) >>"$LOG_DIR/frontend-build.log" 2>&1
+  (cd "$FRONTEND_DIR" && npm run build:all) >>"$LOG_DIR/frontend-build.log" 2>&1
 }
 
 launch_backend() {

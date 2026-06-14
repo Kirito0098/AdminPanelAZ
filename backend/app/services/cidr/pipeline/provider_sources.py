@@ -1,15 +1,6 @@
-"""Provider URLs, game catalog, region scopes, and DPI maps."""
+"""Provider URLs, region scopes, and DPI maps."""
 import os
 import re
-
-from app.services.cidr.pipeline.constants import (
-    GAME_FILTER_BLOCK_END,
-    GAME_FILTER_BLOCK_START,
-    GAME_FILTER_IP_BLOCK_END,
-    GAME_FILTER_IP_BLOCK_START,
-    GAME_INCLUDE_HOSTS_FILE,
-    GAME_INCLUDE_IPS_FILE,
-)
 
 PROVIDER_SOURCES = {
     "akamai-ips.txt": [

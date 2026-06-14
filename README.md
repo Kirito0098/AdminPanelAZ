@@ -36,7 +36,7 @@
 | VPN-клиенты (OpenVPN, WireGuard, AmneziaWG) | ✅ | CRUD, sync, download, QR |
 | Политики доступа (блок, срок, лимиты) | ✅ | OpenVPN + WG/AWG + TG notify |
 | Синхронизация и графики трафика | ✅ | Collector + «Мониторинг трафика» |
-| Маршрутизация / CIDR | ✅ | Pipeline, presets CRUD, AntiZapret config, game filters include/exclude |
+| Маршрутизация / CIDR | ✅ | Pipeline, presets CRUD, AntiZapret config |
 | Редактор файлов AntiZapret | ✅ | Мультифайловый редактор + apply + diff-подсветка |
 | Мониторинг сервера (CPU/RAM/vnstat) | ✅ | Страница «Сервер» |
 | NOC / клиенты / логи | ✅ | Monitoring + Logs + экспорт action logs |
@@ -64,11 +64,12 @@
 
 - [x] VPN-клиенты OpenVPN / WireGuard / AmneziaWG (CRUD, sync, download, QR, public routes)
 - [x] Политики доступа, лимиты трафика, reconcile + TG notify
-- [x] Маршрутизация / CIDR pipeline, game filters include (~75), presets CRUD, вкладка «Конфиг AntiZapret»
+- [x] Маршрутизация / CIDR pipeline, presets CRUD, вкладка «Конфиг AntiZapret»
 - [x] Мониторинг: трафик, подключённые клиенты, CPU/RAM, vnstat, WebSocket
 - [x] Безопасность: JWT, captcha, 2FA/TOTP, IP whitelist (+ temp 1h/12h/24h UI), scanner ipset/iptables, global API rate limit
 - [x] Бэкапы панели + AntiZapret (`client.sh 8`), авто-бэкап, TG-доставка
 - [x] Telegram Login, Mini App, AdminNotify (все основные события, включая ban/unban и user ops)
+- [x] Интерактивный Telegram-бот (webhook, `/start`, `/status`, `/configs`, `/settings`)
 - [x] Multi-node: local + remote через Node Agent (mTLS)
 - [x] Установка: `install.sh`, nginx, firewall scripts, site-diagnostics CLI
 - [x] CI: pytest (414), ruff, frontend build, shellcheck, eslint
@@ -80,7 +81,18 @@
 - [ ] **2FA/TOTP** — вход с включённым TOTP, recovery codes
 - [ ] **Nginx + TLS** — `scripts/nginx-setup.sh`, `BEHIND_NGINX`, сертификаты
 - [ ] **Firewall** — `scripts/firewall-setup.sh`; backend на `127.0.0.1` за reverse proxy
-- [ ] **Telegram** — Login Widget, Mini App, AdminNotify на реальный `telegram_id`
+- [ ] **Telegram** — регрессия (см. чеклист ниже)
+
+#### Чеклист регрессии Telegram
+
+1. Login Widget с username + token на `/login`.
+2. Mini App: dashboard, configs, send to self, QR-ссылка.
+3. AdminNotify: тест + событие login.
+4. Backup: `test-telegram` и доставка архива.
+5. Бот: `/start` → `/status` для привязанного пользователя; `/link` с кодом.
+6. Бот (admin): `/settings` → изменение порога мониторинга или toggle бэкапа.
+7. Webhook: регистрация из раздела Telegram; callback inline-кнопок (`help`, `configs`, `st:root`).
+8. Бот (admin): `/cidr` — статус pipeline; `/warper` — если `FEATURE_WARPER_ENABLED`.
 - [x] **In-panel pytest** — вкладка «Тесты» в настройках (или `cd backend && pytest`); 53 модуля / 414 тестов
 
 ### Известные пробелы vs AdminAntizapret 1.9.0

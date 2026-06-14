@@ -31,10 +31,20 @@ def list_feature_toggles(_: User = Depends(require_admin)):
 
 @router.put("")
 def update_feature_toggles(payload: FeatureToggleUpdate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    service = _service()
+    turning_off_telegram = (
+        "telegram" in payload.toggles
+        and payload.toggles["telegram"] is False
+        and service.is_enabled("telegram")
+    )
     try:
-        result = _service().update_toggles(payload.toggles)
+        result = service.update_toggles(payload.toggles)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if turning_off_telegram:
+        from app.services.telegram_module import shutdown_telegram_integration
+
+        shutdown_telegram_integration(db)
     db.commit()
     return result
 

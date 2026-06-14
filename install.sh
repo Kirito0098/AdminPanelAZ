@@ -976,9 +976,9 @@ setup_frontend() {
   fi
   ui_progress_done "Frontend (npm install)"
 
-  ui_progress_start "Сборка frontend (npm run build)"
-  (cd "$FRONTEND_DIR" && npm run build)
-  ui_progress_done "Frontend собран: $FRONTEND_DIR/dist"
+  ui_progress_start "Сборка frontend (npm run build:all)"
+  (cd "$FRONTEND_DIR" && npm run build:all)
+  ui_progress_done "Frontend собран: $FRONTEND_DIR/dist + tg_mini"
 }
 
 setup_runtime_dirs() {

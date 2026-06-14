@@ -179,3 +179,18 @@ def test_feature_modules_includes_maintenance_tab(maintenance_disabled_client):
     data = resp.json()
     assert data["features"]["maintenance"] is False
     assert data["settings_tabs"]["maintenance"] == "maintenance"
+
+
+def test_blocked_tg_mini_when_telegram_disabled(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("FEATURE_TELEGRAM_ENABLED=false\n", encoding="utf-8")
+    service_factory = _feature_service_factory(env_file)
+    monkeypatch.setattr("app.services.feature_guards.get_feature_service", service_factory)
+    monkeypatch.setattr("app.routers.feature_toggles.get_feature_service", service_factory)
+
+    from app.main import app
+
+    client = TestClient(app)
+    resp = client.get("/api/tg-mini")
+    assert resp.status_code == 403
+    assert resp.json()["feature_disabled"] == "telegram"

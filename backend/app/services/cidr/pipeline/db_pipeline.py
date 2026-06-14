@@ -28,19 +28,12 @@ from app.services.cidr.pipeline.file_pipeline import (
     _make_runtime_backup,
     _snapshot_baseline_if_missing,
 )
-from app.services.cidr.pipeline.games import (
-    _collect_game_domains,
-    _resolve_game_filter_selection,
-    sync_game_hosts_filter,
-)
 
 def update_cidr_files_from_db(
     selected_files=None,
     region_scopes=None,
     include_non_geo_fallback=False,
     exclude_ru_cidrs=False,
-    include_game_hosts=False,
-    include_game_keys=None,
     strict_geo_filter=False,
     filter_by_antifilter=False,
     total_cidr_limit=None,
@@ -68,8 +61,6 @@ def update_cidr_files_from_db(
             region_scopes=region_scopes,
             include_non_geo_fallback=include_non_geo_fallback,
             exclude_ru_cidrs=exclude_ru_cidrs,
-            include_game_hosts=include_game_hosts,
-            include_game_keys=include_game_keys,
             strict_geo_filter=strict_geo_filter,
             filter_by_antifilter=filter_by_antifilter,
             total_cidr_limit=total_cidr_limit,
@@ -91,8 +82,6 @@ def _update_cidr_files_from_db_impl(
     region_scopes=None,
     include_non_geo_fallback=False,
     exclude_ru_cidrs=False,
-    include_game_hosts=False,
-    include_game_keys=None,
     strict_geo_filter=False,
     filter_by_antifilter=False,
     total_cidr_limit=None,
@@ -139,27 +128,6 @@ def _update_cidr_files_from_db_impl(
 
     _emit_progress(progress_callback, 8, "Создание резервной копии текущих CIDR-файлов")
     backup_dir, backup_files = _make_runtime_backup(normalized)
-
-    selected_game_keys = _resolve_game_filter_selection(
-        include_game_keys=include_game_keys,
-        include_game_hosts=bool(include_game_hosts),
-    )
-    game_filter_sync_result = sync_game_hosts_filter(include_game_keys=selected_game_keys)
-    game_hosts_filter = game_filter_sync_result.get("game_hosts_filter") or {}
-    game_ips_filter = game_filter_sync_result.get("game_ips_filter") or {}
-    if not game_filter_sync_result.get("success"):
-        _emit_progress(progress_callback, 100, "Ошибка синхронизации игрового фильтра")
-        return {
-            "success": False,
-            "message": "Не удалось синхронизировать игровой фильтр",
-            "updated": [],
-            "failed": [],
-            "skipped": [],
-            "backup_dir": backup_dir,
-            "backup_files": backup_files,
-            "game_hosts_filter": game_hosts_filter,
-            "game_ips_filter": game_ips_filter,
-        }
 
     planned_updates = []
     failed = []
@@ -363,8 +331,6 @@ def _update_cidr_files_from_db_impl(
         "skipped": skipped,
         "backup_dir": backup_dir,
         "backup_files": backup_files,
-        "game_hosts_filter": game_hosts_filter,
-        "game_ips_filter": game_ips_filter,
         "quality_report": {
             "providers": quality_by_file,
             "totals": {
@@ -396,8 +362,6 @@ def estimate_cidr_matches_from_db(
     region_scopes=None,
     include_non_geo_fallback=False,
     exclude_ru_cidrs=False,
-    include_game_hosts=False,
-    include_game_keys=None,
     strict_geo_filter=False,
     filter_by_antifilter=False,
     total_cidr_limit=None,
@@ -421,8 +385,6 @@ def estimate_cidr_matches_from_db(
             region_scopes=region_scopes,
             include_non_geo_fallback=include_non_geo_fallback,
             exclude_ru_cidrs=exclude_ru_cidrs,
-            include_game_hosts=include_game_hosts,
-            include_game_keys=include_game_keys,
             strict_geo_filter=strict_geo_filter,
             filter_by_antifilter=filter_by_antifilter,
             total_cidr_limit=total_cidr_limit,
@@ -444,8 +406,6 @@ def _estimate_cidr_matches_from_db_impl(
     region_scopes=None,
     include_non_geo_fallback=False,
     exclude_ru_cidrs=False,
-    include_game_hosts=False,
-    include_game_keys=None,
     strict_geo_filter=False,
     filter_by_antifilter=False,
     total_cidr_limit=None,
@@ -473,22 +433,6 @@ def _estimate_cidr_matches_from_db_impl(
 
         ordered_files = list(counts_by_file.keys())
         original_total = sum(int(counts_by_file.get(name) or 0) for name in ordered_files)
-
-        try:
-            from app.services.cidr.pipeline.games import is_game_filter_config_route_limit_enforced
-
-            limit_enforced = is_game_filter_config_route_limit_enforced()
-        except Exception:  # noqa: BLE001
-            limit_enforced = True
-
-        if not limit_enforced:
-            return dict(counts_by_file), {
-                "strategy": "global_total_route_limit",
-                "limit": int(route_limit),
-                "limit_enforced": False,
-                "original_total_cidr_count": original_total,
-                "compressed_total_cidr_count": original_total,
-            }
 
         if original_total <= int(route_limit):
             return dict(counts_by_file), None
@@ -770,25 +714,12 @@ def _estimate_cidr_matches_from_db_impl(
                     file_quality["status"] = "skipped"
                     file_quality["skip_reason"] = "empty_after_total_limit"
 
-        selected_game_keys = _resolve_game_filter_selection(
-            include_game_keys=include_game_keys,
-            include_game_hosts=bool(include_game_hosts),
-        )
-        _, selected_game_domains = _collect_game_domains(selected_game_keys)
-
         result = {
             "success": True,
             "message": "Оценка CIDR из БД готова",
             "estimated": estimated,
             "failed": failed,
             "skipped": skipped,
-            "game_hosts_filter": {
-                "enabled": bool(selected_game_keys),
-                "selected_game_keys": selected_game_keys,
-                "selected_game_count": len(selected_game_keys),
-                "domain_count": len(selected_game_domains),
-                "file": _cfg("GAME_INCLUDE_HOSTS_FILE"),
-            },
             "quality_report": {
                 "providers": quality_by_file,
                 "totals": {
@@ -969,25 +900,12 @@ def _estimate_cidr_matches_from_db_impl(
                 file_quality["status"] = "skipped"
                 file_quality["skip_reason"] = "empty_after_total_limit"
 
-    selected_game_keys = _resolve_game_filter_selection(
-        include_game_keys=include_game_keys,
-        include_game_hosts=bool(include_game_hosts),
-    )
-    _, selected_game_domains = _collect_game_domains(selected_game_keys)
-
     result = {
         "success": True,
         "message": "Оценка CIDR из БД готова",
         "estimated": estimated,
         "failed": failed,
         "skipped": skipped,
-        "game_hosts_filter": {
-            "enabled": bool(selected_game_keys),
-            "selected_game_keys": selected_game_keys,
-            "selected_game_count": len(selected_game_keys),
-            "domain_count": len(selected_game_domains),
-            "file": _cfg("GAME_INCLUDE_HOSTS_FILE"),
-        },
         "quality_report": {
             "providers": quality_by_file,
             "totals": {

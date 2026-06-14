@@ -59,3 +59,15 @@ def test_verify_rejects_bad_hash() -> None:
 def test_verify_rejects_missing_hash() -> None:
     with pytest.raises(ValueError, match="hash"):
         _verify_telegram_init_data("auth_date=1&user=%7B%7D", "token")
+
+
+def test_verify_rejects_expired_auth_date() -> None:
+    token = "test-tg-mini-expired-token"
+    auth_date = str(int(time.time()) - 600)
+    user_json = '{"id":1,"first_name":"X"}'
+    raw = _sign_init_data(
+        {"auth_date": auth_date, "query_id": "Q", "user": user_json},
+        token,
+    )
+    with pytest.raises(ValueError, match="устарел"):
+        _verify_telegram_init_data(raw, token, max_age=300)

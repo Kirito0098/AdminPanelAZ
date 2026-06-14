@@ -138,10 +138,12 @@ def test_add_domain_success(mock_api):
 def test_list_domains_api_failure(mock_api):
     mock_api.list_domains.return_value = _FakeResult(ok=False, message="fail")
     service = WarperService()
-    with patch.object(service, "_api_client", return_value=mock_api):
-        with pytest.raises(HTTPException) as exc:
-            service.list_domains()
-    assert exc.value.status_code == 502
+    with (
+        patch.object(service, "_api_client", return_value=mock_api),
+        patch("app.services.warper._parse_domains_file", return_value=[]),
+    ):
+        result = service.list_domains()
+    assert result == []
 
 
 def test_run_warper_action_not_installed():

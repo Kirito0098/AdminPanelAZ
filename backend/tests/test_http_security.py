@@ -9,7 +9,9 @@ from app.middleware.http_security import (
     HttpSecurityMiddleware,
     build_robots_txt,
     build_security_txt,
+    csp_for_path,
     get_panel_branding,
+    is_tg_mini_path,
     should_noindex_path,
 )
 from tests.conftest import run_async
@@ -149,6 +151,28 @@ def test_middleware_apply_headers_sets_csp():
             self.headers = {}
 
     response = Response()
-    settings = Settings(content_security_policy="default-src 'self'")
+    settings = Settings(content_security_policy="default-src 'self'; frame-ancestors 'self';")
     HttpSecurityMiddleware._apply_headers(response, settings, "/api/health")
-    assert response.headers.get("Content-Security-Policy") == "default-src 'self'"
+    assert response.headers.get("Content-Security-Policy") == "default-src 'self'; frame-ancestors 'self';"
+
+
+def test_tg_mini_path_allows_telegram_frame_ancestors():
+    base = (
+        "default-src 'self'; script-src 'self' https://telegram.org; "
+        "frame-ancestors 'self'; base-uri 'self';"
+    )
+    csp = csp_for_path("/api/tg-mini", base)
+    assert "https://web.telegram.org" in csp
+    assert "frame-ancestors 'self'" not in csp or "https://telegram.org" in csp
+
+
+def test_tg_mini_path_skips_x_frame_options():
+    class Response:
+        def __init__(self):
+            self.headers = {}
+
+    response = Response()
+    settings = Settings(content_security_policy="default-src 'self'; frame-ancestors 'self';")
+    HttpSecurityMiddleware._apply_headers(response, settings, "/api/tg-mini")
+    assert response.headers.get("X-Frame-Options") is None
+    assert is_tg_mini_path("/api/tg-mini/assets/app.js")

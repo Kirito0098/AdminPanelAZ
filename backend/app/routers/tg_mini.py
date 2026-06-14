@@ -1,238 +1,53 @@
-"""Telegram Mini App API + full UI (ported from AdminAntizapret tg_mini)."""
+"""Telegram Mini App API + static React UI."""
+
+from __future__ import annotations
 
 import hashlib
 import hmac
 import json
+import os
+import tempfile
+import time
 import urllib.parse
 from datetime import datetime
-
 from pathlib import Path
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import create_access_token, get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import AppSetting, User, VpnConfig, VpnType
-from app.services.admin_notify import admin_notify_service
+from app.models import DEFAULT_TG_NOTIFY_EVENTS, AppSetting, User, VpnConfig, VpnType
+from app.routers.maintenance import (
+    _admin_notify_settings_response,
+    _get_setting,
+    _set_setting,
+    _telegram_settings_response,
+    update_telegram_settings,
+)
+from app.schemas import (
+    AdminNotifySettingsResponse,
+    AdminNotifySettingsUpdate,
+    MessageResponse,
+    TelegramSettingsResponse,
+    TelegramSettingsUpdate,
+)
+from app.services.admin_notify import TG_NOTIFY_EVENT_LABELS, admin_notify_service
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.notify_time import get_client_timezone_from_request
+from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.qr_download import QrDownloadService
+from app.services.security import SecurityService
+from app.services.telegram import send_tg_document, send_tg_message
 
 router = APIRouter(prefix="/tg-mini", tags=["tg-mini"])
 settings = get_settings()
 _STATIC_DIR = Path(__file__).resolve().parents[1] / "static" / "tg_mini"
-
-MINI_APP_HTML = """<!DOCTYPE html>
-<html lang="ru"><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="/api/tg-mini/assets/tg_mini_app.css">
-<title>AntiZapret Mini</title>
-</head>
-<body class="tg-mini-app">
-<main class="tg-mini-main">
-<div class="tg-mini-shell" id="tgMiniApp">
-  <header class="tg-mini-header">
-    <p class="tg-mini-kicker">AdminPanelAZ</p>
-    <h1 class="tg-mini-brand">Панель в Telegram</h1>
-    <div id="hdrStatus" class="tg-mini-status">Авторизация...</div>
-  </header>
-
-  <div class="tg-mini-tabs-sticky">
-    <nav class="tg-mini-tabs" role="tablist" aria-label="Mini app tabs">
-      <button class="tg-mini-tab is-active" data-pane="dash" type="button">Дашборд</button>
-      <button class="tg-mini-tab" data-pane="clients" type="button">Конфиги</button>
-      <button class="tg-mini-tab" data-pane="settings" type="button">Настройки</button>
-    </nav>
-  </div>
-
-  <section class="tg-mini-pane is-active" data-pane="dash">
-    <div class="tg-mini-cards" id="kpi"></div>
-    <article class="tg-mini-panel"><h3>Подключённые OpenVPN</h3><div id="ovpnList"></div></article>
-    <article class="tg-mini-panel"><h3>WireGuard</h3><div id="wgList"></div></article>
-  </section>
-
-  <section class="tg-mini-pane" data-pane="clients">
-    <div id="configList"></div>
-  </section>
-
-  <section class="tg-mini-pane" data-pane="settings">
-    <article class="tg-mini-panel" id="settingsCard">Загрузка...</article>
-  </section>
-</div>
-</main>
-<script>
-const tg = window.Telegram && window.Telegram.WebApp;
-let token = localStorage.getItem('tg_token') || '';
-if (tg) { tg.ready(); tg.expand(); }
-const hdr = document.getElementById('hdrStatus');
-
-function openBottomSheet(html) {
-  const modal = document.createElement('div');
-  modal.className = 'tg-mini-modal';
-  modal.innerHTML =
-    '<div class="tg-mini-modal-backdrop"></div>' +
-    '<div class="tg-mini-modal-dialog" role="dialog" aria-modal="true">' +
-    '<div class="tg-mini-modal-handle" aria-hidden="true"></div>' + html + '</div>';
-  const close = () => {
-    modal.classList.remove('is-open');
-    document.body.classList.remove('tg-mini-modal-open');
-    setTimeout(() => modal.remove(), 220);
-  };
-  modal.querySelector('.tg-mini-modal-backdrop').onclick = close;
-  const closeBtn = modal.querySelector('.tg-mini-modal-close');
-  if (closeBtn) closeBtn.onclick = close;
-  document.body.appendChild(modal);
-  document.body.classList.add('tg-mini-modal-open');
-  requestAnimationFrame(() => modal.classList.add('is-open'));
-  return { modal, close };
-}
-
-async function api(path, opts = {}) {
-  const r = await fetch('/api/tg-mini' + path, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: 'Bearer ' + token } : {}),
-      ...(opts.headers || {}),
-    },
-  });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.detail || d.message || 'Ошибка');
-  return d;
-}
-
-async function auth() {
-  if (!tg || !tg.initData) {
-    hdr.textContent = 'Откройте через Telegram';
-    hdr.className = 'tg-mini-status is-error';
-    return;
-  }
-  const r = await fetch('/api/tg-mini/auth', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ init_data: tg.initData }),
-  });
-  const d = await r.json();
-  if (!r.ok) {
-    hdr.textContent = d.detail || 'Ошибка авторизации';
-    hdr.className = 'tg-mini-status is-error';
-    return;
-  }
-  token = d.access_token;
-  localStorage.setItem('tg_token', token);
-  hdr.textContent = 'Подключено';
-  hdr.className = 'tg-mini-status is-success';
-  loadAll();
-}
-
-function showPane(name) {
-  document.querySelectorAll('.tg-mini-pane').forEach((p) => p.classList.remove('is-active'));
-  document.querySelectorAll('.tg-mini-tab').forEach((t) => t.classList.remove('is-active'));
-  document.querySelector('[data-pane="' + name + '"].tg-mini-pane').classList.add('is-active');
-  document.querySelector('.tg-mini-tab[data-pane="' + name + '"]').classList.add('is-active');
-}
-
-document.querySelectorAll('.tg-mini-tab').forEach((t) => {
-  t.onclick = () => showPane(t.dataset.pane);
-});
-
-function fmtB(n) {
-  const u = ['B', 'KB', 'MB', 'GB'];
-  let i = 0;
-  let v = n || 0;
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  return v.toFixed(1) + ' ' + u[i];
-}
-
-async function loadDash() {
-  const d = await api('/dashboard');
-  document.getElementById('kpi').innerHTML =
-    '<article class="tg-mini-card"><b>' + d.total_configs + '</b><span>Конфигов</span></article>' +
-    '<article class="tg-mini-card"><b>' + d.connected_openvpn + '</b><span>OpenVPN</span></article>' +
-    '<article class="tg-mini-card"><b>' + d.connected_wireguard + '</b><span>WireGuard</span></article>' +
-    '<article class="tg-mini-card"><b>' + (d.server_ip || '—') + '</b><span>Сервер</span></article>';
-  document.getElementById('ovpnList').innerHTML = (d.openvpn_clients || [])
-    .map((c) => '<div class="tg-mini-client"><span>' + c.common_name + '</span><span style="color:var(--ok)">online</span></div>')
-    .join('') || '<div class="tg-mini-empty">Нет подключений</div>';
-  document.getElementById('wgList').innerHTML = (d.wireguard_peers || [])
-    .map((p) => '<div class="tg-mini-client"><span>' + (p.client_name || p.public_key.slice(0, 8)) + '</span><span style="color:var(--ok)">' + fmtB(p.transfer_rx + p.transfer_tx) + '</span></div>')
-    .join('') || '<div class="tg-mini-empty">Нет пиров</div>';
-}
-
-async function loadConfigs() {
-  const d = await api('/configs');
-  document.getElementById('configList').innerHTML = (d.configs || [])
-    .map((c) =>
-      '<article class="tg-mini-panel"><div class="tg-mini-client"><div><b>' + c.client_name + '</b><br><span style="color:var(--muted);font-size:12px">' + c.vpn_type + '</span></div>' +
-      '<button class="tg-mini-btn tg-mini-btn-sm" data-send="' + c.id + '">Отправить</button></div></article>'
-    )
-    .join('') || '<div class="tg-mini-empty">Нет конфигов</div>';
-  document.querySelectorAll('[data-send]').forEach((btn) => {
-    btn.onclick = () => confirmSendConfig(Number(btn.dataset.send), btn.closest('.tg-mini-panel')?.querySelector('b')?.textContent || '');
-  });
-}
-
-function confirmSendConfig(id, name) {
-  const sheet = openBottomSheet(
-    '<button type="button" class="tg-mini-modal-close" aria-label="Закрыть">×</button>' +
-    '<div class="tg-mini-modal-header"><h4>Отправить конфиг</h4>' +
-    '<p class="tg-mini-modal-message">Конфиг «' + name + '» будет отправлен в Telegram.</p></div>' +
-    '<div class="tg-mini-modal-actions">' +
-    '<button type="button" class="tg-mini-btn tg-mini-btn-ghost tg-mini-cancel">Отмена</button>' +
-    '<button type="button" class="tg-mini-btn tg-mini-submit">Отправить</button></div>'
-  );
-  sheet.modal.querySelector('.tg-mini-cancel').onclick = sheet.close;
-  sheet.modal.querySelector('.tg-mini-submit').onclick = async () => {
-    const btn = sheet.modal.querySelector('.tg-mini-submit');
-    btn.disabled = true;
-    try {
-      await api('/send-config', { method: 'POST', body: JSON.stringify({ config_id: id }) });
-      sheet.close();
-      const ok = openBottomSheet(
-        '<div class="tg-mini-modal-header"><h4>Готово</h4><p class="tg-mini-modal-message">Конфиг отправлен в Telegram.</p></div>' +
-        '<div class="tg-mini-modal-actions"><button type="button" class="tg-mini-btn tg-mini-ok">OK</button></div>'
-      );
-      ok.modal.querySelector('.tg-mini-ok').onclick = ok.close;
-    } catch (e) {
-      btn.disabled = false;
-      alert(e.message);
-    }
-  };
-}
-
-async function loadSettings() {
-  try {
-    const d = await api('/settings');
-    document.getElementById('settingsCard').innerHTML =
-      '<h3>Настройки</h3><p><b>Сервер:</b> ' + (d.server_ip || '—') + '</p>' +
-      '<p><b>Бот:</b> ' + (d.bot_configured ? 'настроен' : 'не настроен') + '</p>' +
-      '<p><b>Пользователь:</b> ' + d.username + '</p>';
-  } catch (e) {
-    document.getElementById('settingsCard').innerHTML = '<p style="color:var(--err)">' + e.message + '</p>';
-  }
-}
-
-async function loadAll() {
-  await loadDash();
-  await loadConfigs();
-  await loadSettings();
-}
-
-if (token) {
-  hdr.textContent = 'Подключено';
-  hdr.className = 'tg-mini-status is-success';
-  loadAll();
-} else {
-  auth();
-}
-</script>
-</body></html>"""
 
 
 class TelegramAuthRequest(BaseModel):
@@ -244,11 +59,21 @@ class SendConfigRequest(BaseModel):
     path: str | None = None
 
 
-def _verify_telegram_init_data(init_data: str, bot_token: str) -> dict:
+class SendConfigV2Request(BaseModel):
+    path: str | None = None
+    destination: Literal["self", "chat"] = "self"
+
+
+def _verify_telegram_init_data(init_data: str, bot_token: str, *, max_age: int = 300) -> dict:
     parsed = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
     received_hash = parsed.pop("hash", None)
     if not received_hash:
         raise ValueError("hash отсутствует")
+    auth_date_raw = (parsed.get("auth_date") or "").strip()
+    if not auth_date_raw.isdigit():
+        raise ValueError("auth_date отсутствует или некорректен")
+    if abs(int(time.time()) - int(auth_date_raw)) > max(30, min(max_age, 86400)):
+        raise ValueError("init_data устарел")
     data_check = "\n".join(f"{k}={v}" for k, v in sorted(parsed.items()))
     secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     computed = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
@@ -258,30 +83,126 @@ def _verify_telegram_init_data(init_data: str, bot_token: str) -> dict:
 
 
 def _get_bot_token(db: Session) -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == "telegram_bot_token").first()
-    return row.value if row else ""
+    return _get_setting(db, "telegram_bot_token")
 
 
-@router.get("/assets/tg_mini_app.css", include_in_schema=False)
-def mini_app_css():
-    css_path = _STATIC_DIR / "tg_mini_app.css"
-    return FileResponse(css_path, media_type="text/css")
+def _static_index() -> Path:
+    return _STATIC_DIR / "index.html"
+
+
+def _qr_download_service(db: Session, request: Request) -> QrDownloadService:
+    sec = SecurityService().get_settings(db)
+    pin_row = db.query(AppSetting).filter(AppSetting.key == "qr_download_pin").first()
+    base_url = str(request.base_url).rstrip("/")
+    return QrDownloadService(
+        db,
+        base_url=base_url,
+        ttl_seconds=sec["qr_download_ttl_seconds"],
+        max_downloads=sec["qr_download_max_downloads"],
+        pin=pin_row.value if pin_row else "",
+    )
+
+
+def _get_accessible_config(db: Session, config_id: int, current_user: User) -> VpnConfig:
+    node = get_active_node(db)
+    config = (
+        db.query(VpnConfig)
+        .filter(VpnConfig.id == config_id, VpnConfig.node_id == node.id)
+        .first()
+    )
+    if not config:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
+    if config.owner_id != current_user.id and current_user.role.value != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+    return config
+
+
+def _resolve_send_chat_id(
+    db: Session,
+    current_user: User,
+    destination: Literal["self", "chat"],
+) -> str:
+    if destination == "chat":
+        if current_user.role.value != "admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только admin может отправлять в общий chat")
+        chat_id = _get_setting(db, "telegram_chat_id").strip()
+        if not chat_id:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Глобальный chat_id не настроен")
+        return chat_id
+    chat_id = (current_user.telegram_id or "").strip()
+    if not chat_id and current_user.role.value == "admin":
+        chat_id = _get_setting(db, "telegram_chat_id").strip()
+    if not chat_id:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram ID не привязан к вашему аккаунту")
+    return chat_id
+
+
+def _send_config_file(
+    db: Session,
+    config: VpnConfig,
+    current_user: User,
+    *,
+    path: str | None,
+    destination: Literal["self", "chat"],
+) -> MessageResponse:
+    adapter = get_active_adapter(db)
+    files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
+    if not files:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файлы конфигурации не найдены")
+    selected_path = path or files[0].get("path", "")
+    content = adapter.read_profile_file(selected_path)
+    token = _get_bot_token(db)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram не настроен")
+    chat_id = _resolve_send_chat_id(db, current_user, destination)
+    selected = next((item for item in files if item.get("path") == selected_path), files[0])
+    download_name = selected.get("download_filename") or build_profile_download_filename(
+        config.client_name,
+        protocol=selected.get("protocol", ""),
+        variant=selected.get("variant", ""),
+        path=selected.get("path", selected_path),
+    )
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".tmp", delete=False) as handle:
+        handle.write(content)
+        tmp = handle.name
+    try:
+        send_tg_document(token, chat_id, tmp, caption=f"Конфиг: {config.client_name}", filename=download_name)
+    finally:
+        os.unlink(tmp)
+    return MessageResponse(message="Конфиг отправлен в Telegram")
+
+
+@router.get("/assets/{file_path:path}", include_in_schema=False)
+def mini_app_asset(file_path: str):
+    asset_path = (_STATIC_DIR / "assets" / file_path).resolve()
+    assets_root = (_STATIC_DIR / "assets").resolve()
+    if not str(asset_path).startswith(str(assets_root)) or not asset_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return FileResponse(asset_path)
 
 
 @router.get("")
 def mini_app_page():
-    return HTMLResponse(MINI_APP_HTML)
+    index_path = _static_index()
+    if not index_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Mini App UI не собран. Выполните: cd frontend && npm run build:tg-mini",
+        )
+    return FileResponse(index_path, media_type="text/html")
 
 
 @router.post("/auth")
 def tg_auth(payload: TelegramAuthRequest, request: Request, db: Session = Depends(get_db)):
     token = _get_bot_token(db)
     if not token:
-        raise HTTPException(status_code=503, detail="Telegram bot не настроен")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram bot не настроен")
     try:
-        tg_user = _verify_telegram_init_data(payload.init_data, token)
+        max_age_raw = _get_setting(db, "telegram_auth_max_age_seconds")
+        max_age = int(max_age_raw) if max_age_raw.isdigit() else 300
+        tg_user = _verify_telegram_init_data(payload.init_data, token, max_age=max_age)
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     tg_id = str(tg_user.get("id", ""))
     user = db.query(User).filter(User.telegram_id == tg_id).first()
     if not user:
@@ -298,7 +219,7 @@ def tg_auth(payload: TelegramAuthRequest, request: Request, db: Session = Depend
             client_timezone=get_client_timezone_from_request(request),
         )
         raise HTTPException(
-            status_code=401,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Этот Telegram аккаунт не привязан ни к одному пользователю панели",
         )
     access_token = create_access_token({"sub": user.username})
@@ -354,6 +275,54 @@ def mini_configs(current_user: User = Depends(get_current_user), db: Session = D
     }
 
 
+@router.get("/configs/{config_id}/files")
+def mini_config_files(
+    config_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    config = _get_accessible_config(db, config_id, current_user)
+    adapter = get_active_adapter(db)
+    files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
+    if not files:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файлы конфигурации не найдены")
+    return {"files": enrich_profile_files(config.client_name, files)}
+
+
+@router.post("/configs/{config_id}/send", response_model=MessageResponse)
+def mini_send_config(
+    config_id: int,
+    payload: SendConfigV2Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    config = _get_accessible_config(db, config_id, current_user)
+    return _send_config_file(db, config, current_user, path=payload.path, destination=payload.destination)
+
+
+@router.get("/qr-link")
+def mini_qr_link(
+    request: Request,
+    config_id: int = Query(...),
+    path: str = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    config = _get_accessible_config(db, config_id, current_user)
+    adapter = get_active_adapter(db)
+    files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
+    if not any(item.get("path") == path for item in files):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
+    return _qr_download_service(db, request).create_token(
+        file_path=path,
+        config_type=config.vpn_type.value,
+        config_name=build_profile_download_filename(config.client_name, path=path),
+        creator_id=current_user.id,
+        creator_username=current_user.username,
+        remote_addr=request.client.host if request.client else None,
+    )
+
+
 @router.get("/settings")
 def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     adapter = get_active_adapter(db)
@@ -366,49 +335,104 @@ def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(ge
     }
 
 
-@router.post("/send-config")
-def send_config(payload: SendConfigRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    node = get_active_node(db)
-    config = (
-        db.query(VpnConfig)
-        .filter(VpnConfig.id == payload.config_id, VpnConfig.node_id == node.id)
-        .first()
-    )
-    if not config or (config.owner_id != current_user.id and current_user.role.value != "admin"):
-        raise HTTPException(status_code=404, detail="Конфигурация не найдена")
-    adapter = get_active_adapter(db)
-    files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
-    if not files:
-        raise HTTPException(status_code=404, detail="Файлы конфигурации не найдены")
-    path = payload.path or files[0].get("path", "")
-    content = adapter.read_profile_file(path)
-    token = _get_bot_token(db)
-    chat_row = db.query(AppSetting).filter(AppSetting.key == "telegram_chat_id").first()
-    if not token:
-        raise HTTPException(status_code=503, detail="Telegram не настроен")
-    chat_id = chat_row.value if chat_row else ""
-    if not chat_id:
-        raise HTTPException(status_code=503, detail="Telegram chat_id не настроен")
-    from app.services.profile_download_name import build_profile_download_filename
-    from app.services.telegram import send_tg_document
-    import os
-    import tempfile
+@router.get("/admin-notify", response_model=AdminNotifySettingsResponse)
+def mini_get_admin_notify(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _admin_notify_settings_response(db, current_user)
 
-    selected = next((item for item in files if item.get("path") == path), files[0])
-    download_name = selected.get("download_filename") or build_profile_download_filename(
-        config.client_name,
-        protocol=selected.get("protocol", ""),
-        variant=selected.get("variant", ""),
-        path=selected.get("path", path),
+
+@router.patch("/admin-notify", response_model=AdminNotifySettingsResponse)
+def mini_update_admin_notify(
+    payload: AdminNotifySettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if payload.telegram_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Изменение Telegram ID в Mini App недоступно — используйте /link в боте или веб-панель",
+        )
+    if payload.events is not None:
+        merged = current_user.merged_tg_notify_events()
+        for key in DEFAULT_TG_NOTIFY_EVENTS:
+            if key in payload.events:
+                merged[key] = bool(payload.events[key])
+        current_user.tg_notify_events = json.dumps(merged)
+    db.commit()
+    db.refresh(current_user)
+    return _admin_notify_settings_response(db, current_user)
+
+
+@router.post("/admin-notify/test", response_model=MessageResponse)
+def mini_test_admin_notify(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.telegram_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите Telegram ID в настройках уведомлений")
+    bot_token = _get_bot_token(db)
+    if not bot_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
+    merged = current_user.merged_tg_notify_events()
+    enabled = [label for key, label in TG_NOTIFY_EVENT_LABELS if merged.get(key)]
+    events_text = "\n".join(f"  ✓ {item}" for item in enabled) if enabled else "  (нет включённых событий)"
+    text = (
+        "🔔 <b>Тест уведомлений AdminPanelAZ</b>\n\n"
+        f"Аккаунт: <code>{current_user.username}</code>\n\n"
+        f"Включённые события:\n{events_text}"
     )
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".tmp", delete=False) as f:
-        f.write(content)
-        tmp = f.name
-    try:
-        send_tg_document(token, chat_id, tmp, caption=f"Конфиг: {config.client_name}", filename=download_name)
-    finally:
-        os.unlink(tmp)
-    return {"message": "Конфиг отправлен в Telegram"}
+    ok = send_tg_message(bot_token, current_user.telegram_id, text, run_async=False)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
+    return MessageResponse(message="Тестовое сообщение отправлено")
+
+
+@router.get("/telegram-settings", response_model=TelegramSettingsResponse)
+def mini_get_telegram_settings(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    return _telegram_settings_response(db, request)
+
+
+@router.patch("/telegram-settings", response_model=TelegramSettingsResponse)
+def mini_update_telegram_settings(
+    payload: TelegramSettingsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return update_telegram_settings(payload, request, db, admin)
+
+
+@router.post("/telegram-settings/test", response_model=MessageResponse)
+def mini_test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    bot_token = _get_bot_token(db)
+    chat_id = _get_setting(db, "telegram_chat_id")
+    if not bot_token or not chat_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите токен бота и chat_id")
+    ok = send_tg_message(
+        bot_token,
+        chat_id,
+        "✅ <b>AdminPanelAZ</b>: тестовое уведомление Telegram",
+        run_async=False,
+    )
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
+    return MessageResponse(message="Тестовое сообщение отправлено")
+
+
+@router.post("/send-config", response_model=MessageResponse, deprecated=True)
+def send_config(
+    payload: SendConfigRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    config = _get_accessible_config(db, payload.config_id, current_user)
+    return _send_config_file(db, config, current_user, path=payload.path, destination="self")
 
 
 @router.post("/check-bot-delivery")

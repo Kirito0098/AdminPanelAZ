@@ -6,12 +6,10 @@ import {
   getAntifilterStatus,
   getCidrDbStatus,
   getCidrDbStatusSummary,
-  getGameFilters,
   getRoutingOverview,
   refreshAntifilter,
   refreshCidrDb,
   clearCidrDb,
-  syncGameFilters,
   syncRoutingProviders,
   toggleRoutingProvider,
   ApiError,
@@ -25,7 +23,6 @@ import type {
   CidrDbPresetInfo,
   CidrDbStatus,
   CidrPipelineTask,
-  GameFilterItem,
   RoutingOverview,
 } from '@/types'
 import type { PipelinePendingAction, PipelineStage, IngestKind } from '@/components/routing/utils'
@@ -74,8 +71,6 @@ export function useRoutingPage() {
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
 
-  const [games, setGames] = useState<GameFilterItem[]>([])
-  const [gameModes, setGameModes] = useState<Record<string, string>>({})
   const [filterAntifilter, setFilterAntifilter] = useState(false)
   const [deployAllOnline, setDeployAllOnline] = useState(false)
   const [deployTargetNodeIds, setDeployTargetNodeIds] = useState<number[]>([])
@@ -193,20 +188,6 @@ export function useRoutingPage() {
     return () => window.clearInterval(timer)
   }, [pipelinePolling])
 
-  const loadGames = useCallback(async () => {
-    try {
-      const { games: gameList } = await getGameFilters()
-      setGames(gameList)
-      const modes: Record<string, string> = {}
-      gameList.forEach((g) => {
-        modes[g.key] = g.mode
-      })
-      setGameModes(modes)
-    } catch {
-      /* optional panel */
-    }
-  }, [])
-
   const load = useCallback(
     async (opts: { initial?: boolean; manual?: boolean } = {}) => {
       const { initial = false, manual = false } = opts
@@ -218,7 +199,7 @@ export function useRoutingPage() {
       }
       try {
         setData(await getRoutingOverview())
-        await Promise.all([loadPipelineMeta(), loadGames()])
+        await loadPipelineMeta()
         setCountdown(REFRESH_INTERVAL)
         if (manual) success('Данные маршрутизации обновлены')
       } catch (err) {
@@ -229,7 +210,7 @@ export function useRoutingPage() {
         if (initial) doneGlobal()
       }
     },
-    [startGlobal, doneGlobal, notifyLoadError, loadPipelineMeta, loadGames, success],
+    [startGlobal, doneGlobal, notifyLoadError, loadPipelineMeta, success],
   )
 
   useEffect(() => {
@@ -479,9 +460,6 @@ export function useRoutingPage() {
     autoRefresh,
     setAutoRefresh,
     countdown,
-    games,
-    gameModes,
-    setGameModes,
     filterAntifilter,
     setFilterAntifilter,
     deployAllOnline,
@@ -511,8 +489,6 @@ export function useRoutingPage() {
           .map((provider) => toggleRoutingProvider(provider.filename, targetProviders.has(provider.filename)))
         await Promise.all(toggles)
       }, `Пресет «${preset.name}» применён`, `Применение пресета «${preset.name}»...`),
-    syncGames: () =>
-      withAction(() => syncGameFilters(gameModes), 'Игровые фильтры синхронизированы', 'Синхронизация игровых фильтров...'),
     inline,
     refreshCidrDb: () => runRefreshCidrDb(),
     refreshOneProvider,

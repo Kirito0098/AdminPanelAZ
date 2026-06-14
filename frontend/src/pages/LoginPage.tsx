@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import { LogIn, Shield } from 'lucide-react'
 import {
@@ -20,6 +20,15 @@ import { useNotifications } from '@/context/NotificationContext'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
+function resolveApiBase(): string {
+  const base = API_BASE
+  if (base.startsWith('http://') || base.startsWith('https://')) {
+    return base.replace(/\/$/, '')
+  }
+  const path = base.startsWith('/') ? base : `/${base}`
+  return `${window.location.origin}${path}`.replace(/\/$/, '')
+}
+
 export default function LoginPage() {
   const { user, login, loading, setToken } = useAuth()
   const { error: notifyError } = useNotifications()
@@ -31,10 +40,17 @@ export default function LoginPage() {
   const [captchaImageUrl, setCaptchaImageUrl] = useState('')
   const [captchaRequired, setCaptchaRequired] = useState(false)
   const [tgBot, setTgBot] = useState('')
+  const [tgLoginReason, setTgLoginReason] = useState<string | null>(null)
+  const [telegramModuleEnabled, setTelegramModuleEnabled] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [needs2FA, setNeeds2FA] = useState(false)
   const [tempToken, setTempToken] = useState('')
   const [totpCode, setTotpCode] = useState('')
+  const telegramLoginRef = useRef<HTMLDivElement>(null)
+  const telegramAuthCallback = useMemo(
+    () => (typeof window !== 'undefined' ? `${resolveApiBase()}/auth/telegram` : ''),
+    [],
+  )
 
   useEffect(() => {
     const hashToken = window.location.hash.match(/^#token=(.+)$/)?.[1]
@@ -71,11 +87,44 @@ export default function LoginPage() {
     Promise.all([getFeatureModules().catch(() => null), getTelegramLoginConfig().catch(() => null)])
       .then(([modules, tgConfig]) => {
         const telegramEnabled = modules?.features?.telegram ?? true
-        if (telegramEnabled && tgConfig?.enabled && tgConfig.bot_username) {
-          setTgBot(tgConfig.bot_username)
+        setTelegramModuleEnabled(telegramEnabled)
+        if (!telegramEnabled) {
+          setTgLoginReason('Модуль Telegram отключён в настройках модулей')
+          return
         }
+        if (!tgConfig) {
+          setTgLoginReason('Не удалось загрузить настройки Telegram')
+          return
+        }
+        if (tgConfig.enabled && tgConfig.bot_username) {
+          setTgBot(tgConfig.bot_username)
+          setTgLoginReason(null)
+          return
+        }
+        if (!tgConfig.bot_username) {
+          setTgLoginReason('Не указан username бота — заполните в разделе «Telegram»')
+          return
+        }
+        setTgLoginReason('Не указан токен бота — заполните в разделе «Telegram»')
       })
   }, [])
+
+  useEffect(() => {
+    const container = telegramLoginRef.current
+    if (!container || !tgBot || !telegramAuthCallback) {
+      if (container) container.innerHTML = ''
+      return
+    }
+    container.innerHTML = ''
+    const script = document.createElement('script')
+    script.async = true
+    script.src = 'https://telegram.org/js/telegram-widget.js?22'
+    script.setAttribute('data-telegram-login', tgBot)
+    script.setAttribute('data-size', 'large')
+    script.setAttribute('data-auth-url', telegramAuthCallback)
+    script.setAttribute('data-request-access', 'write')
+    container.appendChild(script)
+  }, [tgBot, telegramAuthCallback])
 
   useEffect(() => {
     return () => {
@@ -215,19 +264,13 @@ export default function LoginPage() {
                 </>
               )}
             </Button>
-            {tgBot && (
-              <div className="text-center">
-                <script async src="https://telegram.org/js/telegram-widget.js?22" />
-                <iframe
-                  title="Telegram Login"
-                  src={`https://oauth.telegram.org/embed/${tgBot}?origin=${encodeURIComponent(window.location.origin)}&return_to=${encodeURIComponent(`${API_BASE}/auth/telegram`)}`}
-                  width="100%"
-                  height="44"
-                  style={{ border: 'none', overflow: 'hidden' }}
-                />
-              </div>
+            {telegramModuleEnabled && !tgBot && tgLoginReason && (
+              <p className="rounded-md border border-dashed px-3 py-2 text-center text-xs text-muted-foreground">
+                {tgLoginReason}
+              </p>
             )}
           </form>
+          <div ref={telegramLoginRef} className="flex min-h-[44px] justify-center pt-4" />
         </CardContent>
       </Card>
     </div>

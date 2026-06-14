@@ -13,7 +13,6 @@ EXPECTED_ROUTER_PREFIXES = (
     "/api/nodes",
     "/api/routing",
     "/api/routing/cidr-db",
-    "/api/routing/game-filters",
     "/api/traffic",
     "/api/client-access",
     "/api/edit-files",

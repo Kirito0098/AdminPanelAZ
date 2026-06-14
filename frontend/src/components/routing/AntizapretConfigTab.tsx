@@ -210,7 +210,7 @@ export default function AntizapretConfigTab() {
       <InlineProgressBar active={saving} label="Сохранение настроек..." />
       <InlineProgressBar active={applying} label="Применение doall.sh..." />
 
-      <StatusPanel title="Конфиг AntiZapret" icon={Settings2}>
+      <StatusPanel title="Параметры setup" icon={Settings2}>
         <p className="mb-4 text-sm text-muted-foreground">
           Параметры файла <span className="font-mono text-xs">setup</span> на активном узле. После
           сохранения выполните «Применить (doall.sh)», чтобы изменения вступили в силу.

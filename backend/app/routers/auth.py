@@ -224,9 +224,14 @@ def captcha_required(request: Request):
 
 @router.get("/telegram/config")
 def telegram_login_config(db: Session = Depends(get_db)):
+    from app.services.feature_guards import get_feature_service
+
+    if not get_feature_service().is_enabled("telegram"):
+        return {"enabled": False, "bot_username": "", "max_age_seconds": 300}
     token, username, max_age = _get_telegram_auth_settings(db)
+    enabled = bool(token and username)
     return {
-        "enabled": bool(token and username),
+        "enabled": enabled,
         "bot_username": username,
         "max_age_seconds": max_age,
     }
@@ -268,11 +273,11 @@ def telegram_login_callback(request: Request, db: Session = Depends(get_db)):
             remote_addr=client_ip,
             client_timezone=get_client_timezone_from_request(request),
         )
-    access = create_access_token(
+    access_token = create_access_token(
         data={"sub": user.username, "role": user.role.value},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
-    redirect_url = f"/login#token={access.access_token}"
+    redirect_url = f"/login#token={access_token}"
     return RedirectResponse(url=redirect_url, status_code=302)
 
 

@@ -351,27 +351,6 @@ def routing_sync(_: None = Depends(verify_api_key)):
     return cidr_service.sync_providers()
 
 
-class GameFiltersSyncRequest(BaseModel):
-    include_game_keys: list[str] = Field(default_factory=list)
-    exclude_game_keys: list[str] = Field(default_factory=list)
-    include_game_domains: bool = True
-
-
-@app.post("/routing/game-filters/sync")
-def routing_game_filters_sync(payload: GameFiltersSyncRequest, _: None = Depends(verify_api_key)):
-    from app.services.cidr.game_filter_sync import run_sync_game_routes_filter
-
-    result = run_sync_game_routes_filter(
-        service.config_dir,
-        include_game_keys=payload.include_game_keys,
-        exclude_game_keys=payload.exclude_game_keys,
-        include_game_domains=payload.include_game_domains,
-    )
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("message") or "Game filter sync failed")
-    return result
-
-
 @app.get("/routing/files/{file_key}")
 def routing_file_get(file_key: str, _: None = Depends(verify_api_key)):
     return cidr_service.read_route_file(file_key)

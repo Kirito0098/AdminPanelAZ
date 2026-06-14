@@ -125,6 +125,20 @@ def update_user(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
         validate_password(payload.password, username=user.username)
         user.password_hash = get_password_hash(payload.password)
+    if payload.telegram_id is not None:
+        if not is_admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять Telegram ID")
+        tg_id = payload.telegram_id.strip()
+        if tg_id:
+            existing = db.query(User).filter(User.telegram_id == tg_id, User.id != user.id).first()
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Этот Telegram ID уже привязан к другому пользователю",
+                )
+            user.telegram_id = tg_id
+        else:
+            user.telegram_id = None
 
     db.commit()
     db.refresh(user)

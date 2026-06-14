@@ -7,7 +7,18 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 
+def _outbound_enabled() -> bool:
+    try:
+        from app.services.feature_guards import get_feature_service
+
+        return get_feature_service().is_enabled("telegram")
+    except Exception:
+        return False
+
+
 def send_tg_message(bot_token: str, chat_id: str, text: str, *, run_async: bool = True) -> bool:
+    if not _outbound_enabled():
+        return False
     def _send() -> bool:
         try:
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -42,6 +53,8 @@ def send_tg_document(
     run_async: bool = True,
     timeout_seconds: int = 120,
 ) -> bool:
+    if not _outbound_enabled():
+        return False
     upload_timeout = max(15, int(timeout_seconds or 120))
 
     def _send() -> bool:

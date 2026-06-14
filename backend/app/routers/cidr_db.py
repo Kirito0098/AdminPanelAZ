@@ -51,7 +51,6 @@ class CidrDbGenerateRequest(BaseModel):
     region_scopes: list[str] | None = None
     include_non_geo_fallback: bool = False
     exclude_ru_cidrs: bool = False
-    include_game_hosts: bool = False
     strict_geo_filter: bool = False
     filter_by_antifilter: bool = False
     apply_after: bool = False
@@ -280,7 +279,6 @@ def cidr_db_generate(
         region_scopes=region_scopes,
         include_non_geo_fallback=payload.include_non_geo_fallback,
         exclude_ru_cidrs=payload.exclude_ru_cidrs,
-        include_game_hosts=payload.include_game_hosts,
         strict_geo_filter=payload.strict_geo_filter,
         filter_by_antifilter=payload.filter_by_antifilter,
         total_cidr_limit=None,

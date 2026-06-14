@@ -130,6 +130,16 @@ def _module_guard_under_always_allowed(path: str, *, service: FeatureToggleServi
     if maintenance is not None and not service.is_enabled("maintenance"):
         if path in maintenance.api_paths or any(path.startswith(prefix) for prefix in maintenance.api_prefixes):
             return "maintenance", module_disabled_message("maintenance")
+
+    telegram = FEATURE_TOGGLE_BY_KEY.get("telegram")
+    if telegram is not None and not service.is_enabled("telegram"):
+        telegram_paths = (
+            "/api/settings/telegram",
+            "/api/settings/admin-notify",
+        )
+        if path in telegram_paths or any(path.startswith(f"{prefix}/") for prefix in telegram_paths):
+            return "telegram", module_disabled_message("telegram")
+
     return None
 
 

@@ -36,13 +36,14 @@ class Settings(BaseSettings):
     hsts_max_age: int = 31536000
     content_security_policy: str = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline' https://telegram.org; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: blob:; "
         "connect-src 'self' ws: wss:; "
+        "frame-src 'self' https://oauth.telegram.org; "
         "frame-ancestors 'self'; "
         "base-uri 'self'; "
-        "form-action 'self'"
+        "form-action 'self' https://oauth.telegram.org"
     )
     audit_log_enabled: bool = True
     database_url: str = "sqlite:///./data/adminpanel.db"

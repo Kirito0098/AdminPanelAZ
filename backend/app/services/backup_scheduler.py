@@ -66,29 +66,35 @@ async def run_backup_scheduler_loop(app_root: Path, backup_root: Path, db_path: 
                     except Exception:
                         pass
                 if _get_setting(db, "backup_telegram_enabled", "false") == "true":
-                    token = _get_setting(db, "telegram_bot_token")
-                    chat = _get_setting(db, "telegram_chat_id")
-                    if token and chat:
-                        send_tg_document(
-                            token,
-                            chat,
-                            str(manager.get_backup_path(result["file_name"])),
-                            caption=f"Авто-бэкап: {result['file_name']}",
-                        )
+                    from app.services.feature_guards import get_feature_service
+
+                    if get_feature_service().is_enabled("telegram"):
+                        token = _get_setting(db, "telegram_bot_token")
+                        chat = _get_setting(db, "telegram_chat_id")
+                        if token and chat:
+                            send_tg_document(
+                                token,
+                                chat,
+                                str(manager.get_backup_path(result["file_name"])),
+                                caption=f"Авто-бэкап: {result['file_name']}",
+                            )
                 if _get_setting(db, "backup_az_enabled", "true") == "true":
                     try:
                         adapter = get_active_adapter(db)
                         az_result = adapter.create_antizapret_backup()
                         if _get_setting(db, "backup_telegram_enabled", "false") == "true":
-                            token = _get_setting(db, "telegram_bot_token")
-                            chat = _get_setting(db, "telegram_chat_id")
-                            if token and chat and az_result.get("archive_path"):
-                                send_tg_document(
-                                    token,
-                                    chat,
-                                    az_result["archive_path"],
-                                    caption=f"Авто-бэкап AntiZapret: {az_result.get('archive_name', '')}",
-                                )
+                            from app.services.feature_guards import get_feature_service
+
+                            if get_feature_service().is_enabled("telegram"):
+                                token = _get_setting(db, "telegram_bot_token")
+                                chat = _get_setting(db, "telegram_chat_id")
+                                if token and chat and az_result.get("archive_path"):
+                                    send_tg_document(
+                                        token,
+                                        chat,
+                                        az_result["archive_path"],
+                                        caption=f"Авто-бэкап AntiZapret: {az_result.get('archive_name', '')}",
+                                    )
                     except Exception as exc:
                         logger.warning("Auto AntiZapret backup (client.sh 8) failed: %s", exc)
                 db.commit()

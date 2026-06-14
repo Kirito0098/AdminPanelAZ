@@ -1,19 +1,15 @@
 import {
   CloudDownload,
   FileText,
-  Gamepad2,
   LayoutDashboard,
   Layers,
   Route,
-  Settings2,
 } from 'lucide-react'
 import { useMemo } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import AntizapretConfigTab from '@/components/routing/AntizapretConfigTab'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import ConfirmActionDialog from '@/components/routing/ConfirmActionDialog'
 import CidrPipelineTab from '@/components/routing/CidrPipelineTab'
 import FilesTab from '@/components/routing/FilesTab'
-import GameFiltersTab from '@/components/routing/GameFiltersTab'
 import PipelineStatusBar from '@/components/routing/PipelineStatusBar'
 import PipelineTaskProgress from '@/components/routing/PipelineTaskProgress'
 import PresetsTab from '@/components/routing/PresetsTab'
@@ -34,12 +30,16 @@ export default function RoutingPage() {
 
   const initialRoutingTab = useMemo(() => {
     const tab = searchParams.get('tab')
-    const publicTabs = new Set(['overview', 'providers', 'presets', 'files', 'games'])
-    const adminTabs = new Set(['pipeline', 'antizapret-config'])
+    const publicTabs = new Set(['overview', 'providers', 'presets', 'files'])
+    const adminTabs = new Set(['pipeline'])
     if (tab && publicTabs.has(tab)) return tab
     if (tab && adminTabs.has(tab) && isAdmin) return tab
     return 'overview'
   }, [searchParams, isAdmin])
+
+  if (searchParams.get('tab') === 'antizapret-config') {
+    return <Navigate to="/antizapret" replace />
+  }
 
   const {
     data,
@@ -54,9 +54,6 @@ export default function RoutingPage() {
     autoRefresh,
     setAutoRefresh,
     countdown,
-    games,
-    gameModes,
-    setGameModes,
     filterAntifilter,
     setFilterAntifilter,
     deployAllOnline,
@@ -71,7 +68,6 @@ export default function RoutingPage() {
     executeConfirm,
     toggleProvider,
     applyPreset,
-    syncGames,
     refreshCidrDb,
     refreshOneProvider,
     retryFailedProviders,
@@ -136,16 +132,6 @@ export default function RoutingPage() {
             <FileText size={14} />
             <span className="hidden sm:inline">Файлы</span>
           </TabsTrigger>
-          <TabsTrigger value="games" className="gap-1.5">
-            <Gamepad2 size={14} />
-            <span className="hidden sm:inline">Игровые фильтры</span>
-          </TabsTrigger>
-          {isAdmin && (
-            <TabsTrigger value="antizapret-config" className="gap-1.5">
-              <Settings2 size={14} />
-              <span className="hidden sm:inline">Конфиг AntiZapret</span>
-            </TabsTrigger>
-          )}
         </TabsList>
 
         <TabsContent value="overview">
@@ -207,23 +193,6 @@ export default function RoutingPage() {
         <TabsContent value="files">
           <FilesTab isAdmin={isAdmin} />
         </TabsContent>
-
-        <TabsContent value="games">
-          <GameFiltersTab
-            games={games}
-            gameModes={gameModes}
-            isAdmin={isAdmin}
-            actionLoading={actionLoading}
-            onModeChange={(key, mode) => setGameModes((prev) => ({ ...prev, [key]: mode }))}
-            onSync={syncGames}
-          />
-        </TabsContent>
-
-        {isAdmin && (
-          <TabsContent value="antizapret-config">
-            <AntizapretConfigTab />
-          </TabsContent>
-        )}
       </Tabs>
 
       <ConfirmActionDialog

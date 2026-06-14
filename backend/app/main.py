@@ -22,7 +22,6 @@ from app.routers import (
     client_access,
     configs,
     edit_files,
-    game_filters,
     ip_blocked,
     logs,
     maintenance,
@@ -39,6 +38,7 @@ from app.routers import (
     tasks,
     tg_mini,
     traffic,
+    telegram_webhook,
     session,
 )
 from app.routers import settings as settings_router
@@ -242,10 +242,10 @@ app.include_router(edit_files.router, prefix="/api")
 app.include_router(security.router, prefix="/api")
 app.include_router(public_download.router, prefix="/api")
 app.include_router(server_monitor.router, prefix="/api")
-app.include_router(game_filters.router, prefix="/api")
 app.include_router(logs.router, prefix="/api")
 app.include_router(system.router, prefix="/api")
 app.include_router(tg_mini.router, prefix="/api")
+app.include_router(telegram_webhook.router, prefix="/api")
 app.include_router(tests.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
 app.include_router(feature_toggles.router, prefix="/api")
@@ -272,6 +272,7 @@ async def ip_restriction_middleware(request, call_next):
     exempt = (
         path.startswith("/api/public/")
         or path.startswith("/api/tg-mini")
+        or path.startswith("/api/telegram/webhook/")
         or path.startswith("/api/ip-blocked")
         or path.startswith("/api/auth/captcha")
         or path.startswith("/api/auth/telegram")

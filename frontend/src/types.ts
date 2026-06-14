@@ -39,6 +39,7 @@ export interface User {
   is_active: boolean
   must_change_password: boolean
   totp_enabled?: boolean
+  telegram_id?: string | null
   created_at: string
 }
 
@@ -181,9 +182,21 @@ export interface LatestChangelog {
 
 export interface TelegramSettings {
   bot_token_set: boolean
+  bot_username: string
+  auth_max_age_seconds: number
+  mini_app_url: string
   chat_id: string
   notify_enabled: boolean
   notify_on_backup: boolean
+  interactive_enabled: boolean
+  webhook_registered: boolean
+  webhook_secret_set: boolean
+  webhook_set_at: string
+}
+
+export interface TelegramLinkCode {
+  code: string
+  expires_in_seconds: number
 }
 
 export interface AdminNotifyEventItem {
@@ -197,6 +210,56 @@ export interface AdminNotifySettings {
   notify_enabled: boolean
   bot_token_set: boolean
   events: AdminNotifyEventItem[]
+}
+
+export interface TgMiniAuthResponse {
+  access_token: string
+  token_type: string
+  telegram_id: string
+}
+
+export interface TgMiniDashboard {
+  total_configs: number
+  connected_openvpn: number
+  connected_wireguard: number
+  server_ip: string | null
+  openvpn_clients: Array<{ common_name?: string; [key: string]: unknown }>
+  wireguard_peers: Array<{
+    client_name: string | null
+    public_key: string
+    transfer_rx: number
+    transfer_tx: number
+  }>
+  timestamp: string
+}
+
+export interface TgMiniConfig {
+  id: number
+  client_name: string
+  vpn_type: string
+}
+
+export interface TgMiniConfigFile {
+  path: string
+  filename?: string
+  download_filename?: string
+  protocol?: string
+  variant?: string
+}
+
+export interface TgMiniSettings {
+  server_ip: string | null
+  bot_configured: boolean
+  username: string
+  role: string
+}
+
+export interface TgMiniQrLink {
+  url: string
+  token: string
+  expires_at: string
+  max_downloads: number
+  pin_required: boolean
 }
 
 export interface VpnNetworkEnvRow {
@@ -513,15 +576,6 @@ export interface EditFileEntry {
   key: string
   filename: string
   title: string
-}
-
-export interface GameFilterItem {
-  key: string
-  title: string
-  subtitle: string
-  domains: string[]
-  mode: string
-  selected: boolean
 }
 
 export interface SecuritySettings {

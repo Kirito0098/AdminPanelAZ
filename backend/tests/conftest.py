@@ -16,11 +16,6 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-_GAME_ROUTE_LIMIT_ENV_KEYS = (
-    "AZ_GAME_DISABLE_CONFIG_ROUTE_LIMIT",
-    "AZ_GAME_CONFIG_ROUTE_LIMIT_RISK_ACK",
-)
-
 
 def run_async(coro):
     """Run an async coroutine from sync pytest tests."""
@@ -28,9 +23,31 @@ def run_async(coro):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_game_route_limit_env(monkeypatch):
-    for key in _GAME_ROUTE_LIMIT_ENV_KEYS:
-        monkeypatch.delenv(key, raising=False)
+def _neutralize_deploy_env(monkeypatch):
+    """Production .env often sets ENFORCE_HTTPS/BEHIND_NGINX; keep HTTP tests stable."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("ENFORCE_HTTPS", "false")
+    monkeypatch.setenv("BEHIND_NGINX", "false")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture()
+def db_session(tmp_path):
+    """Isolated SQLite session for unit tests that need AppSetting rows."""
+    from app.database import Base
+
+    db_path = tmp_path / "unit_test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    try:
+        yield session
+    finally:
+        session.close()
 
 
 @pytest.fixture()
@@ -90,6 +107,8 @@ def api_test_env(tmp_path, monkeypatch):
         api_rate_limit_enabled=False,
         audit_log_enabled=False,
         security_headers_enabled=True,
+        enforce_https=False,
+        behind_nginx=False,
     )
 
     def override_get_db():
@@ -107,8 +126,19 @@ def api_test_env(tmp_path, monkeypatch):
     mock_adapter.apply_config_changes.return_value = "ok"
     mock_adapter.ensure_openvpn_ban_check.return_value = None
 
+    from app.services.feature_toggles import FEATURE_TOGGLES, FeatureToggleService
+
+    features_env = tmp_path / "features.env"
+    features_env.write_text(
+        "\n".join(f"{item.env_key}=true" for item in FEATURE_TOGGLES) + "\n",
+        encoding="utf-8",
+    )
+    feature_service = FeatureToggleService(features_env)
+
     patches = (
         patch("app.config.get_settings", return_value=test_settings),
+        patch("app.middleware.http_security.get_settings", return_value=test_settings),
+        patch("app.routers.maintenance.get_settings", return_value=test_settings),
         patch("app.services.api_rate_limit.get_settings", return_value=test_settings),
         patch("app.services.public_download_rate_limit.get_settings", return_value=test_settings),
         patch("app.services.ip_restriction.ip_restriction_service.login_needs_captcha", return_value=False),
@@ -116,6 +146,8 @@ def api_test_env(tmp_path, monkeypatch):
         patch("app.services.auth_rate_limit.auth_rate_limit_service.check", return_value=None),
         patch("app.services.auth_rate_limit.auth_rate_limit_service.record_failure", return_value=None),
         patch("app.services.auth_rate_limit.auth_rate_limit_service.record_success", return_value=None),
+        patch("app.services.feature_guards.get_feature_service", return_value=feature_service),
+        patch("app.routers.feature_toggles.get_feature_service", return_value=feature_service),
         patch("app.routers.edit_files.get_active_adapter", return_value=mock_adapter),
         patch("app.services.node_manager.get_active_adapter", return_value=mock_adapter),
     )

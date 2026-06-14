@@ -51,7 +51,7 @@ export default function WarperAlerts({ health, activeNode, loadError }: WarperAl
         <SettingsAlert variant="danger" title="Конфликт Cloudflare WARP">
           <strong>ANTIZAPRET_WARP=y</strong> блокирует доменную маршрутизацию AZ-WARP. Отключите
           встроенный WARP в{' '}
-          <Link to="/routing" className="font-medium text-primary underline-offset-4 hover:underline">
+          <Link to="/antizapret" className="font-medium text-primary underline-offset-4 hover:underline">
             Конфиг AntiZapret
           </Link>
           .

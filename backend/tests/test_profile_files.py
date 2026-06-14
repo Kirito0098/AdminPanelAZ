@@ -17,7 +17,7 @@ from app.services.profile_files import (
     [
         ("vpn-Alex-(vpn.claymore-it.ru)-wg.conf", "Alex", True),
         ("vpn-Andrew-2-(vpn.claymore-it.ru)-wg.conf", "Andrew-2", True),
-        ("vpn-Andrew_TV-(vpn.claymore-it.ru)-am.conf", "Andrew_TV", True),
+        ("vpn-Andrew_TV-(vpn.claymore-it.ru)-am.conf", "Andrew_TV", False),
         ("vpn-Test-(vpn.claymore-it.ru)-wg.conf", "Test", True),
         ("vpn-Test111111122-(vpn.claymore-it.ru)-wg.conf", "Test", False),
         ("vpn-Test111111122-(vpn.claymore-it.ru)-wg.conf", "Test111111122", True),

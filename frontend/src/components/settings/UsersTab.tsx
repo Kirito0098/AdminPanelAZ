@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { Eye, Save, Search, Trash2, UserPlus, Users } from 'lucide-react'
-import { ApiError, getConfigs, getViewerAccess, setViewerAccess } from '@/api/client'
+import { Eye, Pencil, Save, Search, Trash2, UserPlus, Users } from 'lucide-react'
+import { ApiError, getConfigs, getViewerAccess, setViewerAccess, updateUser } from '@/api/client'
 import AppDialog from '@/components/shared/AppDialog'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
@@ -59,6 +59,14 @@ export default function UsersTab({
   const [accessLoading, setAccessLoading] = useState(false)
   const [savingAccess, setSavingAccess] = useState(false)
   const [search, setSearch] = useState('')
+  const [activeEditor, setActiveEditor] = useState<User | null>(null)
+  const [draftTelegramId, setDraftTelegramId] = useState('')
+  const [savingUser, setSavingUser] = useState(false)
+  const [usersList, setUsersList] = useState(users)
+
+  useEffect(() => {
+    setUsersList(users)
+  }, [users])
 
   const viewerUsers = useMemo(() => users.filter((u) => u.role === 'viewer'), [users])
 
@@ -165,6 +173,26 @@ export default function UsersTab({
 
   const countGranted = (userId: number) => accessMap[userId]?.length ?? 0
 
+  const openUserEditor = (user: User) => {
+    setActiveEditor(user)
+    setDraftTelegramId(user.telegram_id || '')
+  }
+
+  const saveUserTelegramId = async () => {
+    if (!activeEditor) return
+    setSavingUser(true)
+    try {
+      const updated = await updateUser(activeEditor.id, { telegram_id: draftTelegramId.trim() })
+      setUsersList((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      success(`Telegram ID для «${updated.username}» сохранён`)
+      setActiveEditor(null)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения пользователя')
+    } finally {
+      setSavingUser(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <Card>
@@ -225,11 +253,13 @@ export default function UsersTab({
             Список пользователей
           </CardTitle>
           <CardDescription>
-            {users.length > 0 ? `${users.length} учётн${users.length === 1 ? 'ая запись' : 'ых записей'}` : 'Пользователи не найдены'}
+            {usersList.length > 0
+              ? `${usersList.length} учётн${usersList.length === 1 ? 'ая запись' : 'ых записей'}`
+              : 'Пользователи не найдены'}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {users.length === 0 ? (
+          {usersList.length === 0 ? (
             <EmptyState
               icon={Users}
               title="Нет пользователей"
@@ -244,12 +274,13 @@ export default function UsersTab({
                     <TableHead>ID</TableHead>
                     <TableHead>Логин</TableHead>
                     <TableHead>Роль</TableHead>
+                    <TableHead>Telegram ID</TableHead>
                     <TableHead>Статус</TableHead>
                     <TableHead />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {users.map((u) => (
+                  {usersList.map((u) => (
                     <TableRow key={u.id}>
                       <TableCell className="text-muted-foreground">{u.id}</TableCell>
                       <TableCell className="font-medium">{u.username}</TableCell>
@@ -258,23 +289,32 @@ export default function UsersTab({
                           {roleLabels[u.role] ?? u.role}
                         </Badge>
                       </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {u.telegram_id || '—'}
+                      </TableCell>
                       <TableCell>
                         <Badge variant={u.is_active ? 'success' : 'destructive'}>
                           {u.is_active ? 'Активен' : 'Отключён'}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {u.id !== currentUserId && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="border-destructive/30 text-destructive hover:bg-destructive/10"
-                            onClick={() => onDeleteUser(u.id, u.username)}
-                          >
-                            <Trash2 size={14} />
-                            Удалить
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" size="sm" onClick={() => openUserEditor(u)}>
+                            <Pencil size={14} />
+                            Telegram ID
                           </Button>
-                        )}
+                          {u.id !== currentUserId && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                              onClick={() => onDeleteUser(u.id, u.username)}
+                            >
+                              <Trash2 size={14} />
+                              Удалить
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -327,6 +367,40 @@ export default function UsersTab({
           )}
         </CardContent>
       </Card>
+
+      <AppDialog
+        open={activeEditor !== null}
+        onOpenChange={(open) => {
+          if (!open && !savingUser) setActiveEditor(null)
+        }}
+        title={activeEditor ? `Telegram ID: ${activeEditor.username}` : 'Telegram ID'}
+        description="Числовой ID пользователя Telegram для входа через виджет и Mini App"
+        icon={Users}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setActiveEditor(null)} disabled={savingUser}>
+              Отмена
+            </Button>
+            <Button onClick={() => void saveUserTelegramId()} disabled={savingUser}>
+              <Save size={16} />
+              {savingUser ? 'Сохранение...' : 'Сохранить'}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-2">
+          <Label htmlFor="editTelegramId">Telegram ID</Label>
+          <Input
+            id="editTelegramId"
+            value={draftTelegramId}
+            onChange={(e) => setDraftTelegramId(e.target.value)}
+            placeholder="123456789"
+          />
+          <p className="text-xs text-muted-foreground">
+            Оставьте пустым, чтобы снять привязку. Один ID нельзя назначить двум пользователям.
+          </p>
+        </div>
+      </AppDialog>
 
       <AppDialog
         open={activeViewer !== null}

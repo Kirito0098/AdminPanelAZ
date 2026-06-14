@@ -14,7 +14,6 @@ import SettingsNav, {
   isSectionAvailable,
   type SettingsSection,
 } from '@/components/settings/SettingsNav'
-import TelegramTab from '@/components/settings/TelegramTab'
 import TestsTab from '@/components/settings/TestsTab'
 import UpdatesTab from '@/components/settings/UpdatesTab'
 import UsersTab from '@/components/settings/UsersTab'
@@ -61,10 +60,6 @@ const SECTION_TITLES: Record<SettingsSection, { title: string; description: stri
   vpn_network: {
     title: 'Сеть и публикация',
     description: 'Публикация панели и reverse-proxy (фаза 17 — полный UI)',
-  },
-  telegram: {
-    title: 'Telegram',
-    description: 'Бот для оповещений администратора и доставки бэкапов',
   },
   modules: {
     title: 'Модули',
@@ -229,8 +224,6 @@ export default function SettingsPage() {
         return <BackupTab />
       case 'monitoring':
         return <MonitoringTab />
-      case 'telegram':
-        return <TelegramTab />
       case 'modules':
         return <FeatureTogglesTab />
       case 'updates':

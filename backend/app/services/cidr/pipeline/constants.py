@@ -103,38 +103,3 @@ _ANTIFILTER_INDEX_CACHE = {
     "expires_at": 0.0,
     "index": None,
 }
-_az_path = str(_settings.antizapret_path)
-LEGACY_GAME_INCLUDE_HOSTS_FILE = os.getenv(
-    "CIDR_GAME_LEGACY_INCLUDE_HOSTS_FILE",
-    f"{_az_path}/config/include-hosts.txt",
-)
-LEGACY_GAME_INCLUDE_IPS_FILE = os.getenv(
-    "CIDR_GAME_LEGACY_INCLUDE_IPS_FILE",
-    f"{_az_path}/config/include-ips.txt",
-)
-AZ_GAME_INCLUDE_HOSTS_FILE = os.getenv(
-    "CIDR_AZ_GAME_INCLUDE_HOSTS_FILE",
-    f"{_az_path}/config/AZ-Game-include-hosts.txt",
-)
-AZ_GAME_INCLUDE_IPS_FILE = os.getenv(
-    "CIDR_AZ_GAME_INCLUDE_IPS_FILE",
-    f"{_az_path}/config/AZ-Game-include-ips.txt",
-)
-GAME_INCLUDE_HOSTS_FILE = AZ_GAME_INCLUDE_HOSTS_FILE
-GAME_INCLUDE_IPS_FILE = AZ_GAME_INCLUDE_IPS_FILE
-AZ_GAME_EXCLUDE_HOSTS_FILE = os.getenv(
-    "CIDR_AZ_GAME_EXCLUDE_HOSTS_FILE",
-    f"{_az_path}/config/AZ-Game-exclude-hosts.txt",
-)
-AZ_GAME_EXCLUDE_IPS_FILE = os.getenv(
-    "CIDR_AZ_GAME_EXCLUDE_IPS_FILE",
-    f"{_az_path}/config/AZ-Game-exclude-ips.txt",
-)
-GAME_FILTER_BLOCK_START = "# BEGIN AdminPanelAZ CIDR games include"
-GAME_FILTER_BLOCK_END = "# END AdminPanelAZ CIDR games include"
-GAME_FILTER_IP_BLOCK_START = "# BEGIN AdminPanelAZ CIDR games include-ips"
-GAME_FILTER_IP_BLOCK_END = "# END AdminPanelAZ CIDR games include-ips"
-GAME_FILTER_EXCLUDE_BLOCK_START = "# BEGIN AdminPanelAZ CIDR games exclude"
-GAME_FILTER_EXCLUDE_BLOCK_END = "# END AdminPanelAZ CIDR games exclude"
-GAME_FILTER_EXCLUDE_IP_BLOCK_START = "# BEGIN AdminPanelAZ CIDR games exclude-ips"
-GAME_FILTER_EXCLUDE_IP_BLOCK_END = "# END AdminPanelAZ CIDR games exclude-ips"

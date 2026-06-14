@@ -8,7 +8,6 @@ import {
   KeyRound,
   Puzzle,
   QrCode,
-  Send,
   Shield,
   User,
   Users,
@@ -26,7 +25,6 @@ export type SettingsSection =
   | 'backup'
   | 'monitoring'
   | 'vpn_network'
-  | 'telegram'
   | 'modules'
   | 'updates'
   | 'tests'
@@ -34,7 +32,6 @@ export type SettingsSection =
 type SettingsTabKey =
   | 'backup'
   | 'maintenance'
-  | 'telegram'
   | 'security'
   | 'tests'
   | 'users'
@@ -129,19 +126,6 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
         icon: Globe,
         description: 'HTTPS, домен и reverse-proxy',
         settingsTab: 'vpn_network',
-      },
-    ],
-  },
-  {
-    label: 'Интеграции',
-    adminOnly: true,
-    items: [
-      {
-        id: 'telegram',
-        label: 'Telegram',
-        icon: Send,
-        description: 'Уведомления и доставка бэкапов',
-        settingsTab: 'telegram',
       },
     ],
   },

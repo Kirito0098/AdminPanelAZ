@@ -10,7 +10,9 @@ def test_get_feature_states_defaults_true(tmp_path: Path):
     env_file.write_text("", encoding="utf-8")
     service = FeatureToggleService(env_file)
     states = service.get_feature_states()
-    assert all(states[item.key] for item in FEATURE_TOGGLES)
+    for item in FEATURE_TOGGLES:
+        expected = item.default
+        assert states[item.key] is expected, item.key
 
 
 def test_is_enabled_reads_env(tmp_path: Path):

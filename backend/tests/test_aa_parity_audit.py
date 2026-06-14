@@ -34,7 +34,7 @@ AA_PARITY_MATRIX: dict[str, tuple[str, str]] = {
     "test_edit_files_page_context.py": ("test_edit_files_api.py", "page context → API tests"),
     "test_feature_toggles.py": ("test_feature_toggles_service.py, test_feature_guards.py", "split"),
     "test_firewall_tools_check.py": ("test_firewall_tools_check.py", "direct"),
-    "test_game_catalog_coverage.py": ("test_game_catalog_coverage.py", "direct"),
+    "test_game_catalog_coverage.py": ("N/A", "game filters removed from AdminPanelAZ"),
     "test_http_security.py": ("test_http_security.py", "direct"),
     "test_index_page_context.py": ("N/A", "Jinja page context"),
     "test_index_routes_wg_access.py": ("test_wg_access_policy_service.py", "route logic in service tests"),
@@ -59,7 +59,7 @@ AA_PARITY_MATRIX: dict[str, tuple[str, str]] = {
         "Flask sessions → JWT/web sessions",
     ),
     "test_settings_api_action_logs_export.py": ("test_action_logs_export.py", "renamed"),
-    "test_settings_api_cidr_games.py": ("test_cidr_db_presets.py, test_game_filters_sync.py", "split"),
+    "test_settings_api_cidr_games.py": ("test_cidr_db_presets.py", "N/A — game filters removed"),
     "test_settings_page_context.py": ("N/A", "Jinja page context"),
     "test_settings_post_handlers.py": ("test_settings_post_handlers.py", "direct"),
     "test_site_diagnostics.py": ("test_site_diagnostics.py", "direct"),
@@ -84,7 +84,7 @@ AA_NON_PORTABLE = frozenset(
 
 def test_all_aa_modules_accounted_for():
     assert len(AA_PARITY_MATRIX) == 53
-    assert len(AA_NON_PORTABLE) == 9
+    assert len(AA_NON_PORTABLE) == 10
 
 
 def test_jinja_only_module_is_documented_non_portable():

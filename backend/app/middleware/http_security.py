@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -16,6 +17,7 @@ NOINDEX_PATH_PREFIXES = (
     "/login",
     "/settings",
     "/routing",
+    "/antizapret",
     "/server-monitor",
     "/logs",
     "/edit-files",
@@ -47,6 +49,7 @@ Disallow: /
 Disallow: /login
 Disallow: /settings
 Disallow: /routing
+Disallow: /antizapret
 Disallow: /server-monitor
 Disallow: /logs
 Disallow: /edit-files
@@ -89,6 +92,26 @@ def build_security_txt(branding: Mapping[str, Any] | None = None) -> str:
     )
 
 
+def is_tg_mini_path(path: str) -> bool:
+    return path.startswith("/api/tg-mini")
+
+
+TG_MINI_FRAME_ANCESTORS = (
+    "frame-ancestors 'self' "
+    "https://web.telegram.org https://weba.telegram.org https://webk.telegram.org "
+    "https://telegram.org https://t.me"
+)
+
+
+def csp_for_path(path: str, base_csp: str) -> str:
+    if not is_tg_mini_path(path):
+        return base_csp
+    stripped = re.sub(r"frame-ancestors[^;]*;?\s*", "", base_csp).strip()
+    if stripped and not stripped.endswith(";"):
+        stripped += ";"
+    return f"{stripped} {TG_MINI_FRAME_ANCESTORS};".strip()
+
+
 class HttpSecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         settings = get_settings()
@@ -113,12 +136,16 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _apply_headers(response: Response, settings, path: str, request: Request | None = None) -> None:
+        tg_mini = is_tg_mini_path(path)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        if not tg_mini:
+            response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+        if not tg_mini:
+            response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         if request is not None and HttpSecurityMiddleware._is_secure(request):
-            response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+            coop = "same-origin-allow-popups" if path.rstrip("/") in ("/login", "") else "same-origin"
+            response.headers.setdefault("Cross-Origin-Opener-Policy", coop)
         response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
         response.headers.setdefault(
             "Permissions-Policy",
@@ -130,6 +157,7 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
                 f"max-age={settings.hsts_max_age}; includeSubDomains",
             )
         if settings.content_security_policy:
-            response.headers.setdefault("Content-Security-Policy", settings.content_security_policy)
+            csp = csp_for_path(path, settings.content_security_policy)
+            response.headers["Content-Security-Policy"] = csp
         if should_noindex_path(path):
             response.headers.setdefault("X-Robots-Tag", "noindex, nofollow, noarchive")

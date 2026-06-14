@@ -727,9 +727,10 @@ wizard_ask_optional() {
       WIZ_TRAFFIC_SYNC_ENABLED="false"
     fi
 
-    wiz_prompt_yesno "Настроить Telegram-уведомления?" "n"
+    wiz_prompt_yesno "Настроить Telegram-уведомления (опционально, только bot token и chat_id)?" "n"
     if [[ "$REPLY" == "y" ]]; then
       WIZ_TELEGRAM_ENABLED="true"
+      print_info "Модуль Telegram и Mini App включаются позже в панели: Настройки → Модули → Telegram."
       wiz_prompt "Telegram Bot Token" ""
       WIZ_TELEGRAM_BOT_TOKEN="$REPLY"
       wiz_prompt "Telegram Chat ID" ""

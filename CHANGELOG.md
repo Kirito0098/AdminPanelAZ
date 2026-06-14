@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-06-14
+
+### Removed
+- **Игровые фильтры** — полное удаление функциональности include/exclude для игровых доменов и IP (~75 игр из каталога AdminAntizapret):
+  - **UI** — вкладка «Игровые фильтры» на странице маршрутизации (`GameFiltersTab`, deep link `?tab=games`).
+  - **API** — `GET/POST /api/routing/game-filters`, сохранение режимов в `app_settings.game_filter_modes`.
+  - **Node agent** — `POST /routing/game-filters/sync`.
+  - **Backend** — модули `game_catalog.py`, `game_server_data.py`, `game_filters.py`, `game_filter_sync.py`, `pipeline/games.py`, `pipeline/games_catalog.py`, router `game_filters.py`; метод `NodeAdapter.sync_game_routes_filter`.
+  - **CIDR pipeline** — синхронизация `AZ-Game-include-*` / `AZ-Game-exclude-*` при generate/deploy; поле `include_game_hosts` в `CidrDbGenerateRequest`.
+  - **Константы/env** — `CIDR_AZ_GAME_*`, `CIDR_GAME_LEGACY_*`, `AZ_GAME_DISABLE_CONFIG_ROUTE_LIMIT` и связанные маркеры managed-блоков.
+  - **Тесты** — `test_game_filters_sync.py`, `test_game_catalog_coverage.py`; game-related кейсы в `test_cidr_list_updater.py`.
+
+### Changed
+- **CIDR pipeline** — generate/estimate/deploy больше не трогают игровые конфиги AntiZapret; лимит маршрутов OpenVPN всегда enforced (без env-обхода через game filter).
+- **README** — убраны упоминания game filters из матрицы возможностей и чеклиста.
+- **Telegram — Mini App** — inline HTML в `tg_mini.py` заменён на static React-сборку; deprecated `POST /api/tg-mini/send-config`.
+
+### Fixed
+- **Тесты** — стабильный прогон на машинах с production `.env` (`ENFORCE_HTTPS`, `BEHIND_NGINX`): autouse-изоляция env в `conftest.py`, патч `http_security.get_settings` в `api_test_env`; исправлены ожидания в `test_profile_files`, `test_warper_service`, `test_api_rate_limit` (patch middleware import path).
+- **Telegram webhook** — IP-allowlist использует `X-Real-IP` / `request.client`, без доверия к подменённому `X-Forwarded-For`.
+- **Telegram Mini App** — проверка `auth_date` в `init_data`; запрет смены `telegram_id` через `PATCH /admin-notify`.
+- **Telegram Mini App** — `PATCH /telegram-settings` делегирует в `maintenance.update_telegram_settings` (interactive + webhook lifecycle).
+- **Telegram bot /settings** — webhook регистрируется с публичным URL из `mini_app_url`, не `panel.local`.
+- **Debug** — удалена временная agent-log инструментация из `auth.py` и `LoginPage.tsx`.
+
+### Added
+- **Telegram — интерактивный бот (фазы 0–4)** — webhook `POST /api/telegram/webhook/{secret}`, IP-allowlist Telegram, rate limit; команды `/start`, `/link`, `/status`, `/configs`, `/config`, `/help`, `/settings` (admin, inline-меню настроек панели).
+- **Telegram — /settings в боте** — разделы Telegram, AdminNotify, бэкапы, мониторинг, безопасность, обслуживание; FSM-ввод чисел/токена; confirm для опасных действий; `action_logs` с `source=telegram_bot`.
+- **Telegram — Mini App v2** — React entry `frontend/src/tg-mini/` (Dashboard, Configs, Settings, TelegramSettings); Vite build → `backend/app/static/tg_mini/`; API: files, send (`self`|`chat`), QR-link, admin-notify и telegram-settings proxy.
+- **Telegram — фаза 0** — `TelegramTab`: username, max auth age, Mini App URL, interactive bot + webhook UI, notify_on_backup; `UsersTab`: Telegram ID; Login Widget — причина отключения; send-config на `user.telegram_id`; AdminNotify при PATCH telegram settings; `GET /api/telegram/link-code`.
+- **Telegram — фаза 4** — единый словарь RU `telegram_bot_i18n.py`; команды `/cidr` (статус pipeline) и `/warper` (статус AZ-WARP, если модуль включён).
+- **Документация** — обновлены `docs/Telegram.md` и чеклист регрессии Telegram в `README.md`.
+- **Тесты** — `test_telegram_settings.py`, `test_telegram_webhook.py` (callback_query, inline keyboard), `test_telegram_bot_settings.py`, `test_tg_mini_routes.py`, `test_tg_mini_send_config.py`.
+
+### Migration notes
+- **`app_settings.game_filter_modes`** — orphan-записи в БД можно оставить или удалить вручную; на работу панели не влияют.
+- **`AZ-Game-*` на узлах** — существующие файлы в `config/` AntiZapret больше не обновляются кодом; при необходимости очистите вручную или перезапишите через AntiZapret.
+
 ## [1.7.0] - 2026-06-14
 
 ### Added
@@ -374,7 +412,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Production-развёртывание: `install.sh`, daemon/watchdog, systemd, раздача UI из backend в prod-режиме.
 - OpenVPN management sockets, vnStat, WebSocket-мониторинг, Telegram Mini App, in-panel pytest.
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.4.3...v1.5.0

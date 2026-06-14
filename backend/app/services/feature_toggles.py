@@ -155,14 +155,14 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         key="routing",
         env_key="FEATURE_ROUTING_ENABLED",
         label="Маршрутизация",
-        description="Раздел «Маршрутизация / CIDR».",
+        description="Разделы «Маршрутизация / CIDR» и «Конфиг AntiZapret».",
         icon="🗺️",
         disable_hint="Раздел маршрутизации будет недоступен.",
         resource_impact_level="minimal",
         default=True,
         group="app_module",
         api_prefixes=("/api/routing",),
-        frontend_paths=("/routing",),
+        frontend_paths=("/routing", "/antizapret"),
     ),
     FeatureToggleDefinition(
         key="warper",
@@ -194,15 +194,26 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         key="telegram",
         env_key="FEATURE_TELEGRAM_ENABLED",
         label="Telegram",
-        description="Telegram-авторизация и Mini App.",
+        description=(
+            "Полная интеграция: бот, webhook, Mini App, вход через Telegram, AdminNotify и доставка бэкапов."
+        ),
         icon="✈️",
-        disable_hint="Вход через Telegram и Mini App будут недоступны.",
+        disable_hint=(
+            "Раздел Telegram, webhook, Mini App и все вызовы Bot API будут отключены. "
+            "Webhook снимается автоматически; перезапустите панель после сохранения."
+        ),
         resource_impact_level="low",
-        default=True,
+        resource_savings="Webhook, Bot API, Mini App auth и исходящие TG-уведомления/бэкапы.",
+        default=False,
         group="app_module",
-        api_prefixes=("/api/tg-mini",),
-        api_paths=("/api/auth/telegram", "/api/auth/telegram/config"),
-        settings_tabs=("telegram",),
+        api_prefixes=("/api/tg-mini", "/api/telegram"),
+        api_paths=(
+            "/api/auth/telegram",
+            "/api/auth/telegram/config",
+            "/api/settings/telegram",
+            "/api/settings/admin-notify",
+        ),
+        frontend_paths=("/telegram",),
     ),
     FeatureToggleDefinition(
         key="backups",

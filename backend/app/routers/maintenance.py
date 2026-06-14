@@ -1,4 +1,6 @@
 from pathlib import Path
+import secrets
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -16,6 +18,7 @@ from app.schemas import (
     BackgroundTaskResponse,
     MessageResponse,
     ServiceRestartRequest,
+    TelegramLinkCodeResponse,
     TelegramSettingsResponse,
     TelegramSettingsUpdate,
     VpnNetworkEnvRow,
@@ -38,6 +41,8 @@ from app.services.panel_publish_info import (
     resolve_request_url_root,
 )
 from app.services.telegram import send_tg_message
+from app.services.telegram_api import delete_webhook_sync, set_webhook_sync
+from app.services.telegram_link import create_link_code
 
 router = APIRouter(tags=["maintenance"])
 
@@ -123,37 +128,90 @@ def restart_service(
     return MessageResponse(message=f"Служба {payload.service_name} перезапущена", detail=output)
 
 
-@router.get("/settings/telegram", response_model=TelegramSettingsResponse)
-def get_telegram_settings(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def _normalize_bot_username(value: str) -> str:
+    return value.strip().lstrip("@")
+
+
+def _ensure_webhook_secret(db: Session) -> str:
+    secret = _get_setting(db, "telegram_webhook_secret")
+    if not secret:
+        secret = secrets.token_urlsafe(32)
+        _set_setting(db, "telegram_webhook_secret", secret)
+    return secret
+
+
+def _webhook_url(request: Request, secret: str) -> str:
+    root = resolve_request_url_root(request, behind_nginx=get_settings().behind_nginx).rstrip("/")
+    return f"{root}/api/telegram/webhook/{secret}"
+
+
+def _telegram_settings_response(db: Session, request: Request) -> TelegramSettingsResponse:
+    max_age_raw = _get_setting(db, "telegram_auth_max_age_seconds")
+    max_age = int(max_age_raw) if max_age_raw.isdigit() else 300
+    max_age = max(30, min(max_age, 86400))
+    root = resolve_request_url_root(request, behind_nginx=get_settings().behind_nginx).rstrip("/")
+    webhook_set_at = _get_setting(db, "telegram_webhook_set_at")
+    webhook_secret = _get_setting(db, "telegram_webhook_secret")
     return TelegramSettingsResponse(
         bot_token_set=bool(_get_setting(db, "telegram_bot_token")),
+        bot_username=_get_setting(db, "telegram_bot_username"),
+        auth_max_age_seconds=max_age,
+        mini_app_url=f"{root}/api/tg-mini",
         chat_id=_get_setting(db, "telegram_chat_id"),
         notify_on_backup=_get_setting(db, "backup_telegram_enabled", "false") == "true",
         notify_enabled=_get_setting(db, "telegram_notify_enabled", "false") == "true",
+        interactive_enabled=_get_setting(db, "telegram_bot_interactive_enabled", "false") == "true",
+        webhook_registered=bool(webhook_set_at),
+        webhook_secret_set=bool(webhook_secret),
+        webhook_set_at=webhook_set_at,
     )
+
+
+@router.get("/settings/telegram", response_model=TelegramSettingsResponse)
+def get_telegram_settings(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    return _telegram_settings_response(db, request)
 
 
 @router.patch("/settings/telegram", response_model=TelegramSettingsResponse)
 def update_telegram_settings(
     payload: TelegramSettingsUpdate,
+    request: Request,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
 ):
     if payload.bot_token is not None:
         _set_setting(db, "telegram_bot_token", payload.bot_token.strip())
+    if payload.bot_username is not None:
+        _set_setting(db, "telegram_bot_username", _normalize_bot_username(payload.bot_username))
+    if payload.auth_max_age_seconds is not None:
+        _set_setting(db, "telegram_auth_max_age_seconds", str(payload.auth_max_age_seconds))
     if payload.chat_id is not None:
         _set_setting(db, "telegram_chat_id", payload.chat_id.strip())
     if payload.notify_enabled is not None:
         _set_setting(db, "telegram_notify_enabled", "true" if payload.notify_enabled else "false")
     if payload.notify_on_backup is not None:
         _set_setting(db, "backup_telegram_enabled", "true" if payload.notify_on_backup else "false")
+    if payload.interactive_enabled is not None:
+        _set_setting(db, "telegram_bot_interactive_enabled", "true" if payload.interactive_enabled else "false")
+        if payload.interactive_enabled:
+            _ensure_webhook_secret(db)
+        else:
+            token = _get_setting(db, "telegram_bot_token")
+            if token:
+                delete_webhook_sync(token)
+            _set_setting(db, "telegram_webhook_set_at", "")
     db.commit()
-    return TelegramSettingsResponse(
-        bot_token_set=bool(_get_setting(db, "telegram_bot_token")),
-        chat_id=_get_setting(db, "telegram_chat_id"),
-        notify_on_backup=_get_setting(db, "backup_telegram_enabled", "false") == "true",
-        notify_enabled=_get_setting(db, "telegram_notify_enabled", "false") == "true",
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_telegram_auth_update",
+        client_timezone=get_client_timezone_from_request(request),
     )
+    return _telegram_settings_response(db, request)
 
 
 def _admin_notify_settings_response(db: Session, user: User) -> AdminNotifySettingsResponse:
@@ -242,6 +300,59 @@ def test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin
     if not ok:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
     return MessageResponse(message="Тестовое сообщение отправлено")
+
+
+@router.post("/settings/telegram/webhook/register", response_model=TelegramSettingsResponse)
+def register_telegram_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    if not get_feature_service().is_enabled("telegram"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=module_disabled_message("telegram"))
+    bot_token = _get_setting(db, "telegram_bot_token")
+    if not bot_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
+    if _get_setting(db, "telegram_bot_interactive_enabled", "false") != "true":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Интерактивный бот не включён")
+
+    secret = _ensure_webhook_secret(db)
+    url = _webhook_url(request, secret)
+    ok, error = set_webhook_sync(bot_token, url, secret_token=secret)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setWebhook: {error}")
+
+    _set_setting(db, "telegram_webhook_set_at", datetime.now(timezone.utc).isoformat())
+    db.commit()
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_telegram_auth_update",
+        client_timezone=get_client_timezone_from_request(request),
+    )
+    return _telegram_settings_response(db, request)
+
+
+@router.delete("/settings/telegram/webhook", response_model=TelegramSettingsResponse)
+def unregister_telegram_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    bot_token = _get_setting(db, "telegram_bot_token")
+    if bot_token:
+        ok, error = delete_webhook_sync(bot_token)
+        if not ok:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"deleteWebhook: {error}")
+    _set_setting(db, "telegram_webhook_set_at", "")
+    db.commit()
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_telegram_auth_update",
+        client_timezone=get_client_timezone_from_request(request),
+    )
+    return _telegram_settings_response(db, request)
 
 
 @router.get("/settings/vpn-network", response_model=VpnNetworkSettingsResponse)
