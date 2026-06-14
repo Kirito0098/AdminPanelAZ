@@ -150,6 +150,12 @@ export async function rotateNodeApiKey(nodeId: number) {
   })
 }
 
+export async function disableNodeMtls(nodeId: number) {
+  return apiFetch<import('../types').NodeMtlsDisableResult>(`/nodes/${nodeId}/disable-mtls`, {
+    method: 'POST',
+  })
+}
+
 export async function enableNodeMtls(nodeId: number) {
   return apiFetch<{ message: string; node_id: number; mtls_enabled: boolean }>(
     `/nodes/${nodeId}/enable-mtls`,
@@ -516,6 +522,29 @@ export async function toggleRoutingProvider(filename: string, enabled: boolean) 
   })
 }
 
+export async function getRoutingProviderContent(filename: string) {
+  return apiFetch<import('../types').RoutingProviderContent>(
+    `/routing/providers/${encodeURIComponent(filename)}`,
+  )
+}
+
+export async function saveRoutingProviderContent(filename: string, content: string) {
+  return apiFetch<{ filename: string; cidr_count: number }>(
+    `/routing/providers/${encodeURIComponent(filename)}`,
+    { method: 'PUT', body: JSON.stringify({ content }) },
+  )
+}
+
+export async function getRoutingResults() {
+  return apiFetch<{ files: import('../types').RouteResultFileEntry[] }>('/routing/results')
+}
+
+export async function getRoutingResultContent(key: string) {
+  return apiFetch<{ key: string; filename: string; content: string; line_count: number }>(
+    `/routing/results/${encodeURIComponent(key)}`,
+  )
+}
+
 export async function applyRoutingPreset(presetKey: string) {
   return apiFetch(`/routing/presets/${encodeURIComponent(presetKey)}/apply`, { method: 'POST' })
 }
@@ -572,6 +601,19 @@ export async function resetCidrDbPreset(id: number) {
     `/routing/cidr-db/presets/${id}/reset`,
     { method: 'POST' },
   )
+}
+
+export async function seedCidrDbPresets() {
+  return apiFetch<{ success: boolean; message: string }>('/routing/cidr-db/seed-presets', {
+    method: 'POST',
+  })
+}
+
+export async function clearCidrDb(selectedFiles?: string[] | null) {
+  return apiFetch<{ success: boolean; message: string }>('/routing/cidr-db/clear', {
+    method: 'POST',
+    body: JSON.stringify({ selected_files: selectedFiles ?? null }),
+  })
 }
 
 export async function getCidrDbStatus() {
@@ -1141,6 +1183,20 @@ export async function unbanScannerIp(ip: string) {
   })
 }
 
+export async function clearScannerBans() {
+  return apiFetch<{ message: string }>('/security/scanner-bans/clear', { method: 'POST' })
+}
+
+export async function getQrDownloadLogs(limit = 50) {
+  return apiFetch<import('../types').QrDownloadAuditEntry[]>(`/logs/qr-downloads?limit=${limit}`)
+}
+
+export async function getOpenVpnSockets() {
+  return apiFetch<{ sockets: import('../types').OpenVpnSocketStatus[]; timestamp: string }>(
+    '/logs/openvpn-sockets',
+  )
+}
+
 export async function getActionLogs(limit = 100) {
   return apiFetch<import('../types').ActionLogEntry[]>(`/logs/actions?limit=${limit}`)
 }
@@ -1171,12 +1227,60 @@ export function downloadBackup(fileName: string) {
   return fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
 }
 
-export async function fetchQrBlob(configId: number, path: string) {
+export type QrContentMode = 'profile' | 'download-link'
+
+export type QrBlobResult = {
+  blob: Blob
+  contentMode: QrContentMode
+  downloadUrl?: string
+}
+
+async function parseApiError(response: Response, fallback: string): Promise<ApiError> {
+  let detail = fallback
+  const body = await response.text()
+  if (body) {
+    try {
+      const data = JSON.parse(body) as { detail?: unknown }
+      if (data.detail != null) {
+        detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
+      } else {
+        detail = body
+      }
+    } catch {
+      detail = body
+    }
+  }
+  return new ApiError(detail, response.status)
+}
+
+export async function fetchQrBlob(
+  configId: number,
+  path: string,
+  retry = true,
+): Promise<QrBlobResult> {
+  const headers = new Headers()
   const token = getToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const sessionId = getWebSessionId()
+  if (sessionId) headers.set('X-Web-Session-Id', sessionId)
+
   const params = new URLSearchParams({ path })
   const response = await fetch(`${API_BASE}/configs/${configId}/qr?${params}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers,
+    credentials: 'include',
   })
-  if (!response.ok) throw new ApiError('Ошибка генерации QR', response.status)
-  return response.blob()
+  if (response.status === 401 && retry) {
+    const newToken = await refreshAccessToken()
+    if (newToken) {
+      return fetchQrBlob(configId, path, false)
+    }
+    localStorage.removeItem('token')
+  }
+  if (!response.ok) {
+    throw await parseApiError(response, 'Ошибка генерации QR')
+  }
+  const contentMode: QrContentMode =
+    response.headers.get('X-Qr-Content') === 'download-link' ? 'download-link' : 'profile'
+  const downloadUrl = response.headers.get('X-Qr-Download-Url') ?? undefined
+  return { blob: await response.blob(), contentMode, downloadUrl }
 }

@@ -1,5 +1,6 @@
-import { ExternalLink, FileText } from 'lucide-react'
+import { ExternalLink, FileText, Router } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import RouteResultsPanel from '@/components/routing/RouteResultsPanel'
 import StatusPanel from '@/components/noc/StatusPanel'
 import { Button } from '@/components/ui/button'
 
@@ -18,50 +19,64 @@ interface FilesTabProps {
 
 export default function FilesTab({ isAdmin }: FilesTabProps) {
   return (
-    <StatusPanel title="Файлы маршрутизации" icon={FileText}>
-      <p className="mb-4 text-sm text-muted-foreground">
-        Ручное редактирование базовых списков include/exclude. После сохранения файлов выполните
-        «Применить (doall.sh)» для активации на узле.
-      </p>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        {routingFiles.map((f) => (
-          <div
-            key={f.key}
-            className="flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/40"
-          >
-            <div>
-              <div className="font-medium text-sm">{f.title}</div>
-              <div className="text-xs text-muted-foreground">{f.desc}</div>
-            </div>
-            {isAdmin && (
-              <Button variant="ghost" size="sm" asChild>
-                <Link to={`/edit-files?file=${f.key}`}>
-                  <ExternalLink size={14} className="mr-1" />
-                  Открыть
-                </Link>
-              </Button>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {isAdmin && (
-        <div className="mt-6">
-          <Button asChild>
-            <Link to="/edit-files">
-              <FileText size={14} className="mr-1.5" />
-              Перейти в редактор файлов
-            </Link>
-          </Button>
-        </div>
-      )}
-
-      {!isAdmin && (
-        <p className="mt-4 text-sm text-muted-foreground">
-          Редактирование файлов доступно только администраторам.
+    <div className="space-y-6">
+      <StatusPanel title="Файлы маршрутизации" icon={FileText}>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Ручное редактирование базовых списков include/exclude. После сохранения файлов выполните
+          «Применить (doall.sh)» для активации на узле.
         </p>
-      )}
-    </StatusPanel>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          {routingFiles.map((f) => (
+            <div
+              key={f.key}
+              className="flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/40"
+            >
+              <div>
+                <div className="font-medium text-sm">{f.title}</div>
+                <div className="text-xs text-muted-foreground">{f.desc}</div>
+              </div>
+              {isAdmin && (
+                <Button variant="ghost" size="sm" asChild>
+                  <Link to={`/edit-files?file=${f.key}`}>
+                    <ExternalLink size={14} className="mr-1" />
+                    Открыть
+                  </Link>
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {isAdmin && (
+          <div className="mt-6">
+            <Button asChild>
+              <Link to="/edit-files">
+                <FileText size={14} className="mr-1.5" />
+                Перейти в редактор файлов
+              </Link>
+            </Button>
+          </div>
+        )}
+
+        {!isAdmin && (
+          <p className="mt-4 text-sm text-muted-foreground">
+            Редактирование файлов доступно только администраторам.
+          </p>
+        )}
+      </StatusPanel>
+
+      <StatusPanel title="Route-файлы для роутеров" icon={Router}>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Сгенерированные файлы для Keenetic, MikroTik и TP-Link на активном узле. Публичные ссылки
+          настраиваются в разделе{' '}
+          <Link to="/settings" className="text-primary underline-offset-4 hover:underline">
+            Настройки → Раздача конфигов
+          </Link>
+          .
+        </p>
+        <RouteResultsPanel />
+      </StatusPanel>
+    </div>
   )
 }

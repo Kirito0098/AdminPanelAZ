@@ -10,6 +10,7 @@ import {
   getRoutingOverview,
   refreshAntifilter,
   refreshCidrDb,
+  clearCidrDb,
   syncGameFilters,
   syncRoutingProviders,
   toggleRoutingProvider,
@@ -450,6 +451,21 @@ export function useRoutingPage() {
     pendingPipelineAction != null ||
     (!!pipelineTask && ['queued', 'running'].includes(pipelineTask.status))
 
+  const clearCidrDbData = async () => {
+    const selected_files = resolveSelectedProviderPayload()
+    if (selected_files === undefined) return
+    setActionLoading(true)
+    try {
+      const result = await clearCidrDb(selected_files)
+      success(result.message || 'Данные CIDR БД очищены')
+      await load()
+    } catch (err) {
+      notifyError(errorMessage(err, 'Ошибка очистки CIDR БД'))
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   return {
     data,
     cidrDb,
@@ -503,5 +519,6 @@ export function useRoutingPage() {
     retryFailedProviders,
     refreshAntifilter: () => withPipelineAction(refreshAntifilter, 'Antifilter синхронизирован', 1, 'antifilter'),
     deployCidr: () => setConfirmAction('deploy-only'),
+    clearCidrDbData,
   }
 }

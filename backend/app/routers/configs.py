@@ -32,6 +32,19 @@ router = APIRouter(prefix="/configs", tags=["configs"])
 PROFILE_FILES_MAX_WORKERS = 12
 
 
+def _qr_download_service(db: Session, request: Request) -> QrDownloadService:
+    sec = SecurityService().get_settings(db)
+    pin_row = db.query(AppSetting).filter(AppSetting.key == "qr_download_pin").first()
+    base_url = str(request.base_url).rstrip("/")
+    return QrDownloadService(
+        db,
+        base_url=base_url,
+        ttl_seconds=sec["qr_download_ttl_seconds"],
+        max_downloads=sec["qr_download_max_downloads"],
+        pin=pin_row.value if pin_row else "",
+    )
+
+
 def _active_node_id(db: Session) -> int:
     return get_active_node(db).id
 
@@ -398,6 +411,7 @@ def download_profile(
 def generate_qr(
     config_id: int,
     path: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -408,11 +422,23 @@ def generate_qr(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
     content = get_active_adapter(db).read_profile_file(path)
+    qr_mode = "profile"
+    headers: dict[str, str] = {"X-Qr-Content": qr_mode}
     try:
         png = generate_qr_png(content)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return Response(content=png, media_type="image/png")
+    except ValueError:
+        link = _qr_download_service(db, request).create_token(
+            file_path=path,
+            config_type=config.vpn_type.value,
+            config_name=build_profile_download_filename(config.client_name, path=path),
+            creator_id=current_user.id,
+            creator_username=current_user.username,
+            remote_addr=request.client.host if request.client else None,
+        )
+        png = generate_qr_png(link["url"])
+        qr_mode = "download-link"
+        headers = {"X-Qr-Content": qr_mode, "X-Qr-Download-Url": link["url"]}
+    return Response(content=png, media_type="image/png", headers=headers)
 
 
 @router.post("/{config_id}/one-time-link")
@@ -428,17 +454,7 @@ def create_one_time_link(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     if not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
-    sec = SecurityService().get_settings(db)
-    pin_row = db.query(AppSetting).filter(AppSetting.key == "qr_download_pin").first()
-    base_url = str(request.base_url).rstrip("/")
-    svc = QrDownloadService(
-        db,
-        base_url=base_url,
-        ttl_seconds=sec["qr_download_ttl_seconds"],
-        max_downloads=sec["qr_download_max_downloads"],
-        pin=pin_row.value if pin_row else "",
-    )
-    return svc.create_token(
+    return _qr_download_service(db, request).create_token(
         file_path=path,
         config_type=config.vpn_type.value,
         config_name=build_profile_download_filename(config.client_name, path=path),

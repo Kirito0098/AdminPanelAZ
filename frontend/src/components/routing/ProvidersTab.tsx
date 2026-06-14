@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Route, Search, CloudDownload } from 'lucide-react'
+import { Route, Search, CloudDownload, Pencil } from 'lucide-react'
+import ProviderEditorDialog from '@/components/routing/ProviderEditorDialog'
 import StatusPanel from '@/components/noc/StatusPanel'
 import EmptyState from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/badge'
@@ -52,6 +53,8 @@ export default function ProvidersTab({
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
+  const [editorFilename, setEditorFilename] = useState<string | null>(null)
+  const [editorName, setEditorName] = useState('')
 
   const categories = useMemo(
     () => [...new Set(providers.map((p) => p.category))].sort(),
@@ -113,6 +116,7 @@ export default function ProvidersTab({
   const nodeLabel = activeNode?.name ?? 'активной ноде'
 
   return (
+    <>
     <StatusPanel title="CIDR-провайдеры" icon={Route}>
       <div className="space-y-4">
         {needsCompile && (
@@ -254,6 +258,19 @@ export default function ProvidersTab({
                             )}
                             <Button
                               size="sm"
+                              variant="outline"
+                              disabled={actionLoading || pipelineBusy}
+                              title="Редактировать файл списка провайдера на узле"
+                              onClick={() => {
+                                setEditorFilename(p.filename)
+                                setEditorName(p.name)
+                              }}
+                            >
+                              <Pencil size={14} className="mr-1" />
+                              Редактировать
+                            </Button>
+                            <Button
+                              size="sm"
                               variant={p.enabled ? 'outline' : 'default'}
                               disabled={actionLoading || enableBlocked}
                               title={
@@ -279,5 +296,15 @@ export default function ProvidersTab({
         </div>
       </div>
     </StatusPanel>
+
+      <ProviderEditorDialog
+        filename={editorFilename}
+        providerName={editorName}
+        open={editorFilename != null}
+        onOpenChange={(open) => {
+          if (!open) setEditorFilename(null)
+        }}
+      />
+    </>
   )
 }

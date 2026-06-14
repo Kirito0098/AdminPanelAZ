@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   ArrowDownToLine,
   ClipboardList,
@@ -7,11 +8,13 @@ import {
   Filter,
   Hash,
   ListOrdered,
+  QrCode,
   Radio,
   ScrollText,
   Search,
   Wifi,
   WifiOff,
+  Plug,
 } from 'lucide-react'
 import {
   ApiError,
@@ -19,6 +22,8 @@ import {
   getActionLogs,
   getConnectionLogs,
   getOpenVpnEvents,
+  getOpenVpnSockets,
+  getQrDownloadLogs,
 } from '@/api/client'
 import { NodeBadge } from '@/components/NodeSelector'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
@@ -45,7 +50,7 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { cn } from '@/lib/utils'
-import type { ActionLogEntry, ConnectionLogsSnapshot, OpenVpnEventProfile } from '@/types'
+import type { ActionLogEntry, ConnectionLogsSnapshot, OpenVpnEventProfile, OpenVpnSocketStatus, QrDownloadAuditEntry } from '@/types'
 
 const REFRESH_INTERVAL = 30
 const LOG_PAGE_SIZE = 100
@@ -372,12 +377,16 @@ export default function LogsPage() {
   const { isEnabled } = useFeatureModules()
   const logsDashboardEnabled = isEnabled('logs_dashboard')
   const actionLogsEnabled = isEnabled('action_logs')
+  const qrDownloadsEnabled = isEnabled('qr_downloads')
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal } = useProgress()
   const [actions, setActions] = useState<ActionLogEntry[]>([])
   const [connections, setConnections] = useState<ConnectionLogsSnapshot | null>(null)
   const [events, setEvents] = useState<OpenVpnEventProfile[]>([])
+  const [qrDownloads, setQrDownloads] = useState<QrDownloadAuditEntry[]>([])
+  const [openVpnSockets, setOpenVpnSockets] = useState<OpenVpnSocketStatus[]>([])
+  const [socketsTimestamp, setSocketsTimestamp] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -399,9 +408,27 @@ export default function LogsPage() {
       try {
         const connPromise = logsDashboardEnabled ? getConnectionLogs() : Promise.resolve(null)
         const evtPromise = logsDashboardEnabled ? getOpenVpnEvents() : Promise.resolve({ profiles: [] })
-        const [conn, evt] = await Promise.all([connPromise, evtPromise])
+        const qrPromise =
+          user?.role === 'admin' && qrDownloadsEnabled
+            ? getQrDownloadLogs()
+            : Promise.resolve([])
+        const socketsPromise =
+          user?.role === 'admin' && logsDashboardEnabled
+            ? getOpenVpnSockets()
+            : Promise.resolve(null)
+        const [conn, evt, qr, sockets] = await Promise.all([
+          connPromise,
+          evtPromise,
+          qrPromise,
+          socketsPromise,
+        ])
         if (conn) setConnections(conn)
         setEvents(evt.profiles)
+        setQrDownloads(qr)
+        if (sockets) {
+          setOpenVpnSockets(sockets.sockets)
+          setSocketsTimestamp(sockets.timestamp)
+        }
         setLoadError(null)
         if (user?.role === 'admin' && actionLogsEnabled && !actionsLoadedRef.current) {
           setActions(await getActionLogs())
@@ -419,7 +446,7 @@ export default function LogsPage() {
         if (initial) doneGlobal()
       }
     },
-    [user?.role, notifyError, success, startGlobal, doneGlobal, logsDashboardEnabled, actionLogsEnabled],
+    [user?.role, notifyError, success, startGlobal, doneGlobal, logsDashboardEnabled, actionLogsEnabled, qrDownloadsEnabled],
   )
 
   useEffect(() => {
@@ -503,6 +530,25 @@ export default function LogsPage() {
   const defaultLogTab = logsDashboardEnabled ? 'connections' : 'actions'
   const showConnectionTabs = logsDashboardEnabled
   const showActionTab = user?.role === 'admin' && actionLogsEnabled
+  const showQrDownloadsTab = user?.role === 'admin' && qrDownloadsEnabled
+  const showSocketsTab = user?.role === 'admin' && logsDashboardEnabled
+
+  const [searchParams] = useSearchParams()
+  const initialLogTab = useMemo(() => {
+    const tab = searchParams.get('tab')
+    if (tab === 'qr-downloads' && showQrDownloadsTab) return tab
+    if (tab === 'openvpn-sockets' && showSocketsTab) return tab
+    if (tab === 'actions' && showActionTab) return tab
+    if ((tab === 'connections' || tab === 'openvpn-events') && showConnectionTabs) return tab
+    return defaultLogTab
+  }, [
+    searchParams,
+    showQrDownloadsTab,
+    showSocketsTab,
+    showActionTab,
+    showConnectionTabs,
+    defaultLogTab,
+  ])
 
   if (loading && !connections && events.length === 0 && actions.length === 0) {
     return <Spinner label="Загрузка логов..." className="py-16" />
@@ -521,7 +567,7 @@ export default function LogsPage() {
               <NodeBadge name={activeNode?.name} status={activeNode?.status} />
             </div>
             <p className="text-sm text-muted-foreground">
-              Подключения, события OpenVPN и действия администраторов
+              Подключения, события OpenVPN, аудит QR и действия администраторов
               {connections?.timestamp && (
                 <> · обновлено {new Date(connections.timestamp).toLocaleString('ru-RU')}</>
               )}
@@ -575,7 +621,7 @@ export default function LogsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Tabs defaultValue={defaultLogTab}>
+        <Tabs defaultValue={initialLogTab} key={initialLogTab}>
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
             {showConnectionTabs && (
             <TabsTrigger value="connections" className="gap-1.5">
@@ -608,6 +654,23 @@ export default function LogsPage() {
                     {actions.length}
                   </Badge>
                 )}
+              </TabsTrigger>
+            )}
+            {showQrDownloadsTab && (
+              <TabsTrigger value="qr-downloads" className="gap-1.5">
+                <QrCode size={14} />
+                QR-скачивания
+                {qrDownloads.length > 0 && (
+                  <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                    {qrDownloads.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            )}
+            {showSocketsTab && (
+              <TabsTrigger value="openvpn-sockets" className="gap-1.5">
+                <Plug size={14} />
+                OVPN сокеты
               </TabsTrigger>
             )}
           </TabsList>
@@ -914,6 +977,125 @@ export default function LogsPage() {
                         ))}
                       </div>
                     </>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+
+          {showQrDownloadsTab && (
+            <TabsContent value="qr-downloads" className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <QrCode size={16} />
+                    Аудит QR-скачиваний
+                  </CardTitle>
+                  <CardDescription>
+                    События одноразовых ссылок и скачиваний конфигов клиентами
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {qrDownloads.length === 0 ? (
+                    <EmptyState
+                      icon={QrCode}
+                      title="Событий нет"
+                      description="Записи появятся после первых скачиваний по одноразовым ссылкам"
+                      className="py-10"
+                    />
+                  ) : (
+                    <div className="overflow-x-auto rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Время</TableHead>
+                            <TableHead>Событие</TableHead>
+                            <TableHead>Пользователь</TableHead>
+                            <TableHead>IP</TableHead>
+                            <TableHead>Детали</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {qrDownloads.map((entry) => (
+                            <TableRow key={entry.id}>
+                              <TableCell className="text-xs whitespace-nowrap">
+                                {new Date(entry.created_at).toLocaleString('ru-RU')}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="secondary">{entry.event_type}</Badge>
+                              </TableCell>
+                              <TableCell>{entry.actor_username || '—'}</TableCell>
+                              <TableCell className="font-mono text-xs">{entry.remote_addr || '—'}</TableCell>
+                              <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
+                                {entry.details || '—'}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+
+          {showSocketsTab && (
+            <TabsContent value="openvpn-sockets" className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Plug size={16} />
+                    OpenVPN management sockets
+                  </CardTitle>
+                  <CardDescription>
+                    Диагностика Unix-сокетов для событий OpenVPN на активном узле
+                    {socketsTimestamp && (
+                      <> · обновлено {new Date(socketsTimestamp).toLocaleString('ru-RU')}</>
+                    )}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {openVpnSockets.length === 0 ? (
+                    <EmptyState
+                      icon={Plug}
+                      title="Нет данных о сокетах"
+                      description="Проверьте связь с узлом и обновите страницу"
+                      className="py-10"
+                    />
+                  ) : (
+                    <div className="overflow-x-auto rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Профиль</TableHead>
+                            <TableHead>Путь сокета</TableHead>
+                            <TableHead>Файл</TableHead>
+                            <TableHead>Ответ</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {openVpnSockets.map((socket) => (
+                            <TableRow key={socket.profile}>
+                              <TableCell className="font-medium">{socket.profile}</TableCell>
+                              <TableCell className="max-w-xs truncate font-mono text-xs">
+                                {socket.socket_path}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={socket.socket_exists ? 'default' : 'destructive'}>
+                                  {socket.socket_exists ? 'Есть' : 'Нет'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={socket.responsive ? 'default' : 'secondary'}>
+                                  {socket.responsive ? 'Отвечает' : 'Нет ответа'}
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   )}
                 </CardContent>
               </Card>

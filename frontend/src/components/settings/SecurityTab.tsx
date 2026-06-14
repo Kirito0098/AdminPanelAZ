@@ -3,6 +3,7 @@ import { Ban, Clock, Shield, ShieldOff } from 'lucide-react'
 import {
   ApiError,
   addTempWhitelist,
+  clearScannerBans,
   getClientIp,
   getScannerBans,
   getSecuritySettings,
@@ -34,6 +35,7 @@ export default function SecurityTab() {
   const [tempIpInput, setTempIpInput] = useState('')
   const [addingTemp, setAddingTemp] = useState(false)
   const [removingTempIp, setRemovingTempIp] = useState<string | null>(null)
+  const [clearingBans, setClearingBans] = useState(false)
 
   const load = async () => {
     try {
@@ -84,6 +86,19 @@ export default function SecurityTab() {
       await load()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка разблокировки')
+    }
+  }
+
+  const handleClearBans = async () => {
+    setClearingBans(true)
+    try {
+      const result = await clearScannerBans()
+      success(result.message || 'Все баны сканеров сняты')
+      await load()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка снятия банов')
+    } finally {
+      setClearingBans(false)
     }
   }
 
@@ -367,11 +382,25 @@ export default function SecurityTab() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Ban size={18} />
-            Активные баны сканеров
-          </CardTitle>
-          <CardDescription>IP-адреса, временно заблокированные системой защиты</CardDescription>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Ban size={18} />
+                Активные баны сканеров
+              </CardTitle>
+              <CardDescription>IP-адреса, временно заблокированные системой защиты</CardDescription>
+            </div>
+            {bans.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={clearingBans}
+                onClick={() => void handleClearBans()}
+              >
+                {clearingBans ? 'Снятие...' : 'Снять все баны'}
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {bans.length === 0 ? (

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Layers, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { Layers, Pencil, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react'
 import {
   ApiError,
   createCidrDbPreset,
   deleteCidrDbPreset,
   getCidrDbPresets,
   resetCidrDbPreset,
+  seedCidrDbPresets,
   updateCidrDbPreset,
 } from '@/api/client'
 import AppDialog from '@/components/shared/AppDialog'
@@ -56,6 +57,7 @@ export default function PresetsTab({
   const [editing, setEditing] = useState<CidrDbPresetInfo | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<CidrDbPresetInfo | null>(null)
   const [confirmReset, setConfirmReset] = useState<CidrDbPresetInfo | null>(null)
+  const [seeding, setSeeding] = useState(false)
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -193,6 +195,19 @@ export default function PresetsTab({
     }
   }
 
+  const handleSeed = async () => {
+    setSeeding(true)
+    try {
+      const result = await seedCidrDbPresets()
+      success(result.message || 'Встроенные пресеты обновлены')
+      await loadPresets()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка seed пресетов')
+    } finally {
+      setSeeding(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex h-48 items-center justify-center">
@@ -210,10 +225,16 @@ export default function PresetsTab({
           description="Встроенные пресеты маршрутизации не найдены. Запустите seed или создайте свой пресет."
         />
         {isAdmin && (
-          <Button size="sm" onClick={openCreate}>
-            <Plus size={14} className="mr-1" />
-            Создать пресет
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={handleSeed} disabled={seeding}>
+              <Sparkles size={14} className="mr-1" />
+              {seeding ? 'Загрузка...' : 'Восстановить встроенные'}
+            </Button>
+            <Button size="sm" variant="outline" onClick={openCreate}>
+              <Plus size={14} className="mr-1" />
+              Создать пресет
+            </Button>
+          </div>
         )}
       </div>
     )
@@ -222,7 +243,11 @@ export default function PresetsTab({
   return (
     <div className="space-y-4">
       {isAdmin && (
-        <div className="flex justify-end">
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={handleSeed} disabled={saving || seeding}>
+            <Sparkles size={14} className="mr-1" />
+            {seeding ? 'Загрузка...' : 'Восстановить встроенные'}
+          </Button>
           <Button size="sm" onClick={openCreate} disabled={saving}>
             <Plus size={14} className="mr-1" />
             Создать пресет

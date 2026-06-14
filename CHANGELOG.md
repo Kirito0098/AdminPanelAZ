@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-06-14
+
 ### Added
+- **QR-коды** — для OpenVPN-профилей, не помещающихся в QR (~4.5 КБ), автоматический fallback на одноразовую ссылку скачивания; заголовки ответа `X-Qr-Content` (`profile` / `download-link`) и `X-Qr-Download-Url`.
+- **UI — QR-код** — кнопка «Скопировать ссылку» в диалоге QR при режиме download-link; подсказка, что конфигурация слишком большая для прямого QR.
+- **Тесты** — `test_qr_generator.py` (лимит размера, fallback на ссылку, заголовки API).
 - **AZ-WARP (WARPER)** — интеграция точечной маршрутизации доменов и IPv4-подсетей через Cloudflare WARP на VPN-узлах: `WarperService` → `warper_api`, API `/api/warper/*`, endpoints node agent `/warper/*`, feature toggle `FEATURE_WARPER_ENABLED`.
 - **UI — AZ-WARP** — страница `/warper` (пункт меню «AZ-WARP»): домены (добавление, импорт, синхронизация), встроенные списки Gemini/ChatGPT, IP-подсети, мониторинг (статус, трафик, логи sing-box, диагностика `doctor`), настройки (MTU, уровень логов, sing-box).
 - **UI — AZ-WARP** — шапка со статусом узла и быстрым вкл/выкл; сводные карточки с переходом на вкладки; переключатели встроенных списков вместо пар кнопок «вкл/выкл».
@@ -15,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Тесты** — `test_warper_service.py`, `test_warper_api.py`; parity `get_warper_*` в `test_node_adapter_parity.py`; `test_git_pull_resets_after_diverged_history` в `test_node_update.py`.
 
 ### Fixed
+- **QR-коды** — исправлена ошибка «Ошибка генерации QR» для OpenVPN/AntiZapret `.ovpn` (встроенные сертификаты превышают ёмкость QR); WireGuard/короткие профили по-прежнему кодируются целиком.
+- **API client** — `fetchQrBlob`: разбор `detail` из ответа бэкенда, `credentials: 'include'`, обновление токена при 401, заголовок `X-Web-Session-Id`.
 - **AZ-WARP — health** — установка определяется по `warper.sh` и `warper_api`, не только по симлинку `/usr/local/bin/warper`; в алертах — `missing_components` и подсказка переключить активный узел.
 - **AZ-WARP — doctor** — при ошибках проверок API возвращает полный список результатов, а не 502 с обрезанным текстом; UI показывает сводку OK/ошибок и каждую проверку отдельной строкой.
 - **AZ-WARP — настройки / IP-подсети** — `get_mode()` и fallback чтения `ip-ranges.txt` / `domains.txt` при сбое CLI; корректный парсинг встроенных списков по маркерам в `domains.txt`.
@@ -367,7 +374,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Production-развёртывание: `install.sh`, daemon/watchdog, systemd, раздача UI из backend в prod-режиме.
 - OpenVPN management sockets, vnStat, WebSocket-мониторинг, Telegram Mini App, in-panel pytest.
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.4.2...v1.4.3

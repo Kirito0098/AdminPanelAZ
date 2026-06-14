@@ -5,7 +5,7 @@ from qrcode.exceptions import DataOverflowError
 from qrcode.image.pil import PilImage
 
 
-def generate_qr_png(config_text: str) -> bytes:
+def _build_qr(config_text: str) -> qrcode.QRCode:
     correction_levels = (
         qrcode.constants.ERROR_CORRECT_H,
         qrcode.constants.ERROR_CORRECT_Q,
@@ -13,7 +13,6 @@ def generate_qr_png(config_text: str) -> bytes:
         qrcode.constants.ERROR_CORRECT_L,
     )
 
-    qr = None
     last_error = None
     for correction_level in correction_levels:
         try:
@@ -25,13 +24,23 @@ def generate_qr_png(config_text: str) -> bytes:
             )
             candidate.add_data(config_text)
             candidate.make(fit=True)
-            qr = candidate
-            break
+            return candidate
         except (DataOverflowError, ValueError) as exc:
             last_error = exc
 
-    if qr is None:
-        raise ValueError(f"Конфигурация слишком длинная для QR-кода: {last_error}")
+    raise ValueError(f"Конфигурация слишком длинная для QR-кода: {last_error}")
+
+
+def fits_in_qr(config_text: str) -> bool:
+    try:
+        _build_qr(config_text)
+    except ValueError:
+        return False
+    return True
+
+
+def generate_qr_png(config_text: str) -> bytes:
+    qr = _build_qr(config_text)
 
     img = qr.make_image(fill_color="black", back_color="white", image_factory=PilImage)
     buf = io.BytesIO()

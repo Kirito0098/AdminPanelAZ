@@ -20,6 +20,7 @@ import {
   checkNodeHealth,
   createNode,
   deleteNode,
+  disableNodeMtls,
   enableNodeMtls,
   getNodeMtlsStatus,
   getNodes,
@@ -61,7 +62,7 @@ import { cn } from '@/lib/utils'
 import type { Node, NodeMtlsStatus } from '@/types'
 import { Navigate } from 'react-router-dom'
 
-type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | null
+type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | 'disable-mtls' | null
 
 function isWrongVersionSslError(error: string) {
   return /WRONG_VERSION_NUMBER|wrong version number/i.test(error)
@@ -159,6 +160,7 @@ type NodeActionsProps = {
   onUpdate: () => void
   onRotateKey: () => void
   onEnableMtls: () => void
+  onDisableMtls: () => void
   onEdit: () => void
   onDelete: () => void
   compact?: boolean
@@ -174,6 +176,7 @@ function NodeActions({
   onUpdate,
   onRotateKey,
   onEnableMtls,
+  onDisableMtls,
   onEdit,
   onDelete,
   compact = false,
@@ -235,6 +238,17 @@ function NodeActions({
               {!compact && 'Включить mTLS'}
             </Button>
           )}
+          {node.mtls_enabled && (
+            <Button
+              variant={compact ? 'ghost' : 'outline'}
+              size={btnSize}
+              title="Сбросить флаг mTLS в панели"
+              onClick={onDisableMtls}
+            >
+              <Shield size={iconSize} />
+              {!compact && 'Отключить mTLS'}
+            </Button>
+          )}
           <Button
             variant={compact ? 'ghost' : 'outline'}
             size={btnSize}
@@ -279,6 +293,7 @@ type NodeCardProps = {
   onUpdate: () => void
   onRotateKey: () => void
   onEnableMtls: () => void
+  onDisableMtls: () => void
   onEdit: () => void
   onDelete: () => void
 }
@@ -293,6 +308,7 @@ function NodeCard({
   onUpdate,
   onRotateKey,
   onEnableMtls,
+  onDisableMtls,
   onEdit,
   onDelete,
 }: NodeCardProps) {
@@ -522,6 +538,10 @@ export default function NodesPage() {
     openConfirm('enable-mtls', node)
   }
 
+  const handleDisableMtls = (node: Node) => {
+    openConfirm('disable-mtls', node)
+  }
+
   const handleConfirm = async () => {
     const action = confirmAction
     const target = confirmTarget
@@ -568,6 +588,15 @@ export default function NodesPage() {
         } finally {
           setHealthLoading(null)
         }
+      } else if (action === 'disable-mtls') {
+        const result = await disableNodeMtls(target.id)
+        closeConfirm()
+        success(result.message || `mTLS отключён для узла «${target.name}»`)
+        if (result.warning) {
+          warning(result.warning)
+        }
+        await load()
+        await refresh()
       }
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка операции')
@@ -714,6 +743,7 @@ export default function NodesPage() {
                     onUpdate={() => setUpdateNodeTarget(node)}
                     onRotateKey={() => handleRotateKey(node)}
                     onEnableMtls={() => handleEnableMtls(node)}
+                    onDisableMtls={() => handleDisableMtls(node)}
                     onEdit={() => openEdit(node)}
                     onDelete={() => handleDelete(node)}
                   />
@@ -799,6 +829,7 @@ export default function NodesPage() {
                               onUpdate={() => setUpdateNodeTarget(node)}
                               onRotateKey={() => handleRotateKey(node)}
                               onEnableMtls={() => handleEnableMtls(node)}
+                    onDisableMtls={() => handleDisableMtls(node)}
                               onEdit={() => openEdit(node)}
                               onDelete={() => handleDelete(node)}
                               compact
@@ -937,7 +968,9 @@ export default function NodesPage() {
               ? 'Ротация API-ключа?'
               : confirmAction === 'enable-mtls'
                 ? 'Включить mTLS?'
-                : ''
+                : confirmAction === 'disable-mtls'
+                  ? 'Сбросить mTLS в панели?'
+                  : ''
         }
         description={
           confirmTarget ? (
@@ -967,7 +1000,14 @@ export default function NodesPage() {
                     children:
                       'Будет сгенерирован сертификат, node agent перезапустится ~5–30 сек. Связь может кратковременно прерваться.',
                   }
-                : undefined
+                : confirmAction === 'disable-mtls'
+                  ? {
+                      variant: 'warning',
+                      title: 'Только флаг в панели',
+                      children:
+                        'Сбрасывается флаг mTLS в базе панели. Node agent может продолжать работать с mTLS — для полного отключения настройте узел вручную.',
+                    }
+                  : undefined
         }
         confirmLabel={
           confirmAction === 'delete'
@@ -976,9 +1016,11 @@ export default function NodesPage() {
               ? 'Сгенерировать ключ'
               : confirmAction === 'enable-mtls'
                 ? 'Включить mTLS'
-                : 'Подтвердить'
+                : confirmAction === 'disable-mtls'
+                  ? 'Сбросить mTLS'
+                  : 'Подтвердить'
         }
-        destructive
+        destructive={confirmAction === 'delete'}
         loading={confirmLoading}
         onConfirm={handleConfirm}
       />

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import {
+  Copy,
   FileKey,
   Loader2,
   Plus,
@@ -75,7 +76,12 @@ export default function DashboardPage() {
   const [submitting, setSubmitting] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
-  const [qrPreview, setQrPreview] = useState<{ url: string; filename: string } | null>(null)
+  const [qrPreview, setQrPreview] = useState<{
+    url: string
+    filename: string
+    contentMode: import('../api/client').QrContentMode
+    downloadUrl?: string
+  } | null>(null)
   const [policies, setPolicies] = useState<
     Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
   >({})
@@ -240,12 +246,22 @@ export default function DashboardPage() {
   const handleQr = async (config: VpnConfig, path: string, filename: string) => {
     try {
       await withInline(async () => {
-        const blob = await fetchQrBlob(config.id, path)
+        const { blob, contentMode, downloadUrl } = await fetchQrBlob(config.id, path)
         const url = URL.createObjectURL(blob)
-        setQrPreview({ url, filename })
+        setQrPreview({ url, filename, contentMode, downloadUrl })
       }, 'Генерация QR-кода...')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка генерации QR')
+    }
+  }
+
+  const copyQrDownloadUrl = async () => {
+    if (!qrPreview?.downloadUrl) return
+    try {
+      await navigator.clipboard.writeText(qrPreview.downloadUrl)
+      success('Ссылка скопирована в буфер')
+    } catch {
+      notifyError('Не удалось скопировать ссылку')
     }
   }
 
@@ -470,12 +486,27 @@ export default function DashboardPage() {
               <FileKey size={18} />
               QR-код
             </DialogTitle>
-            <DialogDescription>{qrPreview?.filename}</DialogDescription>
+            <DialogDescription>
+              {qrPreview?.filename}
+              {qrPreview?.contentMode === 'download-link' && (
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  Конфигурация слишком большая для прямого QR — отсканируйте ссылку для скачивания.
+                </span>
+              )}
+            </DialogDescription>
           </DialogHeader>
           {qrPreview && (
             <div className="flex justify-center rounded-lg border bg-muted/30 p-6">
               <img src={qrPreview.url} alt="QR-код конфигурации" className="max-h-72 rounded-md" />
             </div>
+          )}
+          {qrPreview?.downloadUrl && (
+            <DialogFooter className="sm:justify-center">
+              <Button type="button" variant="outline" onClick={() => void copyQrDownloadUrl()}>
+                <Copy size={14} />
+                Скопировать ссылку
+              </Button>
+            </DialogFooter>
           )}
         </DialogContent>
       </Dialog>

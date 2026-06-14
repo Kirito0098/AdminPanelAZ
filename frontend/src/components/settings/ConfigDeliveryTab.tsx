@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { QrCode } from 'lucide-react'
+import { ClipboardList, ExternalLink, QrCode } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { ApiError, getSecuritySettings, updateSecuritySettings } from '@/api/client'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
@@ -90,6 +91,12 @@ export default function ConfigDeliveryTab() {
               <p className="text-xs text-muted-foreground">
                 Ссылки: /api/public/route-download/&#123;keenetic|mikrotik|tplink&#125;
               </p>
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/routing?tab=files">
+                  <ExternalLink size={14} className="mr-1" />
+                  Просмотр route-файлов в маршрутизации
+                </Link>
+              </Button>
             </div>
           )}
 
@@ -97,7 +104,15 @@ export default function ConfigDeliveryTab() {
 
           {qrDownloadsEnabled && (
             <div className="space-y-4">
-              <h4 className="text-sm font-medium">Одноразовые ссылки</h4>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-sm font-medium">Одноразовые ссылки</h4>
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/logs?tab=qr-downloads">
+                    <ClipboardList size={14} className="mr-1" />
+                    Журнал QR-скачиваний
+                  </Link>
+                </Button>
+              </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>TTL одноразовой ссылки (сек)</Label>

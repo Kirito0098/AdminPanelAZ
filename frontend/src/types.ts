@@ -644,6 +644,42 @@ export interface ActionLogEntry {
   created_at: string
 }
 
+export interface QrDownloadAuditEntry {
+  id: number
+  event_type: string
+  actor_username?: string | null
+  remote_addr?: string | null
+  details?: string | null
+  created_at: string
+}
+
+export interface OpenVpnSocketStatus {
+  profile: string
+  socket_path: string
+  socket_exists: boolean
+  responsive: boolean
+}
+
+export interface RouteResultFileEntry {
+  key: string
+  filename: string
+  exists: boolean
+  line_count: number
+}
+
+export interface RoutingProviderContent {
+  filename: string
+  content: string
+  cidr_count: number
+}
+
+export interface NodeMtlsDisableResult {
+  message: string
+  node_id: number
+  mtls_enabled: boolean
+  warning?: string | null
+}
+
 export interface OneTimeLinkResponse {
   url: string
   token: string

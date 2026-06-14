@@ -1,8 +1,9 @@
-import { ArrowRight, CloudDownload, Info, Play, Rocket, Shield, Sparkles } from 'lucide-react'
-import { useMemo } from 'react'
+import { ArrowRight, CloudDownload, Info, Play, Rocket, Shield, Sparkles, Trash2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import ProviderFileSelection from '@/components/routing/ProviderFileSelection'
 import StatusPanel from '@/components/noc/StatusPanel'
 import PipelineStageProgress from '@/components/routing/PipelineStageProgress'
+import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -34,6 +35,7 @@ interface CidrPipelineTabProps {
   onGenerate: () => void
   onDeploy: () => void
   onGenerateDoall: () => void
+  onClearDb: () => void | Promise<void>
 }
 
 const workflowSteps = [
@@ -71,7 +73,10 @@ export default function CidrPipelineTab({
   onGenerate,
   onDeploy,
   onGenerateDoall,
+  onClearDb,
 }: CidrPipelineTabProps) {
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [clearing, setClearing] = useState(false)
   const onlineNodes = nodes.filter((n) => n.status === 'online')
   const deployDisabled =
     pipelineBusy ||
@@ -194,6 +199,16 @@ export default function CidrPipelineTab({
                 <Button size="sm" disabled={refreshDisabled} onClick={onRefreshDb}>
                   <CloudDownload size={14} className="mr-1.5" />
                   {refreshLabel}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive hover:text-destructive"
+                  disabled={pipelineBusy}
+                  onClick={() => setConfirmClear(true)}
+                >
+                  <Trash2 size={14} className="mr-1.5" />
+                  Очистить БД
                 </Button>
               </div>
             </div>
@@ -484,6 +499,34 @@ export default function CidrPipelineTab({
           </div>
         </StatusPanel>
       )}
+
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={setConfirmClear}
+        title="Очистить данные CIDR БД?"
+        description={
+          selectedProviderFiles.length > 0 && selectedProviderFiles.length < providers.length
+            ? `Будут удалены записи SQLite для ${selectedProviderFiles.length} выбранных провайдеров. Файлы на нодах не затрагиваются.`
+            : 'Будут удалены все записи провайдеров в SQLite на контроллере. Файлы на нодах не затрагиваются.'
+        }
+        confirmLabel="Очистить"
+        destructive
+        loading={clearing}
+        onConfirm={async () => {
+          setClearing(true)
+          try {
+            await onClearDb()
+            setConfirmClear(false)
+          } finally {
+            setClearing(false)
+          }
+        }}
+        alert={{
+          variant: 'warning',
+          title: 'Необратимо на контроллере',
+          children: 'После очистки потребуется повторный ingest из интернета.',
+        }}
+      />
     </div>
   )
 }

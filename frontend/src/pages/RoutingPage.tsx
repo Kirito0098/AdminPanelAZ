@@ -7,6 +7,8 @@ import {
   Route,
   Settings2,
 } from 'lucide-react'
+import { useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import AntizapretConfigTab from '@/components/routing/AntizapretConfigTab'
 import ConfirmActionDialog from '@/components/routing/ConfirmActionDialog'
 import CidrPipelineTab from '@/components/routing/CidrPipelineTab'
@@ -28,6 +30,16 @@ export default function RoutingPage() {
   const { user } = useAuth()
   const { activeNode, nodes } = useNode()
   const isAdmin = user?.role === 'admin'
+  const [searchParams] = useSearchParams()
+
+  const initialRoutingTab = useMemo(() => {
+    const tab = searchParams.get('tab')
+    const publicTabs = new Set(['overview', 'providers', 'presets', 'files', 'games'])
+    const adminTabs = new Set(['pipeline', 'antizapret-config'])
+    if (tab && publicTabs.has(tab)) return tab
+    if (tab && adminTabs.has(tab) && isAdmin) return tab
+    return 'overview'
+  }, [searchParams, isAdmin])
 
   const {
     data,
@@ -65,6 +77,7 @@ export default function RoutingPage() {
     retryFailedProviders,
     refreshAntifilter,
     deployCidr,
+    clearCidrDbData,
   } = useRoutingPage()
 
   if (loading && !data) {
@@ -99,7 +112,7 @@ export default function RoutingPage() {
 
       <PipelineStatusBar cidrDb={cidrDb} antifilter={antifilter} />
 
-      <Tabs defaultValue="overview" className="space-y-4">
+      <Tabs defaultValue={initialRoutingTab} key={initialRoutingTab} className="space-y-4">
         <TabsList className="flex h-auto flex-wrap gap-1 bg-muted/50 p-1">
           <TabsTrigger value="overview" className="gap-1.5">
             <LayoutDashboard size={14} />
@@ -177,6 +190,7 @@ export default function RoutingPage() {
               onGenerate={() => setConfirmAction('generate-only')}
               onDeploy={deployCidr}
               onGenerateDoall={() => setConfirmAction('generate-doall')}
+              onClearDb={clearCidrDbData}
             />
           </TabsContent>
         )}
