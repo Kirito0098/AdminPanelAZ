@@ -22,6 +22,12 @@ PROJECT_ROOT = APP_ROOT.parent
 _CHANGELOG_CACHE: dict = {"data": None, "expires": 0.0}
 
 
+def _repo_root() -> Path:
+    from app.services.node_update import resolve_repo_root
+
+    return resolve_repo_root(PROJECT_ROOT) or PROJECT_ROOT
+
+
 class ViewerAccessUpdate(BaseModel):
     user_id: int
     config_groups: list[str] = []
@@ -29,17 +35,18 @@ class ViewerAccessUpdate(BaseModel):
 
 @router.get("/updates")
 def check_updates(_: User = Depends(require_admin)):
+    repo_root = _repo_root()
     try:
-        subprocess.run(["git", "fetch", "origin"], cwd=APP_ROOT, capture_output=True, timeout=30, check=False)
-        local = subprocess.run(["git", "rev-parse", "HEAD"], cwd=APP_ROOT, capture_output=True, text=True, check=False)
-        remote = subprocess.run(["git", "rev-parse", "origin/main"], cwd=APP_ROOT, capture_output=True, text=True, check=False)
+        subprocess.run(["git", "fetch", "origin"], cwd=repo_root, capture_output=True, timeout=30, check=False)
+        local = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_root, capture_output=True, text=True, check=False)
+        remote = subprocess.run(["git", "rev-parse", "origin/main"], cwd=repo_root, capture_output=True, text=True, check=False)
         local_hash = local.stdout.strip()
         remote_hash = remote.stdout.strip()
         behind = 0
         if local_hash and remote_hash and local_hash != remote_hash:
             count = subprocess.run(
                 ["git", "rev-list", "--count", f"{local_hash}..{remote_hash}"],
-                cwd=APP_ROOT, capture_output=True, text=True, check=False,
+                cwd=repo_root, capture_output=True, text=True, check=False,
             )
             behind = int(count.stdout.strip() or "0")
         return {

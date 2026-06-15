@@ -56,11 +56,11 @@ export default function UpdatesTab() {
   const handleUpdate = () => {
     confirm({
       title: 'Применить обновление?',
-      description: 'Будет выполнен git pull origin main. Панель может потребовать перезапуска.',
+      description: 'Будет выполнен git pull, обновление pip/npm, сборка frontend и перезапуск панели.',
       alert: {
         variant: 'warning',
         title: 'Перед обновлением',
-        children: 'Рекомендуется создать бэкап. После git pull может потребоваться перезапуск панели и применение миграций.',
+        children: 'Рекомендуется создать бэкап. Панель перезапустится автоматически через несколько секунд после сборки.',
       },
       confirmLabel: 'Применить обновление',
       destructive: true,
@@ -101,7 +101,7 @@ export default function UpdatesTab() {
             <Download size={18} />
             Системные обновления
           </CardTitle>
-          <CardDescription>Git fetch + pull из origin/main</CardDescription>
+          <CardDescription>Git pull, pip/npm, сборка frontend и перезапуск панели</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -162,7 +162,7 @@ export default function UpdatesTab() {
               </div>
             )}
             <SettingsAlert variant="warning" title="Перед обновлением">
-              Рекомендуется создать бэкап. После git pull может потребоваться перезапуск панели и применение миграций.
+              Рекомендуется создать бэкап. После применения панель перезапустится автоматически (systemd или start.sh).
             </SettingsAlert>
             <Button variant="destructive" onClick={handleUpdate} disabled={updating}>
               {updating ? 'Обновление...' : 'Применить обновление'}

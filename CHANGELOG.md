@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Конфиги — ссылка на трафик** — кнопка «Статистика трафика» на карточке конфига (модуль `traffic_sync`): переход на `/traffic?client=…`.
+- **UI — полное обновление панели** — сервис `system_update.py`: «Настройки → Обновления» выполняет `git pull origin main`, `pip install`, `npm install`, `npm run build:all`, подготовку `backend/data/cidr/` и отложенный перезапуск (`systemctl restart adminpanelaz` или `./start.sh restart`); прогресс в фоновой задаче `update_system`.
+- **Тесты** — `test_system_update.py` (успешный сценарий, ошибка сборки frontend, restart через systemd, каталоги CIDR).
 
 ### Changed
 - **NOC — гео по провайдерам** — нормализация имён ISP (Tele2, MegaFon, MTS и др.) для группировки в donut; сегмент «Прочие» с раскрытием состава в легенде и тултипе; до 8 слайсов для ISP.
@@ -17,11 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Установка — проверка health** — после `systemctl start` / daemon установщик ждёт ответ `/api/health` (до 90 с) и завершается с ошибкой, если backend не поднялся.
 - **Prod start** — `start.sh` в режиме `prod` пропускает `npm run build:all`, если уже есть `frontend/dist/index.html` и `backend/app/static/tg_mini/index.html` (пересборка: `ADMINPANELAZ_FORCE_FRONTEND_BUILD=1`).
 - **Frontend — Vite 6** — обновление с Vite 5.4.x до **6.4.2** (совместим с `@vitejs/plugin-react` 4.x); целевой `build.target: es2022`.
+- **UI — вкладка «Обновления»** — тексты и подтверждение отражают полный цикл (deps + сборка + авто-рестарт); `GET /api/system/updates` использует корень git-репозитория, а не каталог `backend/`.
+- **Git** — `.gitignore`: `backend/app/static/tg_mini/` и кэш Vite (артефакты сборки, как `frontend/dist/`); не коммитятся после `npm run build:all`.
 
 ### Fixed
 - **Установка — CIDR БД** — на чистой установке backend падал с `unable to open database file`: `install.sh` создаёт `backend/data/cidr/list` и `staging`; `run_cidr_db_migrations()` создаёт каталоги до `create_all`.
 - **Prod start — лишняя сборка frontend** — при каждом рестарте systemd watchdog пересобирал frontend (~25 с), backend не слушал порт до завершения сборки.
 - **Frontend — npm audit** — Vite **6.4.2** + `overrides` для `esbuild ^0.28.1`; `build.target: es2022` в `vite.config.ts`. Устранены предупреждения audit (esbuild + GHSA-4w7w-66w2-5vf9) без перехода на Vite 8.
+- **UI — обновление только git pull** — ранее «Применить обновление» подтягивало код без `pip`/`npm`, без пересборки UI/tg_mini и без перезапуска панели; после релизов с новыми зависимостями требовался ручной SSH.
 
 ## [1.9.0] - 2026-06-15
 

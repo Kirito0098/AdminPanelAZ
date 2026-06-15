@@ -6,6 +6,10 @@ backend/__pycache__/
 *.pyc
 .pytest_cache/
 **/.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 .env
 backend/.env
 backend/node_agent.env
@@ -16,15 +20,24 @@ backend/node_agent.env
 # Legacy compile path before paths.py fix:
 backend/app/data/
 
-# Node
+# Node / frontend builds (install.sh, npm run build:all, UI «Обновления»)
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
+backend/app/static/tg_mini/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Runtime
+# Runtime (logs, PIDs — см. ADMINPANELAZ_STATE_DIR / install → /var/lib/adminpanelaz)
 .start.sh.pids
 .runtime/
 
-# IDE
+# IDE / OS
 .idea/
 .vscode/
 *.swp
+*~
+.DS_Store
+Thumbs.db

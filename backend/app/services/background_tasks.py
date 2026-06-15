@@ -409,26 +409,19 @@ class BackgroundTaskService:
         }
 
     def task_update_system(self, progress_updater: Callable[[int, str, str | None], None] | None = None) -> dict[str, str]:
-        output_parts: list[str] = []
-        if progress_updater:
-            progress_updater(15, "Обновление: проверка репозитория…")
-        fetch_stdout, fetch_stderr = self.run_checked_command(
-            ["git", "fetch", "origin"],
-            cwd=APP_ROOT,
-            timeout=90,
-        )
-        output_parts.extend([part for part in [fetch_stdout, fetch_stderr] if part])
-        if progress_updater:
-            progress_updater(60, "Обновление: git pull origin main…")
-        pull_stdout, pull_stderr = self.run_checked_command(
-            ["git", "pull", "origin", "main"],
-            cwd=APP_ROOT,
-            timeout=120,
-        )
-        output_parts.extend([part for part in [pull_stdout, pull_stderr] if part])
+        from app.services.system_update import apply_controller_update
+
+        def _progress(percent: int, stage: str) -> None:
+            if progress_updater:
+                progress_updater(percent, stage)
+
+        result = apply_controller_update(repo_root=PROJECT_ROOT, progress=_progress)
+        if not result.get("success"):
+            error_text = "; ".join(result.get("errors") or []) or "Обновление не выполнено"
+            raise RuntimeError(error_text)
         return {
-            "message": "Обновление применено",
-            "output": "\n".join(output_parts).strip(),
+            "message": str(result.get("message") or "Обновление применено"),
+            "output": str(result.get("output") or ""),
         }
 
     def task_vpn_network_publish(
