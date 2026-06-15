@@ -87,8 +87,8 @@ def test_blocked_warper_api_returns_403(monkeypatch, tmp_path):
     assert resp.json()["feature_disabled"] == "warper"
 
 
-def test_blocked_cidr_db_presets_returns_403(client):
-    resp = client.get("/api/routing/cidr-db/presets")
+def test_blocked_cidr_db_status_returns_403(client):
+    resp = client.get("/api/routing/cidr-db/status")
     assert resp.status_code == 403
     assert resp.json()["feature_disabled"] == "routing"
 

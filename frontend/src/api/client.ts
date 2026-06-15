@@ -566,68 +566,12 @@ export async function getRoutingResultContent(key: string) {
   )
 }
 
-export async function applyRoutingPreset(presetKey: string) {
-  return apiFetch(`/routing/presets/${encodeURIComponent(presetKey)}/apply`, { method: 'POST' })
-}
-
 export async function syncRoutingProviders() {
   return apiFetch('/routing/sync', { method: 'POST' })
 }
 
 export async function applyRouting() {
   return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/routing/apply', { method: 'POST' })
-}
-
-export async function getCidrDbPresets() {
-  return apiFetch<{ success: boolean; presets: import('../types').CidrDbPresetInfo[] }>(
-    '/routing/cidr-db/presets',
-  )
-}
-
-export async function createCidrDbPreset(data: {
-  name: string
-  description?: string
-  providers: string[]
-  settings?: import('../types').CidrPresetSettings
-}) {
-  return apiFetch<{ success: boolean; preset: import('../types').CidrDbPresetInfo }>(
-    '/routing/cidr-db/presets',
-    { method: 'POST', body: JSON.stringify(data) },
-  )
-}
-
-export async function updateCidrDbPreset(
-  id: number,
-  data: {
-    name?: string
-    description?: string
-    providers?: string[]
-    settings?: import('../types').CidrPresetSettings
-  },
-) {
-  return apiFetch<{ success: boolean; preset: import('../types').CidrDbPresetInfo }>(
-    `/routing/cidr-db/presets/${id}`,
-    { method: 'PUT', body: JSON.stringify(data) },
-  )
-}
-
-export async function deleteCidrDbPreset(id: number) {
-  return apiFetch<{ success: boolean; message: string }>(`/routing/cidr-db/presets/${id}`, {
-    method: 'DELETE',
-  })
-}
-
-export async function resetCidrDbPreset(id: number) {
-  return apiFetch<{ success: boolean; preset: import('../types').CidrDbPresetInfo }>(
-    `/routing/cidr-db/presets/${id}/reset`,
-    { method: 'POST' },
-  )
-}
-
-export async function seedCidrDbPresets() {
-  return apiFetch<{ success: boolean; message: string }>('/routing/cidr-db/seed-presets', {
-    method: 'POST',
-  })
 }
 
 export async function clearCidrDb(selectedFiles?: string[] | null) {

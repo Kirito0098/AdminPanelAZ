@@ -1,18 +1,14 @@
 import {
   CloudDownload,
-  FileText,
   LayoutDashboard,
-  Layers,
   Route,
 } from 'lucide-react'
 import { useMemo } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import ConfirmActionDialog from '@/components/routing/ConfirmActionDialog'
 import CidrPipelineTab from '@/components/routing/CidrPipelineTab'
-import FilesTab from '@/components/routing/FilesTab'
 import PipelineStatusBar from '@/components/routing/PipelineStatusBar'
 import PipelineTaskProgress from '@/components/routing/PipelineTaskProgress'
-import PresetsTab from '@/components/routing/PresetsTab'
 import ProvidersTab from '@/components/routing/ProvidersTab'
 import RoutingOverviewTab from '@/components/routing/RoutingOverviewTab'
 import RoutingPageHeader from '@/components/routing/RoutingPageHeader'
@@ -30,7 +26,7 @@ export default function RoutingPage() {
 
   const initialRoutingTab = useMemo(() => {
     const tab = searchParams.get('tab')
-    const publicTabs = new Set(['overview', 'providers', 'presets', 'files'])
+    const publicTabs = new Set(['overview', 'providers'])
     const adminTabs = new Set(['pipeline'])
     if (tab && publicTabs.has(tab)) return tab
     if (tab && adminTabs.has(tab) && isAdmin) return tab
@@ -39,6 +35,10 @@ export default function RoutingPage() {
 
   if (searchParams.get('tab') === 'antizapret-config') {
     return <Navigate to="/antizapret" replace />
+  }
+
+  if (searchParams.get('tab') === 'files') {
+    return <Navigate to="/routing?tab=overview" replace />
   }
 
   const {
@@ -67,7 +67,6 @@ export default function RoutingPage() {
     load,
     executeConfirm,
     toggleProvider,
-    applyPreset,
     refreshCidrDb,
     refreshOneProvider,
     retryFailedProviders,
@@ -124,14 +123,6 @@ export default function RoutingPage() {
               <span className="hidden sm:inline">CIDR Pipeline</span>
             </TabsTrigger>
           )}
-          <TabsTrigger value="presets" className="gap-1.5">
-            <Layers size={14} />
-            <span className="hidden sm:inline">Пресеты</span>
-          </TabsTrigger>
-          <TabsTrigger value="files" className="gap-1.5">
-            <FileText size={14} />
-            <span className="hidden sm:inline">Файлы</span>
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
@@ -181,18 +172,6 @@ export default function RoutingPage() {
           </TabsContent>
         )}
 
-        <TabsContent value="presets">
-          <PresetsTab
-            providers={data.providers}
-            isAdmin={isAdmin}
-            actionLoading={actionLoading}
-            onApply={applyPreset}
-          />
-        </TabsContent>
-
-        <TabsContent value="files">
-          <FilesTab isAdmin={isAdmin} />
-        </TabsContent>
       </Tabs>
 
       <ConfirmActionDialog

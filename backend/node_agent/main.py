@@ -341,11 +341,6 @@ def routing_provider_enabled(filename: str, payload: dict, _: None = Depends(ver
     return cidr_service.set_provider_enabled(filename, bool(payload.get("enabled", False)))
 
 
-@app.post("/routing/presets/{preset_key}/apply")
-def routing_preset_apply(preset_key: str, _: None = Depends(verify_api_key)):
-    return cidr_service.apply_preset(preset_key)
-
-
 @app.post("/routing/sync")
 def routing_sync(_: None = Depends(verify_api_key)):
     return cidr_service.sync_providers()

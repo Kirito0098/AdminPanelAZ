@@ -5,12 +5,7 @@ from pathlib import Path
 
 from fastapi import HTTPException, status
 
-from app.services.cidr.constants import (
-    BUILTIN_CIDR_PRESETS,
-    IP_FILES,
-    RESULT_FILES,
-    ROUTE_CONFIG_FILES,
-)
+from app.services.cidr.constants import IP_FILES, RESULT_FILES, ROUTE_CONFIG_FILES
 from app.services.cidr.ip_manager import IpManager
 
 CIDR_PATTERN = re.compile(
@@ -66,7 +61,6 @@ class CidrRoutingService:
         result_route = self.result_dir / RESULT_FILES["route_ips"]
         return {
             "providers": providers,
-            "presets": BUILTIN_CIDR_PRESETS,
             "route_stats": {
                 "config_include_total": route_stats["total"],
                 "config_include_per_file": route_stats["per_file"],
@@ -111,35 +105,6 @@ class CidrRoutingService:
             ) from exc
         return {"filename": filename, "enabled": enabled, "cidr_count": count}
 
-    def apply_preset(self, preset_key: str) -> dict:
-        preset = next((p for p in BUILTIN_CIDR_PRESETS if p["key"] == preset_key), None)
-        if not preset:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пресет не найден")
-
-        enabled: list[str] = []
-        errors: list[str] = []
-        for fname in IP_FILES:
-            should_enable = fname in preset["providers"]
-            current = self.ip_manager.get_file_states().get(fname, False)
-            if should_enable == current:
-                continue
-            try:
-                if should_enable:
-                    self.ip_manager.enable_file(fname)
-                else:
-                    self.ip_manager.disable_file(fname)
-                enabled.append(fname)
-            except FileNotFoundError:
-                errors.append(fname)
-
-        sync = self.ip_manager.sync_enabled_from_list()
-        return {
-            "preset": preset_key,
-            "changed": enabled,
-            "errors": errors,
-            "sync": sync,
-        }
-
     def sync_providers(self) -> dict:
         restored = self.ip_manager.restore_source_from_config()
         sync = self.ip_manager.sync_enabled_from_list()
@@ -174,7 +139,7 @@ class CidrRoutingService:
             })
         return {"files": files}
 
-    def get_result_file_content(self, key: str) -> dict:
+    def get_result_content(self, key: str) -> dict:
         if key not in RESULT_FILES:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неизвестный файл результата")
         fname = RESULT_FILES[key]

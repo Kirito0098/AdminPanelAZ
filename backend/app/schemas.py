@@ -567,53 +567,6 @@ class CidrProviderInfo(BaseModel):
     cidr_count: int = 0
 
 
-class CidrPresetInfo(BaseModel):
-    key: str
-    name: str
-    description: str = ""
-    providers: list[str] = []
-
-
-class CidrProviderMetaLite(BaseModel):
-    name: str
-    category: str = ""
-    tags: list[str] = []
-
-
-class CidrPresetSettings(BaseModel):
-    region_scopes: list[str] = ["all"]
-    include_non_geo_fallback: bool = False
-    exclude_ru_cidrs: bool = False
-
-
-class CidrDbPresetInfo(BaseModel):
-    id: int
-    key: str
-    name: str
-    description: str = ""
-    is_builtin: bool
-    providers: list[str]
-    settings: CidrPresetSettings = CidrPresetSettings()
-    sort_order: int = 0
-    created_at: str
-    updated_at: str
-    providers_meta: dict[str, CidrProviderMetaLite] | None = None
-
-
-class CidrPresetCreateRequest(BaseModel):
-    name: str
-    description: str = ""
-    providers: list[str]
-    settings: CidrPresetSettings | None = None
-
-
-class CidrPresetUpdateRequest(BaseModel):
-    name: str | None = None
-    description: str | None = None
-    providers: list[str] | None = None
-    settings: CidrPresetSettings | None = None
-
-
 class RouteStatsInfo(BaseModel):
     config_include_total: int = 0
     config_include_per_file: dict[str, int] = {}
@@ -623,7 +576,6 @@ class RouteStatsInfo(BaseModel):
 
 class RoutingOverview(BaseModel):
     providers: list[CidrProviderInfo]
-    presets: list[CidrPresetInfo]
     route_stats: RouteStatsInfo
     list_dir: str = ""
     config_dir: str = ""

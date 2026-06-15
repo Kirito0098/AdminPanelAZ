@@ -20,7 +20,6 @@ import { useProgress } from '@/context/ProgressContext'
 import { usePipelineTaskPoll } from '@/components/routing/usePipelineTaskPoll'
 import type {
   AntifilterStatus,
-  CidrDbPresetInfo,
   CidrDbStatus,
   CidrPipelineTask,
   RoutingOverview,
@@ -480,15 +479,6 @@ export function useRoutingPage() {
         enabled ? `${name} включён` : `${name} отключён`,
         enabled ? `Включение ${name}...` : `Отключение ${name}...`,
       ),
-    applyPreset: (preset: CidrDbPresetInfo) =>
-      withAction(async () => {
-        if (!data) throw new Error('Нет данных маршрутизации')
-        const targetProviders = new Set(preset.providers)
-        const toggles = data.providers
-          .filter((provider) => provider.enabled !== targetProviders.has(provider.filename))
-          .map((provider) => toggleRoutingProvider(provider.filename, targetProviders.has(provider.filename)))
-        await Promise.all(toggles)
-      }, `Пресет «${preset.name}» применён`, `Применение пресета «${preset.name}»...`),
     inline,
     refreshCidrDb: () => runRefreshCidrDb(),
     refreshOneProvider,

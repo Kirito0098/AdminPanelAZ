@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Download, Eye, FileText, RefreshCw } from 'lucide-react'
+import { Copy, Download, Eye, FileText, RefreshCw } from 'lucide-react'
 import {
   ApiError,
   getRoutingResultContent,
@@ -28,8 +28,14 @@ const PUBLIC_SLUGS: Record<string, string> = {
   tplink_ovpn: 'tplink',
 }
 
+function buildPublicRouteUrl(key: string): string | null {
+  const slug = PUBLIC_SLUGS[key]
+  if (!slug) return null
+  return `${window.location.origin}/api/public/route-download/${slug}`
+}
+
 export default function RouteResultsPanel() {
-  const { error: notifyError } = useNotifications()
+  const { error: notifyError, success } = useNotifications()
   const [files, setFiles] = useState<RouteResultFileEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -86,6 +92,19 @@ export default function RouteResultsPanel() {
     URL.revokeObjectURL(url)
   }
 
+  const copyPublicLink = async (key: string) => {
+    const url = buildPublicRouteUrl(key)
+    if (!url) return
+    try {
+      await navigator.clipboard.writeText(url)
+      success('Ссылка скопирована в буфер')
+    } catch {
+      notifyError('Не удалось скопировать ссылку')
+    }
+  }
+
+  const previewPublicUrl = previewKey ? buildPublicRouteUrl(previewKey) : null
+
   if (loading) {
     return <Spinner label="Загрузка route-файлов..." className="py-8" />
   }
@@ -94,7 +113,7 @@ export default function RouteResultsPanel() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          Сгенерированные файлы маршрутизации на активном узле (после doall.sh)
+          Файлы для импорта маршрутов на роутер. Генерируются на активном узле после doall.sh.
         </p>
         <Button size="sm" variant="outline" disabled={refreshing} onClick={() => void load(true)}>
           <RefreshCw size={14} className={refreshing ? 'mr-1 animate-spin' : 'mr-1'} />
@@ -106,7 +125,7 @@ export default function RouteResultsPanel() {
         <EmptyState
           icon={FileText}
           title="Файлы не найдены"
-          description="Запустите doall.sh или примените маршрутизацию, чтобы сгенерировать route-файлы"
+          description="Примените маршрутизацию (doall.sh) в разделе «Маршрутизация», чтобы сгенерировать route-файлы"
           className="py-8"
         />
       ) : (
@@ -128,7 +147,7 @@ export default function RouteResultsPanel() {
                     <div className="font-mono text-xs text-muted-foreground">{file.filename}</div>
                     {PUBLIC_SLUGS[file.key] && (
                       <div className="mt-1 text-xs text-muted-foreground">
-                        Публично: /api/public/route-download/{PUBLIC_SLUGS[file.key]}
+                        Публичная ссылка: /api/public/route-download/{PUBLIC_SLUGS[file.key]}
                       </div>
                     )}
                   </TableCell>
@@ -141,15 +160,28 @@ export default function RouteResultsPanel() {
                     {file.exists ? file.line_count : '—'}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!file.exists}
-                      onClick={() => void openPreview(file.key)}
-                    >
-                      <Eye size={14} className="mr-1" />
-                      Просмотр
-                    </Button>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      {PUBLIC_SLUGS[file.key] && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!file.exists}
+                          onClick={() => void copyPublicLink(file.key)}
+                        >
+                          <Copy size={14} className="mr-1" />
+                          Ссылка
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!file.exists}
+                        onClick={() => void openPreview(file.key)}
+                      >
+                        <Eye size={14} className="mr-1" />
+                        Просмотр
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -165,11 +197,19 @@ export default function RouteResultsPanel() {
         }}
         title={PUBLIC_LABELS[previewKey ?? ''] || previewFilename || 'Route-файл'}
         description={previewFilename ? `Файл: ${previewFilename}` : undefined}
+        className="max-w-4xl w-[min(90vw,56rem)]"
+        contentClassName="max-h-[85vh] overflow-y-auto"
         footer={
           <>
             <Button variant="outline" onClick={() => setPreviewKey(null)}>
               Закрыть
             </Button>
+            {previewPublicUrl && previewKey && (
+              <Button variant="outline" onClick={() => void copyPublicLink(previewKey)}>
+                <Copy size={14} className="mr-1" />
+                Копировать ссылку
+              </Button>
+            )}
             <Button onClick={downloadPreview} disabled={!previewContent}>
               <Download size={14} className="mr-1" />
               Скачать
@@ -183,7 +223,7 @@ export default function RouteResultsPanel() {
           <Textarea
             value={previewContent}
             readOnly
-            className="min-h-[20rem] font-mono text-xs"
+            className="min-h-[24rem] max-h-[50vh] resize-y font-mono text-xs"
           />
         )}
       </AppDialog>

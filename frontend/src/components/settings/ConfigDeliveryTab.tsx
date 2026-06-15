@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { ClipboardList, ExternalLink, QrCode } from 'lucide-react'
+import { ClipboardList, QrCode } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ApiError, getSecuritySettings, updateSecuritySettings } from '@/api/client'
+import RouteResultsPanel from '@/components/settings/RouteResultsPanel'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -76,7 +77,11 @@ export default function ConfigDeliveryTab() {
         <CardContent className="space-y-6">
           {openvpnEnabled && (
             <div className="space-y-4">
-              <h4 className="text-sm font-medium">Публичные route-файлы</h4>
+              <h4 className="text-sm font-medium">Route-файлы для роутеров</h4>
+              <p className="text-sm text-muted-foreground">
+                Готовые списки маршрутов для Keenetic, MikroTik и TP-Link — скачайте или откройте
+                публичную ссылку для настройки роутера.
+              </p>
               <label className="flex cursor-pointer items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -86,17 +91,12 @@ export default function ConfigDeliveryTab() {
                   }
                   className="h-4 w-4 rounded border"
                 />
-                Разрешить публичное скачивание route-файлов (Keenetic, MikroTik, TP-Link)
+                Разрешить публичное скачивание route-файлов без авторизации
               </label>
               <p className="text-xs text-muted-foreground">
-                Ссылки: /api/public/route-download/&#123;keenetic|mikrotik|tplink&#125;
+                Публичные URL: /api/public/route-download/&#123;keenetic|mikrotik|tplink&#125;
               </p>
-              <Button variant="outline" size="sm" asChild>
-                <Link to="/routing?tab=files">
-                  <ExternalLink size={14} className="mr-1" />
-                  Просмотр route-файлов в маршрутизации
-                </Link>
-              </Button>
+              <RouteResultsPanel />
             </div>
           )}
 

@@ -357,33 +357,6 @@ export interface CidrProviderInfo {
   cidr_count: number
 }
 
-export interface CidrPresetInfo {
-  key: string
-  name: string
-  description: string
-  providers: string[]
-}
-
-export interface CidrPresetSettings {
-  region_scopes: string[]
-  include_non_geo_fallback: boolean
-  exclude_ru_cidrs: boolean
-}
-
-export interface CidrDbPresetInfo {
-  id: number
-  key: string
-  name: string
-  description: string
-  is_builtin: boolean
-  providers: string[]
-  settings: CidrPresetSettings
-  sort_order?: number
-  created_at?: string
-  updated_at?: string
-  providers_meta?: Record<string, { name: string; category: string; tags: string[] }>
-}
-
 export interface RouteStatsInfo {
   config_include_total: number
   config_include_per_file: Record<string, number>
@@ -393,7 +366,6 @@ export interface RouteStatsInfo {
 
 export interface RoutingOverview {
   providers: CidrProviderInfo[]
-  presets: CidrPresetInfo[]
   route_stats: RouteStatsInfo
   list_dir: string
   config_dir: string

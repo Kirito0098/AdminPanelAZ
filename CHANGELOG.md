@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-06-15
+
 ### Added
 - **NOC — сводка мониторинга** — `GET /api/monitoring/overview?scope=node|all`: активные OpenVPN/WireGuard, службы, геолокация IP (город · провайдер), режим «Активный узел» / «Все узлы» с таблицей узлов.
 - **NOC — геолокация** — сервис `ip_geo.py`: нормализация endpoint (`udp4:` и т.п.), batch lookup ip-api.com, кэш 24 ч; поля `display_address`, `city`, `isp`, `geo_label` в схемах мониторинга и трафика.
@@ -31,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **NOC — overview 500** — исправлена ошибка Pydantic при обогащении клиентов гео (`model_copy(update=...)` вместо `**model_dump()` + дублирующие поля).
 - **Recharts** — нечитаемый текст в тултипах при наведении на графики (тёмный текст на тёмном фоне).
+- **Журналы — подключения** — исправлен подсчёт WireGuard-пиров и общего числа на вкладке «Подключения»: учитываются только онлайн-пиры с handshake (как в NOC-мониторинге); OpenVPN подписан как «сессии».
 
 ## [1.8.0] - 2026-06-14
 
@@ -437,7 +440,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Production-развёртывание: `install.sh`, daemon/watchdog, systemd, раздача UI из backend в prod-режиме.
 - OpenVPN management sockets, vnStat, WebSocket-мониторинг, Telegram Mini App, in-panel pytest.
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.5.0...v1.6.0

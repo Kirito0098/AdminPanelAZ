@@ -50,9 +50,20 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { cn } from '@/lib/utils'
-import type { ActionLogEntry, ConnectionLogsSnapshot, OpenVpnEventProfile, OpenVpnSocketStatus, QrDownloadAuditEntry } from '@/types'
+import type {
+  ActionLogEntry,
+  ConnectionLogsSnapshot,
+  OpenVpnEventProfile,
+  OpenVpnSocketStatus,
+  QrDownloadAuditEntry,
+  WireGuardPeer,
+} from '@/types'
 
 const REFRESH_INTERVAL = 30
+
+function isWireGuardOnline(peer: WireGuardPeer) {
+  return Boolean(peer.latest_handshake)
+}
 const LOG_PAGE_SIZE = 100
 
 type LogLevel = 'all' | 'error' | 'warn' | 'info'
@@ -472,6 +483,11 @@ export default function LogsPage() {
 
   const openvpnClients = connections?.openvpn_clients ?? []
   const wireguardPeers = connections?.wireguard_peers ?? []
+  const activeWireguardPeers = useMemo(
+    () => wireguardPeers.filter(isWireGuardOnline),
+    [wireguardPeers],
+  )
+  const totalConnections = openvpnClients.length + activeWireguardPeers.length
 
   const selectedEventProfile = useMemo(() => {
     if (selectedProfile === 'all') return null
@@ -627,9 +643,9 @@ export default function LogsPage() {
             <TabsTrigger value="connections" className="gap-1.5">
               <Wifi size={14} />
               Подключения
-              {(openvpnClients.length > 0 || wireguardPeers.length > 0) && (
+              {totalConnections > 0 && (
                 <Badge variant="secondary" className="h-4 px-1 text-[10px]">
-                  {openvpnClients.length + wireguardPeers.length}
+                  {totalConnections}
                 </Badge>
               )}
             </TabsTrigger>
@@ -686,7 +702,10 @@ export default function LogsPage() {
               </Badge>
               <Badge variant="outline" className="gap-1">
                 <Hash size={10} />
-                WireGuard: {wireguardPeers.length}
+                WireGuard: {activeWireguardPeers.length}
+                {wireguardPeers.length > activeWireguardPeers.length && (
+                  <> / {wireguardPeers.length}</>
+                )}
               </Badge>
             </div>
 
@@ -697,7 +716,7 @@ export default function LogsPage() {
                     <Wifi size={16} />
                     OpenVPN
                   </CardTitle>
-                  <CardDescription>{openvpnClients.length} активных клиентов</CardDescription>
+                  <CardDescription>{openvpnClients.length} активных сессий</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {openvpnClients.length === 0 ? (
@@ -750,14 +769,18 @@ export default function LogsPage() {
                     <Wifi size={16} />
                     WireGuard
                   </CardTitle>
-                  <CardDescription>{wireguardPeers.length} пиров</CardDescription>
+                  <CardDescription>
+                    {activeWireguardPeers.length} онлайн
+                    {wireguardPeers.length > activeWireguardPeers.length &&
+                      ` из ${wireguardPeers.length} пиров`}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {wireguardPeers.length === 0 ? (
+                  {activeWireguardPeers.length === 0 ? (
                     <EmptyState
                       icon={WifiOff}
-                      title="Нет пиров WireGuard"
-                      description="Активные пиры с недавним handshake отобразятся здесь"
+                      title="Нет активных пиров WireGuard"
+                      description="Пиры с недавним handshake отобразятся здесь"
                       className="py-8"
                     />
                   ) : (
@@ -771,8 +794,8 @@ export default function LogsPage() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {wireguardPeers.map((p, i) => (
-                              <TableRow key={i}>
+                            {activeWireguardPeers.map((p) => (
+                              <TableRow key={p.public_key}>
                                 <TableCell>{String(p.client_name || '—')}</TableCell>
                                 <TableCell className="text-xs">
                                   {p.latest_handshake
@@ -785,9 +808,9 @@ export default function LogsPage() {
                         </Table>
                       </div>
                       <div className="space-y-2 md:hidden">
-                        {wireguardPeers.map((p, i) => (
+                        {activeWireguardPeers.map((p) => (
                           <WireGuardPeerCard
-                            key={i}
+                            key={p.public_key}
                             name={String(p.client_name || '—')}
                             handshake={
                               p.latest_handshake

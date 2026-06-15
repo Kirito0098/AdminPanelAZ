@@ -42,7 +42,6 @@ REMOTE_ADAPTER_ENDPOINTS: dict[str, str] = {
     "get_provider_content": "GET /routing/providers/{filename}",
     "save_provider_content": "PUT /routing/providers/{filename}",
     "set_provider_enabled": "POST /routing/providers/{filename}/enabled",
-    "apply_cidr_preset": "POST /routing/presets/{preset_key}/apply",
     "sync_cidr_providers": "POST /routing/sync",
     "read_route_file": "GET /routing/files/{file_key}",
     "write_route_file": "PUT /routing/files/{file_key}",

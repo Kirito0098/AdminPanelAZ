@@ -72,10 +72,6 @@ SETTINGS_CHANGE_NOTIFY = frozenset({
     "settings_cidr_db_refresh_queued",
     "settings_cidr_db_clear",
     "settings_cidr_generate_from_db",
-    "settings_cidr_preset_create",
-    "settings_cidr_preset_update",
-    "settings_cidr_preset_delete",
-    "settings_cidr_preset_reset",
     "settings_antifilter_refresh",
     "settings_run_doall",
     "settings_vpn_network_publish",
@@ -97,10 +93,6 @@ SETTINGS_TG_TITLES = {
     "settings_cidr_db_refresh_queued": "База CIDR",
     "settings_cidr_db_clear": "База CIDR",
     "settings_cidr_generate_from_db": "Генерация CIDR",
-    "settings_cidr_preset_create": "CIDR-пресет",
-    "settings_cidr_preset_update": "CIDR-пресет",
-    "settings_cidr_preset_delete": "CIDR-пресет",
-    "settings_cidr_preset_reset": "CIDR-пресет",
     "settings_antifilter_refresh": "AntiFilter",
     "settings_run_doall": "Применение изменений",
     "settings_vpn_network_publish": "Публикация панели",
@@ -119,7 +111,6 @@ SETTINGS_ACTION_EVENTS = frozenset({
     "settings_cidr_db_clear",
     "settings_cidr_generate_from_db",
     "settings_antifilter_refresh",
-    "settings_cidr_preset_reset",
 })
 
 _PREF_KEY_MAP = {

@@ -69,11 +69,6 @@ def toggle_provider(
     return get_active_adapter(db).set_provider_enabled(filename, payload.enabled)
 
 
-@router.post("/presets/{preset_key}/apply")
-def apply_preset(preset_key: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
-    return get_active_adapter(db).apply_cidr_preset(preset_key)
-
-
 @router.post("/sync")
 def sync_providers(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     return get_active_adapter(db).sync_cidr_providers()

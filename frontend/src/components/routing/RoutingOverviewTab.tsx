@@ -1,4 +1,4 @@
-import { FileText, GitBranch, Layers, Route } from 'lucide-react'
+import { GitBranch, Layers, Route, Shield } from 'lucide-react'
 import MetricCard from '@/components/noc/MetricCard'
 import StatusPanel from '@/components/noc/StatusPanel'
 import { Badge } from '@/components/ui/badge'
@@ -40,10 +40,11 @@ export default function RoutingOverviewTab({ data, cidrDb, antifilter }: Routing
           sub={stats.result_route_ips_exists ? 'Сгенерирован' : 'Не сгенерирован'}
         />
         <MetricCard
-          label="Пресеты"
-          value={data.presets.length}
-          icon={FileText}
-          sub="Встроенные"
+          label="Antifilter"
+          value={antifilter?.cidr_count ?? 0}
+          icon={Shield}
+          accent="cyan"
+          sub="Заблокированные подсети"
         />
       </div>
 

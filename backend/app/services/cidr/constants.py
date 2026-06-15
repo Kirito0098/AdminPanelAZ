@@ -1,4 +1,4 @@
-"""CIDR provider catalog and builtin presets (ported from AdminAntizapret)."""
+"""CIDR provider catalog (ported from AdminAntizapret)."""
 
 IP_FILES: dict[str, dict[str, str | list[str]]] = {
     "akamai-ips.txt": {
@@ -74,45 +74,6 @@ IP_FILES: dict[str, dict[str, str | list[str]]] = {
         "tags": ["hosting"],
     },
 }
-
-BUILTIN_CIDR_PRESETS: list[dict] = [
-    {
-        "key": "cdn_only",
-        "name": "Только CDN",
-        "description": "Akamai, Fastly, CDN77, Cloudflare — крупнейшие CDN.",
-        "providers": ["akamai-ips.txt", "fastly-ips.txt", "cdn77-ips.txt", "cloudflare-ips.txt"],
-    },
-    {
-        "key": "web_surfing",
-        "name": "Веб-серфинг",
-        "description": "Google, Fastly, Akamai — баланс покрытия и объёма маршрутов.",
-        "providers": ["google-ips.txt", "fastly-ips.txt", "akamai-ips.txt"],
-    },
-    {
-        "key": "social_media",
-        "name": "Соцсети и мессенджеры",
-        "description": "Twitter/X, Instagram, Twitch.",
-        "providers": ["amazon-ips.txt", "fastly-ips.txt"],
-    },
-    {
-        "key": "streaming",
-        "name": "Видео и стриминг",
-        "description": "YouTube, Twitch, Netflix CDN, Spotify.",
-        "providers": ["google-ips.txt", "amazon-ips.txt", "akamai-ips.txt", "fastly-ips.txt"],
-    },
-    {
-        "key": "gaming",
-        "name": "Игровые сервисы",
-        "description": "AWS, Azure, OVH, Hetzner — игровые серверы.",
-        "providers": ["amazon-ips.txt", "azure-ips.txt", "ovh-ips.txt", "hetzner-ips.txt"],
-    },
-    {
-        "key": "full_cloud",
-        "name": "Все облака",
-        "description": "Все 12 провайдеров — максимальное покрытие.",
-        "providers": list(IP_FILES.keys()),
-    },
-]
 
 ROUTE_CONFIG_FILES = {
     "include_ips": "include-ips.txt",

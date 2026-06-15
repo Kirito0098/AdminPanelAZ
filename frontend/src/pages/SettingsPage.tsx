@@ -54,8 +54,8 @@ const SECTION_TITLES: Record<SettingsSection, { title: string; description: stri
     description: 'Создание, восстановление и автоматизация бэкапов панели',
   },
   monitoring: {
-    title: 'Мониторинг',
-    description: 'Пороги CPU/RAM и интервалы Telegram-оповещений о нагрузке',
+    title: 'Оповещения о нагрузке',
+    description: 'Пороги CPU/RAM и Telegram-оповещения при перегрузке сервера',
   },
   vpn_network: {
     title: 'Сеть и публикация',
@@ -251,7 +251,7 @@ export default function SettingsPage() {
           </div>
           <p className="text-sm text-muted-foreground">
             {isAdmin
-              ? 'Учётная запись, безопасность, операции и параметры системы'
+              ? 'Профиль, доступ, VPN, сервер и параметры панели'
               : 'Тема интерфейса, смена пароля и двухфакторная аутентификация'}
           </p>
         </div>

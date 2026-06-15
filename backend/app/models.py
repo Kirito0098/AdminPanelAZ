@@ -396,21 +396,6 @@ class CidrDbRefreshLog(Base):
     details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class CidrPreset(Base):
-    __tablename__ = "cidr_preset"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    preset_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    name: Mapped[str] = mapped_column(String(100))
-    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
-    providers_json: Mapped[str] = mapped_column(Text, default="[]")
-    settings_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
 class AntifilterCidr(Base):
     __tablename__ = "antifilter_cidr"
 

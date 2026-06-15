@@ -118,9 +118,6 @@ class NodeAdapter(ABC):
     def set_provider_enabled(self, filename: str, enabled: bool) -> dict: ...
 
     @abstractmethod
-    def apply_cidr_preset(self, preset_key: str) -> dict: ...
-
-    @abstractmethod
     def sync_cidr_providers(self) -> dict: ...
 
     @abstractmethod
@@ -327,9 +324,6 @@ class LocalNodeAdapter(NodeAdapter):
 
     def set_provider_enabled(self, filename: str, enabled: bool) -> dict:
         return self._cidr.set_provider_enabled(filename, enabled)
-
-    def apply_cidr_preset(self, preset_key: str) -> dict:
-        return self._cidr.apply_preset(preset_key)
 
     def sync_cidr_providers(self) -> dict:
         return self._cidr.sync_providers()
@@ -751,9 +745,6 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def set_provider_enabled(self, filename: str, enabled: bool) -> dict:
         return self._request("POST", f"/routing/providers/{filename}/enabled", json={"enabled": enabled})
-
-    def apply_cidr_preset(self, preset_key: str) -> dict:
-        return self._request("POST", f"/routing/presets/{preset_key}/apply")
 
     def sync_cidr_providers(self) -> dict:
         return self._request("POST", "/routing/sync")

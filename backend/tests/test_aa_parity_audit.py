@@ -59,7 +59,7 @@ AA_PARITY_MATRIX: dict[str, tuple[str, str]] = {
         "Flask sessions → JWT/web sessions",
     ),
     "test_settings_api_action_logs_export.py": ("test_action_logs_export.py", "renamed"),
-    "test_settings_api_cidr_games.py": ("test_cidr_db_presets.py", "N/A — game filters removed"),
+    "test_settings_api_cidr_games.py": ("N/A", "N/A — game filters and CIDR presets removed"),
     "test_settings_page_context.py": ("N/A", "Jinja page context"),
     "test_settings_post_handlers.py": ("test_settings_post_handlers.py", "direct"),
     "test_site_diagnostics.py": ("test_site_diagnostics.py", "direct"),

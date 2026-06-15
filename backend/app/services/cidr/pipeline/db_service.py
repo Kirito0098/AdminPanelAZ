@@ -939,113 +939,6 @@ class CidrDbUpdaterService:
                 failed.append(str(provider_key))
         return sorted(set(failed))
 
-    # ── Preset management ─────────────────────────────────────────────
-
-    def seed_builtin_presets(self):
-        """Insert built-in presets if they don't exist yet. Called at app startup."""
-        from app.services.cidr.constants import BUILTIN_CIDR_PRESETS
-        m = _get_models()
-
-        for preset_def in BUILTIN_CIDR_PRESETS:
-            existing = self.db.query(m.CidrPreset).filter_by(preset_key=preset_def["key"]).first()
-            if existing:
-                # Update name/description/settings in case they changed, but don't touch user-modified ones
-                if existing.is_builtin:
-                    existing.name = preset_def["name"]
-                    existing.description = preset_def.get("description", "")
-                    existing.sort_order = preset_def.get("sort_order", 0)
-                    # Update default providers only if the preset has never been customized
-                    # (we keep is_builtin=True to allow reset)
-                continue
-
-            preset = m.CidrPreset(
-                preset_key=preset_def["key"],
-                name=preset_def["name"],
-                description=preset_def.get("description", ""),
-                is_builtin=True,
-                providers_json=json.dumps(preset_def.get("providers", []), ensure_ascii=False),
-                settings_json=json.dumps(preset_def.get("settings", {}), ensure_ascii=False),
-                sort_order=preset_def.get("sort_order", 0),
-            )
-            self.db.add(preset)
-
-        try:
-            self.db.commit()
-        except Exception as exc:
-            self.db.rollback()
-            logger.warning("seed_builtin_presets error: %s", exc)
-
-    def get_presets(self):
-        """Return all presets ordered by sort_order."""
-        m = _get_models()
-        presets = self.db.query(m.CidrPreset).order_by(m.CidrPreset.sort_order, m.CidrPreset.id).all()
-        return [self._serialize_preset(p) for p in presets]
-
-    def create_preset(self, *, name, description="", providers, settings=None):
-        """Create a new custom preset. Returns the created preset dict."""
-        import uuid
-        m = _get_models()
-        preset_key = "custom_" + uuid.uuid4().hex[:8]
-        preset = m.CidrPreset(
-            preset_key=preset_key,
-            name=name,
-            description=description,
-            is_builtin=False,
-            providers_json=json.dumps(providers, ensure_ascii=False),
-            settings_json=json.dumps(settings or {}, ensure_ascii=False),
-            sort_order=100,
-        )
-        self.db.add(preset)
-        self.db.commit()
-        return self._serialize_preset(preset)
-
-    def update_preset(self, preset_id, *, name=None, description=None, providers=None, settings=None):
-        """Update an existing preset. Returns updated dict or None if not found."""
-        m = _get_models()
-        preset = self.db.query(m.CidrPreset).filter(m.CidrPreset.id == preset_id).first()
-        if not preset:
-            return None
-        if name is not None:
-            preset.name = name
-        if description is not None:
-            preset.description = description
-        if providers is not None:
-            preset.providers_json = json.dumps(providers, ensure_ascii=False)
-        if settings is not None:
-            preset.settings_json = json.dumps(settings, ensure_ascii=False)
-        self.db.commit()
-        return self._serialize_preset(preset)
-
-    def delete_preset(self, preset_id):
-        """Delete a preset. Returns True if deleted, False if not found or is builtin."""
-        m = _get_models()
-        preset = self.db.query(m.CidrPreset).filter(m.CidrPreset.id == preset_id).first()
-        if not preset:
-            return False, "Пресет не найден"
-        if preset.is_builtin:
-            return False, "Встроенный пресет нельзя удалить"
-        self.db.delete(preset)
-        self.db.commit()
-        return True, "Удалено"
-
-    def reset_builtin_preset(self, preset_id):
-        """Reset a builtin preset to its default values."""
-        from app.services.cidr.constants import BUILTIN_CIDR_PRESETS
-        m = _get_models()
-        preset = self.db.query(m.CidrPreset).filter(m.CidrPreset.id == preset_id).first()
-        if not preset or not preset.is_builtin:
-            return None
-        default = next((p for p in BUILTIN_CIDR_PRESETS if p["key"] == preset.preset_key), None)
-        if not default:
-            return None
-        preset.name = default["name"]
-        preset.description = default.get("description", "")
-        preset.providers_json = json.dumps(default.get("providers", []), ensure_ascii=False)
-        preset.settings_json = json.dumps(default.get("settings", {}), ensure_ascii=False)
-        preset.sort_order = default.get("sort_order", 0)
-        self.db.commit()
-        return self._serialize_preset(preset)
-
     def clear_provider_data(self, *, selected_files=None, triggered_by="manual"):
         """Delete stored CIDR/ASN/meta for all or selected providers."""
         from app.services.cidr.pipeline.provider_sources import PROVIDER_SOURCES
@@ -1104,7 +997,7 @@ class CidrDbUpdaterService:
         }
 
     def cleanup_retired_provider_data(self):
-        """Remove provider rows and preset links that are no longer present in IP_FILES."""
+        """Remove provider rows that are no longer present in IP_FILES."""
         from app.services.cidr.constants import IP_FILES
 
         m = _get_models()
@@ -1114,7 +1007,6 @@ class CidrDbUpdaterService:
                 "success": False,
                 "message": "Пустой список валидных провайдеров",
                 "deleted": {},
-                "updated_presets": 0,
             }
 
         valid_list = sorted(valid_provider_keys)
@@ -1125,21 +1017,6 @@ class CidrDbUpdaterService:
             "provider_asn_snapshot": self.db.query(m.ProviderAsnSnapshot).filter(~m.ProviderAsnSnapshot.provider_key.in_(valid_list)).delete(synchronize_session=False),
         }
 
-        updated_presets = 0
-        for preset in self.db.query(m.CidrPreset).all():
-            try:
-                providers = json.loads(preset.providers_json or "[]")
-            except (TypeError, ValueError):
-                providers = []
-
-            if not isinstance(providers, list):
-                providers = []
-
-            filtered = [item for item in providers if item in valid_provider_keys]
-            if filtered != providers:
-                preset.providers_json = json.dumps(filtered, ensure_ascii=False)
-                updated_presets += 1
-
         self.cidr_db.commit()
         self.db.commit()
 
@@ -1147,7 +1024,6 @@ class CidrDbUpdaterService:
             "success": True,
             "message": "Очистка устаревших провайдеров завершена",
             "deleted": deleted,
-            "updated_presets": updated_presets,
         }
 
     # ── Private helpers ───────────────────────────────────────────────
@@ -1827,27 +1703,4 @@ class CidrDbUpdaterService:
             "last_refreshed_at": meta.last_refreshed_at.isoformat() if meta.last_refreshed_at else None,
             "refresh_status": meta.refresh_status or "never",
             "refresh_error": meta.refresh_error,
-        }
-
-    @staticmethod
-    def _serialize_preset(preset):
-        try:
-            providers = json.loads(preset.providers_json or "[]")
-        except (ValueError, TypeError):
-            providers = []
-        try:
-            settings = json.loads(preset.settings_json or "{}")
-        except (ValueError, TypeError):
-            settings = {}
-        return {
-            "id": preset.id,
-            "key": preset.preset_key,
-            "name": preset.name,
-            "description": preset.description or "",
-            "is_builtin": preset.is_builtin,
-            "providers": providers,
-            "settings": settings,
-            "sort_order": preset.sort_order,
-            "created_at": preset.created_at.isoformat(),
-            "updated_at": preset.updated_at.isoformat(),
         }

@@ -51,13 +51,15 @@ interface NavItem {
 
 interface NavGroup {
   label: string
+  description?: string
   adminOnly?: boolean
   items: NavItem[]
 }
 
 export const SETTINGS_NAV_GROUPS: NavGroup[] = [
   {
-    label: 'Учётная запись',
+    label: 'Профиль',
+    description: 'Личные настройки интерфейса и входа',
     items: [
       {
         id: 'personal',
@@ -65,20 +67,20 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
         icon: User,
         description: 'Тема, пароль и двухфакторная аутентификация',
       },
+    ],
+  },
+  {
+    label: 'Доступ',
+    description: 'Кто может войти в панель',
+    adminOnly: true,
+    items: [
       {
         id: 'users',
         label: 'Пользователи',
         icon: Users,
         description: 'Учётные записи, роли и доступ viewer',
         settingsTab: 'users',
-        adminOnly: true,
       },
-    ],
-  },
-  {
-    label: 'Безопасность',
-    adminOnly: true,
-    items: [
       {
         id: 'security',
         label: 'Доступ к панели',
@@ -86,25 +88,40 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
         description: 'IP whitelist, сканеры и активные баны',
         settingsTab: 'security',
       },
+    ],
+  },
+  {
+    label: 'VPN',
+    description: 'Клиенты и службы на узле',
+    adminOnly: true,
+    items: [
       {
         id: 'config_delivery',
         label: 'Раздача конфигов',
         icon: QrCode,
-        description: 'Одноразовые QR-ссылки и публичные route-файлы',
+        description: 'QR-ссылки и публичные route-файлы',
         settingsTab: 'qr_downloads',
       },
-    ],
-  },
-  {
-    label: 'Операции',
-    adminOnly: true,
-    items: [
       {
         id: 'maintenance',
         label: 'Обслуживание',
         icon: Wrench,
         description: 'Профили клиентов, путь AntiZapret и перезапуск VPN',
         settingsTab: 'maintenance',
+      },
+    ],
+  },
+  {
+    label: 'Сервер',
+    description: 'Публикация, бэкапы и алерты',
+    adminOnly: true,
+    items: [
+      {
+        id: 'vpn_network',
+        label: 'Сеть и публикация',
+        icon: Globe,
+        description: 'HTTPS, домен и reverse-proxy',
+        settingsTab: 'vpn_network',
       },
       {
         id: 'backup',
@@ -115,22 +132,16 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
       },
       {
         id: 'monitoring',
-        label: 'Мониторинг',
+        label: 'Оповещения о нагрузке',
         icon: Activity,
-        description: 'Пороги CPU/RAM и интервалы Telegram-оповещений',
+        description: 'Пороги CPU/RAM и Telegram при перегрузке',
         settingsTab: 'monitoring',
-      },
-      {
-        id: 'vpn_network',
-        label: 'Сеть и публикация',
-        icon: Globe,
-        description: 'HTTPS, домен и reverse-proxy',
-        settingsTab: 'vpn_network',
       },
     ],
   },
   {
-    label: 'Система',
+    label: 'Панель',
+    description: 'Функции и обновления панели',
     adminOnly: true,
     items: [
       {
@@ -195,13 +206,18 @@ export default function SettingsNav({
   })).filter((group) => group.items.length > 0)
 
   return (
-    <nav className="space-y-4" aria-label="Разделы настроек">
+    <nav className="space-y-5" aria-label="Разделы настроек">
       {visibleGroups.map((group, groupIndex) => (
         <div key={group.label}>
           {groupIndex > 0 && <Separator className="mb-4 lg:hidden" />}
-          <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {group.label}
-          </p>
+          <div className="mb-2 px-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {group.label}
+            </p>
+            {group.description && (
+              <p className="mt-0.5 text-xs text-muted-foreground/80">{group.description}</p>
+            )}
+          </div>
           <ul className="space-y-1">
             {group.items.map((item) => {
               const isActive = active === item.id
