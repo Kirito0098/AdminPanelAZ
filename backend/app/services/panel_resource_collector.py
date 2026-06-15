@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import platform
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -125,6 +127,33 @@ def _scan_panel_processes() -> tuple[list[psutil.Process], list[psutil.Process],
     return backend, watchdog, nginx, frontend_dev
 
 
+def _collect_host_metrics() -> dict[str, Any]:
+    cpu = psutil.cpu_percent(interval=None) or 0.0
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+    load_1: float | None = None
+    try:
+        la = os.getloadavg() if hasattr(os, "getloadavg") else psutil.getloadavg()
+        load_1 = round(la[0], 2)
+    except (OSError, AttributeError):
+        pass
+    boot = psutil.boot_time()
+    uptime_s = time.time() - boot
+    days, rem = divmod(uptime_s, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, _ = divmod(rem, 60)
+    return {
+        "host_cpu_percent": round(cpu, 1),
+        "host_memory_percent": round(mem.percent, 1),
+        "host_memory_used_mb": mem.used // (1024 * 1024),
+        "host_memory_total_mb": mem.total // (1024 * 1024),
+        "host_disk_percent": round(disk.percent, 1),
+        "host_load_1": load_1,
+        "host_hostname": platform.node(),
+        "host_uptime": f"{int(days)}д {int(hours)}ч {int(minutes)}м",
+    }
+
+
 def collect_panel_metrics() -> dict[str, Any]:
     """Live snapshot of panel-related processes on this machine."""
     _ensure_cpu()
@@ -164,4 +193,5 @@ def collect_panel_metrics() -> dict[str, Any]:
             if frontend_dev
             else "Статические файлы раздаёт backend (FastAPI)"
         ),
+        **_collect_host_metrics(),
     }

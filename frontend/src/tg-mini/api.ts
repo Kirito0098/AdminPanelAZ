@@ -6,6 +6,8 @@ import type {
   TgMiniConfig,
   TgMiniConfigFile,
   TgMiniDashboard,
+  TgMiniNodeActionResponse,
+  TgMiniNodesResponse,
   TgMiniQrLink,
   TgMiniSettings,
 } from '@/types'
@@ -131,4 +133,16 @@ export async function updateTgTelegramSettings(data: {
 
 export async function testTgTelegram(): Promise<{ message: string }> {
   return tgFetch<{ message: string }>('/telegram-settings/test', { method: 'POST' })
+}
+
+export async function getTgNodes(): Promise<TgMiniNodesResponse> {
+  return tgFetch<TgMiniNodesResponse>('/nodes')
+}
+
+export async function checkTgNodeHealth(nodeId: number): Promise<TgMiniNodeActionResponse> {
+  return tgFetch<TgMiniNodeActionResponse>(`/nodes/${nodeId}/health`, { method: 'POST' })
+}
+
+export async function activateTgNode(nodeId: number): Promise<TgMiniNodeActionResponse> {
+  return tgFetch<TgMiniNodeActionResponse>(`/nodes/${nodeId}/activate`, { method: 'POST' })
 }

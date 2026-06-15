@@ -79,6 +79,15 @@ export interface OpenVpnClient {
   connected_since_ts?: number
   profile?: string | null
   data_source?: string
+  display_address?: string | null
+  client_ip?: string | null
+  city?: string | null
+  country?: string | null
+  isp?: string | null
+  location_label?: string | null
+  geo_label?: string | null
+  node_id?: number | null
+  node_name?: string | null
 }
 
 export interface WireGuardPeer {
@@ -90,6 +99,26 @@ export interface WireGuardPeer {
   transfer_rx: number
   transfer_tx: number
   client_name?: string | null
+  display_address?: string | null
+  client_ip?: string | null
+  city?: string | null
+  country?: string | null
+  isp?: string | null
+  location_label?: string | null
+  geo_label?: string | null
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface MonitoringNodeSummary {
+  node_id: number
+  node_name: string
+  status: string
+  connected_openvpn: number
+  connected_wireguard: number
+  active_services: number
+  total_services: number
+  error?: string | null
 }
 
 export interface MonitoringOverview {
@@ -101,6 +130,12 @@ export interface MonitoringOverview {
   node_id?: number | null
   node_name?: string | null
   openvpn_data_source?: string
+  scope?: 'node' | 'all'
+  nodes_summary?: MonitoringNodeSummary[]
+  nodes_online?: number
+  nodes_total?: number
+  total_connected_openvpn?: number
+  total_connected_wireguard?: number
 }
 
 export interface OpenVpnEventProfile {
@@ -252,6 +287,20 @@ export interface TgMiniSettings {
   bot_configured: boolean
   username: string
   role: string
+}
+
+export interface TgMiniNode extends Node {
+  is_active: boolean
+}
+
+export interface TgMiniNodesResponse {
+  active_node_id: number | null
+  nodes: TgMiniNode[]
+}
+
+export interface TgMiniNodeActionResponse {
+  node: TgMiniNode
+  health: Record<string, unknown>
 }
 
 export interface TgMiniQrLink {
@@ -659,7 +708,15 @@ export interface PanelResourceHistoryPoint {
   backend_memory_mb: number
   backend_workers: number
   nginx_memory_mb?: number | null
+  watchdog_memory_mb?: number | null
+  frontend_dev_memory_mb?: number | null
   total_panel_memory_mb: number
+  host_cpu_percent: number
+  host_memory_percent: number
+  host_memory_used_mb: number
+  host_memory_total_mb: number
+  host_disk_percent: number
+  host_load_1?: number | null
 }
 
 export interface PanelResourceHistory {
@@ -679,6 +736,14 @@ export interface PanelResourceCurrent {
   frontend_dev_memory_mb?: number | null
   total_panel_memory_mb: number
   frontend_note: string
+  host_cpu_percent: number
+  host_memory_percent: number
+  host_memory_used_mb: number
+  host_memory_total_mb: number
+  host_disk_percent: number
+  host_load_1?: number | null
+  host_hostname: string
+  host_uptime: string
 }
 
 export interface ScannerBan {
@@ -755,6 +820,48 @@ export interface TrafficChartData {
   total_vpn: number
   total_antizapret: number
   total: number
+}
+
+export interface TrafficSessionSourceRow {
+  client_ip: string
+  display_address?: string | null
+  city?: string | null
+  country?: string | null
+  isp?: string | null
+  location_label?: string | null
+  geo_label?: string | null
+  sessions_count: number
+  virtual_addresses: string[]
+  total_bytes: number
+  first_seen_at?: string | null
+  last_seen_at?: string | null
+  is_active: boolean
+  share_percent: number
+}
+
+export interface TrafficSessionItem {
+  profile: string
+  real_address?: string | null
+  virtual_address?: string | null
+  connected_since_at?: string | null
+  last_seen_at?: string | null
+  ended_at?: string | null
+  duration_seconds?: number | null
+  bytes_received: number
+  bytes_sent: number
+  total_bytes: number
+  is_active: boolean
+}
+
+export interface TrafficClientSessions {
+  client: string
+  total_sessions: number
+  unique_sources: number
+  unique_virtual_addresses: number
+  by_source: TrafficSessionSourceRow[]
+  recent_sessions: TrafficSessionItem[]
+  node_id?: number | null
+  node_name?: string | null
 }
 
 export interface AntizapretSettingField {

@@ -8,10 +8,11 @@ from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, TrafficSessionState, User
-from app.schemas import MessageResponse, TrafficOverview
+from app.schemas import MessageResponse, TrafficClientSessionsResponse, TrafficOverview
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.traffic.chart import fetch_traffic_chart
 from app.services.traffic.collector import TrafficCollectorService
+from app.services.traffic.sessions import fetch_client_sessions
 from app.services.traffic.maintenance import (
     TrafficMaintenanceService,
     cleanup_openvpn_status_logs_now,
@@ -139,6 +140,24 @@ def traffic_chart(
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
     return result
+
+
+@router.get("/client-sessions", response_model=TrafficClientSessionsResponse)
+def traffic_client_sessions(
+    client: str = Query(..., min_length=1),
+    limit: int = Query(default=30, ge=1, le=100),
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    node = get_active_node(db)
+    result = fetch_client_sessions(db, node.id, client, recent_limit=limit)
+    if "error" in result:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
+    return TrafficClientSessionsResponse(
+        **result,
+        node_id=node.id,
+        node_name=node.name,
+    )
 
 
 @router.post("/reset", response_model=MessageResponse)

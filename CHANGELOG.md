@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **NOC — сводка мониторинга** — `GET /api/monitoring/overview?scope=node|all`: активные OpenVPN/WireGuard, службы, геолокация IP (город · провайдер), режим «Активный узел» / «Все узлы» с таблицей узлов.
+- **NOC — геолокация** — сервис `ip_geo.py`: нормализация endpoint (`udp4:` и т.п.), batch lookup ip-api.com, кэш 24 ч; поля `display_address`, `city`, `isp`, `geo_label` в схемах мониторинга и трафика.
+- **NOC — UI** — единый список VPN-клиентов (`MonitoringConnectionsList`): карточки на узких экранах, широкая таблица на `xl+`; donut-сводки по городам и провайдерам (`MonitoringGeoSummary`); общая тема графиков (`monitoringChartTheme`, `MonitoringChartCard`).
+- **NOC — фильтр «Только онлайн»** — переключатель в блоке VPN-клиентов (включён по умолчанию): скрывает офлайн-пиры WireGuard; сводки и список следуют фильтру.
+- **Трафик — мониторинг клиента** — панель `TrafficClientFocusPanel`: выбор пользователя, метрики, график VPN/AntiZapret, лимит, URL `?client=`; переключатель «Только выбранный».
+- **Трафик — сессии по адресам** — `GET /api/traffic/client-sessions`: разбивка подключений клиента по IP; активные адреса по умолчанию, история неактивных по кнопке «Показать историю».
+- **Трафик — гео в сессиях** — город и ISP под IP клиента в таблице подключений.
+- **Мониторинг панели** — расширенные графики ресурсов хоста и процессов панели (`PanelResourceHistoryCharts`): live-снимок, CPU/RAM/диск хоста, backend/nginx/watchdog/vite.
+- **Telegram — главное меню бота** — Reply Keyboard и inline-навигация (`menu.py`): Статус, Конфиги, Узлы (admin), CIDR, AZ-WARP, Настройки; маршрутизация текста и callback.
+- **Telegram — отправка конфигов** — общий модуль `telegram_config_send.py`, подписи файлов `telegram_profile_ui.py`; улучшенный UX выбора и отправки профилей в боте и Mini App.
+- **Тесты** — `test_ip_geo.py`, `test_monitoring_overview.py`, `test_traffic_sessions.py`, `test_telegram_bot_menu.py`, `test_telegram_bot_ui.py`, `test_telegram_config_send.py`, `test_telegram_nodes.py`, `test_telegram_profile_ui.py`.
+
+### Changed
+- **NOC — UI** — убраны неинформативные графики «Статус служб» и «Трафик сессий»; все аналитические карточки (линия, столбцы, geo) в едином блоке над вкладками; согласованные цвета протоколов (OpenVPN / WireGuard).
+- **NOC — вкладка VPN-клиенты** — выровнен заголовок и панель фильтров (поиск, протокол, «Только онлайн» в одну линию).
+- **NOC — вкладка VPN-узел** — убран бейдж с числом сырых снимков метрик (`sample_count`) на табе; счётчик остаётся в подписи графика внутри вкладки.
+- **Трафик** — страница переработана вокруг фокуса на выбранном клиенте; улучшена читаемость таблиц и адресов.
+- **Recharts** — глобальные стили тултипов для тёмной темы: читаемый текст на фоне `popover`.
+- **Telegram** — обработчики бота делегируют в меню/UI-модули; обновлены `docs/Telegram.md` и i18n.
+
+### Fixed
+- **NOC — overview 500** — исправлена ошибка Pydantic при обогащении клиентов гео (`model_copy(update=...)` вместо `**model_dump()` + дублирующие поля).
+- **Recharts** — нечитаемый текст в тултипах при наведении на графики (тёмный текст на тёмном фоне).
+
 ## [1.8.0] - 2026-06-14
 
 ### Removed

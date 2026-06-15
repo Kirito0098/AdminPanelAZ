@@ -17,3 +17,7 @@ async def handle_link(ctx: BotContext, code: str) -> None:
             username=user.username,
             details=f"telegram_id={ctx.telegram_user_id}",
         )
+        ctx.user = user
+        from app.services.telegram_bot_handlers.start import handle_start
+
+        await handle_start(ctx)

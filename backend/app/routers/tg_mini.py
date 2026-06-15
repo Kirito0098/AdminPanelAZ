@@ -6,7 +6,6 @@ import hashlib
 import hmac
 import json
 import os
-import tempfile
 import time
 import urllib.parse
 from datetime import datetime
@@ -37,13 +36,23 @@ from app.schemas import (
     TelegramSettingsUpdate,
 )
 from app.services.admin_notify import TG_NOTIFY_EVENT_LABELS, admin_notify_service
+from app.services.action_log import log_action
 from app.services.ip_restriction import ip_restriction_service
-from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.node_manager import (
+    check_node_health,
+    get_active_adapter,
+    get_active_node,
+    get_active_node_id,
+    node_metadata_dict,
+    set_active_node_id,
+    sync_local_node,
+    update_node_from_health,
+)
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
 from app.services.qr_download import QrDownloadService
 from app.services.security import SecurityService
-from app.services.telegram import send_tg_document, send_tg_message
+from app.services.telegram import send_tg_message
 
 router = APIRouter(prefix="/tg-mini", tags=["tg-mini"])
 settings = get_settings()
@@ -145,31 +154,137 @@ def _send_config_file(
     path: str | None,
     destination: Literal["self", "chat"],
 ) -> MessageResponse:
-    adapter = get_active_adapter(db)
-    files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
-    if not files:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файлы конфигурации не найдены")
-    selected_path = path or files[0].get("path", "")
-    content = adapter.read_profile_file(selected_path)
+    from app.services.telegram_config_send import send_config_for_user
+
     token = _get_bot_token(db)
     if not token:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram не настроен")
-    chat_id = _resolve_send_chat_id(db, current_user, destination)
-    selected = next((item for item in files if item.get("path") == selected_path), files[0])
-    download_name = selected.get("download_filename") or build_profile_download_filename(
-        config.client_name,
-        protocol=selected.get("protocol", ""),
-        variant=selected.get("variant", ""),
-        path=selected.get("path", selected_path),
+    sent, error = send_config_for_user(
+        db,
+        config,
+        current_user,
+        bot_token=token,
+        path=path,
+        destination=destination,
+        run_async=False,
     )
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".tmp", delete=False) as handle:
-        handle.write(content)
-        tmp = handle.name
-    try:
-        send_tg_document(token, chat_id, tmp, caption=f"Конфиг: {config.client_name}", filename=download_name)
-    finally:
-        os.unlink(tmp)
+    if sent == 0:
+        status_code = status.HTTP_404_NOT_FOUND if error == "Файлы конфигурации не найдены" else status.HTTP_502_BAD_GATEWAY
+        if error in {
+            "Telegram не настроен",
+            "Telegram ID не привязан к вашему аккаунту",
+            "Глобальный chat_id не настроен",
+        }:
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        if error == "Только admin может отправлять в общий chat":
+            status_code = status.HTTP_403_FORBIDDEN
+        raise HTTPException(status_code=status_code, detail=error or "Не удалось отправить конфиг")
     return MessageResponse(message="Конфиг отправлен в Telegram")
+
+
+def _serialize_tg_node(node, *, active_id: int | None) -> dict:
+    meta = node_metadata_dict(node)
+    return {
+        "id": node.id,
+        "name": node.name,
+        "host": node.host,
+        "port": node.port,
+        "status": node.status.value if hasattr(node.status, "value") else str(node.status),
+        "is_local": bool(node.is_local),
+        "mtls_enabled": False if node.is_local else bool(node.mtls_enabled),
+        "is_active": node.id == active_id,
+        "last_seen_at": node.last_seen_at.isoformat() if node.last_seen_at else None,
+        "metadata": {
+            key: meta[key]
+            for key in (
+                "server_ip",
+                "services_active",
+                "services_total",
+                "agent_version",
+                "antizapret_version",
+                "hostname",
+                "last_error",
+            )
+            if key in meta
+        },
+    }
+
+
+def _get_tg_node_or_404(node_id: int, db: Session):
+    from app.models import Node
+
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    return node
+
+
+@router.get("/nodes")
+def mini_list_nodes(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    sync_local_node(db)
+    from app.models import Node
+
+    active_id = get_active_node_id(db)
+    nodes = db.query(Node).order_by(Node.is_local.desc(), Node.name).all()
+    return {
+        "active_node_id": active_id,
+        "nodes": [_serialize_tg_node(node, active_id=active_id) for node in nodes],
+    }
+
+
+@router.get("/nodes/{node_id}")
+def mini_get_node(node_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    sync_local_node(db)
+    node = _get_tg_node_or_404(node_id, db)
+    active_id = get_active_node_id(db)
+    return _serialize_tg_node(node, active_id=active_id)
+
+
+@router.post("/nodes/{node_id}/health")
+def mini_node_health(
+    node_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    node = _get_tg_node_or_404(node_id, db)
+    health = check_node_health(node)
+    update_node_from_health(node, health, db)
+    db.commit()
+    db.refresh(node)
+    active_id = get_active_node_id(db)
+    return {
+        "node": _serialize_tg_node(node, active_id=active_id),
+        "health": health,
+    }
+
+
+@router.post("/nodes/{node_id}/activate")
+def mini_activate_node(
+    node_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    node = _get_tg_node_or_404(node_id, db)
+    set_active_node_id(db, node.id)
+    db.commit()
+    health = check_node_health(node)
+    update_node_from_health(node, health, db)
+    db.commit()
+    db.refresh(node)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_activate",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr="tg-mini",
+            details=f"name={node.name}, id={node.id}",
+        )
+    active_id = get_active_node_id(db)
+    return {
+        "node": _serialize_tg_node(node, active_id=active_id),
+        "health": health,
+    }
 
 
 @router.get("/assets/{file_path:path}", include_in_schema=False)

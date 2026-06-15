@@ -74,6 +74,7 @@ def send_tg_document(
             _add_field("chat_id", str(chat_id))
             if caption:
                 _add_field("caption", caption)
+                _add_field("parse_mode", "HTML")
 
             upload_name = (filename or "").strip() or (file_path or "").strip().split("/")[-1] or "backup.tar.gz"
             body.extend(f"--{boundary}\r\n".encode("utf-8"))

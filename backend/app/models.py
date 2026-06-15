@@ -306,7 +306,15 @@ class PanelResourceSample(Base):
     backend_memory_mb: Mapped[int] = mapped_column(Integer, default=0)
     backend_workers: Mapped[int] = mapped_column(Integer, default=0)
     nginx_memory_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    watchdog_memory_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    frontend_dev_memory_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_panel_memory_mb: Mapped[int] = mapped_column(Integer, default=0)
+    host_cpu_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    host_memory_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    host_memory_used_mb: Mapped[int] = mapped_column(Integer, default=0)
+    host_memory_total_mb: Mapped[int] = mapped_column(Integer, default=0)
+    host_disk_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    host_load_1: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 

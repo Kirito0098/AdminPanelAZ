@@ -153,6 +153,14 @@ def test_panel_resource_current_api(db_session):
         "frontend_dev_memory_mb": None,
         "total_panel_memory_mb": 304,
         "frontend_note": "Статические файлы раздаёт backend (FastAPI)",
+        "host_cpu_percent": 12.5,
+        "host_memory_percent": 45.0,
+        "host_memory_used_mb": 2048,
+        "host_memory_total_mb": 8192,
+        "host_disk_percent": 33.0,
+        "host_load_1": 0.42,
+        "host_hostname": "panel-host",
+        "host_uptime": "1д 2ч 3м",
     }
 
     app.dependency_overrides[get_current_user] = lambda: admin
@@ -166,6 +174,33 @@ def test_panel_resource_current_api(db_session):
     body = resp.json()
     assert body["backend_workers"] == 1
     assert body["total_panel_memory_mb"] == 304
+    assert body["host_hostname"] == "panel-host"
+
+
+def test_persist_host_metrics_fields(db_session):
+    session = db_session
+    sample = persist_sample(
+        session,
+        {
+            "backend_cpu_percent": 1.0,
+            "backend_memory_mb": 100,
+            "backend_workers": 2,
+            "nginx_memory_mb": 20,
+            "watchdog_memory_mb": 5,
+            "total_panel_memory_mb": 125,
+            "host_cpu_percent": 10.0,
+            "host_memory_percent": 50.0,
+            "host_memory_used_mb": 4096,
+            "host_memory_total_mb": 8192,
+            "host_disk_percent": 40.0,
+            "host_load_1": 0.5,
+        },
+    )
+    assert sample.host_cpu_percent == 10.0
+    assert sample.watchdog_memory_mb == 5
+    points, _ = query_history(session, "1d")
+    assert points[0]["host_disk_percent"] == 40.0
+    assert points[0]["watchdog_memory_mb"] == 5
 
 
 def test_panel_resource_api_requires_admin(db_session):

@@ -67,7 +67,6 @@ body.tg-mini-app {
   right: 0;
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
   gap: 0.25rem;
   padding:
     0.5rem

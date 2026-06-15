@@ -3,14 +3,22 @@ import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import { Button } from '@/components/ui/button'
 import Spinner from '@/components/ui/Spinner'
 
-const tabs = [
+const baseTabs = [
   { to: '/', label: 'Дашборд', end: true },
   { to: '/configs', label: 'Конфиги' },
   { to: '/settings', label: 'Настройки' },
 ]
 
 export default function MiniShell() {
-  const { status, error, settings, retryAuth } = useTgAuth()
+  const { status, error, settings, isAdmin, retryAuth } = useTgAuth()
+  const tabs = isAdmin
+    ? [
+        baseTabs[0],
+        baseTabs[1],
+        { to: '/nodes', label: 'Узлы' },
+        baseTabs[2],
+      ]
+    : baseTabs
 
   if (status === 'loading') {
     return (
@@ -49,7 +57,11 @@ export default function MiniShell() {
         <Outlet />
       </main>
 
-      <nav className="tg-mini-tabs" aria-label="Mini app tabs">
+      <nav
+        className="tg-mini-tabs"
+        style={{ gridTemplateColumns: `repeat(${tabs.length}, 1fr)` }}
+        aria-label="Mini app tabs"
+      >
         {tabs.map((tab) => (
           <NavLink
             key={tab.to}

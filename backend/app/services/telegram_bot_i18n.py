@@ -34,7 +34,8 @@ UNLINKED = (
     "3. Отправьте боту: <code>/link &lt;код&gt;</code>"
 )
 
-UNKNOWN_COMMAND = "Неизвестная команда. Используйте /help"
+UNKNOWN_COMMAND = "Неизвестная команда. Откройте меню или /help"
+UNKNOWN_TEXT = "Не понял сообщение.\n\nИспользуйте кнопки меню внизу или откройте главное меню."
 ADMIN_ONLY = "Команда доступна только администратору."
 INSUFFICIENT_PERMISSIONS = "Недостаточно прав."
 VALUE_EMPTY = "Значение не может быть пустым."
@@ -49,6 +50,9 @@ BTN_ALL_CONFIGS = "📁 Все конфиги"
 BTN_BACK = "◀️ Назад"
 BTN_BACK_SETTINGS = "◀️ Настройки"
 BTN_REFRESH = "🔄 Обновить"
+BTN_NODES_HEALTH = "🩺 Проверить связь"
+BTN_NODES_ACTIVATE = "⭐ Сделать активным"
+BTN_NODES_BACK = "◀️ К списку узлов"
 
 BTN_SETTINGS_TELEGRAM = "Telegram"
 BTN_SETTINGS_NOTIFY = "Уведомления"
@@ -56,6 +60,41 @@ BTN_SETTINGS_BACKUPS = "Бэкапы"
 BTN_SETTINGS_MONITOR = "Мониторинг"
 BTN_SETTINGS_SECURITY = "Безопасность"
 BTN_SETTINGS_MAINTENANCE = "Обслуживание"
+
+# --- Main menu (Reply Keyboard + inline nav) ---
+
+BTN_MENU_STATUS = "📊 Статус"
+BTN_MENU_CONFIGS = "📁 Конфиги"
+BTN_MENU_HELP = BTN_HELP
+BTN_MENU_HOME = "🏠 Главная"
+BTN_MENU_SETTINGS = "⚙️ Настройки"
+BTN_MENU_NODES = "🖥 Узлы"
+BTN_MENU_CIDR = "🗂 CIDR"
+BTN_MENU_WARPER = "🌐 AZ-WARP"
+
+MENU_ACTIONS: dict[str, str] = {
+    BTN_MENU_STATUS: "status",
+    BTN_MENU_CONFIGS: "configs",
+    BTN_MENU_HELP: "help",
+    BTN_MENU_HOME: "home",
+    BTN_MENU_SETTINGS: "settings",
+    BTN_MENU_NODES: "nodes",
+    BTN_MENU_CIDR: "cidr",
+    BTN_MENU_WARPER: "warper",
+}
+
+BOT_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("start", "Главное меню"),
+    ("help", "Справка по командам"),
+    ("link", "Привязка аккаунта"),
+    ("status", "Статус панели"),
+    ("configs", "Список VPN-конфигов"),
+    ("config", "Карточка конфига"),
+    ("settings", "Настройки панели (admin)"),
+    ("nodes", "VPN-узлы (admin)"),
+    ("cidr", "Статус CIDR pipeline (admin)"),
+    ("warper", "Статус AZ-WARP (admin)"),
+)
 
 # --- /start ---
 
@@ -67,42 +106,57 @@ START_UNLINKED = (
 )
 START_LINKED = (
     "{title}\n\n"
-    "Аккаунт: <code>{username}</code> ({role})\n\n"
-    "Команды: /status, /configs, /help"
+    "👤 <code>{username}</code>\n"
+    "🔑 {role}\n\n"
+    "Выберите действие — кнопки под сообщением или внизу чата.\n"
+    "Справка: /help"
 )
 
 # --- /help ---
 
-HELP_TITLE = "❓ <b>Команды бота</b>"
-HELP_LINES = (
-    "/start — приветствие и меню",
-    "/link &lt;код&gt; — привязка Telegram ID",
-    "/status — статус панели",
-    "/configs — список конфигов",
-    "/config &lt;имя&gt; — карточка конфига",
-    "/help — эта справка",
+HELP_TITLE = "❓ <b>Справка</b>"
+HELP_SECTION_MAIN = "<b>📌 Основное</b>"
+HELP_LINES_MAIN = (
+    "• /start — главное меню",
+    "• /status — статус панели",
+    "• /help — эта справка",
+    "• /link &lt;код&gt; — привязка Telegram",
 )
+HELP_SECTION_CONFIGS = "<b>📁 Конфиги</b>"
+HELP_LINES_CONFIGS = (
+    "• /configs — список конфигов",
+    "• /config &lt;имя&gt; — выбор протокола и отправка файла",
+    "• OpenVPN / WireGuard / AmneziaWG — отдельные группы",
+)
+HELP_SECTION_ADMIN = "<b>⚙️ Администратор</b>"
+HELP_LINES_ADMIN = (
+    "• /settings — настройки панели",
+    "• /nodes — VPN-узлы",
+)
+HELP_FOOTER = "<i>💡 Подсказка: кнопки внизу чата дублируют команды.</i>"
+HELP_ADMIN_CIDR = "• /cidr — статус CIDR pipeline"
+HELP_ADMIN_NODES = "• /nodes — VPN-узлы (health, активация)"
+HELP_ADMIN_WARPER = "• /warper — статус AZ-WARP"
 HELP_ADMIN_SETTINGS = "/settings — настройки панели (inline-меню)"
-HELP_ADMIN_FOOTER = "\n<i>Admin: конфиги, настройки, /cidr, /warper.</i>"
-HELP_ADMIN_CIDR = "/cidr — статус CIDR pipeline"
-HELP_ADMIN_WARPER = "/warper — статус AZ-WARP"
+HELP_ADMIN_FOOTER = ""
+HELP_LINES = HELP_LINES_MAIN
 
 # --- /status ---
 
 STATUS_TITLE = "📊 <b>Статус панели</b>"
 STATUS_BODY = (
     "{title}\n\n"
-    "Конфигов: <b>{total_configs}</b>\n"
-    "OpenVPN online: <b>{connected_openvpn}</b>\n"
-    "WireGuard online: <b>{connected_wireguard}</b>\n"
-    "IP сервера: <code>{server_ip}</code>\n"
-    "<i>{timestamp}</i>"
+    "📁 Конфигов: <b>{total_configs}</b>\n"
+    "🔐 OpenVPN online: <b>{connected_openvpn}</b>\n"
+    "🛡️ WireGuard online: <b>{connected_wireguard}</b>\n"
+    "🌐 IP сервера: <code>{server_ip}</code>\n\n"
+    "🕐 <i>Обновлено: {timestamp}</i>"
 )
 
 # --- /configs ---
 
-CONFIGS_NONE = "Конфигурации не найдены."
-CONFIGS_LIST = "📁 <b>Конфигурации</b> (стр. {page}/{total_pages}, всего {count})"
+CONFIGS_LIST = "📁 <b>Конфигурации</b>\n\nСтр. {page}/{total_pages} · всего <b>{count}</b>\n\nВыберите клиента:"
+CONFIGS_NONE = "📭 Конфигурации не найдены.\n\nСоздайте клиента в веб-панели или Mini App."
 CONFIG_NOT_FOUND = "Конфиг <code>{name}</code> не найден."
 CONFIG_NOT_FOUND_ID = "Конфигурация не найдена."
 CONFIG_CARD = (
@@ -110,6 +164,25 @@ CONFIG_CARD = (
     "Тип: <code>{vpn_type}</code>\n"
     "ID: <code>{config_id}</code>"
 )
+CONFIG_SEND_OK = "✅ Конфиг <b>{name}</b> отправлен ({count} файл(ов))"
+CONFIG_SEND_OK_ONE = "✅ Файл конфига <b>{name}</b> отправлен в чат"
+CONFIG_SEND_FAILED = "❌ Не удалось отправить конфиг: {detail}"
+CONFIG_SEND_UNKNOWN = "неизвестная ошибка"
+CONFIG_FILES_NONE = "Файлы конфигурации не найдены на узле."
+CONFIG_PICK_PROTOCOL = (
+    "📄 <b>{name}</b>\n"
+    "Тип: <code>{vpn_type}</code>\n\n"
+    "Выберите протокол:"
+)
+CONFIG_PICK_FILE = (
+    "📄 <b>{name}</b>\n"
+    "{protocol}\n\n"
+    "Выберите маршрут:"
+)
+CONFIG_GROUP_NOT_FOUND = "Группа конфигов не найдена."
+CONFIG_FILE_NOT_FOUND = "Файл конфигурации не найден."
+BTN_CONFIG_BACK = "◀️ К протоколам"
+BTN_CONFIG_PICK_ANOTHER = "📤 Ещё файл"
 
 # --- /settings root ---
 
@@ -257,3 +330,30 @@ WARPER_BODY = (
 )
 WARPER_DISABLED = MODULE_DISABLED.format(name="AZ-WARP")
 WARPER_ERROR = "Не удалось получить статус AZ-WARP: {detail}"
+
+# --- /nodes ---
+
+NODES_NONE = "—"
+NODES_LIST_TITLE = "🖥 <b>VPN-узлы</b>"
+NODES_LIST = "{title}\n\nСтр. {page}/{total_pages}, всего: <b>{count}</b>\n★ — активный узел"
+NODES_EMPTY = "VPN-узлы не найдены. Добавьте узел в веб-панели."
+NODES_NOT_FOUND = "Узел не найден."
+NODES_ACTIVE_MARK = " ★"
+NODES_LOCAL_MARK = " (локальный)"
+NODES_TRANSPORT_LOCAL = "локальный"
+NODES_TRANSPORT_MTLS = "mTLS"
+NODES_TRANSPORT_HTTP = "HTTP"
+NODES_CARD_TITLE = "🖥 <b>Узел</b>"
+NODES_CARD = (
+    "{title}\n\n"
+    "<b>{name}</b>{active_mark}{local_mark}\n"
+    "Адрес: <code>{host}:{port}</code>\n"
+    "Статус: {status_icon} <code>{status}</code>\n"
+    "Транспорт: <code>{transport}</code>\n"
+    "Последний контакт: <code>{last_seen}</code>"
+)
+NODES_LINE_SERVER_IP = "IP сервера: <code>{value}</code>"
+NODES_LINE_SERVICES = "Службы: <code>{active}/{total}</code>"
+NODES_LINE_AGENT = "Node agent: <code>{value}</code>"
+NODES_LINE_AZ = "AntiZapret: <code>{value}</code>"
+NODES_LINE_ERROR = "Ошибка: <code>{value}</code>"

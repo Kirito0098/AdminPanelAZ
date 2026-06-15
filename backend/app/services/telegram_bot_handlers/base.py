@@ -47,3 +47,24 @@ def inline_button(text: str, *, url: str | None = None, callback_data: str | Non
     elif callback_data:
         button["callback_data"] = callback_data
     return button
+
+
+def reply_button(text: str, *, web_app_url: str | None = None) -> dict:
+    button: dict = {"text": text}
+    if web_app_url:
+        button["web_app"] = {"url": web_app_url}
+    return button
+
+
+def reply_keyboard(
+    rows: list[list[dict]],
+    *,
+    resize: bool = True,
+    persistent: bool = True,
+) -> dict:
+    markup: dict = {
+        "keyboard": rows,
+        "resize_keyboard": resize,
+        "is_persistent": persistent,
+    }
+    return markup

@@ -233,8 +233,8 @@ export async function syncConfigs() {
   return apiFetch('/configs/sync', { method: 'POST' })
 }
 
-export async function getMonitoring() {
-  return apiFetch<import('../types').MonitoringOverview>('/monitoring/overview')
+export async function getMonitoring(scope: 'node' | 'all' = 'node') {
+  return apiFetch<import('../types').MonitoringOverview>(`/monitoring/overview?scope=${scope}`)
 }
 
 export function openMonitoringStream(
@@ -748,6 +748,11 @@ export async function getTrafficActiveClients() {
 export async function getTrafficChart(client: string, range = '7d', protocol = 'all') {
   const params = new URLSearchParams({ client, range, protocol })
   return apiFetch<import('../types').TrafficChartData>(`/traffic/chart?${params}`)
+}
+
+export async function getTrafficClientSessions(client: string, limit = 30) {
+  const params = new URLSearchParams({ client, limit: String(limit) })
+  return apiFetch<import('../types').TrafficClientSessions>(`/traffic/client-sessions?${params}`)
 }
 
 export async function resetTraffic(scope: 'all' | 'openvpn' | 'wireguard' = 'all') {

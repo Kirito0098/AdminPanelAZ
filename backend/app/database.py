@@ -380,6 +380,16 @@ def run_db_migrations() -> None:
             ("traffic_limit_bytes", "BIGINT"),
             ("traffic_limit_period_days", "INTEGER"),
         ],
+        "panel_resource_sample": [
+            ("watchdog_memory_mb", "INTEGER"),
+            ("frontend_dev_memory_mb", "INTEGER"),
+            ("host_cpu_percent", "FLOAT DEFAULT 0"),
+            ("host_memory_percent", "FLOAT DEFAULT 0"),
+            ("host_memory_used_mb", "INTEGER DEFAULT 0"),
+            ("host_memory_total_mb", "INTEGER DEFAULT 0"),
+            ("host_disk_percent", "FLOAT DEFAULT 0"),
+            ("host_load_1", "FLOAT"),
+        ],
         "users": [
             ("totp_secret_encrypted", "VARCHAR(512)"),
             ("totp_enabled", "INTEGER DEFAULT 0"),

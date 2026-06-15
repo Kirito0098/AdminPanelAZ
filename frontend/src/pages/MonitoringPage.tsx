@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
-  ArrowDownToLine,
-  ArrowUpFromLine,
   Clock,
   Cpu,
   Globe,
@@ -18,6 +16,11 @@ import {
 } from 'lucide-react'
 import { ApiError, getMonitoring, getResourceHistory, openMonitoringStream } from '@/api/client'
 import MonitoringCharts, { formatBytes, totalTraffic } from '@/components/monitoring/MonitoringCharts'
+import MonitoringConnectionsList, {
+  buildMonitoringConnectionRows,
+} from '@/components/monitoring/MonitoringConnectionsList'
+import MonitoringGeoSummary from '@/components/monitoring/MonitoringGeoSummary'
+import { NodeScopeBadge, getConnectionDisplayAddress, getConnectionGeoLabel } from '@/components/monitoring/ConnectionAddress'
 import PanelResourceHistoryCharts from '@/components/monitoring/PanelResourceHistoryCharts'
 import ResourceHistoryCharts from '@/components/monitoring/ResourceHistoryCharts'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
@@ -31,6 +34,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -52,13 +57,15 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { cn } from '@/lib/utils'
-import type { MonitoringOverview, OpenVpnClient, ResourceHistory, WireGuardPeer } from '@/types'
+import type { MonitoringNodeSummary, MonitoringOverview, ResourceHistory, WireGuardPeer } from '@/types'
 
 const REFRESH_INTERVAL = 30
 
+type MonitoringScope = 'node' | 'all'
 type ProtocolFilter = 'all' | 'openvpn' | 'wireguard'
 
 function dataSourceLabel(source?: string) {
+  if (source === 'federated') return 'Все узлы'
   if (source === 'management_socket') return 'Management socket'
   if (source === 'status_log') return 'Status-логи'
   return 'Нет данных'
@@ -72,11 +79,6 @@ function dataSourceVariant(source?: string): 'default' | 'secondary' | 'outline'
 
 function isWireGuardOnline(peer: WireGuardPeer) {
   return Boolean(peer.latest_handshake)
-}
-
-function formatHandshake(value?: string | null) {
-  if (!value) return '—'
-  return new Date(value).toLocaleString('ru-RU')
 }
 
 type SummaryCardProps = {
@@ -104,107 +106,13 @@ function SummaryCard({ label, value, icon: Icon, sub, accent }: SummaryCardProps
   )
 }
 
-type OpenVpnClientCardProps = {
-  client: OpenVpnClient
-}
-
-function OpenVpnClientCard({ client }: OpenVpnClientCardProps) {
-  return (
-    <div className="rounded-lg border p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate font-medium">{client.common_name}</p>
-          <p className="mt-0.5 font-mono text-xs text-muted-foreground">{client.virtual_address}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="default" className="text-[10px]">
-            OVPN
-          </Badge>
-          <Badge variant="success" className="text-[10px]">
-            Онлайн
-          </Badge>
-        </div>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
-        <div>
-          <p className="text-muted-foreground">Real IP</p>
-          <p className="font-mono">{client.real_address}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Подключён с</p>
-          <p className="inline-flex items-center gap-1">
-            <Clock size={12} className="shrink-0 text-muted-foreground" />
-            {client.connected_since}
-          </p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">RX</p>
-          <p className="font-mono">{formatBytes(client.bytes_received)}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">TX</p>
-          <p className="font-mono">{formatBytes(client.bytes_sent)}</p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-type WireGuardPeerCardProps = {
-  peer: WireGuardPeer
-}
-
-function WireGuardPeerCard({ peer }: WireGuardPeerCardProps) {
-  const online = isWireGuardOnline(peer)
-  return (
-    <div className={cn('rounded-lg border p-4', online && 'border-emerald-500/20 bg-emerald-500/5')}>
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate font-medium">{peer.client_name || '—'}</p>
-          <p className="mt-0.5 font-mono text-xs text-muted-foreground">{peer.interface}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="secondary" className="text-[10px]">
-            WG
-          </Badge>
-          <Badge variant={online ? 'success' : 'secondary'} className="text-[10px]">
-            {online ? 'Онлайн' : 'Офлайн'}
-          </Badge>
-        </div>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
-        <div>
-          <p className="text-muted-foreground">Endpoint</p>
-          <p className="font-mono">{peer.endpoint || '—'}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Allowed IPs</p>
-          <p className="font-mono">{peer.allowed_ips || '—'}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">RX / TX</p>
-          <p className="font-mono">
-            {formatBytes(peer.transfer_rx)} / {formatBytes(peer.transfer_tx)}
-          </p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Handshake</p>
-          <p className="inline-flex items-center gap-1">
-            <Clock size={12} className="shrink-0 text-muted-foreground" />
-            {formatHandshake(peer.latest_handshake)}
-          </p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export default function MonitoringPage() {
   const { user } = useAuth()
-  const { activeNode } = useNode()
+  const { activeNode, nodes } = useNode()
   const isAdmin = user?.role === 'admin'
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal } = useProgress()
+  const [scope, setScope] = useState<MonitoringScope>('node')
   const [data, setData] = useState<MonitoringOverview | null>(null)
   const [liveLoading, setLiveLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -212,6 +120,7 @@ export default function MonitoringPage() {
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
   const [search, setSearch] = useState('')
+  const [onlineOnly, setOnlineOnly] = useState(true)
   const [protocolFilter, setProtocolFilter] = useState<ProtocolFilter>('all')
   const [resourcePeriod, setResourcePeriod] = useState<'1d' | '7d' | '30d'>('1d')
   const [panelResourcePeriod, setPanelResourcePeriod] = useState<'1d' | '7d' | '30d'>('1d')
@@ -229,7 +138,7 @@ export default function MonitoringPage() {
         setRefreshing(true)
       }
       try {
-        setData(await getMonitoring())
+        setData(await getMonitoring(scope))
         setLoadError(null)
         if (manual) success('Данные мониторинга обновлены')
         setCountdown(REFRESH_INTERVAL)
@@ -243,7 +152,7 @@ export default function MonitoringPage() {
         if (initial) doneGlobal()
       }
     },
-    [startGlobal, doneGlobal, success, notifyError],
+    [startGlobal, doneGlobal, success, notifyError, scope],
   )
 
   loadRef.current = load
@@ -265,14 +174,14 @@ export default function MonitoringPage() {
 
   useEffect(() => {
     load({ initial: true })
-  }, [load, activeNode?.id])
+  }, [load, activeNode?.id, scope])
 
   useEffect(() => {
     loadResourceHistory(resourcePeriod)
   }, [loadResourceHistory, activeNode?.id, resourcePeriod])
 
   useEffect(() => {
-    if (!autoRefresh) return
+    if (!autoRefresh || scope !== 'node') return
 
     const source = openMonitoringStream(
       (payload) => {
@@ -291,7 +200,25 @@ export default function MonitoringPage() {
       source?.close()
       clearInterval(tick)
     }
-  }, [autoRefresh, activeNode?.id])
+  }, [autoRefresh, scope, activeNode?.id])
+
+  useEffect(() => {
+    if (!autoRefresh || scope !== 'all') return
+    const poll = setInterval(() => {
+      void loadRef.current?.()
+    }, REFRESH_INTERVAL * 1000)
+    const tick = setInterval(() => {
+      setCountdown((c) => (c <= 1 ? REFRESH_INTERVAL : c - 1))
+    }, 1000)
+    return () => {
+      clearInterval(poll)
+      clearInterval(tick)
+    }
+  }, [autoRefresh, scope])
+
+  const isFederated = scope === 'all' || data?.scope === 'all'
+  const showNodeColumn = isFederated
+  const hasMultipleNodes = nodes.length > 1
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
@@ -307,32 +234,61 @@ export default function MonitoringPage() {
 
   const filteredOpenVpn = useMemo(() => {
     if (!searchQuery) return openvpnClients
-    return openvpnClients.filter(
-      (c) =>
+    return openvpnClients.filter((c) => {
+      const address = getConnectionDisplayAddress(c).toLowerCase()
+      const geo = (getConnectionGeoLabel(c) || '').toLowerCase()
+      return (
         c.common_name.toLowerCase().includes(searchQuery) ||
-        c.real_address.toLowerCase().includes(searchQuery) ||
-        c.virtual_address.toLowerCase().includes(searchQuery),
-    )
+        address.includes(searchQuery) ||
+        geo.includes(searchQuery) ||
+        c.virtual_address.toLowerCase().includes(searchQuery) ||
+        (c.node_name || '').toLowerCase().includes(searchQuery)
+      )
+    })
   }, [openvpnClients, searchQuery])
 
   const filteredWireGuard = useMemo(() => {
     if (!searchQuery) return wireguardPeers
     return wireguardPeers.filter((p) => {
       const name = (p.client_name ?? '').toLowerCase()
+      const address = getConnectionDisplayAddress(p, 'endpoint').toLowerCase()
+      const geo = (getConnectionGeoLabel(p) || '').toLowerCase()
       return (
         name.includes(searchQuery) ||
+        address.includes(searchQuery) ||
+        geo.includes(searchQuery) ||
         (p.endpoint ?? '').toLowerCase().includes(searchQuery) ||
         (p.allowed_ips ?? '').toLowerCase().includes(searchQuery) ||
         p.interface.toLowerCase().includes(searchQuery) ||
-        p.public_key.toLowerCase().includes(searchQuery)
+        p.public_key.toLowerCase().includes(searchQuery) ||
+        (p.node_name || '').toLowerCase().includes(searchQuery)
       )
     })
   }, [wireguardPeers, searchQuery])
 
+  const visibleWireGuard = useMemo(() => {
+    if (!onlineOnly) return filteredWireGuard
+    return filteredWireGuard.filter(isWireGuardOnline)
+  }, [filteredWireGuard, onlineOnly])
+
   const showOpenVpn = protocolFilter === 'all' || protocolFilter === 'openvpn'
   const showWireGuard = protocolFilter === 'all' || protocolFilter === 'wireguard'
-  const hasFilteredClients =
-    (showOpenVpn ? filteredOpenVpn.length : 0) + (showWireGuard ? filteredWireGuard.length : 0) > 0
+  const visibleOpenVpn = showOpenVpn ? filteredOpenVpn : []
+  const visibleWireGuardList = showWireGuard ? visibleWireGuard : []
+  const visibleCount = visibleOpenVpn.length + visibleWireGuardList.length
+  const filteredTotalCount =
+    (showOpenVpn ? filteredOpenVpn.length : 0) + (showWireGuard ? filteredWireGuard.length : 0)
+  const hasFilteredClients = visibleCount > 0
+
+  const connectionRows = useMemo(
+    () =>
+      buildMonitoringConnectionRows(visibleOpenVpn, visibleWireGuardList, {
+        showOpenVpn,
+        showWireGuard,
+        isWireGuardOnline,
+      }),
+    [visibleOpenVpn, visibleWireGuardList, showOpenVpn, showWireGuard],
+  )
 
   const handleRefresh = () => {
     load({ manual: true })
@@ -349,40 +305,67 @@ export default function MonitoringPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-2xl font-bold tracking-tight">NOC Мониторинг</h2>
-              <NodeBadge name={activeNode?.name ?? data?.node_name} status={activeNode?.status} />
+              <NodeBadge
+                name={isFederated ? `Все узлы (${data?.nodes_online ?? 0}/${data?.nodes_total ?? nodes.length})` : (activeNode?.name ?? data?.node_name)}
+                status={isFederated ? 'online' : activeNode?.status}
+              />
             </div>
             <p className="text-sm text-muted-foreground">
-              Активные VPN-подключения OpenVPN и WireGuard в реальном времени
+              {isFederated
+                ? 'Сводка активных VPN-подключений со всех узлов'
+                : 'Активные VPN-подключения OpenVPN и WireGuard в реальном времени'}
               {data?.timestamp && (
                 <> · обновлено {new Date(data.timestamp).toLocaleString('ru-RU')}</>
               )}
             </p>
           </div>
         </div>
-        <AutoRefreshControl
+        <div className="flex flex-wrap items-center gap-2">
+          {hasMultipleNodes && (
+            <Select value={scope} onValueChange={(v) => setScope(v as MonitoringScope)}>
+              <SelectTrigger className="h-9 w-[180px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="node">Активный узел</SelectItem>
+                <SelectItem value="all">Все узлы</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+          <AutoRefreshControl
           enabled={autoRefresh}
           onToggle={() => setAutoRefresh((v) => !v)}
           countdown={countdown}
           intervalSec={REFRESH_INTERVAL}
           refreshing={refreshing}
           onManualRefresh={handleRefresh}
-        />
+          />
+        </div>
       </div>
 
-      <SettingsAlert variant="info" title="Данные активного узла">
-        Мониторинг собирается с <strong>{activeNode?.name ?? data?.node_name ?? 'активного узла'}</strong>
-        {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
-        Автообновление каждые {REFRESH_INTERVAL} с. Переключите узел в шапке или на странице «Узлы».
+      <SettingsAlert variant="info" title={isFederated ? 'Сводка по всем узлам' : 'Данные активного узла'}>
+        {isFederated ? (
+          <>
+            Показаны подключения с <strong>{data?.nodes_total ?? nodes.length}</strong> узлов · online{' '}
+            <strong>{data?.nodes_online ?? 0}</strong>. Геолокация IP — приблизительный город и провайдер.
+          </>
+        ) : (
+          <>
+            Мониторинг собирается с <strong>{activeNode?.name ?? data?.node_name ?? 'активного узла'}</strong>
+            {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
+            Автообновление каждые {REFRESH_INTERVAL} с. Переключите узел в шапке или на странице «Узлы».
+          </>
+        )}
       </SettingsAlert>
 
-      {nodeOffline && (
+      {!isFederated && nodeOffline && (
         <SettingsAlert variant="warning" title="Узел офлайн">
           Активный узел недоступен. Данные подключений могут быть устаревшими или отсутствовать.
           Проверьте связь с node agent и повторите обновление.
         </SettingsAlert>
       )}
 
-      {nodeUnknown && !nodeOffline && (
+      {!isFederated && nodeUnknown && !nodeOffline && (
         <SettingsAlert variant="warning" title="Статус узла неизвестен">
           Связь с узлом не подтверждена. Запустите проверку здоровья на странице «Узлы».
         </SettingsAlert>
@@ -428,21 +411,72 @@ export default function MonitoringPage() {
               )}
               <Badge variant="outline" className="gap-1">
                 <Hash size={10} />
-                Службы: {activeServices}/{totalServices}
+                {isFederated
+                  ? `Узлы: ${data.nodes_online ?? 0}/${data.nodes_total ?? 0}`
+                  : `Службы: ${activeServices}/${totalServices}`}
               </Badge>
             </div>
+
+            {isFederated && (data.nodes_summary?.length ?? 0) > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Server size={18} />
+                    Сводка по узлам
+                  </CardTitle>
+                  <CardDescription>
+                    Подключения и службы на каждом VPN-узле
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Узел</TableHead>
+                          <TableHead>Статус</TableHead>
+                          <TableHead className="text-right">OpenVPN</TableHead>
+                          <TableHead className="text-right">WireGuard</TableHead>
+                          <TableHead className="text-right">Службы</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {data.nodes_summary?.map((node: MonitoringNodeSummary) => (
+                          <TableRow key={node.node_id}>
+                            <TableCell className="font-medium">{node.node_name}</TableCell>
+                            <TableCell>
+                              <Badge variant={node.status === 'online' ? 'success' : 'secondary'} className="text-[10px]">
+                                {node.status === 'online' ? 'Online' : node.status}
+                              </Badge>
+                              {node.error && (
+                                <p className="mt-1 text-[11px] text-destructive">{node.error}</p>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">{node.connected_openvpn}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{node.connected_wireguard}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {node.active_services}/{node.total_services}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
                 label="OpenVPN онлайн"
-                value={String(openvpnClients.length)}
+                value={String(isFederated ? data.total_connected_openvpn ?? openvpnClients.length : openvpnClients.length)}
                 icon={Wifi}
                 accent="text-primary"
                 sub="активных сессий"
               />
               <SummaryCard
                 label="WireGuard онлайн"
-                value={String(wgActive)}
+                value={String(isFederated ? data.total_connected_wireguard ?? wgActive : wgActive)}
                 icon={Radio}
                 accent="text-emerald-500"
                 sub={`из ${wireguardPeers.length} пиров`}
@@ -467,7 +501,19 @@ export default function MonitoringPage() {
               />
             </div>
 
-            <MonitoringCharts data={data} />
+            <div className="space-y-4">
+              <MonitoringCharts data={data} />
+              {totalConnections > 0 && hasFilteredClients && (
+                <MonitoringGeoSummary
+                  openvpnClients={visibleOpenVpn}
+                  wireguardPeers={visibleWireGuardList}
+                  showOpenVpn={showOpenVpn}
+                  showWireGuard={showWireGuard}
+                  isWireGuardOnline={isWireGuardOnline}
+                  onlineOnly={onlineOnly}
+                />
+              )}
+            </div>
 
             <Tabs defaultValue="connections">
               <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
@@ -492,11 +538,6 @@ export default function MonitoringPage() {
                 <TabsTrigger value="resources" className="gap-1.5">
                   <Cpu size={14} />
                   VPN-узел
-                  {resourceHistory && resourceHistory.sample_count > 0 && (
-                    <Badge variant="secondary" className="h-4 px-1 text-[10px]">
-                      {resourceHistory.sample_count}
-                    </Badge>
-                  )}
                 </TabsTrigger>
                 {isAdmin && (
                   <TabsTrigger value="panel" className="gap-1.5">
@@ -508,8 +549,8 @@ export default function MonitoringPage() {
 
               <TabsContent value="connections" className="space-y-4">
                 <Card>
-                  <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
+                  <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="shrink-0">
                       <CardTitle className="flex items-center gap-2 text-base">
                         <Users size={18} />
                         VPN-клиенты
@@ -517,11 +558,13 @@ export default function MonitoringPage() {
                       <CardDescription>
                         {totalConnections === 0
                           ? 'Нет активных подключений'
-                          : `${filteredOpenVpn.length + filteredWireGuard.length} из ${openvpnClients.length + wireguardPeers.length} записей`}
+                          : onlineOnly
+                            ? `${visibleCount} онлайн${filteredTotalCount > visibleCount ? ` из ${filteredTotalCount}` : ''}`
+                            : `${visibleCount} из ${openvpnClients.length + wireguardPeers.length} записей`}
                       </CardDescription>
                     </div>
-                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                      <div className="relative sm:w-56">
+                    <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto lg:justify-end">
+                      <div className="relative w-full sm:w-56">
                         <Search
                           size={14}
                           className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -529,7 +572,7 @@ export default function MonitoringPage() {
                         <Input
                           value={search}
                           onChange={(e) => setSearch(e.target.value)}
-                          placeholder="Поиск по имени, IP..."
+                          placeholder="Поиск по имени, IP, городу..."
                           className="h-9 pl-9 text-xs"
                         />
                       </div>
@@ -546,6 +589,16 @@ export default function MonitoringPage() {
                           <SelectItem value="wireguard">WireGuard</SelectItem>
                         </SelectContent>
                       </Select>
+                      <div className="flex h-9 shrink-0 items-center gap-2">
+                        <Switch
+                          id="monitoring-online-only"
+                          checked={onlineOnly}
+                          onCheckedChange={setOnlineOnly}
+                        />
+                        <Label htmlFor="monitoring-online-only" className="whitespace-nowrap text-xs text-muted-foreground">
+                          Только онлайн
+                        </Label>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent>
@@ -560,195 +613,15 @@ export default function MonitoringPage() {
                       <EmptyState
                         icon={Search}
                         title="Нет совпадений"
-                        description="Измените поисковый запрос или сбросьте фильтр протокола"
+                        description={
+                          onlineOnly && filteredTotalCount > 0
+                            ? 'Снимите фильтр «Только онлайн» или измените поисковый запрос'
+                            : 'Измените поисковый запрос или сбросьте фильтр протокола'
+                        }
                         className="py-8"
                       />
                     ) : (
-                      <div
-                        className={cn(
-                          'grid gap-4',
-                          showOpenVpn && showWireGuard && 'lg:grid-cols-2',
-                        )}
-                      >
-                        {showOpenVpn && (
-                          <Card className="border-dashed shadow-none">
-                            <CardHeader className="pb-3">
-                              <CardTitle className="flex items-center gap-2 text-base">
-                                <Wifi size={16} />
-                                OpenVPN
-                              </CardTitle>
-                              <CardDescription>
-                                {filteredOpenVpn.length} активных клиентов
-                              </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                              {filteredOpenVpn.length === 0 ? (
-                                <EmptyState
-                                  icon={WifiOff}
-                                  title="Нет клиентов OpenVPN"
-                                  description="Нет совпадений по текущему фильтру"
-                                  className="py-6"
-                                />
-                              ) : (
-                                <>
-                                  <div className="space-y-3 lg:hidden">
-                                    {filteredOpenVpn.map((c) => (
-                                      <OpenVpnClientCard
-                                        key={`${c.common_name}-${c.real_address}`}
-                                        client={c}
-                                      />
-                                    ))}
-                                  </div>
-                                  <div className="hidden overflow-x-auto rounded-md border lg:block">
-                                    <Table>
-                                      <TableHeader>
-                                        <TableRow>
-                                          <TableHead>Статус</TableHead>
-                                          <TableHead>Клиент</TableHead>
-                                          <TableHead>Real IP</TableHead>
-                                          <TableHead>VPN IP</TableHead>
-                                          <TableHead className="text-right">RX</TableHead>
-                                          <TableHead className="text-right">TX</TableHead>
-                                          <TableHead>Подключён с</TableHead>
-                                        </TableRow>
-                                      </TableHeader>
-                                      <TableBody>
-                                        {filteredOpenVpn.map((c) => (
-                                          <TableRow key={`${c.common_name}-${c.real_address}`}>
-                                            <TableCell>
-                                              <div className="flex flex-wrap items-center gap-1">
-                                                <Badge variant="default" className="text-[10px]">
-                                                  OVPN
-                                                </Badge>
-                                                <Badge variant="success" className="text-[10px]">
-                                                  Онлайн
-                                                </Badge>
-                                              </div>
-                                            </TableCell>
-                                            <TableCell className="font-medium">{c.common_name}</TableCell>
-                                            <TableCell className="font-mono text-xs">{c.real_address}</TableCell>
-                                            <TableCell className="font-mono text-xs">{c.virtual_address}</TableCell>
-                                            <TableCell className="text-right font-mono text-xs">
-                                              <span className="inline-flex items-center justify-end gap-1">
-                                                <ArrowDownToLine size={12} className="text-primary" />
-                                                {formatBytes(c.bytes_received)}
-                                              </span>
-                                            </TableCell>
-                                            <TableCell className="text-right font-mono text-xs">
-                                              <span className="inline-flex items-center justify-end gap-1">
-                                                <ArrowUpFromLine size={12} className="text-amber-500" />
-                                                {formatBytes(c.bytes_sent)}
-                                              </span>
-                                            </TableCell>
-                                            <TableCell className="text-xs text-muted-foreground">
-                                              <span className="inline-flex items-center gap-1">
-                                                <Clock size={12} className="shrink-0" />
-                                                {c.connected_since}
-                                              </span>
-                                            </TableCell>
-                                          </TableRow>
-                                        ))}
-                                      </TableBody>
-                                    </Table>
-                                  </div>
-                                </>
-                              )}
-                            </CardContent>
-                          </Card>
-                        )}
-
-                        {showWireGuard && (
-                          <Card className="border-dashed shadow-none">
-                            <CardHeader className="pb-3">
-                              <CardTitle className="flex items-center gap-2 text-base">
-                                <Radio size={16} />
-                                WireGuard / AmneziaWG
-                              </CardTitle>
-                              <CardDescription>
-                                {filteredWireGuard.filter(isWireGuardOnline).length} онлайн из{' '}
-                                {filteredWireGuard.length} пиров
-                              </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                              {filteredWireGuard.length === 0 ? (
-                                <EmptyState
-                                  icon={WifiOff}
-                                  title="Нет пиров WireGuard"
-                                  description="Нет совпадений по текущему фильтру"
-                                  className="py-6"
-                                />
-                              ) : (
-                                <>
-                                  <div className="space-y-3 lg:hidden">
-                                    {filteredWireGuard.map((p) => (
-                                      <WireGuardPeerCard
-                                        key={`${p.interface}-${p.public_key}`}
-                                        peer={p}
-                                      />
-                                    ))}
-                                  </div>
-                                  <div className="hidden overflow-x-auto rounded-md border lg:block">
-                                    <Table>
-                                      <TableHeader>
-                                        <TableRow>
-                                          <TableHead>Статус</TableHead>
-                                          <TableHead>IF</TableHead>
-                                          <TableHead>Клиент</TableHead>
-                                          <TableHead>Endpoint</TableHead>
-                                          <TableHead>IP</TableHead>
-                                          <TableHead className="text-right">RX</TableHead>
-                                          <TableHead className="text-right">TX</TableHead>
-                                          <TableHead>Handshake</TableHead>
-                                        </TableRow>
-                                      </TableHeader>
-                                      <TableBody>
-                                        {filteredWireGuard.map((p) => {
-                                          const online = isWireGuardOnline(p)
-                                          return (
-                                            <TableRow
-                                              key={`${p.interface}-${p.public_key}`}
-                                              className={cn(online && 'bg-emerald-500/5')}
-                                            >
-                                              <TableCell>
-                                                <div className="flex flex-wrap items-center gap-1">
-                                                  <Badge variant="secondary" className="text-[10px]">
-                                                    WG
-                                                  </Badge>
-                                                  <Badge
-                                                    variant={online ? 'success' : 'secondary'}
-                                                    className="text-[10px]"
-                                                  >
-                                                    {online ? 'Онлайн' : 'Офлайн'}
-                                                  </Badge>
-                                                </div>
-                                              </TableCell>
-                                              <TableCell className="font-mono text-xs">{p.interface}</TableCell>
-                                              <TableCell className="font-medium">
-                                                {p.client_name || '—'}
-                                              </TableCell>
-                                              <TableCell className="font-mono text-xs">{p.endpoint || '—'}</TableCell>
-                                              <TableCell className="font-mono text-xs">{p.allowed_ips || '—'}</TableCell>
-                                              <TableCell className="text-right font-mono text-xs">
-                                                {formatBytes(p.transfer_rx)}
-                                              </TableCell>
-                                              <TableCell className="text-right font-mono text-xs">
-                                                {formatBytes(p.transfer_tx)}
-                                              </TableCell>
-                                              <TableCell className="text-xs text-muted-foreground">
-                                                {formatHandshake(p.latest_handshake)}
-                                              </TableCell>
-                                            </TableRow>
-                                          )
-                                        })}
-                                      </TableBody>
-                                    </Table>
-                                  </div>
-                                </>
-                              )}
-                            </CardContent>
-                          </Card>
-                        )}
-                      </div>
+                      <MonitoringConnectionsList rows={connectionRows} showNodeColumn={showNodeColumn} />
                     )}
                   </CardContent>
                 </Card>
@@ -759,15 +632,49 @@ export default function MonitoringPage() {
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-base">
                       <Server size={18} />
-                      Матрица служб
+                      {isFederated ? 'Службы по узлам' : 'Матрица служб'}
                     </CardTitle>
                     <CardDescription>
-                      {activeServices} из {totalServices} служб online
-                      {data?.server_ip && <> · IP {data.server_ip}</>}
+                      {isFederated
+                        ? 'Для детальной матрицы переключитесь на режим «Активный узел»'
+                        : `${activeServices} из ${totalServices} служб online`}
+                      {!isFederated && data?.server_ip && <> · IP {data.server_ip}</>}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {totalServices === 0 ? (
+                    {isFederated ? (
+                      (data.nodes_summary?.length ?? 0) === 0 ? (
+                        <EmptyState
+                          icon={Server}
+                          title="Нет данных по узлам"
+                          description="Список узлов появится после успешного опроса"
+                          className="py-8"
+                        />
+                      ) : (
+                        <div className="overflow-x-auto rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Узел</TableHead>
+                                <TableHead>Статус</TableHead>
+                                <TableHead className="text-right">Online</TableHead>
+                                <TableHead className="text-right">Всего</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {data.nodes_summary?.map((node) => (
+                                <TableRow key={node.node_id}>
+                                  <TableCell>{node.node_name}</TableCell>
+                                  <TableCell>{node.status}</TableCell>
+                                  <TableCell className="text-right font-mono text-xs">{node.active_services}</TableCell>
+                                  <TableCell className="text-right font-mono text-xs">{node.total_services}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )
+                    ) : totalServices === 0 ? (
                       <EmptyState
                         icon={Server}
                         title="Нет данных о службах"

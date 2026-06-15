@@ -7,8 +7,8 @@ from sqlalchemy import func
 from app.models import ProviderMeta
 from app.services.cidr.cidr_tasks import find_any_active_pipeline_task
 from app.services.cidr.pipeline.deploy import list_compile_artifacts
-from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext, is_admin, unlinked_message
+from app.services.telegram_bot_handlers.ui import nav_footer_keyboard, send_or_edit
 from app.services import telegram_bot_i18n as i18n
 
 
@@ -64,18 +64,25 @@ def _format_cidr_status(db) -> str:
     )
 
 
-async def handle_cidr_status(ctx: BotContext) -> None:
+async def handle_cidr_status(ctx: BotContext, *, message_id: int | None = None) -> None:
     if ctx.user is None:
+        from app.services.telegram_api import send_message
+
         await send_message(ctx.bot_token, ctx.chat_id, unlinked_message())
         return
     if not is_admin(ctx.user):
+        from app.services.telegram_api import send_message
+
         await send_message(ctx.bot_token, ctx.chat_id, i18n.ADMIN_ONLY)
         return
 
     try:
         text = _format_cidr_status(ctx.db)
     except Exception as exc:
+        from app.services.telegram_api import send_message
+
         await send_message(ctx.bot_token, ctx.chat_id, i18n.CIDR_ERROR.format(detail=exc))
         return
 
-    await send_message(ctx.bot_token, ctx.chat_id, text)
+    markup = nav_footer_keyboard(refresh="nav:cidr")
+    await send_or_edit(ctx, text, markup=markup, message_id=message_id)

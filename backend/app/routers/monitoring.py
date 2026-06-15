@@ -21,6 +21,7 @@ from app.schemas import (
     ResourceHistoryPoint,
     ResourceHistoryResponse,
 )
+from app.services.monitoring_overview import build_federated_monitoring_overview, build_monitoring_overview
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.panel_resource_collector import collect_panel_metrics
 from app.services.panel_resource_metrics import VALID_PERIODS as PANEL_VALID_PERIODS
@@ -31,25 +32,25 @@ router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 _settings = get_settings()
 
 
-def _build_monitoring_overview(db: Session) -> MonitoringOverview:
-    adapter = get_active_adapter(db)
-    node = get_active_node(db)
-    ovpn_clients, openvpn_data_source = adapter.get_openvpn_status_snapshot()
-    return MonitoringOverview(
-        services=adapter.get_service_status(),
-        openvpn_clients=ovpn_clients,
-        wireguard_peers=adapter.parse_wireguard_status(),
-        server_ip=adapter.get_server_ip(),
-        timestamp=datetime.utcnow(),
-        node_id=node.id,
-        node_name=node.name,
-        openvpn_data_source=openvpn_data_source,
-    )
+def _build_monitoring_overview(db: Session, scope: str = "node") -> MonitoringOverview:
+    if scope == "all":
+        return build_federated_monitoring_overview(db)
+    return build_monitoring_overview(db)
 
 
 @router.get("/overview", response_model=MonitoringOverview)
-def monitoring_overview(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return _build_monitoring_overview(db)
+def monitoring_overview(
+    scope: str = Query(default="node", pattern="^(node|all)$"),
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return _build_monitoring_overview(db, scope=scope)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка сборки мониторинга: {exc}",
+        ) from exc
 
 
 def _user_from_access_token(token: str, db: Session) -> User:

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from app.models import AppSetting, User, VpnConfig, VpnType
+from app.models import AppSetting, Node, NodeStatus, User, VpnConfig, VpnType
 
 
 def _client(env):
@@ -81,9 +81,9 @@ def test_send_config_v2_self_destination(api_test_env):
         return True
 
     with (
-        patch("app.routers.tg_mini.get_active_adapter", return_value=mock_adapter),
+        patch("app.services.telegram_config_send.get_active_adapter", return_value=mock_adapter),
         patch("app.routers.tg_mini.get_active_node", return_value=env["node"]),
-        patch("app.routers.tg_mini.send_tg_document", side_effect=_capture_send),
+        patch("app.services.telegram_config_send.send_tg_document", side_effect=_capture_send),
     ):
         response = _client(env).post(
             f"/api/tg-mini/configs/{config_id}/send",
@@ -188,3 +188,51 @@ def test_mini_app_page_requires_build(api_test_env, monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert "Mini" in response.text
+
+
+def test_tg_mini_nodes_list_admin(api_test_env):
+    env = api_test_env
+    response = _client(env).get("/api/tg-mini/nodes", headers=env["admin_headers"])
+    assert response.status_code == 200
+    body = response.json()
+    assert "nodes" in body
+    assert len(body["nodes"]) >= 1
+    assert body["nodes"][0]["name"] == "local"
+
+
+def test_tg_mini_nodes_forbidden_for_viewer(api_test_env):
+    env = api_test_env
+    response = _client(env).get("/api/tg-mini/nodes", headers=env["viewer_headers"])
+    assert response.status_code == 403
+
+
+def test_tg_mini_activate_node(api_test_env):
+    env = api_test_env
+    session = env["session_factory"]()
+    try:
+        remote = Node(
+            name="remote-mini",
+            host="10.0.0.5",
+            port=9100,
+            api_key_hash="hash",
+            api_key_encrypted="enc",
+            is_local=False,
+            status=NodeStatus.online,
+        )
+        session.add(remote)
+        session.commit()
+        session.refresh(remote)
+        remote_id = remote.id
+    finally:
+        session.close()
+
+    with patch("app.routers.tg_mini.check_node_health", return_value={"status": "online", "server_ip": "10.0.0.5"}):
+        response = _client(env).post(
+            f"/api/tg-mini/nodes/{remote_id}/activate",
+            headers=env["admin_headers"],
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["node"]["is_active"] is True
+    assert body["node"]["name"] == "remote-mini"

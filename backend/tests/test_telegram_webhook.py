@@ -109,6 +109,12 @@ def test_webhook_rejects_non_telegram_ip(api_test_env):
     assert response.status_code == 403
 
 
+def _text_update(text: str, user_id: int = 123456789) -> dict:
+    update = _start_update(user_id=user_id)
+    update["message"]["text"] = text
+    return update
+
+
 def test_webhook_start_linked_user(api_test_env):
     _setup_bot(api_test_env["session_factory"])
     mock_adapter = api_test_env["mock_adapter"]
@@ -127,7 +133,11 @@ def test_webhook_start_linked_user(api_test_env):
         )
     assert response.status_code == 200
     assert response.json() == {"ok": True}
-    send.assert_awaited_once()
+    assert send.await_count == 2
+    inline_markup = send.await_args_list[0].kwargs.get("reply_markup") or send.await_args_list[0].args[3]
+    reply_markup = send.await_args_list[1].kwargs.get("reply_markup") or send.await_args_list[1].args[3]
+    assert "inline_keyboard" in inline_markup
+    assert "keyboard" in reply_markup
 
 
 def test_webhook_status_for_linked_user(api_test_env):
@@ -139,16 +149,16 @@ def test_webhook_status_for_linked_user(api_test_env):
 
     with (
         patch("app.routers.telegram_webhook.is_telegram_ip", return_value=True),
-        patch("app.services.telegram_bot_handlers.status.send_message", new_callable=AsyncMock) as send,
+        patch("app.services.telegram_bot_handlers.status.send_or_edit", new_callable=AsyncMock) as send_or_edit,
     ):
-        send.return_value = True
+        send_or_edit.return_value = True
         response = _client(api_test_env).post(
             "/api/telegram/webhook/test-webhook-secret",
             json=_status_update(),
         )
     assert response.status_code == 200
-    send.assert_awaited_once()
-    text = send.call_args.args[2]
+    send_or_edit.assert_awaited_once()
+    text = send_or_edit.call_args.args[1]
     assert "Статус панели" in text
 
 
@@ -167,15 +177,18 @@ def test_webhook_link_redeems_code(api_test_env):
 
     with (
         patch("app.routers.telegram_webhook.is_telegram_ip", return_value=True),
-        patch("app.services.telegram_bot_handlers.link.send_message", new_callable=AsyncMock) as send,
+        patch("app.services.telegram_bot_handlers.link.send_message", new_callable=AsyncMock) as send_link,
+        patch("app.services.telegram_bot_handlers.start.send_message", new_callable=AsyncMock) as send_start,
     ):
-        send.return_value = True
+        send_link.return_value = True
+        send_start.return_value = True
         response = _client(api_test_env).post(
             "/api/telegram/webhook/test-webhook-secret",
             json=_link_update(code, user_id=999888777),
         )
     assert response.status_code == 200
-    send.assert_awaited_once()
+    send_link.assert_awaited_once()
+    assert send_start.await_count == 2
 
     session = api_test_env["session_factory"]()
     try:
@@ -223,7 +236,10 @@ def test_register_webhook_endpoint(api_test_env):
     finally:
         session.close()
 
-    with patch("app.routers.maintenance.set_webhook_sync", return_value=(True, "")):
+    with (
+        patch("app.routers.maintenance.set_webhook_sync", return_value=(True, "")),
+        patch("app.services.telegram_api.set_my_commands_sync", return_value=(True, "")),
+    ):
         response = _client(api_test_env).post(
             "/api/settings/telegram/webhook/register",
             headers=api_test_env["admin_headers"],
@@ -257,7 +273,7 @@ def test_webhook_callback_help(api_test_env):
     with (
         patch("app.routers.telegram_webhook.is_telegram_ip", return_value=True),
         patch("app.services.telegram_bot.answer_callback_query", new_callable=AsyncMock) as answer_cb,
-        patch("app.services.telegram_bot_handlers.help.edit_message_text", new_callable=AsyncMock) as edit,
+        patch("app.services.telegram_bot_handlers.help.send_or_edit", new_callable=AsyncMock) as edit,
     ):
         edit.return_value = True
         answer_cb.return_value = True
@@ -268,7 +284,7 @@ def test_webhook_callback_help(api_test_env):
     assert response.status_code == 200
     answer_cb.assert_awaited_once()
     edit.assert_awaited_once()
-    assert "Команды бота" in edit.call_args.args[3]
+    assert "Справка" in edit.call_args.args[1]
 
 
 def test_webhook_callback_settings_root(api_test_env):
@@ -312,7 +328,7 @@ def test_webhook_callback_configs_pagination(api_test_env):
     with (
         patch("app.routers.telegram_webhook.is_telegram_ip", return_value=True),
         patch("app.services.telegram_bot.answer_callback_query", new_callable=AsyncMock) as answer_cb,
-        patch("app.services.telegram_bot_handlers.configs.edit_message_text", new_callable=AsyncMock) as edit,
+        patch("app.services.telegram_bot_handlers.configs.send_or_edit", new_callable=AsyncMock) as edit,
     ):
         edit.return_value = True
         answer_cb.return_value = True
@@ -323,7 +339,7 @@ def test_webhook_callback_configs_pagination(api_test_env):
     assert response.status_code == 200
     answer_cb.assert_awaited_once()
     edit.assert_awaited_once()
-    assert "Конфигурации" in edit.call_args.args[3]
+    assert "Конфигурации" in edit.call_args.args[1]
 
 
 def test_webhook_cidr_status_command(api_test_env):
@@ -332,7 +348,7 @@ def test_webhook_cidr_status_command(api_test_env):
     update["message"]["text"] = "/cidr"
     with (
         patch("app.routers.telegram_webhook.is_telegram_ip", return_value=True),
-        patch("app.services.telegram_bot_handlers.cidr_status.send_message", new_callable=AsyncMock) as send,
+        patch("app.services.telegram_bot_handlers.cidr_status.send_or_edit", new_callable=AsyncMock) as send,
         patch(
             "app.services.telegram_bot_handlers.cidr_status._format_cidr_status",
             return_value="🗂 <b>CIDR pipeline</b>\n\nВсего CIDR: <code>0</code>",
@@ -345,7 +361,7 @@ def test_webhook_cidr_status_command(api_test_env):
         )
     assert response.status_code == 200
     send.assert_awaited_once()
-    assert "CIDR" in send.call_args.args[2]
+    assert "CIDR" in send.call_args.args[1]
 
 
 def test_webhook_rejects_spoofed_forwarded_for(api_test_env):
@@ -372,8 +388,11 @@ def test_webhook_warper_status_command(api_test_env):
     update["message"]["text"] = "/warper"
     with (
         patch("app.routers.telegram_webhook.is_telegram_ip", return_value=True),
-        patch("app.services.telegram_bot_handlers.warper_status.send_message", new_callable=AsyncMock) as send,
+        patch("app.services.telegram_bot_handlers.warper_status.get_active_adapter") as get_adapter,
+        patch("app.services.telegram_bot_handlers.warper_status.get_active_node", return_value=api_test_env["node"]),
+        patch("app.services.telegram_bot_handlers.warper_status.send_or_edit", new_callable=AsyncMock) as send,
     ):
+        get_adapter.return_value = mock_adapter
         send.return_value = True
         response = _client(api_test_env).post(
             "/api/telegram/webhook/test-webhook-secret",
@@ -381,4 +400,61 @@ def test_webhook_warper_status_command(api_test_env):
         )
     assert response.status_code == 200
     send.assert_awaited_once()
-    assert "AZ-WARP" in send.call_args.args[2]
+    assert "AZ-WARP" in send.call_args.args[1]
+
+
+def test_webhook_menu_text_status(api_test_env):
+    _setup_bot(api_test_env["session_factory"])
+    mock_adapter = api_test_env["mock_adapter"]
+    mock_adapter.parse_openvpn_status.return_value = []
+    mock_adapter.parse_wireguard_status.return_value = []
+    mock_adapter.get_server_ip.return_value = "10.0.0.1"
+
+    from app.services import telegram_bot_i18n as i18n
+
+    with (
+        patch("app.routers.telegram_webhook.is_telegram_ip", return_value=True),
+        patch("app.services.telegram_bot_handlers.status.send_or_edit", new_callable=AsyncMock) as send_or_edit,
+    ):
+        send_or_edit.return_value = True
+        response = _client(api_test_env).post(
+            "/api/telegram/webhook/test-webhook-secret",
+            json=_text_update(i18n.BTN_MENU_STATUS),
+        )
+    assert response.status_code == 200
+    send_or_edit.assert_awaited_once()
+    assert "Статус панели" in send_or_edit.call_args.args[1]
+
+
+def test_webhook_callback_nav_configs(api_test_env):
+    _setup_bot(api_test_env["session_factory"])
+    session = api_test_env["session_factory"]()
+    try:
+        admin = session.query(User).filter(User.username == "api_admin").first()
+        session.add(
+            VpnConfig(
+                node_id=api_test_env["node"].id,
+                client_name="nav-client",
+                vpn_type=VpnType.openvpn,
+                owner_id=admin.id,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    with (
+        patch("app.routers.telegram_webhook.is_telegram_ip", return_value=True),
+        patch("app.services.telegram_bot.answer_callback_query", new_callable=AsyncMock) as answer_cb,
+        patch("app.services.telegram_bot_handlers.configs.send_or_edit", new_callable=AsyncMock) as edit,
+    ):
+        edit.return_value = True
+        answer_cb.return_value = True
+        response = _client(api_test_env).post(
+            "/api/telegram/webhook/test-webhook-secret",
+            json=_callback_update("nav:configs"),
+        )
+    assert response.status_code == 200
+    answer_cb.assert_awaited_once()
+    edit.assert_awaited_once()
+    assert "Конфигурации" in edit.call_args.args[1]

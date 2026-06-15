@@ -18,12 +18,20 @@ from app.services.telegram_bot_handlers.configs import (
 from app.services.telegram_bot_handlers.cidr_status import handle_cidr_status
 from app.services.telegram_bot_handlers.help import handle_help
 from app.services.telegram_bot_handlers.link import handle_link
+from app.services.telegram_bot_handlers.nodes import (
+    handle_node_activate,
+    handle_node_detail,
+    handle_node_health,
+    handle_nodes_root,
+)
 from app.services.telegram_bot_handlers.settings import (
     handle_settings_callback,
     handle_settings_root,
     handle_settings_text,
 )
 from app.services.telegram_bot_handlers.start import handle_start
+from app.services.telegram_bot_handlers.menu import handle_menu_callback, handle_menu_text
+from app.services.telegram_bot_handlers.ui import handle_unknown_text, nav_footer_keyboard
 from app.services.telegram_bot_handlers.status import handle_status
 from app.services.telegram_bot_handlers.warper_status import handle_warper_status
 from app.services import telegram_bot_i18n as i18n
@@ -88,6 +96,8 @@ async def _dispatch_command(ctx: BotContext, command: str, args: str) -> None:
         await handle_settings_root(ctx)
     elif command == "/cidr":
         await handle_cidr_status(ctx)
+    elif command == "/nodes":
+        await handle_nodes_root(ctx)
     elif command == "/warper":
         await handle_warper_status(ctx)
     else:
@@ -97,10 +107,13 @@ async def _dispatch_command(ctx: BotContext, command: str, args: str) -> None:
             ctx.bot_token,
             ctx.chat_id,
             i18n.UNKNOWN_COMMAND,
+            reply_markup=nav_footer_keyboard(refresh=None, include_help=True, include_home=True),
         )
 
 
 async def _dispatch_callback(ctx: BotContext, data: str, *, message_id: int | None) -> None:
+    if await handle_menu_callback(ctx, data, message_id=message_id):
+        return
     if data == "help":
         await handle_help(ctx, message_id=message_id)
         return
@@ -108,12 +121,44 @@ async def _dispatch_callback(ctx: BotContext, data: str, *, message_id: int | No
         page = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
         await handle_configs(ctx, page=page, message_id=message_id)
         return
+    if data.startswith("cfgf:"):
+        parts = data.split(":")
+        config_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        file_index = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else -1
+        from app.services.telegram_bot_handlers.configs import handle_config_file_send
+
+        await handle_config_file_send(ctx, config_id, file_index, message_id=message_id)
+        return
+    if data.startswith("cfgg:"):
+        parts = data.split(":")
+        config_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        group_key = parts[2] if len(parts) > 2 else ""
+        from app.services.telegram_bot_handlers.configs import handle_config_group_callback
+
+        await handle_config_group_callback(ctx, config_id, group_key, message_id=message_id)
+        return
     if data.startswith("cfg:"):
         config_id = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
-        await handle_config_callback(ctx, config_id)
+        await handle_config_callback(ctx, config_id, message_id=message_id)
         return
     if data.startswith("st:"):
         await handle_settings_callback(ctx, data, message_id=message_id)
+        return
+    if data.startswith("nodes:"):
+        page = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
+        await handle_nodes_root(ctx, page=page, message_id=message_id)
+        return
+    if data.startswith("ndh:"):
+        node_id = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
+        await handle_node_health(ctx, node_id, message_id=message_id)
+        return
+    if data.startswith("nda:"):
+        node_id = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
+        await handle_node_activate(ctx, node_id, message_id=message_id)
+        return
+    if data.startswith("nd:"):
+        node_id = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
+        await handle_node_detail(ctx, node_id, message_id=message_id)
         return
 
 
@@ -155,6 +200,10 @@ class TelegramBotService:
         if not command:
             if text.strip() and await handle_settings_text(ctx, text):
                 return
+            if text.strip() and await handle_menu_text(ctx, text):
+                return
+            if text.strip():
+                await handle_unknown_text(ctx)
             return
 
         await _dispatch_command(ctx, command, args)
@@ -182,7 +231,7 @@ class TelegramBotService:
             telegram_user_id=telegram_user_id,
             mini_app_url=mini_app_url,
         )
-        if ctx.user is None and not data.startswith("help"):
+        if ctx.user is None and not (data == "help" or data.startswith("nav:help")):
             from app.services.telegram_api import send_message
             from app.services.telegram_bot_handlers.base import unlinked_message
 

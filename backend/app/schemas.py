@@ -168,6 +168,15 @@ class OpenVpnClient(BaseModel):
     connected_since_ts: int = 0
     profile: str | None = None
     data_source: str = "status_log"
+    display_address: str | None = None
+    client_ip: str | None = None
+    city: str | None = None
+    country: str | None = None
+    isp: str | None = None
+    location_label: str | None = None
+    geo_label: str | None = None
+    node_id: int | None = None
+    node_name: str | None = None
 
 
 class WireGuardPeer(BaseModel):
@@ -179,6 +188,26 @@ class WireGuardPeer(BaseModel):
     transfer_rx: int = 0
     transfer_tx: int = 0
     client_name: str | None = None
+    display_address: str | None = None
+    client_ip: str | None = None
+    city: str | None = None
+    country: str | None = None
+    isp: str | None = None
+    location_label: str | None = None
+    geo_label: str | None = None
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class MonitoringNodeSummary(BaseModel):
+    node_id: int
+    node_name: str
+    status: str
+    connected_openvpn: int = 0
+    connected_wireguard: int = 0
+    active_services: int = 0
+    total_services: int = 0
+    error: str | None = None
 
 
 class MonitoringOverview(BaseModel):
@@ -190,6 +219,12 @@ class MonitoringOverview(BaseModel):
     node_id: int | None = None
     node_name: str | None = None
     openvpn_data_source: str = "status_log"
+    scope: str = "node"
+    nodes_summary: list[MonitoringNodeSummary] = Field(default_factory=list)
+    nodes_online: int = 0
+    nodes_total: int = 0
+    total_connected_openvpn: int = 0
+    total_connected_wireguard: int = 0
 
 
 class ResourceHistoryPoint(BaseModel):
@@ -218,7 +253,15 @@ class PanelResourceHistoryPoint(BaseModel):
     backend_memory_mb: int
     backend_workers: int
     nginx_memory_mb: int | None = None
+    watchdog_memory_mb: int | None = None
+    frontend_dev_memory_mb: int | None = None
     total_panel_memory_mb: int
+    host_cpu_percent: float = 0.0
+    host_memory_percent: float = 0.0
+    host_memory_used_mb: int = 0
+    host_memory_total_mb: int = 0
+    host_disk_percent: float = 0.0
+    host_load_1: float | None = None
 
 
 class PanelResourceHistoryResponse(BaseModel):
@@ -238,6 +281,14 @@ class PanelResourceCurrentResponse(BaseModel):
     frontend_dev_memory_mb: int | None = None
     total_panel_memory_mb: int
     frontend_note: str
+    host_cpu_percent: float = 0.0
+    host_memory_percent: float = 0.0
+    host_memory_used_mb: int = 0
+    host_memory_total_mb: int = 0
+    host_disk_percent: float = 0.0
+    host_load_1: float | None = None
+    host_hostname: str = ""
+    host_uptime: str = ""
 
 
 class AppSettingsResponse(BaseModel):
@@ -771,5 +822,47 @@ class TrafficOverview(BaseModel):
     rows: list[TrafficClientRow]
     summary: TrafficSummary
     timestamp: datetime
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class TrafficSessionSourceRow(BaseModel):
+    client_ip: str
+    display_address: str | None = None
+    city: str | None = None
+    country: str | None = None
+    isp: str | None = None
+    location_label: str | None = None
+    geo_label: str | None = None
+    sessions_count: int = 0
+    virtual_addresses: list[str] = Field(default_factory=list)
+    total_bytes: int = 0
+    first_seen_at: str | None = None
+    last_seen_at: str | None = None
+    is_active: bool = False
+    share_percent: float = 0.0
+
+
+class TrafficSessionItem(BaseModel):
+    profile: str = "unknown"
+    real_address: str | None = None
+    virtual_address: str | None = None
+    connected_since_at: str | None = None
+    last_seen_at: str | None = None
+    ended_at: str | None = None
+    duration_seconds: int | None = None
+    bytes_received: int = 0
+    bytes_sent: int = 0
+    total_bytes: int = 0
+    is_active: bool = False
+
+
+class TrafficClientSessionsResponse(BaseModel):
+    client: str
+    total_sessions: int = 0
+    unique_sources: int = 0
+    unique_virtual_addresses: int = 0
+    by_source: list[TrafficSessionSourceRow] = Field(default_factory=list)
+    recent_sessions: list[TrafficSessionItem] = Field(default_factory=list)
     node_id: int | None = None
     node_name: str | None = None

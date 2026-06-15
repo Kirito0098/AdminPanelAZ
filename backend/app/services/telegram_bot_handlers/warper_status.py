@@ -4,19 +4,25 @@ from __future__ import annotations
 
 from app.services.feature_guards import get_feature_service
 from app.services.node_manager import get_active_adapter, get_active_node
-from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext, is_admin, unlinked_message
+from app.services.telegram_bot_handlers.ui import nav_footer_keyboard, send_or_edit
 from app.services import telegram_bot_i18n as i18n
 
 
-async def handle_warper_status(ctx: BotContext) -> None:
+async def handle_warper_status(ctx: BotContext, *, message_id: int | None = None) -> None:
     if ctx.user is None:
+        from app.services.telegram_api import send_message
+
         await send_message(ctx.bot_token, ctx.chat_id, unlinked_message())
         return
     if not is_admin(ctx.user):
+        from app.services.telegram_api import send_message
+
         await send_message(ctx.bot_token, ctx.chat_id, i18n.ADMIN_ONLY)
         return
     if not get_feature_service().is_enabled("warper"):
+        from app.services.telegram_api import send_message
+
         await send_message(ctx.bot_token, ctx.chat_id, i18n.WARPER_DISABLED)
         return
 
@@ -35,7 +41,10 @@ async def handle_warper_status(ctx: BotContext) -> None:
             status=status_text,
         )
     except Exception as exc:
+        from app.services.telegram_api import send_message
+
         await send_message(ctx.bot_token, ctx.chat_id, i18n.WARPER_ERROR.format(detail=exc))
         return
 
-    await send_message(ctx.bot_token, ctx.chat_id, text)
+    markup = nav_footer_keyboard(refresh="nav:warper")
+    await send_or_edit(ctx, text, markup=markup, message_id=message_id)

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Activity,
   ArrowDownToLine,
@@ -16,13 +17,10 @@ import {
   Trash2,
 } from 'lucide-react'
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -36,11 +34,13 @@ import {
   getTrafficChart,
   getTrafficCleanupSchedule,
   getTrafficActiveClients,
+  getClientPolicies,
   getTrafficOverview,
   resetTraffic,
   setTrafficCleanupSchedule,
 } from '@/api/client'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
+import TrafficClientFocusPanel from '@/components/traffic/TrafficClientFocusPanel'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import { NodeBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -72,12 +72,10 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { cn } from '@/lib/utils'
-import type { TrafficChartData, TrafficClientRow, TrafficOverview } from '@/types'
+import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficOverview } from '@/types'
 
 const REFRESH_INTERVAL = 60
 
-const CHART_VPN = 'hsl(187, 72%, 45%)'
-const CHART_ANTIZAPRET = 'hsl(38, 92%, 50%)'
 const BAR_COLORS = [
   'hsl(187, 72%, 45%)',
   'hsl(142, 71%, 45%)',
@@ -239,9 +237,14 @@ export default function TrafficPage() {
   const isAdmin = user?.role === 'admin'
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal, inline, withInline } = useProgress()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const urlClientApplied = useRef(false)
   const [data, setData] = useState<TrafficOverview | null>(null)
   const [chartData, setChartData] = useState<TrafficChartData | null>(null)
-  const [selectedClient, setSelectedClient] = useState<string>('')
+  const [selectedClient, setSelectedClient] = useState<string>(() => searchParams.get('client') ?? '')
+  const [focusOnly, setFocusOnly] = useState(false)
+  const [clientPolicy, setClientPolicy] = useState<ClientAccessPolicy | null>(null)
+  const [policyLoading, setPolicyLoading] = useState(false)
   const [chartRange, setChartRange] = useState('7d')
   const [loading, setLoading] = useState(true)
   const [liveLoading, setLiveLoading] = useState(false)
@@ -279,7 +282,12 @@ export default function TrafficPage() {
         setLoadError(null)
         setSelectedClient((current) => {
           if (current && overview.rows.some((r) => r.common_name === current)) return current
-          return overview.rows[0]?.common_name ?? ''
+          if (!urlClientApplied.current) {
+            const urlClient = searchParams.get('client')
+            urlClientApplied.current = true
+            if (urlClient && overview.rows.some((r) => r.common_name === urlClient)) return urlClient
+          }
+          return current || overview.rows[0]?.common_name || ''
         })
         setCountdown(REFRESH_INTERVAL)
 
@@ -317,8 +325,38 @@ export default function TrafficPage() {
         if (initial) doneGlobal()
       }
     },
-    [startGlobal, doneGlobal, notifyError],
+    [startGlobal, doneGlobal, notifyError, searchParams],
   )
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams)
+    if (selectedClient) next.set('client', selectedClient)
+    else next.delete('client')
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true })
+    }
+  }, [selectedClient, searchParams, setSearchParams])
+
+  useEffect(() => {
+    if (!selectedClient) {
+      setClientPolicy(null)
+      return
+    }
+    const row = data?.rows.find((r) => r.common_name === selectedClient)
+    setPolicyLoading(true)
+    void getClientPolicies(selectedClient)
+      .then((policies) => {
+        const entry = policies[selectedClient]
+        if (!entry) {
+          setClientPolicy(null)
+          return
+        }
+        const proto = row?.protocol_type?.toLowerCase()
+        setClientPolicy(proto === 'wireguard' ? entry.wireguard : entry.openvpn)
+      })
+      .catch(() => setClientPolicy(null))
+      .finally(() => setPolicyLoading(false))
+  }, [selectedClient, data?.rows])
 
   const loadChart = useCallback(async () => {
     if (!selectedClient) return
@@ -387,7 +425,10 @@ export default function TrafficPage() {
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const rows = [...(data?.rows ?? [])]
+    let rows = [...(data?.rows ?? [])]
+    if (focusOnly && selectedClient) {
+      rows = rows.filter((r) => r.common_name === selectedClient)
+    }
     const filtered = q
       ? rows.filter(
           (r) =>
@@ -403,7 +444,13 @@ export default function TrafficPage() {
       return (b[sortKey] as number) - (a[sortKey] as number)
     })
     return filtered
-  }, [data?.rows, search, sortKey])
+  }, [data?.rows, search, sortKey, focusOnly, selectedClient])
+
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter' || filteredRows.length === 0) return
+    setSelectedClient(filteredRows[0].common_name)
+    setFocusOnly(true)
+  }
 
   const maxBytes = useMemo(
     () => Math.max(...(filteredRows.map((r) => r.total_bytes) ?? [0]), 1),
@@ -424,14 +471,6 @@ export default function TrafficPage() {
         .map((r) => ({ name: r.common_name, traffic: r.traffic_7d })),
     [data?.rows],
   )
-
-  const chartPoints =
-    chartData?.labels?.map((label, i) => ({
-      label,
-      vpn: chartData.vpn_bytes?.[i] ?? 0,
-      antizapret: chartData.antizapret_bytes?.[i] ?? 0,
-      total: (chartData.vpn_bytes?.[i] ?? 0) + (chartData.antizapret_bytes?.[i] ?? 0),
-    })) ?? []
 
   const handleRefresh = () => load(false, true)
 
@@ -629,32 +668,36 @@ export default function TrafficPage() {
             />
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card>
-              <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Activity size={18} />
-                    График трафика
-                  </CardTitle>
-                  <CardDescription>
-                    Дельта байт по времени · {RANGE_LABELS[chartRange] ?? chartRange}
-                    {selectedClient && ` · ${selectedClient}`}
-                  </CardDescription>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Select value={selectedClient} onValueChange={setSelectedClient}>
-                    <SelectTrigger className="h-9 w-[180px] text-xs">
-                      <SelectValue placeholder="Клиент" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {data?.rows.map((r) => (
-                        <SelectItem key={`${r.common_name}-${r.protocol_type}`} value={r.common_name}>
-                          {r.common_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+          <TrafficClientFocusPanel
+            rows={data?.rows ?? []}
+            selectedClient={selectedClient}
+            onSelectClient={(name) => {
+              setSelectedClient(name)
+              if (name) setFocusOnly(true)
+            }}
+            focusOnly={focusOnly}
+            onFocusOnlyChange={setFocusOnly}
+            chartData={chartData}
+            chartLoading={chartLoading}
+            chartRange={chartRange}
+            onChartRangeChange={setChartRange}
+            policy={clientPolicy}
+            policyLoading={policyLoading}
+          />
+
+          <div className={cn('grid gap-6', !selectedClient && 'lg:grid-cols-2')}>
+            {!selectedClient && (
+              <Card>
+                <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Activity size={18} />
+                      Общий график
+                    </CardTitle>
+                    <CardDescription>
+                      Выберите клиента выше для детального графика · {RANGE_LABELS[chartRange] ?? chartRange}
+                    </CardDescription>
+                  </div>
                   <Select value={chartRange} onValueChange={setChartRange}>
                     <SelectTrigger className="h-9 w-[120px] text-xs">
                       <SelectValue />
@@ -666,88 +709,19 @@ export default function TrafficPage() {
                       <SelectItem value="30d">30 дней</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {chartLoading ? (
-                  <Spinner label="Загрузка графика..." className="py-12" />
-                ) : chartPoints.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={260}>
-                    <AreaChart data={chartPoints} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="trafficVpn" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={CHART_VPN} stopOpacity={0.35} />
-                          <stop offset="95%" stopColor={CHART_VPN} stopOpacity={0.02} />
-                        </linearGradient>
-                        <linearGradient id="trafficAz" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={CHART_ANTIZAPRET} stopOpacity={0.35} />
-                          <stop offset="95%" stopColor={CHART_ANTIZAPRET} stopOpacity={0.02} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
-                      <XAxis
-                        dataKey="label"
-                        tick={{ fontSize: 11 }}
-                        tickLine={false}
-                        axisLine={false}
-                        interval="preserveStartEnd"
-                      />
-                      <YAxis
-                        tickFormatter={(v) => formatBytes(v)}
-                        tick={{ fontSize: 11 }}
-                        tickLine={false}
-                        axisLine={false}
-                        width={64}
-                      />
-                      <Tooltip
-                        formatter={(v: number, name: string) => [
-                          formatBytes(v),
-                          name === 'vpn' ? 'VPN' : 'AntiZapret',
-                        ]}
-                        labelFormatter={(label) => `Период: ${label}`}
-                        contentStyle={{
-                          borderRadius: '8px',
-                          border: '1px solid hsl(var(--border))',
-                          background: 'hsl(var(--popover))',
-                          fontSize: '12px',
-                        }}
-                      />
-                      <Legend
-                        formatter={(value) => (value === 'vpn' ? 'VPN' : 'AntiZapret')}
-                        wrapperStyle={{ fontSize: '12px' }}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="vpn"
-                        stackId="1"
-                        stroke={CHART_VPN}
-                        fill="url(#trafficVpn)"
-                        strokeWidth={2}
-                        name="vpn"
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="antizapret"
-                        stackId="1"
-                        stroke={CHART_ANTIZAPRET}
-                        fill="url(#trafficAz)"
-                        strokeWidth={2}
-                        name="antizapret"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                ) : (
+                </CardHeader>
+                <CardContent>
                   <EmptyState
                     icon={BarChart3}
-                    title="Нет данных за период"
-                    description="Выберите другого клиента или расширьте временной диапазон"
+                    title="Клиент не выбран"
+                    description="Используйте блок «Мониторинг клиента» для просмотра графика конкретного пользователя"
                     className="py-8"
                   />
-                )}
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
 
-            <Card>
+            <Card className={selectedClient ? 'lg:col-span-1' : undefined}>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <BarChart3 size={18} />
@@ -814,7 +788,7 @@ export default function TrafficPage() {
                 </CardTitle>
                 <CardDescription>
                   {hasRows
-                    ? `${filteredRows.length} из ${data?.rows.length ?? 0} клиентов · сортировка: ${SORT_LABELS[sortKey]}`
+                    ? `${filteredRows.length} из ${data?.rows.length ?? 0} клиентов · сортировка: ${SORT_LABELS[sortKey]}${focusOnly && selectedClient ? ` · фокус: ${selectedClient}` : ''}`
                     : 'Накопленные RX/TX, окна 1д / 7д / 30д'}
                   {summary?.latest_sample_at && (
                     <> · последний снимок {new Date(summary.latest_sample_at).toLocaleString('ru-RU')}</>
@@ -827,7 +801,8 @@ export default function TrafficPage() {
                   <Input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Поиск по имени..."
+                    onKeyDown={handleSearchKeyDown}
+                    placeholder="Поиск по имени... (Enter — выбрать)"
                     className="h-9 pl-9 text-xs"
                   />
                 </div>
@@ -869,7 +844,10 @@ export default function TrafficPage() {
                         row={r}
                         maxBytes={maxBytes}
                         selected={selectedClient === r.common_name}
-                        onSelect={() => setSelectedClient(r.common_name)}
+                        onSelect={() => {
+                          setSelectedClient(r.common_name)
+                          setFocusOnly(true)
+                        }}
                       />
                     ))}
                   </div>
@@ -899,7 +877,10 @@ export default function TrafficPage() {
                               'cursor-pointer hover:bg-muted/50',
                               selectedClient === r.common_name && 'bg-primary/5',
                             )}
-                            onClick={() => setSelectedClient(r.common_name)}
+                            onClick={() => {
+                              setSelectedClient(r.common_name)
+                              setFocusOnly(true)
+                            }}
                           >
                             <TableCell className="font-medium">{r.common_name}</TableCell>
                             <TableCell>

@@ -36,7 +36,15 @@ def metrics_to_sample_fields(metrics: dict[str, Any]) -> dict[str, Any]:
         "backend_memory_mb": int(metrics.get("backend_memory_mb") or 0),
         "backend_workers": int(metrics.get("backend_workers") or 0),
         "nginx_memory_mb": metrics.get("nginx_memory_mb"),
+        "watchdog_memory_mb": metrics.get("watchdog_memory_mb"),
+        "frontend_dev_memory_mb": metrics.get("frontend_dev_memory_mb"),
         "total_panel_memory_mb": int(metrics.get("total_panel_memory_mb") or 0),
+        "host_cpu_percent": float(metrics.get("host_cpu_percent") or 0),
+        "host_memory_percent": float(metrics.get("host_memory_percent") or 0),
+        "host_memory_used_mb": int(metrics.get("host_memory_used_mb") or 0),
+        "host_memory_total_mb": int(metrics.get("host_memory_total_mb") or 0),
+        "host_disk_percent": float(metrics.get("host_disk_percent") or 0),
+        "host_load_1": metrics.get("host_load_1"),
     }
 
 
@@ -74,6 +82,9 @@ def _aggregate_bucket(samples: list[PanelResourceSample]) -> dict[str, Any]:
     def avg(attr: str) -> float:
         return round(sum(getattr(s, attr) or 0 for s in samples) / count, 1)
     nginx_vals = [s.nginx_memory_mb for s in samples if s.nginx_memory_mb is not None]
+    watchdog_vals = [s.watchdog_memory_mb for s in samples if s.watchdog_memory_mb is not None]
+    frontend_vals = [s.frontend_dev_memory_mb for s in samples if s.frontend_dev_memory_mb is not None]
+    loads = [s.host_load_1 for s in samples if s.host_load_1 is not None]
     latest = max(samples, key=lambda s: s.created_at)
     return {
         "timestamp": latest.created_at,
@@ -81,7 +92,15 @@ def _aggregate_bucket(samples: list[PanelResourceSample]) -> dict[str, Any]:
         "backend_memory_mb": int(sum(s.backend_memory_mb for s in samples) / count),
         "backend_workers": int(sum(s.backend_workers for s in samples) / count),
         "nginx_memory_mb": int(sum(nginx_vals) / len(nginx_vals)) if nginx_vals else None,
+        "watchdog_memory_mb": int(sum(watchdog_vals) / len(watchdog_vals)) if watchdog_vals else None,
+        "frontend_dev_memory_mb": int(sum(frontend_vals) / len(frontend_vals)) if frontend_vals else None,
         "total_panel_memory_mb": int(sum(s.total_panel_memory_mb for s in samples) / count),
+        "host_cpu_percent": avg("host_cpu_percent"),
+        "host_memory_percent": avg("host_memory_percent"),
+        "host_memory_used_mb": int(sum(s.host_memory_used_mb for s in samples) / count),
+        "host_memory_total_mb": latest.host_memory_total_mb,
+        "host_disk_percent": avg("host_disk_percent"),
+        "host_load_1": round(sum(loads) / len(loads), 2) if loads else None,
     }
 
 

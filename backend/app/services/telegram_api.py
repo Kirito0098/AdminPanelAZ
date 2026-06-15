@@ -173,3 +173,24 @@ async def get_webhook_info(bot_token: str) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("getWebhookInfo error: %s", exc)
     return {}
+
+
+async def set_my_commands(bot_token: str, commands: list[dict[str, str]]) -> bool:
+    payload = {"commands": commands}
+    return (await call_bot_api(bot_token, "setMyCommands", payload=payload)) is not None
+
+
+def set_my_commands_sync(bot_token: str, commands: list[dict[str, str]]) -> tuple[bool, str]:
+    payload = {"commands": commands}
+    try:
+        with httpx.Client(timeout=_TIMEOUT) as client:
+            response = client.post(
+                _API_BASE.format(token=bot_token, method="setMyCommands"),
+                json=payload,
+            )
+            data = response.json()
+            if data.get("ok"):
+                return True, ""
+            return False, str(data.get("description") or "setMyCommands failed")
+    except Exception as exc:
+        return False, str(exc)

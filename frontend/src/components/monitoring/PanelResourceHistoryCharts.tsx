@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity, Cpu, MemoryStick, Server } from 'lucide-react'
+import { Activity, Cpu, HardDrive, MemoryStick, Server } from 'lucide-react'
 import {
   Area,
   AreaChart,
   CartesianGrid,
   Legend,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -17,16 +19,28 @@ import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useNotifications } from '@/context/NotificationContext'
-import type { PanelResourceCurrent, PanelResourceHistory } from '@/types'
+import type { PanelResourceCurrent, PanelResourceHistory, PanelResourceHistoryPoint } from '@/types'
 
 const CHART_CPU = 'hsl(187, 72%, 45%)'
 const CHART_RAM = 'hsl(142, 71%, 45%)'
+const CHART_DISK = 'hsl(38, 92%, 50%)'
 const CHART_TOTAL = 'hsl(217, 33%, 55%)'
+const CHART_NGINX = 'hsl(0, 62%, 50%)'
+const CHART_WATCHDOG = 'hsl(38, 92%, 50%)'
+const CHART_VITE = 'hsl(280, 65%, 55%)'
+const CHART_LOAD = 'hsl(217, 33%, 55%)'
 
 const RANGE_LABELS: Record<'1d' | '7d' | '30d', string> = {
   '1d': '1 день',
   '7d': '7 дней',
   '30d': '30 дней',
+}
+
+const TOOLTIP_STYLE = {
+  borderRadius: '8px',
+  border: '1px solid hsl(var(--border))',
+  background: 'hsl(var(--popover))',
+  fontSize: '12px',
 }
 
 type Period = '1d' | '7d' | '30d'
@@ -47,14 +61,61 @@ function formatLabel(ts: string, period: Period) {
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
 }
 
-function buildChartRows(points: PanelResourceHistory['points'], period: Period) {
+function buildChartRows(points: PanelResourceHistoryPoint[], period: Period) {
   return points.map((p) => ({
     label: formatLabel(p.timestamp, period),
     cpu: p.backend_cpu_percent,
     memory: p.backend_memory_mb,
+    nginx: p.nginx_memory_mb ?? 0,
+    watchdog: p.watchdog_memory_mb ?? 0,
+    vite: p.frontend_dev_memory_mb ?? 0,
     total: p.total_panel_memory_mb,
     workers: p.backend_workers,
+    hostCpu: p.host_cpu_percent,
+    hostMemory: p.host_memory_percent,
+    hostDisk: p.host_disk_percent,
+    hostLoad: p.host_load_1 ?? null,
   }))
+}
+
+function periodStats(points: PanelResourceHistoryPoint[]) {
+  if (!points.length) return null
+  const cpus = points.map((p) => p.backend_cpu_percent)
+  const totals = points.map((p) => p.total_panel_memory_mb)
+  const hostCpus = points.map((p) => p.host_cpu_percent)
+  return {
+    backendCpuAvg: cpus.reduce((a, b) => a + b, 0) / cpus.length,
+    backendCpuMax: Math.max(...cpus),
+    totalMemAvg: totals.reduce((a, b) => a + b, 0) / totals.length,
+    totalMemMax: Math.max(...totals),
+    hostCpuAvg: hostCpus.reduce((a, b) => a + b, 0) / hostCpus.length,
+    hostCpuMax: Math.max(...hostCpus),
+  }
+}
+
+function hasHostHistory(points: PanelResourceHistoryPoint[]) {
+  return points.some((p) => p.host_cpu_percent > 0 || p.host_memory_percent > 0)
+}
+
+function hasNginxHistory(points: PanelResourceHistoryPoint[]) {
+  return points.some((p) => p.nginx_memory_mb != null && p.nginx_memory_mb > 0)
+}
+
+function hasWatchdogHistory(points: PanelResourceHistoryPoint[]) {
+  return points.some((p) => p.watchdog_memory_mb != null && p.watchdog_memory_mb > 0)
+}
+
+function hasViteHistory(points: PanelResourceHistoryPoint[]) {
+  return points.some((p) => p.frontend_dev_memory_mb != null && p.frontend_dev_memory_mb > 0)
+}
+
+function sumLiveComponents(live: PanelResourceCurrent) {
+  return (
+    live.backend_memory_mb +
+    (live.nginx_memory_mb ?? 0) +
+    (live.watchdog_memory_mb ?? 0) +
+    (live.frontend_dev_memory_mb ?? 0)
+  )
 }
 
 export default function PanelResourceHistoryCharts({
@@ -66,38 +127,56 @@ export default function PanelResourceHistoryCharts({
   const [current, setCurrent] = useState<PanelResourceCurrent | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const load = async () => {
+  const loadHistory = async () => {
     setLoading(true)
     try {
-      const [hist, live] = await Promise.all([
-        getPanelResourceHistory(period),
-        getPanelResourceCurrent(),
-      ])
+      const hist = await getPanelResourceHistory(period)
       setHistory(hist)
-      setCurrent(live)
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Ошибка загрузки ресурсов панели'
+      const message = err instanceof ApiError ? err.message : 'Ошибка загрузки истории ресурсов панели'
       notifyError(message)
     } finally {
       setLoading(false)
     }
   }
 
+  const loadCurrent = async () => {
+    try {
+      const live = await getPanelResourceCurrent()
+      setCurrent(live)
+    } catch {
+      // live refresh is best-effort
+    }
+  }
+
   useEffect(() => {
-    load()
+    loadHistory()
   }, [period])
+
+  useEffect(() => {
+    loadCurrent()
+    const timer = window.setInterval(loadCurrent, 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const chartData = useMemo(() => buildChartRows(history?.points ?? [], period), [history?.points, period])
   const latest = history?.points?.length ? history.points[history.points.length - 1] : null
+  const stats = useMemo(() => periodStats(history?.points ?? []), [history?.points])
+  const showHostCharts = hasHostHistory(history?.points ?? [])
+  const showNginxChart = hasNginxHistory(history?.points ?? [])
+  const showWatchdogChart = hasWatchdogHistory(history?.points ?? [])
+  const showViteChart = hasViteHistory(history?.points ?? [])
+
+  const live = current
+  const snap = latest
 
   return (
     <div className="space-y-4">
       <SettingsAlert variant="info" title="Что измеряется">
-        Метрики процессов AdminPanelAZ на машине контроллера (где запущена панель):{' '}
-        <strong>Backend (FastAPI/uvicorn)</strong> — CPU, RAM, число workers;{' '}
-        <strong>Frontend</strong> — статические файлы, раздаёт backend (отдельного процесса в production нет).
-        Опционально учитывается Nginx (если <code>BEHIND_NGINX=true</code>) и watchdog <code>start.sh</code>.
-        Снимки пишутся каждые ~60 с, хранение 30 дней.
+        На машине контроллера (где запущена панель):{' '}
+        <strong>процессы AdminPanelAZ</strong> — Backend, Nginx, watchdog <code>start.sh</code>, при разработке также Vite (
+        <code>npm run dev</code>). <strong>Итого</strong> — сумма этих процессов, не RAM всего сервера.{' '}
+        <strong>Ресурсы хоста</strong> — CPU/RAM/диск всей машины. Снимки ~60 с, хранение 30 дней.
       </SettingsAlert>
 
       <Card>
@@ -108,7 +187,8 @@ export default function PanelResourceHistoryCharts({
               Ресурсы панели AdminPanelAZ
             </CardTitle>
             <CardDescription>
-              Backend (FastAPI/uvicorn) · {RANGE_LABELS[period]}
+              {live?.host_hostname ? `${live.host_hostname} · ` : ''}
+              uptime {live?.host_uptime || '—'} · {RANGE_LABELS[period]}
               {history && history.sample_count > 0 && <> · {history.sample_count} снимков</>}
             </CardDescription>
           </div>
@@ -130,80 +210,251 @@ export default function PanelResourceHistoryCharts({
             <Spinner label="Загрузка ресурсов панели..." className="py-12" />
           ) : (
             <div className="space-y-6">
-              {(current || latest) && (
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Cpu size={14} />
-                      Backend CPU
+              {(live || snap) && (
+                <>
+                  <div>
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Процессы панели
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-lg border p-3">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Cpu size={14} />
+                          Backend CPU
+                        </div>
+                        <p className="mono mt-1 text-xl font-bold tabular-nums">
+                          {Math.round(live?.backend_cpu_percent ?? snap?.backend_cpu_percent ?? 0)}%
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">FastAPI / uvicorn</p>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <MemoryStick size={14} />
+                          Backend RAM
+                        </div>
+                        <p className="mono mt-1 text-xl font-bold tabular-nums">
+                          {live?.backend_memory_mb ?? snap?.backend_memory_mb ?? 0} MB
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          RSS {live?.backend_rss_mb ?? live?.backend_memory_mb ?? 0} MB
+                        </p>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Activity size={14} />
+                          Workers
+                        </div>
+                        <p className="mono mt-1 text-xl font-bold tabular-nums">
+                          {live?.backend_workers ?? snap?.backend_workers ?? 0}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">процессов uvicorn</p>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Server size={14} />
+                          Итого панель
+                        </div>
+                        <p className="mono mt-1 text-xl font-bold tabular-nums">
+                          {live?.total_panel_memory_mb ?? snap?.total_panel_memory_mb ?? 0} MB
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {live?.frontend_note ?? 'Frontend — статика через backend'}
+                          {live && <> · сумма компонентов {sumLiveComponents(live)} MB</>}
+                        </p>
+                      </div>
                     </div>
-                    <p className="mono mt-1 text-xl font-bold tabular-nums">
-                      {Math.round(current?.backend_cpu_percent ?? latest?.backend_cpu_percent ?? 0)}%
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">FastAPI / uvicorn</p>
                   </div>
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <MemoryStick size={14} />
-                      Backend RAM
+
+                  <div>
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Машина контроллера
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-lg border p-3">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Cpu size={14} />
+                          CPU хоста
+                        </div>
+                        <p className="mono mt-1 text-xl font-bold tabular-nums">
+                          {Math.round(live?.host_cpu_percent ?? snap?.host_cpu_percent ?? 0)}%
+                        </p>
+                        {live?.host_load_1 != null && (
+                          <p className="mt-1 text-xs text-muted-foreground">load {live.host_load_1.toFixed(2)}</p>
+                        )}
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <MemoryStick size={14} />
+                          RAM хоста
+                        </div>
+                        <p className="mono mt-1 text-xl font-bold tabular-nums">
+                          {Math.round(live?.host_memory_percent ?? snap?.host_memory_percent ?? 0)}%
+                          <span className="ml-1 text-sm font-normal text-muted-foreground">
+                            ({((live?.host_memory_used_mb ?? snap?.host_memory_used_mb ?? 0) / 1024).toFixed(1)} /{' '}
+                            {((live?.host_memory_total_mb ?? snap?.host_memory_total_mb ?? 0) / 1024).toFixed(1)} GB)
+                          </span>
+                        </p>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <HardDrive size={14} />
+                          Диск хоста
+                        </div>
+                        <p className="mono mt-1 text-xl font-bold tabular-nums">
+                          {Math.round(live?.host_disk_percent ?? snap?.host_disk_percent ?? 0)}%
+                        </p>
+                      </div>
+                      {(live?.nginx_memory_mb != null ||
+                        live?.watchdog_memory_mb != null ||
+                        snap?.nginx_memory_mb != null ||
+                        snap?.watchdog_memory_mb != null) && (
+                        <div className="rounded-lg border p-3">
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Server size={14} />
+                            Доп. процессы
+                          </div>
+                          <p className="mono mt-1 text-sm font-semibold tabular-nums">
+                            {live?.nginx_memory_mb != null && <>Nginx {live.nginx_memory_mb} MB</>}
+                            {live?.nginx_memory_mb != null && live?.watchdog_memory_mb != null && ' · '}
+                            {live?.watchdog_memory_mb != null && <>Watchdog {live.watchdog_memory_mb} MB</>}
+                            {live?.frontend_dev_memory_mb != null && (
+                              <>
+                                {(live?.nginx_memory_mb != null || live?.watchdog_memory_mb != null) && ' · '}
+                                Vite {live.frontend_dev_memory_mb} MB
+                              </>
+                            )}
+                            {live?.nginx_memory_mb == null &&
+                              live?.watchdog_memory_mb == null &&
+                              snap?.nginx_memory_mb != null &&
+                              <>Nginx {snap.nginx_memory_mb} MB</>}
+                          </p>
+                        </div>
+                      )}
                     </div>
-                    <p className="mono mt-1 text-xl font-bold tabular-nums">
-                      {current?.backend_memory_mb ?? latest?.backend_memory_mb ?? 0} MB
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      RSS {current?.backend_rss_mb ?? current?.backend_memory_mb ?? 0} MB
-                    </p>
                   </div>
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Activity size={14} />
-                      Workers
-                    </div>
-                    <p className="mono mt-1 text-xl font-bold tabular-nums">
-                      {current?.backend_workers ?? latest?.backend_workers ?? 0}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">процессов uvicorn</p>
-                  </div>
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Server size={14} />
-                      Итого панель
-                    </div>
-                    <p className="mono mt-1 text-xl font-bold tabular-nums">
-                      {current?.total_panel_memory_mb ?? latest?.total_panel_memory_mb ?? 0} MB
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {current?.frontend_note ?? 'Frontend — статика через backend'}
-                    </p>
-                  </div>
-                </div>
+                </>
               )}
 
-              {current?.nginx_memory_mb != null && (
-                <p className="text-xs text-muted-foreground">
-                  Nginx (reverse proxy): {current.nginx_memory_mb} MB
-                  {current.watchdog_memory_mb != null && (
-                    <> · Watchdog start.sh: {current.watchdog_memory_mb} MB</>
-                  )}
-                </p>
-              )}
-
-              {current?.frontend_dev_memory_mb != null && (
+              {live?.frontend_dev_memory_mb != null && (
                 <SettingsAlert variant="warning" title="Режим разработки">
-                  Обнаружен Vite dev-сервер ({current.frontend_dev_memory_mb} MB). В production frontend
-                  раздаётся как статика через backend.
+                  Обнаружен Vite dev-сервер ({live.frontend_dev_memory_mb} MB). В production frontend раздаётся как
+                  статика через backend.
                 </SettingsAlert>
+              )}
+
+              {stats && (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    Backend CPU · {RANGE_LABELS[period]}: среднее{' '}
+                    <span className="mono font-medium text-foreground">{stats.backendCpuAvg.toFixed(1)}%</span>, пик{' '}
+                    <span className="mono font-medium text-foreground">{stats.backendCpuMax.toFixed(1)}%</span>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    Итого RAM панели · {RANGE_LABELS[period]}: среднее{' '}
+                    <span className="mono font-medium text-foreground">{Math.round(stats.totalMemAvg)} MB</span>, пик{' '}
+                    <span className="mono font-medium text-foreground">{stats.totalMemMax} MB</span>
+                  </div>
+                  {showHostCharts && (
+                    <div className="rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                      CPU хоста · {RANGE_LABELS[period]}: среднее{' '}
+                      <span className="mono font-medium text-foreground">{stats.hostCpuAvg.toFixed(1)}%</span>, пик{' '}
+                      <span className="mono font-medium text-foreground">{stats.hostCpuMax.toFixed(1)}%</span>
+                    </div>
+                  )}
+                </div>
               )}
 
               {!history || chartData.length === 0 ? (
                 <EmptyState
                   icon={Cpu}
                   title="История ресурсов панели пока пуста"
-                  description="Снимки CPU/RAM backend собираются фоновым worker каждую минуту. Подождите несколько минут после запуска панели."
+                  description="Снимки CPU/RAM backend и хоста собираются фоновым worker каждую минуту. Подождите несколько минут после запуска панели."
                   className="py-8"
                 />
               ) : (
                 <>
+                  {showHostCharts && (
+                    <div>
+                      <p className="mb-2 text-sm font-medium">Хост контроллера: CPU / RAM / Диск (%)</p>
+                      <ResponsiveContainer width="100%" height={240}>
+                        <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="panelHostCpu" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={CHART_CPU} stopOpacity={0.3} />
+                              <stop offset="95%" stopColor={CHART_CPU} stopOpacity={0.02} />
+                            </linearGradient>
+                            <linearGradient id="panelHostRam" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={CHART_RAM} stopOpacity={0.3} />
+                              <stop offset="95%" stopColor={CHART_RAM} stopOpacity={0.02} />
+                            </linearGradient>
+                            <linearGradient id="panelHostDisk" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={CHART_DISK} stopOpacity={0.3} />
+                              <stop offset="95%" stopColor={CHART_DISK} stopOpacity={0.02} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
+                          <XAxis
+                            dataKey="label"
+                            tick={{ fontSize: 11 }}
+                            tickLine={false}
+                            axisLine={false}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis
+                            domain={[0, 100]}
+                            tick={{ fontSize: 11 }}
+                            tickLine={false}
+                            axisLine={false}
+                            unit="%"
+                            width={44}
+                          />
+                          <Tooltip
+                            formatter={(value: number, name: string) => {
+                              const labels: Record<string, string> = {
+                                hostCpu: 'CPU',
+                                hostMemory: 'RAM',
+                                hostDisk: 'Диск',
+                              }
+                              return [`${Number(value).toFixed(1)}%`, labels[name] ?? name]
+                            }}
+                            labelFormatter={(label) => `Время: ${label}`}
+                            contentStyle={TOOLTIP_STYLE}
+                          />
+                          <Legend
+                            formatter={(value) =>
+                              value === 'hostCpu' ? 'CPU' : value === 'hostMemory' ? 'RAM' : 'Диск'
+                            }
+                            wrapperStyle={{ fontSize: '12px' }}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="hostCpu"
+                            name="hostCpu"
+                            stroke={CHART_CPU}
+                            fill="url(#panelHostCpu)"
+                            strokeWidth={2}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="hostMemory"
+                            name="hostMemory"
+                            stroke={CHART_RAM}
+                            fill="url(#panelHostRam)"
+                            strokeWidth={2}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="hostDisk"
+                            name="hostDisk"
+                            stroke={CHART_DISK}
+                            fill="url(#panelHostDisk)"
+                            strokeWidth={2}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+
                   <div>
                     <p className="mb-2 text-sm font-medium">Backend CPU (%)</p>
                     <ResponsiveContainer width="100%" height={220}>
@@ -226,12 +477,7 @@ export default function PanelResourceHistoryCharts({
                         <Tooltip
                           formatter={(value: number) => [`${Number(value).toFixed(1)}%`, 'CPU']}
                           labelFormatter={(label) => `Время: ${label}`}
-                          contentStyle={{
-                            borderRadius: '8px',
-                            border: '1px solid hsl(var(--border))',
-                            background: 'hsl(var(--popover))',
-                            fontSize: '12px',
-                          }}
+                          contentStyle={TOOLTIP_STYLE}
                         />
                         <Area
                           type="monotone"
@@ -246,8 +492,8 @@ export default function PanelResourceHistoryCharts({
                   </div>
 
                   <div>
-                    <p className="mb-2 text-sm font-medium">Backend RAM / Итого панель (MB)</p>
-                    <ResponsiveContainer width="100%" height={220}>
+                    <p className="mb-2 text-sm font-medium">Память процессов панели (MB)</p>
+                    <ResponsiveContainer width="100%" height={240}>
                       <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                         <defs>
                           <linearGradient id="panelRam" x1="0" y1="0" x2="0" y2="1">
@@ -271,23 +517,28 @@ export default function PanelResourceHistoryCharts({
                         <Tooltip
                           formatter={(value: number, name: string) => {
                             const labels: Record<string, string> = {
-                              memory: 'Backend RAM',
-                              total: 'Итого панель',
+                              memory: 'Backend',
+                              nginx: 'Nginx',
+                              watchdog: 'Watchdog',
+                              vite: 'Vite dev',
+                              total: 'Итого',
                             }
                             return [`${Number(value).toFixed(0)} MB`, labels[name] ?? name]
                           }}
                           labelFormatter={(label) => `Время: ${label}`}
-                          contentStyle={{
-                            borderRadius: '8px',
-                            border: '1px solid hsl(var(--border))',
-                            background: 'hsl(var(--popover))',
-                            fontSize: '12px',
-                          }}
+                          contentStyle={TOOLTIP_STYLE}
                         />
                         <Legend
-                          formatter={(value) =>
-                            value === 'memory' ? 'Backend RAM' : value === 'total' ? 'Итого панель' : value
-                          }
+                          formatter={(value) => {
+                            const labels: Record<string, string> = {
+                              memory: 'Backend',
+                              nginx: 'Nginx',
+                              watchdog: 'Watchdog',
+                              vite: 'Vite dev',
+                              total: 'Итого',
+                            }
+                            return labels[value] ?? value
+                          }}
                           wrapperStyle={{ fontSize: '12px' }}
                         />
                         <Area
@@ -298,6 +549,39 @@ export default function PanelResourceHistoryCharts({
                           fill="url(#panelRam)"
                           strokeWidth={2}
                         />
+                        {showNginxChart && (
+                          <Area
+                            type="monotone"
+                            dataKey="nginx"
+                            name="nginx"
+                            stroke={CHART_NGINX}
+                            fill="none"
+                            strokeWidth={2}
+                            strokeDasharray="4 4"
+                          />
+                        )}
+                        {showWatchdogChart && (
+                          <Area
+                            type="monotone"
+                            dataKey="watchdog"
+                            name="watchdog"
+                            stroke={CHART_WATCHDOG}
+                            fill="none"
+                            strokeWidth={2}
+                            strokeDasharray="4 4"
+                          />
+                        )}
+                        {showViteChart && (
+                          <Area
+                            type="monotone"
+                            dataKey="vite"
+                            name="vite"
+                            stroke={CHART_VITE}
+                            fill="none"
+                            strokeWidth={2}
+                            strokeDasharray="4 4"
+                          />
+                        )}
                         <Area
                           type="monotone"
                           dataKey="total"
@@ -307,6 +591,42 @@ export default function PanelResourceHistoryCharts({
                           strokeWidth={2}
                         />
                       </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-sm font-medium">Workers uvicorn</p>
+                    <ResponsiveContainer width="100%" height={180}>
+                      <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
+                        <XAxis
+                          dataKey="label"
+                          tick={{ fontSize: 11 }}
+                          tickLine={false}
+                          axisLine={false}
+                          interval="preserveStartEnd"
+                        />
+                        <YAxis
+                          allowDecimals={false}
+                          tick={{ fontSize: 11 }}
+                          tickLine={false}
+                          axisLine={false}
+                          width={36}
+                        />
+                        <Tooltip
+                          formatter={(value: number) => [value, 'Workers']}
+                          labelFormatter={(label) => `Время: ${label}`}
+                          contentStyle={TOOLTIP_STYLE}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="workers"
+                          name="workers"
+                          stroke={CHART_LOAD}
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      </LineChart>
                     </ResponsiveContainer>
                   </div>
                 </>
