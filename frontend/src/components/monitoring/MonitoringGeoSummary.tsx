@@ -4,6 +4,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import {
   buildGeoPieSlices,
   collectMonitoringGeoConnections,
+  type GeoPieSlice,
 } from '@/components/monitoring/ConnectionAddress'
 import MonitoringChartCard, { MonitoringChartEmpty } from '@/components/monitoring/MonitoringChartCard'
 import {
@@ -26,21 +27,16 @@ type GeoDonutCardProps = {
   title: string
   description: string
   icon: typeof MapPin
-  slices: Array<{ name: string; value: number }>
+  slices: GeoPieSlice[]
   total: number
 }
 
-function GeoDonutLegend({
-  slices,
-  total,
-}: {
-  slices: Array<{ name: string; value: number }>
-  total: number
-}) {
+function GeoDonutLegend({ slices, total }: { slices: GeoPieSlice[]; total: number }) {
   return (
     <ul className="min-w-0 flex-1 space-y-2">
       {slices.map((slice, index) => {
         const percent = total > 0 ? Math.round((slice.value / total) * 100) : 0
+        const othersCount = slice.breakdown?.length ?? 0
         return (
           <li key={slice.name} className="flex items-start gap-2 text-sm">
             <span
@@ -48,10 +44,24 @@ function GeoDonutLegend({
               style={{ backgroundColor: getMonitoringSliceColor(index) }}
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate font-medium leading-snug">{slice.name}</p>
+              <p className="truncate font-medium leading-snug">
+                {slice.name}
+                {othersCount > 0 && (
+                  <span className="font-normal text-muted-foreground"> · {othersCount} пров.</span>
+                )}
+              </p>
               <p className="text-xs text-muted-foreground tabular-nums">
                 {slice.value} · {percent}%
               </p>
+              {slice.breakdown && slice.breakdown.length > 0 && (
+                <div className="mt-1.5 max-h-28 space-y-0.5 overflow-y-auto border-l border-border/60 pl-2 text-[11px] text-muted-foreground">
+                  {slice.breakdown.map((entry) => (
+                    <p key={entry.name} className="truncate leading-snug">
+                      {entry.name} · {entry.value}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           </li>
         )
@@ -103,7 +113,12 @@ function GeoDonutCard({ title, description, icon, slices, total }: GeoDonutCardP
                 {...monitoringChartTooltipProps}
                 formatter={(value: number, _name, item) => {
                   const percent = total > 0 ? Math.round((value / total) * 100) : 0
-                  return [`${value} (${percent}%)`, item.payload.name]
+                  const slice = item.payload as GeoPieSlice
+                  if (slice.breakdown?.length) {
+                    const detail = slice.breakdown.map((b) => `${b.name} (${b.value})`).join(', ')
+                    return [`${value} (${percent}%) — ${detail}`, slice.name]
+                  }
+                  return [`${value} (${percent}%)`, slice.name]
                 }}
               />
             </PieChart>
@@ -155,7 +170,7 @@ export default function MonitoringGeoSummary({
       />
       <GeoDonutCard
         title="По провайдерам"
-        description="ISP активных подключений"
+        description="Топ ISP; состав «Прочие» — в легенде справа"
         icon={Building2}
         slices={ispSlices}
         total={total}

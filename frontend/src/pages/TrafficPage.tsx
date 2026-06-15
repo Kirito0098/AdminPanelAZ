@@ -17,16 +17,6 @@ import {
   Trash2,
 } from 'lucide-react'
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import {
   ApiError,
   cleanupTrafficStatusLogs,
   deleteDeletedClientTraffic,
@@ -75,17 +65,6 @@ import { cn } from '@/lib/utils'
 import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficOverview } from '@/types'
 
 const REFRESH_INTERVAL = 60
-
-const BAR_COLORS = [
-  'hsl(187, 72%, 45%)',
-  'hsl(142, 71%, 45%)',
-  'hsl(38, 92%, 50%)',
-  'hsl(217, 33%, 55%)',
-  'hsl(280, 45%, 55%)',
-  'hsl(0, 72%, 55%)',
-  'hsl(160, 50%, 45%)',
-  'hsl(30, 80%, 50%)',
-]
 
 const RANGE_LABELS: Record<string, string> = {
   '1h': '1 час',
@@ -463,15 +442,6 @@ export default function TrafficPage() {
     return [...rows].sort((a, b) => b.traffic_7d - a.traffic_7d)[0]
   }, [data?.rows])
 
-  const topChartData = useMemo(
-    () =>
-      [...(data?.rows ?? [])]
-        .sort((a, b) => b.traffic_7d - a.traffic_7d)
-        .slice(0, 8)
-        .map((r) => ({ name: r.common_name, traffic: r.traffic_7d })),
-    [data?.rows],
-  )
-
   const handleRefresh = () => load(false, true)
 
   const handleReset = async () => {
@@ -685,99 +655,40 @@ export default function TrafficPage() {
             policyLoading={policyLoading}
           />
 
-          <div className={cn('grid gap-6', !selectedClient && 'lg:grid-cols-2')}>
-            {!selectedClient && (
-              <Card>
-                <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Activity size={18} />
-                      Общий график
-                    </CardTitle>
-                    <CardDescription>
-                      Выберите клиента выше для детального графика · {RANGE_LABELS[chartRange] ?? chartRange}
-                    </CardDescription>
-                  </div>
-                  <Select value={chartRange} onValueChange={setChartRange}>
-                    <SelectTrigger className="h-9 w-[120px] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1h">1 час</SelectItem>
-                      <SelectItem value="1d">24 часа</SelectItem>
-                      <SelectItem value="7d">7 дней</SelectItem>
-                      <SelectItem value="30d">30 дней</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </CardHeader>
-                <CardContent>
-                  <EmptyState
-                    icon={BarChart3}
-                    title="Клиент не выбран"
-                    description="Используйте блок «Мониторинг клиента» для просмотра графика конкретного пользователя"
-                    className="py-8"
-                  />
-                </CardContent>
-              </Card>
-            )}
-
-            <Card className={selectedClient ? 'lg:col-span-1' : undefined}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <BarChart3 size={18} />
-                  Топ клиентов (7д)
-                </CardTitle>
-                <CardDescription>Наибольший объём трафика за последние 7 дней</CardDescription>
+          {!selectedClient && (
+            <Card>
+              <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Activity size={18} />
+                    Общий график
+                  </CardTitle>
+                  <CardDescription>
+                    Выберите клиента выше для детального графика · {RANGE_LABELS[chartRange] ?? chartRange}
+                  </CardDescription>
+                </div>
+                <Select value={chartRange} onValueChange={setChartRange}>
+                  <SelectTrigger className="h-9 w-[120px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1h">1 час</SelectItem>
+                    <SelectItem value="1d">24 часа</SelectItem>
+                    <SelectItem value="7d">7 дней</SelectItem>
+                    <SelectItem value="30d">30 дней</SelectItem>
+                  </SelectContent>
+                </Select>
               </CardHeader>
               <CardContent>
-                {topChartData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={260}>
-                    <BarChart data={topChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
-                      <XAxis
-                        dataKey="name"
-                        tick={{ fontSize: 10 }}
-                        tickLine={false}
-                        axisLine={false}
-                        interval={0}
-                        angle={-25}
-                        textAnchor="end"
-                        height={56}
-                      />
-                      <YAxis
-                        tickFormatter={(v) => formatBytes(v)}
-                        tick={{ fontSize: 11 }}
-                        tickLine={false}
-                        axisLine={false}
-                        width={64}
-                      />
-                      <Tooltip
-                        formatter={(v: number) => [formatBytes(v), '7 дней']}
-                        contentStyle={{
-                          borderRadius: '8px',
-                          border: '1px solid hsl(var(--border))',
-                          background: 'hsl(var(--popover))',
-                          fontSize: '12px',
-                        }}
-                      />
-                      <Bar dataKey="traffic" name="7 дней" radius={[4, 4, 0, 0]}>
-                        {topChartData.map((_, i) => (
-                          <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <EmptyState
-                    icon={Users}
-                    title="Нет клиентов"
-                    description="Статистика появится после первого сбора данных коллектором"
-                    className="py-8"
-                  />
-                )}
+                <EmptyState
+                  icon={BarChart3}
+                  title="Клиент не выбран"
+                  description="Используйте блок «Мониторинг клиента» для просмотра графика конкретного пользователя"
+                  className="py-8"
+                />
               </CardContent>
             </Card>
-          </div>
+          )}
 
           <Card>
             <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

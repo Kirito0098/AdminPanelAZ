@@ -74,6 +74,7 @@ export default function ConfigCardsSection({
 }: ConfigCardsSectionProps) {
   const { isEnabled } = useFeatureModules()
   const qrDownloadsEnabled = isEnabled('qr_downloads')
+  const trafficLinkEnabled = isEnabled('traffic_sync')
   const visibleTabs = useVisibleTabs()
   const [activeTab, setActiveTab] = useState<ProtocolTab>(visibleTabs[0] ?? 'openvpn')
   useEffect(() => {
@@ -409,6 +410,7 @@ export default function ConfigCardsSection({
                           isAdmin || userRole === 'user' ? () => openConfirm('delete', config) : undefined
                         }
                         showQrDownloads={qrDownloadsEnabled}
+                        showTrafficLink={trafficLinkEnabled}
                       />
                     ))}
                   </div>

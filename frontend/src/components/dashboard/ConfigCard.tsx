@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import {
   AlertTriangle,
   Ban,
+  BarChart3,
   Calendar,
   CheckCircle2,
   Copy,
@@ -52,6 +54,7 @@ interface ConfigCardProps {
   onUnblock?: () => void
   onDelete?: () => void
   showQrDownloads?: boolean
+  showTrafficLink?: boolean
 }
 
 const statusIcons = {
@@ -248,6 +251,7 @@ export default function ConfigCard({
   onUnblock,
   onDelete,
   showQrDownloads = true,
+  showTrafficLink = false,
 }: ConfigCardProps) {
   const status = getConfigStatus(config, tab, policy)
   const StatusIcon = statusIcons[status.variant]
@@ -426,6 +430,20 @@ export default function ConfigCard({
                   </IconActionButton>
                 )}
               </>
+            )}
+
+            {showTrafficLink && (
+              <Button
+                asChild
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                title="Статистика трафика"
+              >
+                <Link to={`/traffic?client=${encodeURIComponent(config.client_name)}`}>
+                  <BarChart3 size={14} />
+                </Link>
+              </Button>
             )}
 
             <IconActionButton title="Все действия" onClick={onOpenDetails}>

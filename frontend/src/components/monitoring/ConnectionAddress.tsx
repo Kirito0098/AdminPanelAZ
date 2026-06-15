@@ -34,17 +34,44 @@ export function getConnectionCity(item: GeoConnection): string | null {
 }
 
 export function getConnectionIsp(item: GeoConnection): string | null {
-  return item.isp?.trim() || null
+  const raw = item.isp?.trim()
+  return raw ? normalizeIspName(raw) : null
 }
 
-export type GeoPieSlice = { name: string; value: number }
+const ISP_CANONICAL_RULES: Array<[RegExp, string]> = [
+  [/tele2|t2 russia/i, 'Tele2'],
+  [/megafon/i, 'MegaFon'],
+  [/\bmts\b|mobile telesystems/i, 'MTS'],
+  [/rostelecom/i, 'Rostelecom'],
+  [/beeline|vimpelcom/i, 'Beeline'],
+  [/yota/i, 'Yota'],
+  [/dom\.ru|ertelecom|domru/i, 'Dom.ru'],
+  [/ttk|trans telekom/i, 'TTK'],
+]
+
+/** Collapse ip-api ISP variants (T2/Tele2, MTS PJSC, …) for chart grouping. */
+export function normalizeIspName(isp: string): string {
+  const trimmed = isp.trim()
+  if (!trimmed) return trimmed
+
+  for (const [pattern, canonical] of ISP_CANONICAL_RULES) {
+    if (pattern.test(trimmed)) return canonical
+  }
+
+  return trimmed
+    .replace(/\s*,?\s*(PJSC|LLC|JSC|Ltd\.?|Inc\.?|Groups)$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+export type GeoPieSlice = { name: string; value: number; breakdown?: Array<{ name: string; value: number }> }
 
 const UNKNOWN_GEO_LABEL = 'Неизвестно'
 
 export function buildGeoPieSlices(
   items: Array<{ city: string | null; isp: string | null }>,
   field: 'city' | 'isp',
-  maxSlices = 6,
+  maxSlices = field === 'isp' ? 8 : 6,
 ): GeoPieSlice[] {
   const counts = new Map<string, number>()
   for (const item of items) {
@@ -54,14 +81,22 @@ export function buildGeoPieSlices(
   }
   if (counts.size === 0) return []
 
-  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1])
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ru'))
   if (sorted.length <= maxSlices) {
     return sorted.map(([name, value]) => ({ name, value }))
   }
 
   const top = sorted.slice(0, maxSlices - 1)
-  const otherValue = sorted.slice(maxSlices - 1).reduce((sum, [, value]) => sum + value, 0)
-  return [...top.map(([name, value]) => ({ name, value })), { name: 'Прочие', value: otherValue }]
+  const othersEntries = sorted.slice(maxSlices - 1)
+  const otherValue = othersEntries.reduce((sum, [, value]) => sum + value, 0)
+  return [
+    ...top.map(([name, value]) => ({ name, value })),
+    {
+      name: 'Прочие',
+      value: otherValue,
+      breakdown: othersEntries.map(([name, value]) => ({ name, value })),
+    },
+  ]
 }
 
 export function collectMonitoringGeoConnections(
