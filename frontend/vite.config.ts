@@ -34,6 +34,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
+      target: 'es2022',
       outDir: isTgMini ? '../backend/app/static/tg_mini' : 'dist',
       emptyOutDir: true,
       cssCodeSplit: !isTgMini,
