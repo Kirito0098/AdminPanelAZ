@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **NOC — гео по провайдерам** — нормализация имён ISP (Tele2, MegaFon, MTS и др.) для группировки в donut; сегмент «Прочие» с раскрытием состава в легенде и тултипе; до 8 слайсов для ISP.
 - **Трафик** — убран дублирующий bar-chart «Топ клиентов (7д)»; без выбранного клиента остаётся только подсказка выбрать пользователя в блоке «Мониторинг клиента».
+- **Установка — Node.js** — `install.sh` требует Node **20+** (при 18.x — обновление через apt/NodeSource); устраняет `EBADENGINE` от `eslint-visitor-keys` при `npm install`.
+- **Установка — проверка health** — после `systemctl start` / daemon установщик ждёт ответ `/api/health` (до 90 с) и завершается с ошибкой, если backend не поднялся.
+- **Prod start** — `start.sh` в режиме `prod` пропускает `npm run build:all`, если уже есть `frontend/dist/index.html` и `backend/app/static/tg_mini/index.html` (пересборка: `ADMINPANELAZ_FORCE_FRONTEND_BUILD=1`).
+
+### Fixed
+- **Установка — CIDR БД** — на чистой установке backend падал с `unable to open database file`: `install.sh` создаёт `backend/data/cidr/list` и `staging`; `run_cidr_db_migrations()` создаёт каталоги до `create_all`.
+- **Prod start — лишняя сборка frontend** — при каждом рестарте systemd watchdog пересобирал frontend (~25 с), backend не слушал порт до завершения сборки.
 
 ## [1.9.0] - 2026-06-15
 

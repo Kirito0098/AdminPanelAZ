@@ -564,16 +564,21 @@ node_major_version() {
 install_nodejs() {
   local major
   major="$(node_major_version)"
-  if [[ "$major" -ge 18 ]]; then
+  if [[ "$major" -ge 20 ]]; then
     log "Node.js $(node -v) — OK"
     return
   fi
 
-  log "Установка Node.js 18+..."
-  if apt-cache show nodejs 2>/dev/null | grep -q '^Version: 18\|^Version: 20\|^Version: 22'; then
+  if [[ "$major" -ge 18 ]]; then
+    warn "Node.js $(node -v) ниже рекомендуемого минимума (20+), обновление..."
+  else
+    log "Установка Node.js 20+..."
+  fi
+
+  if apt-cache show nodejs 2>/dev/null | grep -qE '^Version: (20|22)'; then
     apt-get install -y nodejs npm
     major="$(node_major_version)"
-    if [[ "$major" -ge 18 ]]; then
+    if [[ "$major" -ge 20 ]]; then
       log "Node.js $(node -v) установлен из apt"
       return
     fi
@@ -583,10 +588,50 @@ install_nodejs() {
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
   apt-get install -y nodejs
   major="$(node_major_version)"
-  if [[ "$major" -lt 18 ]]; then
-    die "Не удалось установить Node.js 18+ (текущая версия: $(node -v 2>/dev/null || echo 'нет'))"
+  if [[ "$major" -lt 20 ]]; then
+    die "Не удалось установить Node.js 20+ (текущая версия: $(node -v 2>/dev/null || echo 'нет'))"
   fi
   log "Node.js $(node -v) установлен"
+}
+
+ensure_backend_data_dirs() {
+  mkdir -p \
+    "$BACKEND_DIR/data" \
+    "$BACKEND_DIR/data/cidr/list" \
+    "$BACKEND_DIR/data/cidr/staging" \
+    "${WIZ_BACKUP_ROOT:-/var/backups/adminpanelaz}"
+}
+
+wait_for_backend_health() {
+  local port="${1:-${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}}"
+  local url="http://127.0.0.1:${port}/api/health"
+  local attempts="${2:-90}"
+  local i
+
+  for ((i = 1; i <= attempts; i++)); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+verify_controller_running() {
+  if ! install_controller_selected; then
+    return 0
+  fi
+
+  local port="${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}"
+  local state_dir="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-/var/lib/adminpanelaz}}"
+
+  ui_progress_start "Проверка backend (/api/health)"
+  if wait_for_backend_health "$port" 90; then
+    ui_progress_done "Backend отвечает на порту ${port}"
+    return 0
+  fi
+
+  die "Backend не ответил на /api/health за 90 с (порт ${port}). Проверьте: systemctl status adminpanelaz; journalctl -u adminpanelaz -n 50; ${state_dir}/logs/backend.log"
 }
 
 install_system_deps() {
@@ -866,7 +911,7 @@ setup_env() {
     log "Добавлены значения по умолчанию из scripts/env_defaults.sh (AdminAntizapret 1.9.0)"
   fi
 
-  mkdir -p "$BACKEND_DIR/data" "${WIZ_BACKUP_ROOT:-/var/backups/adminpanelaz}"
+  ensure_backend_data_dirs
 }
 
 setup_node_env() {
@@ -924,7 +969,7 @@ setup_backend() {
   source "$VENV_DIR/bin/activate"
   pip install -q --upgrade pip
   pip install -q -r "$BACKEND_DIR/requirements.txt"
-  mkdir -p "$BACKEND_DIR/data"
+  ensure_backend_data_dirs
   ui_progress_done "Backend (Python venv)"
 }
 
@@ -937,7 +982,7 @@ seed_admin_user_from_env() {
   fi
 
   log "Синхронизация учётной записи администратора (мастер → БД)..."
-  mkdir -p "$BACKEND_DIR/data"
+  ensure_backend_data_dirs
   (cd "$BACKEND_DIR" && "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/seed-admin-user.py" --bootstrap) \
     || die "Не удалось создать/обновить администратора в БД"
 }
@@ -1514,6 +1559,10 @@ run_install_flow() {
     elif [[ "$WITH_DAEMON" == true ]]; then
       start_node_agent_daemon "$GENERATED_NODE_KEY"
     fi
+  fi
+
+  if install_controller_selected && { [[ "$WITH_SYSTEMD" == true ]] || [[ "$WITH_DAEMON" == true ]]; }; then
+    verify_controller_running
   fi
 
   print_post_install "$GENERATED_NODE_KEY"

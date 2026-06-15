@@ -60,11 +60,24 @@ def get_cidr_db():
         db.close()
 
 
+def ensure_cidr_data_dirs() -> None:
+    """Ensure SQLite CIDR paths exist before first DB open."""
+    if not _is_sqlite:
+        return
+    from app.paths import resolve_backend_path
+
+    cfg = get_settings()
+    resolve_cidr_db_path().parent.mkdir(parents=True, exist_ok=True)
+    resolve_backend_path(cfg.cidr_list_dir).mkdir(parents=True, exist_ok=True)
+    resolve_backend_path(cfg.cidr_db_staging_dir).mkdir(parents=True, exist_ok=True)
+
+
 def run_cidr_db_migrations() -> None:
     """Create cidr.db schema and one-time copy provider_cidr from adminpanel.db."""
     from app.cidr_models import ProviderCidr  # noqa: F401
     from app.database import engine as main_engine
 
+    ensure_cidr_data_dirs()
     CidrBase.metadata.create_all(bind=cidr_engine)
 
     main_inspector = inspect(main_engine)

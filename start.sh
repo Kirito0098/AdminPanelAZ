@@ -194,7 +194,20 @@ setup_frontend() {
   fi
 }
 
+frontend_build_needed() {
+  if [[ "${ADMINPANELAZ_FORCE_FRONTEND_BUILD:-}" == "1" ]]; then
+    return 0
+  fi
+  [[ -f "$FRONTEND_DIR/dist/index.html" ]] || return 0
+  [[ -f "$BACKEND_DIR/app/static/tg_mini/index.html" ]] || return 0
+  return 1
+}
+
 build_frontend() {
+  if ! frontend_build_needed; then
+    log "Frontend dist уже собран, пропуск production build (ADMINPANELAZ_FORCE_FRONTEND_BUILD=1 для пересборки)"
+    return 0
+  fi
   log "Building frontend for production..."
   (cd "$FRONTEND_DIR" && npm run build:all) >>"$LOG_DIR/frontend-build.log" 2>&1
 }
