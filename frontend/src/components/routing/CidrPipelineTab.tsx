@@ -1,15 +1,16 @@
-import { ArrowRight, CloudDownload, Info, Play, Rocket, Shield, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowRight, CloudDownload, History, Info, Play, PlusCircle, Rocket, Shield, Sparkles, Trash2, Undo2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import ProviderFileSelection from '@/components/routing/ProviderFileSelection'
 import StatusPanel from '@/components/noc/StatusPanel'
 import PipelineStageProgress from '@/components/routing/PipelineStageProgress'
+import DeployPreviewPanel from '@/components/routing/DeployPreviewPanel'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import type { AntifilterStatus, CidrDbStatus, CidrPipelineTask, CidrProviderInfo, Node } from '@/types'
+import type { AntifilterStatus, CidrDbStatus, CidrDeployPreview, CidrPipelineTask, CidrProviderInfo, Node } from '@/types'
 import { formatDt, getPipelineStage, isPipelineRunning, pendingMatchesStage, statusBadgeVariant, statusLabel, type PipelinePendingAction } from './utils'
 
 interface CidrPipelineTabProps {
@@ -36,6 +37,11 @@ interface CidrPipelineTabProps {
   onDeploy: () => void
   onGenerateDoall: () => void
   onClearDb: () => void | Promise<void>
+  onOpenCustomWizard: () => void
+  onLoadDeployPreview: () => void
+  deployPreview: CidrDeployPreview | null
+  deployPreviewLoading: boolean
+  onRollback: (stamp: string) => void
 }
 
 const workflowSteps = [
@@ -74,6 +80,11 @@ export default function CidrPipelineTab({
   onDeploy,
   onGenerateDoall,
   onClearDb,
+  onOpenCustomWizard,
+  onLoadDeployPreview,
+  deployPreview,
+  deployPreviewLoading,
+  onRollback,
 }: CidrPipelineTabProps) {
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
@@ -203,6 +214,15 @@ export default function CidrPipelineTab({
                 <Button
                   size="sm"
                   variant="outline"
+                  disabled={pipelineBusy}
+                  onClick={onOpenCustomWizard}
+                >
+                  <PlusCircle size={14} className="mr-1.5" />
+                  Свои ASN/CIDR
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
                   className="text-destructive hover:text-destructive"
                   disabled={pipelineBusy}
                   onClick={() => setConfirmClear(true)}
@@ -312,6 +332,33 @@ export default function CidrPipelineTab({
               : 'Сгенерировать из БД'}
           </Button>
         </div>
+
+        {(cidrDb?.runtime_backups?.length ?? 0) > 0 && (
+          <div className="mt-4 rounded-md border p-4">
+            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+              <History size={14} />
+              Откат из runtime_backups
+            </div>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Резервные копии создаются перед сборкой списков (этап 2). Откат восстанавливает файлы на контроллере и
+              разворачивает их на ноды.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {cidrDb!.runtime_backups!.slice(0, 5).map((backup) => (
+                <Button
+                  key={backup.stamp}
+                  size="sm"
+                  variant="outline"
+                  disabled={pipelineBusy}
+                  onClick={() => onRollback(backup.stamp)}
+                >
+                  <Undo2 size={14} className="mr-1.5" />
+                  {backup.stamp} ({backup.file_count})
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
       </StatusPanel>
 
       <StatusPanel title="Этап 3 — Списки на ноду (deploy)" icon={Rocket}>
@@ -447,7 +494,17 @@ export default function CidrPipelineTab({
           </div>
         )}
 
+        <DeployPreviewPanel preview={deployPreview} loading={deployPreviewLoading} />
+
         <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={deployDisabled}
+            onClick={onLoadDeployPreview}
+          >
+            Dry-run preview
+          </Button>
           <Button size="sm" disabled={deployDisabled} onClick={onDeploy}>
             <Rocket size={14} className="mr-1.5" />
             {deployAllOnline ? 'Развернуть на все online' : 'Развернуть на выбранные'}

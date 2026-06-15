@@ -4,7 +4,7 @@ import { getWebSessionId } from '@/lib/webSession'
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 const HEARTBEAT_INTERVAL_MS = 60_000
 
-export function useSessionHeartbeat(enabled: boolean) {
+export function useSessionHeartbeat(enabled: boolean, onRevoked?: () => void) {
   useEffect(() => {
     if (!enabled) return
 
@@ -15,7 +15,7 @@ export function useSessionHeartbeat(enabled: boolean) {
       if (!token || !sessionId) return
 
       try {
-        await fetch(`${API_BASE}/session-heartbeat`, {
+        const resp = await fetch(`${API_BASE}/session-heartbeat`, {
           method: 'GET',
           cache: 'no-store',
           credentials: 'include',
@@ -24,6 +24,10 @@ export function useSessionHeartbeat(enabled: boolean) {
             'X-Web-Session-Id': sessionId,
           },
         })
+        if (resp.ok) {
+          const data = (await resp.json()) as { revoked?: boolean }
+          if (data.revoked) onRevoked?.()
+        }
       } catch {
         /* ignore background heartbeat errors */
       }
@@ -32,5 +36,5 @@ export function useSessionHeartbeat(enabled: boolean) {
     sendHeartbeat()
     const timer = window.setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS)
     return () => window.clearInterval(timer)
-  }, [enabled])
+  }, [enabled, onRevoked])
 }

@@ -1,29 +1,38 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import {
   Copy,
+  Download,
   FileKey,
   Loader2,
   Plus,
   RefreshCw,
   Shield,
+  Upload,
   Users,
   Wifi,
 } from 'lucide-react'
 import {
   ApiError,
+  applyClientTemplate,
   createConfig,
+  downloadConfigsExport,
   downloadProfile,
   fetchQrBlob,
   getClientPolicies,
+  getClientTemplates,
   getConfigProfileFiles,
+  getConfigQuota,
   getConfigs,
   getDashboardSummary,
   getUsers,
+  importConfigsCsv,
   syncConfigs,
 } from '@/api/client'
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
+import GlobalDashboardSection from '@/components/dashboard/GlobalDashboardSection'
+import GeoRoutingHintBanner from '@/components/dashboard/GeoRoutingHintBanner'
 import MetricCard from '@/components/noc/MetricCard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
@@ -53,7 +62,8 @@ import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
-import type { ClientAccessPolicy, DashboardSummary, User, VpnConfig, VpnType } from '@/types'
+import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
+import type { ClientAccessPolicy, ClientTemplate, DashboardSummary, SelfServiceQuota, User, VpnConfig, VpnType } from '@/types'
 
 export default function DashboardPage() {
   const { user } = useAuth()
@@ -61,9 +71,13 @@ export default function DashboardPage() {
   const openvpnEnabled = isEnabled('openvpn')
   const wireguardEnabled = isEnabled('wireguard') || isEnabled('amneziawg')
   const canCreateClient = openvpnEnabled || wireguardEnabled
-  const { activeNode } = useNode()
+  const { activeNode, nodes } = useNode()
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
+  const { task: importTask, polling: importPolling, startPoll: startImportPoll } = useBackgroundTaskPoll()
+  const csvInputRef = useRef<HTMLInputElement>(null)
+  const [csvExporting, setCsvExporting] = useState(false)
+  const [csvImporting, setCsvImporting] = useState(false)
   const [configs, setConfigs] = useState<VpnConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingFiles, setLoadingFiles] = useState(false)
@@ -87,7 +101,10 @@ export default function DashboardPage() {
   >({})
   const [panelUsers, setPanelUsers] = useState<User[]>([])
   const [ownerId, setOwnerId] = useState<number | null>(null)
+  const [templates, setTemplates] = useState<ClientTemplate[]>([])
+  const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
   const isAdmin = user?.role === 'admin'
+  const quotaReached = quota != null && !quota.unlimited && !quota.can_create
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
@@ -130,6 +147,13 @@ export default function DashboardPage() {
     try {
       const configsData = await getConfigs(false)
       setConfigs(configsData)
+      if (user?.role !== 'admin') {
+        getConfigQuota()
+          .then(setQuota)
+          .catch(() => setQuota(null))
+      } else {
+        setQuota(null)
+      }
       if (user?.role === 'admin' && configsData.length > 0) {
         const names = configsData.map((c) => c.client_name).join(',')
         getClientPolicies(names).then(setPolicies).catch(() => {})
@@ -168,6 +192,13 @@ export default function DashboardPage() {
       cancelled = true
     }
   }, [isAdmin])
+
+  useEffect(() => {
+    if (!canCreateClient) return
+    void getClientTemplates()
+      .then(setTemplates)
+      .catch(() => setTemplates([]))
+  }, [canCreateClient, activeNode?.id])
 
   const resetForm = () => {
     setClientName('')
@@ -216,6 +247,34 @@ export default function DashboardPage() {
       success(`Клиент «${name}» создан`)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка создания клиента')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleApplyTemplate = async (template: ClientTemplate) => {
+    const trimmedName = clientName.trim()
+    if (!trimmedName) {
+      notifyError('Укажите имя клиента для шаблона')
+      return
+    }
+    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(trimmedName)) {
+      notifyError('Имя: латиница, цифры, _ и -, до 32 символов')
+      return
+    }
+    setSubmitting(true)
+    try {
+      await withInline(async () => {
+        await applyClientTemplate(template.id, {
+          client_name: trimmedName,
+          owner_id: isAdmin && ownerId ? ownerId : undefined,
+        })
+        closeForm()
+        await load({ silent: true })
+      }, `Создание: ${template.name}...`)
+      success(`Клиент «${trimmedName}» создан по шаблону`)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка применения шаблона')
     } finally {
       setSubmitting(false)
     }
@@ -280,8 +339,63 @@ export default function DashboardPage() {
     }
   }
 
+  const handleExportCsv = async () => {
+    setCsvExporting(true)
+    try {
+      const response = await downloadConfigsExport()
+      if (!response.ok) throw new ApiError('Ошибка экспорта', response.status)
+      const blob = await response.blob()
+      const disposition = response.headers.get('content-disposition') || ''
+      const filename = parseContentDispositionFilename(disposition) || 'vpn-configs.csv'
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      URL.revokeObjectURL(url)
+      success('CSV экспортирован')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка экспорта CSV')
+    } finally {
+      setCsvExporting(false)
+    }
+  }
+
+  const handleImportCsv = async (file: File) => {
+    setCsvImporting(true)
+    try {
+      const result = await importConfigsCsv(file)
+      if (result.queued && result.task_id) {
+        startImportPoll(result.task_id, {
+          onComplete: async (task) => {
+            success(task.message || 'Импорт CSV завершён')
+            await load({ silent: true })
+            setCsvImporting(false)
+          },
+          onError: (_task, message) => {
+            notifyError(message)
+            setCsvImporting(false)
+          },
+        })
+        success(result.message)
+        return
+      }
+      success(result.message)
+      await load({ silent: true })
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка импорта CSV')
+    } finally {
+      if (!importPolling) setCsvImporting(false)
+    }
+  }
+
+  const showGlobalDashboard = user?.role === 'admin' && nodes.length > 1
+
   return (
     <div className="space-y-6">
+      {showGlobalDashboard && <GlobalDashboardSection />}
+      <GeoRoutingHintBanner enabled={nodes.length > 1} />
+
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -299,10 +413,39 @@ export default function DashboardPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           {user?.role === 'admin' && (
-            <Button variant="outline" onClick={handleSync} disabled={syncing}>
-              {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-              {syncing ? 'Синхронизация...' : 'Синхронизировать'}
-            </Button>
+            <>
+              <Button variant="outline" onClick={handleSync} disabled={syncing}>
+                {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                {syncing ? 'Синхронизация...' : 'Синхронизировать'}
+              </Button>
+              <Button variant="outline" onClick={() => void handleExportCsv()} disabled={csvExporting}>
+                {csvExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                Экспорт CSV
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => csvInputRef.current?.click()}
+                disabled={csvImporting || importPolling}
+              >
+                {csvImporting || importPolling ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Upload size={16} />
+                )}
+                Импорт CSV
+              </Button>
+              <input
+                ref={csvInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ''
+                  if (file) void handleImportCsv(file)
+                }}
+              />
+            </>
           )}
           {user?.role !== 'viewer' && canCreateClient && (
             <Button
@@ -310,6 +453,7 @@ export default function DashboardPage() {
                 setOwnerId(user?.id ?? null)
                 setShowForm(true)
               }}
+              disabled={quotaReached}
             >
               <Plus size={16} />
               Новый клиент
@@ -318,11 +462,25 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {(importPolling || importTask) && (
+        <SettingsAlert variant="info" title="Импорт CSV">
+          {importTask?.progress_stage || importTask?.message || 'Импорт выполняется…'}
+          {importTask?.progress_percent != null && ` (${importTask.progress_percent}%)`}
+        </SettingsAlert>
+      )}
+
       <SettingsAlert variant="info" title="Конфигурации активного узла">
         Список клиентов привязан к узлу <strong>{activeNode?.name ?? summary?.node_name ?? 'не выбран'}</strong>
         {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'} — при переключении узла
         отображаются только его конфигурации. Управление — в шапке или на странице «Узлы».
       </SettingsAlert>
+
+      {quota && !quota.unlimited && (
+        <SettingsAlert variant={quotaReached ? 'warning' : 'info'} title="Лимит конфигураций">
+          Использовано <strong>{quota.used}</strong> из <strong>{quota.limit}</strong> разрешённых клиентов.
+          {quotaReached ? ' Удалите конфиг или обратитесь к администратору для увеличения квоты.' : ''}
+        </SettingsAlert>
+      )}
 
       {nodeOffline && (
         <SettingsAlert variant="warning" title="Узел офлайн">
@@ -449,6 +607,25 @@ export default function DashboardPage() {
                 description="Пользователь с ролью «Пользователь» увидит этот конфиг в своём списке."
               />
             )}
+            {templates.length > 0 && (
+              <div className="space-y-2">
+                <Label>Шаблоны (one-click)</Label>
+                <div className="flex flex-wrap gap-2">
+                  {templates.map((tpl) => (
+                    <Button
+                      key={tpl.id}
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={submitting}
+                      onClick={() => void handleApplyTemplate(tpl)}
+                    >
+                      {tpl.name}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeForm} disabled={submitting}>
                 Отмена
@@ -538,6 +715,7 @@ export default function DashboardPage() {
                         setOwnerId(user?.id ?? null)
                         setShowForm(true)
                       }}
+                      disabled={quotaReached}
                     >
                       <Plus size={16} />
                       Создать клиента

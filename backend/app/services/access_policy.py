@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import OpenVpnAccessPolicy, WgAccessPolicy
+from app.models import Node, OpenVpnAccessPolicy, WgAccessPolicy
 from app.services.node_adapter import NodeAdapter
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.traffic_limit import (
@@ -36,10 +36,12 @@ class AccessPolicyService:
         *,
         antizapret_path,
         node_id: int | None = None,
+        node_name: str | None = None,
         adapter: NodeAdapter | None = None,
     ):
         self.db = db
         self.node_id = node_id
+        self.node_name = node_name
         self._adapter = adapter
         self.banned_clients_file = antizapret_path / "config" / "banned_clients"
         self.wg_runtime_calls = 0
@@ -48,6 +50,15 @@ class AccessPolicyService:
         if self.node_id is None:
             raise ValueError("node_id is required for access policy DB operations")
         return self.node_id
+
+    def _attach_node_context(self, payload: dict) -> dict:
+        if self.node_id is None:
+            return payload
+        return {
+            **payload,
+            "node_id": self.node_id,
+            "node_name": self.node_name,
+        }
 
     def _consumed_bytes(self, client_name: str, *, period_days: int | None = None) -> int:
         return get_client_consumed_traffic_bytes(
@@ -157,7 +168,7 @@ class AccessPolicyService:
             block_mode = "traffic_limit"
         else:
             block_mode = "none"
-        return {
+        return self._attach_node_context({
             "is_blocked": blocked,
             "block_mode": block_mode,
             "blocked_days_left": (block_until - now).days if temp and block_until else None,
@@ -165,7 +176,7 @@ class AccessPolicyService:
             "block_until": block_until.strftime("%Y-%m-%d %H:%M:%S") if block_until else None,
             "traffic_limit_exceeded": traffic_exceeded,
             **self._traffic_human_fields(traffic_state),
-        }
+        })
 
     def _cleanup_ovpn_temp_block(self, row: OpenVpnAccessPolicy, now: datetime) -> bool:
         if row.is_temp_blocked and row.block_until and _as_utc(row.block_until) <= now:
@@ -319,11 +330,11 @@ class AccessPolicyService:
         )
         if row is None:
             traffic_state = self._ovpn_traffic_state(None, client_name=client_name)
-            return {
+            return self._attach_node_context({
                 "is_blocked": client_name in self.read_banned_clients(),
                 "block_mode": "none",
                 **self._traffic_human_fields(traffic_state),
-            }
+            })
         return self._ovpn_state(row)
 
     # ── WireGuard ────────────────────────────────────────────────────────
@@ -417,7 +428,7 @@ class AccessPolicyService:
             block_mode = "traffic_limit"
         else:
             block_mode = "none"
-        return {
+        return self._attach_node_context({
             "is_blocked": blocked,
             "block_mode": block_mode,
             "expired": expired,
@@ -427,7 +438,7 @@ class AccessPolicyService:
             "expires_at": expires.isoformat() if expires else None,
             "traffic_limit_exceeded": traffic_exceeded,
             **self._traffic_human_fields(traffic_state),
-        }
+        })
 
     def reconcile_wg(
         self,
@@ -575,11 +586,11 @@ class AccessPolicyService:
         )
         if row is None:
             traffic_state = self._wg_traffic_state(None, client_name=normalized)
-            return {
+            return self._attach_node_context({
                 "is_blocked": False,
                 "block_mode": "none",
                 **self._traffic_human_fields(traffic_state),
-            }
+            })
         return self._wg_state(row)
 
     def get_all_policies(self, client_names: list[str]) -> dict[str, dict]:
@@ -721,3 +732,36 @@ class AccessPolicyService:
             "clients_changed": changed,
             "wg_runtime_calls": self.wg_runtime_calls,
         }
+
+
+def _policy_row_flags(row: OpenVpnAccessPolicy | WgAccessPolicy) -> tuple[bool, bool]:
+    blocked = bool(row.is_permanent_blocked or row.is_temp_blocked)
+    limited = row.traffic_limit_bytes is not None
+    return blocked, limited
+
+
+def build_policy_summary_by_node(db: Session) -> list[dict]:
+    nodes = db.query(Node).order_by(Node.id.asc()).all()
+    summaries: list[dict] = []
+    for node in nodes:
+        ovpn_rows = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id).all()
+        wg_rows = db.query(WgAccessPolicy).filter_by(node_id=node.id).all()
+        blocked_clients = 0
+        traffic_limited_clients = 0
+        for row in (*ovpn_rows, *wg_rows):
+            blocked, limited = _policy_row_flags(row)
+            if blocked:
+                blocked_clients += 1
+            if limited:
+                traffic_limited_clients += 1
+        summaries.append(
+            {
+                "node_id": node.id,
+                "node_name": node.name,
+                "openvpn_policies": len(ovpn_rows),
+                "wireguard_policies": len(wg_rows),
+                "blocked_clients": blocked_clients,
+                "traffic_limited_clients": traffic_limited_clients,
+            }
+        )
+    return summaries

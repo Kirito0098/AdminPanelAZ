@@ -5,6 +5,27 @@
 
 ---
 
+## Статус реализации (2026-06-16)
+
+Сверка с кодовой базой. Легенда: **✅** готово · **◐** частично · **⬜** не начато.
+
+| Этап | Название | Статус | Комментарий |
+|------|----------|--------|-------------|
+| **1** | Prod foundation | ✅ | Все 1.1–1.8; промпты — для доработок/regression |
+| **2** | Admin productivity | ✅ | Теги, шаблоны, bulk, AWG tab, сессии |
+| **3** | Multi-node обзор | ✅ | 3.4 per-node — ◐ (сводка, без wizard лимитов) |
+| **4** | CIDR безопасность | ✅ | dry-run, rollback, custom provider |
+| **5** | Node Sync / HA | ◐ | MVP + v2 в коде; ◐ NOC по HA-группам |
+| **6** | Self-service | ✅ | web + TG + reminders |
+| **7** | Мониторинг и алерты | ◐ | GeoIP ◐ (нужны MMDB); 7.3–7.4 ⬜ |
+| **8** | Ops и интеграции | ✅ | runbook, CSV, rolling update, OpenAPI, webhooks, mini app |
+| **9** | Security / enterprise | ◐ | passkeys + audit ✅; CSP ◐; secrets rotation ⬜ |
+| **10** | Масштаб | ⬜ | i18n бота ◐; PG / plugin / inline ⬜ |
+
+**Что делать дальше (по приоритету backlog):** см. **[Backlog-otkryto.md](Backlog-otkryto.md)** — 7.3 · 5.6 · 7.1 · 9.1 · 9.4 · 10.1…
+
+---
+
 ## Как пользоваться
 
 1. Выбери **этап** в [Idei.md § Этапы](Idei.md#этапы-реализации-roadmap).
@@ -58,11 +79,13 @@ cd /opt/AdminPanelAZ/frontend && npm run lint && npm run build
 
 ---
 
-# Этап 1 — Prod foundation
+# Этап 1 — Prod foundation · ✅ **реализовано**
 
 **Зависимости:** нет  
 **Режим:** Ask → Agent (подзадачи можно параллелить)  
-**DoD:** [Idei.md § Этап 1](Idei.md#этап-1--prod-foundation)
+**DoD:** [Idei.md § Этап 1](Idei.md#этап-1--prod-foundation) — закрыт  
+
+> Промпты ниже — для повторной реализации, регрессии или расширения. Ключевые файлы: `retention_worker.py`, `prometheus_metrics.py`, `health_checks.py`, `FeatureTogglesTab`, `test_feature_profiles.py`, Vitest в CI.
 
 ### Подготовка (Ask)
 
@@ -163,11 +186,13 @@ curl -s http://127.0.0.1:8000/api/feature-toggles | jq '.[] | select(.enabled==f
 
 ---
 
-# Этап 2 — Admin productivity
+# Этап 2 — Admin productivity · ✅ **реализовано**
 
 **Зависимости:** Этап 1  
 **Режим:** Plan (теги + mass ops) → Agent  
-**DoD:** [Idei.md § Этап 2](Idei.md#этап-2--admin-productivity)
+**DoD:** [Idei.md § Этап 2](Idei.md#этап-2--admin-productivity) — закрыт  
+
+> Файлы: `config-tags` router, `client_templates`, `bulk_config_ops.py`, `ConfigCardsSection` (AWG tab), `SecurityTab` (sessions). Тесты: `test_stage2_admin_productivity.py`.
 
 ### Подготовка (Plan)
 
@@ -208,11 +233,13 @@ cd backend && .venv/bin/pytest tests/ -q -k "tag or template or session or bulk"
 
 ---
 
-# Этап 3 — Multi-node обзор
+# Этап 3 — Multi-node обзор · ✅ **реализовано**
 
 **Зависимости:** Этап 1; желательно Этап 2  
 **Режим:** Ask → Agent  
-**DoD:** [Idei.md § Этап 3](Idei.md#этап-3--multi-node-обзор)
+**DoD:** [Idei.md § Этап 3](Idei.md#этап-3--multi-node-обзор) — закрыт  
+
+> ◐ **3.4:** `NodePolicySummarySection` — сводка политик; отдельный UI задания лимитов EU/RU — backlog.
 
 ### Подготовка (Ask)
 
@@ -251,11 +278,13 @@ cd backend && .venv/bin/pytest tests/ -q -k "monitoring_overview or node"
 
 ---
 
-# Этап 4 — CIDR безопасность
+# Этап 4 — CIDR безопасность · ✅ **реализовано**
 
 **Зависимости:** Этап 1 (route budget)  
 **Режим:** Agent  
-**DoD:** [Idei.md § Этап 4](Idei.md#этап-4--cidr-безопасность)
+**DoD:** [Idei.md § Этап 4](Idei.md#этап-4--cidr-безопасность) — закрыт  
+
+> Файлы: `deploy_preview.py`, rollback API, `CustomProviderWizardDialog`, `test_cidr_stage4.py`.
 
 ### Реализация (Agent)
 
@@ -281,11 +310,14 @@ cd backend && .venv/bin/pytest tests/ -q -k "cidr_pipeline or cidr_db_deploy"
 
 ---
 
-# Этап 5 — Node Sync / HA
+# Этап 5 — Node Sync / HA · ◐ **частично**
 
 **Зависимости:** Этап 1; желательно Этап 3  
 **Режим:** Plan (обязательно) → Agent по подзадачам 5.1→5.3  
-**DoD:** [Idei.md § Этап 5](Idei.md#этап-5--node-sync--ha-antizapret-failover)
+**DoD MVP:** закрыт · **DoD v2:** закрыт, кроме NOC HA-агрегации  
+
+> ✅ MVP + v2: [`NodeSync.md`](NodeSync.md), `services/node_sync/*`, `NodeSyncGroupSection`.  
+> ◐ **5.6:** Dashboard HA badge есть; federated NOC пока по узлам, не по sync group.
 
 ### Подготовка (Plan)
 
@@ -318,12 +350,19 @@ AntiZapret: /root/antizapret, easyrsa3, wireguard keys must match.
 Не делай 5.4–5.6 в этом PR. pytest test_node_sync*.py. Документ docs/NodeSync.md кратко.
 ```
 
-### Реализация v2 (Agent, отдельный PR)
+### Промпт — доработка 5.6 (NOC HA)
 
 ```
-Этап 5 v2: auto-sync create/delete client на все replica в sync group;
-reconcile worker (как wg_policy_sync_worker); HA badge на Dashboard — 
-один VpnConfig logical id на группу или linked configs.
+AdminPanelAZ: NOC federated overview должен агрегировать online клиентов по NodeSyncGroup
+(одна строка на HA logical client, badge domain + node count).
+Опирайся на ha_primary_config_id / sync_group_id. pytest + минимальный UI diff.
+```
+
+### Реализация v2 (Agent, отдельный PR) — ✅ уже в коде
+
+```
+Этап 5 v2 реализован: client_sync, reconcile_worker, HA badge на ConfigCard.
+Пропусти, если не нужны доработки. См. docs/NodeSync.md § v2.
 ```
 
 ### Запуск и проверка
@@ -336,11 +375,13 @@ cd backend && .venv/bin/pytest tests/ -q -k "node_sync or antizapret_backup"
 
 ---
 
-# Этап 6 — Self-service
+# Этап 6 — Self-service · ✅ **реализовано**
 
 **Зависимости:** Этап 2  
 **Режим:** Agent  
-**DoD:** [Idei.md § Этап 6](Idei.md#этап-6--self-service)
+**DoD:** [Idei.md § Этап 6](Idei.md#этап-6--self-service) — закрыт  
+
+> `self_service.py`, TG `/myconfigs` `/traffic`, `user_reminder_worker.py`, `test_self_service.py`.
 
 ### Реализация (Agent)
 
@@ -366,11 +407,32 @@ cd backend && .venv/bin/pytest tests/ -q -k "telegram or tg_mini or traffic_limi
 
 ---
 
-# Этап 7 — Мониторинг и алерты
+# Этап 7 — Мониторинг и алерты · ◐ **частично**
 
 **Зависимости:** Этап 1  
 **Режим:** Agent  
-**DoD:** [Idei.md § Этап 7](Idei.md#этап-7--мониторинг-и-алерты)
+**DoD:** [Idei.md § Этап 7](Idei.md#этап-7--мониторинг-и-алерты) — частично  
+
+> ✅ **7.2** `noc_report_scheduler.py` · ◐ **7.1** `geoip_local.py` (положите MMDB в `data/geoip/`) · ⬜ **7.3** alert rules · ⬜ **7.4** PDF reports  
+
+### Промпт — доработка 7.1 (MMDB onboarding)
+
+```
+Добавь в README/docs инструкцию загрузки GeoLite2 City+ASN в data/geoip/;
+опционально — кнопка/статус в Settings → Maintenance «GeoIP: loaded / fallback ip-api».
+Не меняй логику lookup, только UX и документацию.
+```
+
+### Промпт — реализация 7.3 (alert rules)
+
+```
+Реализуй правила алертов AdminPanelAZ (Idei.md 7.3):
+- модель AlertRule (порог, метрика/агрегат, cooldown)
+- worker поверх prometheus_metrics / DB aggregates
+- AdminNotify при срабатывании
+- UI в Settings → Monitoring (admin only)
+pytest test_alert_rules.py
+```
 
 ### Реализация (Agent)
 
@@ -395,11 +457,13 @@ cd backend && .venv/bin/pytest tests/ -q -k "ip_geo or admin_notify"
 
 ---
 
-# Этап 8 — Ops и интеграции
+# Этап 8 — Ops и интеграции · ✅ **реализовано**
 
 **Зависимости:** Этапы 1–4  
 **Режим:** Agent (задачи независимы — отдельные PR)  
-**DoD:** [Idei.md § Этап 8](Idei.md#этап-8--ops-и-интеграции)
+**DoD:** [Idei.md § Этап 8](Idei.md#этап-8--ops-и-интеграции) — закрыт  
+
+> Runbook, CSV, rolling update, OpenAPI gate, webhooks, tg-mini Warper/CIDR — в коде и тестах.
 
 ### Промпты по задачам
 
@@ -421,11 +485,23 @@ cd backend && .venv/bin/pytest tests/ -q -k "site_diagnostics or backup or webho
 
 ---
 
-# Этап 9 — Security / enterprise
+# Этап 9 — Security / enterprise · ◐ **частично**
 
 **Зависимости:** Этап 1; перед публичным prod  
 **Режим:** Plan (CSP) → Agent  
-**DoD:** [Idei.md § Этап 9](Idei.md#этап-9--security--enterprise)
+**DoD:** [Idei.md § Этап 9](Idei.md#этап-9--security--enterprise) — частично  
+
+> ✅ passkeys, audit SIEM · ◐ CSP nonce (scripts ok, styles inline) · ⬜ secrets rotation wizard  
+
+### Промпт — доработка 9.1 (CSP styles)
+
+```
+Убери style-src 'unsafe-inline' где возможно (AdminPanelAZ):
+- audit inline styles в frontend
+- CSS modules / Tailwind без runtime inline где feasible
+- сохрани nonce для scripts
+pytest test_http_security.py
+```
 
 ### Реализация (Agent)
 
@@ -450,11 +526,13 @@ cd backend && .venv/bin/pytest tests/ -q -k "security or http_security"
 
 ---
 
-# Этап 10 — Масштаб
+# Этап 10 — Масштаб · ⬜ **не начато** (i18n бота ◐)
 
 **Зависимости:** метрики SQLite bottleneck  
 **Режим:** Plan (обязательно для 10.1) → Agent  
-**DoD:** [Idei.md § Этап 10](Idei.md#этап-10--масштаб-и-экосистема)
+**DoD:** [Idei.md § Этап 10](Idei.md#этап-10--масштаб-и-экосистема) — открыт  
+
+> ⬜ PostgreSQL, plugin, inline bot · ◐ `telegram_bot_i18n.py` без веб-locale
 
 ### Подготовка (Plan)
 
@@ -557,10 +635,11 @@ cd frontend && npm run lint && npm run build
 | Файл | Назначение |
 |------|------------|
 | [Idei.md](Idei.md) | Этапы, DoD, детали идей, [§11 VDS](Idei.md#11-vds-и-размещение) |
+| [Backlog-otkryto.md](Backlog-otkryto.md) | **Открытый backlog** — только ◐ и ⬜ |
 | [PROJECT_MAP.md](PROJECT_MAP.md) | Архитектура, пути к коду |
 | [Telegram.md](Telegram.md) | Этапы 6, 7, 8.6 |
 | [SECURITY.md](../SECURITY.md) | Этап 9 |
 
 ---
 
-*Обновляй промпты после реализации этапа: добавляй «уже сделано» и ссылки на PR/commit.*
+*Обновляй промпты после реализации этапа: статус в [Idei.md](Idei.md) и таблице «Статус реализации» выше.*

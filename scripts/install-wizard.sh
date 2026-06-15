@@ -37,7 +37,9 @@ WIZ_NODE_AGENT_PORT="${WIZ_NODE_AGENT_PORT:-9100}"
 WIZ_NODE_AGENT_API_KEY="${WIZ_NODE_AGENT_API_KEY:-}"
 WIZ_NODE_AGENT_ALLOWED_IPS="${WIZ_NODE_AGENT_ALLOWED_IPS:-}"
 WIZ_AUTH_RATE_LIMIT_BACKEND="${WIZ_AUTH_RATE_LIMIT_BACKEND:-memory}"
+WIZ_API_RATE_LIMIT_BACKEND="${WIZ_API_RATE_LIMIT_BACKEND:-memory}"
 WIZ_REDIS_URL="${WIZ_REDIS_URL:-}"
+WIZ_RESOURCE_PROFILE="${WIZ_RESOURCE_PROFILE:-standard}"
 WIZ_NODE_AGENT_MTLS_ENABLED="${WIZ_NODE_AGENT_MTLS_ENABLED:-false}"
 WIZ_NODE_API_KEY_ROTATION_DAYS="${WIZ_NODE_API_KEY_ROTATION_DAYS:-0}"
 WIZ_RUN_MODE="${WIZ_RUN_MODE:-manual}"
@@ -605,9 +607,10 @@ wizard_ask_security_hardening() {
 
   if [[ "$WIZ_UVICORN_WORKERS" -gt 1 ]]; then
     wizard_show_redis_rate_limit_hint
-    wiz_prompt_yesno "Настроить Redis для rate limit auth (AUTH_RATE_LIMIT_BACKEND=redis)?" "y"
+    wiz_prompt_yesno "Настроить Redis для rate limit (auth + API)?" "y"
     if [[ "$REPLY" == "y" ]]; then
       WIZ_AUTH_RATE_LIMIT_BACKEND="redis"
+      WIZ_API_RATE_LIMIT_BACKEND="redis"
       wiz_prompt "REDIS_URL" "redis://127.0.0.1:6379/0"
       WIZ_REDIS_URL="$REPLY"
     fi
@@ -705,26 +708,62 @@ wizard_ask_services() {
   echo
 }
 
+wizard_ask_resource_profile() {
+  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
+    return 0
+  fi
+
+  wiz_step "Профиль ресурсов (VDS)"
+  echo "Выберите пресет для панели. Minimal рекомендуется для VDS 1 GB только под панель (без AntiZapret на том же хосте)."
+  wiz_prompt_choice "Resource profile:" \
+    "Minimal — 1 GB panel-only (без traffic/CIDR collectors)" \
+    "Standard — баланс (рекомендуется 2 GB)" \
+    "Full — все фоновые задачи"
+
+  case "$REPLY" in
+    1) WIZ_RESOURCE_PROFILE="minimal" ;;
+    2) WIZ_RESOURCE_PROFILE="standard" ;;
+    3) WIZ_RESOURCE_PROFILE="full" ;;
+    *) WIZ_RESOURCE_PROFILE="standard" ;;
+  esac
+  echo "Выбран профиль: $WIZ_RESOURCE_PROFILE"
+  echo
+}
+
 wizard_ask_optional() {
   wiz_step "Опциональные функции"
 
   if [[ "$WIZ_INSTALL_TYPE" != "node" ]]; then
-    wiz_prompt_yesno "Включить ночное обновление CIDR DB (CIDR_DB_REFRESH_ENABLED)?" "y"
-    if [[ "$REPLY" == "y" ]]; then
-      WIZ_CIDR_DB_REFRESH_ENABLED="true"
-      wiz_prompt "Час запуска (0-23)" "$WIZ_CIDR_DB_REFRESH_HOUR"
-      WIZ_CIDR_DB_REFRESH_HOUR="$REPLY"
-      wiz_prompt "Минута запуска (0-59)" "$WIZ_CIDR_DB_REFRESH_MINUTE"
-      WIZ_CIDR_DB_REFRESH_MINUTE="$REPLY"
-    else
+    if [[ "$WIZ_RESOURCE_PROFILE" == "minimal" ]]; then
       WIZ_CIDR_DB_REFRESH_ENABLED="false"
+      WIZ_TRAFFIC_SYNC_ENABLED="false"
+      WIZ_UVICORN_WORKERS="1"
+      print_info "Minimal profile: CIDR scheduler и traffic sync отключены."
+    elif [[ "$WIZ_RESOURCE_PROFILE" == "full" ]]; then
+      WIZ_CIDR_DB_REFRESH_ENABLED="true"
+      WIZ_TRAFFIC_SYNC_ENABLED="true"
     fi
 
-    wiz_prompt_yesno "Включить сбор трафика (TRAFFIC_SYNC_ENABLED)?" "y"
-    if [[ "$REPLY" == "y" ]]; then
-      WIZ_TRAFFIC_SYNC_ENABLED="true"
-    else
-      WIZ_TRAFFIC_SYNC_ENABLED="false"
+    if [[ "$WIZ_RESOURCE_PROFILE" != "minimal" ]]; then
+      wiz_prompt_yesno "Включить ночное обновление CIDR DB (CIDR_DB_REFRESH_ENABLED)?" "y"
+      if [[ "$REPLY" == "y" ]]; then
+        WIZ_CIDR_DB_REFRESH_ENABLED="true"
+        wiz_prompt "Час запуска (0-23)" "$WIZ_CIDR_DB_REFRESH_HOUR"
+        WIZ_CIDR_DB_REFRESH_HOUR="$REPLY"
+        wiz_prompt "Минута запуска (0-59)" "$WIZ_CIDR_DB_REFRESH_MINUTE"
+        WIZ_CIDR_DB_REFRESH_MINUTE="$REPLY"
+      else
+        WIZ_CIDR_DB_REFRESH_ENABLED="false"
+      fi
+    fi
+
+    if [[ "$WIZ_RESOURCE_PROFILE" != "minimal" ]]; then
+      wiz_prompt_yesno "Включить сбор трафика (TRAFFIC_SYNC_ENABLED)?" "y"
+      if [[ "$REPLY" == "y" ]]; then
+        WIZ_TRAFFIC_SYNC_ENABLED="true"
+      else
+        WIZ_TRAFFIC_SYNC_ENABLED="false"
+      fi
     fi
 
     wiz_prompt_yesno "Настроить Telegram-уведомления (опционально, только bot token и chat_id)?" "n"
@@ -832,7 +871,8 @@ wizard_show_summary() {
     fi
     ui_summary_row "Uvicorn workers" "$WIZ_UVICORN_WORKERS"
     if [[ "$WIZ_UVICORN_WORKERS" -gt 1 ]]; then
-      ui_summary_row "Rate limit" "${WIZ_AUTH_RATE_LIMIT_BACKEND}${WIZ_REDIS_URL:+, REDIS_URL=$WIZ_REDIS_URL}"
+      ui_summary_row "Rate limit" "${WIZ_AUTH_RATE_LIMIT_BACKEND}/${WIZ_API_RATE_LIMIT_BACKEND}${WIZ_REDIS_URL:+, REDIS_URL=$WIZ_REDIS_URL}"
+      ui_summary_row "Resource profile" "$WIZ_RESOURCE_PROFILE"
     fi
     ui_summary_row "Администратор" "$WIZ_ADMIN_USERNAME"
     ui_summary_row "Смена пароля" "$WIZ_ADMIN_MUST_CHANGE_PASSWORD"
@@ -893,6 +933,7 @@ run_install_wizard() {
   wizard_ask_node_agent
   wizard_ask_services
   wizard_ask_security_hardening
+  wizard_ask_resource_profile
   wizard_ask_optional
   wizard_ask_paths
   wizard_ask_firewall

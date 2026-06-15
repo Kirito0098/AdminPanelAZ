@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -55,6 +56,27 @@ def persist_sample(db: Session, node_id: int, metrics: dict[str, Any]) -> NodeRe
     db.commit()
     db.refresh(sample)
     return sample
+
+
+def get_latest_samples_by_node(db: Session) -> dict[int, NodeResourceSample]:
+    subq = (
+        db.query(
+            NodeResourceSample.node_id,
+            func.max(NodeResourceSample.created_at).label("max_created"),
+        )
+        .group_by(NodeResourceSample.node_id)
+        .subquery()
+    )
+    samples = (
+        db.query(NodeResourceSample)
+        .join(
+            subq,
+            (NodeResourceSample.node_id == subq.c.node_id)
+            & (NodeResourceSample.created_at == subq.c.max_created),
+        )
+        .all()
+    )
+    return {sample.node_id: sample for sample in samples}
 
 
 def purge_old_samples(db: Session) -> int:

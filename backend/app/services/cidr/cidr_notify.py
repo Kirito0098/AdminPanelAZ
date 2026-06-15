@@ -97,3 +97,34 @@ def maybe_notify_deploy_failed(
         details=_format_deploy_failure_details(result),
         actor_username=triggered_by,
     )
+
+
+def _format_rollback_failure_details(result: dict[str, Any]) -> str:
+    parts: list[str] = []
+    message = str(result.get("message") or "").strip()
+    if message:
+        parts.append(message)
+    missing = result.get("missing") or []
+    if missing:
+        parts.append(f"Не найдено: {', '.join(missing[:5])}")
+    deploy = result.get("deploy") or {}
+    failed = deploy.get("failed") or []
+    if failed:
+        first = failed[0]
+        parts.append(f"Deploy {first.get('file', '?')}: {first.get('error', 'ошибка')}")
+    return " · ".join(parts) if parts else "Откат CIDR завершился с ошибкой"
+
+
+def maybe_notify_rollback_failed(
+    db: Session,
+    result: dict[str, Any],
+    *,
+    triggered_by: str | None = None,
+) -> None:
+    if bool(result.get("success")):
+        return
+    admin_notify_service.send_cidr_rollback_failed(
+        db,
+        details=_format_rollback_failure_details(result),
+        actor_username=triggered_by,
+    )

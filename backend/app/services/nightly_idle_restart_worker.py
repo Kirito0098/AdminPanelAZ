@@ -31,32 +31,7 @@ def _set_setting(db: Session, key: str, value: str) -> None:
     db.commit()
 
 
-def _cron_field_matches(field: str, value: int) -> bool:
-    field = (field or "").strip()
-    if field == "*":
-        return True
-    if field.isdigit():
-        return int(field) == value
-    return False
-
-
-def cron_matches_now(cron_expr: str, now: datetime | None = None) -> bool:
-    """Match standard 5-field cron for exact minute/hour and wildcard day/month/dow."""
-    now = now or datetime.now(timezone.utc)
-    parts = (cron_expr or "").strip().split()
-    if len(parts) != 5:
-        return False
-    minute, hour, dom, month, dow = parts
-    if not _cron_field_matches(minute, now.minute):
-        return False
-    if not _cron_field_matches(hour, now.hour):
-        return False
-    for field in (dom, month, dow):
-        if field != "*":
-            return False
-    return True
-
-
+from app.services.cron_schedule import cron_matches_now
 def _already_ran_this_minute(db: Session, now: datetime) -> bool:
     last_raw = _get_setting(db, "nightly_idle_restart_last_run", "")
     if not last_raw:

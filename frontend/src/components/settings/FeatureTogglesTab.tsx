@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Puzzle, RefreshCw, Save } from 'lucide-react'
-import { ApiError, getFeatureToggles, updateFeatureToggles } from '@/api/client'
+import { ApiError, applyResourceProfile, getFeatureToggles, getResourceProfiles, updateFeatureToggles } from '@/api/client'
+import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -8,26 +9,77 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
-import type { FeatureToggleItem } from '@/types'
+import type { FeatureToggleItem, ResourceProfileImpact, ResourceProfileItem } from '@/types'
+
+const RESTART_BANNER_KEY = 'featureTogglesPendingRestart'
+
+function workerLabel(key: string): string {
+  const labels: Record<string, string> = {
+    traffic_collector: 'Сбор трафика',
+    node_health: 'Опрос узлов',
+    resource_metrics: 'Метрики VPN-узлов',
+    panel_resource_metrics: 'Метрики панели',
+    cidr_scheduler: 'CIDR scheduler',
+    cert_sync: 'Синхронизация сертификатов',
+    resource_monitor: 'CPU/RAM monitor',
+  }
+  return labels[key] || key
+}
 
 export default function FeatureTogglesTab() {
   const { refresh: refreshModules } = useFeatureModules()
   const { success, error: notifyError } = useNotifications()
   const [items, setItems] = useState<FeatureToggleItem[]>([])
+  const [profiles, setProfiles] = useState<ResourceProfileItem[]>([])
+  const [currentProfile, setCurrentProfile] = useState('standard')
   const [draft, setDraft] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [applyingProfile, setApplyingProfile] = useState<string | null>(null)
+  const [pendingRestart, setPendingRestart] = useState(
+    () => sessionStorage.getItem(RESTART_BANNER_KEY) === '1',
+  )
+  const [lastImpact, setLastImpact] = useState<ResourceProfileImpact | null>(null)
+  const [lastWorkersDisabled, setLastWorkersDisabled] = useState<string[]>([])
+
+  const markRestartPending = () => {
+    sessionStorage.setItem(RESTART_BANNER_KEY, '1')
+    setPendingRestart(true)
+  }
 
   const load = async () => {
     setLoading(true)
     try {
-      const data = await getFeatureToggles()
+      const [data, profileData] = await Promise.all([getFeatureToggles(), getResourceProfiles()])
       setItems(data.items)
       setDraft(Object.fromEntries(data.items.map((item) => [item.key, item.enabled])))
+      setProfiles(profileData.items)
+      setCurrentProfile(profileData.current_profile)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить модули')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const applyProfile = async (profile: string) => {
+    setApplyingProfile(profile)
+    try {
+      const result = await applyResourceProfile(profile)
+      setCurrentProfile(result.profile)
+      setProfiles(result.profiles.items)
+      setLastImpact(result.impact ?? null)
+      setLastWorkersDisabled(result.workers_disabled ?? [])
+      const data = await getFeatureToggles()
+      setItems(data.items)
+      setDraft(Object.fromEntries(data.items.map((item) => [item.key, item.enabled])))
+      await refreshModules()
+      markRestartPending()
+      success(`Профиль «${profile}» применён. Перезапустите панель для фоновых задач.`)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось применить профиль')
+    } finally {
+      setApplyingProfile(null)
     }
   }
 
@@ -45,6 +97,8 @@ export default function FeatureTogglesTab() {
     return map
   }, [items])
 
+  const activeProfileMeta = profiles.find((p) => p.key === currentProfile)
+
   const enabledCount = Object.values(draft).filter(Boolean).length
   const dirty = items.some((item) => draft[item.key] !== item.enabled)
 
@@ -58,6 +112,7 @@ export default function FeatureTogglesTab() {
       setItems(data.items)
       setDraft(Object.fromEntries(data.items.map((item) => [item.key, item.enabled])))
       await refreshModules()
+      markRestartPending()
       success('Модули сохранены. Перезапустите панель для применения фоновых задач.')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения модулей')
@@ -72,7 +127,73 @@ export default function FeatureTogglesTab() {
 
   return (
     <div className="space-y-4">
-      <InlineProgressBar active={saving} label="Сохранение модулей..." />
+      <InlineProgressBar active={saving || applyingProfile !== null} label="Сохранение модулей..." />
+
+      {pendingRestart && (
+        <SettingsAlert variant="warning" title="Перезапустите панель">
+          Изменения профиля или модулей записаны в <code className="text-xs">backend/.env</code>. Фоновые задачи
+          (traffic, CIDR, metrics) подхватятся только после перезапуска сервиса панели.
+        </SettingsAlert>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Resource profiles</CardTitle>
+          <CardDescription>
+            Пресеты для VDS с разным объёмом RAM. Minimal отключает traffic sync, metrics collectors, CIDR scheduler и
+            опрос узлов.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-3">
+          {profiles.map((profile) => (
+            <div key={profile.key} className="rounded-lg border p-3">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div className="font-medium">{profile.label}</div>
+                {profile.key === currentProfile && <Badge variant="default">Текущий</Badge>}
+              </div>
+              <p className="mb-2 text-xs text-muted-foreground">{profile.description}</p>
+              {profile.recommended_ram_gb != null && (
+                <p className="mb-2 text-xs text-muted-foreground">Рекомендуется: {profile.recommended_ram_gb} GB RAM</p>
+              )}
+              {profile.impact && (
+                <div className="mb-3 space-y-1 text-xs text-muted-foreground">
+                  {profile.impact.ram && <p>RAM: {profile.impact.ram}</p>}
+                  {profile.impact.cpu_disk && <p>CPU/диск: {profile.impact.cpu_disk}</p>}
+                  {profile.impact.note && <p>{profile.impact.note}</p>}
+                </div>
+              )}
+              {(profile.workers_disabled?.length ?? 0) > 0 && (
+                <p className="mb-3 text-xs text-amber-700 dark:text-amber-400">
+                  Не запускаются: {profile.workers_disabled!.map(workerLabel).join(', ')}
+                </p>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant={profile.key === currentProfile ? 'secondary' : 'default'}
+                disabled={applyingProfile !== null || profile.key === currentProfile}
+                onClick={() => void applyProfile(profile.key)}
+              >
+                {applyingProfile === profile.key ? 'Применение…' : 'Применить'}
+              </Button>
+            </div>
+          ))}
+        </CardContent>
+        {(lastImpact || activeProfileMeta?.impact) && pendingRestart && (
+          <CardContent className="border-t pt-4 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">Экономия после применения</p>
+            {(lastImpact?.ram || activeProfileMeta?.impact?.ram) && (
+              <p>RAM: {lastImpact?.ram ?? activeProfileMeta?.impact?.ram}</p>
+            )}
+            {(lastImpact?.cpu_disk || activeProfileMeta?.impact?.cpu_disk) && (
+              <p>CPU/диск: {lastImpact?.cpu_disk ?? activeProfileMeta?.impact?.cpu_disk}</p>
+            )}
+            {lastWorkersDisabled.length > 0 && (
+              <p>Отключённые workers: {lastWorkersDisabled.map(workerLabel).join(', ')}</p>
+            )}
+          </CardContent>
+        )}
+      </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">

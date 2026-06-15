@@ -16,6 +16,8 @@ export default function MiniShell() {
         baseTabs[0],
         baseTabs[1],
         { to: '/nodes', label: 'Узлы' },
+        { to: '/warper', label: 'WARP' },
+        { to: '/cidr', label: 'CIDR' },
         baseTabs[2],
       ]
     : baseTabs

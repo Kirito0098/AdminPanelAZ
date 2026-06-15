@@ -14,6 +14,7 @@ from app.models import User
 from app.models import VpnConfig, VpnType
 from app.schemas import (
     DashboardSummary,
+    GlobalDashboardSummary,
     MonitoringOverview,
     PanelResourceCurrentResponse,
     PanelResourceHistoryPoint,
@@ -21,8 +22,18 @@ from app.schemas import (
     ResourceHistoryPoint,
     ResourceHistoryResponse,
 )
-from app.services.monitoring_overview import build_federated_monitoring_overview, build_monitoring_overview
+from app.services.monitoring_overview import (
+    build_federated_monitoring_overview,
+    build_global_dashboard_summary,
+    build_monitoring_overview,
+)
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.node_remote_cache import (
+    FEDERATED_OVERVIEW_CACHE_KEY,
+    GLOBAL_DASHBOARD_CACHE_KEY,
+    NODES_COMPARE_CACHE_KEY,
+    get_cached_monitoring_overview,
+)
 from app.services.panel_resource_collector import collect_panel_metrics
 from app.services.panel_resource_metrics import VALID_PERIODS as PANEL_VALID_PERIODS
 from app.services.panel_resource_metrics import query_history as query_panel_history
@@ -32,10 +43,58 @@ router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 _settings = get_settings()
 
 
+def _monitoring_cache_ttl() -> int:
+    return max(0, int(_settings.monitoring_overview_cache_ttl_seconds))
+
+
 def _build_monitoring_overview(db: Session, scope: str = "node") -> MonitoringOverview:
     if scope == "all":
-        return build_federated_monitoring_overview(db)
+        ttl = _monitoring_cache_ttl()
+        return get_cached_monitoring_overview(
+            FEDERATED_OVERVIEW_CACHE_KEY,
+            ttl,
+            lambda: build_federated_monitoring_overview(db),
+        )
     return build_monitoring_overview(db)
+
+
+@router.get("/global-summary", response_model=GlobalDashboardSummary)
+def global_dashboard_summary(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        ttl = _monitoring_cache_ttl()
+        return get_cached_monitoring_overview(
+            GLOBAL_DASHBOARD_CACHE_KEY,
+            ttl,
+            lambda: build_global_dashboard_summary(db),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка сборки global dashboard: {exc}",
+        ) from exc
+
+
+@router.get("/nodes-compare", response_model=GlobalDashboardSummary)
+def nodes_compare(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Side-by-side compare metrics for all nodes (same payload as global-summary)."""
+    try:
+        ttl = _monitoring_cache_ttl()
+        return get_cached_monitoring_overview(
+            NODES_COMPARE_CACHE_KEY,
+            ttl,
+            lambda: build_global_dashboard_summary(db),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка сборки сравнения узлов: {exc}",
+        ) from exc
 
 
 @router.get("/overview", response_model=MonitoringOverview)

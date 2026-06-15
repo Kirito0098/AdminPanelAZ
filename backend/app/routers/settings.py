@@ -9,7 +9,7 @@ from app.auth import get_current_user, require_admin
 from app.config import get_settings as load_app_config
 from app.database import get_db
 from app.models import AppSetting, User
-from app.schemas import AppSettingsResponse, AppSettingsUpdate, MessageResponse, MonitorSettingsResponse, MonitorSettingsUpdate
+from app.schemas import AppSettingsResponse, AppSettingsUpdate, MessageResponse, MonitorSettingsResponse, MonitorSettingsUpdate, RetentionSettingsResponse, RetentionSettingsUpdate
 from app.services.admin_notify import admin_notify_service
 from app.services.env_file import EnvFileService
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
@@ -209,4 +209,67 @@ def update_monitor_settings(
         ram_threshold=updated.monitor_ram_threshold,
         interval_seconds=updated.monitor_check_interval_seconds,
         cooldown_minutes=updated.monitor_cooldown_minutes,
+    )
+
+
+@router.get("/retention", response_model=RetentionSettingsResponse)
+def get_retention_settings(_: User = Depends(require_admin)):
+    cfg = load_app_config()
+    return RetentionSettingsResponse(
+        enabled=cfg.retention_enabled,
+        interval_hours=cfg.retention_interval_hours,
+        traffic_sample_retention_days=cfg.traffic_sample_retention_days,
+        action_log_retention_days=cfg.action_log_retention_days,
+        resource_metrics_retention_days=cfg.resource_metrics_retention_days,
+        panel_resource_metrics_retention_days=cfg.panel_resource_metrics_retention_days,
+    )
+
+
+@router.patch("/retention", response_model=RetentionSettingsResponse)
+def update_retention_settings(
+    payload: RetentionSettingsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    env_service = EnvFileService(ENV_FILE)
+    cfg = load_app_config()
+
+    if payload.enabled is not None:
+        env_service.set_env_value("RETENTION_ENABLED", "true" if payload.enabled else "false")
+        os.environ["RETENTION_ENABLED"] = "true" if payload.enabled else "false"
+    if payload.interval_hours is not None:
+        env_service.set_env_value("RETENTION_INTERVAL_HOURS", str(payload.interval_hours))
+        os.environ["RETENTION_INTERVAL_HOURS"] = str(payload.interval_hours)
+    if payload.traffic_sample_retention_days is not None:
+        env_service.set_env_value("TRAFFIC_SAMPLE_RETENTION_DAYS", str(payload.traffic_sample_retention_days))
+        os.environ["TRAFFIC_SAMPLE_RETENTION_DAYS"] = str(payload.traffic_sample_retention_days)
+    if payload.action_log_retention_days is not None:
+        env_service.set_env_value("ACTION_LOG_RETENTION_DAYS", str(payload.action_log_retention_days))
+        os.environ["ACTION_LOG_RETENTION_DAYS"] = str(payload.action_log_retention_days)
+    if payload.resource_metrics_retention_days is not None:
+        env_service.set_env_value("RESOURCE_METRICS_RETENTION_DAYS", str(payload.resource_metrics_retention_days))
+        os.environ["RESOURCE_METRICS_RETENTION_DAYS"] = str(payload.resource_metrics_retention_days)
+    if payload.panel_resource_metrics_retention_days is not None:
+        env_service.set_env_value(
+            "PANEL_RESOURCE_METRICS_RETENTION_DAYS",
+            str(payload.panel_resource_metrics_retention_days),
+        )
+        os.environ["PANEL_RESOURCE_METRICS_RETENTION_DAYS"] = str(payload.panel_resource_metrics_retention_days)
+
+    load_app_config.cache_clear()
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_retention_update",
+        client_timezone=get_client_timezone_from_request(request),
+    )
+    updated = load_app_config()
+    return RetentionSettingsResponse(
+        enabled=updated.retention_enabled,
+        interval_hours=updated.retention_interval_hours,
+        traffic_sample_retention_days=updated.traffic_sample_retention_days,
+        action_log_retention_days=updated.action_log_retention_days,
+        resource_metrics_retention_days=updated.resource_metrics_retention_days,
+        panel_resource_metrics_retention_days=updated.panel_resource_metrics_retention_days,
     )

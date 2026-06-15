@@ -55,13 +55,13 @@ def test_send_config_uses_user_telegram_id(api_test_env):
         return True
 
     with (
-        patch("app.routers.tg_mini.get_active_adapter", return_value=mock_adapter),
+        patch("app.services.telegram_config_send.get_active_adapter", return_value=mock_adapter),
         patch("app.routers.tg_mini.get_active_node", return_value=env["node"]),
-        patch("app.routers.tg_mini.send_tg_document", side_effect=_capture_send),
+        patch("app.services.telegram_config_send.send_tg_document", side_effect=_capture_send),
     ):
         response = _client(env).post(
-            "/api/tg-mini/send-config",
-            json={"config_id": config_id},
+            f"/api/tg-mini/configs/{config_id}/send",
+            json={"destination": "self"},
             headers=env["admin_headers"],
         )
 
@@ -92,13 +92,13 @@ def test_send_config_admin_fallback_to_chat_id(api_test_env):
         return True
 
     with (
-        patch("app.routers.tg_mini.get_active_adapter", return_value=mock_adapter),
+        patch("app.services.telegram_config_send.get_active_adapter", return_value=mock_adapter),
         patch("app.routers.tg_mini.get_active_node", return_value=env["node"]),
-        patch("app.routers.tg_mini.send_tg_document", side_effect=_capture_send),
+        patch("app.services.telegram_config_send.send_tg_document", side_effect=_capture_send),
     ):
         response = _client(env).post(
-            "/api/tg-mini/send-config",
-            json={"config_id": config_id},
+            f"/api/tg-mini/configs/{config_id}/send",
+            json={"destination": "self"},
             headers=env["admin_headers"],
         )
 
@@ -122,12 +122,12 @@ def test_send_config_user_without_telegram_id_fails(api_test_env):
     mock_adapter.read_profile_file.return_value = "client-config"
 
     with (
-        patch("app.routers.tg_mini.get_active_adapter", return_value=mock_adapter),
+        patch("app.services.telegram_config_send.get_active_adapter", return_value=mock_adapter),
         patch("app.routers.tg_mini.get_active_node", return_value=env["node"]),
     ):
         response = _client(env).post(
-            "/api/tg-mini/send-config",
-            json={"config_id": config_id},
+            f"/api/tg-mini/configs/{config_id}/send",
+            json={"destination": "self"},
             headers=env["viewer_headers"],
         )
     assert response.status_code == 503

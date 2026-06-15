@@ -68,13 +68,14 @@ def api_test_env(tmp_path, monkeypatch):
     """Isolated SQLite DB + patched auth/rate-limit for API integration tests."""
     from app.auth import create_access_token, get_password_hash
     from app.config import Settings
-    from app.database import Base, get_db
+    from app.database import Base, get_db, run_db_migrations
     from app.main import app
     from app.models import Node, NodeStatus, User, UserRole
 
     db_path = tmp_path / "api_test.db"
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)
+    run_db_migrations()
     TestingSession = sessionmaker(bind=engine)
     session = TestingSession()
 
@@ -150,6 +151,16 @@ def api_test_env(tmp_path, monkeypatch):
         patch("app.routers.feature_toggles.get_feature_service", return_value=feature_service),
         patch("app.routers.edit_files.get_active_adapter", return_value=mock_adapter),
         patch("app.services.node_manager.get_active_adapter", return_value=mock_adapter),
+        patch("app.services.client_templates.get_active_adapter", return_value=mock_adapter),
+        patch("app.services.bulk_config_ops.get_active_adapter", return_value=mock_adapter),
+        patch(
+            "app.services.bulk_config_ops.get_active_node",
+            side_effect=lambda db: db.query(__import__("app.models", fromlist=["Node"]).Node).filter_by(is_local=True).first(),
+        ),
+        patch(
+            "app.services.bulk_config_ops.get_node_antizapret_path",
+            return_value=__import__("pathlib").Path("/tmp/antizapret"),
+        ),
     )
     for item in patches:
         item.start()

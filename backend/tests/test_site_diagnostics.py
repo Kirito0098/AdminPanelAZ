@@ -13,6 +13,7 @@ from app.services.site_diagnostics import (
     CheckResult,
     DiagnosticsContext,
     decode_journal_line,
+    report_to_dict,
     run_site_diagnostics,
 )
 

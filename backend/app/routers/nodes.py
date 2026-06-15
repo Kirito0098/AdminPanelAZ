@@ -21,7 +21,9 @@ from app.schemas import (
     NodeUpdate,
     NodeUpdateRequest,
     NodeUpdateResult,
+    NodeUpdateRollRequest,
     NodeUpdatesResponse,
+    GeoRoutingHintResponse,
     ResourceHistoryPoint,
     ResourceHistoryResponse,
 )
@@ -45,9 +47,44 @@ from app.services.node_manager import (
 )
 from app.services.action_log import log_action
 from app.services.ip_restriction import ip_restriction_service
+from app.services.node_update_roll import enqueue_node_update_roll
+from app.services.background_tasks import background_task_service
+from app.services.geo_routing_hint import build_geo_routing_hint
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 settings = get_settings()
+
+
+@router.post("/update-roll")
+def rolling_node_update(
+    payload: NodeUpdateRollRequest,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    try:
+        task_id = enqueue_node_update_roll(db, node_ids=payload.node_ids, actor_username=admin.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    task = background_task_service.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Не удалось создать задачу")
+
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_update_roll_queued",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"nodes={','.join(str(x) for x in payload.node_ids)}",
+        )
+
+    return background_task_service.build_accepted_payload(
+        task,
+        f"Rolling update: {len(payload.node_ids)} узл(ов) в очереди",
+    )
 
 
 def _to_response(node: Node) -> NodeResponse:
@@ -71,6 +108,22 @@ def list_nodes(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     sync_local_node(db)
     nodes = db.query(Node).order_by(Node.is_local.desc(), Node.name).all()
     return [_to_response(n) for n in nodes]
+
+
+@router.get("/geo-routing-hint", response_model=GeoRoutingHintResponse)
+def geo_routing_hint(
+    request: Request,
+    client_ip: str | None = Query(default=None, description="Публичный IP клиента (опционально)"),
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    resolved_ip = client_ip
+    if not resolved_ip and request.client:
+        resolved_ip = request.client.host
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        resolved_ip = forwarded.split(",")[0].strip()
+    return build_geo_routing_hint(db, client_ip=resolved_ip)
 
 
 @router.post("", response_model=NodeResponse, status_code=status.HTTP_201_CREATED)

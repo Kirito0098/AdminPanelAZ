@@ -61,6 +61,7 @@ export default function UsersTab({
   const [search, setSearch] = useState('')
   const [activeEditor, setActiveEditor] = useState<User | null>(null)
   const [draftTelegramId, setDraftTelegramId] = useState('')
+  const [draftConfigQuota, setDraftConfigQuota] = useState('')
   const [savingUser, setSavingUser] = useState(false)
   const [usersList, setUsersList] = useState(users)
 
@@ -176,13 +177,25 @@ export default function UsersTab({
   const openUserEditor = (user: User) => {
     setActiveEditor(user)
     setDraftTelegramId(user.telegram_id || '')
+    setDraftConfigQuota(
+      user.config_quota != null && user.config_quota > 0 ? String(user.config_quota) : '',
+    )
   }
 
   const saveUserTelegramId = async () => {
     if (!activeEditor) return
     setSavingUser(true)
     try {
-      const updated = await updateUser(activeEditor.id, { telegram_id: draftTelegramId.trim() })
+      const payload: Record<string, unknown> = { telegram_id: draftTelegramId.trim() }
+      if (activeEditor.role === 'user') {
+        const raw = draftConfigQuota.trim()
+        payload.config_quota = raw === '' ? 0 : Number.parseInt(raw, 10)
+        if (raw !== '' && (!Number.isFinite(payload.config_quota as number) || (payload.config_quota as number) < 0)) {
+          notifyError('Квота: целое число ≥ 0 (0 = без лимита по умолчанию)')
+          return
+        }
+      }
+      const updated = await updateUser(activeEditor.id, payload)
       setUsersList((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       success(`Telegram ID для «${updated.username}» сохранён`)
       setActiveEditor(null)
@@ -373,8 +386,8 @@ export default function UsersTab({
         onOpenChange={(open) => {
           if (!open && !savingUser) setActiveEditor(null)
         }}
-        title={activeEditor ? `Telegram ID: ${activeEditor.username}` : 'Telegram ID'}
-        description="Числовой ID пользователя Telegram для входа через виджет и Mini App"
+        title={activeEditor ? `Пользователь: ${activeEditor.username}` : 'Пользователь'}
+        description="Telegram ID и квота конфигов для self-service"
         icon={Users}
         footer={
           <>
@@ -388,17 +401,36 @@ export default function UsersTab({
           </>
         }
       >
-        <div className="space-y-2">
-          <Label htmlFor="editTelegramId">Telegram ID</Label>
-          <Input
-            id="editTelegramId"
-            value={draftTelegramId}
-            onChange={(e) => setDraftTelegramId(e.target.value)}
-            placeholder="123456789"
-          />
-          <p className="text-xs text-muted-foreground">
-            Оставьте пустым, чтобы снять привязку. Один ID нельзя назначить двум пользователям.
-          </p>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="editTelegramId">Telegram ID</Label>
+            <Input
+              id="editTelegramId"
+              value={draftTelegramId}
+              onChange={(e) => setDraftTelegramId(e.target.value)}
+              placeholder="123456789"
+            />
+            <p className="text-xs text-muted-foreground">
+              Оставьте пустым, чтобы снять привязку. Один ID нельзя назначить двум пользователям.
+            </p>
+          </div>
+          {activeEditor?.role === 'user' && (
+            <div className="space-y-2">
+              <Label htmlFor="editConfigQuota">Квота конфигов</Label>
+              <Input
+                id="editConfigQuota"
+                type="number"
+                min={0}
+                max={1000}
+                value={draftConfigQuota}
+                onChange={(e) => setDraftConfigQuota(e.target.value)}
+                placeholder="по умолчанию"
+              />
+              <p className="text-xs text-muted-foreground">
+                Максимум VPN-клиентов для role=user. Пусто или 0 — глобальный лимит из настроек.
+              </p>
+            </div>
+          )}
         </div>
       </AppDialog>
 

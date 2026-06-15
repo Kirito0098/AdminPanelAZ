@@ -388,11 +388,16 @@ def test_webhook_warper_status_command(api_test_env):
     update["message"]["text"] = "/warper"
     with (
         patch("app.routers.telegram_webhook.is_telegram_ip", return_value=True),
-        patch("app.services.telegram_bot_handlers.warper_status.get_active_adapter") as get_adapter,
-        patch("app.services.telegram_bot_handlers.warper_status.get_active_node", return_value=api_test_env["node"]),
+        patch(
+            "app.services.telegram_bot_handlers.warper_status.build_warper_status_payload",
+            return_value={
+                "node_name": api_test_env["node"].name,
+                "node_host": api_test_env["node"].host,
+                "status": "running",
+            },
+        ),
         patch("app.services.telegram_bot_handlers.warper_status.send_or_edit", new_callable=AsyncMock) as send,
     ):
-        get_adapter.return_value = mock_adapter
         send.return_value = True
         response = _client(api_test_env).post(
             "/api/telegram/webhook/test-webhook-secret",

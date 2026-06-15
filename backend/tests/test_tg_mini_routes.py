@@ -236,3 +236,48 @@ def test_tg_mini_activate_node(api_test_env):
     body = response.json()
     assert body["node"]["is_active"] is True
     assert body["node"]["name"] == "remote-mini"
+
+
+def test_tg_mini_warper_status_admin(api_test_env):
+    env = api_test_env
+    mock_adapter = env["mock_adapter"]
+    mock_adapter.get_warper_status.return_value = {"status": "running", "mode": "auto"}
+
+    with patch("app.routers.tg_mini.build_warper_status_payload", return_value={
+        "node_id": env["node"].id,
+        "node_name": "local",
+        "node_host": "127.0.0.1",
+        "status": "running",
+        "raw": {"status": "running"},
+    }):
+        response = _client(env).get("/api/tg-mini/warper/status", headers=env["admin_headers"])
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "running"
+    assert body["node_name"] == "local"
+
+
+def test_tg_mini_warper_status_viewer_forbidden(api_test_env):
+    env = api_test_env
+    response = _client(env).get("/api/tg-mini/warper/status", headers=env["viewer_headers"])
+    assert response.status_code == 403
+
+
+def test_tg_mini_cidr_status_admin(api_test_env):
+    env = api_test_env
+    with patch(
+        "app.routers.tg_mini.build_cidr_status_payload",
+        return_value={
+            "total_cidrs": 42,
+            "last_refresh_status": "ok",
+            "last_refresh_finished": "2026-01-01T00:00:00",
+            "active_task": None,
+            "last_compile": None,
+            "last_deploy": None,
+        },
+    ):
+        response = _client(env).get("/api/tg-mini/cidr/status", headers=env["admin_headers"])
+
+    assert response.status_code == 200
+    assert response.json()["total_cidrs"] == 42

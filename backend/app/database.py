@@ -363,13 +363,330 @@ def _migrate_panel_resource_sample_table() -> None:
     logger.info("DB migration: created panel_resource_sample table")
 
 
+def _migrate_stage2_admin_productivity() -> None:
+    """Stage 2: config tags, client templates, active_web_session.revoked_at."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    if "config_tags" not in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE config_tags (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        node_id INTEGER NOT NULL,
+                        name VARCHAR(64) NOT NULL,
+                        color VARCHAR(16),
+                        created_at DATETIME,
+                        UNIQUE (node_id, name),
+                        FOREIGN KEY(node_id) REFERENCES nodes (id)
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_config_tags_node_id ON config_tags (node_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_config_tags_name ON config_tags (name)"))
+        logger.info("DB migration: created config_tags table")
+
+    if "vpn_config_tag_links" not in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE vpn_config_tag_links (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        vpn_config_id INTEGER NOT NULL,
+                        tag_id INTEGER NOT NULL,
+                        UNIQUE (vpn_config_id, tag_id),
+                        FOREIGN KEY(vpn_config_id) REFERENCES vpn_configs (id) ON DELETE CASCADE,
+                        FOREIGN KEY(tag_id) REFERENCES config_tags (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_vpn_config_tag_links_vpn_config_id "
+                    "ON vpn_config_tag_links (vpn_config_id)"
+                )
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_vpn_config_tag_links_tag_id ON vpn_config_tag_links (tag_id)")
+            )
+        logger.info("DB migration: created vpn_config_tag_links table")
+
+    if "client_templates" not in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE client_templates (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        node_id INTEGER NOT NULL,
+                        name VARCHAR(64) NOT NULL,
+                        vpn_type VARCHAR(16) NOT NULL,
+                        cert_expire_days INTEGER,
+                        traffic_limit_value FLOAT,
+                        traffic_limit_unit VARCHAR(8),
+                        traffic_limit_period_days INTEGER,
+                        description_template VARCHAR(255),
+                        sort_order INTEGER DEFAULT 0,
+                        is_builtin INTEGER DEFAULT 0,
+                        created_at DATETIME,
+                        UNIQUE (node_id, name),
+                        FOREIGN KEY(node_id) REFERENCES nodes (id)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_client_templates_node_id ON client_templates (node_id)")
+            )
+        logger.info("DB migration: created client_templates table")
+
+    inspector = inspect(engine)
+    if "active_web_session" in inspector.get_table_names():
+        cols = {col["name"] for col in inspector.get_columns("active_web_session")}
+        if "revoked_at" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE active_web_session ADD COLUMN revoked_at DATETIME"))
+            logger.info("DB migration: added active_web_session.revoked_at")
+
+
+def _migrate_user_reminder_logs_table() -> None:
+    inspector = inspect(engine)
+    if "user_reminder_logs" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE user_reminder_logs (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    reminder_type VARCHAR(32) NOT NULL,
+                    dedup_key VARCHAR(128) NOT NULL,
+                    sent_at DATETIME,
+                    UNIQUE (user_id, reminder_type, dedup_key),
+                    FOREIGN KEY(user_id) REFERENCES users (id)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_user_reminder_logs_user_id ON user_reminder_logs (user_id)")
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_user_reminder_logs_sent_at ON user_reminder_logs (sent_at)")
+        )
+    logger.info("DB migration: created user_reminder_logs table")
+
+
+def _seed_client_templates_for_nodes() -> None:
+    from app.models import ClientTemplate, Node, VpnType
+
+    inspector = inspect(engine)
+    if "client_templates" not in inspector.get_table_names() or "nodes" not in inspector.get_table_names():
+        return
+
+    builtins = [
+        {
+            "name": "OVPN 3650d",
+            "vpn_type": VpnType.openvpn,
+            "cert_expire_days": 3650,
+            "sort_order": 10,
+        },
+        {
+            "name": "OVPN 3650d + 100 GB",
+            "vpn_type": VpnType.openvpn,
+            "cert_expire_days": 3650,
+            "traffic_limit_value": 100.0,
+            "traffic_limit_unit": "GB",
+            "sort_order": 20,
+        },
+        {
+            "name": "WireGuard базовый",
+            "vpn_type": VpnType.wireguard,
+            "sort_order": 30,
+        },
+        {
+            "name": "WG + 50 GB / мес",
+            "vpn_type": VpnType.wireguard,
+            "traffic_limit_value": 50.0,
+            "traffic_limit_unit": "GB",
+            "traffic_limit_period_days": 30,
+            "sort_order": 40,
+        },
+    ]
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        nodes = db.query(Node).all()
+        for node in nodes:
+            existing = db.query(ClientTemplate).filter(ClientTemplate.node_id == node.id).count()
+            if existing:
+                continue
+            for item in builtins:
+                db.add(
+                    ClientTemplate(
+                        node_id=node.id,
+                        is_builtin=True,
+                        description_template=None,
+                        **item,
+                    )
+                )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _migrate_node_sync_groups_table() -> None:
+    inspector = inspect(engine)
+    if "node_sync_groups" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE node_sync_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name VARCHAR(128) NOT NULL,
+                    shared_domain VARCHAR(255) NOT NULL,
+                    primary_node_id INTEGER NOT NULL REFERENCES nodes(id),
+                    replica_node_ids TEXT NOT NULL DEFAULT '[]',
+                    sync_mode VARCHAR(32) NOT NULL DEFAULT 'manual_full',
+                    sync_status VARCHAR(20) NOT NULL DEFAULT 'unknown',
+                    last_sync_at DATETIME,
+                    last_verify_at DATETIME,
+                    last_sync_task_id VARCHAR(32),
+                    last_sync_error TEXT,
+                    last_verify_result TEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX ix_node_sync_groups_primary ON node_sync_groups(primary_node_id)"))
+        logger.info("DB migration: created node_sync_groups table")
+
+
+def _migrate_vpn_configs_ha_links() -> None:
+    inspector = inspect(engine)
+    if "vpn_configs" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("vpn_configs")}
+    with engine.begin() as conn:
+        if "sync_group_id" not in cols:
+            conn.execute(
+                text("ALTER TABLE vpn_configs ADD COLUMN sync_group_id INTEGER REFERENCES node_sync_groups(id)")
+            )
+            logger.info("DB migration: added vpn_configs.sync_group_id")
+        if "ha_primary_config_id" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE vpn_configs ADD COLUMN ha_primary_config_id INTEGER REFERENCES vpn_configs(id)"
+                )
+            )
+            logger.info("DB migration: added vpn_configs.ha_primary_config_id")
+
+
+def _migrate_webhook_delivery_table() -> None:
+    inspector = inspect(engine)
+    if "webhook_delivery" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE webhook_delivery (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_action VARCHAR(64) NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    url VARCHAR(512) NOT NULL,
+                    destination_type VARCHAR(16) NOT NULL DEFAULT 'http',
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_status_code INTEGER,
+                    last_error TEXT,
+                    next_retry_at DATETIME,
+                    created_at DATETIME NOT NULL,
+                    delivered_at DATETIME
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX ix_webhook_delivery_event_action ON webhook_delivery (event_action)"))
+        conn.execute(text("CREATE INDEX ix_webhook_delivery_status ON webhook_delivery (status)"))
+        conn.execute(text("CREATE INDEX ix_webhook_delivery_next_retry_at ON webhook_delivery (next_retry_at)"))
+        conn.execute(text("CREATE INDEX ix_webhook_delivery_created_at ON webhook_delivery (created_at)"))
+        logger.info("DB migration: created webhook_delivery table")
+
+
+def _migrate_webauthn_credentials_table() -> None:
+    inspector = inspect(engine)
+    if "webauthn_credentials" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE webauthn_credentials (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    credential_id VARCHAR(512) NOT NULL,
+                    public_key TEXT NOT NULL,
+                    sign_count INTEGER NOT NULL DEFAULT 0,
+                    transports TEXT,
+                    aaguid VARCHAR(64),
+                    nickname VARCHAR(128) NOT NULL DEFAULT 'Passkey',
+                    created_at DATETIME NOT NULL,
+                    last_used_at DATETIME,
+                    CONSTRAINT uq_webauthn_credential_id UNIQUE (credential_id)
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX ix_webauthn_credentials_user_id ON webauthn_credentials (user_id)"))
+        conn.execute(
+            text("CREATE INDEX ix_webauthn_credentials_credential_id ON webauthn_credentials (credential_id)")
+        )
+        logger.info("DB migration: created webauthn_credentials table")
+
+
+def _migrate_webhook_delivery_destination_type() -> None:
+    inspector = inspect(engine)
+    if "webhook_delivery" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("webhook_delivery")}
+    if "destination_type" in existing:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE webhook_delivery ADD COLUMN destination_type VARCHAR(16) NOT NULL DEFAULT 'http'"
+            )
+        )
+        conn.execute(text("CREATE INDEX ix_webhook_delivery_destination_type ON webhook_delivery (destination_type)"))
+        logger.info("DB migration: added webhook_delivery.destination_type")
+
+
 def run_db_migrations() -> None:
     """Lightweight SQLite migrations for columns added after initial deploy."""
+    _migrate_node_sync_groups_table()
+    _migrate_vpn_configs_ha_links()
     _migrate_vpn_configs_node_scope()
     _migrate_access_policy_node_scope()
     _migrate_node_resource_sample_table()
     _migrate_panel_resource_sample_table()
     _migrate_active_web_session_table()
+    _migrate_stage2_admin_productivity()
+    _migrate_user_reminder_logs_table()
+    _migrate_webhook_delivery_table()
+    _migrate_webauthn_credentials_table()
+    _migrate_webhook_delivery_destination_type()
     inspector = inspect(engine)
     migrations = {
         "wg_access_policy": [
@@ -396,6 +713,7 @@ def run_db_migrations() -> None:
             ("totp_backup_codes_encrypted", "VARCHAR(1024)"),
             ("telegram_id", "VARCHAR(32)"),
             ("tg_notify_events", "TEXT"),
+            ("config_quota", "INTEGER"),
         ],
     }
     with engine.begin() as conn:
@@ -411,6 +729,7 @@ def run_db_migrations() -> None:
 
     _migrate_user_telegram_backfill()
     _migrate_nodes_mtls_enabled()
+    _seed_client_templates_for_nodes()
 
 
 def _migrate_nodes_mtls_enabled() -> None:

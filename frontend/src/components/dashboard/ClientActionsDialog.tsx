@@ -24,6 +24,7 @@ import {
   openvpnSetTrafficLimit,
   openvpnTempBlock,
   openvpnUnblock,
+  setConfigTags,
   updateConfig,
   wgClearTrafficLimit,
   wgPermanentBlock,
@@ -58,7 +59,8 @@ import {
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
-import type { ClientAccessPolicy, User, UserRole, VpnConfig } from '@/types'
+import { useNode } from '@/context/NodeContext'
+import type { ClientAccessPolicy, ConfigTag, User, UserRole, VpnConfig } from '@/types'
 
 interface ClientActionsDialogProps {
   config: VpnConfig | null
@@ -66,6 +68,7 @@ interface ClientActionsDialogProps {
   policy?: ClientAccessPolicy
   userRole: UserRole
   ownerCandidates?: User[]
+  allTags?: ConfigTag[]
   open: boolean
   onOpenChange: (open: boolean) => void
   onRefresh: () => Promise<void>
@@ -145,6 +148,7 @@ export default function ClientActionsDialog({
   policy,
   userRole,
   ownerCandidates = [],
+  allTags = [],
   open,
   onOpenChange,
   onRefresh,
@@ -154,6 +158,7 @@ export default function ClientActionsDialog({
   onNotifyError,
   showQrDownloads = true,
 }: ClientActionsDialogProps) {
+  const { activeNode } = useNode()
   const [promptMode, setPromptMode] = useState<PromptMode>(null)
   const [promptTitle, setPromptTitle] = useState('')
   const [promptMessage, setPromptMessage] = useState('')
@@ -169,6 +174,25 @@ export default function ClientActionsDialog({
   if (!config) return null
 
   const isAdmin = userRole === 'admin'
+  const policyNodeName = policy?.node_name ?? activeNode?.name
+
+  const toggleConfigTag = async (tagId: number) => {
+    if (!isAdmin) return
+    const current = new Set((config.tags ?? []).map((t) => t.id))
+    if (current.has(tagId)) current.delete(tagId)
+    else current.add(tagId)
+    setBusyAction('tags')
+    try {
+      await setConfigTags(config.id, [...current])
+      onNotifySuccess('Теги обновлены')
+      await onRefresh()
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка обновления тегов')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
   const isOwner = userRole === 'user' || isAdmin
   const canManage = isAdmin
   const canDelete = isAdmin || userRole === 'user'
@@ -586,6 +610,11 @@ export default function ClientActionsDialog({
                   AZ
                 </Badge>
               )}
+              {policyNodeName && (
+                <Badge variant="outline" className="text-[10px]">
+                  Политика: {policyNodeName}
+                </Badge>
+              )}
             </div>
           </DialogHeader>
 
@@ -698,6 +727,30 @@ export default function ClientActionsDialog({
                       destructive
                     />
                   ))}
+                </div>
+              </section>
+            )}
+
+            {isAdmin && allTags.length > 0 && (
+              <section className="rounded-lg border p-3">
+                <h3 className="mb-2.5 text-sm font-medium">Теги</h3>
+                <div className="flex flex-wrap gap-2">
+                  {allTags.map((tag) => {
+                    const active = (config.tags ?? []).some((t) => t.id === tag.id)
+                    return (
+                      <Button
+                        key={tag.id}
+                        type="button"
+                        size="sm"
+                        variant={active ? 'default' : 'outline'}
+                        className="h-7 text-xs"
+                        disabled={busyAction === 'tags'}
+                        onClick={() => void toggleConfigTag(tag.id)}
+                      >
+                        {tag.name}
+                      </Button>
+                    )
+                  })}
                 </div>
               </section>
             )}

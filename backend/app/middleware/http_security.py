@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 from collections.abc import Mapping
 from typing import Any
 
@@ -103,10 +104,31 @@ TG_MINI_FRAME_ANCESTORS = (
 )
 
 
-def csp_for_path(path: str, base_csp: str) -> str:
-    if not is_tg_mini_path(path):
+def generate_csp_nonce() -> str:
+    return secrets.token_urlsafe(16)
+
+
+def apply_csp_nonce(base_csp: str, nonce: str | None, *, relaxed: bool = False) -> str:
+    if not nonce or relaxed:
         return base_csp
-    stripped = re.sub(r"frame-ancestors[^;]*;?\s*", "", base_csp).strip()
+
+    def _patch_script_src(match: re.Match[str]) -> str:
+        directive = match.group(1)
+        directive = directive.replace("'unsafe-inline'", "")
+        directive = re.sub(r"\s+", " ", directive).strip()
+        nonce_token = f"'nonce-{nonce}'"
+        if nonce_token not in directive:
+            directive = f"{directive} {nonce_token}".strip()
+        return f"script-src {directive};"
+
+    return re.sub(r"script-src\s+([^;]+);", _patch_script_src, base_csp, count=1)
+
+
+def csp_for_path(path: str, base_csp: str, nonce: str | None = None, *, relaxed: bool = False) -> str:
+    csp = apply_csp_nonce(base_csp, nonce, relaxed=relaxed)
+    if not is_tg_mini_path(path):
+        return csp
+    stripped = re.sub(r"frame-ancestors[^;]*;?\s*", "", csp).strip()
     if stripped and not stripped.endswith(";"):
         stripped += ";"
     return f"{stripped} {TG_MINI_FRAME_ANCESTORS};".strip()
@@ -115,6 +137,7 @@ def csp_for_path(path: str, base_csp: str) -> str:
 class HttpSecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         settings = get_settings()
+        request.state.csp_nonce = generate_csp_nonce()
 
         if settings.enforce_https and not self._is_secure(request):
             url = str(request.url).replace("http://", "https://", 1)
@@ -157,7 +180,13 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
                 f"max-age={settings.hsts_max_age}; includeSubDomains",
             )
         if settings.content_security_policy:
-            csp = csp_for_path(path, settings.content_security_policy)
+            nonce = getattr(request.state, "csp_nonce", None) if request is not None else None
+            csp = csp_for_path(
+                path,
+                settings.content_security_policy,
+                nonce,
+                relaxed=settings.csp_relaxed_dev,
+            )
             response.headers["Content-Security-Policy"] = csp
         if should_noindex_path(path):
             response.headers.setdefault("X-Robots-Tag", "noindex, nofollow, noarchive")

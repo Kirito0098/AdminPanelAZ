@@ -14,6 +14,11 @@ def monitoring_overview_cache_key(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
+FEDERATED_OVERVIEW_CACHE_KEY = "federated:overview:all"
+GLOBAL_DASHBOARD_CACHE_KEY = "federated:global-summary"
+NODES_COMPARE_CACHE_KEY = "federated:nodes-compare"
+
+
 def get_cached_monitoring_overview(
     cache_key: str,
     ttl_seconds: int,

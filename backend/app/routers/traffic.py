@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import AppSetting, TrafficSessionState, User
-from app.schemas import MessageResponse, TrafficClientSessionsResponse, TrafficOverview
+from app.models import AppSetting, TrafficSessionState, User, UserRole
+from app.schemas import MessageResponse, TrafficClientRow, TrafficClientSessionsResponse, TrafficOverview, TrafficSummary
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.self_service import get_owned_client_names
 from app.services.traffic.chart import fetch_traffic_chart
 from app.services.traffic.collector import TrafficCollectorService
 from app.services.traffic.sessions import fetch_client_sessions
@@ -83,10 +84,23 @@ def _active_traffic_client_names(db: Session, node_id: int) -> set[str]:
     return active_names
 
 
+def _scoped_client_names(db: Session, user: User, node_id: int) -> set[str] | None:
+    if user.role == UserRole.admin:
+        return None
+    return get_owned_client_names(db, user, node_id=node_id)
+
+
+def _filter_client_names(names: set[str], allowed: set[str] | None) -> set[str]:
+    if allowed is None:
+        return names
+    return {name for name in names if name in allowed}
+
+
 @router.get("/active-clients")
-def traffic_active_clients(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def traffic_active_clients(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     node = get_active_node(db)
-    active_names = _active_traffic_client_names(db, node.id)
+    allowed = _scoped_client_names(db, current_user, node.id)
+    active_names = _filter_client_names(_active_traffic_client_names(db, node.id), allowed)
     return {
         "active_clients": sorted(active_names),
         "timestamp": datetime.utcnow(),
@@ -98,17 +112,28 @@ def traffic_active_clients(_: User = Depends(get_current_user), db: Session = De
 @router.get("/overview", response_model=TrafficOverview)
 def traffic_overview(
     live: bool = Query(True, description="Запрашивать live-статус онлайн с узла"),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     node = get_active_node(db)
+    allowed = _scoped_client_names(db, current_user, node.id)
     if live:
-        active_names = _active_traffic_client_names(db, node.id)
+        active_names = _filter_client_names(_active_traffic_client_names(db, node.id), allowed)
     else:
-        active_names = _db_active_traffic_client_names(db, node.id)
+        active_names = _filter_client_names(_db_active_traffic_client_names(db, node.id), allowed)
 
     collector = TrafficCollectorService(db, node.id)
     rows, summary = collector.get_summary(active_names, settings.traffic_db_stale_seconds)
+    if allowed is not None:
+        rows = [row for row in rows if row.common_name in allowed]
+        summary.users_count = len(rows)
+        summary.active_users_count = sum(1 for row in rows if row.is_active)
+        summary.total_received = sum(row.total_received for row in rows)
+        summary.total_sent = sum(row.total_sent for row in rows)
+        summary.total_received_vpn = sum(row.total_received_vpn for row in rows)
+        summary.total_sent_vpn = sum(row.total_sent_vpn for row in rows)
+        summary.total_received_antizapret = sum(row.total_received_antizapret for row in rows)
+        summary.total_sent_antizapret = sum(row.total_sent_antizapret for row in rows)
 
     return TrafficOverview(
         rows=rows,
@@ -132,10 +157,13 @@ def traffic_chart(
     client: str = Query(...),
     range: str = Query(default="7d", alias="range"),
     protocol: str = Query(default="all"),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     node = get_active_node(db)
+    allowed = _scoped_client_names(db, current_user, node.id)
+    if allowed is not None and client not in allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     result = fetch_traffic_chart(db, node.id, client, range, protocol)
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
@@ -146,10 +174,13 @@ def traffic_chart(
 def traffic_client_sessions(
     client: str = Query(..., min_length=1),
     limit: int = Query(default=30, ge=1, le=100),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     node = get_active_node(db)
+    allowed = _scoped_client_names(db, current_user, node.id)
+    if allowed is not None and client not in allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     result = fetch_client_sessions(db, node.id, client, recent_limit=limit)
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])

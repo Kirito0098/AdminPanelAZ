@@ -44,7 +44,7 @@ export type PipelinePendingAction = {
 
 const STAGE_TASK_TYPES: Record<PipelineStage, readonly string[]> = {
   1: ['cidr_db_refresh', 'cidr_db_refresh_dry_run', 'antifilter_refresh'],
-  2: ['cidr_generate_from_db', 'cidr_estimate_from_db'],
+  2: ['cidr_generate_from_db', 'cidr_estimate_from_db', 'cidr_rollback'],
   3: ['cidr_deploy'],
 }
 

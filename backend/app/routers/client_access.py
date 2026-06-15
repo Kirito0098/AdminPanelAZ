@@ -6,7 +6,8 @@ from app.auth import require_admin
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
-from app.services.access_policy import AccessPolicyService
+from app.schemas import NodePolicySummary
+from app.services.access_policy import AccessPolicyService, build_policy_summary_by_node
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
@@ -45,6 +46,7 @@ def _service(db: Session) -> AccessPolicyService:
         db,
         antizapret_path=get_node_antizapret_path(db),
         node_id=node.id,
+        node_name=node.name,
         adapter=get_active_adapter(db),
     )
 
@@ -98,6 +100,14 @@ def list_policies(
     if not names:
         return {}
     return svc.get_all_policies(names)
+
+
+@router.get("/policy-summary-by-node", response_model=list[NodePolicySummary])
+def policy_summary_by_node(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    return build_policy_summary_by_node(db)
 
 
 @router.get("/openvpn/{client_name}")

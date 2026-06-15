@@ -1,0 +1,200 @@
+"""NodeSyncGroup CRUD and preflight validation."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus
+from app.services.node_manager import node_metadata_dict
+
+
+def parse_replica_node_ids(raw: str | list[int] | None) -> list[int]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [int(item) for item in raw]
+    try:
+        parsed = json.loads(raw or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [int(item) for item in parsed]
+
+
+def serialize_replica_node_ids(replica_ids: list[int]) -> str:
+    return json.dumps(sorted(set(int(item) for item in replica_ids)))
+
+
+def group_member_node_ids(group: NodeSyncGroup) -> set[int]:
+    members = {group.primary_node_id}
+    members.update(parse_replica_node_ids(group.replica_node_ids))
+    return members
+
+
+def find_group_for_node(db: Session, node_id: int, *, exclude_group_id: int | None = None) -> NodeSyncGroup | None:
+    groups = db.query(NodeSyncGroup).all()
+    for group in groups:
+        if exclude_group_id is not None and group.id == exclude_group_id:
+            continue
+        if node_id in group_member_node_ids(group):
+            return group
+    return None
+
+
+def validate_sync_group_payload(
+    db: Session,
+    *,
+    primary_node_id: int,
+    replica_node_ids: list[int],
+    exclude_group_id: int | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    if not replica_node_ids:
+        errors.append("Укажите хотя бы один replica-узел")
+    if primary_node_id in replica_node_ids:
+        errors.append("Primary не может быть в списке replica")
+
+    primary = db.get(Node, primary_node_id)
+    if not primary:
+        errors.append(f"Primary узел {primary_node_id} не найден")
+    elif primary.status != NodeStatus.online:
+        errors.append(f"Primary узел «{primary.name}» не online")
+
+    replica_nodes: list[Node] = []
+    for node_id in replica_node_ids:
+        node = db.get(Node, node_id)
+        if not node:
+            errors.append(f"Replica узел {node_id} не найден")
+            continue
+        if node.status != NodeStatus.online:
+            errors.append(f"Replica «{node.name}» не online")
+        existing = find_group_for_node(db, node_id, exclude_group_id=exclude_group_id)
+        if existing:
+            errors.append(f"Узел «{node.name}» уже в группе «{existing.name}»")
+        replica_nodes.append(node)
+
+    if primary:
+        existing = find_group_for_node(db, primary.id, exclude_group_id=exclude_group_id)
+        if existing:
+            errors.append(f"Primary «{primary.name}» уже в группе «{existing.name}»")
+
+    versions: set[str] = set()
+    for node in ([primary] if primary else []) + replica_nodes:
+        meta = node_metadata_dict(node)
+        version = str(meta.get("antizapret_version") or "").strip()
+        if version:
+            versions.add(version)
+    if len(versions) > 1:
+        errors.append(f"Разные версии AntiZapret на узлах: {', '.join(sorted(versions))}")
+
+    return errors
+
+
+def raise_if_preflight_errors(errors: list[str]) -> None:
+    if not errors:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={"errors": errors},
+    )
+
+
+def apply_group_fields(
+    group: NodeSyncGroup,
+    *,
+    name: str | None = None,
+    shared_domain: str | None = None,
+    primary_node_id: int | None = None,
+    replica_node_ids: list[int] | None = None,
+    sync_mode: str | None = None,
+) -> None:
+    if name is not None:
+        group.name = name.strip()
+    if shared_domain is not None:
+        group.shared_domain = shared_domain.strip()
+    if primary_node_id is not None:
+        group.primary_node_id = primary_node_id
+    if replica_node_ids is not None:
+        group.replica_node_ids = serialize_replica_node_ids(replica_node_ids)
+    if sync_mode is not None:
+        group.sync_mode = sync_mode
+
+
+def is_auto_sync_enabled(group: NodeSyncGroup) -> bool:
+    return str(group.sync_mode or "").strip().lower() == "auto"
+
+
+def find_sync_group_for_primary(db: Session, node_id: int) -> NodeSyncGroup | None:
+    return db.query(NodeSyncGroup).filter(NodeSyncGroup.primary_node_id == node_id).first()
+
+
+def find_sync_group_containing_node(
+    db: Session,
+    node_id: int,
+) -> tuple[NodeSyncGroup | None, str]:
+    group = find_group_for_node(db, node_id)
+    if not group:
+        return None, ""
+    if group.primary_node_id == node_id:
+        return group, "primary"
+    return group, "replica"
+
+
+def get_replica_nodes(db: Session, group: NodeSyncGroup) -> list[Node]:
+    replica_ids = parse_replica_node_ids(group.replica_node_ids)
+    if not replica_ids:
+        return []
+    nodes = db.query(Node).filter(Node.id.in_(replica_ids)).all()
+    by_id = {node.id: node for node in nodes}
+    return [by_id[node_id] for node_id in replica_ids if node_id in by_id]
+
+
+def build_ha_metadata(group: NodeSyncGroup | None) -> dict[str, Any] | None:
+    if not group:
+        return None
+    replica_count = len(parse_replica_node_ids(group.replica_node_ids))
+    return {
+        "sync_group_id": group.id,
+        "shared_domain": group.shared_domain,
+        "node_count": replica_count + 1,
+        "sync_status": group.sync_status.value if hasattr(group.sync_status, "value") else str(group.sync_status),
+        "sync_mode": group.sync_mode,
+    }
+
+
+def group_to_dict(group: NodeSyncGroup, db: Session) -> dict[str, Any]:
+    replicas = parse_replica_node_ids(group.replica_node_ids)
+    nodes_by_id = {
+        node.id: node
+        for node in db.query(Node).filter(Node.id.in_([group.primary_node_id, *replicas])).all()
+    }
+    primary = nodes_by_id.get(group.primary_node_id)
+    verify_result = None
+    if group.last_verify_result:
+        try:
+            verify_result = json.loads(group.last_verify_result)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            verify_result = None
+    return {
+        "id": group.id,
+        "name": group.name,
+        "shared_domain": group.shared_domain,
+        "primary_node_id": group.primary_node_id,
+        "primary_node_name": primary.name if primary else None,
+        "replica_node_ids": replicas,
+        "replica_node_names": [nodes_by_id[nid].name for nid in replicas if nid in nodes_by_id],
+        "sync_mode": group.sync_mode,
+        "sync_status": group.sync_status.value if hasattr(group.sync_status, "value") else str(group.sync_status),
+        "last_sync_at": group.last_sync_at,
+        "last_verify_at": group.last_verify_at,
+        "last_sync_task_id": group.last_sync_task_id,
+        "last_sync_error": group.last_sync_error,
+        "last_verify_result": verify_result,
+        "created_at": group.created_at,
+        "updated_at": group.updated_at,
+    }

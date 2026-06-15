@@ -6,10 +6,15 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import Node, NodeStatus
-from app.services.cidr.cidr_notify import maybe_notify_deploy_failed, maybe_notify_ingest_partial
+from app.services.cidr.cidr_notify import (
+    maybe_notify_deploy_failed,
+    maybe_notify_ingest_partial,
+    maybe_notify_rollback_failed,
+)
 from app.services.cidr.pipeline.deploy import compute_artifact_stamp, push_cidr_artifacts
 from app.services.cidr.pipeline.db_pipeline import update_cidr_files_from_db
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
+from app.services.cidr.pipeline.file_pipeline import rollback_from_runtime_backup
 from app.services.node_adapter import NodeAdapter, RemoteNodeAdapter
 from app.services.node_manager import get_active_node, get_adapter_for_node
 
@@ -264,4 +269,58 @@ def run_multi_deploy(
         "nodes_skipped": len(skipped_nodes),
     }
     maybe_notify_deploy_failed(db, result, triggered_by=triggered_by)
+    return result
+
+
+def run_rollback(
+    db: Session,
+    backup_stamp: str,
+    *,
+    selected_files: list[str] | None = None,
+    redeploy_after: bool = False,
+    target_node_ids: list[int] | None = None,
+    all_online: bool = False,
+    target_node_id: int | None = None,
+    sync_after: bool = True,
+    apply_after: bool = False,
+    triggered_by: str | None = None,
+    progress_callback=None,
+) -> dict[str, Any]:
+    """Restore controller LIST_DIR from runtime_backups; optionally redeploy to nodes."""
+    result = rollback_from_runtime_backup(
+        backup_stamp,
+        selected_files=selected_files,
+        progress_callback=progress_callback,
+    )
+    if not result.get("success"):
+        maybe_notify_rollback_failed(db, result, triggered_by=triggered_by)
+        return result
+
+    result["artifact_stamp"] = compute_artifact_stamp()
+
+    if redeploy_after:
+        deploy_result = run_multi_deploy(
+            db,
+            target_node_ids=target_node_ids,
+            all_online=all_online,
+            target_node_id=target_node_id,
+            files=result.get("restored"),
+            sync_after=sync_after,
+            apply_after=apply_after,
+            triggered_by=triggered_by,
+        )
+        result["deploy"] = deploy_result.get("deploy")
+        result["per_node"] = deploy_result.get("per_node")
+        result["nodes_deployed"] = deploy_result.get("nodes_deployed")
+        result["nodes_failed"] = deploy_result.get("nodes_failed")
+        result["nodes_skipped"] = deploy_result.get("nodes_skipped")
+        result["success"] = bool(deploy_result.get("success"))
+        if result["success"]:
+            result["message"] = (
+                f"{result.get('message', '')} · развёрнуто на {deploy_result.get('nodes_deployed', 0)} узел(ов)"
+            ).strip(" ·")
+        else:
+            result["message"] = deploy_result.get("message") or result.get("message")
+
+    maybe_notify_rollback_failed(db, result, triggered_by=triggered_by)
     return result

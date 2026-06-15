@@ -34,6 +34,8 @@ from app.services.telegram_bot_handlers.menu import handle_menu_callback, handle
 from app.services.telegram_bot_handlers.ui import handle_unknown_text, nav_footer_keyboard
 from app.services.telegram_bot_handlers.status import handle_status
 from app.services.telegram_bot_handlers.warper_status import handle_warper_status
+from app.services.telegram_bot_handlers.traffic import handle_traffic
+from app.services.telegram_bot_command_rate_limit import telegram_bot_command_rate_limit_service
 from app.services import telegram_bot_i18n as i18n
 
 logger = logging.getLogger(__name__)
@@ -86,10 +88,19 @@ async def _dispatch_command(ctx: BotContext, command: str, args: str) -> None:
         await send_message(ctx.bot_token, ctx.chat_id, unlinked_message())
         return
 
+    rate_error = telegram_bot_command_rate_limit_service.consume(ctx.db, ctx.telegram_user_id)
+    if rate_error:
+        from app.services.telegram_api import send_message
+
+        await send_message(ctx.bot_token, ctx.chat_id, rate_error)
+        return
+
     if command == "/status":
         await handle_status(ctx)
-    elif command == "/configs":
+    elif command == "/configs" or command == "/myconfigs":
         await handle_configs(ctx)
+    elif command == "/traffic":
+        await handle_traffic(ctx)
     elif command == "/config":
         await handle_config(ctx, args)
     elif command == "/settings":
@@ -120,6 +131,10 @@ async def _dispatch_callback(ctx: BotContext, data: str, *, message_id: int | No
     if data.startswith("configs:"):
         page = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
         await handle_configs(ctx, page=page, message_id=message_id)
+        return
+    if data.startswith("traffic:"):
+        page = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
+        await handle_traffic(ctx, page=page, message_id=message_id)
         return
     if data.startswith("cfgf:"):
         parts = data.split(":")

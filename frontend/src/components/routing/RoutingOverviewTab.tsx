@@ -1,8 +1,10 @@
 import { GitBranch, Layers, Route, Shield } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { getRouteBudget } from '@/api/client'
 import MetricCard from '@/components/noc/MetricCard'
 import StatusPanel from '@/components/noc/StatusPanel'
 import { Badge } from '@/components/ui/badge'
-import type { AntifilterStatus, CidrDbStatus, RoutingOverview } from '@/types'
+import type { AntifilterStatus, CidrDbStatus, RouteBudgetInfo, RoutingOverview } from '@/types'
 import { formatDt, statusBadgeVariant, statusLabel } from './utils'
 
 interface RoutingOverviewTabProps {
@@ -14,9 +16,43 @@ interface RoutingOverviewTabProps {
 export default function RoutingOverviewTab({ data, cidrDb, antifilter }: RoutingOverviewTabProps) {
   const enabledCount = data.providers.filter((p) => p.enabled).length
   const stats = data.route_stats
+  const [routeBudget, setRouteBudget] = useState<RouteBudgetInfo | null>(null)
+
+  useEffect(() => {
+    void getRouteBudget()
+      .then(setRouteBudget)
+      .catch(() => setRouteBudget(null))
+  }, [])
 
   return (
     <div className="space-y-6">
+      {routeBudget?.available && routeBudget.limit != null && routeBudget.used != null && (
+        <div className="rounded-xl border bg-card p-4">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-medium">Бюджет маршрутов OpenVPN</div>
+              <div className="text-xs text-muted-foreground">
+                По последней оценке CIDR pipeline
+                {routeBudget.finished_at ? ` · ${formatDt(routeBudget.finished_at)}` : ''}
+              </div>
+            </div>
+            <Badge variant={routeBudget.remaining === 0 ? 'destructive' : 'secondary'}>
+              осталось {routeBudget.remaining ?? 0} из {routeBudget.limit}
+            </Badge>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-primary transition-all"
+              style={{
+                width: `${Math.min(100, Math.round(((routeBudget.used ?? 0) / Math.max(routeBudget.limit, 1)) * 100))}%`,
+              }}
+            />
+          </div>
+          {routeBudget.warning && (
+            <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{routeBudget.warning}</p>
+          )}
+        </div>
+      )}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           label="Провайдеры активны"

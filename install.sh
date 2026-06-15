@@ -617,6 +617,21 @@ wait_for_backend_health() {
   return 1
 }
 
+wait_for_backend_health_deep() {
+  local port="${1:-${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}}"
+  local url="http://127.0.0.1:${port}/api/health/deep"
+  local attempts="${2:-30}"
+  local i
+
+  for ((i = 1; i <= attempts; i++)); do
+    if curl -fsS "$url" | grep -q '"status"' 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 verify_controller_running() {
   if ! install_controller_selected; then
     return 0
@@ -628,10 +643,17 @@ verify_controller_running() {
   ui_progress_start "Проверка backend (/api/health)"
   if wait_for_backend_health "$port" 90; then
     ui_progress_done "Backend отвечает на порту ${port}"
-    return 0
+  else
+    die "Backend не ответил на /api/health за 90 с (порт ${port}). Проверьте: systemctl status adminpanelaz; journalctl -u adminpanelaz -n 50; ${state_dir}/logs/backend.log"
   fi
 
-  die "Backend не ответил на /api/health за 90 с (порт ${port}). Проверьте: systemctl status adminpanelaz; journalctl -u adminpanelaz -n 50; ${state_dir}/logs/backend.log"
+  ui_progress_start "Проверка backend (/api/health/deep)"
+  if wait_for_backend_health_deep "$port" 30; then
+    ui_progress_done "Deep health OK"
+  else
+    warn "Deep health не ответил за 30 с — проверьте: curl -s http://127.0.0.1:${port}/api/health/deep"
+    ui_progress_done "Light health OK, deep health пропущен"
+  fi
 }
 
 install_system_deps() {
@@ -780,6 +802,19 @@ _wiz_should_apply() {
   [[ "$WIZARD_RAN" == true || -n "${!wiz_var:-}" ]]
 }
 
+apply_wiz_resource_profile() {
+  local profile="${1:-standard}"
+  local script="$ROOT_DIR/scripts/apply-resource-profile.py"
+  if [[ ! -f "$script" ]]; then
+    die "Не найден $script"
+  fi
+  if [[ ! -f "$ENV_FILE" ]]; then
+    die "Не найден $ENV_FILE для профиля ресурсов"
+  fi
+  log "Применение resource profile: $profile (scripts/apply-resource-profile.py)"
+  PYTHONPATH="$BACKEND_DIR" python3 "$script" "$profile" --env "$ENV_FILE"
+}
+
 apply_wiz_env_settings() {
   if _wiz_should_apply WIZ_APP_ENV; then
     env_set APP_ENV "$WIZ_APP_ENV"
@@ -845,8 +880,23 @@ apply_wiz_env_settings() {
   if _wiz_should_apply WIZ_AUTH_RATE_LIMIT_BACKEND; then
     env_set AUTH_RATE_LIMIT_BACKEND "$WIZ_AUTH_RATE_LIMIT_BACKEND"
   fi
+  if _wiz_should_apply WIZ_API_RATE_LIMIT_BACKEND; then
+    env_set API_RATE_LIMIT_BACKEND "$WIZ_API_RATE_LIMIT_BACKEND"
+  fi
   if _wiz_should_apply WIZ_REDIS_URL; then
     env_set REDIS_URL "$WIZ_REDIS_URL"
+  fi
+  if [[ "$WIZARD_RAN" == true && -n "${WIZ_RESOURCE_PROFILE:-}" ]] \
+    || _wiz_should_apply WIZ_RESOURCE_PROFILE; then
+    apply_wiz_resource_profile "${WIZ_RESOURCE_PROFILE:-standard}"
+    if [[ "$WIZARD_RAN" == true && "${WIZ_RESOURCE_PROFILE:-standard}" != "minimal" ]]; then
+      if [[ -n "${WIZ_TRAFFIC_SYNC_ENABLED:-}" ]]; then
+        env_set TRAFFIC_SYNC_ENABLED "$WIZ_TRAFFIC_SYNC_ENABLED"
+      fi
+      if [[ -n "${WIZ_CIDR_DB_REFRESH_ENABLED:-}" ]]; then
+        env_set CIDR_DB_REFRESH_ENABLED "$WIZ_CIDR_DB_REFRESH_ENABLED"
+      fi
+    fi
   fi
   if [[ "${WIZ_NODE_AGENT_MTLS_ENABLED:-false}" == "true" ]] \
     && { [[ "$WIZARD_RAN" == true ]] || _wiz_should_apply WIZ_NODE_AGENT_MTLS_ENABLED; }; then

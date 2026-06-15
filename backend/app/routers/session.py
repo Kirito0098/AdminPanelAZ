@@ -19,6 +19,8 @@ def session_heartbeat(
 ):
     session_id = active_web_session_service.get_session_id_from_request(request)
     if session_id:
+        if active_web_session_service.is_session_revoked(db, session_id):
+            return {"success": False, "revoked": True}
         try:
             active_web_session_service.touch_active_web_session(
                 db,

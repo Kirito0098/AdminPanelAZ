@@ -139,6 +139,10 @@ def update_user(
             user.telegram_id = tg_id
         else:
             user.telegram_id = None
+    if payload.config_quota is not None:
+        if not is_admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять квоту")
+        user.config_quota = payload.config_quota
 
     db.commit()
     db.refresh(user)

@@ -390,6 +390,126 @@ def estimate_cidr_matches(
 
     return result
 
+def list_runtime_backups() -> list[dict]:
+    """List available runtime backup stamps (newest first)."""
+    root = _cfg("RUNTIME_BACKUP_ROOT")
+    if not os.path.isdir(root):
+        return []
+
+    backups: list[dict] = []
+    for entry_name in os.listdir(root):
+        entry_path = os.path.join(root, entry_name)
+        if not os.path.isdir(entry_path):
+            continue
+        files = sorted(
+            name
+            for name in os.listdir(entry_path)
+            if name in IP_FILES and os.path.isfile(os.path.join(entry_path, name))
+        )
+        if not files:
+            continue
+        try:
+            mtime = os.path.getmtime(entry_path)
+        except OSError:
+            mtime = 0.0
+        backups.append(
+            {
+                "stamp": entry_name,
+                "files": files,
+                "file_count": len(files),
+                "mtime": mtime,
+            }
+        )
+
+    backups.sort(key=lambda item: item["mtime"], reverse=True)
+    return backups
+
+
+def rollback_from_runtime_backup(
+    backup_stamp: str,
+    selected_files=None,
+    progress_callback=None,
+):
+    """Restore controller LIST_DIR files from a runtime_backups stamp."""
+    _emit_progress(progress_callback, 3, "Подготовка к откату из runtime_backups")
+
+    if not backup_stamp or not str(backup_stamp).strip():
+        _emit_progress(progress_callback, 100, "Откат завершен")
+        return {
+            "success": False,
+            "message": "Не указан stamp резервной копии",
+            "restored": [],
+            "missing": [],
+            "backup_stamp": backup_stamp,
+        }
+
+    safe_stamp = os.path.basename(str(backup_stamp).strip())
+    backup_dir = os.path.join(_cfg("RUNTIME_BACKUP_ROOT"), safe_stamp)
+    if not os.path.isdir(backup_dir):
+        _emit_progress(progress_callback, 100, "Откат завершен")
+        return {
+            "success": False,
+            "message": f"Резервная копия {safe_stamp} не найдена",
+            "restored": [],
+            "missing": [],
+            "backup_stamp": safe_stamp,
+        }
+
+    available = sorted(
+        name
+        for name in os.listdir(backup_dir)
+        if name in IP_FILES and os.path.isfile(os.path.join(backup_dir, name))
+    )
+    if not available:
+        _emit_progress(progress_callback, 100, "Откат завершен")
+        return {
+            "success": False,
+            "message": f"В резервной копии {safe_stamp} нет CIDR-файлов",
+            "restored": [],
+            "missing": [],
+            "backup_stamp": safe_stamp,
+        }
+
+    requested = selected_files or available
+    normalized = [name for name in requested if name in IP_FILES and name in available]
+    if not normalized:
+        normalized = available
+
+    restored = []
+    missing = []
+    total_files = len(normalized)
+    for index, file_name in enumerate(normalized, start=1):
+        progress_start = 8 + int(((index - 1) / max(total_files, 1)) * 90)
+        _emit_progress(progress_callback, progress_start, f"Восстановление {file_name}")
+
+        source_path = os.path.join(backup_dir, file_name)
+        target_path = os.path.join(_cfg("LIST_DIR"), file_name)
+        if not os.path.isfile(source_path):
+            missing.append(file_name)
+            continue
+        shutil.copyfile(source_path, target_path)
+        restored.append(file_name)
+
+    success = bool(restored)
+    if restored and missing:
+        message = "Откат из runtime_backups выполнен частично"
+    elif restored:
+        message = f"Восстановлено {len(restored)} файл(ов) из {safe_stamp}"
+    else:
+        message = "Не удалось восстановить файлы из runtime_backups"
+
+    _emit_progress(progress_callback, 100, "Откат CIDR-файлов завершен")
+    return {
+        "success": success,
+        "message": message,
+        "restored": restored,
+        "missing": missing,
+        "backup_stamp": safe_stamp,
+        "backup_dir": backup_dir,
+        "backup_files": available,
+    }
+
+
 def rollback_to_baseline(selected_files=None, progress_callback=None):
     _emit_progress(progress_callback, 3, "Подготовка к откату CIDR-файлов")
     _snapshot_baseline_if_missing()

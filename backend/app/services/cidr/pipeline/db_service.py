@@ -1611,6 +1611,137 @@ class CidrDbUpdaterService:
         if commit:
             self.db.commit()
 
+    def add_custom_provider_entries(
+        self,
+        provider_key: str,
+        *,
+        cidrs: list[str] | None = None,
+        cidrs_text: str | None = None,
+        asns: list[str | int] | None = None,
+        triggered_by: str = "manual",
+    ) -> dict:
+        """Add manual ASN/CIDR entries to CIDR DB for an existing provider key."""
+        from app.services.cidr.constants import IP_FILES
+        from app.services.cidr.pipeline.constants import CIDR_V4_SCAN_PATTERN
+        from app.services.cidr.pipeline.db_extract import _normalize_asn
+
+        key = str(provider_key or "").strip()
+        if key not in IP_FILES:
+            return {
+                "success": False,
+                "message": f"Неизвестный провайдер: {key}",
+                "provider_key": key,
+                "cidrs_added": 0,
+                "asns_added": 0,
+            }
+
+        parsed_cidrs: list[str] = []
+        for raw in cidrs or []:
+            value = str(raw or "").strip()
+            if value and CIDR_V4_SCAN_PATTERN.search(value):
+                match = CIDR_V4_SCAN_PATTERN.search(value)
+                if match:
+                    parsed_cidrs.append(match.group(0))
+
+        if cidrs_text:
+            for line in str(cidrs_text).splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                match = CIDR_V4_SCAN_PATTERN.search(stripped)
+                if match:
+                    parsed_cidrs.append(match.group(0))
+
+        deduped_cidrs = list(dict.fromkeys(parsed_cidrs))
+
+        parsed_asns: list[int] = []
+        for raw in asns or []:
+            asn = _normalize_asn(raw)
+            if asn is not None:
+                parsed_asns.append(asn)
+        deduped_asns = list(dict.fromkeys(parsed_asns))
+
+        if not deduped_cidrs and not deduped_asns:
+            return {
+                "success": False,
+                "message": "Укажите хотя бы один CIDR или ASN",
+                "provider_key": key,
+                "cidrs_added": 0,
+                "asns_added": 0,
+            }
+
+        m = _get_models()
+        now = datetime.now(timezone.utc)
+        cidrs_added = 0
+
+        if deduped_cidrs:
+            existing_rows = self.cidr_db.query(m.ProviderCidr).filter_by(provider_key=key).all()
+            existing_items = [
+                {
+                    "cidr": row.cidr,
+                    "region": row.region_scope,
+                    "countries": (
+                        [c.strip() for c in row.country_codes.split(",") if c.strip()]
+                        if row.country_codes
+                        else None
+                    ),
+                }
+                for row in existing_rows
+            ]
+            existing_set = {item["cidr"] for item in existing_items}
+            new_items = [
+                {"cidr": cidr, "region": None, "countries": None}
+                for cidr in deduped_cidrs
+                if cidr not in existing_set
+            ]
+            if new_items:
+                self._upsert_provider_cidrs(
+                    key,
+                    existing_items + new_items,
+                    commit=True,
+                    progress_label=f"{key}: custom",
+                )
+                cidrs_added = len(new_items)
+
+        asns_added = 0
+        if deduped_asns:
+            before_rows = self.db.query(m.ProviderAsn).filter_by(provider_key=key, active=True).all()
+            before_asns = {int(row.asn) for row in before_rows}
+            merged_asns = sorted(before_asns | set(deduped_asns))
+            asn_rows = self._upsert_provider_asns(key, merged_asns, commit=True)
+            for row in asn_rows:
+                if int(row.asn) in deduped_asns and row.source != "manual":
+                    row.source = "manual"
+            self.db.commit()
+            after_asns = {int(row.asn) for row in asn_rows if row.active}
+            asns_added = len(after_asns - before_asns)
+
+        total_cidrs = int(self.cidr_db.query(m.ProviderCidr).filter_by(provider_key=key).count() or 0)
+        active_asn_count = int(
+            self.db.query(m.ProviderAsn).filter_by(provider_key=key, active=True).count() or 0
+        )
+        self._update_provider_meta(
+            key,
+            cidr_count=total_cidrs,
+            source_used="manual",
+            status="ok",
+            error=None,
+            asn_count=active_asn_count,
+            active_asn_count=active_asn_count,
+            commit=True,
+        )
+
+        return {
+            "success": True,
+            "message": f"Добавлено CIDR: {cidrs_added}, ASN: {asns_added}",
+            "provider_key": key,
+            "cidrs_added": cidrs_added,
+            "asns_added": asns_added,
+            "total_cidrs": total_cidrs,
+            "active_asn_count": active_asn_count,
+            "triggered_by": triggered_by,
+        }
+
     # ── Antifilter.download ────────────────────────────────────────────────
 
     def refresh_antifilter(self, *, triggered_by="manual", progress_callback=None):

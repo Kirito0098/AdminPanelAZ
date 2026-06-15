@@ -61,9 +61,16 @@ export function protocolLabel(tab: ProtocolTab): string {
   return 'WireGuard'
 }
 
+export function hasProtocolProfiles(config: VpnConfig, protocol: 'amneziawg' | 'wireguard' | 'openvpn'): boolean {
+  if (!config.profile_files?.length) return false
+  return config.profile_files.some((file) => file.protocol === protocol)
+}
+
 export function configMatchesTab(config: VpnConfig, tab: ProtocolTab): boolean {
   if (tab === 'openvpn') return config.vpn_type === 'openvpn'
-  return config.vpn_type === 'wireguard'
+  if (!config.profile_files?.length) return config.vpn_type === 'wireguard'
+  if (tab === 'amneziawg') return hasProtocolProfiles(config, 'amneziawg')
+  return hasProtocolProfiles(config, 'wireguard')
 }
 
 export function parseAccessExpiresAt(value?: string | null): Date | null {

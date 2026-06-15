@@ -39,6 +39,10 @@ _PIPELINE_TASK_TYPES = {
     "cidr_generate_from_db",
     "cidr_deploy",
     "antifilter_refresh",
+    "config_bulk_op",
+    "config_csv_import",
+    "node_sync_push_full",
+    "node_update_roll",
 }
 
 _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
@@ -54,6 +58,10 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "cidr_deploy": ("Развёртывание CIDR на ноду…", "Подготовка развёртывания…", 3),
     "antifilter_refresh": ("Обновление Antifilter…", "Подготовка Antifilter…", 3),
     "vpn_network_publish": ("Публикация панели…", "Запуск nginx-setup.sh…", 5),
+    "config_bulk_op": ("Массовая операция с клиентами…", "Подготовка…", 3),
+    "config_csv_import": ("Импорт CSV клиентов…", "Подготовка импорта…", 3),
+    "node_sync_push_full": ("Синхронизация HA…", "Подготовка push-full…", 5),
+    "node_update_roll": ("Rolling update узлов…", "Подготовка очереди…", 3),
 }
 
 _TASK_DONE_PROGRESS: dict[str, str] = {
@@ -69,6 +77,10 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "cidr_deploy": "Развёртывание завершено",
     "antifilter_refresh": "Antifilter обновлён",
     "vpn_network_publish": "Публикация панели завершена",
+    "config_bulk_op": "Массовая операция завершена",
+    "config_csv_import": "Импорт CSV завершён",
+    "node_sync_push_full": "Синхронизация HA завершена",
+    "node_update_roll": "Rolling update завершён",
 }
 
 

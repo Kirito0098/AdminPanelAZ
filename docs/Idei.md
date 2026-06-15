@@ -23,12 +23,23 @@
 | 🟠 **Среднее** | Заметная нагрузка при активном использовании; нужны лимиты |
 | 🔴 **Высокое** | Существенный рост ресурсов; архитектурные решения |
 
+### Легенда: статус реализации
+
+> **Актуализация:** 2026-06-16 — сверка с кодовой базой `/opt/AdminPanelAZ`.
+
+| Метка | Значение |
+|-------|----------|
+| ✅ | **Реализовано** — функция в коде, есть тесты и/или UI; DoD этапа закрыт |
+| ◐ | **Частично** — базовая реализация есть; не весь DoD, опциональная часть или нужна ручная настройка (MMDB, Redis…) |
+| ⬜ | **Не начато** — в коде нет или только заготовки |
+
 ### Навигация по документу
 
 | Часть | Содержание |
 |-------|------------|
 | [Этапы реализации](#этапы-реализации-roadmap) | **Главный план** — порядок работ, DoD, чеклисты |
 | [Prompty-etapy.md](Etapy-prompty.md) | **Промпты и режимы Cursor** для каждого этапа |
+| [Backlog-otkryto.md](Backlog-otkryto.md) | **Открытый backlog** — ◐ частично и ⬜ не начато |
 | [§1–§11](#1-доработать-то-что-уже-частично-есть) | Каталог идей + [§11 VDS и размещение](#11-vds-и-размещение) |
 | [Матрица приоритетов](#матрица-все-идеи-по-приоритету) | Сводная таблица P0–P3 |
 
@@ -45,16 +56,16 @@
 
 | Этап | Название | Срок* | Perf | Статус |
 |------|----------|-------|------|--------|
-| **1** | Prod foundation | 1–2 нед. | 🟢 | - [ ] |
-| **2** | Admin productivity | 2–4 нед. | 🟠 | - [ ] |
-| **3** | Multi-node обзор | 2–3 нед. | 🟠 | - [ ] |
-| **4** | CIDR безопасность | 2–3 нед. | 🟡 | - [ ] |
-| **5** | Node Sync / HA | 3–5 нед. | 🟠 | - [ ] |
-| **6** | Self-service | 2–4 нед. | 🟡 | - [ ] |
-| **7** | Мониторинг и алерты | 2–3 нед. | 🟡 | - [ ] |
-| **8** | Ops и интеграции | по мере нужды | 🟡 | - [ ] |
-| **9** | Security / enterprise | перед публичным prod | 🟢 | - [ ] |
-| **10** | Масштаб | при росте нагрузки | 🟡→🟢 | - [ ] |
+| **1** | Prod foundation | 1–2 нед. | 🟢 | ✅ |
+| **2** | Admin productivity | 2–4 нед. | 🟠 | ✅ |
+| **3** | Multi-node обзор | 2–3 нед. | 🟠 | ✅ |
+| **4** | CIDR безопасность | 2–3 нед. | 🟡 | ✅ |
+| **5** | Node Sync / HA | 3–5 нед. | 🟠 | ◐ |
+| **6** | Self-service | 2–4 нед. | 🟡 | ✅ |
+| **7** | Мониторинг и алерты | 2–3 нед. | 🟡 | ◐ |
+| **8** | Ops и интеграции | по мере нужды | 🟡 | ✅ |
+| **9** | Security / enterprise | перед публичным prod | 🟢 | ◐ |
+| **10** | Масштаб | при росте нагрузки | 🟡→🟢 | ⬜ |
 
 *\*Ориентир для одного разработчика; параллельте задачи внутри этапа, где нет зависимости.*
 
@@ -66,23 +77,23 @@
 
 **Требует:** — (стартовый этап)
 
-| # | Задача | § | P | Perf |
-|---|--------|---|---|------|
-| 1.1 | Retention policies (traffic samples, action logs) | §5 | P0 | 🟢+ |
-| 1.2 | Prometheus `/metrics` | §2 | P0 | 🟢 |
-| 1.3 | Redis в prod (док + дефолт в install для workers>1) | §2 | P0 | 🟢 |
-| 1.4 | Расширенный health (`/health` + `/health/deep`) | §2 | P0 | 🟡 |
-| 1.5 | Route budget dashboard | §8 | P0 | 🟢 |
-| 1.6 | Корреляция NOC → Traffic (клик из online-списка) | §5 | P0 | 🟢 |
-| 1.7 | Frontend unit tests (Vitest baseline) | §9 | P0 | 🟢 |
-| 1.8 | **Resource profiles** (Minimal / Standard / Full) | §2, §11 | P0 | 🟢+ |
+| # | Задача | § | P | Perf | Статус |
+|---|--------|---|---|------|--------|
+| 1.1 | Retention policies (traffic samples, action logs) | §5 | P0 | 🟢+ | ✅ |
+| 1.2 | Prometheus `/metrics` | §2 | P0 | 🟢 | ✅ |
+| 1.3 | Redis в prod (док + дефолт в install для workers>1) | §2 | P0 | 🟢 | ✅ |
+| 1.4 | Расширенный health (`/health` + `/health/deep`) | §2 | P0 | 🟡 | ✅ |
+| 1.5 | Route budget dashboard | §8 | P0 | 🟢 | ✅ |
+| 1.6 | Корреляция NOC → Traffic (клик из online-списка) | §5 | P0 | 🟢 | ✅ |
+| 1.7 | Frontend unit tests (Vitest baseline) | §9 | P0 | 🟢 | ✅ |
+| 1.8 | **Resource profiles** (Minimal / Standard / Full) | §2, §11 | P0 | 🟢+ | ✅ |
 
 **DoD (критерий готовности):**
-- [ ] Grafana или ручной scrape `/metrics` показывает lag collectors
-- [ ] systemd/install.sh использует deep health
-- [ ] Retention настраивается в UI или `.env`
-- [ ] Vitest в CI green
-- [ ] Профиль **Minimal** отключает лишние workers; панель на 1 GB (panel-only) стабильна
+- [x] Grafana или ручной scrape `/metrics` показывает lag collectors
+- [x] systemd/install.sh использует deep health
+- [x] Retention настраивается в UI или `.env`
+- [x] Vitest в CI green
+- [x] Профиль **Minimal** отключает лишние workers; панель на 1 GB (panel-only) стабильна
 
 ---
 
@@ -92,18 +103,18 @@
 
 **Требует:** Этап 1 (background_tasks и метрики — для mass ops)
 
-| # | Задача | § | P | Perf |
-|---|--------|---|---|------|
-| 2.1 | Группы / теги клиентов | §3 | P1 | 🟢 |
-| 2.2 | Шаблоны клиентов | §3 | P1 | 🟢 |
-| 2.3 | Массовые операции (block / delete / renew по тегу) | §1 | P1 | 🟠 |
-| 2.4 | Отдельная вкладка AmneziaWG | §3 | P1 | 🟢 |
-| 2.5 | Управление активными сессиями | §1 | P1 | 🟢 |
+| # | Задача | § | P | Perf | Статус |
+|---|--------|---|---|------|--------|
+| 2.1 | Группы / теги клиентов | §3 | P1 | 🟢 | ✅ |
+| 2.2 | Шаблоны клиентов | §3 | P1 | 🟢 | ✅ |
+| 2.3 | Массовые операции (block / delete / renew по тегу) | §1 | P1 | 🟠 | ✅ |
+| 2.4 | Отдельная вкладка AmneziaWG | §3 | P1 | 🟢 | ✅ |
+| 2.5 | Управление активными сессиями | §1 | P1 | 🟢 | ✅ |
 
 **DoD:**
-- [ ] Массовое действие на 20+ клиентов — фоновая задача + progress
-- [ ] Фильтр по тегу на Dashboard и в mass ops
-- [ ] Экран сессий с revoke
+- [x] Массовое действие на 20+ клиентов — фоновая задача + progress
+- [x] Фильтр по тегу на Dashboard и в mass ops
+- [x] Экран сессий с revoke
 
 **Порядок внутри этапа:** 2.1 → 2.2 → 2.3 → 2.4, 2.5 параллельно
 
@@ -115,16 +126,16 @@
 
 **Требует:** Этап 1 (кэш метрик); желательно Этап 2 (теги для фильтрации)
 
-| # | Задача | § | P | Perf |
-|---|--------|---|---|------|
-| 3.1 | Global dashboard (сводка всех узлов) | §4 | P1 | 🟠 |
-| 3.2 | Сравнение узлов side-by-side | §4 | P2 | 🟠 |
-| 3.3 | Geo-routing hint (подсказка «ближе node Y») | §4 | P2 | 🟡 |
-| 3.4 | Политики per-node (лимиты EU vs RU) | §4 | P2 | 🟢 |
+| # | Задача | § | P | Perf | Статус |
+|---|--------|---|---|------|--------|
+| 3.1 | Global dashboard (сводка всех узлов) | §4 | P1 | 🟠 | ✅ |
+| 3.2 | Сравнение узлов side-by-side | §4 | P2 | 🟠 | ✅ |
+| 3.3 | Geo-routing hint (подсказка «ближе node Y») | §4 | P2 | 🟡 | ✅ |
+| 3.4 | Политики per-node (лимиты EU vs RU) | §4 | P2 | 🟢 | ◐ |
 
 **DoD:**
-- [ ] Главная или отдельная страница: online/t health по всем узлам без switch active node
-- [ ] Кэш 30–60 с, без N× запросов с фронта на каждый refresh
+- [x] Главная или отдельная страница: online/t health по всем узлам без switch active node
+- [x] Кэш 30–60 с, без N× запросов с фронта на каждый refresh
 
 **Порядок:** 3.1 обязательно → 3.2 → 3.3, 3.4 опционально
 
@@ -136,16 +147,16 @@
 
 **Требует:** Этап 1 (route budget — уже в 1.5)
 
-| # | Задача | § | P | Perf |
-|---|--------|---|---|------|
-| 4.1 | Dry-run diff перед deploy | §8 | P1 | 🟡 |
-| 4.2 | Rollback CIDR deploy (`runtime_backups`) | §8 | P1 | 🟠 |
-| 4.3 | Custom provider wizard | §8 | P2 | 🟡 |
+| # | Задача | § | P | Perf | Статус |
+|---|--------|---|---|------|--------|
+| 4.1 | Dry-run diff перед deploy | §8 | P1 | 🟡 | ✅ |
+| 4.2 | Rollback CIDR deploy (`runtime_backups`) | §8 | P1 | 🟠 | ✅ |
+| 4.3 | Custom provider wizard | §8 | P2 | 🟡 | ✅ |
 
 **DoD:**
-- [ ] Перед deploy — preview файлов и числа маршрутов
-- [ ] One-click rollback с подтверждением
-- [ ] Action log + AdminNotify при failed deploy
+- [x] Перед deploy — preview файлов и числа маршрутов
+- [x] One-click rollback с подтверждением
+- [x] Action log + AdminNotify при failed deploy
 
 ---
 
@@ -155,24 +166,25 @@
 
 **Требует:** Этап 1 (background_tasks); Этап 3 желателен (UI узлов)
 
-| # | Задача | § | P | Perf |
-|---|--------|---|---|------|
-| 5.1 | Sync Group — модель + UI на «Узлы» | §10 | P1 | 🟢 |
-| 5.2 | Manual full push (backup primary → restore replica) | §10 | P1 | 🟠 |
-| 5.3 | Verify parity (списки клиентов + checksums) | §10 | P1 | 🟡 |
-| 5.4 | Auto-sync при create/delete клиента | §10 | P2 | 🟡 |
-| 5.5 | Reconcile worker (split-brain) | §10 | P2 | 🟢–🟡 |
-| 5.6 | HA в Dashboard и NOC (одна карточка на группу) | §10 | P2 | 🟢 |
+| # | Задача | § | P | Perf | Статус |
+|---|--------|---|---|------|--------|
+| 5.1 | Sync Group — модель + UI на «Узлы» | §10 | P1 | 🟢 | ✅ |
+| 5.2 | Manual full push (backup primary → restore replica) | §10 | P1 | 🟠 | ✅ |
+| 5.3 | Verify parity (списки клиентов + checksums) | §10 | P1 | 🟡 | ✅ |
+| 5.4 | Auto-sync при create/delete клиента | §10 | P2 | 🟡 | ✅ |
+| 5.5 | Reconcile worker (split-brain) | §10 | P2 | 🟢–🟡 | ✅ |
+| 5.6 | HA в Dashboard и NOC (одна карточка на группу) | §10 | P2 | 🟢 | ◐ |
 
 **DoD MVP (5.1–5.3):**
-- [ ] Создана HA-группа с shared domain
-- [ ] Full push завершается с progress bar
-- [ ] Verify показывает «ready for DNS failover» или diff
-- [ ] Документировано: DNS (2-й IP) — вручную у регистратора
+- [x] Создана HA-группа с shared domain
+- [x] Full push завершается с progress bar
+- [x] Verify показывает «ready for DNS failover» или diff
+- [x] Документировано: DNS (2-й IP) — вручную у регистратора
 
 **DoD v2 (5.4–5.6):**
-- [ ] Create client на primary → автоматически на replica
-- [ ] Reconcile алертит при расхождении >15 мин
+- [x] Create client на primary → автоматически на replica
+- [x] Reconcile алертит при расхождении >15 мин
+- [~] NOC: агрегация online по HA-группе (Dashboard badge и dedup configs — ✅; federated NOC по-прежнему по узлам)
 
 **Порядок:** строго 5.1 → 5.2 → 5.3 → (DNS) → 5.4 → 5.5 → 5.6
 
@@ -184,16 +196,16 @@
 
 **Требует:** Этап 2 (шаблоны, квоты); Telegram включён
 
-| # | Задача | § | P | Perf |
-|---|--------|---|---|------|
-| 6.1 | Self-service для user-роли (create/download/traffic в лимитах) | §3 | P1 | 🟡 |
-| 6.2 | TG user commands (`/myconfigs`, `/traffic`) | §7 | P1 | 🟡 |
-| 6.3 | Авто-напоминания (expiry, лимит, temp block) | §3 | P1 | 🟡 |
+| # | Задача | § | P | Perf | Статус |
+|---|--------|---|---|------|--------|
+| 6.1 | Self-service для user-роли (create/download/traffic в лимитах) | §3 | P1 | 🟡 | ✅ |
+| 6.2 | TG user commands (`/myconfigs`, `/traffic`) | §7 | P1 | 🟡 | ✅ |
+| 6.3 | Авто-напоминания (expiry, лимит, temp block) | §3 | P1 | 🟡 | ✅ |
 
 **DoD:**
-- [ ] Квоты: N конфигов на user, rate limit на create
-- [ ] Mini App и веб согласованы по правам
-- [ ] Напоминание не чаще 1 раза в сутки на событие
+- [x] Квоты: N конфигов на user, rate limit на create
+- [x] Mini App и веб согласованы по правам
+- [x] Напоминание не чаще 1 раза в сутки на событие
 
 ---
 
@@ -203,16 +215,16 @@
 
 **Требует:** Этап 1 (Prometheus — для правил); AdminNotify
 
-| # | Задача | § | P | Perf |
-|---|--------|---|---|------|
-| 7.1 | Локальная GeoIP БД | §5 | P1 | 🟡 |
-| 7.2 | Scheduled reports в TG | §7 | P1 | 🟡 |
-| 7.3 | Правила алертов (кастомные пороги) | §5 | P2 | 🟡 |
-| 7.4 | Отчёты PDF/TG (weekly) | §5 | P2 | 🟡 |
+| # | Задача | § | P | Perf | Статус |
+|---|--------|---|---|------|--------|
+| 7.1 | Локальная GeoIP БД | §5 | P1 | 🟡 | ◐ |
+| 7.2 | Scheduled reports в TG | §7 | P1 | 🟡 | ✅ |
+| 7.3 | Правила алертов (кастомные пороги) | §5 | P2 | 🟡 | ⬜ |
+| 7.4 | Отчёты PDF/TG (weekly) | §5 | P2 | 🟡 | ⬜ |
 
 **DoD:**
-- [ ] NOC работает при недоступности ip-api.com
-- [ ] Ежедневная/еженедельная сводка в TG admin
+- [~] NOC работает при недоступности ip-api.com — да, если загружены MMDB (`data/geoip/*.mmdb`); иначе fallback на ip-api
+- [x] Ежедневная/еженедельная сводка в TG admin
 
 ---
 
@@ -222,18 +234,18 @@
 
 **Требует:** Этапы 1–4 стабильны
 
-| # | Задача | § | P | Perf |
-|---|--------|---|---|------|
-| 8.1 | Runbook в UI (site-diagnostics) | §2 | P2 | 🟢 |
-| 8.2 | Import / export CSV | §3 | P2 | 🟠 |
-| 8.3 | Rolling update узлов | §4 | P2 | 🟠 |
-| 8.4 | OpenAPI `/docs` с auth-gate | §9 | P2 | 🟢 |
-| 8.5 | Event webhooks | §9 | P2 | 🟡 |
-| 8.6 | Mini App warper/CIDR read-only | §7 | P2 | 🟢 |
+| # | Задача | § | P | Perf | Статус |
+|---|--------|---|---|------|--------|
+| 8.1 | Runbook в UI (site-diagnostics) | §2 | P2 | 🟢 | ✅ |
+| 8.2 | Import / export CSV | §3 | P2 | 🟠 | ✅ |
+| 8.3 | Rolling update узлов | §4 | P2 | 🟠 | ✅ |
+| 8.4 | OpenAPI `/docs` с auth-gate | §9 | P2 | 🟢 | ✅ |
+| 8.5 | Event webhooks | §9 | P2 | 🟡 | ✅ |
+| 8.6 | Mini App warper/CIDR read-only | §7 | P2 | 🟢 | ✅ |
 
 **DoD:**
-- [ ] Import 100+ клиентов — только background task
-- [ ] Webhook retry queue при 5xx endpoint
+- [x] Import 100+ клиентов — только background task
+- [x] Webhook retry queue при 5xx endpoint
 
 ---
 
@@ -243,16 +255,16 @@
 
 **Требует:** Этап 1; перед выходом в интернет
 
-| # | Задача | § | P | Perf |
-|---|--------|---|---|------|
-| 9.1 | CSP hardening (nonce) | §6 | P2 | 🟢 |
-| 9.2 | WebAuthn / passkeys | §6 | P2 | 🟢 |
-| 9.3 | Audit export + SIEM | §6 | P2 | 🟡 |
-| 9.4 | Secrets rotation UI | §6 | P3 | 🟢 |
+| # | Задача | § | P | Perf | Статус |
+|---|--------|---|---|------|--------|
+| 9.1 | CSP hardening (nonce) | §6 | P2 | 🟢 | ◐ |
+| 9.2 | WebAuthn / passkeys | §6 | P2 | 🟢 | ✅ |
+| 9.3 | Audit export + SIEM | §6 | P2 | 🟡 | ✅ |
+| 9.4 | Secrets rotation UI | §6 | P3 | 🟢 | ⬜ |
 
 **DoD:**
-- [ ] CSP без `'unsafe-inline'` на основных страницах
-- [ ] Passkeys для admin optional alongside TOTP
+- [~] CSP без `'unsafe-inline'` на основных страницах — nonce для `script-src` ✅; `style-src 'unsafe-inline'` пока остаётся
+- [x] Passkeys для admin optional alongside TOTP
 
 ---
 
@@ -262,16 +274,16 @@
 
 **Требует:** метрики из Этапа 1 показывают упор в SQLite / нужен i18n
 
-| # | Задача | § | P | Perf |
-|---|--------|---|---|------|
-| 10.1 | PostgreSQL вместо SQLite | §2 | P3 | 🟡→🟢 |
-| 10.2 | Полноценный i18n (RU + EN) | §1 | P3 | 🟢 |
-| 10.3 | Plugin / hook architecture | §9 | P3 | 🟡 |
-| 10.4 | Inline-режим бота | §7 | P3 | 🟡 |
+| # | Задача | § | P | Perf | Статус |
+|---|--------|---|---|------|--------|
+| 10.1 | PostgreSQL вместо SQLite | §2 | P3 | 🟡→🟢 | ⬜ |
+| 10.2 | Полноценный i18n (RU + EN) | §1 | P3 | 🟢 | ◐ |
+| 10.3 | Plugin / hook architecture | §9 | P3 | 🟡 | ⬜ |
+| 10.4 | Inline-режим бота | §7 | P3 | 🟡 | ⬜ |
 
 **DoD:**
 - [ ] Миграция SQLite → PG документирована, dual-support или one-way
-- [ ] EN locale для web + bot
+- [~] EN locale для web + bot — словарь бота (`telegram_bot_i18n.py`) есть; веб-панель без react-i18next
 
 ---
 
@@ -371,7 +383,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** пиковая нагрузка при массовых операциях (N запросов к node agent). Нужны `background_tasks`, батчинг и лимит параллелизма.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `bulk_config_ops.py`, `POST /api/configs/bulk`, фильтр по тегам
 
 ---
 
@@ -387,7 +399,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** чтение небольшой таблицы; фоновая очистка stale-сессий раз в N минут.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `SecurityTab`, `GET/DELETE /api/security/active-sessions`
 
 ---
 
@@ -403,7 +415,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** +10–30 KB gzip на локаль; runtime без заметного CPU.
 
-- [ ] Не начато
+- [~] ◐ **Частично** — словарь Telegram-бота; веб без react-i18next
 
 ---
 
@@ -423,7 +435,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** scrape 15–60 с. Без high-cardinality labels (имена клиентов).
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `GET /metrics`, `prometheus_metrics.py`, `test_metrics.py`
 
 ---
 
@@ -439,7 +451,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** лёгкий `/health` + тяжёлый `/health/deep` реже.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `/api/health`, `/api/health/deep`, install.sh deep check
 
 ---
 
@@ -455,7 +467,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** на малых инсталляциях overhead выше SQLite; выигрыш при высокой write-нагрузке.
 
-- [ ] Не начато
+- [ ] ⬜ **Не начато**
 
 ---
 
@@ -471,7 +483,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** ~1 ms RTT на проверку; надёжнее in-memory.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — README, SECURITY.md, install-wizard при workers>1
 
 ---
 
@@ -487,7 +499,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** по кнопке; отдельные шаги эпизодически 🟡.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `RunbookTab`, `site_diagnostics` API
 
 ---
 
@@ -501,20 +513,12 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Что даст:** пресеты **Minimal / Standard / Full** — один клик отключает тяжёлый функционал; пользователь на слабом VDS понимает, что именно экономится. Опора на существующий `FeatureToggleService` + доработка `lifespan` в `main.py`.
 
-**Уже есть (база):**
+**Реализовано (2026-06):**
 - `feature_toggles.py` — `background` / `app_module`, `resource_impact_level`, `resource_savings`
 - UI: **Настройки → Feature toggles** (`FeatureTogglesTab`)
 - Workers частично читают `.env` (`TRAFFIC_SYNC_ENABLED`, `RESOURCE_METRICS_ENABLED`…)
 
-**Что доработать:**
-
-| Компонент | Задача |
-|-----------|--------|
-| **Пресеты** | Minimal / Standard / Full — batch apply toggles + env |
-| **lifespan** | Не стартовать asyncio-task, если модуль выключен (CIDR scheduler, backup, health…) |
-| **UI** | Сводный impact; блок «Рекомендуется для 1 GB»; hint «нужен перезапуск» |
-| **install.sh** | Wizard: «тип VDS: 1 GB panel / 2 GB / combo» → preset Minimal |
-| **Minimal profile** | См. таблицу ниже |
+**Ключевые файлы:** `feature_toggles.py`, `FeatureTogglesTab`, `lifespan_workers.py`, `scripts/install-wizard.sh`, `scripts/apply-resource-profile.py`
 
 **Профиль Minimal (ориентир для 1 GB panel-only):**
 
@@ -534,11 +538,11 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 | **Combo panel+VPN на 1 GB** | **не спасает** — VPN ~0.5+ GB сам по себе |
 
 **DoD:**
-- [ ] POST `/api/feature-toggles/apply-profile?profile=minimal` (или аналог)
-- [ ] После apply + restart — в `ps`/metrics нет лишних collector loops
-- [ ] Документация: panel на 1 GB **без AntiZapret на том же хосте**
+- [x] POST `/api/feature-toggles/apply-profile?profile=minimal` (или аналог)
+- [x] После apply + restart — в `ps`/metrics нет лишних collector loops
+- [x] Документация: panel на 1 GB **без AntiZapret на том же хосте**
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — пресеты, `worker_lifecycle.py`, install-wizard, `test_feature_profiles.py`
 
 ---
 
@@ -556,7 +560,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** квоты и rate limit на create обязательны.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `self_service.py`, квоты, guards
 
 ---
 
@@ -572,7 +576,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** индекс по тегу в БД.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `ConfigTag`, фильтр Dashboard
 
 ---
 
@@ -588,7 +592,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** worker раз в час; dedup «не слать дважды за сутки».
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `user_reminder_worker`, dedup 24ч
 
 ---
 
@@ -604,7 +608,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** те же операции, что ручное создание.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `ClientTemplate`, API + Dashboard
 
 ---
 
@@ -620,7 +624,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** фоновая задача + progress bar для 500+ строк.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `config_csv_ops.py`, background import
 
 ---
 
@@ -636,7 +640,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** только UI.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — вкладка в `ConfigCardsSection`
 
 ---
 
@@ -656,7 +660,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** кэш 30–60 с (`node_remote_cache`).
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `GlobalDashboardSection`, federated cache
 
 ---
 
@@ -672,7 +676,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** один aggregate-endpoint на backend, не N×M с фронта.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `NodesCompareSection`, `/monitoring/nodes-compare`
 
 ---
 
@@ -688,7 +692,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** данные уже scoped by `node_id`.
 
-- [ ] Не начато
+- [~] ◐ **Частично** — сводка `NodePolicySummarySection`; per-node scope в БД, без отдельного wizard лимитов
 
 ---
 
@@ -704,7 +708,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** только фон; кратковременный offline узла.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `node_update_roll.py`
 
 ---
 
@@ -720,7 +724,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** lookup + кэш 24 ч.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `GeoRoutingHintBanner`, `/api/nodes/geo-routing-hint`
 
 > **См. также:** [§10 Node Sync / HA-пары](#10-node-sync--ha-пары-antizapret-failover) — другой сценарий multi-node: не «EU + US», а **primary + replica** с одним доменом и двумя IP ([AntiZapret-VPN](https://github.com/GubernievS/AntiZapret-VPN)).
 
@@ -742,7 +746,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** RAM ~50–100 MB; lookup быстрее HTTP.
 
-- [ ] Не начато
+- [~] ◐ **Частично** — `geoip_local.py`; нужны MMDB в `data/geoip/`, иначе fallback ip-api
 
 ---
 
@@ -758,7 +762,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** worker 1–5 мин по агрегатам.
 
-- [ ] Не начато
+- [ ] ⬜ **Не начато**
 
 ---
 
@@ -774,7 +778,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** генерация по расписанию, не в hot path.
 
-- [ ] Не начато
+- [ ] ⬜ **Не начато** — PDF weekly; TG-сводки есть (7.2)
 
 ---
 
@@ -790,7 +794,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** меньше данных → быстрее Traffic и Logs.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `retention_worker`, Settings → Maintenance
 
 ---
 
@@ -806,7 +810,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** навигация + существующие API.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — ссылка в `MonitoringConnectionsList` → `/traffic?client=`
 
 ---
 
@@ -826,7 +830,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** проверка только на login.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `PasskeysTab`, login passkey flow
 
 ---
 
@@ -842,7 +846,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** async emit; буфер при падении SIEM.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `audit_stream.py`, Settings → Security
 
 ---
 
@@ -858,7 +862,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** re-login всех после смены JWT secret.
 
-- [ ] Не начато
+- [ ] ⬜ **Не начато**
 
 ---
 
@@ -874,7 +878,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** nonce на HTML response.
 
-- [ ] Не начато
+- [~] ◐ **Частично** — nonce для scripts; `style-src 'unsafe-inline'` остаётся
 
 ---
 
@@ -894,7 +898,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** rate limit на команды.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `/myconfigs`, `/traffic` в боте
 
 ---
 
@@ -910,7 +914,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** TTL-кэш inline results.
 
-- [ ] Не начато
+- [ ] ⬜ **Не начато**
 
 ---
 
@@ -926,7 +930,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** cron + aggregate SQL, не full overview.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `noc_report_scheduler.py`
 
 ---
 
@@ -942,7 +946,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** read-only API.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `tg-mini/pages/Warper.tsx`, `Cidr.tsx`
 
 ---
 
@@ -962,7 +966,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** локальный diff; estimate уже в pipeline.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `DeployPreviewPanel`, `deploy_preview.py`
 
 ---
 
@@ -978,7 +982,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** как обычный deploy.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — rollback API + UI, `test_cidr_stage4.py`
 
 ---
 
@@ -994,7 +998,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** insert в CIDR DB + refresh.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `CustomProviderWizardDialog`
 
 ---
 
@@ -1010,7 +1014,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** метаданные последнего estimate.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `/routing/cidr-db/route-budget`, RoutingPage
 
 ---
 
@@ -1030,7 +1034,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** auth-gate или IP whitelist в prod.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `openapi_docs_gate.py`
 
 ---
 
@@ -1046,7 +1050,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** async fire-and-forget, timeout 5 s.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `event_webhooks.py`, delivery worker
 
 ---
 
@@ -1062,7 +1066,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** strict timeout / subprocess для плагинов.
 
-- [ ] Не начато
+- [ ] ⬜ **Не начато**
 
 ---
 
@@ -1078,7 +1082,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** +30–60 s в CI.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — Vitest, 2 test files, CI step
 
 ---
 
@@ -1114,22 +1118,26 @@ flowchart LR
 
 ### Что уже есть в коде (опора для реализации)
 
-| Компонент | Файл / API | Роль в HA |
-|-----------|------------|-----------|
-| Multi-node + adapter | `node_adapter.py`, `node_manager.py` | Вызовы на primary/replica |
-| AZ backup create | `antizapret_backup.py`, `POST .../backups/antizapret` | Основа **full push** |
-| Background tasks | `background_tasks.py` | Длинный sync с прогрессом |
-| Multi-deploy CIDR | `cidr/pipeline/orchestrator.py` | Паттерн «orchestrator → N узлов» |
-| WG reconcile | `wg_policy_sync_worker.py` | Паттерн периодической сверки |
+| Компонент | Файл / API | Роль в HA | Статус |
+|-----------|------------|-----------|--------|
+| Multi-node + adapter | `node_adapter.py`, `node_manager.py` | Вызовы на primary/replica | ✅ |
+| AZ backup create | `antizapret_backup.py`, `POST .../backups/antizapret` | Основа **full push** | ✅ |
+| Background tasks | `background_tasks.py` | Длинный sync с прогрессом | ✅ |
+| Multi-deploy CIDR | `cidr/pipeline/orchestrator.py` | Паттерн «orchestrator → N узлов» | ✅ |
+| WG reconcile | `wg_policy_sync_worker.py` | Паттерн периодической сверки | ✅ |
+| **Node Sync (MVP + v2)** | `services/node_sync/`, `routers/node_sync.py` | Sync Group, push, verify, auto-sync, reconcile | ✅ / ◐ NOC |
+| **Документация** | [`NodeSync.md`](NodeSync.md) | API, ограничения, DNS | ✅ |
 
-### Что нужно добавить
+### Что было добавлено (реализовано)
 
-| Компонент | Описание |
-|-----------|----------|
-| `NodeSyncGroup` | primary, replicas[], shared_domain, sync_mode |
-| Node agent | restore AZ backup, sync client keys, parity check |
-| `services/node_sync/` | orchestrator push / delta / verify |
-| UI «Узлы» | создание группы, кнопки sync, статусы |
+| Компонент | Описание | Статус |
+|-----------|----------|--------|
+| `NodeSyncGroup` | primary, replicas[], shared_domain, sync_mode | ✅ |
+| Node agent | restore AZ backup, fingerprints, parity check | ✅ |
+| `services/node_sync/` | push / verify / client_sync / reconcile | ✅ |
+| UI «Узлы» | `NodeSyncGroupSection` — группа, push, verify | ✅ |
+| Dashboard HA | badge, dedup linked configs | ✅ |
+| NOC HA-группы | агрегация online по группе | ◐ |
 
 ### Ограничения (важно знать заранее)
 
@@ -1152,7 +1160,7 @@ flowchart LR
 
 **Производительность:** только метаданные в БД; проверки — по кнопке или при добавлении в группу.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `NodeSyncGroupSection`, `node_sync.py`
 
 ---
 
@@ -1168,7 +1176,7 @@ flowchart LR
 
 **Производительность:** разово 🟠 — tar.gz по сети, минуты; только через `background_tasks` + progress bar.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `push_full.py`, progress bar
 
 ---
 
@@ -1184,7 +1192,7 @@ flowchart LR
 
 **Производительность:** эпизодически 🟡 — list clients + hash ключевых файлов на каждом узле.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `verify.py`, UI verify
 
 ---
 
@@ -1200,7 +1208,7 @@ flowchart LR
 
 **Производительность:** +1..N HTTP к replica на каждый create; обязательно async + retry queue.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `client_sync.py`, linked configs
 
 ---
 
@@ -1216,7 +1224,7 @@ flowchart LR
 
 **Производительность:** 🟢 при сравнении списков; 🟡 если догоняющий push.
 
-- [ ] Не начато
+- [x] ✅ **Реализовано** — `reconcile_worker.py`
 
 ---
 
@@ -1232,7 +1240,7 @@ flowchart LR
 
 **Производительность:** агрегация при чтении; без новых collectors.
 
-- [ ] Не начато
+- [~] ◐ **Частично** — HA badge на Dashboard; NOC federated по узлам, не по группам
 
 ---
 
@@ -1285,8 +1293,8 @@ flowchart LR
 | SQLite «database is locked» | Этап 1 → **10.1 PostgreSQL** |
 
 **DoD раздела (документация):**
-- [ ] README/install: таблица «тип VDS → preset»
-- [ ] Честное предупреждение: Minimal экономит RAM умеренно, CPU/disk — заметнее
+- [x] README/install: таблица «тип VDS → preset»
+- [x] Честное предупреждение: Minimal экономит RAM умеренно, CPU/disk — заметнее
 
 ---
 
@@ -1294,70 +1302,70 @@ flowchart LR
 
 ### P0 — 8 идей · [Этап 1](#этап-1--prod-foundation)
 
-| Идея | Этап | Perf | Сложность | Главный эффект |
-|------|------|------|-----------|----------------|
-| Retention policies | 1 | 🟢+ | Низкая | Скорость БД, размер диска |
-| Prometheus `/metrics` | 1 | 🟢 | Низкая | Observability |
-| Redis в prod | 1 | 🟢 | Низкая | Безопасность multi-worker |
-| Расширенный health | 1 | 🟡 | Низкая | Надёжность деплоя |
-| Route budget dashboard | 1 | 🟢 | Низкая | CIDR без сюрпризов |
-| Корреляция NOC + Traffic | 1 | 🟢 | Низкая | UX мониторинга |
-| Frontend unit tests | 1 | 🟢 | Низкая | Качество релизов |
-| **Resource profiles (Minimal)** | 1 | 🟢+ | Средняя | Панель на 1 GB без лишних workers |
+| Идея | Этап | Статус | Perf | Сложность | Главный эффект |
+|------|------|--------|------|-----------|----------------|
+| Retention policies | 1 | ✅ | 🟢+ | Низкая | Скорость БД, размер диска |
+| Prometheus `/metrics` | 1 | ✅ | 🟢 | Низкая | Observability |
+| Redis в prod | 1 | ✅ | 🟢 | Низкая | Безопасность multi-worker |
+| Расширенный health | 1 | ✅ | 🟡 | Низкая | Надёжность деплоя |
+| Route budget dashboard | 1 | ✅ | 🟢 | Низкая | CIDR без сюрпризов |
+| Корреляция NOC + Traffic | 1 | ✅ | 🟢 | Низкая | UX мониторинга |
+| Frontend unit tests | 1 | ✅ | 🟢 | Низкая | Качество релизов |
+| **Resource profiles (Minimal)** | 1 | ✅ | 🟢+ | Средняя | Панель на 1 GB без лишних workers |
 
 ### P1 — 20 идей · [Этапы 2–7](#этапы-реализации-roadmap)
 
-| Идея | Этап | Perf | Сложность | Главный эффект |
-|------|------|------|-----------|----------------|
-| Массовые операции | 2 | 🟠 | Средняя | Экономия времени admin |
-| Управление сессиями | 2 | 🟢 | Низкая | Безопасность |
-| Self-service user | 6 | 🟡 | Средняя | Разгрузка admin |
-| Группы / теги | 2 | 🟢 | Низкая | Организация клиентов |
-| Авто-напоминания | 6 | 🟡 | Средняя | Меньше «сломалось» |
-| Шаблоны клиентов | 2 | 🟢 | Низкая | Быстрое создание |
-| AmneziaWG вкладка | 2 | 🟢 | Низкая | UX |
-| Global dashboard | 3 | 🟠 | Средняя | Multi-node |
-| **Sync Group (HA)** | 5 | 🟢 | Средняя | Модель failover-пары |
-| **HA manual push** | 5 | 🟠 | Средняя–высокая | Замена ручного client.sh 8 |
-| **HA verify parity** | 5 | 🟡 | Средняя | Безопасный 2-й IP в DNS |
-| Локальная GeoIP | 7 | 🟡 | Средняя | Стабильность NOC |
-| TG user commands | 6 | 🟡 | Средняя | Self-service в TG |
-| Scheduled reports TG | 7 | 🟡 | Низкая | Проактивный мониторинг |
-| Dry-run CIDR | 4 | 🟡 | Средняя | Безопасный deploy |
-| Rollback CIDR | 4 | 🟠 | Средняя | Быстрое восстановление |
+| Идея | Этап | Статус | Perf | Сложность | Главный эффект |
+|------|------|--------|------|-----------|----------------|
+| Массовые операции | 2 | ✅ | 🟠 | Средняя | Экономия времени admin |
+| Управление сессиями | 2 | ✅ | 🟢 | Низкая | Безопасность |
+| Self-service user | 6 | ✅ | 🟡 | Средняя | Разгрузка admin |
+| Группы / теги | 2 | ✅ | 🟢 | Низкая | Организация клиентов |
+| Авто-напоминания | 6 | ✅ | 🟡 | Средняя | Меньше «сломалось» |
+| Шаблоны клиентов | 2 | ✅ | 🟢 | Низкая | Быстрое создание |
+| AmneziaWG вкладка | 2 | ✅ | 🟢 | Низкая | UX |
+| Global dashboard | 3 | ✅ | 🟠 | Средняя | Multi-node |
+| **Sync Group (HA)** | 5 | ✅ | 🟢 | Средняя | Модель failover-пары |
+| **HA manual push** | 5 | ✅ | 🟠 | Средняя–высокая | Замена ручного client.sh 8 |
+| **HA verify parity** | 5 | ✅ | 🟡 | Средняя | Безопасный 2-й IP в DNS |
+| Локальная GeoIP | 7 | ◐ | 🟡 | Средняя | Стабильность NOC |
+| TG user commands | 6 | ✅ | 🟡 | Средняя | Self-service в TG |
+| Scheduled reports TG | 7 | ✅ | 🟡 | Низкая | Проактивный мониторинг |
+| Dry-run CIDR | 4 | ✅ | 🟡 | Средняя | Безопасный deploy |
+| Rollback CIDR | 4 | ✅ | 🟠 | Средняя | Быстрое восстановление |
 
 ### P2 — 21 идея · [Этапы 3–9](#этапы-реализации-roadmap)
 
-| Идея | Этап |
-|------|------|
-| Runbook UI | 8 |
-| Import CSV | 8 |
-| Сравнение узлов | 3 |
-| Политики per-node | 3 |
-| Rolling update | 8 |
-| Geo-routing hint | 3 |
-| **HA auto-sync** | 5 |
-| **HA reconcile worker** | 5 |
-| **HA Dashboard/NOC** | 5 |
-| Правила алертов | 7 |
-| Отчёты | 7 |
-| Mini App warper/CIDR | 8 |
-| Custom provider wizard | 4 |
-| OpenAPI | 8 |
-| Event webhooks | 8 |
-| WebAuthn | 9 |
-| CSP hardening | 9 |
-| Audit SIEM | 9 |
+| Идея | Этап | Статус |
+|------|------|--------|
+| Runbook UI | 8 | ✅ |
+| Import CSV | 8 | ✅ |
+| Сравнение узлов | 3 | ✅ |
+| Политики per-node | 3 | ◐ |
+| Rolling update | 8 | ✅ |
+| Geo-routing hint | 3 | ✅ |
+| **HA auto-sync** | 5 | ✅ |
+| **HA reconcile worker** | 5 | ✅ |
+| **HA Dashboard/NOC** | 5 | ◐ |
+| Правила алертов | 7 | ⬜ |
+| Отчёты | 7 | ⬜ |
+| Mini App warper/CIDR | 8 | ✅ |
+| Custom provider wizard | 4 | ✅ |
+| OpenAPI | 8 | ✅ |
+| Event webhooks | 8 | ✅ |
+| WebAuthn | 9 | ✅ |
+| CSP hardening | 9 | ◐ |
+| Audit SIEM | 9 | ✅ |
 
 ### P3 — 5 идей · [Этапы 9–10](#этапы-реализации-roadmap)
 
-| Идея | Этап |
-|------|------|
-| PostgreSQL | 10 |
-| i18n | 10 |
-| Inline-бот | 10 |
-| Plugin architecture | 10 |
-| Secrets rotation UI | 9 |
+| Идея | Этап | Статус |
+|------|------|--------|
+| PostgreSQL | 10 | ⬜ |
+| i18n | 10 | ◐ |
+| Inline-бот | 10 | ⬜ |
+| Plugin architecture | 10 | ⬜ |
+| Secrets rotation UI | 9 | ⬜ |
 
 ---
 
@@ -1368,26 +1376,26 @@ flowchart LR
 
 | Этап | Название | Готово |
 |------|----------|--------|
-| 1 | Prod foundation | - [ ] |
-| 2 | Admin productivity | - [ ] |
-| 3 | Multi-node обзор | - [ ] |
-| 4 | CIDR безопасность | - [ ] |
-| 5 | Node Sync / HA | - [ ] |
-| 6 | Self-service | - [ ] |
-| 7 | Мониторинг и алерты | - [ ] |
-| 8 | Ops и интеграции | - [ ] |
-| 9 | Security / enterprise | - [ ] |
-| 10 | Масштаб | - [ ] |
+| 1 | Prod foundation | ✅ |
+| 2 | Admin productivity | ✅ |
+| 3 | Multi-node обзор | ✅ |
+| 4 | CIDR безопасность | ✅ |
+| 5 | Node Sync / HA | ◐ |
+| 6 | Self-service | ✅ |
+| 7 | Мониторинг и алерты | ◐ |
+| 8 | Ops и интеграции | ✅ |
+| 9 | Security / enterprise | ◐ |
+| 10 | Масштаб | ⬜ |
 
 ---
 
 ## Как обновлять этот файл
 
 1. Отмечай **этап** в [сводной таблице](#сводка-этапов) и DoD этапа.
-2. Меняй `- [ ]` на `- [x]` у конкретных задач (1.1, 2.3, 5.2…) и идей в каталоге §1–§11.
+2. Меняй `- [ ]` / `- [x]` у конкретных задач и статус **✅ / ◐ / ⬜** в [сводной таблице](#сводка-этапов) и [матрице](#матрица-все-идеи-по-приоритету).
 3. Пересматривай приоритет раз в релиз: P3 → P1, если появилась боль (например, «database is locked» → PostgreSQL в Этап 10).
 4. Не поднимай приоритет без метрики: «хочется» ≠ «горит».
 
 ---
 
-*Связано: [`PROJECT_MAP.md`](PROJECT_MAP.md) · [`Etapy-prompty.md`](Etapy-prompty.md) · [`CHANGELOG.md`](../CHANGELOG.md) · [`Telegram.md`](Telegram.md) · [AntiZapret-VPN](https://github.com/GubernievS/AntiZapret-VPN)*
+*Связано: [`PROJECT_MAP.md`](PROJECT_MAP.md) · [`Etapy-prompty.md`](Etapy-prompty.md) · [`Backlog-otkryto.md`](Backlog-otkryto.md) · [`CHANGELOG.md`](../CHANGELOG.md) · [`Telegram.md`](Telegram.md) · [AntiZapret-VPN](https://github.com/GubernievS/AntiZapret-VPN)*

@@ -135,6 +135,8 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
             "/api/logs/openvpn-events",
             "/api/logs/openvpn-sockets",
             "/api/monitoring/overview",
+            "/api/monitoring/global-summary",
+            "/api/monitoring/nodes-compare",
         ),
         frontend_paths=("/monitoring",),
     ),
@@ -263,13 +265,13 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         key="diagnostics_tests",
         env_key="FEATURE_DIAGNOSTICS_TESTS_ENABLED",
         label="Тесты и диагностика",
-        description="Вкладка «Тесты» с in-panel pytest.",
+        description="Runbook диагностики запуска и smoke-тесты backend (pytest).",
         icon="🧪",
         disable_hint="Вкладка тестов будет недоступна.",
         resource_impact_level="medium",
         default=True,
         group="app_module",
-        api_prefixes=("/api/tests",),
+        api_prefixes=("/api/tests", "/api/site-diagnostics"),
         settings_tabs=("tests",),
     ),
     FeatureToggleDefinition(
@@ -378,6 +380,132 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
 FEATURE_TOGGLE_BY_KEY = {item.key: item for item in FEATURE_TOGGLES}
 FEATURE_TOGGLE_BY_ENV = {item.env_key: item for item in FEATURE_TOGGLES}
 
+RESOURCE_PROFILES: dict[str, dict] = {
+    "minimal": {
+        "label": "Minimal (1 GB panel-only)",
+        "description": "Минимум фоновых задач: без traffic/CIDR/metrics collectors, 1 worker.",
+        "recommended_ram_gb": 1,
+        "impact": {
+            "ram": "минимальная (−0…80 MB steady state)",
+            "cpu_disk": "заметно меньше: нет traffic/CIDR/metrics collectors и опроса узлов",
+            "note": "Panel-only на 1 GB без AntiZapret на том же хосте",
+        },
+        "workers_disabled": [
+            "traffic_collector",
+            "node_health",
+            "resource_metrics",
+            "panel_resource_metrics",
+            "cidr_scheduler",
+            "cert_sync",
+            "resource_monitor",
+        ],
+        "toggles": {
+            "traffic_sync": False,
+            "wg_policy_sync": False,
+            "resource_monitor": False,
+            "logs_dashboard": False,
+            "server_monitor": False,
+            "routing": False,
+            "warper": False,
+            "telegram": False,
+            "diagnostics_tests": False,
+            "runtime_backup_cleanup": True,
+            "nightly_idle_restart": True,
+            "active_web_sessions": True,
+        },
+        "env": {
+            "RESOURCE_PROFILE": "minimal",
+            "UVICORN_WORKERS": "1",
+            "TRAFFIC_SYNC_ENABLED": "false",
+            "WG_POLICY_SYNC_ENABLED": "false",
+            "RESOURCE_METRICS_ENABLED": "false",
+            "PANEL_RESOURCE_METRICS_ENABLED": "false",
+            "NODE_HEALTH_SYNC_ENABLED": "false",
+            "CERT_SYNC_ENABLED": "false",
+            "CIDR_DB_REFRESH_ENABLED": "false",
+            "MONITOR_ENABLED": "false",
+        },
+    },
+    "standard": {
+        "label": "Standard",
+        "description": "Баланс: traffic sync, health poll, retention; без тяжёлого CIDR auto-scheduler.",
+        "recommended_ram_gb": 2,
+        "impact": {
+            "ram": "умеренная",
+            "cpu_disk": "traffic + metrics без nightly CIDR auto-scheduler",
+            "note": "Рекомендуется для панели с несколькими VPN-узлами",
+        },
+        "workers_disabled": ["cidr_scheduler"],
+        "toggles": {
+            "traffic_sync": True,
+            "wg_policy_sync": True,
+            "resource_monitor": True,
+            "logs_dashboard": True,
+            "server_monitor": True,
+            "routing": True,
+            "warper": False,
+            "telegram": False,
+            "diagnostics_tests": True,
+            "runtime_backup_cleanup": True,
+            "nightly_idle_restart": True,
+            "active_web_sessions": True,
+        },
+        "env": {
+            "RESOURCE_PROFILE": "standard",
+            "UVICORN_WORKERS": "1",
+            "TRAFFIC_SYNC_ENABLED": "true",
+            "WG_POLICY_SYNC_ENABLED": "true",
+            "RESOURCE_METRICS_ENABLED": "true",
+            "PANEL_RESOURCE_METRICS_ENABLED": "true",
+            "NODE_HEALTH_SYNC_ENABLED": "true",
+            "CERT_SYNC_ENABLED": "true",
+            "CIDR_DB_REFRESH_ENABLED": "false",
+            "MONITOR_ENABLED": "true",
+        },
+    },
+    "full": {
+        "label": "Full",
+        "description": "Все фоновые задачи и разделы; рекомендуется 2+ GB RAM.",
+        "recommended_ram_gb": 2,
+        "impact": {
+            "ram": "выше (все collectors + CIDR scheduler)",
+            "cpu_disk": "полная фоновая нагрузка",
+            "note": "Combo panel+VPN на 1 GB не рекомендуется",
+        },
+        "workers_disabled": [],
+        "toggles": {
+            "traffic_sync": True,
+            "wg_policy_sync": True,
+            "resource_monitor": True,
+            "logs_dashboard": True,
+            "server_monitor": True,
+            "routing": True,
+            "warper": True,
+            "telegram": False,
+            "diagnostics_tests": True,
+            "runtime_backup_cleanup": True,
+            "nightly_idle_restart": True,
+            "active_web_sessions": True,
+        },
+        "env": {
+            "RESOURCE_PROFILE": "full",
+            "UVICORN_WORKERS": "1",
+            "TRAFFIC_SYNC_ENABLED": "true",
+            "WG_POLICY_SYNC_ENABLED": "true",
+            "RESOURCE_METRICS_ENABLED": "true",
+            "PANEL_RESOURCE_METRICS_ENABLED": "true",
+            "NODE_HEALTH_SYNC_ENABLED": "true",
+            "CERT_SYNC_ENABLED": "true",
+            "CIDR_DB_REFRESH_ENABLED": "true",
+            "MONITOR_ENABLED": "true",
+        },
+    },
+}
+
+VALID_RESOURCE_PROFILES = frozenset(RESOURCE_PROFILES.keys())
+# Alias used in docs/prompts (Etapy 1.8)
+PROFILE_PRESETS = RESOURCE_PROFILES
+
 FRONTEND_PATH_TO_MODULE: dict[str, str] = {}
 SETTINGS_TAB_TO_MODULE: dict[str, str] = {}
 for _item in FEATURE_TOGGLES:
@@ -445,3 +573,49 @@ class FeatureToggleService:
                 raise ValueError(f"Неизвестный модуль: {key}")
             self.env.set_env_value(definition.env_key, "true" if enabled else "false")
         return self.list_toggles()
+
+    def get_resource_profile(self) -> str:
+        raw = (self.env.get_env_value("RESOURCE_PROFILE", "") or "").strip().lower()
+        if raw in VALID_RESOURCE_PROFILES:
+            return raw
+        return "standard"
+
+    def list_resource_profiles(self) -> dict:
+        current = self.get_resource_profile()
+        items = []
+        for key, meta in RESOURCE_PROFILES.items():
+            items.append({
+                "key": key,
+                "label": meta["label"],
+                "description": meta["description"],
+                "recommended_ram_gb": meta.get("recommended_ram_gb"),
+                "impact": meta.get("impact", {}),
+                "workers_disabled": meta.get("workers_disabled", []),
+                "active": key == current,
+            })
+        return {
+            "current_profile": current,
+            "requires_restart": True,
+            "items": items,
+        }
+
+    def apply_resource_profile(self, profile: str) -> dict:
+        normalized = (profile or "").strip().lower()
+        if normalized not in RESOURCE_PROFILES:
+            raise ValueError(f"Неизвестный профиль: {profile}")
+        preset = RESOURCE_PROFILES[normalized]
+        for env_key, value in preset.get("env", {}).items():
+            self.env.set_env_value(env_key, str(value))
+        for toggle_key, enabled in preset.get("toggles", {}).items():
+            definition = FEATURE_TOGGLE_BY_KEY.get(toggle_key)
+            if definition is None:
+                continue
+            self.env.set_env_value(definition.env_key, "true" if enabled else "false")
+        return {
+            "profile": normalized,
+            "requires_restart": True,
+            "impact": preset.get("impact", {}),
+            "workers_disabled": preset.get("workers_disabled", []),
+            "toggles": self.list_toggles(),
+            "profiles": self.list_resource_profiles(),
+        }

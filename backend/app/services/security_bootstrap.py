@@ -20,7 +20,35 @@ def _fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def _validate_redis_rate_limit(settings: Settings) -> None:
+    import os
+
+    workers = max(1, int(os.environ.get("UVICORN_WORKERS", settings.uvicorn_workers or 1)))
+    needs_redis = workers > 1 or settings.auth_rate_limit_backend == "redis" or settings.api_rate_limit_backend == "redis"
+    if not needs_redis:
+        return
+    if not (settings.redis_url or "").strip():
+        _fail(
+            "Для UVICORN_WORKERS>1 или *_RATE_LIMIT_BACKEND=redis задайте REDIS_URL "
+            "(см. SECURITY.md)."
+        )
+    if workers > 1 and settings.auth_rate_limit_backend != "redis":
+        logger.warning(
+            "UVICORN_WORKERS=%d, но AUTH_RATE_LIMIT_BACKEND=%s — используйте redis",
+            workers,
+            settings.auth_rate_limit_backend,
+        )
+    if workers > 1 and settings.api_rate_limit_backend != "redis":
+        logger.warning(
+            "UVICORN_WORKERS=%d, но API_RATE_LIMIT_BACKEND=%s — используйте redis",
+            workers,
+            settings.api_rate_limit_backend,
+        )
+
+
 def validate_panel_settings(settings: Settings) -> None:
+    if settings.is_production:
+        _validate_redis_rate_limit(settings)
     if not settings.is_production or not settings.require_production_secrets:
         return
     if settings.secret_key == _DEFAULT_SECRET_KEY or len(settings.secret_key) < 32:

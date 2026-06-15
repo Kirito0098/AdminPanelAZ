@@ -15,6 +15,7 @@ import {
   WifiOff,
 } from 'lucide-react'
 import { ApiError, getMonitoring, getResourceHistory, openMonitoringStream } from '@/api/client'
+import NodesCompareSection from '@/components/dashboard/NodesCompareSection'
 import MonitoringCharts, { formatBytes, totalTraffic } from '@/components/monitoring/MonitoringCharts'
 import MonitoringConnectionsList, {
   buildMonitoringConnectionRows,
@@ -30,6 +31,7 @@ import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
+import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -106,13 +108,24 @@ function SummaryCard({ label, value, icon: Icon, sub, accent }: SummaryCardProps
   )
 }
 
+function formatMetricPercent(value?: number | null) {
+  if (value == null || Number.isNaN(value)) return '—'
+  return `${value.toFixed(1)}%`
+}
+
+function MetricProgress({ value }: { value: number }) {
+  const clamped = Math.min(100, Math.max(0, value))
+  return <Progress value={clamped} className="h-2" />
+}
+
 export default function MonitoringPage() {
   const { user } = useAuth()
-  const { activeNode, nodes } = useNode()
+  const { activeNode, nodes, loading: nodesLoading } = useNode()
   const isAdmin = user?.role === 'admin'
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal } = useProgress()
   const [scope, setScope] = useState<MonitoringScope>('node')
+  const [scopeInitialized, setScopeInitialized] = useState(false)
   const [data, setData] = useState<MonitoringOverview | null>(null)
   const [liveLoading, setLiveLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -157,6 +170,12 @@ export default function MonitoringPage() {
 
   loadRef.current = load
 
+  useEffect(() => {
+    if (nodesLoading || scopeInitialized) return
+    if (nodes.length > 1) setScope('all')
+    setScopeInitialized(true)
+  }, [nodesLoading, nodes.length, scopeInitialized])
+
   const loadResourceHistory = useCallback(
     async (period: '1d' | '7d' | '30d') => {
       setResourceLoading(true)
@@ -173,8 +192,9 @@ export default function MonitoringPage() {
   )
 
   useEffect(() => {
+    if (nodesLoading && !scopeInitialized) return
     load({ initial: true })
-  }, [load, activeNode?.id, scope])
+  }, [load, activeNode?.id, scope, nodesLoading, scopeInitialized])
 
   useEffect(() => {
     loadResourceHistory(resourcePeriod)
@@ -438,6 +458,10 @@ export default function MonitoringPage() {
                           <TableHead className="text-right">OpenVPN</TableHead>
                           <TableHead className="text-right">WireGuard</TableHead>
                           <TableHead className="text-right">Службы</TableHead>
+                          <TableHead>CPU</TableHead>
+                          <TableHead>RAM</TableHead>
+                          <TableHead className="text-right">Трафик</TableHead>
+                          <TableHead className="text-right">CIDR</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -457,6 +481,36 @@ export default function MonitoringPage() {
                             <TableCell className="text-right font-mono text-xs">
                               {node.active_services}/{node.total_services}
                             </TableCell>
+                            <TableCell className="min-w-[110px]">
+                              {node.cpu_percent != null ? (
+                                <div className="space-y-1">
+                                  <MetricProgress value={node.cpu_percent} />
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {formatMetricPercent(node.cpu_percent)}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">н/д</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="min-w-[110px]">
+                              {node.memory_percent != null ? (
+                                <div className="space-y-1">
+                                  <MetricProgress value={node.memory_percent} />
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {formatMetricPercent(node.memory_percent)}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">н/д</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {node.total_traffic_bytes != null ? formatBytes(node.total_traffic_bytes) : '—'}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {node.cidr_routes_count ?? '—'}
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -465,6 +519,8 @@ export default function MonitoringPage() {
                 </CardContent>
               </Card>
             )}
+
+            {isFederated && hasMultipleNodes && <NodesCompareSection />}
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard

@@ -24,10 +24,13 @@ import {
   enableNodeMtls,
   getNodeMtlsStatus,
   getNodes,
+  rollingNodeUpdate,
   rotateNodeApiKey,
   updateNode,
 } from '@/api/client'
 import NodeUpdateDialog from '@/components/NodeUpdateDialog'
+import NodePolicySummarySection from '@/components/nodes/NodePolicySummarySection'
+import NodeSyncGroupSection from '@/components/nodes/NodeSyncGroupSection'
 import { NodeBadge, NodeStatusBadge, statusLabels } from '@/components/NodeSelector'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -58,6 +61,7 @@ import {
 import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { cn } from '@/lib/utils'
 import type { Node, NodeMtlsStatus } from '@/types'
 import { Navigate } from 'react-router-dom'
@@ -288,6 +292,8 @@ type NodeCardProps = {
   isActive: boolean
   healthLoading: boolean
   activateLoading: boolean
+  selected?: boolean
+  onToggleSelect?: () => void
   onActivate: () => void
   onHealth: () => void
   onUpdate: () => void
@@ -303,6 +309,8 @@ function NodeCard({
   isActive,
   healthLoading,
   activateLoading,
+  selected = false,
+  onToggleSelect,
   onActivate,
   onHealth,
   onUpdate,
@@ -322,6 +330,15 @@ function NodeCard({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 space-y-1">
             <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+              {onToggleSelect && (
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  onChange={onToggleSelect}
+                  aria-label={`Выбрать ${node.name}`}
+                  className="h-4 w-4 rounded border"
+                />
+              )}
               <Server size={16} className="shrink-0 text-muted-foreground" />
               <span className="truncate">{node.name}</span>
               {isActive && (
@@ -404,6 +421,9 @@ export default function NodesPage() {
   const [confirmTarget, setConfirmTarget] = useState<Node | null>(null)
   const [confirmLoading, setConfirmLoading] = useState(false)
   const [mtlsStatus, setMtlsStatus] = useState<NodeMtlsStatus | null>(null)
+  const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([])
+  const [rollingUpdating, setRollingUpdating] = useState(false)
+  const { task: rollTask, polling: rollPolling, startPoll: startRollPoll } = useBackgroundTaskPoll()
 
   const load = async () => {
     setLoading(true)
@@ -640,6 +660,41 @@ export default function NodesPage() {
     }
   }
 
+  const toggleNodeSelection = (nodeId: number) => {
+    setSelectedNodeIds((prev) =>
+      prev.includes(nodeId) ? prev.filter((id) => id !== nodeId) : [...prev, nodeId],
+    )
+  }
+
+  const handleRollingUpdate = async () => {
+    if (selectedNodeIds.length === 0) {
+      notifyError('Выберите хотя бы один узел')
+      return
+    }
+    setRollingUpdating(true)
+    try {
+      const result = await rollingNodeUpdate(selectedNodeIds)
+      if (result.task_id) {
+        startRollPoll(result.task_id, {
+          onComplete: async (task) => {
+            success(task.message || 'Rolling update завершён')
+            setSelectedNodeIds([])
+            await load()
+            setRollingUpdating(false)
+          },
+          onError: (_task, message) => {
+            notifyError(message)
+            setRollingUpdating(false)
+          },
+        })
+        success(result.message)
+      }
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка rolling update')
+      setRollingUpdating(false)
+    }
+  }
+
   const onlineCount = nodes.filter((n) => n.status === 'online').length
   const hasRemoteNodes = nodes.some((n) => !n.is_local)
   const showMtlsStatus =
@@ -668,6 +723,18 @@ export default function NodesPage() {
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
             Обновить
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => void handleRollingUpdate()}
+            disabled={rollingUpdating || rollPolling || selectedNodeIds.length === 0}
+          >
+            {rollingUpdating || rollPolling ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Download size={16} />
+            )}
+            Rolling update ({selectedNodeIds.length})
+          </Button>
           <Button onClick={openCreate}>
             <Plus size={16} />
             Добавить узел
@@ -683,8 +750,19 @@ export default function NodesPage() {
 
       {showMtlsStatus && <MtlsCaStatusAlert status={mtlsStatus} />}
 
+      <NodePolicySummarySection nodes={nodes.map((n) => ({ id: n.id, name: n.name, status: n.status }))} />
+
+      <NodeSyncGroupSection nodes={nodes} />
+
+      {(rollPolling || rollTask) && (
+        <SettingsAlert variant="info" title="Rolling update">
+          {rollTask?.progress_stage || rollTask?.message || 'Обновление узлов…'}
+          {rollTask?.progress_percent != null && ` (${rollTask.progress_percent}%)`}
+        </SettingsAlert>
+      )}
+
       <InlineProgressBar
-        active={loading || healthLoading !== null || confirmLoading || submitting}
+        active={loading || healthLoading !== null || confirmLoading || submitting || rollingUpdating || rollPolling}
         label={
           submitting
             ? 'Сохранение узла...'
@@ -738,6 +816,8 @@ export default function NodesPage() {
                     isActive={activeNode?.id === node.id}
                     healthLoading={healthLoading === node.id}
                     activateLoading={activateLoading === node.id}
+                    selected={selectedNodeIds.includes(node.id)}
+                    onToggleSelect={() => toggleNodeSelection(node.id)}
                     onActivate={() => handleActivate(node)}
                     onHealth={() => handleHealth(node)}
                     onUpdate={() => setUpdateNodeTarget(node)}
@@ -754,6 +834,7 @@ export default function NodesPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-10" />
                       <TableHead>Имя</TableHead>
                       <TableHead>Адрес</TableHead>
                       <TableHead>IP сервера</TableHead>
@@ -774,6 +855,15 @@ export default function NodesPage() {
 
                       return (
                         <TableRow key={node.id} className={cn(isActive && 'bg-primary/5')}>
+                          <TableCell>
+                            <input
+                              type="checkbox"
+                              checked={selectedNodeIds.includes(node.id)}
+                              onChange={() => toggleNodeSelection(node.id)}
+                              aria-label={`Выбрать ${node.name}`}
+                              className="h-4 w-4 rounded border"
+                            />
+                          </TableCell>
                           <TableCell className="font-medium">
                             <div className="flex flex-wrap items-center gap-2">
                               {node.name}

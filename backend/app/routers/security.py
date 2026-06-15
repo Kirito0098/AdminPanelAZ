@@ -9,6 +9,10 @@ from app.models import User
 from app.services.action_log import log_action
 from app.services.ip_restriction import ip_restriction_service
 from app.services.public_download_settings import is_public_download_enabled, set_public_download_enabled
+from app.schemas import ActiveWebSessionResponse
+from app.services.active_web_session import active_web_session_service
+from app.services.event_webhooks import event_webhook_service
+from app.services.audit_stream import audit_stream_service
 from app.services.security import SecurityService
 
 router = APIRouter(prefix="/security", tags=["security"])
@@ -33,6 +37,24 @@ class SecuritySettingsUpdate(BaseModel):
 
 class PublicDownloadToggle(BaseModel):
     enabled: bool | None = None
+
+
+class EventWebhookSettingsUpdate(BaseModel):
+    url: str | None = None
+    secret: str | None = None
+    enabled: bool | None = None
+    events: list[dict[str, object]] | None = None
+
+
+class AuditStreamSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    mode: str | None = None
+    http_url: str | None = None
+    secret: str | None = None
+    syslog_host: str | None = None
+    syslog_port: int | None = Field(default=None, ge=1, le=65535)
+    syslog_protocol: str | None = None
+    format: str | None = None
 
 
 class TempWhitelistRequest(BaseModel):
@@ -140,6 +162,102 @@ def toggle_public_download(
     }
 
 
+@router.get("/event-webhooks")
+def get_event_webhooks(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return event_webhook_service.get_settings(db)
+
+
+@router.patch("/event-webhooks")
+def update_event_webhooks(
+    payload: EventWebhookSettingsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    result = event_webhook_service.update_settings(db, payload.model_dump(exclude_none=True))
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="event_webhook_settings_update",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details="event_webhook_settings",
+        )
+    return result
+
+
+@router.get("/audit-stream")
+def get_audit_stream_settings(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return audit_stream_service.get_settings(db)
+
+
+@router.patch("/audit-stream")
+def update_audit_stream_settings(
+    payload: AuditStreamSettingsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    try:
+        result = audit_stream_service.update_settings(db, payload.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="audit_stream_settings_update",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details="audit_stream_settings",
+        )
+    return result
+
+
+@router.post("/audit-stream/test")
+def test_audit_stream(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    cfg = audit_stream_service.get_settings(db)
+    if not cfg["enabled"]:
+        raise HTTPException(status_code=400, detail="Audit stream выключен")
+    payload = audit_stream_service.build_test_payload()
+    fmt = cfg["format"]
+    message = audit_stream_service.format_message(payload, fmt)
+    results: dict[str, str] = {}
+    mode = cfg["mode"]
+    if mode in {"http", "both"}:
+        url = cfg["http_url"].strip()
+        if not url:
+            results["http"] = "skipped: URL не задан"
+        else:
+            body = message.encode("utf-8")
+            secret = db.query(AppSetting).filter(AppSetting.key == "audit_stream_http_secret").first()
+            secret_val = secret.value if secret else ""
+            ok, code, err = event_webhook_service._post_once(url, body, secret_val or "")
+            results["http"] = "ok" if ok else f"failed: {code} {err}"
+    if mode in {"syslog", "both"}:
+        host = cfg["syslog_host"].strip()
+        if not host:
+            results["syslog"] = "skipped: host не задан"
+        else:
+            dest = f"{cfg['syslog_protocol']}://{host}:{cfg['syslog_port']}"
+            ok, err = audit_stream_service.send_syslog(dest, message)
+            results["syslog"] = "ok" if ok else f"failed: {err}"
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="audit_stream_test",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+        )
+    return {"results": results}
+
+
 @router.get("/check-ip")
 def check_ip(request: Request, db: Session = Depends(get_db), _: User = Depends(require_admin)):
     client_ip = request.client.host if request.client else "unknown"
@@ -173,3 +291,38 @@ def clear_scanner_bans(_: User = Depends(require_admin)):
 
     ip_restriction_service.clear_all_bans()
     return {"message": "Все баны сканеров сняты"}
+
+
+@router.get("/active-sessions", response_model=list[ActiveWebSessionResponse])
+def list_active_sessions(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    if not active_web_session_service.is_enabled():
+        return []
+    current_session_id = active_web_session_service.get_session_id_from_request(request)
+    rows = active_web_session_service.list_active_sessions(db)
+    return [
+        ActiveWebSessionResponse(
+            session_id=row.session_id,
+            username=row.username,
+            remote_addr=row.remote_addr,
+            user_agent=row.user_agent,
+            created_at=row.created_at,
+            last_seen_at=row.last_seen_at,
+            is_current=bool(current_session_id and row.session_id == current_session_id),
+        )
+        for row in rows
+    ]
+
+
+@router.delete("/active-sessions/{session_id}")
+def revoke_active_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    if not active_web_session_service.revoke_session(db, session_id):
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    return {"message": "Сессия отозвана"}

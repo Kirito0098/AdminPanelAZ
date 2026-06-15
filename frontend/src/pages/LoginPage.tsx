@@ -5,10 +5,13 @@ import {
   ApiError,
   getCaptchaRequired,
   getFeatureModules,
+  getPasskeyLoginOptions,
   getTelegramLoginConfig,
   login2FA,
   loginWithCaptcha,
+  verifyPasskeyLogin,
 } from '@/api/client'
+import { authenticatePasskey } from '@/lib/passkeys'
 import { storeWebSessionId } from '@/lib/webSession'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -44,6 +47,7 @@ export default function LoginPage() {
   const [telegramModuleEnabled, setTelegramModuleEnabled] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [needs2FA, setNeeds2FA] = useState(false)
+  const [passkeyAvailable, setPasskeyAvailable] = useState(false)
   const [tempToken, setTempToken] = useState('')
   const [totpCode, setTotpCode] = useState('')
   const telegramLoginRef = useRef<HTMLDivElement>(null)
@@ -161,6 +165,7 @@ export default function LoginPage() {
       if ('requires_2fa' in res && res.requires_2fa) {
         setNeeds2FA(true)
         setTempToken(res.temp_token)
+        setPasskeyAvailable(Boolean(res.passkey_available))
         return
       }
       if ('access_token' in res && res.access_token && setToken) {
@@ -180,6 +185,22 @@ export default function LoginPage() {
         setCaptchaRequired(true)
         await refreshCaptcha()
       }
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handlePasskeyLogin = async () => {
+    if (!tempToken) return
+    setSubmitting(true)
+    try {
+      const { options } = await getPasskeyLoginOptions(tempToken)
+      const { sessionKey, credential } = await authenticatePasskey(options)
+      const res = await verifyPasskeyLogin(tempToken, sessionKey, credential)
+      if (res.web_session_id) storeWebSessionId(res.web_session_id)
+      if (setToken) await setToken(res.access_token)
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Passkey вход не выполнен')
     } finally {
       setSubmitting(false)
     }
@@ -229,8 +250,18 @@ export default function LoginPage() {
                   onChange={(e) => setTotpCode(e.target.value.replace(/\s/g, ''))}
                   placeholder="123456"
                   autoComplete="one-time-code"
-                  required
                 />
+                {passkeyAvailable && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    disabled={submitting}
+                    onClick={() => void handlePasskeyLogin()}
+                  >
+                    Войти с passkey
+                  </Button>
+                )}
               </div>
             )}
             {captchaRequired && !needs2FA && (

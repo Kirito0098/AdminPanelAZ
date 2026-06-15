@@ -2,7 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
@@ -20,18 +20,23 @@ from app.routers import (
     backups,
     cidr_db,
     client_access,
+    client_templates,
+    config_tags,
     configs,
+    configs_bulk,
     edit_files,
     ip_blocked,
     logs,
     maintenance,
     monitoring,
     nodes,
+    node_sync,
     public_download,
     routing,
     warper,
     security,
     server_monitor,
+    site_diagnostics,
     system,
     feature_toggles,
     tests,
@@ -43,19 +48,11 @@ from app.routers import (
 )
 from app.routers import settings as settings_router
 from app.routers import users
-from app.services.backup_scheduler import run_backup_scheduler_loop, run_runtime_backup_cleanup_loop
-from app.services.cidr.cidr_scheduler import run_cidr_db_scheduler_loop
-from app.services.wg_policy_sync_worker import run_wg_policy_sync_loop
-from app.services.nightly_idle_restart_worker import run_nightly_idle_restart_loop
 from app.services.admin_bootstrap import upsert_bootstrap_admin
 from app.services.node_manager import get_active_adapter, get_active_node, sync_local_node
 from app.services.ip_restriction import ip_restriction_service
-from app.services.node_health_worker import run_node_health_loop
-from app.services.panel_resource_metrics_worker import run_panel_resource_metrics_loop
-from app.services.resource_metrics_worker import run_resource_metrics_loop
-from app.services.node_key_rotation import run_node_key_rotation_loop
-from app.services.cert_sync_worker import run_cert_sync_loop
-from app.services.traffic.worker import run_traffic_collector_loop
+from app.services.lifespan_workers import cancel_background_tasks, spawn_background_tasks
+from app.services.worker_lifecycle import should_start_resource_monitor
 
 settings = get_settings()
 validate_panel_settings(settings)
@@ -127,32 +124,12 @@ async def lifespan(_: FastAPI):
     db_path = Path(db_url.replace("sqlite:///", ""))
     if not db_path.is_absolute():
         db_path = app_root / db_path
-    collector_task = asyncio.create_task(run_traffic_collector_loop())
-    cert_sync_task = (
-        asyncio.create_task(run_cert_sync_loop()) if settings.cert_sync_enabled else None
-    )
-    health_task = asyncio.create_task(run_node_health_loop())
-    resource_metrics_task = asyncio.create_task(run_resource_metrics_loop())
-    panel_resource_metrics_task = asyncio.create_task(run_panel_resource_metrics_loop())
     env_path = app_root / ".env"
-    backup_task = asyncio.create_task(
-        run_backup_scheduler_loop(
-            app_root=app_root,
-            backup_root=Path(settings.backup_root),
-            db_path=db_path,
-            env_path=env_path,
-        )
-    )
-    runtime_backup_cleanup_task = asyncio.create_task(
-        run_runtime_backup_cleanup_loop(env_path=env_path)
-    )
-    cidr_task = asyncio.create_task(run_cidr_db_scheduler_loop())
-    wg_policy_sync_task = asyncio.create_task(run_wg_policy_sync_loop())
-    nightly_idle_restart_task = asyncio.create_task(run_nightly_idle_restart_loop())
-    key_rotation_task = asyncio.create_task(run_node_key_rotation_loop())
+    background_tasks = spawn_background_tasks(app_root=app_root, db_path=db_path, env_path=env_path)
     from app.services.admin_notify import admin_notify_service
 
-    admin_notify_service.start_monitor()
+    if should_start_resource_monitor():
+        admin_notify_service.start_monitor()
     try:
         from app.services.background_tasks import background_task_service
 
@@ -184,29 +161,16 @@ async def lifespan(_: FastAPI):
     except Exception:
         pass
     yield
-    for task in (
-        collector_task,
-        cert_sync_task,
-        health_task,
-        resource_metrics_task,
-        panel_resource_metrics_task,
-        backup_task,
-        runtime_backup_cleanup_task,
-        cidr_task,
-        wg_policy_sync_task,
-        nightly_idle_restart_task,
-        key_rotation_task,
-    ):
-        if task is None:
-            continue
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+    await cancel_background_tasks(background_tasks)
 
 
-app = FastAPI(title=settings.app_name, lifespan=lifespan)
+app = FastAPI(
+    title=settings.app_name,
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.add_middleware(ActiveSessionMiddleware)
 app.add_middleware(HttpSecurityMiddleware)
 app.add_middleware(
@@ -222,10 +186,14 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(session.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(configs.router, prefix="/api")
+app.include_router(configs_bulk.router, prefix="/api")
+app.include_router(config_tags.router, prefix="/api")
+app.include_router(client_templates.router, prefix="/api")
 app.include_router(monitoring.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(maintenance.router, prefix="/api")
 app.include_router(backups.router, prefix="/api")
+app.include_router(node_sync.router, prefix="/api")
 app.include_router(nodes.router, prefix="/api")
 app.include_router(routing.router, prefix="/api")
 app.include_router(warper.router, prefix="/api")
@@ -241,6 +209,7 @@ app.include_router(system.router, prefix="/api")
 app.include_router(tg_mini.router, prefix="/api")
 app.include_router(telegram_webhook.router, prefix="/api")
 app.include_router(tests.router, prefix="/api")
+app.include_router(site_diagnostics.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
 app.include_router(feature_toggles.router, prefix="/api")
 app.include_router(feature_toggles.feature_modules_router, prefix="/api")
@@ -272,7 +241,7 @@ async def ip_restriction_middleware(request, call_next):
         or path.startswith("/api/auth/telegram")
         or path.startswith("/api/auth/refresh")
         or path.startswith("/api/auth/login")
-        or path in ("/api/health", "/ip-blocked")
+        or path in ("/api/health", "/api/health/deep", "/metrics", "/ip-blocked")
     )
     if exempt:
         return await call_next(request)
@@ -299,9 +268,67 @@ async def ip_restriction_middleware(request, call_next):
     return await call_next(request)
 
 
+def _register_openapi_docs_routes() -> None:
+    from fastapi import Request
+    from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+    from fastapi.responses import JSONResponse
+
+    from app.services.openapi_docs_gate import assert_openapi_docs_access
+
+    @app.get("/openapi.json", include_in_schema=False)
+    async def protected_openapi_schema(request: Request):
+        assert_openapi_docs_access(request)
+        return JSONResponse(app.openapi())
+
+    @app.get("/docs", include_in_schema=False)
+    async def protected_swagger_ui(request: Request):
+        assert_openapi_docs_access(request)
+        return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{settings.app_name} — Swagger UI")
+
+    @app.get("/redoc", include_in_schema=False)
+    async def protected_redoc(request: Request):
+        assert_openapi_docs_access(request)
+        return get_redoc_html(openapi_url="/openapi.json", title=f"{settings.app_name} — ReDoc")
+
+
+_register_openapi_docs_routes()
+
+
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "app": settings.app_name}
+    from app.services.health_checks import build_light_health
+
+    return build_light_health()
+
+
+@app.get("/api/health/deep")
+def health_deep():
+    from pathlib import Path
+
+    from app.database import SessionLocal
+    from app.services.health_checks import build_deep_health
+
+    app_root = Path(__file__).resolve().parents[1]
+    db = SessionLocal()
+    try:
+        return build_deep_health(db, app_root=app_root)
+    finally:
+        db.close()
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics():
+    from fastapi.responses import Response
+
+    from app.database import SessionLocal
+    from app.services.prometheus_metrics import render_metrics
+
+    db = SessionLocal()
+    try:
+        body, content_type = render_metrics(db)
+        return Response(content=body, media_type=content_type)
+    finally:
+        db.close()
 
 
 @app.get("/robots.txt", include_in_schema=False)
@@ -349,7 +376,9 @@ def _mount_frontend(app: FastAPI) -> None:
         raise HTTPException(status_code=404, detail="API endpoint not found — перезапустите панель после обновления")
 
     @app.get("/{full_path:path}", include_in_schema=False)
-    async def serve_spa(full_path: str):
+    async def serve_spa(full_path: str, request: Request):
+        from app.services.html_csp import serve_html_with_nonce
+
         if full_path.startswith("api/") or full_path == "api":
             from fastapi import HTTPException
 
@@ -358,7 +387,7 @@ def _mount_frontend(app: FastAPI) -> None:
             candidate = dist / full_path
             if candidate.is_file():
                 return FileResponse(candidate)
-        return FileResponse(index_file)
+        return serve_html_with_nonce(request, index_file)
 
 
 if settings.serve_frontend:

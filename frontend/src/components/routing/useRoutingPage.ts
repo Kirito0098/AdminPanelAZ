@@ -12,6 +12,9 @@ import {
   clearCidrDb,
   syncRoutingProviders,
   toggleRoutingProvider,
+  previewCidrDeploy,
+  rollbackCidrFromBackup,
+  addCustomCidrProviderEntries,
   ApiError,
 } from '@/api/client'
 import { useNode } from '@/context/NodeContext'
@@ -21,6 +24,7 @@ import { usePipelineTaskPoll } from '@/components/routing/usePipelineTaskPoll'
 import type {
   AntifilterStatus,
   CidrDbStatus,
+  CidrDeployPreview,
   CidrPipelineTask,
   RoutingOverview,
 } from '@/types'
@@ -39,6 +43,7 @@ export type ConfirmAction =
   | 'deploy-only'
   | 'generate-doall'
   | 'generate-only'
+  | 'rollback-cidr'
   | 'sync-providers'
   | null
 
@@ -75,6 +80,11 @@ export function useRoutingPage() {
   const [deployTargetNodeIds, setDeployTargetNodeIds] = useState<number[]>([])
   const [selectedProviderFiles, setSelectedProviderFiles] = useState<string[] | null>(null)
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
+  const [deployPreview, setDeployPreview] = useState<CidrDeployPreview | null>(null)
+  const [deployPreviewLoading, setDeployPreviewLoading] = useState(false)
+  const [rollbackStamp, setRollbackStamp] = useState<string | null>(null)
+  const [customWizardOpen, setCustomWizardOpen] = useState(false)
+  const [customWizardLoading, setCustomWizardLoading] = useState(false)
   const trackedTaskIdRef = useRef<string | null>(null)
   const pipelinePollingRef = useRef(false)
   const loadRef = useRef<(opts?: { initial?: boolean; manual?: boolean }) => Promise<void>>(async () => {})
@@ -421,6 +431,31 @@ export function useRoutingPage() {
             : 'CIDR-файлы развёрнуты на выбранные ноды',
           3,
         )
+        setDeployPreview(null)
+        break
+      }
+      case 'rollback-cidr': {
+        if (!rollbackStamp) {
+          notifyError('Выберите резервную копию для отката')
+          return
+        }
+        const selected_files = resolveSelectedProviderPayload()
+        if (selected_files === undefined) return
+        await withPipelineAction(
+          () =>
+            rollbackCidrFromBackup({
+              backup_stamp: rollbackStamp,
+              selected_files,
+              redeploy_after: true,
+              all_online: deployAllOnline,
+              target_node_ids: deployAllOnline ? null : deployTargetNodeIds.length ? deployTargetNodeIds : null,
+              sync_after: true,
+              apply_after: false,
+            }),
+          'Откат CIDR из runtime_backups выполнен',
+          2,
+        )
+        setRollbackStamp(null)
         break
       }
     }
@@ -444,6 +479,57 @@ export function useRoutingPage() {
     } finally {
       setActionLoading(false)
     }
+  }
+
+  const loadDeployPreview = async () => {
+    const selected_files = resolveSelectedProviderPayload()
+    if (selected_files === undefined) return
+    setDeployPreviewLoading(true)
+    try {
+      const preview = await previewCidrDeploy({
+        all_online: deployAllOnline,
+        target_node_ids: deployAllOnline ? null : deployTargetNodeIds.length ? deployTargetNodeIds : null,
+        selected_files,
+      })
+      setDeployPreview(preview)
+      if (!preview.success && preview.message) {
+        notifyError(preview.message)
+      }
+    } catch (err) {
+      notifyError(errorMessage(err, 'Ошибка preview deploy'))
+    } finally {
+      setDeployPreviewLoading(false)
+    }
+  }
+
+  const submitCustomProvider = async (payload: {
+    providerKey: string
+    cidrs_text: string
+    asns_text: string
+  }) => {
+    setCustomWizardLoading(true)
+    try {
+      const asns = payload.asns_text
+        .split(/[\n,;\s]+/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+      const result = await addCustomCidrProviderEntries(payload.providerKey, {
+        cidrs_text: payload.cidrs_text,
+        asns: asns.length ? asns : undefined,
+      })
+      success(result.message || 'Записи добавлены в CIDR БД')
+      setCustomWizardOpen(false)
+      await load()
+    } catch (err) {
+      notifyError(errorMessage(err, 'Ошибка добавления ASN/CIDR'))
+    } finally {
+      setCustomWizardLoading(false)
+    }
+  }
+
+  const requestRollback = (stamp: string) => {
+    setRollbackStamp(stamp)
+    setConfirmAction('rollback-cidr')
   }
 
   return {
@@ -485,6 +571,15 @@ export function useRoutingPage() {
     retryFailedProviders,
     refreshAntifilter: () => withPipelineAction(refreshAntifilter, 'Antifilter синхронизирован', 1, 'antifilter'),
     deployCidr: () => setConfirmAction('deploy-only'),
+    loadDeployPreview,
+    deployPreview,
+    deployPreviewLoading,
+    requestRollback,
+    rollbackStamp,
+    customWizardOpen,
+    setCustomWizardOpen,
+    customWizardLoading,
+    submitCustomProvider,
     clearCidrDbData,
   }
 }

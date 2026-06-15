@@ -9,7 +9,7 @@ from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.cidr_database import get_cidr_db
 from app.database import get_db
-from app.models import User
+from app.schemas import RouteBudgetInfo
 from app.services.action_log import log_action
 from app.services.cidr.cidr_tasks import (
     create_cidr_task,
@@ -23,15 +23,19 @@ from app.services.cidr.cidr_tasks import (
 from app.services.cidr.constants import IP_FILES
 from app.services.cidr.pipeline.db_pipeline import estimate_cidr_matches_from_db
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
-from app.models import Node, ProviderMeta
+from app.models import Node, ProviderMeta, User
 from app.services.cidr.pipeline.orchestrator import (
     run_apply,
     run_compile,
     run_deploy,
     run_ingest,
     run_multi_deploy,
+    run_rollback,
 )
 from app.services.cidr.pipeline.deploy import list_compile_artifacts
+from app.services.cidr.pipeline.deploy_preview import compute_deploy_preview
+from app.services.cidr.pipeline.file_pipeline import list_runtime_backups
+from app.services.cidr.route_budget import build_route_budget_payload
 from app.services.node_manager import get_active_adapter, get_adapter_for_node
 
 router = APIRouter(prefix="/routing/cidr-db", tags=["cidr-db"])
@@ -69,6 +73,30 @@ class CidrDbDeployRequest(BaseModel):
 
 class CidrDbClearRequest(BaseModel):
     selected_files: list[str] | None = None
+
+
+class CidrDbDeployPreviewRequest(BaseModel):
+    target_node_id: int | None = None
+    target_node_ids: list[int] | None = None
+    all_online: bool = False
+    selected_files: list[str] | None = None
+
+
+class CidrDbRollbackRequest(BaseModel):
+    backup_stamp: str
+    selected_files: list[str] | None = None
+    redeploy_after: bool = True
+    target_node_id: int | None = None
+    target_node_ids: list[int] | None = None
+    all_online: bool = False
+    sync_after: bool = True
+    apply_after: bool = False
+
+
+class CidrCustomProviderRequest(BaseModel):
+    cidrs: list[str] | None = None
+    cidrs_text: str | None = None
+    asns: list[str] | None = None
 
 
 def _svc(db: Session, cidr_db: Session) -> CidrDbUpdaterService:
@@ -158,6 +186,7 @@ def cidr_db_status(
         "last_compile_at": _summarize_last_compile(),
         "last_deploy": _summarize_last_deploy(),
         "compile_artifacts": list_compile_artifacts(),
+        "runtime_backups": list_runtime_backups()[:10],
         "active_task": find_any_active_pipeline_task(),
     }
 
@@ -333,6 +362,110 @@ def cidr_db_generate(
     return {"success": True, "queued": True, "task_id": task_id, "message": "Генерация CIDR-файлов из БД запущена"}
 
 
+@router.post("/deploy/preview")
+def cidr_deploy_preview(
+    payload: CidrDbDeployPreviewRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    result = compute_deploy_preview(
+        db,
+        target_node_ids=payload.target_node_ids,
+        all_online=payload.all_online,
+        target_node_id=payload.target_node_id,
+        selected_files=payload.selected_files,
+    )
+    return {"success": result.get("success", False), **result}
+
+
+@router.get("/rollback/backups")
+def cidr_rollback_backups(_: User = Depends(get_current_user)):
+    backups = list_runtime_backups()
+    return {"success": True, "backups": backups}
+
+
+@router.post("/rollback", status_code=status.HTTP_202_ACCEPTED)
+def cidr_db_rollback(
+    payload: CidrDbRollbackRequest,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    active = find_active_cidr_task("cidr_rollback")
+    if active:
+        return {
+            "success": True,
+            "queued": True,
+            "task_id": active["task_id"],
+            "message": "Откат CIDR уже выполняется",
+        }
+
+    triggered_by = f"manual:{user.username}"
+    task_id = create_cidr_task("cidr_rollback", "Откат CIDR из runtime_backups запущен")
+
+    def _rollback_runner(progress_callback):
+        from app.database import SessionLocal
+
+        inner_db = SessionLocal()
+        try:
+            return run_rollback(
+                inner_db,
+                payload.backup_stamp,
+                selected_files=payload.selected_files,
+                redeploy_after=payload.redeploy_after,
+                target_node_ids=payload.target_node_ids,
+                all_online=payload.all_online,
+                target_node_id=payload.target_node_id,
+                sync_after=payload.sync_after,
+                apply_after=payload.apply_after,
+                triggered_by=triggered_by,
+                progress_callback=progress_callback,
+            )
+        finally:
+            inner_db.close()
+
+    start_cidr_task(task_id, _rollback_runner)
+    log_action(
+        db,
+        action="settings_cidr_rollback_queued",
+        user_id=user.id,
+        username=user.username,
+        details=payload.backup_stamp,
+    )
+    return {
+        "success": True,
+        "queued": True,
+        "task_id": task_id,
+        "message": "Откат CIDR из runtime_backups запущен",
+    }
+
+
+@router.post("/providers/{provider_key}/custom")
+def cidr_custom_provider_entries(
+    provider_key: str,
+    payload: CidrCustomProviderRequest,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+    cidr_db: Session = Depends(get_cidr_db),
+):
+    result = _svc(db, cidr_db).add_custom_provider_entries(
+        provider_key,
+        cidrs=payload.cidrs,
+        cidrs_text=payload.cidrs_text,
+        asns=payload.asns,
+        triggered_by=f"manual:{user.username}",
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "Ошибка добавления"))
+    log_action(
+        db,
+        action="settings_cidr_custom_provider",
+        user_id=user.id,
+        username=user.username,
+        details=f"{provider_key}: +{result.get('cidrs_added', 0)} cidr, +{result.get('asns_added', 0)} asn",
+    )
+    return result
+
+
 @router.post("/deploy", status_code=status.HTTP_202_ACCEPTED)
 def cidr_db_deploy(
     payload: CidrDbDeployRequest,
@@ -448,3 +581,8 @@ def antifilter_refresh(user: User = Depends(require_admin), db: Session = Depend
         "task_id": task_id,
         "message": "Обновление антифильтра запущено в фоне (~1–3 минуты)",
     }
+
+
+@router.get("/route-budget", response_model=RouteBudgetInfo)
+def route_budget(_: User = Depends(get_current_user)):
+    return RouteBudgetInfo(**build_route_budget_payload())

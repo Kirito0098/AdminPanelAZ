@@ -8,25 +8,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Конфиги — ссылка на трафик** — кнопка «Статистика трафика» на карточке конфига (модуль `traffic_sync`): переход на `/traffic?client=…`.
-- **UI — полное обновление панели** — сервис `system_update.py`: «Настройки → Обновления» выполняет `git pull origin main`, `pip install`, `npm install`, `npm run build:all`, подготовку `backend/data/cidr/` и отложенный перезапуск (`systemctl restart adminpanelaz` или `./start.sh restart`); прогресс в фоновой задаче `update_system`.
-- **Тесты** — `test_system_update.py` (успешный сценарий, ошибка сборки frontend, restart через systemd, каталоги CIDR).
+- _(пусто — см. [Backlog-otkryto.md](docs/Backlog-otkryto.md))_
+
+## [2.0.0] - 2026-06-16
+
+Major release: roadmap этапы 1–8 (и большая часть 9) — prod foundation, admin productivity, multi-node, CIDR safety, Node Sync HA, self-service, ops/security. Открытые пункты: [docs/Backlog-otkryto.md](docs/Backlog-otkryto.md).
+
+### Added
+
+#### Prod foundation (этап 1)
+- **Retention policies** — фоновый `retention_worker`, batch purge traffic samples / action logs / resource metrics; настройки в **Настройки → Обслуживание** и `.env`.
+- **Prometheus** — `GET /metrics` (`traffic_collector_lag_seconds`, `node_health_*`, без high-cardinality labels).
+- **Health** — `GET /api/health/deep` (SQLite, CIDR DB, traffic lag); установщик проверяет deep health после старта.
+- **Resource profiles** — пресеты **Minimal / Standard / Full**: `POST /api/feature-toggles/apply-profile`, `worker_lifecycle.py`, wizard в `install-wizard.sh`, UI impact + banner «нужен restart».
+- **Route budget** — `GET /api/routing/cidr-db/route-budget`, виджет на странице маршрутизации.
+- **Vitest** — baseline-тесты (`configCardUtils`, `buildLightDiff`), шаг `npm test` в CI.
+- **Redis в prod** — документация README/SECURITY; wizard подсказывает Redis при `UVICORN_WORKERS > 1`.
+
+#### Admin productivity (этап 2)
+- **Теги клиентов** — CRUD `/api/config-tags`, назначение на конфиг, фильтр на Dashboard и в mass ops.
+- **Шаблоны клиентов** — `ClientTemplate`, one-click create с пресетами cert/traffic.
+- **Массовые операции** — `POST /api/configs/bulk` (block / delete / renew), фоновая задача + progress, лимит параллелизма.
+- **AmneziaWG** — отдельная вкладка на Dashboard (`ConfigCardsSection`).
+- **Активные сессии** — список и revoke в **Настройки → Безопасность** (`ActiveWebSession`).
+
+#### Multi-node (этап 3)
+- **Global dashboard** — сводка online/health по всем узлам (`GlobalDashboardSection`, кэш `node_remote_cache` 30–60 с).
+- **Сравнение узлов** — `NodesCompareSection`, `GET /api/monitoring/nodes-compare`.
+- **Geo-routing hint** — баннер «ближайший узел» (`GeoRoutingHintBanner`, `/api/nodes/geo-routing-hint`).
+- **Политики per-node** — сводка лимитов/блокировок по узлам (`NodePolicySummarySection`).
+
+#### CIDR безопасность (этап 4)
+- **Dry-run deploy** — preview файлов и route count (`deploy_preview.py`, `DeployPreviewPanel`).
+- **Rollback CIDR** — one-click откат из `runtime_backups`, background task, AdminNotify при ошибке.
+- **Custom provider wizard** — UI добавления ASN/CIDR без правки файлов.
+
+#### Node Sync / HA (этап 5)
+- **Sync Group** — модель `NodeSyncGroup`, CRUD `/api/nodes/sync-groups`, UI на странице **Узлы**.
+- **Push full** — backup primary → restore replica(s), progress bar (`push_full.py`).
+- **Verify parity** — сравнение OVPN/WG клиентов и checksums PKI/peers.
+- **Auto-sync** — create/delete на primary реплицирует на replica (`client_sync.py`, linked `VpnConfig`).
+- **Reconcile worker** — периодическая сверка, алерт при drift (`reconcile_worker.py`).
+- **HA на Dashboard** — badge «HA: domain (N узл.)», dedup shadow configs.
+- **Node agent** — `POST /backups/antizapret/restore`, fingerprints; документация [`docs/NodeSync.md`](docs/NodeSync.md).
+
+#### Self-service (этап 6)
+- **User role** — create/download/traffic в квотах (`self_service.py`).
+- **Telegram** — команды `/myconfigs`, `/traffic` для привязанных пользователей.
+- **Напоминания** — expiry cert, traffic limit, temp block → TG; dedup 1×/сутки (`user_reminder_worker`).
+
+#### Мониторинг и алерты (этап 7)
+- **Локальная GeoIP** — `geoip_local.py` (MaxMind MMDB в `data/geoip/`, fallback ip-api).
+- **Scheduled NOC reports** — ежедневная/еженедельная сводка в TG admin (`noc_report_scheduler.py`).
+
+#### Ops и интеграции (этап 8)
+- **Runbook UI** — guided diagnostics в **Настройки** (`RunbookTab`, `site_diagnostics` API).
+- **Import / export CSV** — массовый импорт через background task, export GET.
+- **Rolling node update** — очередь обновлений agent на нескольких узлах (`node_update_roll.py`).
+- **OpenAPI** — `/docs` за admin auth или IP whitelist (`openapi_docs_gate.py`).
+- **Event webhooks** — HTTP POST на события action log, retry queue (`webhook_delivery_worker`).
+- **Mini App** — read-only страницы Warper и CIDR status.
+
+#### Security / enterprise (этап 9)
+- **WebAuthn passkeys** — регистрация и вход для admin (вместе с TOTP), `PasskeysTab`.
+- **Audit SIEM** — stream `UserActionLog` в syslog/HTTP (`audit_stream.py`, Settings).
+- **CSP nonce** — inject nonce в HTML/scripts (`html_csp.py`, Vite `%CSP_NONCE%`).
+
+#### UI и прочее (после 1.9.0)
+- **Конфиги — ссылка на трафик** — кнопка «Статистика трафика» на карточке конфига → `/traffic?client=…`.
+- **NOC → Traffic** — клик по клиенту в `MonitoringConnectionsList` открывает график трафика.
+- **UI — полное обновление панели** — `system_update.py`: git pull + pip + npm + build + отложенный restart; прогресс `update_system`.
+- **NOC — гео по провайдерам** — нормализация ISP (Tele2, MegaFon, MTS…), сегмент «Прочие» с раскрытием.
+
+#### Документация
+- **Roadmap** — [`docs/Idei.md`](docs/Idei.md), промпты [`docs/Etapy-prompty.md`](docs/Etapy-prompty.md), открытый backlog [`docs/Backlog-otkryto.md`](docs/Backlog-otkryto.md), [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md).
+
+#### Тесты
+- Новые pytest-модули: retention, metrics, health, feature profiles, stage2/3/4, node_sync*, self_service, noc_report, config CSV, event webhooks, audit stream, openapi gate, site diagnostics API, antizapret restore, node update roll и др.
 
 ### Changed
-- **NOC — гео по провайдерам** — нормализация имён ISP (Tele2, MegaFon, MTS и др.) для группировки в donut; сегмент «Прочие» с раскрытием состава в легенде и тултипе; до 8 слайсов для ISP.
-- **Трафик** — убран дублирующий bar-chart «Топ клиентов (7д)»; без выбранного клиента остаётся только подсказка выбрать пользователя в блоке «Мониторинг клиента».
-- **Установка — Node.js** — `install.sh` требует Node **20+** (при 18.x — обновление через apt/NodeSource); устраняет `EBADENGINE` от `eslint-visitor-keys` при `npm install`.
-- **Установка — проверка health** — после `systemctl start` / daemon установщик ждёт ответ `/api/health` (до 90 с) и завершается с ошибкой, если backend не поднялся.
-- **Prod start** — `start.sh` в режиме `prod` пропускает `npm run build:all`, если уже есть `frontend/dist/index.html` и `backend/app/static/tg_mini/index.html` (пересборка: `ADMINPANELAZ_FORCE_FRONTEND_BUILD=1`).
-- **Frontend — Vite 6** — обновление с Vite 5.4.x до **6.4.2** (совместим с `@vitejs/plugin-react` 4.x); целевой `build.target: es2022`.
-- **UI — вкладка «Обновления»** — тексты и подтверждение отражают полный цикл (deps + сборка + авто-рестарт); `GET /api/system/updates` использует корень git-репозитория, а не каталог `backend/`.
-- **Git** — `.gitignore`: `backend/app/static/tg_mini/` и кэш Vite (артефакты сборки, как `frontend/dist/`); не коммитятся после `npm run build:all`.
+- **NOC — federated overview** — aggregate endpoint с кэшем; режим «Все узлы» без N+1 с фронта.
+- **Lifespan** — фоновые workers стартуют через `lifespan_workers.py` с учётом feature toggles и resource profile.
+- **Установка** — Node.js **20+**; deep health check до 90 с; resource profile в wizard; создание `backend/data/cidr/` до миграций.
+- **Prod start** — `start.sh` пропускает `npm run build:all`, если dist/tg_mini уже собраны (`ADMINPANELAZ_FORCE_FRONTEND_BUILD=1` для принудительной пересборки).
+- **Frontend — Vite 6.4.2** — `build.target: es2022`; overrides `esbuild ^0.28.1`.
+- **Трафик** — убран дублирующий bar-chart «Топ клиентов (7д)»; фокус на выбранном клиенте.
+- **README / SECURITY** — таблица VDS → profile, Redis для multi-worker, passkeys, health/metrics endpoints.
+- **Git** — `.gitignore`: `backend/app/static/tg_mini/`, кэш Vite.
+- **Обновления UI** — «Настройки → Обновления» отражает полный цикл deps + build + restart.
 
 ### Fixed
-- **Установка — CIDR БД** — на чистой установке backend падал с `unable to open database file`: `install.sh` создаёт `backend/data/cidr/list` и `staging`; `run_cidr_db_migrations()` создаёт каталоги до `create_all`.
-- **Prod start — лишняя сборка frontend** — при каждом рестарте systemd watchdog пересобирал frontend (~25 с), backend не слушал порт до завершения сборки.
-- **Frontend — npm audit** — Vite **6.4.2** + `overrides` для `esbuild ^0.28.1`; `build.target: es2022` в `vite.config.ts`. Устранены предупреждения audit (esbuild + GHSA-4w7w-66w2-5vf9) без перехода на Vite 8.
-- **UI — обновление только git pull** — ранее «Применить обновление» подтягивало код без `pip`/`npm`, без пересборки UI/tg_mini и без перезапуска панели; после релизов с новыми зависимостями требовался ручной SSH.
+- **Установка — CIDR БД** — `unable to open database file` на чистой установке (каталоги до `create_all`).
+- **Prod start** — лишняя пересборка frontend при каждом systemd restart (~25 с без listening port).
+- **npm audit** — Vite 6.4.2 + esbuild override без перехода на Vite 8.
+- **UI — git pull only** — «Применить обновление» раньше не ставило deps и не пересобирало UI.
+
+### Security
+- Passkeys optional alongside TOTP; audit stream для compliance; CSP nonce для scripts; OpenAPI и webhooks — admin-only.
 
 ## [1.9.0] - 2026-06-15
 
@@ -461,7 +539,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Production-развёртывание: `install.sh`, daemon/watchdog, systemd, раздача UI из backend в prod-режиме.
 - OpenVPN management sockets, vnStat, WebSocket-мониторинг, Telegram Mini App, in-panel pytest.
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.9.0...v2.0.0
 [1.9.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.6.0...v1.7.0

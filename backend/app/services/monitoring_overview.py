@@ -7,13 +7,113 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.models import Node, NodeStatus
-from app.schemas import MonitoringNodeSummary, MonitoringOverview, MonitoringService, OpenVpnClient, WireGuardPeer
+from app.schemas import (
+    GlobalDashboardSummary,
+    MonitoringNodeSummary,
+    MonitoringOverview,
+    MonitoringService,
+    OpenVpnClient,
+    WireGuardPeer,
+)
 from app.services.ip_geo import lookup_ips_geo, parse_client_endpoint
 from app.services.node_manager import get_active_node, get_adapter_for_node
+from app.services.node_compare_metrics import extract_cidr_routes_count, get_traffic_totals_by_node
+from app.services.resource_metrics import get_latest_samples_by_node
 
 
 def _wg_is_online(peer: WireGuardPeer) -> bool:
     return bool(peer.latest_handshake)
+
+
+def _node_status_value(node: Node) -> str:
+    return node.status.value if hasattr(node.status, "value") else str(node.status)
+
+
+def _collect_nodes_monitoring_data(db: Session) -> list[dict]:
+    nodes = db.query(Node).order_by(Node.id.asc()).all()
+    latest_metrics = get_latest_samples_by_node(db)
+    traffic_totals = get_traffic_totals_by_node(db)
+    node_payloads: list[dict] = []
+
+    for node in nodes:
+        sample = latest_metrics.get(node.id)
+        payload = {
+            "node": node,
+            "ovpn_clients": [],
+            "wireguard_peers": [],
+            "services": [],
+            "server_ip": None,
+            "error": None,
+            "cpu_percent": round(sample.cpu_percent, 1) if sample else None,
+            "memory_percent": round(sample.memory_percent, 1) if sample else None,
+            "total_traffic_bytes": traffic_totals.get(node.id),
+            "cidr_routes_count": None,
+        }
+        try:
+            adapter = get_adapter_for_node(node)
+            ovpn_clients, _ = adapter.get_openvpn_status_snapshot()
+            wireguard_peers = adapter.parse_wireguard_status()
+            payload.update(
+                {
+                    "ovpn_clients": ovpn_clients,
+                    "wireguard_peers": wireguard_peers,
+                    "services": adapter.get_service_status(),
+                    "server_ip": adapter.get_server_ip(),
+                    "cidr_routes_count": extract_cidr_routes_count(adapter),
+                }
+            )
+        except Exception as exc:
+            payload["error"] = str(exc)
+        node_payloads.append(payload)
+
+    return node_payloads
+
+
+def _build_node_summary(payload: dict) -> MonitoringNodeSummary:
+    node: Node = payload["node"]
+    ovpn_clients: list[OpenVpnClient] = payload["ovpn_clients"]
+    wireguard_peers: list[WireGuardPeer] = payload["wireguard_peers"]
+    services: list[MonitoringService] = payload["services"]
+    return MonitoringNodeSummary(
+        node_id=node.id,
+        node_name=node.name,
+        status=_node_status_value(node),
+        connected_openvpn=len(ovpn_clients),
+        connected_wireguard=sum(1 for peer in wireguard_peers if _wg_is_online(peer)),
+        active_services=sum(1 for service in services if service.active),
+        total_services=len(services),
+        cpu_percent=payload.get("cpu_percent"),
+        memory_percent=payload.get("memory_percent"),
+        total_traffic_bytes=payload.get("total_traffic_bytes"),
+        cidr_routes_count=payload.get("cidr_routes_count"),
+        error=payload["error"],
+    )
+
+
+def build_global_dashboard_summary(db: Session) -> GlobalDashboardSummary:
+    node_payloads = _collect_nodes_monitoring_data(db)
+    nodes_summary: list[MonitoringNodeSummary] = []
+    nodes_online = 0
+    total_connected_openvpn = 0
+    total_connected_wireguard = 0
+
+    for payload in node_payloads:
+        node: Node = payload["node"]
+        summary = _build_node_summary(payload)
+        if node.status == NodeStatus.online:
+            nodes_online += 1
+        total_connected_openvpn += summary.connected_openvpn
+        total_connected_wireguard += summary.connected_wireguard
+        nodes_summary.append(summary)
+
+    return GlobalDashboardSummary(
+        timestamp=datetime.utcnow(),
+        nodes_summary=nodes_summary,
+        nodes_online=nodes_online,
+        nodes_total=len(node_payloads),
+        total_connected_openvpn=total_connected_openvpn,
+        total_connected_wireguard=total_connected_wireguard,
+    )
 
 
 def _collect_lookup_ips(
@@ -115,35 +215,12 @@ def build_monitoring_overview(db: Session) -> MonitoringOverview:
 
 
 def build_federated_monitoring_overview(db: Session) -> MonitoringOverview:
-    nodes = db.query(Node).order_by(Node.id.asc()).all()
-    node_payloads: list[dict] = []
+    node_payloads = _collect_nodes_monitoring_data(db)
     lookup_ips: list[str | None] = []
-
-    for node in nodes:
-        payload = {
-            "node": node,
-            "ovpn_clients": [],
-            "wireguard_peers": [],
-            "services": [],
-            "server_ip": None,
-            "error": None,
-        }
-        try:
-            adapter = get_adapter_for_node(node)
-            ovpn_clients, _ = adapter.get_openvpn_status_snapshot()
-            wireguard_peers = adapter.parse_wireguard_status()
-            payload.update(
-                {
-                    "ovpn_clients": ovpn_clients,
-                    "wireguard_peers": wireguard_peers,
-                    "services": adapter.get_service_status(),
-                    "server_ip": adapter.get_server_ip(),
-                }
-            )
-            lookup_ips.extend(_collect_lookup_ips(ovpn_clients, wireguard_peers))
-        except Exception as exc:
-            payload["error"] = str(exc)
-        node_payloads.append(payload)
+    for payload in node_payloads:
+        lookup_ips.extend(
+            _collect_lookup_ips(payload["ovpn_clients"], payload["wireguard_peers"]),
+        )
 
     geo_map = lookup_ips_geo(lookup_ips)
     all_openvpn: list[OpenVpnClient] = []
@@ -158,17 +235,7 @@ def build_federated_monitoring_overview(db: Session) -> MonitoringOverview:
         node: Node = payload["node"]
         ovpn_clients: list[OpenVpnClient] = payload["ovpn_clients"]
         wireguard_peers: list[WireGuardPeer] = payload["wireguard_peers"]
-        services: list[MonitoringService] = payload["services"]
-        summary = MonitoringNodeSummary(
-            node_id=node.id,
-            node_name=node.name,
-            status=node.status.value if hasattr(node.status, "value") else str(node.status),
-            connected_openvpn=len(ovpn_clients),
-            connected_wireguard=sum(1 for peer in wireguard_peers if _wg_is_online(peer)),
-            active_services=sum(1 for service in services if service.active),
-            total_services=len(services),
-            error=payload["error"],
-        )
+        summary = _build_node_summary(payload)
         if node.status == NodeStatus.online:
             nodes_online += 1
         total_connected_openvpn += summary.connected_openvpn
@@ -179,6 +246,7 @@ def build_federated_monitoring_overview(db: Session) -> MonitoringOverview:
         all_wireguard.extend(enrich_wireguard_peers(wireguard_peers, geo_map, node_id=node.id, node_name=node.name))
         nodes_summary.append(summary)
 
+    nodes = [payload["node"] for payload in node_payloads]
     active_node = None
     try:
         active_node = get_active_node(db)

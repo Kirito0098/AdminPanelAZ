@@ -61,6 +61,18 @@
 | `NODE_AGENT_MTLS_CLIENT_KEY` | `/etc/adminpanelaz/mtls/panel.key` | Ключ клиентского сертификата |
 | `NODE_API_KEY_ROTATION_DAYS` | `0` | Автоматическая ротация ключей узлов (0 = выкл) |
 | `NODE_API_KEY_ROTATION_CHECK_HOURS` | `24` | Интервал проверки расписания ротации |
+| `OPENAPI_DOCS_ENABLED` | `true` | Включить `/docs`, `/redoc`, `/openapi.json` (в production можно `false`) |
+| `OPENAPI_DOCS_ALLOWED_IPS` | *(пусто)* | Дополнительный allowlist IP/CIDR для доступа к OpenAPI без JWT (через запятую) |
+
+## OpenAPI-документация
+
+Эндпоинты `/docs`, `/redoc` и `/openapi.json` **не публичны** по умолчанию:
+
+1. Передайте **admin JWT** в заголовке `Authorization: Bearer <token>` (удобно для скриптов и Swagger UI после входа).
+2. Либо добавьте IP/CIDR панели в `OPENAPI_DOCS_ALLOWED_IPS` (например `127.0.0.1,10.0.0.0/8` для доступа из офисной сети без токена).
+3. Для полного отключения в production: `OPENAPI_DOCS_ENABLED=false` — маршруты вернут 404.
+
+Рекомендация для internet-facing деплоя: `OPENAPI_DOCS_ENABLED=false` или узкий IP allowlist + отдельный VPN.
 
 ## Переменные окружения (node agent)
 
@@ -79,6 +91,8 @@
 
 - JWT access + refresh-токены (httpOnly cookie, ротация при refresh)
 - TOTP 2FA для администраторов (настройка, резервные коды)
+- WebAuthn passkeys для администраторов (опционально вместе с TOTP; вход через passkey или TOTP после пароля)
+- Telegram OAuth и Mini App вход **не** требуют TOTP/passkey (отдельный канал; привязка к учётной записи обязательна)
 - Rate limit auth: in-memory или Redis (fallback на memory)
 - Global API rate limit: per-IP sliding window на `/api/*` (исключения: health, ip-blocked); public route download — 30/min
 - robots.txt и security.txt (RFC 9116), X-Robots-Tag noindex для чувствительных путей

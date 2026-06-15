@@ -83,7 +83,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user, silentRefresh])
 
-  useSessionHeartbeat(!!user)
+  const logout = useCallback(() => {
+    api.logoutApi().catch(() => {})
+    localStorage.removeItem('token')
+    setUser(null)
+  }, [])
+
+  useSessionHeartbeat(!!user, logout)
 
   const login = useCallback(async (username: string, password: string) => {
     const result = await api.login(username, password)
@@ -104,12 +110,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     [refreshUser],
   )
-
-  const logout = useCallback(() => {
-    api.logoutApi().catch(() => {})
-    localStorage.removeItem('token')
-    setUser(null)
-  }, [])
 
   const value = useMemo(
     () => ({ user, loading, login, setToken, logout, refreshUser }),

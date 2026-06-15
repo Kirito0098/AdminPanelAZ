@@ -1,18 +1,33 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import PlainTextResponse, Response
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
 from app.database import get_db
 from app.models import AppSetting, User, UserRole, ViewerConfigAccess, VpnConfig, VpnType
-from app.schemas import MessageResponse, VpnConfigCreate, VpnConfigResponse, VpnConfigUpdate
+from app.schemas import ConfigTagResponse, MessageResponse, SelfServiceQuotaResponse, VpnConfigCreate, VpnConfigHaInfo, VpnConfigResponse, VpnConfigUpdate
+from app.services.self_service import build_quota_payload, enforce_user_can_create_config
 from app.services.admin_notify import admin_notify_service
+from app.services.background_tasks import background_task_service
+from app.services.config_csv_ops import (
+    enqueue_config_csv_import,
+    iter_config_export_csv,
+    parse_import_csv,
+    run_config_csv_import,
+    should_import_async,
+)
+from app.services.config_tags import get_tags_for_configs, resolve_config_ids_by_tags
 from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_adapter import NodeAdapter
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.node_sync.client_sync import maybe_replicate_create, maybe_replicate_delete
+from app.services.node_sync.groups import build_ha_metadata, find_sync_group_containing_node, find_sync_group_for_primary
 from app.services.openvpn_cert import resolve_openvpn_cert_days_remaining
 from app.services.openvpn_group import (
     filter_openvpn_profile_files,
@@ -50,13 +65,45 @@ def _active_node_id(db: Session) -> int:
 
 
 def _scoped_config_query(db: Session, query=None):
-    node_id = _active_node_id(db)
+    active_node = get_active_node(db)
+    group, _role = find_sync_group_containing_node(db, active_node.id)
     base = query if query is not None else db.query(VpnConfig)
-    return base.filter(VpnConfig.node_id == node_id)
+    if group:
+        return base.filter(
+            VpnConfig.node_id == group.primary_node_id,
+            VpnConfig.ha_primary_config_id.is_(None),
+        )
+    return base.filter(
+        VpnConfig.node_id == active_node.id,
+        VpnConfig.ha_primary_config_id.is_(None),
+    )
 
 
 def _get_config_for_active_node(db: Session, config_id: int) -> VpnConfig | None:
-    return _scoped_config_query(db).filter(VpnConfig.id == config_id).first()
+    config = db.get(VpnConfig, config_id)
+    if not config or config.ha_primary_config_id is not None:
+        return None
+    active_node = get_active_node(db)
+    group, _role = find_sync_group_containing_node(db, active_node.id)
+    if group:
+        if config.node_id == group.primary_node_id:
+            return config
+        return None
+    if config.node_id == active_node.id:
+        return config
+    return None
+
+
+def _ha_info_for_config(db: Session, config: VpnConfig) -> VpnConfigHaInfo | None:
+    if not config.sync_group_id:
+        return None
+    from app.models import NodeSyncGroup
+
+    group = db.get(NodeSyncGroup, config.sync_group_id)
+    meta = build_ha_metadata(group)
+    if not meta:
+        return None
+    return VpnConfigHaInfo(**meta)
 
 
 def _can_access_config(user: User, config: VpnConfig, db: Session | None = None) -> bool:
@@ -95,6 +142,7 @@ def _to_response(
     openvpn_group: str | None = None,
     adapter: NodeAdapter | None = None,
     profile_files: list[dict[str, str]] | None = None,
+    tags: list[ConfigTagResponse] | None = None,
 ) -> VpnConfigResponse:
     owner = db.query(User).filter(User.id == config.owner_id).first()
     files: list[dict[str, str]] = []
@@ -119,6 +167,8 @@ def _to_response(
         created_at=config.created_at,
         updated_at=config.updated_at,
         profile_files=files,
+        tags=tags or [],
+        ha=_ha_info_for_config(db, config),
     )
 
 
@@ -180,18 +230,33 @@ def _fetch_profile_files_map(
     return result
 
 
+@router.get("/quota", response_model=SelfServiceQuotaResponse)
+def get_config_quota(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return SelfServiceQuotaResponse(**build_quota_payload(db, current_user))
+
+
 @router.get("", response_model=list[VpnConfigResponse])
 def list_configs(
     include_files: bool = Query(False, description="Загружать список файлов профилей с узла"),
+    tag_ids: list[int] = Query(default=[], description="Фильтр по тегам (OR)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     openvpn_group = get_user_openvpn_group(db, current_user.id)
     configs = _list_accessible_configs(db, current_user)
+    if tag_ids:
+        node_id = _active_node_id(db)
+        allowed_ids = {c.id for c in configs}
+        matched = set(resolve_config_ids_by_tags(db, node_id, tag_ids))
+        configs = [c for c in configs if c.id in matched and c.id in allowed_ids]
     adapter = get_active_adapter(db) if include_files else None
     files_map: dict[int, list[dict[str, str]]] = {}
     if include_files and adapter is not None and configs:
         files_map = _fetch_profile_files_map(adapter, configs, openvpn_group=openvpn_group)
+    tags_map = get_tags_for_configs(db, [c.id for c in configs]) if configs else {}
     return [
         _to_response(
             c,
@@ -200,6 +265,10 @@ def list_configs(
             openvpn_group=openvpn_group,
             adapter=adapter,
             profile_files=files_map.get(c.id) if include_files else None,
+            tags=[
+                ConfigTagResponse(id=t.id, name=t.name, color=t.color)
+                for t in tags_map.get(c.id, [])
+            ],
         )
         for c in configs
     ]
@@ -250,6 +319,53 @@ def put_openvpn_group(
     return {"group": group, "options": list_openvpn_groups()}
 
 
+@router.get("/export")
+def export_configs_csv(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    node_id = _active_node_id(db)
+    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    filename = f"vpn-configs-node{node_id}-{stamp}.csv"
+    return StreamingResponse(
+        iter_config_export_csv(db, node_id=node_id),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/import")
+async def import_configs_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пуст")
+    try:
+        rows = parse_import_csv(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if should_import_async(len(rows)):
+        task_id = enqueue_config_csv_import(db, rows=rows, actor=admin)
+        task = background_task_service.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Не удалось создать задачу")
+        return background_task_service.build_accepted_payload(
+            task,
+            f"Импорт {len(rows)} клиент(ов) поставлен в очередь",
+        )
+
+    result = run_config_csv_import(
+        rows=rows,
+        actor_username=admin.username,
+        default_owner_id=admin.id,
+    )
+    return {"success": True, "async": False, "message": result["message"], "result": json.loads(result["output"])}
+
+
 @router.post("", response_model=VpnConfigResponse, status_code=status.HTTP_201_CREATED)
 def create_config(
     payload: VpnConfigCreate,
@@ -257,6 +373,7 @@ def create_config(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    enforce_user_can_create_config(db, current_user)
     owner_id = payload.owner_id if current_user.role == UserRole.admin and payload.owner_id else current_user.id
     owner = db.query(User).filter(User.id == owner_id).first()
     if not owner:
@@ -294,6 +411,11 @@ def create_config(
     db.add(config)
     db.commit()
     db.refresh(config)
+
+    group = find_sync_group_for_primary(db, node_id)
+    if group:
+        maybe_replicate_create(db, node_id=node_id, primary_config=config)
+
     node = get_active_node(db)
     admin_notify_service.send_config_create(
         db,
@@ -375,6 +497,11 @@ def delete_config(
     client_name = config.client_name
     vpn_type = config.vpn_type.value
     node = get_active_node(db)
+
+    sync_group = find_sync_group_for_primary(db, node.id)
+    if sync_group:
+        maybe_replicate_delete(db, node_id=node.id, primary_config=config)
+
     db.delete(config)
     db.commit()
     admin_notify_service.send_config_delete(

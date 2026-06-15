@@ -10,6 +10,7 @@ from app.services.feature_toggles import (
     FRONTEND_PATH_TO_MODULE,
     SETTINGS_TAB_TO_MODULE,
     FeatureToggleService,
+    VALID_RESOURCE_PROFILES,
 )
 
 router = APIRouter(prefix="/feature-toggles", tags=["feature-toggles"])
@@ -47,6 +48,37 @@ def update_feature_toggles(payload: FeatureToggleUpdate, _: User = Depends(requi
         shutdown_telegram_integration(db)
     db.commit()
     return result
+
+
+@router.get("/profiles")
+def list_resource_profiles(_: User = Depends(require_admin)):
+    return _service().list_resource_profiles()
+
+
+@router.post("/apply-profile")
+def apply_resource_profile(profile: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    service = _service()
+    telegram_was_enabled = service.is_enabled("telegram")
+    try:
+        result = service.apply_resource_profile(profile)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if telegram_was_enabled and not service.is_enabled("telegram"):
+        from app.services.telegram_module import shutdown_telegram_integration
+
+        shutdown_telegram_integration(db)
+        db.commit()
+    return result
+
+
+@router.get("/current-profile")
+def get_current_resource_profile(_: User = Depends(require_admin)):
+    service = _service()
+    return {
+        "profile": service.get_resource_profile(),
+        "requires_restart": True,
+        "valid_profiles": sorted(VALID_RESOURCE_PROFILES),
+    }
 
 
 @feature_modules_router.get("")

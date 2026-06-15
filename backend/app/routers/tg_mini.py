@@ -37,6 +37,7 @@ from app.schemas import (
 )
 from app.services.admin_notify import TG_NOTIFY_EVENT_LABELS, admin_notify_service
 from app.services.action_log import log_action
+from app.services.feature_guards import get_feature_service
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_manager import (
     check_node_health,
@@ -53,6 +54,7 @@ from app.services.profile_download_name import build_profile_download_filename, 
 from app.services.qr_download import QrDownloadService
 from app.services.security import SecurityService
 from app.services.telegram import send_tg_message
+from app.services.tg_mini_status import build_cidr_status_payload, build_warper_status_payload
 
 router = APIRouter(prefix="/tg-mini", tags=["tg-mini"])
 settings = get_settings()
@@ -287,6 +289,18 @@ def mini_activate_node(
     }
 
 
+@router.get("/warper/status")
+def mini_warper_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    if not get_feature_service().is_enabled("warper"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Модуль WARPER отключён")
+    return build_warper_status_payload(db)
+
+
+@router.get("/cidr/status")
+def mini_cidr_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return build_cidr_status_payload(db)
+
+
 @router.get("/assets/{file_path:path}", include_in_schema=False)
 def mini_app_asset(file_path: str):
     asset_path = (_STATIC_DIR / "assets" / file_path).resolve()
@@ -297,14 +311,16 @@ def mini_app_asset(file_path: str):
 
 
 @router.get("")
-def mini_app_page():
+def mini_app_page(request: Request):
+    from app.services.html_csp import serve_html_with_nonce
+
     index_path = _static_index()
     if not index_path.is_file():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Mini App UI не собран. Выполните: cd frontend && npm run build:tg-mini",
         )
-    return FileResponse(index_path, media_type="text/html")
+    return serve_html_with_nonce(request, index_path)
 
 
 @router.post("/auth")

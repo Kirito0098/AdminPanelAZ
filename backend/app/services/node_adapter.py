@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -268,6 +269,36 @@ class LocalNodeAdapter(NodeAdapter):
 
     def create_antizapret_backup(self) -> dict[str, str]:
         return self._service.create_antizapret_backup()
+
+    def download_antizapret_backup(self, archive_name: str) -> bytes:
+        from pathlib import Path
+
+        path = Path(archive_name)
+        if not path.is_file():
+            path = self._service.base_path / archive_name
+        if not path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Архив AntiZapret не найден: {archive_name}",
+            )
+        return path.read_bytes()
+
+    def restore_antizapret_backup(self, archive: str | bytes, archive_name: str = "restore.tar.gz") -> dict[str, str]:
+        import os
+        import tempfile
+
+        if isinstance(archive, bytes):
+            with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+                tmp.write(archive)
+                path = tmp.name
+            try:
+                return self._service.restore_antizapret_backup(path)
+            finally:
+                os.unlink(path)
+        return self._service.restore_antizapret_backup(str(archive))
+
+    def get_antizapret_fingerprints(self) -> dict[str, str]:
+        return self._service.get_antizapret_fingerprints()
 
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]:
         return self._service.get_profile_files(client_name, vpn_type)
@@ -609,6 +640,34 @@ class RemoteNodeAdapter(NodeAdapter):
             return None
         return response.json()
 
+    def _request_bytes(self, method: str, path: str, **kwargs) -> bytes:
+        url = f"{self.base_url}{path}"
+        timeout = kwargs.pop("timeout", HTTP_TIMEOUT)
+        try:
+            client = self._get_http_client()
+            response = client.request(
+                method,
+                url,
+                headers=self._headers(),
+                timeout=timeout,
+                **kwargs,
+            )
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=self._format_connection_error(exc),
+            ) from exc
+
+        if response.status_code >= 400:
+            detail = response.text
+            try:
+                data = response.json()
+                detail = data.get("detail", detail)
+            except Exception:
+                pass
+            raise HTTPException(status_code=response.status_code, detail=detail)
+        return response.content
+
     def health_check(self) -> dict[str, Any]:
         return self._request("GET", "/health", timeout=10.0)
 
@@ -650,6 +709,33 @@ class RemoteNodeAdapter(NodeAdapter):
             "archive_path": data.get("archive_path", ""),
             "archive_name": data.get("archive_name", ""),
         }
+
+    def download_antizapret_backup(self, archive_name: str) -> bytes:
+        return self._request_bytes(
+            "GET",
+            "/backups/antizapret/download",
+            params={"name": archive_name},
+            timeout=600.0,
+        )
+
+    def restore_antizapret_backup(self, archive: str | bytes, archive_name: str = "restore.tar.gz") -> dict[str, str]:
+        if not isinstance(archive, bytes):
+            archive = Path(archive).read_bytes()
+        data = self._request(
+            "POST",
+            "/backups/antizapret/restore",
+            files={"archive": (archive_name, archive, "application/gzip")},
+            timeout=600.0,
+        )
+        return {
+            "archive_path": data.get("archive_path", ""),
+            "archive_name": data.get("archive_name", archive_name),
+            "detail": data.get("detail", data.get("message", "")),
+        }
+
+    def get_antizapret_fingerprints(self) -> dict[str, str]:
+        data = self._request("GET", "/backups/antizapret/fingerprints", timeout=60.0)
+        return dict(data.get("fingerprints") or {})
 
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]:
         data = self._request(

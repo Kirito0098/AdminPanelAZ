@@ -14,6 +14,7 @@ import SettingsNav, {
   isSectionAvailable,
   type SettingsSection,
 } from '@/components/settings/SettingsNav'
+import RunbookTab from '@/components/settings/RunbookTab'
 import TestsTab from '@/components/settings/TestsTab'
 import UpdatesTab from '@/components/settings/UpdatesTab'
 import UsersTab from '@/components/settings/UsersTab'
@@ -71,7 +72,7 @@ const SECTION_TITLES: Record<SettingsSection, { title: string; description: stri
   },
   tests: {
     title: 'Диагностика',
-    description: 'Запуск smoke-тестов backend из панели',
+    description: 'Runbook запуска панели и smoke-тесты backend (pytest)',
   },
 }
 
@@ -229,7 +230,12 @@ export default function SettingsPage() {
       case 'updates':
         return <UpdatesTab />
       case 'tests':
-        return <TestsTab />
+        return (
+          <div className="space-y-4">
+            <RunbookTab />
+            <TestsTab />
+          </div>
+        )
       case 'vpn_network':
         return <VpnNetworkTab />
       default:

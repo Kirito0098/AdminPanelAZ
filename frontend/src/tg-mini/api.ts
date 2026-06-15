@@ -10,6 +10,8 @@ import type {
   TgMiniNodesResponse,
   TgMiniQrLink,
   TgMiniSettings,
+  TgMiniWarperStatus,
+  TgMiniCidrStatus,
 } from '@/types'
 
 const API_BASE = '/api/tg-mini'
@@ -145,4 +147,12 @@ export async function checkTgNodeHealth(nodeId: number): Promise<TgMiniNodeActio
 
 export async function activateTgNode(nodeId: number): Promise<TgMiniNodeActionResponse> {
   return tgFetch<TgMiniNodeActionResponse>(`/nodes/${nodeId}/activate`, { method: 'POST' })
+}
+
+export async function getTgWarperStatus(): Promise<TgMiniWarperStatus> {
+  return tgFetch<TgMiniWarperStatus>('/warper/status')
+}
+
+export async function getTgCidrStatus(): Promise<TgMiniCidrStatus> {
+  return tgFetch<TgMiniCidrStatus>('/cidr/status')
 }

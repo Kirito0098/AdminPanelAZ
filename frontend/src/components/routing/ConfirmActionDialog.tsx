@@ -1,5 +1,6 @@
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import type { ConfirmAction } from './useRoutingPage'
+import type { CidrDeployPreview } from '@/types'
 
 const confirmMeta: Record<
   Exclude<ConfirmAction, null>,
@@ -38,6 +39,14 @@ const confirmMeta: Record<
     destructive: true,
     alertTitle: 'Длительная операция',
   },
+  'rollback-cidr': {
+    title: 'Откатить CIDR из runtime_backups?',
+    description:
+      'Файлы на контроллере будут восстановлены из выбранной резервной копии и развёрнуты на выбранные ноды. Операция в фоне.',
+    confirmLabel: 'Откатить и развернуть',
+    destructive: true,
+    alertTitle: 'Откат deploy',
+  },
 }
 
 interface ConfirmActionDialogProps {
@@ -45,11 +54,27 @@ interface ConfirmActionDialogProps {
   onClose: () => void
   onConfirm: () => void
   loading?: boolean
+  deployPreview?: CidrDeployPreview | null
+  rollbackStamp?: string | null
 }
 
-export default function ConfirmActionDialog({ action, onClose, onConfirm, loading }: ConfirmActionDialogProps) {
+export default function ConfirmActionDialog({
+  action,
+  onClose,
+  onConfirm,
+  loading,
+  deployPreview,
+  rollbackStamp,
+}: ConfirmActionDialogProps) {
   if (!action) return null
   const meta = confirmMeta[action]
+
+  const description =
+    action === 'deploy-only' && deployPreview
+      ? `${meta.description} Preview: ${deployPreview.message}`
+      : action === 'rollback-cidr' && rollbackStamp
+        ? `${meta.description} Копия: ${rollbackStamp}.`
+        : meta.description
 
   return (
     <ConfirmDialog
@@ -58,7 +83,7 @@ export default function ConfirmActionDialog({ action, onClose, onConfirm, loadin
         if (!open && !loading) onClose()
       }}
       title={meta.title}
-      description={meta.description}
+      description={description}
       confirmLabel={meta.confirmLabel}
       destructive={meta.destructive}
       loading={loading}

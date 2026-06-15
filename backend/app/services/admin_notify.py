@@ -36,11 +36,18 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("user_delete", "Удаление пользователя"),
     ("client_ban", "Блокировка / разблокировка клиента"),
     ("traffic_limit", "Лимит трафика (блок / авторазблокировка)"),
+    ("cert_expiry_reminder", "Напоминание: срок сертификата"),
+    ("traffic_limit_reminder", "Напоминание: лимит трафика"),
+    ("temp_block_reminder", "Напоминание: временная блокировка"),
+    ("user_cert_expiry_reminder", "Пользователь: срок сертификата"),
+    ("user_traffic_limit_reminder", "Пользователь: лимит трафика"),
+    ("user_temp_block_reminder", "Пользователь: временная блокировка"),
     ("settings_change", "Изменение настроек"),
     ("high_cpu", "Высокая нагрузка CPU"),
     ("high_ram", "Высокая нагрузка RAM"),
     ("cidr_deploy_failed", "Ошибка развёртывания CIDR"),
     ("cidr_ingest_partial", "Частичное обновление CIDR БД"),
+    ("noc_report", "NOC: ежедневная/еженедельная сводка"),
 ]
 
 CLIENT_BLOCK_NOTIFY_EVENTS = frozenset({
@@ -701,6 +708,20 @@ class AdminNotifyService:
             details=details,
         )
 
+    def send_cidr_rollback_failed(
+        self,
+        db: Session,
+        *,
+        details: str | None = None,
+        actor_username: str | None = None,
+    ) -> None:
+        self.send(
+            db,
+            "settings_cidr_rollback_queued",
+            actor_username=actor_username,
+            details=details,
+        )
+
     def maybe_send_resource_alert(
         self,
         db: Session,
@@ -901,18 +922,22 @@ class AdminNotifyService:
                 action,
                 when,
             )
-        if event_type == "cidr_ingest_partial":
-            action = details or "Обновление CIDR БД завершилось частично"
-            if actor_username:
-                return _format_notify(
-                    "⚠️ <b>Частичное обновление CIDR БД</b>",
-                    _fmt_actor(actor_username, as_admin=True),
-                    action,
-                    when,
-                )
+        if event_type in (
+            "user_cert_expiry_reminder",
+            "user_traffic_limit_reminder",
+            "user_temp_block_reminder",
+        ):
+            titles = {
+                "user_cert_expiry_reminder": "⚠️ <b>Сертификат пользователя</b>",
+                "user_traffic_limit_reminder": "📊 <b>Лимит трафика пользователя</b>",
+                "user_temp_block_reminder": "⛔ <b>Временная блокировка</b>",
+            }
+            user_label = _fmt_code(subject_name or actor_username)
+            client_label = _fmt_code(target_name)
+            detail_line = details or "—"
             return _format_notify_system(
-                "⚠️ <b>Частичное обновление CIDR БД</b>",
-                action,
+                titles[event_type],
+                f"👤 {user_label} · клиент {client_label} · {detail_line}",
                 when,
             )
         return None

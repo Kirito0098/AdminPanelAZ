@@ -2,6 +2,29 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const CSP_NONCE_PLACEHOLDER = '%CSP_NONCE%'
+
+function cspNoncePlaceholder(): Plugin {
+  return {
+    name: 'csp-nonce-placeholder',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        return html
+          .replace(
+            /(<script\b(?![^>]*\bnonce=)[^>]*)(>)/gi,
+            `$1 nonce="${CSP_NONCE_PLACEHOLDER}"$2`,
+          )
+          .replace(
+            /(<link\b[^>]*\brel=["']modulepreload["'][^>]*)(>)/gi,
+            `$1 nonce="${CSP_NONCE_PLACEHOLDER}"$2`,
+          )
+      },
+    },
+  }
+}
+
 function tgMiniMoveScriptToBody(): Plugin {
   return {
     name: 'tg-mini-move-script-to-body',
@@ -26,7 +49,7 @@ export default defineConfig(({ mode }) => {
   const isTgMini = mode === 'tg-mini'
 
   return {
-    plugins: [react(), ...(isTgMini ? [tgMiniMoveScriptToBody()] : [])],
+    plugins: [react(), cspNoncePlaceholder(), ...(isTgMini ? [tgMiniMoveScriptToBody()] : [])],
     base: isTgMini ? '/api/tg-mini/' : '/',
     resolve: {
       alias: {

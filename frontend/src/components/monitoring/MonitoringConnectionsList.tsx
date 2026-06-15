@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { ArrowDownToLine, ArrowUpFromLine, Clock, MapPin } from 'lucide-react'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import {
@@ -132,7 +133,12 @@ function ConnectionCard({ row, showNodeColumn }: { row: MonitoringConnectionRow;
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
-          <p className="truncate text-base font-semibold">{row.clientName}</p>
+          <Link
+            to={`/traffic?client=${encodeURIComponent(row.clientName)}`}
+            className="truncate text-base font-semibold text-primary hover:underline"
+          >
+            {row.clientName}
+          </Link>
           <p className="font-mono text-sm text-muted-foreground">{row.vpnIp}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -232,7 +238,12 @@ export default function MonitoringConnectionsList({ rows, showNodeColumn }: Moni
                 {showNodeColumn && <TableCell className="text-sm">{row.nodeName || '—'}</TableCell>}
                 <TableCell>
                   <div className="space-y-1">
-                    <p className="text-sm font-semibold">{row.clientName}</p>
+                    <Link
+                      to={`/traffic?client=${encodeURIComponent(row.clientName)}`}
+                      className="text-sm font-semibold text-primary hover:underline"
+                    >
+                      {row.clientName}
+                    </Link>
                     {row.interfaceName && (
                       <p className="font-mono text-xs text-muted-foreground">{row.interfaceName}</p>
                     )}

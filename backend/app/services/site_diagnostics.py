@@ -13,7 +13,51 @@ from typing import Literal
 from app.services.firewall_tools_check import apt_install_hint, check_firewall_tools
 
 Status = Literal["ok", "warn", "fail"]
+RunCategory = Literal["systemd", "files", "https", "port", "http", "nginx", "firewall", "summary"]
 RunCmd = Callable[[list[str], float], subprocess.CompletedProcess]
+
+RUNBOOK_STEPS: list[dict[str, str]] = [
+    {
+        "id": "systemd",
+        "title": "Systemd сервис",
+        "description": "Unit-файл, автозагрузка, состояние и journal",
+    },
+    {
+        "id": "files",
+        "title": "Файлы проекта",
+        "description": ".env, база данных, venv и скрипты запуска",
+    },
+    {
+        "id": "https",
+        "title": "HTTPS и домен",
+        "description": "BEHIND_NGINX, ENFORCE_HTTPS и DOMAIN в .env",
+    },
+    {
+        "id": "port",
+        "title": "Порт backend",
+        "description": "Слушает ли uvicorn BACKEND_PORT",
+    },
+    {
+        "id": "http",
+        "title": "HTTP-проверка",
+        "description": "Ответ /api/health на localhost",
+    },
+    {
+        "id": "nginx",
+        "title": "Nginx reverse-proxy",
+        "description": "Конфиг, proxy_pass и nginx -t",
+    },
+    {
+        "id": "firewall",
+        "title": "Firewall tools",
+        "description": "iptables и ipset для защиты панели",
+    },
+    {
+        "id": "summary",
+        "title": "Итог",
+        "description": "Сводка и рекомендуемые команды",
+    },
+]
 
 
 @dataclass
@@ -22,6 +66,7 @@ class CheckResult:
     title: str
     detail: str = ""
     hint_ru: str = ""
+    category: RunCategory = "summary"
 
 
 @dataclass
@@ -43,6 +88,7 @@ class DiagnosticsContext:
 class DiagnosticsReport:
     results: list[CheckResult] = field(default_factory=list)
     recommended_commands: list[str] = field(default_factory=list)
+    _current_category: RunCategory = field(default="summary", repr=False, compare=False)
 
     @property
     def ok_count(self) -> int:
@@ -133,8 +179,96 @@ def _env_bool(value: str | None) -> bool:
     return (value or "").lower() in ("1", "true", "yes", "on")
 
 
+def _set_category(report: DiagnosticsReport, category: RunCategory) -> None:
+    report._current_category = category
+
+
 def _append_result(report: DiagnosticsReport, result: CheckResult) -> None:
+    result.category = report._current_category
     report.results.append(result)
+
+
+def resolve_diagnostics_context(
+    *,
+    install_dir: str | None = None,
+    service_name: str | None = None,
+    venv_path: str | None = None,
+) -> DiagnosticsContext:
+    from pathlib import Path
+
+    from app.config import get_settings
+
+    app_root = Path(__file__).resolve().parents[2]
+    resolved_install = install_dir or os.environ.get("INSTALL_DIR") or str(app_root.parent)
+    settings = get_settings()
+    raw_service = service_name or os.environ.get("SERVICE_NAME") or settings.admin_panel_az_service_name
+    resolved_service = raw_service.removesuffix(".service")
+    resolved_venv = (
+        venv_path
+        or os.environ.get("VENV_PATH")
+        or os.path.join(resolved_install, "backend", ".venv")
+    )
+    return DiagnosticsContext(
+        install_dir=resolved_install,
+        service_name=resolved_service,
+        venv_path=resolved_venv,
+    )
+
+
+def _step_status(results: list[CheckResult]) -> Status:
+    if any(r.status == "fail" for r in results):
+        return "fail"
+    if any(r.status == "warn" for r in results):
+        return "warn"
+    if results:
+        return "ok"
+    return "ok"
+
+
+def _check_result_dict(result: CheckResult) -> dict[str, str]:
+    payload: dict[str, str] = {
+        "status": result.status,
+        "title": result.title,
+        "category": result.category,
+    }
+    if result.detail:
+        payload["detail"] = result.detail
+    if result.hint_ru:
+        payload["hint_ru"] = result.hint_ru
+    return payload
+
+
+def report_to_dict(report: DiagnosticsReport, ctx: DiagnosticsContext) -> dict:
+    by_category: dict[str, list[CheckResult]] = {step["id"]: [] for step in RUNBOOK_STEPS}
+    for result in report.results:
+        by_category.setdefault(result.category, []).append(result)
+
+    steps = []
+    for step_def in RUNBOOK_STEPS:
+        step_id = step_def["id"]
+        step_results = by_category.get(step_id, [])
+        steps.append(
+            {
+                **step_def,
+                "status": _step_status(step_results),
+                "checks": [_check_result_dict(r) for r in step_results],
+            }
+        )
+
+    return {
+        "success": not report.has_failures(),
+        "install_dir": ctx.install_dir,
+        "service_name": ctx.service_name,
+        "summary": {
+            "ok": report.ok_count,
+            "warn": report.warn_count,
+            "fail": report.fail_count,
+            "has_failures": report.has_failures(),
+        },
+        "steps": steps,
+        "results": [_check_result_dict(r) for r in report.results],
+        "recommended_commands": list(report.recommended_commands),
+    }
 
 
 def _check_systemd(
@@ -604,13 +738,21 @@ def run_site_diagnostics(
     env_path = os.path.join(ctx.backend_dir(), ".env")
     env = _read_env_file(env_path) if os.path.isfile(env_path) else {}
 
+    _set_category(report, "systemd")
     _check_systemd(ctx, env, report, runner)
+    _set_category(report, "files")
     env = _check_project_files(ctx, report)
+    _set_category(report, "https")
     _check_https(env, report)
+    _set_category(report, "port")
     _check_port(env, report, runner)
+    _set_category(report, "http")
     _check_http_probe(env, report, runner)
+    _set_category(report, "nginx")
     _check_nginx(env, report, runner)
+    _set_category(report, "firewall")
     _check_firewall_tools(report, runner)
+    _set_category(report, "summary")
     _build_summary(report, ctx)
 
     return report

@@ -1,10 +1,12 @@
-import { useState } from 'react'
-import { FolderOpen, Play, RotateCcw, ServerCrash } from 'lucide-react'
-import { ApiError, recreateProfiles, restartService, runDoall } from '@/api/client'
+import { useEffect, useState } from 'react'
+import { Database, FolderOpen, Play, RotateCcw, ServerCrash } from 'lucide-react'
+import { ApiError, getRetentionSettings, recreateProfiles, restartService, runDoall, updateRetentionSettings } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -14,7 +16,7 @@ import {
 } from '@/components/ui/select'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
-import type { AppSettings } from '@/types'
+import type { AppSettings, RetentionSettings } from '@/types'
 
 const SERVICES = [
   'openvpn-server@antizapret-udp',
@@ -34,6 +36,28 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
   const { withInline, trackBackgroundTask } = useProgress()
   const [service, setService] = useState(SERVICES[0])
   const [busy, setBusy] = useState<string | null>(null)
+  const [retention, setRetention] = useState<RetentionSettings | null>(null)
+  const [retentionSaving, setRetentionSaving] = useState(false)
+
+  useEffect(() => {
+    void getRetentionSettings()
+      .then(setRetention)
+      .catch(() => setRetention(null))
+  }, [])
+
+  const saveRetention = async () => {
+    if (!retention) return
+    setRetentionSaving(true)
+    try {
+      const updated = await updateRetentionSettings(retention)
+      setRetention(updated)
+      success('Настройки retention сохранены')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось сохранить retention')
+    } finally {
+      setRetentionSaving(false)
+    }
+  }
 
   const run = async (key: string, label: string, fn: () => Promise<unknown>) => {
     setBusy(key)
@@ -111,6 +135,80 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
           </Button>
         </CardContent>
       </Card>
+
+      {retention && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Database size={18} />
+              Retention (очистка БД)
+            </CardTitle>
+            <CardDescription>
+              Автоматическое удаление старых traffic samples, action logs и resource metrics
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <div className="flex items-center justify-between rounded-lg border p-3 md:col-span-2">
+              <div>
+                <div className="font-medium">Фоновая очистка</div>
+                <div className="text-xs text-muted-foreground">Batch DELETE по расписанию</div>
+              </div>
+              <Switch
+                checked={retention.enabled}
+                onCheckedChange={(checked) => setRetention({ ...retention, enabled: checked })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="retention-interval">Интервал (часы)</Label>
+              <Input
+                id="retention-interval"
+                type="number"
+                min={1}
+                max={168}
+                value={retention.interval_hours}
+                onChange={(e) => setRetention({ ...retention, interval_hours: Number(e.target.value) })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="retention-traffic">Traffic samples (дней)</Label>
+              <Input
+                id="retention-traffic"
+                type="number"
+                min={1}
+                value={retention.traffic_sample_retention_days}
+                onChange={(e) =>
+                  setRetention({ ...retention, traffic_sample_retention_days: Number(e.target.value) })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="retention-logs">Action logs (дней)</Label>
+              <Input
+                id="retention-logs"
+                type="number"
+                min={1}
+                value={retention.action_log_retention_days}
+                onChange={(e) => setRetention({ ...retention, action_log_retention_days: Number(e.target.value) })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="retention-node-metrics">Node metrics (дней)</Label>
+              <Input
+                id="retention-node-metrics"
+                type="number"
+                min={1}
+                value={retention.resource_metrics_retention_days}
+                onChange={(e) =>
+                  setRetention({ ...retention, resource_metrics_retention_days: Number(e.target.value) })
+                }
+              />
+            </div>
+            <Button type="button" disabled={retentionSaving} onClick={() => void saveRetention()}>
+              Сохранить retention
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {settings && (
         <Card>

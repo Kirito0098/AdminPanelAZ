@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import ipaddress
 import time
+from pathlib import Path
 from threading import Lock
 
 import httpx
+
+from app.config import get_settings
 
 _PROTOCOL_PREFIXES = ("udp4:", "udp6:", "tcp4:", "tcp6:")
 _GEO_CACHE_TTL_SECONDS = 86_400
 _GEO_CACHE_MAX_ENTRIES = 2_000
 _geo_cache: dict[str, tuple[float, dict[str, str | None]]] = {}
 _geo_cache_lock = Lock()
+_local_geo_initialized = False
 
 
 def strip_protocol_prefix(address: str) -> str:
@@ -138,6 +142,38 @@ def _geo_from_api_item(item: dict) -> dict[str, str | None]:
     }
 
 
+def _ensure_local_geo_loaded() -> None:
+    global _local_geo_initialized
+    if _local_geo_initialized:
+        return
+    from app.services import geoip_local
+
+    settings = get_settings()
+    app_root = Path(__file__).resolve().parents[2]
+    geoip_local.try_load_geoip_databases(
+        Path(settings.geoip_city_mmdb_path),
+        Path(settings.geoip_asn_mmdb_path) if settings.geoip_asn_mmdb_path else None,
+        app_root=app_root,
+    )
+    _local_geo_initialized = True
+
+
+def is_local_geoip_loaded() -> bool:
+    _ensure_local_geo_loaded()
+    from app.services import geoip_local
+
+    return geoip_local.is_geoip_db_loaded()
+
+
+def _lookup_local_geo(lookup_ip: str) -> dict[str, str | None] | None:
+    _ensure_local_geo_loaded()
+    from app.services import geoip_local
+
+    if not geoip_local.is_geoip_db_loaded():
+        return None
+    return geoip_local.lookup_geo_local(lookup_ip)
+
+
 def lookup_ip_geo(ip: str | None) -> dict[str, str | None]:
     lookup_ip = (ip or "").strip("[]")
     if not lookup_ip or not _is_public_ip(lookup_ip):
@@ -146,6 +182,11 @@ def lookup_ip_geo(ip: str | None) -> dict[str, str | None]:
     cached = _read_geo_cache(lookup_ip)
     if cached is not None:
         return cached
+
+    local_payload = _lookup_local_geo(lookup_ip)
+    if local_payload is not None:
+        _write_geo_cache(lookup_ip, local_payload)
+        return local_payload
 
     try:
         with httpx.Client(timeout=3.0) as client:
@@ -174,10 +215,17 @@ def lookup_ips_geo(ips: list[str | None]) -> dict[str, dict[str, str | None]]:
 
     results: dict[str, dict[str, str | None]] = {}
     to_fetch: list[str] = []
+    use_local_only = is_local_geoip_loaded()
+
     for lookup_ip in normalized_ips:
         cached = _read_geo_cache(lookup_ip)
         if cached is not None:
             results[lookup_ip] = cached
+            continue
+        if use_local_only:
+            payload = _lookup_local_geo(lookup_ip) or _empty_geo()
+            results[lookup_ip] = payload
+            _write_geo_cache(lookup_ip, payload)
         else:
             to_fetch.append(lookup_ip)
 

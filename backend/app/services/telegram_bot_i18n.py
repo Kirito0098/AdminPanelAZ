@@ -88,6 +88,8 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("help", "Справка по командам"),
     ("link", "Привязка аккаунта"),
     ("status", "Статус панели"),
+    ("myconfigs", "Мои VPN-конфиги"),
+    ("traffic", "Мой трафик"),
     ("configs", "Список VPN-конфигов"),
     ("config", "Карточка конфига"),
     ("settings", "Настройки панели (admin)"),
@@ -124,8 +126,10 @@ HELP_LINES_MAIN = (
 )
 HELP_SECTION_CONFIGS = "<b>📁 Конфиги</b>"
 HELP_LINES_CONFIGS = (
+    "• /myconfigs — ваши конфиги",
     "• /configs — список конфигов",
     "• /config &lt;имя&gt; — выбор протокола и отправка файла",
+    "• /traffic — трафик ваших клиентов",
     "• OpenVPN / WireGuard / AmneziaWG — отдельные группы",
 )
 HELP_SECTION_ADMIN = "<b>⚙️ Администратор</b>"
@@ -157,6 +161,17 @@ STATUS_BODY = (
 
 CONFIGS_LIST = "📁 <b>Конфигурации</b>\n\nСтр. {page}/{total_pages} · всего <b>{count}</b>\n\nВыберите клиента:"
 CONFIGS_NONE = "📭 Конфигурации не найдены.\n\nСоздайте клиента в веб-панели или Mini App."
+
+# --- /traffic ---
+
+TRAFFIC_LIST = (
+    "📊 <b>Мой трафик</b>\n\n"
+    "Стр. {page}/{total_pages} · клиентов <b>{count}</b> · суммарно <b>{total}</b>\n\n"
+    "{lines}"
+)
+TRAFFIC_NONE = "📭 У вас нет конфигураций для отображения трафика."
+TRAFFIC_NO_STATS = "📊 Статистика трафика для ваших клиентов ещё не собрана."
+
 CONFIG_NOT_FOUND = "Конфиг <code>{name}</code> не найден."
 CONFIG_NOT_FOUND_ID = "Конфигурация не найдена."
 CONFIG_CARD = (

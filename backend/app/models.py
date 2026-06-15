@@ -30,11 +30,18 @@ DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
     "user_delete": True,
     "client_ban": True,
     "traffic_limit": True,
+    "cert_expiry_reminder": True,
+    "traffic_limit_reminder": True,
+    "temp_block_reminder": True,
+    "user_cert_expiry_reminder": False,
+    "user_traffic_limit_reminder": False,
+    "user_temp_block_reminder": False,
     "settings_change": True,
     "high_cpu": True,
     "high_ram": True,
     "cidr_deploy_failed": True,
     "cidr_ingest_partial": True,
+    "noc_report": True,
 }
 
 
@@ -53,10 +60,12 @@ class User(Base):
     totp_backup_codes_encrypted: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     telegram_id: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True, index=True)
     tg_notify_events: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    config_quota: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     vpn_configs: Mapped[list["VpnConfig"]] = relationship(back_populates="owner")
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user")
+    webauthn_credentials: Mapped[list["WebAuthnCredential"]] = relationship(back_populates="user")
 
     def get_tg_notify_events(self) -> dict[str, bool]:
         try:
@@ -102,6 +111,7 @@ class ActiveWebSession(Base):
     user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class VpnConfig(Base):
@@ -115,16 +125,100 @@ class VpnConfig(Base):
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     cert_expire_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sync_group_id: Mapped[int | None] = mapped_column(ForeignKey("node_sync_groups.id"), nullable=True, index=True)
+    ha_primary_config_id: Mapped[int | None] = mapped_column(ForeignKey("vpn_configs.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     owner: Mapped["User"] = relationship(back_populates="vpn_configs")
+    tag_links: Mapped[list["VpnConfigTagLink"]] = relationship(
+        back_populates="vpn_config",
+        cascade="all, delete-orphan",
+    )
+
+
+class ConfigTag(Base):
+    __tablename__ = "config_tags"
+    __table_args__ = (UniqueConstraint("node_id", "name", name="uq_config_tag_node_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    name: Mapped[str] = mapped_column(String(64), index=True)
+    color: Mapped[str | None] = mapped_column(String(16), nullable=True, default="#6366f1")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    links: Mapped[list["VpnConfigTagLink"]] = relationship(
+        back_populates="tag",
+        cascade="all, delete-orphan",
+    )
+
+
+class VpnConfigTagLink(Base):
+    __tablename__ = "vpn_config_tag_links"
+    __table_args__ = (UniqueConstraint("vpn_config_id", "tag_id", name="uq_config_tag_link"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    vpn_config_id: Mapped[int] = mapped_column(
+        ForeignKey("vpn_configs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    tag_id: Mapped[int] = mapped_column(
+        ForeignKey("config_tags.id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    vpn_config: Mapped["VpnConfig"] = relationship(back_populates="tag_links")
+    tag: Mapped["ConfigTag"] = relationship(back_populates="links")
+
+
+class ClientTemplate(Base):
+    __tablename__ = "client_templates"
+    __table_args__ = (UniqueConstraint("node_id", "name", name="uq_client_template_node_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    vpn_type: Mapped[VpnType] = mapped_column(Enum(VpnType))
+    cert_expire_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    traffic_limit_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    traffic_limit_unit: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    traffic_limit_period_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    description_template: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class NodeStatus(str, enum.Enum):
     online = "online"
     offline = "offline"
     unknown = "unknown"
+
+
+class SyncStatus(str, enum.Enum):
+    unknown = "unknown"
+    synced = "synced"
+    pending = "pending"
+    failed = "failed"
+
+
+class NodeSyncGroup(Base):
+    __tablename__ = "node_sync_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    shared_domain: Mapped[str] = mapped_column(String(255))
+    primary_node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    replica_node_ids: Mapped[str] = mapped_column(Text, default="[]")
+    sync_mode: Mapped[str] = mapped_column(String(32), default="manual_full")
+    sync_status: Mapped[SyncStatus] = mapped_column(Enum(SyncStatus), default=SyncStatus.unknown)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_verify_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_sync_task_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_verify_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Node(Base):
@@ -413,6 +507,21 @@ class AntifilterMeta(Base):
     refresh_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class UserReminderLog(Base):
+    """Dedup log for self-service user reminders (max once per 24h per event key)."""
+
+    __tablename__ = "user_reminder_logs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "reminder_type", "dedup_key", name="uq_user_reminder_dedup"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    reminder_type: Mapped[str] = mapped_column(String(32), index=True)
+    dedup_key: Mapped[str] = mapped_column(String(128))
+    sent_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
 class BackgroundTask(Base):
     __tablename__ = "background_task"
 
@@ -428,3 +537,38 @@ class BackgroundTask(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class WebAuthnCredential(Base):
+    __tablename__ = "webauthn_credentials"
+    __table_args__ = (UniqueConstraint("credential_id", name="uq_webauthn_credential_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    credential_id: Mapped[str] = mapped_column(String(512), index=True)
+    public_key: Mapped[str] = mapped_column(Text)
+    sign_count: Mapped[int] = mapped_column(Integer, default=0)
+    transports: Mapped[str | None] = mapped_column(Text, nullable=True)
+    aaguid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    nickname: Mapped[str] = mapped_column(String(128), default="Passkey")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="webauthn_credentials")
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_delivery"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_action: Mapped[str] = mapped_column(String(64), index=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    url: Mapped[str] = mapped_column(String(512))
+    destination_type: Mapped[str] = mapped_column(String(16), default="http", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

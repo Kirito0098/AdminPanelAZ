@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     hsts_max_age: int = 31536000
     content_security_policy: str = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://telegram.org; "
+        "script-src 'self' https://telegram.org; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: blob:; "
         "connect-src 'self' ws: wss:; "
@@ -45,6 +45,10 @@ class Settings(BaseSettings):
         "base-uri 'self'; "
         "form-action 'self' https://oauth.telegram.org"
     )
+    csp_relaxed_dev: bool = False
+    webauthn_rp_id: str = ""
+    webauthn_rp_name: str = "AdminPanel AntiZapret"
+    webauthn_origin: str = ""
     audit_log_enabled: bool = True
     database_url: str = "sqlite:///./data/adminpanel.db"
     cidr_database_url: str = "sqlite:///./data/cidr/cidr.db"
@@ -67,6 +71,8 @@ class Settings(BaseSettings):
     traffic_limit_reconcile_after_sync: bool = True
     wg_policy_sync_enabled: bool = True
     wg_policy_sync_interval_seconds: int = 120
+    node_sync_reconcile_enabled: bool = True
+    node_sync_reconcile_interval_seconds: int = 600
     node_health_sync_enabled: bool = True
     node_health_sync_interval_seconds: int = 60
     resource_metrics_enabled: bool = True
@@ -80,9 +86,13 @@ class Settings(BaseSettings):
     monitor_check_interval_seconds: int = 60
     monitor_cooldown_minutes: int = 30
     traffic_db_stale_seconds: int = 600
-    monitoring_overview_cache_ttl_seconds: int = 20
+    monitoring_overview_cache_ttl_seconds: int = 45
     cert_sync_enabled: bool = True
     cert_sync_interval_seconds: int = 300
+    self_service_reminder_enabled: bool = True
+    self_service_reminder_interval_seconds: int = 3600
+    self_service_reminder_cert_days_threshold: int = 7
+    self_service_traffic_warning_percent: int = 90
     node_active_health_cache_seconds: int = 45
     openvpn_socket_dir: Path = Path("/run/openvpn-server")
     openvpn_socket_timeout: float = 2.5
@@ -117,6 +127,29 @@ class Settings(BaseSettings):
     nightly_idle_restart_enabled: bool = True
     nightly_idle_restart_cron: str = "0 4 * * *"
     admin_panel_az_service_name: str = "admin-panel-az.service"
+    uvicorn_workers: int = 1
+    resource_profile: str = "standard"
+    retention_enabled: bool = True
+    retention_interval_hours: int = 24
+    traffic_sample_retention_days: int = 90
+    action_log_retention_days: int = 365
+    retention_batch_size: int = 5000
+    health_deep_node_ping: bool = True
+    health_deep_node_ping_timeout_seconds: float = 3.0
+    bulk_config_op_max_workers: int = 4
+    telegram_bot_command_rate_limit_enabled: bool = True
+    geoip_city_mmdb_path: Path = Path("data/geoip/GeoLite2-City.mmdb")
+    geoip_asn_mmdb_path: Path = Path("data/geoip/GeoLite2-ASN.mmdb")
+    noc_report_enabled: bool = True
+    noc_report_check_interval_seconds: int = 60
+    noc_report_daily_cron: str = "0 8 * * *"
+    noc_report_weekly_cron: str = "0 9 * * 1"
+    openapi_docs_enabled: bool = True
+    openapi_docs_allowed_ips: str = ""
+    config_csv_import_async_threshold: int = 100
+    event_webhook_timeout_seconds: float = 5.0
+    event_webhook_max_attempts: int = 5
+    event_webhook_retry_interval_seconds: int = 60
 
     @field_validator("auth_rate_limit_backend", "api_rate_limit_backend")
     @classmethod
@@ -165,6 +198,10 @@ class Settings(BaseSettings):
     @property
     def node_agent_allowed_ip_list(self) -> list[str]:
         return [ip.strip() for ip in self.node_agent_allowed_ips.split(",") if ip.strip()]
+
+    @property
+    def openapi_docs_allowed_ip_list(self) -> list[str]:
+        return [ip.strip() for ip in self.openapi_docs_allowed_ips.split(",") if ip.strip()]
 
     @property
     def cidr_db_deploy_target_node_id_list(self) -> list[int]:

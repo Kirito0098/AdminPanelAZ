@@ -1,12 +1,25 @@
 """Tests for client endpoint formatting and geo labels."""
 
+from unittest.mock import MagicMock, patch
+
+import httpx
+
+from app.services import geoip_local
 from app.services.ip_geo import (
+    _geo_cache,
     build_geo_label,
+    is_local_geoip_loaded,
     lookup_ip_geo,
+    lookup_ips_geo,
     normalize_client_ip,
     parse_client_endpoint,
     strip_protocol_prefix,
 )
+
+
+def setup_function():
+    _geo_cache.clear()
+    geoip_local.reset_geoip_readers()
 
 
 def test_strip_protocol_prefix():
@@ -36,3 +49,83 @@ def test_build_geo_label():
 def test_lookup_ip_geo_private_ip():
     payload = lookup_ip_geo("10.8.0.5")
     assert payload["geo_label"] is None
+
+
+def test_lookup_ip_geo_uses_local_db_without_http(tmp_path):
+    local_payload = {
+        "city": "Frankfurt",
+        "country": "Germany",
+        "isp": "Example ISP",
+        "location_label": "Frankfurt, Germany",
+        "geo_label": "Frankfurt · Example ISP",
+    }
+
+    with (
+        patch("app.services.ip_geo._lookup_local_geo", return_value=local_payload),
+        patch("app.services.ip_geo.is_local_geoip_loaded", return_value=True),
+        patch("httpx.Client") as mock_client_cls,
+    ):
+        payload = lookup_ip_geo("8.8.8.8")
+
+    assert payload == local_payload
+    mock_client_cls.assert_not_called()
+
+
+def test_lookup_ip_geo_falls_back_to_api_when_local_unavailable():
+    api_response = MagicMock()
+    api_response.json.return_value = {
+        "status": "success",
+        "city": "Ashburn",
+        "country": "United States",
+        "isp": "Google LLC",
+        "query": "8.8.8.8",
+    }
+    api_response.raise_for_status = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.__enter__.return_value = mock_client
+    mock_client.get.return_value = api_response
+
+    with (
+        patch("app.services.ip_geo._lookup_local_geo", return_value=None),
+        patch("app.services.ip_geo.is_local_geoip_loaded", return_value=False),
+        patch("httpx.Client", return_value=mock_client),
+    ):
+        payload = lookup_ip_geo("8.8.8.8")
+
+    assert payload["city"] == "Ashburn"
+    assert payload["country"] == "United States"
+    assert payload["geo_label"] == "Ashburn · Google LLC"
+    mock_client.get.assert_called_once()
+
+
+def test_lookup_ips_geo_batch_skips_http_when_local_loaded():
+    local_payload = {
+        "city": "Paris",
+        "country": "France",
+        "isp": None,
+        "location_label": "Paris, France",
+        "geo_label": "Paris",
+    }
+
+    with (
+        patch("app.services.ip_geo.is_local_geoip_loaded", return_value=True),
+        patch("app.services.ip_geo._lookup_local_geo", return_value=local_payload),
+        patch("httpx.Client") as mock_client_cls,
+    ):
+        results = lookup_ips_geo(["1.1.1.1", "10.0.0.1", "1.1.1.1"])
+
+    assert results["1.1.1.1"] == local_payload
+    assert "10.0.0.1" not in results
+    mock_client_cls.assert_not_called()
+
+
+def test_is_local_geoip_loaded_false_without_mmdb_file():
+    from app.config import Settings
+
+    with patch("app.services.ip_geo.get_settings") as mock_settings:
+        mock_settings.return_value = Settings(
+            geoip_city_mmdb_path=__import__("pathlib").Path("data/geoip/missing.mmdb"),
+            geoip_asn_mmdb_path=__import__("pathlib").Path("data/geoip/missing-asn.mmdb"),
+        )
+        assert is_local_geoip_loaded() is False

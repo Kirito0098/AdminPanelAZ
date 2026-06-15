@@ -1,6 +1,7 @@
 import { FormEvent } from 'react'
 import { KeyRound, Moon, Palette, Sun } from 'lucide-react'
 import TwoFactorTab from '@/components/settings/TwoFactorTab'
+import PasskeysTab from '@/components/settings/PasskeysTab'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -114,6 +115,7 @@ export default function PersonalTab({
       </Card>
 
       <TwoFactorTab />
+      <PasskeysTab />
     </div>
   )
 }

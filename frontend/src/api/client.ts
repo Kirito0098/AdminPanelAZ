@@ -77,7 +77,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, retry
 
 export type LoginResult =
   | { access_token: string; web_session_id?: string; requires_2fa?: false }
-  | { requires_2fa: true; temp_token: string }
+  | { requires_2fa: true; temp_token: string; passkey_available?: boolean }
 
 export async function login(username: string, password: string): Promise<LoginResult> {
   return apiFetch<LoginResult>('/auth/login/json', {
@@ -144,6 +144,63 @@ export async function regenerate2FABackupCodes(code: string) {
   })
 }
 
+export type PasskeyCredential = {
+  id: number
+  nickname: string
+  created_at: string
+  last_used_at: string | null
+}
+
+export async function getPasskeys() {
+  return apiFetch<{ credentials: PasskeyCredential[]; count: number }>('/auth/passkeys')
+}
+
+export async function getPasskeyRegisterOptions() {
+  return apiFetch<{ options: Record<string, unknown> & { sessionKey?: string } }>(
+    '/auth/passkeys/register/options',
+    { method: 'POST' },
+  )
+}
+
+export async function verifyPasskeyRegister(
+  sessionKey: string,
+  credential: unknown,
+  nickname?: string,
+) {
+  return apiFetch<PasskeyCredential>('/auth/passkeys/register/verify', {
+    method: 'POST',
+    body: JSON.stringify({ session_key: sessionKey, credential, nickname }),
+  })
+}
+
+export async function deletePasskey(credentialId: number) {
+  return apiFetch('/auth/passkeys/' + credentialId, { method: 'DELETE' })
+}
+
+export async function renamePasskey(credentialId: number, nickname: string) {
+  return apiFetch<PasskeyCredential>('/auth/passkeys/' + credentialId, {
+    method: 'PATCH',
+    body: JSON.stringify({ nickname }),
+  })
+}
+
+export async function getPasskeyLoginOptions(tempToken: string) {
+  return apiFetch<{ options: Record<string, unknown> & { sessionKey?: string } }>(
+    '/auth/login/passkey/options',
+    {
+      method: 'POST',
+      body: JSON.stringify({ temp_token: tempToken }),
+    },
+  )
+}
+
+export async function verifyPasskeyLogin(tempToken: string, sessionKey: string, credential: unknown) {
+  return apiFetch<{ access_token: string; web_session_id?: string }>('/auth/login/passkey/verify', {
+    method: 'POST',
+    body: JSON.stringify({ temp_token: tempToken, session_key: sessionKey, credential }),
+  })
+}
+
 export async function rotateNodeApiKey(nodeId: number) {
   return apiFetch<{ message: string; node_id: number }>(`/nodes/${nodeId}/rotate-key`, {
     method: 'POST',
@@ -188,11 +245,16 @@ export async function changePassword(current: string, newPassword: string) {
   })
 }
 
-export async function getConfigs(includeFiles = false) {
+export async function getConfigs(includeFiles = false, tagIds?: number[]) {
   const params = new URLSearchParams()
   if (includeFiles) params.set('include_files', 'true')
+  if (tagIds?.length) tagIds.forEach((id) => params.append('tag_ids', String(id)))
   const query = params.toString() ? `?${params.toString()}` : ''
   return apiFetch<import('../types').VpnConfig[]>(`/configs${query}`)
+}
+
+export async function getConfigQuota() {
+  return apiFetch<import('../types').SelfServiceQuota>('/configs/quota')
 }
 
 export async function getConfigProfileFiles(ids?: number[]) {
@@ -233,8 +295,84 @@ export async function syncConfigs() {
   return apiFetch('/configs/sync', { method: 'POST' })
 }
 
+export async function getConfigTags() {
+  return apiFetch<import('../types').ConfigTag[]>('/config-tags')
+}
+
+export async function createConfigTag(data: { name: string; color?: string }) {
+  return apiFetch<import('../types').ConfigTag>('/config-tags', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteConfigTag(id: number) {
+  return apiFetch(`/config-tags/${id}`, { method: 'DELETE' })
+}
+
+export async function setConfigTags(configId: number, tagIds: number[]) {
+  return apiFetch<import('../types').ConfigTag[]>(`/config-tags/configs/${configId}/tags`, {
+    method: 'PUT',
+    body: JSON.stringify({ tag_ids: tagIds }),
+  })
+}
+
+export async function getClientTemplates() {
+  return apiFetch<import('../types').ClientTemplate[]>('/client-templates')
+}
+
+export async function applyClientTemplate(
+  templateId: number,
+  data: { client_name: string; owner_id?: number },
+) {
+  return apiFetch<import('../types').VpnConfig>(`/client-templates/${templateId}/apply`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function bulkConfigOp(data: {
+  operation: 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert'
+  config_ids?: number[]
+  tag_ids?: number[]
+  block_days?: number
+  renew_cert_days?: number
+}) {
+  return apiFetch<{ task_id: string; queued: boolean; status_url: string }>('/configs/bulk', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getActiveWebSessions() {
+  return apiFetch<import('../types').ActiveWebSession[]>('/security/active-sessions')
+}
+
+export async function revokeActiveWebSession(sessionId: string) {
+  return apiFetch(`/security/active-sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function getMonitoring(scope: 'node' | 'all' = 'node') {
   return apiFetch<import('../types').MonitoringOverview>(`/monitoring/overview?scope=${scope}`)
+}
+
+export async function getGlobalDashboardSummary() {
+  return apiFetch<import('../types').GlobalDashboardSummary>('/monitoring/global-summary')
+}
+
+export async function getNodesCompare() {
+  return apiFetch<import('../types').GlobalDashboardSummary>('/monitoring/nodes-compare')
+}
+
+export async function getGeoRoutingHint(clientIp?: string) {
+  const query = clientIp ? `?client_ip=${encodeURIComponent(clientIp)}` : ''
+  return apiFetch<import('../types').GeoRoutingHint>(`/nodes/geo-routing-hint${query}`)
+}
+
+export async function getNodePolicySummary() {
+  return apiFetch<import('../types').NodePolicySummary[]>('/client-access/policy-summary-by-node')
 }
 
 export function openMonitoringStream(
@@ -400,6 +538,129 @@ export async function applyNodeUpdate(id: number) {
   }>(`/nodes/${id}/update`, {
     method: 'POST',
     body: JSON.stringify({}),
+  })
+}
+
+export async function rollingNodeUpdate(nodeIds: number[]) {
+  return apiFetch<import('../types').BackgroundTaskAccepted>('/nodes/update-roll', {
+    method: 'POST',
+    body: JSON.stringify({ node_ids: nodeIds }),
+  })
+}
+
+export function downloadConfigsExport() {
+  const token = getToken()
+  return fetch(`${API_BASE}/configs/export`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+  })
+}
+
+export async function importConfigsCsv(file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return apiFetch<import('../types').ConfigCsvImportResponse>('/configs/import', {
+    method: 'POST',
+    body: form,
+  })
+}
+
+export async function getEventWebhookSettings() {
+  return apiFetch<import('../types').EventWebhookSettings>('/security/event-webhooks')
+}
+
+export async function updateEventWebhookSettings(data: {
+  url?: string
+  secret?: string
+  enabled?: boolean
+  events?: Array<{ key: string; enabled: boolean }>
+}) {
+  return apiFetch<import('../types').EventWebhookSettings>('/security/event-webhooks', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getAuditStreamSettings() {
+  return apiFetch<import('../types').AuditStreamSettings>('/security/audit-stream')
+}
+
+export async function updateAuditStreamSettings(data: {
+  enabled?: boolean
+  mode?: 'http' | 'syslog' | 'both'
+  http_url?: string
+  secret?: string
+  syslog_host?: string
+  syslog_port?: number
+  syslog_protocol?: 'udp' | 'tcp'
+  format?: 'json' | 'cef'
+}) {
+  return apiFetch<import('../types').AuditStreamSettings>('/security/audit-stream', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function testAuditStream() {
+  return apiFetch<{ results: Record<string, string> }>('/security/audit-stream/test', {
+    method: 'POST',
+  })
+}
+
+export async function getNodeSyncGroups() {
+  return apiFetch<import('../types').NodeSyncGroup[]>('/nodes/sync-groups')
+}
+
+export async function createNodeSyncGroup(data: {
+  name: string
+  shared_domain: string
+  primary_node_id: number
+  replica_node_ids: number[]
+  sync_mode?: string
+}) {
+  return apiFetch<import('../types').NodeSyncGroup>('/nodes/sync-groups', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateNodeSyncGroup(
+  id: number,
+  data: Partial<{
+    name: string
+    shared_domain: string
+    primary_node_id: number
+    replica_node_ids: number[]
+    sync_mode: string
+  }>,
+) {
+  return apiFetch<import('../types').NodeSyncGroup>(`/nodes/sync-groups/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteNodeSyncGroup(id: number) {
+  return apiFetch<{ message: string }>(`/nodes/sync-groups/${id}`, { method: 'DELETE' })
+}
+
+export async function getNodeSyncGroupStatus(id: number) {
+  return apiFetch<import('../types').NodeSyncGroupStatus>(`/nodes/sync-groups/${id}/status`)
+}
+
+export async function pushNodeSyncGroupFull(id: number) {
+  return apiFetch<{
+    task_id: string
+    group_id: number
+    message: string
+    queued?: boolean
+    status_url?: string | null
+  }>(`/nodes/sync-groups/${id}/push-full`, { method: 'POST' })
+}
+
+export async function verifyNodeSyncGroup(id: number) {
+  return apiFetch<import('../types').NodeSyncVerifyResult>(`/nodes/sync-groups/${id}/verify`, {
+    method: 'POST',
   })
 }
 
@@ -663,6 +924,72 @@ export async function deployCidrToNode(options?: {
   })
 }
 
+export async function previewCidrDeploy(options?: {
+  target_node_id?: number | null
+  target_node_ids?: number[] | null
+  all_online?: boolean
+  selected_files?: string[] | null
+}) {
+  return apiFetch<import('../types').CidrDeployPreview>('/routing/cidr-db/deploy/preview', {
+    method: 'POST',
+    body: JSON.stringify({
+      target_node_id: options?.target_node_id ?? null,
+      target_node_ids: options?.target_node_ids ?? null,
+      all_online: options?.all_online ?? false,
+      selected_files: options?.selected_files ?? null,
+    }),
+  })
+}
+
+export async function getCidrRollbackBackups() {
+  return apiFetch<{ success: boolean; backups: import('../types').CidrRuntimeBackup[] }>(
+    '/routing/cidr-db/rollback/backups',
+  )
+}
+
+export async function rollbackCidrFromBackup(options: {
+  backup_stamp: string
+  selected_files?: string[] | null
+  redeploy_after?: boolean
+  target_node_id?: number | null
+  target_node_ids?: number[] | null
+  all_online?: boolean
+  sync_after?: boolean
+  apply_after?: boolean
+}) {
+  return apiFetch<{ success: boolean; task_id: string; message: string }>('/routing/cidr-db/rollback', {
+    method: 'POST',
+    body: JSON.stringify({
+      backup_stamp: options.backup_stamp,
+      selected_files: options.selected_files ?? null,
+      redeploy_after: options.redeploy_after ?? true,
+      target_node_id: options.target_node_id ?? null,
+      target_node_ids: options.target_node_ids ?? null,
+      all_online: options.all_online ?? false,
+      sync_after: options.sync_after ?? true,
+      apply_after: options.apply_after ?? false,
+    }),
+  })
+}
+
+export async function addCustomCidrProviderEntries(
+  providerKey: string,
+  payload: { cidrs?: string[]; cidrs_text?: string; asns?: string[] },
+) {
+  return apiFetch<{
+    success: boolean
+    message: string
+    provider_key: string
+    cidrs_added: number
+    asns_added: number
+    total_cidrs?: number
+    active_asn_count?: number
+  }>(`/routing/cidr-db/providers/${encodeURIComponent(providerKey)}/custom`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function getCidrBackgroundTask(taskId: string) {
   const resp = await apiFetch<
     { success?: boolean; task?: import('../types').BackgroundTask } & import('../types').BackgroundTask
@@ -911,6 +1238,37 @@ export async function updateFeatureToggles(toggles: Record<string, boolean>) {
   })
 }
 
+export async function getResourceProfiles() {
+  return apiFetch<import('../types').ResourceProfilesResponse>('/feature-toggles/profiles')
+}
+
+export async function applyResourceProfile(profile: string) {
+  return apiFetch<{
+    profile: string
+    requires_restart: boolean
+    impact?: import('../types').ResourceProfileImpact
+    workers_disabled?: string[]
+    profiles: import('../types').ResourceProfilesResponse
+  }>(`/feature-toggles/apply-profile?profile=${encodeURIComponent(profile)}`, {
+    method: 'POST',
+  })
+}
+
+export async function getRetentionSettings() {
+  return apiFetch<import('../types').RetentionSettings>('/settings/retention')
+}
+
+export async function updateRetentionSettings(data: Partial<import('../types').RetentionSettings>) {
+  return apiFetch<import('../types').RetentionSettings>('/settings/retention', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getRouteBudget() {
+  return apiFetch<import('../types').RouteBudgetInfo>('/routing/cidr-db/route-budget')
+}
+
 export async function getAntizapretSettings() {
   return apiFetch<import('../types').AntizapretSettingsResponse>('/routing/antizapret-settings')
 }
@@ -1120,6 +1478,12 @@ export async function runTests(testIds: string[] = []) {
   return apiFetch<{ task_id: string; message: string }>('/tests/run', {
     method: 'POST',
     body: JSON.stringify({ test_ids: testIds }),
+  })
+}
+
+export async function runSiteDiagnostics() {
+  return apiFetch<import('../types').SiteDiagnosticsReport>('/site-diagnostics/run', {
+    method: 'POST',
   })
 }
 

@@ -14,6 +14,7 @@ ACTIVE_PIPELINE_TASK_TYPES = (
     "cidr_generate_from_db",
     "cidr_estimate_from_db",
     "cidr_deploy",
+    "cidr_rollback",
 )
 
 CIDR_TASK_STALE_SECONDS: dict[str, int] = {
@@ -23,6 +24,7 @@ CIDR_TASK_STALE_SECONDS: dict[str, int] = {
     "cidr_generate_from_db": 1800,
     "cidr_estimate_from_db": 900,
     "cidr_deploy": 1800,
+    "cidr_rollback": 1800,
 }
 
 # In-memory fallback for unit tests without DB wiring

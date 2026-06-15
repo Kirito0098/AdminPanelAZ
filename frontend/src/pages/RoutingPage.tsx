@@ -7,6 +7,7 @@ import { useMemo } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import ConfirmActionDialog from '@/components/routing/ConfirmActionDialog'
 import CidrPipelineTab from '@/components/routing/CidrPipelineTab'
+import CustomProviderWizardDialog from '@/components/routing/CustomProviderWizardDialog'
 import PipelineStatusBar from '@/components/routing/PipelineStatusBar'
 import PipelineTaskProgress from '@/components/routing/PipelineTaskProgress'
 import ProvidersTab from '@/components/routing/ProvidersTab'
@@ -73,6 +74,15 @@ export default function RoutingPage() {
     refreshAntifilter,
     deployCidr,
     clearCidrDbData,
+    loadDeployPreview,
+    deployPreview,
+    deployPreviewLoading,
+    requestRollback,
+    rollbackStamp,
+    customWizardOpen,
+    setCustomWizardOpen,
+    customWizardLoading,
+    submitCustomProvider,
   } = useRoutingPage()
 
   if (loading && !data) {
@@ -168,6 +178,11 @@ export default function RoutingPage() {
               onDeploy={deployCidr}
               onGenerateDoall={() => setConfirmAction('generate-doall')}
               onClearDb={clearCidrDbData}
+              onOpenCustomWizard={() => setCustomWizardOpen(true)}
+              onLoadDeployPreview={loadDeployPreview}
+              deployPreview={deployPreview}
+              deployPreviewLoading={deployPreviewLoading}
+              onRollback={requestRollback}
             />
           </TabsContent>
         )}
@@ -179,6 +194,16 @@ export default function RoutingPage() {
         onClose={() => setConfirmAction(null)}
         onConfirm={executeConfirm}
         loading={actionLoading}
+        deployPreview={deployPreview}
+        rollbackStamp={rollbackStamp}
+      />
+
+      <CustomProviderWizardDialog
+        open={customWizardOpen}
+        onOpenChange={setCustomWizardOpen}
+        providers={data.providers}
+        loading={customWizardLoading}
+        onSubmit={submitCustomProvider}
       />
     </div>
   )

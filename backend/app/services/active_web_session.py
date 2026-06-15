@@ -75,6 +75,9 @@ class ActiveWebSessionService:
         user_agent = (request.headers.get("User-Agent") or "")[:255]
 
         row = db.query(ActiveWebSession).filter(ActiveWebSession.session_id == session_id).first()
+        if row is not None and row.revoked_at is not None:
+            return
+
         if row is None:
             db.add(
                 ActiveWebSession(
@@ -98,6 +101,41 @@ class ActiveWebSessionService:
         with _touch_cache_lock:
             _touch_cache[session_id] = now_ts
 
+    def is_session_revoked(self, db: Session, session_id: str) -> bool:
+        session_id = (session_id or "").strip()
+        if not session_id:
+            return False
+        row = db.query(ActiveWebSession).filter(ActiveWebSession.session_id == session_id).first()
+        return row is not None and row.revoked_at is not None
+
+    def list_active_sessions(self, db: Session) -> list[ActiveWebSession]:
+        if not self.is_enabled():
+            return []
+        ttl_seconds, _ = self.get_ttl_and_touch_interval()
+        cutoff = datetime.utcnow() - timedelta(seconds=ttl_seconds)
+        return (
+            db.query(ActiveWebSession)
+            .filter(
+                ActiveWebSession.last_seen_at >= cutoff,
+                ActiveWebSession.revoked_at.is_(None),
+            )
+            .order_by(ActiveWebSession.last_seen_at.desc())
+            .all()
+        )
+
+    def revoke_session(self, db: Session, session_id: str) -> bool:
+        session_id = (session_id or "").strip()
+        if not session_id:
+            return False
+        row = db.query(ActiveWebSession).filter(ActiveWebSession.session_id == session_id).first()
+        if row is None:
+            return False
+        row.revoked_at = datetime.utcnow()
+        db.commit()
+        with _touch_cache_lock:
+            _touch_cache.pop(session_id, None)
+        return True
+
     def remove_active_web_session(self, db: Session, session_id: str) -> None:
         session_id = (session_id or "").strip()
         if not session_id:
@@ -116,7 +154,10 @@ class ActiveWebSessionService:
         cutoff = datetime.utcnow() - timedelta(seconds=ttl_seconds)
         return (
             db.query(ActiveWebSession)
-            .filter(ActiveWebSession.last_seen_at >= cutoff)
+            .filter(
+                ActiveWebSession.last_seen_at >= cutoff,
+                ActiveWebSession.revoked_at.is_(None),
+            )
             .count()
         )
 

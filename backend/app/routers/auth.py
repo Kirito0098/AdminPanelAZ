@@ -28,6 +28,13 @@ from app.schemas import (
     Login2FARequired,
     LoginRequest,
     MessageResponse,
+    PasskeyAuthOptionsRequest,
+    PasskeyAuthVerifyRequest,
+    PasskeyCredentialResponse,
+    PasskeyListResponse,
+    PasskeyRegisterOptionsResponse,
+    PasskeyRegisterVerifyRequest,
+    PasskeyRenameRequest,
     PasswordChangeRequest,
     Token,
     TwoFABackupCodesResponse,
@@ -65,6 +72,7 @@ from app.services.totp_service import (
     require_valid_totp,
     verify_totp_code,
 )
+from app.services.webauthn_service import user_has_passkeys, webauthn_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
@@ -113,8 +121,46 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
     )
 
 
-def _clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie(key=settings.refresh_token_cookie_name, path="/api/auth")
+def _admin_requires_2fa(db: Session, user: User) -> bool:
+    if user.role != UserRole.admin:
+        return False
+    return bool(user.totp_enabled or user_has_passkeys(db, user.id))
+
+
+def _user_from_2fa_token(db: Session, temp_token: str, client_ip: str) -> User:
+    username = decode_2fa_pending_token(temp_token)
+    user = db.query(User).filter(User.username == username).first()
+    if not user or not user.is_active or user.role != UserRole.admin:
+        auth_rate_limit_service.record_failure(client_ip)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный код 2FA")
+    if not _admin_requires_2fa(db, user):
+        auth_rate_limit_service.record_failure(client_ip)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="2FA не настроена")
+    return user
+
+
+def _complete_2fa_login(user: User, db: Session, request: Request, response: Response, *, details: str) -> Token:
+    client_ip = ip_restriction_service.get_client_ip(request)
+    ip_restriction_service.record_login_attempt(client_ip, success=True)
+    auth_rate_limit_service.record_success(client_ip)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="login_success",
+            user_id=user.id,
+            username=user.username,
+            remote_addr=client_ip,
+            details=details,
+        )
+    if user.role != UserRole.viewer:
+        admin_notify_service.send_login_success(
+            db,
+            actor_username=user.username,
+            remote_addr=client_ip,
+            client_timezone=get_client_timezone_from_request(request),
+        )
+    db.commit()
+    return _issue_token_pair(user, db, response, request)
 
 
 def _issue_token_pair(
@@ -140,6 +186,10 @@ def _issue_token_pair(
             force=True,
         )
     return Token(access_token=access, web_session_id=web_session_id)
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(key=settings.refresh_token_cookie_name, path="/api/auth")
 
 
 def _login_with_checks(
@@ -183,8 +233,11 @@ def _login_with_checks(
             detail += " (требуется капча)"
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
 
-    if user.totp_enabled and user.role == UserRole.admin:
-        return Login2FARequired(temp_token=create_2fa_pending_token(user.username))
+    if _admin_requires_2fa(db, user):
+        return Login2FARequired(
+            temp_token=create_2fa_pending_token(user.username),
+            passkey_available=user_has_passkeys(db, user.id),
+        )
 
     ip_restriction_service.record_login_attempt(client_ip, success=True)
     auth_rate_limit_service.record_success(client_ip)
@@ -316,34 +369,14 @@ def login_json(
 def login_2fa(payload: Login2FARequest, request: Request, response: Response, db: Session = Depends(get_db)):
     client_ip = ip_restriction_service.get_client_ip(request)
     auth_rate_limit_service.check(client_ip)
-    username = decode_2fa_pending_token(payload.temp_token)
-    user = db.query(User).filter(User.username == username).first()
-    if not user or not user.is_active or not user.totp_enabled:
+    user = _user_from_2fa_token(db, payload.temp_token, client_ip)
+    if not user.totp_enabled:
         auth_rate_limit_service.record_failure(client_ip)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный код 2FA")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="TOTP не настроен")
     if not verify_totp_code(user, payload.code):
         auth_rate_limit_service.record_failure(client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный код 2FA")
-    ip_restriction_service.record_login_attempt(client_ip, success=True)
-    auth_rate_limit_service.record_success(client_ip)
-    if settings.audit_log_enabled:
-        log_action(
-            db,
-            action="login_success",
-            user_id=user.id,
-            username=user.username,
-            remote_addr=client_ip,
-            details="2fa",
-        )
-    if user.role != UserRole.viewer:
-        admin_notify_service.send_login_success(
-            db,
-            actor_username=user.username,
-            remote_addr=client_ip,
-            client_timezone=get_client_timezone_from_request(request),
-        )
-    db.commit()
-    return _issue_token_pair(user, db, response, request)
+    return _complete_2fa_login(user, db, request, response, details="2fa")
 
 
 @router.post("/refresh", response_model=Token, response_model_exclude_none=True)
@@ -497,3 +530,123 @@ def twofa_regenerate_backup(
     current_user.totp_backup_codes_encrypted = encrypt_backup_codes(backup_codes)
     db.commit()
     return TwoFABackupCodesResponse(backup_codes=backup_codes)
+
+
+@router.post("/passkeys/register/options", response_model=PasskeyRegisterOptionsResponse)
+def passkey_register_options(
+    request: Request,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    options = webauthn_service.registration_options(db, current_user, request)
+    return PasskeyRegisterOptionsResponse(options=options)
+
+
+@router.post("/passkeys/register/verify", response_model=PasskeyCredentialResponse)
+def passkey_register_verify(
+    payload: PasskeyRegisterVerifyRequest,
+    request: Request,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    row = webauthn_service.registration_verify(
+        db,
+        current_user,
+        request,
+        credential=payload.credential,
+        session_key=payload.session_key,
+        nickname=payload.nickname,
+    )
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="passkey_register",
+            user_id=current_user.id,
+            username=current_user.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=row.nickname,
+        )
+    return row
+
+
+@router.get("/passkeys", response_model=PasskeyListResponse)
+def passkey_list(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    rows = webauthn_service.list_passkeys(db, current_user.id)
+    return PasskeyListResponse(credentials=rows, count=len(rows))
+
+
+@router.patch("/passkeys/{credential_id}", response_model=PasskeyCredentialResponse)
+def passkey_rename(
+    credential_id: int,
+    payload: PasskeyRenameRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return webauthn_service.rename_passkey(db, current_user, credential_id, payload.nickname)
+
+
+@router.delete("/passkeys/{credential_id}", response_model=MessageResponse)
+def passkey_delete(
+    credential_id: int,
+    request: Request,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    webauthn_service.delete_passkey(db, current_user, credential_id)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="passkey_delete",
+            user_id=current_user.id,
+            username=current_user.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=str(credential_id),
+        )
+    return MessageResponse(message="Passkey удалён")
+
+
+@router.post("/login/passkey/options", response_model=PasskeyRegisterOptionsResponse)
+def passkey_login_options(
+    payload: PasskeyAuthOptionsRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    client_ip = ip_restriction_service.get_client_ip(request)
+    auth_rate_limit_service.check(client_ip)
+    user = _user_from_2fa_token(db, payload.temp_token, client_ip)
+    if not user_has_passkeys(db, user.id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passkeys не настроены")
+    options = webauthn_service.authentication_options(db, user, request)
+    return PasskeyRegisterOptionsResponse(options=options)
+
+
+@router.post("/login/passkey/verify", response_model=Token)
+def passkey_login_verify(
+    payload: PasskeyAuthVerifyRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    client_ip = ip_restriction_service.get_client_ip(request)
+    auth_rate_limit_service.check(client_ip)
+    user = _user_from_2fa_token(db, payload.temp_token, client_ip)
+    try:
+        webauthn_service.authentication_verify(
+            db,
+            user,
+            request,
+            credential=payload.credential,
+            session_key=payload.session_key,
+        )
+    except HTTPException:
+        auth_rate_limit_service.record_failure(client_ip)
+        if settings.audit_log_enabled:
+            log_action(
+                db,
+                action="passkey_login_failed",
+                user_id=user.id,
+                username=user.username,
+                remote_addr=client_ip,
+            )
+        raise
+    return _complete_2fa_login(user, db, request, response, details="passkey")

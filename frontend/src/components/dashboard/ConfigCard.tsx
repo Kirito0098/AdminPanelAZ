@@ -46,6 +46,9 @@ interface ConfigCardProps {
   userRole: UserRole
   filesLoading?: boolean
   loadingAction?: ActionKey | null
+  selected?: boolean
+  showSelect?: boolean
+  onSelectChange?: (checked: boolean) => void
   onOpenDetails: () => void
   onCopyName: () => void
   onDownload: (path: string, filename: string) => void
@@ -243,6 +246,9 @@ export default function ConfigCard({
   userRole,
   filesLoading = false,
   loadingAction,
+  selected = false,
+  showSelect = false,
+  onSelectChange,
   onOpenDetails,
   onCopyName,
   onDownload,
@@ -293,6 +299,15 @@ export default function ConfigCard({
     >
       <CardHeader className="space-y-2 pb-2">
         <div className="flex items-start gap-2">
+          {showSelect && (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={(e) => onSelectChange?.(e.target.checked)}
+              className="mt-1 h-4 w-4 shrink-0 rounded border-input"
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
           <div className="min-w-0 flex-1">
             <CardTitle className="flex items-center gap-1.5 text-sm font-semibold leading-tight">
               <span className="truncate">{config.client_name}</span>
@@ -311,12 +326,27 @@ export default function ConfigCard({
             {config.description && (
               <CardDescription className="mt-1 line-clamp-1 text-[11px]">{config.description}</CardDescription>
             )}
+            {config.ha ? (
+              <Badge variant="outline" className="mt-1 gap-1 px-1.5 text-[10px]">
+                HA: {config.ha.shared_domain} ({config.ha.node_count} узл.)
+              </Badge>
+            ) : null}
           </div>
           <Badge variant={statusBadgeVariant} className="shrink-0 gap-1 px-2 py-0 text-[10px]">
             <StatusIcon size={11} />
             {status.label}
           </Badge>
         </div>
+
+        {(config.tags?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {config.tags!.map((tag) => (
+              <Badge key={tag.id} variant="outline" className="h-5 px-1.5 text-[10px]">
+                {tag.name}
+              </Badge>
+            ))}
+          </div>
+        )}
 
         {(hasVpnProfiles(config, tab) || hasAzProfiles(config, tab)) && (
           <div className="flex flex-wrap gap-1">

@@ -6,7 +6,8 @@ import secrets
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -288,6 +289,48 @@ def create_antizapret_backup(_: None = Depends(verify_api_key)):
         "message": "Бэкап AntiZapret создан",
         **result,
     }
+
+
+@app.get("/backups/antizapret/download")
+def download_antizapret_backup(
+    name: str = Query(..., min_length=1),
+    _: None = Depends(verify_api_key),
+):
+    candidate = Path(name)
+    if not candidate.is_file():
+        candidate = ANTIZAPRET_PATH / name
+    if not candidate.is_file():
+        candidate = Path("/root") / name
+    if not candidate.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив не найден")
+    return FileResponse(candidate, filename=candidate.name, media_type="application/gzip")
+
+
+@app.post("/backups/antizapret/restore")
+async def restore_antizapret_backup(
+    archive: UploadFile = File(...),
+    _: None = Depends(verify_api_key),
+):
+    import tempfile
+
+    suffix = ".tar.gz"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        content = await archive.read()
+        tmp.write(content)
+        tmp_path = tmp.name
+    try:
+        result = service.restore_antizapret_backup(tmp_path)
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+    return {
+        "message": "AntiZapret восстановлен из бэкапа",
+        **result,
+    }
+
+
+@app.get("/backups/antizapret/fingerprints")
+def antizapret_fingerprints(_: None = Depends(verify_api_key)):
+    return {"fingerprints": service.get_antizapret_fingerprints()}
 
 
 @app.post("/services/restart")

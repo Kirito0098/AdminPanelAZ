@@ -15,6 +15,7 @@ _EXEMPT_PREFIXES = (
     "/api/ip-blocked",
     "/api/routing",
     "/api/tasks",
+    "/metrics",
 )
 
 

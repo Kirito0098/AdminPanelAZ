@@ -1,13 +1,16 @@
-"""AntiZapret full backup via client.sh 8 (ported from AdminAntizapret)."""
+"""AntiZapret full backup/restore via client.sh 8 (ported from AdminAntizapret)."""
 
 from __future__ import annotations
 
 import glob
 import os
 import re
+import shutil
 import subprocess
 import tarfile
 from pathlib import Path
+
+from app.services.node_sync.fingerprints import collect_antizapret_fingerprints
 
 
 class AntizapretBackupService:
@@ -47,6 +50,109 @@ class AntizapretBackupService:
             "archive_path": archive_path,
             "archive_name": os.path.basename(archive_path),
         }
+
+    def restore_backup(self, archive_path: str | Path) -> dict[str, str]:
+        """Restore AntiZapret state from client.sh 8 archive (setup.sh-compatible flow)."""
+        archive = Path(archive_path).resolve()
+        self._verify_archive(str(archive))
+
+        extract_root = Path("/root")
+        with tarfile.open(archive, "r:gz") as tar:
+            tar.extractall(path=str(extract_root))
+
+        self._copy_tree(extract_root / "easyrsa3", Path("/etc/openvpn/easyrsa3"))
+        self._copy_files(extract_root / "wireguard", Path("/etc/wireguard"))
+        self._copy_files(extract_root / "config", self.install_dir / "config")
+        self._copy_files(extract_root / "knot-resolver", Path("/etc/knot-resolver"))
+        custom_src = extract_root / "custom"
+        if custom_src.is_dir():
+            for item in custom_src.iterdir():
+                if item.is_file():
+                    shutil.copy2(item, self.install_dir / item.name)
+
+        self._cleanup_extract_artifacts(extract_root, archive.name)
+
+        client_sh = self.install_dir / "client.sh"
+        recreate = subprocess.run(
+            [str(client_sh), "7"],
+            cwd=str(self.install_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=self.timeout_seconds,
+        )
+        if recreate.returncode != 0:
+            detail = (recreate.stderr or recreate.stdout or "").strip()
+            raise RuntimeError(f"client.sh 7 после restore завершился с ошибкой: {detail}")
+
+        doall_sh = self.install_dir / "doall.sh"
+        apply_detail = ""
+        if doall_sh.is_file():
+            apply = subprocess.run(
+                [str(doall_sh)],
+                cwd=str(self.install_dir),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=self.timeout_seconds,
+            )
+            apply_detail = (apply.stdout or apply.stderr or "").strip()
+            if apply.returncode != 0:
+                raise RuntimeError(f"doall.sh после restore завершился с ошибкой: {apply_detail}")
+
+        for service in ("openvpn", "wg-quick@wg0"):
+            subprocess.run(
+                ["systemctl", "restart", service],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            )
+
+        return {
+            "archive_path": str(archive),
+            "archive_name": archive.name,
+            "detail": apply_detail[:500] if apply_detail else "restore completed",
+        }
+
+    def get_fingerprints(self) -> dict[str, str]:
+        return collect_antizapret_fingerprints(self.install_dir)
+
+    def _copy_tree(self, src: Path, dst: Path) -> None:
+        if not src.is_dir():
+            return
+        dst.mkdir(parents=True, exist_ok=True)
+        for item in src.iterdir():
+            target = dst / item.name
+            if item.is_dir():
+                if target.exists():
+                    shutil.rmtree(target, ignore_errors=True)
+                shutil.copytree(item, target)
+            elif item.is_file():
+                shutil.copy2(item, target)
+
+    def _copy_files(self, src: Path, dst: Path) -> None:
+        if not src.is_dir():
+            return
+        dst.mkdir(parents=True, exist_ok=True)
+        for item in src.iterdir():
+            if item.is_file():
+                shutil.copy2(item, dst / item.name)
+
+    def _cleanup_extract_artifacts(self, extract_root: Path, archive_name: str) -> None:
+        for name in ("easyrsa3", "wireguard", "config", "knot-resolver", "custom"):
+            path = extract_root / name
+            if path.exists():
+                if path.is_dir():
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    path.unlink(missing_ok=True)
+        for pattern in ("backup*.tar.gz", archive_name):
+            for path in glob.glob(str(extract_root / pattern)):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
     def _resolve_archive_path(self, stdout: str) -> str:
         for line in (stdout or "").splitlines():

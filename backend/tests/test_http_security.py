@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 from app.config import Settings
 from app.middleware.http_security import (
     HttpSecurityMiddleware,
+    apply_csp_nonce,
     build_robots_txt,
     build_security_txt,
     csp_for_path,
@@ -14,6 +15,7 @@ from app.middleware.http_security import (
     is_tg_mini_path,
     should_noindex_path,
 )
+from app.services.html_csp import CSP_NONCE_PLACEHOLDER, inject_csp_nonce
 from tests.conftest import run_async
 
 
@@ -176,3 +178,66 @@ def test_tg_mini_path_skips_x_frame_options():
     HttpSecurityMiddleware._apply_headers(response, settings, "/api/tg-mini")
     assert response.headers.get("X-Frame-Options") is None
     assert is_tg_mini_path("/api/tg-mini/assets/app.js")
+
+
+def test_apply_csp_nonce_removes_unsafe_inline_from_script_src():
+    base = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://telegram.org; "
+        "style-src 'self' 'unsafe-inline';"
+    )
+    csp = apply_csp_nonce(base, "abc123")
+    assert "'unsafe-inline'" not in csp.split("style-src")[0]
+    assert "'nonce-abc123'" in csp
+    assert "style-src 'self' 'unsafe-inline'" in csp
+
+
+def test_csp_for_path_with_nonce_on_tg_mini():
+    base = (
+        "default-src 'self'; script-src 'self' https://telegram.org; "
+        "frame-ancestors 'self';"
+    )
+    csp = csp_for_path("/api/tg-mini", base, "nonce-test")
+    assert "'nonce-nonce-test'" in csp
+    assert "'unsafe-inline'" not in csp.split("style-src")[0] if "style-src" in csp else True
+    assert "https://web.telegram.org" in csp
+
+
+def test_inject_csp_nonce_replaces_placeholder_and_adds_to_scripts():
+    html = f'<html><script nonce="{CSP_NONCE_PLACEHOLDER}" src="/app.js"></script></html>'
+    out = inject_csp_nonce(html, "n1")
+    assert CSP_NONCE_PLACEHOLDER not in out
+    assert 'nonce="n1"' in out
+
+
+def test_spa_index_served_with_matching_csp_nonce(tmp_path):
+    from fastapi import FastAPI, Request
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    from app.middleware.http_security import HttpSecurityMiddleware
+    from app.services.html_csp import serve_html_with_nonce
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    index = dist / "index.html"
+    index.write_text(
+        f'<html><body><script nonce="{CSP_NONCE_PLACEHOLDER}" src="/assets/app.js"></script></body></html>',
+        encoding="utf-8",
+    )
+
+    app = FastAPI()
+    app.add_middleware(HttpSecurityMiddleware)
+
+    @app.get("/")
+    async def root(request: Request):
+        return serve_html_with_nonce(request, index)
+
+    client = __import__("fastapi.testclient", fromlist=["TestClient"]).TestClient(app)
+    response = client.get("/")
+    assert response.status_code == 200
+    csp = response.headers.get("Content-Security-Policy", "")
+    assert "'unsafe-inline'" not in csp.split("style-src")[0] if "style-src" in csp else True
+    nonce_match = __import__("re").search(r"'nonce-([^']+)'", csp)
+    assert nonce_match is not None
+    nonce = nonce_match.group(1)
+    assert f'nonce="{nonce}"' in response.text
+    assert CSP_NONCE_PLACEHOLDER not in response.text

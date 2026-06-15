@@ -21,6 +21,63 @@ export interface ActiveNode {
   active: boolean
 }
 
+export type SyncStatus = 'unknown' | 'synced' | 'pending' | 'failed'
+
+export interface NodeSyncMismatch {
+  kind: string
+  only_primary?: string[]
+  only_replica?: string[]
+  path?: string | null
+  primary?: string | null
+  replica?: string | null
+  detail?: string | null
+}
+
+export interface NodeSyncReplicaVerifyResult {
+  node_id: number
+  node_name?: string | null
+  online: boolean
+  mismatches: NodeSyncMismatch[]
+}
+
+export interface NodeSyncVerifyResult {
+  ready: boolean
+  shared_domain: string
+  primary_node_id: number
+  replicas: NodeSyncReplicaVerifyResult[]
+  summary: string
+}
+
+export interface NodeSyncGroup {
+  id: number
+  name: string
+  shared_domain: string
+  primary_node_id: number
+  primary_node_name?: string | null
+  replica_node_ids: number[]
+  replica_node_names: string[]
+  sync_mode: string
+  sync_status: SyncStatus
+  last_sync_at?: string | null
+  last_verify_at?: string | null
+  last_sync_task_id?: string | null
+  last_sync_error?: string | null
+  last_verify_result?: NodeSyncVerifyResult | null
+  created_at: string
+  updated_at: string
+}
+
+export interface NodeSyncGroupStatus {
+  group_id: number
+  sync_status: SyncStatus
+  last_sync_at?: string | null
+  last_verify_at?: string | null
+  last_sync_task_id?: string | null
+  last_sync_error?: string | null
+  progress_percent?: number | null
+  progress_stage?: string | null
+}
+
 export interface NodeMtlsStatus {
   ready: boolean
   writable: boolean
@@ -40,7 +97,56 @@ export interface User {
   must_change_password: boolean
   totp_enabled?: boolean
   telegram_id?: string | null
+  config_quota?: number | null
   created_at: string
+}
+
+export interface SelfServiceQuota {
+  used: number
+  limit: number | null
+  remaining: number | null
+  unlimited: boolean
+  can_create: boolean
+  create_rate_max?: number | null
+  create_rate_window_seconds?: number | null
+}
+
+export interface ConfigTag {
+  id: number
+  name: string
+  color?: string | null
+  config_count?: number
+}
+
+export interface ClientTemplate {
+  id: number
+  name: string
+  vpn_type: VpnType
+  cert_expire_days?: number | null
+  traffic_limit_value?: number | null
+  traffic_limit_unit?: string | null
+  traffic_limit_period_days?: number | null
+  description_template?: string | null
+  sort_order: number
+  is_builtin: boolean
+}
+
+export interface ActiveWebSession {
+  session_id: string
+  username: string
+  remote_addr?: string | null
+  user_agent?: string | null
+  created_at: string
+  last_seen_at: string
+  is_current: boolean
+}
+
+export interface VpnConfigHaInfo {
+  sync_group_id: number
+  shared_domain: string
+  node_count: number
+  sync_status: SyncStatus
+  sync_mode: string
 }
 
 export interface VpnConfig {
@@ -53,6 +159,8 @@ export interface VpnConfig {
   description?: string | null
   created_at: string
   updated_at: string
+  tags?: ConfigTag[]
+  ha?: VpnConfigHaInfo | null
   profile_files: Array<{
     protocol: string
     variant: string
@@ -118,7 +226,51 @@ export interface MonitoringNodeSummary {
   connected_wireguard: number
   active_services: number
   total_services: number
+  cpu_percent?: number | null
+  memory_percent?: number | null
+  total_traffic_bytes?: number | null
+  cidr_routes_count?: number | null
   error?: string | null
+}
+
+export interface GeoRoutingNodeHint {
+  node_id: number
+  node_name: string
+  status: string
+  server_ip?: string | null
+  country?: string | null
+  city?: string | null
+  geo_label?: string | null
+  is_recommended: boolean
+}
+
+export interface GeoRoutingHint {
+  client_ip?: string | null
+  client_country?: string | null
+  client_city?: string | null
+  client_geo_label?: string | null
+  recommended_node_id?: number | null
+  recommended_node_name?: string | null
+  hint_message?: string | null
+  nodes: GeoRoutingNodeHint[]
+}
+
+export interface NodePolicySummary {
+  node_id: number
+  node_name: string
+  openvpn_policies: number
+  wireguard_policies: number
+  blocked_clients: number
+  traffic_limited_clients: number
+}
+
+export interface GlobalDashboardSummary {
+  timestamp: string
+  nodes_summary: MonitoringNodeSummary[]
+  nodes_online?: number
+  nodes_total?: number
+  total_connected_openvpn?: number
+  total_connected_wireguard?: number
 }
 
 export interface MonitoringOverview {
@@ -200,6 +352,51 @@ export interface MonitorSettings {
   ram_threshold: number
   interval_seconds: number
   cooldown_minutes: number
+}
+
+export interface RetentionSettings {
+  enabled: boolean
+  interval_hours: number
+  traffic_sample_retention_days: number
+  action_log_retention_days: number
+  resource_metrics_retention_days: number
+  panel_resource_metrics_retention_days: number
+}
+
+export interface RouteBudgetInfo {
+  available: boolean
+  limit?: number | null
+  used?: number | null
+  remaining?: number | null
+  original_total?: number | null
+  warning?: string | null
+  strategy?: string | null
+  task_id?: string | null
+  finished_at?: string | null
+  status?: string | null
+  message?: string | null
+}
+
+export interface ResourceProfileImpact {
+  ram?: string
+  cpu_disk?: string
+  note?: string
+}
+
+export interface ResourceProfileItem {
+  key: string
+  label: string
+  description: string
+  recommended_ram_gb?: number | null
+  active: boolean
+  impact?: ResourceProfileImpact
+  workers_disabled?: string[]
+}
+
+export interface ResourceProfilesResponse {
+  current_profile: string
+  requires_restart: boolean
+  items: ResourceProfileItem[]
 }
 
 export interface ChangelogSection {
@@ -311,6 +508,23 @@ export interface TgMiniQrLink {
   pin_required: boolean
 }
 
+export interface TgMiniWarperStatus {
+  node_id: number
+  node_name: string
+  node_host: string
+  status: string
+  raw: Record<string, unknown>
+}
+
+export interface TgMiniCidrStatus {
+  total_cidrs: number
+  last_refresh_status?: string | null
+  last_refresh_finished?: string | null
+  active_task?: string | null
+  last_compile?: Record<string, unknown> | null
+  last_deploy?: Record<string, unknown> | null
+}
+
 export interface VpnNetworkEnvRow {
   label: string
   value: string
@@ -417,6 +631,48 @@ export interface CidrCompileArtifact {
   exists: boolean
 }
 
+export interface CidrRuntimeBackup {
+  stamp: string
+  files: string[]
+  file_count: number
+  mtime: number
+}
+
+export interface CidrDeployPreviewFile {
+  file: string
+  status: string
+  controller_cidr_count?: number
+  node_cidr_count?: number
+  diff?: { added: number; removed: number; unchanged: number; changed: boolean }
+  error?: string
+}
+
+export interface CidrDeployPreviewNode {
+  node_id: number
+  node_name?: string | null
+  status: string
+  files?: CidrDeployPreviewFile[]
+  total_controller_routes?: number
+  total_node_routes?: number
+  total_added?: number
+  total_removed?: number
+  files_changed?: number
+  error?: string
+}
+
+export interface CidrDeployPreview {
+  success: boolean
+  message: string
+  dry_run?: boolean
+  has_changes?: boolean
+  artifact_files?: string[]
+  controller_artifacts?: Record<string, CidrCompileArtifact>
+  per_node?: CidrDeployPreviewNode[]
+  nodes_previewed?: number
+  nodes_skipped?: number
+  nodes_errored?: number
+}
+
 export interface CidrDbStatus {
   success: boolean
   last_refresh_started?: string | null
@@ -430,6 +686,7 @@ export interface CidrDbStatus {
   last_compile_at?: CidrLastCompileSummary | null
   last_deploy?: CidrLastDeploySummary | null
   compile_artifacts?: Record<string, CidrCompileArtifact>
+  runtime_backups?: CidrRuntimeBackup[]
   active_task?: CidrPipelineTask | null
 }
 
@@ -499,6 +756,45 @@ export interface BackgroundTaskAcceptedResponse extends BackgroundTask {
   status_url: string
 }
 
+export type BackgroundTaskAccepted = BackgroundTaskAcceptedResponse
+
+export interface ConfigCsvImportResponse {
+  success: boolean
+  async?: boolean
+  queued?: boolean
+  task_id?: string
+  message: string
+  result?: {
+    total: number
+    succeeded: Array<Record<string, unknown>>
+    failed: Array<Record<string, unknown>>
+  }
+}
+
+export interface EventWebhookEventToggle {
+  key: string
+  label: string
+  enabled: boolean
+}
+
+export interface EventWebhookSettings {
+  url: string
+  secret_configured: boolean
+  enabled: boolean
+  events: EventWebhookEventToggle[]
+}
+
+export interface AuditStreamSettings {
+  enabled: boolean
+  mode: 'http' | 'syslog' | 'both'
+  http_url: string
+  secret_configured: boolean
+  syslog_host: string
+  syslog_port: number
+  syslog_protocol: 'udp' | 'tcp'
+  format: 'json' | 'cef'
+}
+
 export interface TrafficClientRow {
   common_name: string
   protocol_type: string
@@ -545,6 +841,8 @@ export interface TrafficOverview {
 export interface ClientAccessPolicy {
   is_blocked: boolean
   block_mode: string
+  node_id?: number | null
+  node_name?: string | null
   access_days_left?: number | null
   blocked_days_left?: number | null
   block_duration_days?: number | null
@@ -960,3 +1258,36 @@ export interface WarperModeResponse {
 }
 
 export type WarperTrafficPeriod = 'today' | 'week' | 'month' | 'all'
+
+export type SiteDiagnosticsStatus = 'ok' | 'warn' | 'fail'
+
+export interface SiteDiagnosticsCheck {
+  status: SiteDiagnosticsStatus
+  title: string
+  category: string
+  detail?: string
+  hint_ru?: string
+}
+
+export interface SiteDiagnosticsStep {
+  id: string
+  title: string
+  description: string
+  status: SiteDiagnosticsStatus
+  checks: SiteDiagnosticsCheck[]
+}
+
+export interface SiteDiagnosticsReport {
+  success: boolean
+  install_dir: string
+  service_name: string
+  summary: {
+    ok: number
+    warn: number
+    fail: number
+    has_failures: boolean
+  }
+  steps: SiteDiagnosticsStep[]
+  results: SiteDiagnosticsCheck[]
+  recommended_commands: string[]
+}

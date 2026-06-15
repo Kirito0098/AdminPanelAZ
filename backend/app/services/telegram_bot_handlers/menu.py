@@ -108,6 +108,10 @@ async def _dispatch_action(ctx: BotContext, action: str, *, message_id: int | No
         from app.services.telegram_bot_handlers.configs import handle_configs
 
         await handle_configs(ctx, message_id=message_id)
+    elif action == "traffic":
+        from app.services.telegram_bot_handlers.traffic import handle_traffic
+
+        await handle_traffic(ctx, message_id=message_id)
     elif action == "help":
         from app.services.telegram_bot_handlers.help import handle_help
 

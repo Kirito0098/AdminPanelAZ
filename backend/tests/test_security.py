@@ -417,3 +417,126 @@ def test_viewer_access_endpoints_require_admin(viewer_config_client):
         json={"user_id": viewer_id, "config_groups": ["alice"]},
     )
     assert put_response.status_code == 403
+
+
+def _first_admin(db):
+    user = db.query(User).filter(User.role == UserRole.admin).first()
+    assert user is not None, "admin user required for security tests"
+    return user
+
+
+def test_user_has_passkeys_helper():
+    from app.database import SessionLocal, run_db_migrations
+    from app.models import WebAuthnCredential
+    from app.services.webauthn_service import user_has_passkeys
+
+    run_db_migrations()
+    db = SessionLocal()
+    try:
+        user = _first_admin(db)
+        db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete()
+        db.commit()
+        assert user_has_passkeys(db, user.id) is False
+        db.add(
+            WebAuthnCredential(
+                user_id=user.id,
+                credential_id="test-cred-id",
+                public_key="dGVzdA",
+                sign_count=0,
+            )
+        )
+        db.commit()
+        assert user_has_passkeys(db, user.id) is True
+        db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete()
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_login_requires_2fa_when_passkeys_configured():
+    from app.auth import get_password_hash
+    from app.database import SessionLocal, run_db_migrations
+    from app.main import app
+    from app.models import WebAuthnCredential
+
+    run_db_migrations()
+    test_password = "PasskeyLogin1"
+    db = SessionLocal()
+    try:
+        user = _first_admin(db)
+        user.password_hash = get_password_hash(test_password)
+        user.totp_enabled = False
+        user.totp_secret_encrypted = None
+        db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete()
+        db.add(
+            WebAuthnCredential(
+                user_id=user.id,
+                credential_id="login-test-cred",
+                public_key="dGVzdA",
+                sign_count=1,
+            )
+        )
+        db.commit()
+        username = user.username
+    finally:
+        db.close()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/auth/login/json",
+        json={"username": username, "password": test_password},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("requires_2fa") is True
+    assert data.get("passkey_available") is True
+
+
+def test_passkey_register_options_requires_admin():
+    from app.main import app
+
+    client = TestClient(app)
+    response = client.post("/api/auth/passkeys/register/options")
+    assert response.status_code == 401
+
+
+def test_passkey_login_verify_uses_service():
+    from app.auth import create_2fa_pending_token, get_password_hash
+    from app.database import SessionLocal, run_db_migrations
+    from app.main import app
+    from app.models import WebAuthnCredential
+
+    run_db_migrations()
+    db = SessionLocal()
+    try:
+        user = _first_admin(db)
+        user.password_hash = get_password_hash("PasskeyVerify1")
+        user.totp_enabled = False
+        db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete()
+        db.add(
+            WebAuthnCredential(
+                user_id=user.id,
+                credential_id="verify-cred",
+                public_key="dGVzdA",
+                sign_count=1,
+            )
+        )
+        db.commit()
+        temp_token = create_2fa_pending_token(user.username)
+    finally:
+        db.close()
+
+    client = TestClient(app)
+    with patch("app.routers.auth.webauthn_service.authentication_verify") as verify_mock:
+        verify_mock.return_value = MagicMock()
+        response = client.post(
+            "/api/auth/login/passkey/verify",
+            json={
+                "temp_token": temp_token,
+                "session_key": "sess",
+                "credential": {"id": "verify-cred", "rawId": "verify-cred", "response": {}},
+            },
+        )
+    assert response.status_code == 200
+    assert response.json().get("access_token")
+    verify_mock.assert_called_once()
