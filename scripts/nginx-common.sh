@@ -214,12 +214,20 @@ nginx_obtain_letsencrypt_cert() {
     certbot certonly --standalone --non-interactive --agree-tos -m "$email" -d "$domain" || {
       nginx_restore_port80_nat
       systemctl start nginx 2>/dev/null || true
+      if [[ "${NGINX_FAIL_SOFT:-false}" == true ]]; then
+        nginx_warn "Не удалось получить сертификат Let's Encrypt"
+        return 1
+      fi
       nginx_die "Не удалось получить сертификат Let's Encrypt"
     }
   else
     certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email -d "$domain" || {
       nginx_restore_port80_nat
       systemctl start nginx 2>/dev/null || true
+      if [[ "${NGINX_FAIL_SOFT:-false}" == true ]]; then
+        nginx_warn "Не удалось получить сертификат Let's Encrypt"
+        return 1
+      fi
       nginx_die "Не удалось получить сертификат Let's Encrypt"
     }
   fi

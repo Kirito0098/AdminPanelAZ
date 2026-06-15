@@ -461,6 +461,15 @@ wizard_ask_https() {
     "Наружу — только Nginx на HTTPS (и HTTP для ACME)." \
     "Позже можно изменить: ./scripts/nginx-setup.sh"
   echo
+  if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
+    WIZ_NGINX_MODE="none"
+    WIZ_BACKEND_HOST="127.0.0.1"
+    WIZ_BEHIND_NGINX="false"
+    echo "Способ публикации [3]: Пропустить Nginx (только localhost, dev/тесты)"
+    print_info "Backend будет доступен только на http://127.0.0.1:${WIZ_BACKEND_PORT}/"
+    echo
+    return 0
+  fi
   wiz_prompt_choice "Способ публикации" \
     "Nginx + Let's Encrypt (домен, рекомендуется для интернета)" \
     "Nginx + самоподписанный сертификат (LAN / внутренняя сеть)" \
@@ -679,30 +688,36 @@ wizard_ask_firewall() {
 
 wizard_ask_services() {
   wiz_step "Сервисы и автозапуск"
-  wiz_prompt_choice "Как запускать после установки?" \
-    "Вручную (./start.sh / ./start_node_agent.sh)" \
-    "Daemon через start.sh (watchdog)" \
-    "Systemd (рекомендуется для production)"
+  if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
+    WIZ_RUN_MODE="systemd"
+    echo "Как запускать после установки? [3]: Systemd (рекомендуется для production)"
+  else
+    wiz_prompt_choice "Как запускать после установки?" \
+      "Вручную (./start.sh / ./start_node_agent.sh)" \
+      "Daemon через start.sh (watchdog)" \
+      "Systemd (рекомендуется для production)"
 
-  case "$REPLY" in
-    1) WIZ_RUN_MODE="manual" ;;
-    2) WIZ_RUN_MODE="daemon" ;;
-    3) WIZ_RUN_MODE="systemd" ;;
-  esac
+    case "$REPLY" in
+      1) WIZ_RUN_MODE="manual" ;;
+      2) WIZ_RUN_MODE="daemon" ;;
+      3) WIZ_RUN_MODE="systemd" ;;
+    esac
+  fi
 
   if [[ "$WIZ_INSTALL_TYPE" != "node" ]]; then
     local workers_default="$WIZ_UVICORN_WORKERS"
-    if [[ "$WIZ_RUN_MODE" == "systemd" && "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
-      workers_default="1"
-    fi
-    wiz_prompt "Количество uvicorn workers (1 = по умолчанию, >1 требует Redis для rate limit)" "$workers_default"
-    if [[ "$REPLY" =~ ^[0-9]+$ ]] && (( REPLY >= 1 && REPLY <= 32 )); then
-      WIZ_UVICORN_WORKERS="$REPLY"
-    else
+    if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
       WIZ_UVICORN_WORKERS="1"
-    fi
-    if [[ "$WIZ_UVICORN_WORKERS" -gt 1 ]]; then
-      wizard_show_redis_rate_limit_hint
+    else
+      wiz_prompt "Количество uvicorn workers (1 = по умолчанию, >1 требует Redis для rate limit)" "$workers_default"
+      if [[ "$REPLY" =~ ^[0-9]+$ ]] && (( REPLY >= 1 && REPLY <= 32 )); then
+        WIZ_UVICORN_WORKERS="$REPLY"
+      else
+        WIZ_UVICORN_WORKERS="1"
+      fi
+      if [[ "$WIZ_UVICORN_WORKERS" -gt 1 ]]; then
+        wizard_show_redis_rate_limit_hint
+      fi
     fi
   fi
   echo
@@ -809,6 +824,9 @@ wizard_ask_paths() {
 }
 
 wizard_apply_run_mode_flags() {
+  local cli_with_systemd="${WITH_SYSTEMD:-false}"
+  local cli_with_daemon="${WITH_DAEMON:-false}"
+
   WITH_DAEMON=false
   WITH_SYSTEMD=false
   WITH_NODE_AGENT=false
@@ -817,6 +835,14 @@ wizard_apply_run_mode_flags() {
     daemon) WITH_DAEMON=true ;;
     systemd) WITH_SYSTEMD=true ;;
   esac
+
+  if [[ "$cli_with_systemd" == true ]]; then
+    WITH_SYSTEMD=true
+    WITH_DAEMON=false
+  elif [[ "$cli_with_daemon" == true ]]; then
+    WITH_DAEMON=true
+    WITH_SYSTEMD=false
+  fi
 
   case "$WIZ_INSTALL_TYPE" in
     node) WITH_NODE_AGENT=true ;;

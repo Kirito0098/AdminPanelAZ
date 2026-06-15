@@ -8,7 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- _(пусто — см. [Backlog-otkryto.md](docs/Backlog-otkryto.md))_
+- **Простая установка (`install-easy.sh`)** — отдельный установщик для начинающих: понятные вопросы с пояснениями, минимум технических терминов. Мастер [`scripts/install-easy-wizard.sh`](scripts/install-easy-wizard.sh): тип установки (панель / панель+VPN / node agent), доступ в браузере (свой домен / DuckDNS / только локально), логин и пароль, размер сервера (1 GB / 2 GB+), автозапуск systemd и firewall. Меню: установка, удаление, переход к полному `install.sh`, справка. Флаг `--easy` в [`install.sh`](install.sh) вызывает тот же мастер.
+- **CI — install smoke** — job `install-smoke` в GitHub Actions: non-interactive установка через systemd, проверка `/api/health`, `/api/health/deep` и статики frontend; скрипт [`scripts/install-smoke-test.sh`](scripts/install-smoke-test.sh).
+
+### Changed
+- **README — установка** — простой установщик (`install-easy.sh`) указан первым в «Быстром старте»; полный `install.sh` — для расширенных настроек.
+- **Установка — non-interactive** — автогенерация пароля администратора, профиль **Minimal**, отключение локального AntiZapret, синхронизация admin в БД без интерактивного мастера; `--with-systemd` / `--with-daemon` переопределяют режим запуска из CLI.
+- **Мастер установки — defaults** — при `WIZ_ACCEPT_DEFAULTS`: Nginx пропускается (localhost), systemd, 1 uvicorn worker.
+- **Удалённая установка** — автоматическая установка `git` через apt при bootstrap, если пакет отсутствует.
+
+### Fixed
+- **Node Sync reconcile worker** — восстановлен импорт `run_node_sync_reconcile_loop` в `lifespan_workers.py` (воркер не стартовал).
+- **Установка — Let's Encrypt** — при недоступном DNS/порте 80 установка продолжается без HTTPS (`NGINX_FAIL_SOFT`); подсказка про `./scripts/nginx-setup.sh`.
+- **Мастер установки** — безопасные значения по умолчанию для `WIZ_TELEGRAM_*` / `WIZ_AUTO_BACKUP_*` при seed в БД.
+
+### Dependencies
+- **cryptography** — 44.0.0 → 46.0.3.
 
 ## [2.0.0] - 2026-06-16
 

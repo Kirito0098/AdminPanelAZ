@@ -23,6 +23,14 @@ bootstrap_remote_install() {
   echo "[install] Загрузка AdminPanelAZ из $git_url в $target ..."
 
   if ! command -v git >/dev/null 2>&1; then
+    if [[ "$(id -u)" -eq 0 ]] && command -v apt-get >/dev/null 2>&1; then
+      echo "[install] git не найден — установка через apt..."
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq
+      apt-get install -y git
+    fi
+  fi
+  if ! command -v git >/dev/null 2>&1; then
     echo "[install] ОШИБКА: git не найден. Установите: apt install -y git" >&2
     exit 1
   fi
@@ -86,6 +94,7 @@ NODE_ONLY=false
 FORCE=false
 NON_INTERACTIVE=false
 ACCEPT_DEFAULTS=false
+EASY_MODE=false
 INSTALL_FROM_GIT="${INSTALL_FROM_GIT:-}"
 # Стандартный каталог — /opt/AdminPanelAZ; при запуске из клона resolve_project_dir подставит ROOT_DIR
 INSTALL_TARGET="${INSTALL_TARGET:-$DEFAULT_INSTALL_TARGET}"
@@ -128,6 +137,7 @@ usage() {
 
 has_explicit_install_intent() {
   [[ "$NON_INTERACTIVE" == true ]] && return 0
+  [[ "$EASY_MODE" == true ]] && return 0
   [[ "$WITH_SYSTEMD" == true ]] && return 0
   [[ "$WITH_DAEMON" == true ]] && return 0
   [[ "$WITH_NODE_AGENT" == true ]] && return 0
@@ -211,6 +221,9 @@ parse_args() {
         ;;
       --reinstall)
         ACTION="reinstall"
+        ;;
+      --easy)
+        EASY_MODE=true
         ;;
       --help|-h)
         usage
@@ -464,6 +477,18 @@ should_run_wizard() {
 }
 
 run_wizard_if_needed() {
+  if [[ "$EASY_MODE" == true ]]; then
+    # shellcheck source=scripts/install-easy-wizard.sh
+    source "$ROOT_DIR/scripts/install-easy-wizard.sh"
+    run_install_easy_wizard
+    if [[ "${WIZ_APPLY_CONFIRMED:-false}" != true ]]; then
+      exit 0
+    fi
+    WIZARD_RAN=true
+    FORCE=true
+    return 0
+  fi
+
   if ! should_run_wizard; then
     return 0
   fi
@@ -952,6 +977,24 @@ setup_env() {
     local backend_port="${BACKEND_PORT:-8000}"
     env_set CORS_ORIGINS "http://127.0.0.1:${backend_port},http://localhost:${backend_port},http://127.0.0.1:5173,http://localhost:5173"
     env_set BACKEND_HOST "127.0.0.1"
+
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+      env_set LOCAL_ANTIZAPRET_ENABLED "false"
+      env_set APP_ENV "development"
+      local admin_user admin_pw
+      admin_user="$(env_get DEFAULT_ADMIN_USERNAME)"
+      admin_pw="$(env_get DEFAULT_ADMIN_PASSWORD)"
+      [[ -n "$admin_user" ]] || admin_user="admin"
+      if is_placeholder_secret "$admin_pw" || [[ -z "$admin_pw" ]]; then
+        admin_pw="$(random_hex | cut -c1-16)"
+        log "Non-interactive: сгенерирован пароль администратора"
+      fi
+      env_set DEFAULT_ADMIN_USERNAME "$admin_user"
+      env_set DEFAULT_ADMIN_PASSWORD "$admin_pw"
+      env_set DEFAULT_ADMIN_MUST_CHANGE_PASSWORD "true"
+      export WIZ_ADMIN_USERNAME="$admin_user"
+      export WIZ_ADMIN_PASSWORD="$admin_pw"
+    fi
   fi
 
   if [[ -f "$ROOT_DIR/scripts/env_defaults.sh" ]]; then
@@ -959,6 +1002,13 @@ setup_env() {
     source "$ROOT_DIR/scripts/env_defaults.sh"
     ensure_env_defaults
     log "Добавлены значения по умолчанию из scripts/env_defaults.sh (AdminAntizapret 1.9.0)"
+  fi
+
+  if [[ "$NON_INTERACTIVE" == true ]] && ! wiz_config_active; then
+    if [[ -f "$ROOT_DIR/scripts/apply-resource-profile.py" ]]; then
+      apply_wiz_resource_profile "minimal"
+    fi
+    env_set LOCAL_ANTIZAPRET_ENABLED "false"
   fi
 
   ensure_backend_data_dirs
@@ -1028,7 +1078,9 @@ seed_admin_user_from_env() {
     return 0
   fi
   if [[ "$WIZARD_RAN" != true ]] && ! wiz_env_exported; then
-    return 0
+    if [[ "$NON_INTERACTIVE" != true ]]; then
+      return 0
+    fi
   fi
 
   log "Синхронизация учётной записи администратора (мастер → БД)..."
@@ -1041,18 +1093,18 @@ seed_wizard_db_settings() {
   if ! wiz_config_active || ! install_controller_selected; then
     return 0
   fi
-  if [[ "$WIZ_TELEGRAM_ENABLED" != true && "$WIZ_AUTO_BACKUP_ENABLED" != true ]]; then
+  if [[ "${WIZ_TELEGRAM_ENABLED:-false}" != true && "${WIZ_AUTO_BACKUP_ENABLED:-false}" != true ]]; then
     return 0
   fi
 
   log "Применение настроек мастера в БД (Telegram, auto-backup)..."
   (
     cd "$BACKEND_DIR" || exit 1
-    WIZ_TELEGRAM_ENABLED="$WIZ_TELEGRAM_ENABLED" \
-    WIZ_TELEGRAM_BOT_TOKEN="$WIZ_TELEGRAM_BOT_TOKEN" \
-    WIZ_TELEGRAM_CHAT_ID="$WIZ_TELEGRAM_CHAT_ID" \
-    WIZ_AUTO_BACKUP_ENABLED="$WIZ_AUTO_BACKUP_ENABLED" \
-    WIZ_AUTO_BACKUP_DAYS="$WIZ_AUTO_BACKUP_DAYS" \
+    WIZ_TELEGRAM_ENABLED="${WIZ_TELEGRAM_ENABLED:-false}" \
+    WIZ_TELEGRAM_BOT_TOKEN="${WIZ_TELEGRAM_BOT_TOKEN:-}" \
+    WIZ_TELEGRAM_CHAT_ID="${WIZ_TELEGRAM_CHAT_ID:-}" \
+    WIZ_AUTO_BACKUP_ENABLED="${WIZ_AUTO_BACKUP_ENABLED:-false}" \
+    WIZ_AUTO_BACKUP_DAYS="${WIZ_AUTO_BACKUP_DAYS:-7}" \
       "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/seed-wizard-db.py"
   ) || warn "Не удалось записать настройки в БД"
 }
@@ -1250,7 +1302,13 @@ setup_nginx_if_selected() {
     le)
       [[ -n "$domain" ]] || die "Для Let's Encrypt нужен домен (запустите install.sh заново или ./scripts/nginx-setup.sh)"
       nginx_ensure_nginx || die "Не удалось установить nginx"
-      nginx_obtain_letsencrypt_cert "$domain" "${WIZ_NGINX_EMAIL:-}"
+      NGINX_FAIL_SOFT=true
+      if ! nginx_obtain_letsencrypt_cert "$domain" "${WIZ_NGINX_EMAIL:-}"; then
+        unset NGINX_FAIL_SOFT
+        warn "Let's Encrypt не выдан (DNS/порт 80). Продолжаем без HTTPS — позже: sudo ./scripts/nginx-setup.sh"
+        return 0
+      fi
+      unset NGINX_FAIL_SOFT
       local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
       local key="/etc/letsencrypt/live/${domain}/privkey.pem"
       local conf
@@ -1562,7 +1620,7 @@ main() {
     require_tty_or_explicit_intent
   fi
 
-  if [[ "$original_argc" -eq 0 && -t 0 && "$NON_INTERACTIVE" != true ]]; then
+  if [[ "$original_argc" -eq 0 && -t 0 && "$NON_INTERACTIVE" != true && "$EASY_MODE" != true ]]; then
     show_main_menu
   fi
 

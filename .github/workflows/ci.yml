@@ -75,7 +75,7 @@ jobs:
       - name: Shell scripts (shellcheck)
         run: |
           if command -v shellcheck >/dev/null 2>&1; then
-            shellcheck install.sh start.sh start_node_agent.sh scripts/*.sh
+            shellcheck install.sh install-easy.sh start.sh start_node_agent.sh scripts/*.sh
           else
             echo "shellcheck not available, skipping"
           fi
@@ -86,3 +86,19 @@ jobs:
         run: |
           bandit -r backend/app backend/node_agent -ll \
             --exclude backend/tests,backend/.venv,backend/app/data
+
+  install-smoke:
+    name: install smoke (non-interactive + systemd)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run install smoke test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git curl wget
+          sudo chmod +x install.sh scripts/install-smoke-test.sh
+          sudo ./scripts/install-smoke-test.sh

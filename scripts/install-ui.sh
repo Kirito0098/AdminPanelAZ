@@ -247,12 +247,15 @@ ui_show_help() {
 Единая точка входа для установки AdminPanelAZ.
 Без аргументов (TTY) - интерактивное меню.
 
+Для начинающих: sudo ./install-easy.sh (простой мастер с пояснениями).
+
 Действия:
   (меню)                Новая установка / переустановка / удаление / справка
   --uninstall           Полное удаление сервисов (каталог проекта сохраняется)
   --purge-all           Удалить всё без следов (сервисы, проект, бэкапы)
   --purge               Вместе с --uninstall: удалить каталог проекта
   --reinstall           Переустановка: удалить сервисы и установить заново
+  --easy                Простой мастер (как install-easy.sh)
 
 Опции установки:
   --with-daemon         Запустить prod daemon через start.sh после установки
@@ -289,6 +292,9 @@ ui_show_help() {
   AntiZapret устанавливается отдельно в /root/antizapret (см. README).
 
 Примеры:
+  sudo ./install-easy.sh
+  wget -qO /tmp/install-easy.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install-easy.sh
+  sudo bash /tmp/install-easy.sh
   wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh
   sudo bash /tmp/install.sh
   cd /opt/AdminPanelAZ && sudo ./install.sh

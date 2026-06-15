@@ -49,6 +49,16 @@
 
 ### Быстрый старт
 
+**Простая установка** (рекомендуется новичкам — понятные вопросы с пояснениями):
+
+```bash
+sudo apt update && sudo apt install -y git wget curl
+wget -qO /tmp/install-easy.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install-easy.sh
+sudo bash /tmp/install-easy.sh
+```
+
+**Полный установщик** (больше настроек):
+
 ```bash
 sudo apt update && sudo apt install -y git wget curl
 wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh
@@ -57,7 +67,16 @@ sudo bash /tmp/install.sh
 
 > Запускайте установщик **из SSH-терминала**, не через `curl | bash` — иначе не откроется интерактивный мастер.
 
-Мастер спросит:
+Простой мастер (`install-easy.sh`) спросит:
+1. **Что ставим** — только панель, панель + VPN на этом сервере, или связь VPN-сервера с панелью
+2. **Как заходить в браузере** — свой домен, бесплатный DuckDNS, или только на этом сервере
+3. **Логин и пароль** администратора
+4. **Размер сервера** — 1 GB (облегчённый) или 2 GB+ (обычный)
+5. **Автозапуск** — включается автоматически (рекомендуется)
+
+Полный мастер (`install.sh`) дополнительно настраивает порты, firewall, Telegram и др.
+
+Мастер полного установщика спросит:
 1. **Тип** — только панель, панель + VPN на этом сервере, или только агент на VPN-сервере
 2. **Домен или DDNS** — DuckDNS / No-IP / свой домен
 3. **HTTPS** — Let's Encrypt (рекомендуется) или самоподписанный сертификат
@@ -68,7 +87,8 @@ sudo bash /tmp/install.sh
 
 ```bash
 cd /opt/AdminPanelAZ
-sudo ./install.sh
+sudo ./install-easy.sh    # простой мастер
+sudo ./install.sh         # полный мастер
 ```
 
 ### После установки

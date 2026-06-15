@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.services.backup_scheduler import run_backup_scheduler_loop, run_runtime_backup_cleanup_loop
 from app.services.cert_sync_worker import run_cert_sync_loop
 from app.services.cidr.cidr_scheduler import run_cidr_db_scheduler_loop
+from app.services.node_sync.reconcile_worker import run_node_sync_reconcile_loop
 from app.services.nightly_idle_restart_worker import run_nightly_idle_restart_loop
 from app.services.node_health_worker import run_node_health_loop
 from app.services.node_key_rotation import run_node_key_rotation_loop
