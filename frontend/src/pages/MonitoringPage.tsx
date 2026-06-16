@@ -15,6 +15,7 @@ import {
   WifiOff,
 } from 'lucide-react'
 import { ApiError, getMonitoring, getResourceHistory, openMonitoringStream } from '@/api/client'
+import GeoRoutingHintBanner from '@/components/dashboard/GeoRoutingHintBanner'
 import NodesCompareSection from '@/components/dashboard/NodesCompareSection'
 import MonitoringCharts, { formatBytes, totalTraffic } from '@/components/monitoring/MonitoringCharts'
 import MonitoringConnectionsList, {
@@ -379,6 +380,8 @@ export default function MonitoringPage() {
           </>
         )}
       </SettingsAlert>
+
+      <GeoRoutingHintBanner enabled={hasMultipleNodes} />
 
       {!isFederated && nodeOffline && (
         <SettingsAlert variant="warning" title="Узел офлайн">

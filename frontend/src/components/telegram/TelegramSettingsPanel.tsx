@@ -116,7 +116,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <StepCard done={false} step={1} title="Создайте бота в @BotFather">
+            <StepCard done={tg.loginConfigured} step={1} title="Создайте бота в @BotFather">
               Команда <code>/newbot</code> → сохраните <strong>токен</strong> и <strong>username</strong> (без @).
               <Button variant="link" size="sm" className="h-auto p-0" asChild>
                 <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">
@@ -125,7 +125,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               </Button>
             </StepCard>
 
-            <StepCard done={false} step={2} title="Привяжите домен панели к боту">
+            <StepCard done={tg.loginConfigured} step={2} title="Привяжите домен панели к боту">
               В BotFather: <code>/setdomain</code> → выберите бота → домен{' '}
               <code>{panelDomain}</code> (без https://).
               <Button type="button" variant="secondary" size="sm" className="mt-2" onClick={() => void copyDomain()}>

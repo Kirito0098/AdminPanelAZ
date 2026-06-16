@@ -8,6 +8,7 @@ type MonitoringChartCardProps = {
   icon: LucideIcon
   children: React.ReactNode
   className?: string
+  panelClassName?: string
 }
 
 export default function MonitoringChartCard({
@@ -16,6 +17,7 @@ export default function MonitoringChartCard({
   icon: Icon,
   children,
   className,
+  panelClassName,
 }: MonitoringChartCardProps) {
   return (
     <Card className={className}>
@@ -26,7 +28,7 @@ export default function MonitoringChartCard({
         </CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent className="monitoring-chart-panel">{children}</CardContent>
+      <CardContent className={cn('monitoring-chart-panel', panelClassName)}>{children}</CardContent>
     </Card>
   )
 }

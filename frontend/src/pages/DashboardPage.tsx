@@ -31,8 +31,6 @@ import {
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
-import GlobalDashboardSection from '@/components/dashboard/GlobalDashboardSection'
-import GeoRoutingHintBanner from '@/components/dashboard/GeoRoutingHintBanner'
 import MetricCard from '@/components/noc/MetricCard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
@@ -71,7 +69,7 @@ export default function DashboardPage() {
   const openvpnEnabled = isEnabled('openvpn')
   const wireguardEnabled = isEnabled('wireguard') || isEnabled('amneziawg')
   const canCreateClient = openvpnEnabled || wireguardEnabled
-  const { activeNode, nodes } = useNode()
+  const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
   const { task: importTask, polling: importPolling, startPoll: startImportPoll } = useBackgroundTaskPoll()
@@ -389,13 +387,8 @@ export default function DashboardPage() {
     }
   }
 
-  const showGlobalDashboard = user?.role === 'admin' && nodes.length > 1
-
   return (
     <div className="space-y-6">
-      {showGlobalDashboard && <GlobalDashboardSection />}
-      <GeoRoutingHintBanner enabled={nodes.length > 1} />
-
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
