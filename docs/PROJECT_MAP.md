@@ -4,6 +4,8 @@
 
 **AdminPanel AntiZapret** — веб-панель для администрирования VPN-сервера [AntiZapret](https://github.com/GubernievS/AntiZapret-VPN): клиенты (OpenVPN / WireGuard / AmneziaWG), маршрутизация CIDR, мониторинг, бэкапы, Telegram-бот и Mini App.
 
+**Пользовательские инструкции** (без жаргона, для админов и клиентов VPN): [`docs/README.md`](README.md).
+
 ---
 
 ## Общая архитектура
@@ -76,7 +78,23 @@
 │   └── vite.config.ts           # две сборки: default + tg-mini
 ├── scripts/                     # firewall, install-wizard, uninstall
 ├── docs/
-│   ├── Telegram.md
+│   ├── README.md                # оглавление пользовательских руководств
+│   ├── konfiguracii.md          # UI: Конфигурации
+│   ├── noc-monitoring.md
+│   ├── traffic-monitoring.md
+│   ├── routing-cidr.md
+│   ├── antizapret-config.md
+│   ├── warper.md
+│   ├── edit-files.md
+│   ├── logs.md
+│   ├── server-monitor.md
+│   ├── uzly.md
+│   ├── nastrojki/               # инструкции по подразделам Настроек
+│   │   ├── README.md
+│   │   ├── profil.md … diagnostika.md
+│   ├── Telegram.md              # Telegram (пользователь + setup)
+│   ├── GeoIP.md                 # локальная GeoIP (MaxMind)
+│   ├── NodeSync.md              # HA / sync groups (разработчик)
 │   └── PROJECT_MAP.md           # этот файл
 ├── install.sh / start.sh
 └── .runtime/                    # логи, PID (dev)
@@ -84,23 +102,68 @@
 
 ---
 
+## Документация
+
+| Аудитория | Точка входа | Содержание |
+|-----------|-------------|------------|
+| **Пользователь / админ VPN** | [`docs/README.md`](README.md) | Простые инструкции по каждому разделу меню и настройкам |
+| **Разработчик** | этот файл | Архитектура, роутеры, сервисы, модели |
+| **Безопасность (ops)** | [`SECURITY.md`](../SECURITY.md) | HTTPS, 2FA, rate limit, Redis |
+| **Установка** | [`README.md`](../README.md) | install.sh, первый запуск |
+
+### UI ↔ пользовательская инструкция
+
+| Маршрут | Страница | User doc |
+|---------|----------|----------|
+| `/` | `DashboardPage` | [`konfiguracii.md`](konfiguracii.md) |
+| `/monitoring` | `MonitoringPage` | [`noc-monitoring.md`](noc-monitoring.md) |
+| `/traffic` | `TrafficPage` | [`traffic-monitoring.md`](traffic-monitoring.md) |
+| `/routing` | `RoutingPage` | [`routing-cidr.md`](routing-cidr.md) |
+| `/antizapret` | `AntizapretConfigPage` | [`antizapret-config.md`](antizapret-config.md) |
+| `/warper` | `WarperPage` | [`warper.md`](warper.md) |
+| `/telegram` | `TelegramPage` | [`Telegram.md`](Telegram.md) |
+| `/edit-files` | `EditFilesPage` | [`edit-files.md`](edit-files.md) |
+| `/logs` | `LogsPage` | [`logs.md`](logs.md) |
+| `/server-monitor` | `ServerMonitorPage` | [`server-monitor.md`](server-monitor.md) |
+| `/nodes` | `NodesPage` | [`uzly.md`](uzly.md) |
+| `/settings` | `SettingsPage` | [`nastrojki/README.md`](nastrojki/README.md) |
+| `/login` | `LoginPage` | [`nastrojki/profil.md`](nastrojki/profil.md) (2FA, passkey) |
+
+### Настройки: UI ↔ компонент ↔ user doc
+
+| `SettingsSection` | Компонент | User doc |
+|-------------------|-----------|----------|
+| `personal` | `PersonalTab`, `TwoFactorTab`, `PasskeysTab` | [`nastrojki/profil.md`](nastrojki/profil.md) |
+| `users` | `UsersTab` | [`nastrojki/polzovateli.md`](nastrojki/polzovateli.md) |
+| `security` | `SecurityTab`, `SecretsRotationWizard` | [`nastrojki/bezopasnost.md`](nastrojki/bezopasnost.md) |
+| `config_delivery` | `ConfigDeliveryTab` | [`nastrojki/razdacha-konfigov.md`](nastrojki/razdacha-konfigov.md) |
+| `maintenance` | `MaintenanceTab` | [`nastrojki/obsluzhivanie.md`](nastrojki/obsluzhivanie.md) |
+| `vpn_network` | `VpnNetworkTab` | [`nastrojki/set-i-publikaciya.md`](nastrojki/set-i-publikaciya.md) |
+| `backup` | `BackupTab` | [`nastrojki/rezervnye-kopii.md`](nastrojki/rezervnye-kopii.md) |
+| `monitoring` | `MonitoringTab`, `AlertRulesCard` | [`nastrojki/monitoring-i-alerty.md`](nastrojki/monitoring-i-alerty.md) |
+| `modules` | `FeatureTogglesTab` | [`nastrojki/moduli.md`](nastrojki/moduli.md) |
+| `updates` | `UpdatesTab` | [`nastrojki/obnovleniya.md`](nastrojki/obnovleniya.md) |
+| `tests` | `RunbookTab`, `TestsTab` | [`nastrojki/diagnostika.md`](nastrojki/diagnostika.md) |
+
+---
+
 ## Frontend: страницы ↔ API
 
-| Маршрут | Страница | Feature toggle | Назначение |
-|---------|----------|----------------|------------|
-| `/` | `DashboardPage` | — | VPN-клиенты, карточки конфигов |
-| `/monitoring` | `MonitoringPage` | `logs_dashboard` | NOC: подключения, графики, службы |
-| `/traffic` | `TrafficPage` | `traffic_sync` | Трафик по клиентам, лимиты |
-| `/routing` | `RoutingPage` | `routing` | CIDR-провайдеры, pipeline |
-| `/antizapret` | `AntizapretConfigPage` | `routing` | Конфиг AntiZapret (admin) |
-| `/warper` | `WarperPage` | `warper` | AZ-WARP / Cloudflare WARP |
-| `/telegram` | `TelegramPage` | `telegram` | Настройки бота и Mini App |
-| `/edit-files` | `EditFilesPage` | `edit_files` | Редактор файлов AntiZapret |
-| `/logs` | `LogsPage` | `logs_dashboard` / `action_logs` | Журналы |
-| `/server-monitor` | `ServerMonitorPage` | `server_monitor` | vnStat, нагрузка сервера |
-| `/nodes` | `NodesPage` | — (admin) | VPN-узлы |
-| `/settings` | `SettingsPage` | — | Пользователи, бэкапы, безопасность… |
-| `/login` | `LoginPage` | — | JWT + 2FA |
+| Маршрут | Страница | Feature toggle | User doc | Назначение |
+|---------|----------|----------------|----------|------------|
+| `/` | `DashboardPage` | — | [konfiguracii](konfiguracii.md) | VPN-клиенты, карточки конфигов |
+| `/monitoring` | `MonitoringPage` | `logs_dashboard` | [noc-monitoring](noc-monitoring.md) | NOC: подключения, графики, службы |
+| `/traffic` | `TrafficPage` | `traffic_sync` | [traffic-monitoring](traffic-monitoring.md) | Трафик по клиентам, лимиты |
+| `/routing` | `RoutingPage` | `routing` | [routing-cidr](routing-cidr.md) | CIDR-провайдеры, pipeline |
+| `/antizapret` | `AntizapretConfigPage` | `routing` | [antizapret-config](antizapret-config.md) | Конфиг AntiZapret (admin) |
+| `/warper` | `WarperPage` | `warper` | [warper](warper.md) | AZ-WARP / Cloudflare WARP |
+| `/telegram` | `TelegramPage` | `telegram` | [Telegram](Telegram.md) | Настройки бота и Mini App |
+| `/edit-files` | `EditFilesPage` | `edit_files` | [edit-files](edit-files.md) | Редактор файлов AntiZapret |
+| `/logs` | `LogsPage` | `logs_dashboard` / `action_logs` | [logs](logs.md) | Журналы |
+| `/server-monitor` | `ServerMonitorPage` | `server_monitor` | [server-monitor](server-monitor.md) | vnStat, нагрузка сервера |
+| `/nodes` | `NodesPage` | — (admin) | [uzly](uzly.md) | VPN-узлы, sync groups (HA) |
+| `/settings` | `SettingsPage` | — | [nastrojki](nastrojki/README.md) | Пользователи, бэкапы, безопасность… |
+| `/login` | `LoginPage` | — | [profil](nastrojki/profil.md) | JWT + 2FA + passkey |
 
 **Ключевые контексты:** `AuthContext`, `NodeContext` (активный узел), `FeatureModulesContext`, `ThemeContext`.
 
@@ -142,11 +205,12 @@
 ### VPN и узлы
 - `node_manager.py` — активный узел, CRUD узлов
 - `node_adapter.py` — абстракция **LocalAdapter** / **RemoteAdapter** (HTTP к agent :9100)
+- sync groups / HA — UI: `NodeSyncGroupSection.tsx`, API: `nodes` router; см. [`NodeSync.md`](NodeSync.md), user: [`uzly.md`](uzly.md)
 - `antizapret.py`, `openvpn_management.py`, `wg_runtime.py` — работа с VPN на узле
 - `profile_files.py`, `qr_generator.py` — конфиги и QR
 
 ### Мониторинг и трафик
-- `monitoring_overview.py`, `ip_geo.py` — NOC-сводка
+- `monitoring_overview.py`, `ip_geo.py`, `geoip_local.py` — NOC-сводка, GeoIP ([`GeoIP.md`](GeoIP.md))
 - `traffic/` — collector, sessions, chart, worker
 - `traffic_limit.py`, `traffic_limit_reconcile.py` — лимиты
 - `resource_metrics*.py`, `panel_resource_metrics*.py` — CPU/RAM узлов и панели
@@ -259,6 +323,7 @@ cd backend && .venv/bin/pytest tests/
 | CIDR deploy | `services/cidr/pipeline/` |
 | Telegram-команда | `services/telegram_bot_handlers/` |
 | Feature flag | `services/feature_toggles.py` + `FeatureGuardRoute` на фронте |
+| User doc для UI-раздела | `docs/<module>.md` или `docs/nastrojki/<section>.md` + строка в [`docs/README.md`](README.md) |
 | Миграция БД | `database.py` → `run_db_migrations()` |
 | Фоновая задача | `background_tasks.py` + `tasks` router |
 
@@ -274,9 +339,17 @@ cd backend && .venv/bin/pytest tests/
 
 ## Связанные документы
 
-- [`README.md`](../README.md) — установка, возможности
+### Пользовательские руководства
+
+- [`docs/README.md`](README.md) — оглавление всех инструкций
+- [`docs/nastrojki/README.md`](nastrojki/README.md) — настройки панели
+- [`docs/Telegram.md`](Telegram.md) — Telegram-интеграция
+- [`docs/GeoIP.md`](GeoIP.md) — локальная GeoIP (MaxMind)
+
+### Разработка и эксплуатация
+
+- [`README.md`](../README.md) — установка, возможности, ссылки на user docs
 - [`SECURITY.md`](../SECURITY.md) — безопасность
 - [`CHANGELOG.md`](../CHANGELOG.md) — история изменений
-- [`docs/Idei.md`](Idei.md) — backlog и этапы реализации
-- [`docs/Etapy-prompty.md`](Etapy-prompty.md) — промпты Cursor по этапам
-- [`docs/Telegram.md`](Telegram.md) — Telegram-интеграция
+- [`docs/NodeSync.md`](NodeSync.md) — HA / sync groups (API, ограничения)
+- [`docs/PROJECT_MAP.md`](PROJECT_MAP.md) — этот файл

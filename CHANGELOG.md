@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Пользовательская документация** — простые инструкции по разделам веб-панели: [`docs/README.md`](docs/README.md), модули меню (`konfiguracii.md`, `noc-monitoring.md`, …), подразделы настроек [`docs/nastrojki/`](docs/nastrojki/README.md).
+
+### Changed
+
+- [`README.md`](README.md) — длинные блоки NOC/трафик/узлы заменены ссылками на user docs.
+- [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) — карта UI ↔ user doc, актуальное дерево `docs/`.
+
+### Removed
+
+- **Roadmap-документы** — `docs/Idei.md`, `docs/Etapy-prompty.md`, `docs/Backlog-otkryto.md` (задача **10.1 PostgreSQL** снята с плана: для типичного деплоя SQLite достаточен).
 ## [2.1.0] - 2026-06-16
 
 ### Added
