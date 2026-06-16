@@ -100,6 +100,10 @@ class CidrCustomProviderRequest(BaseModel):
     asns: list[str] | None = None
 
 
+class CidrDpiAnalyzeRequest(BaseModel):
+    dpi_log_text: str
+
+
 def _svc(db: Session, cidr_db: Session) -> CidrDbUpdaterService:
     return CidrDbUpdaterService(db=db, cidr_db=cidr_db)
 
@@ -588,3 +592,28 @@ def antifilter_refresh(user: User = Depends(require_admin), db: Session = Depend
 @router.get("/route-budget", response_model=RouteBudgetInfo)
 def route_budget(_: User = Depends(get_current_user)):
     return RouteBudgetInfo(**build_route_budget_payload())
+
+
+@router.post("/analyze-dpi")
+def analyze_dpi_log_endpoint(
+    payload: CidrDpiAnalyzeRequest,
+    _: User = Depends(get_current_user),
+):
+    from app.services.cidr.pipeline.dpi import analyze_dpi_log
+
+    result = analyze_dpi_log(payload.dpi_log_text)
+    for provider in result.get("providers") or []:
+        file_name = provider.get("file")
+        if not file_name:
+            continue
+        meta = IP_FILES.get(file_name, {})
+        provider["name"] = meta.get("name", file_name)
+        provider["category"] = meta.get("category", "")
+    for recommendation in result.get("recommendations") or []:
+        file_name = recommendation.get("file")
+        if not file_name:
+            continue
+        meta = IP_FILES.get(file_name, {})
+        recommendation["name"] = meta.get("name", file_name)
+        recommendation["category"] = meta.get("category", "")
+    return result

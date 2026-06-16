@@ -1,7 +1,7 @@
 import type { CidrDbStatus, CidrProviderInfo } from '@/types'
 import { pluralProviders } from './utils'
 
-export type RoutingTab = 'overview' | 'providers' | 'pipeline'
+export type RoutingTab = 'overview' | 'providers' | 'pipeline' | 'analysis'
 
 export type WorkflowStage = 1 | 2 | 3 | 4
 

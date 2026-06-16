@@ -1366,6 +1366,13 @@ export async function getRouteBudget() {
   return apiFetch<import('../types').RouteBudgetInfo>('/routing/cidr-db/route-budget')
 }
 
+export async function analyzeDpiLog(dpiLogText: string) {
+  return apiFetch<import('../types').DpiAnalysisResult>('/routing/cidr-db/analyze-dpi', {
+    method: 'POST',
+    body: JSON.stringify({ dpi_log_text: dpiLogText }),
+  })
+}
+
 export async function getAntizapretSettings() {
   return apiFetch<import('../types').AntizapretSettingsResponse>('/routing/antizapret-settings')
 }

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-16
+
+### Added
+
+- **Маршрутизация / CIDR — вкладка «Анализ»** — разбор лога [TCP 16-20 DPI checker](https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-20/): вставка лога, рекомендации по включению CIDR-списков; URL `?tab=analysis`; карточка быстрой навигации на странице маршрутизации.
+- **API `POST /api/routing/cidr-db/analyze-dpi`** — парсер `analyze_dpi_log`: консоль checker, таблица 6 и 4 колонок; сопоставление узлов с `*-ips.txt`.
+- **DPI checker suite** — `dpi_checker_suite.py`: маппинг ID узлов checker → hostname (например `SE.AKM-01` → `cdn.apple-mapkit.com`, `PL.AKM-01` → `www.mobil.com.se`).
+- **Умные рекомендации** — уровни must / should / consider / skip с confidence (`high`, `medium`, `weak`, `inconclusive`); `actionable_files` только для надёжных сигналов; учёт противоречий (detected на одном узле провайдера и not detected на другом).
+- **UI «Анализ»** — предупреждения (checker без VPN, detected ≠ «сайт не открывается», CIDR для split-маршрутизации); карточки узлов с hostname и ссылкой «открыть»; таблица всех узлов лога (alive, method, tcp 16-20); переход к провайдерам для actionable-списков.
+
+### Changed
+
+- **Парсер DPI** — извлечение `alived: yes/no/unknown`, `method: N`, enrichment узлов полями `host`, `checker_provider`, `checker_country`.
+
+### Tests
+
+- `test_analyze_dpi_log_marks_mixed_akamai_as_weak_must` — mixed Akamai (detected + not detected) → `confidence=weak`, `actionable=false`.
+
 ## [2.2.0] - 2026-06-16
 
 ### Added
@@ -630,7 +648,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 - Production-развёртывание: `install.sh`, daemon/watchdog, systemd, раздача UI из backend в prod-режиме.
 - OpenVPN management sockets, vnStat, WebSocket-мониторинг, Telegram Mini App, in-panel pytest.
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.9.0...v2.0.0

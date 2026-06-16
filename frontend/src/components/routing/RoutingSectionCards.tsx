@@ -1,4 +1,4 @@
-import { CloudDownload, LayoutDashboard, Route } from 'lucide-react'
+import { CloudDownload, FlaskConical, LayoutDashboard, Route } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import type { RoutingTab, RoutingWorkflowState } from './routingWorkflow'
@@ -55,6 +55,14 @@ export default function RoutingSectionCards({
       tone: workflow.currentStage === 4 ? 'text-amber-600 dark:text-amber-400' : undefined,
     },
     {
+      key: 'analysis',
+      title: 'Анализ',
+      icon: FlaskConical,
+      value: 'DPI лог',
+      sub: 'Рекомендации по CIDR из checker',
+      accent: activeTab === 'analysis' ? 'border-l-primary' : 'border-l-muted-foreground/30',
+    },
+    {
       key: 'pipeline',
       title: 'Pipeline',
       icon: CloudDownload,
@@ -87,7 +95,7 @@ export default function RoutingSectionCards({
   const visible = cards.filter((c) => !c.adminOnly || isAdmin)
 
   return (
-    <div className={cn('grid gap-3', visible.length === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
+    <div className={cn('grid gap-3 sm:grid-cols-2', visible.length >= 4 ? 'xl:grid-cols-4' : visible.length === 3 ? 'lg:grid-cols-3' : '')}>
       {visible.map((card) => (
         <button
           key={card.key}

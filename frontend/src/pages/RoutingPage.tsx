@@ -1,10 +1,12 @@
 import {
   CloudDownload,
+  FlaskConical,
   LayoutDashboard,
   Route,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
+import AnalysisTab from '@/components/routing/AnalysisTab'
 import ConfirmActionDialog from '@/components/routing/ConfirmActionDialog'
 import CidrPipelineTab from '@/components/routing/CidrPipelineTab'
 import CustomProviderWizardDialog from '@/components/routing/CustomProviderWizardDialog'
@@ -38,6 +40,13 @@ const ROUTING_TABS: Array<{ id: RoutingTab; label: string; shortLabel: string; i
     description: 'Включение CIDR-списков для маршрутизации на активном узле',
   },
   {
+    id: 'analysis',
+    label: 'Анализ',
+    shortLabel: 'Анализ',
+    icon: FlaskConical,
+    description: 'Разбор лога DPI checker и рекомендации по включению CIDR-списков',
+  },
+  {
     id: 'pipeline',
     label: 'Pipeline',
     shortLabel: 'Pipeline',
@@ -47,7 +56,7 @@ const ROUTING_TABS: Array<{ id: RoutingTab; label: string; shortLabel: string; i
   },
 ]
 
-const PUBLIC_TABS = new Set<RoutingTab>(['overview', 'providers'])
+const PUBLIC_TABS = new Set<RoutingTab>(['overview', 'providers', 'analysis'])
 
 export default function RoutingPage() {
   const { user } = useAuth()
@@ -221,6 +230,10 @@ export default function RoutingPage() {
             onNavigateTab={navigateTab}
             workflow={workflow}
           />
+        </TabsContent>
+
+        <TabsContent value="analysis" className="mt-0">
+          <AnalysisTab providers={data.providers} onNavigateTab={navigateTab} />
         </TabsContent>
 
         {isAdmin && (

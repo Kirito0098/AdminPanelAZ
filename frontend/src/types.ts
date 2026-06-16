@@ -772,6 +772,87 @@ export interface AntifilterStatus {
   refresh_error?: string | null
 }
 
+export interface DpiAnalysisNode {
+  node_id: string
+  file: string | null
+  severity: string
+  severity_score: number
+  status_text: string
+  alive?: string | null
+  host?: string | null
+  checker_provider?: string | null
+  checker_country?: string | null
+  dpi_method?: number | null
+}
+
+export interface DpiAnalysisTriggerNode {
+  node_id: string
+  host?: string | null
+  alive?: string | null
+  severity: string
+  severity_score: number
+  status_text: string
+  dpi_method?: number | null
+}
+
+export interface DpiAnalysisRecommendation {
+  file: string
+  name?: string
+  category?: string
+  level: 'must' | 'should' | 'consider' | 'skip'
+  confidence: 'high' | 'medium' | 'low' | 'weak' | 'inconclusive'
+  actionable: boolean
+  reason: string
+  trigger_nodes: DpiAnalysisTriggerNode[]
+  all_nodes: DpiAnalysisTriggerNode[]
+}
+
+export interface DpiAnalysisCaveat {
+  type: string
+  severity: 'warning' | 'info'
+  title: string
+  message: string
+}
+
+export interface DpiAnalysisProvider {
+  file: string
+  name?: string
+  category?: string
+  max_severity_score: number
+  detected: number
+  possible_detected: number
+  unlikely: number
+  not_detected: number
+  unknown?: number
+  nodes: number
+}
+
+export interface DpiAnalysisResult {
+  success: boolean
+  message: string
+  summary: {
+    total_nodes?: number
+    matched_nodes?: number
+    unknown_nodes?: number
+    all_seen_files?: number
+    detected_files?: number
+    priority_files?: number
+    critical_files?: number
+    actionable_files?: number
+    weak_signals?: number
+  }
+  nodes: DpiAnalysisNode[]
+  providers: DpiAnalysisProvider[]
+  recommendations: DpiAnalysisRecommendation[]
+  caveats: DpiAnalysisCaveat[]
+  all_seen_files: string[]
+  detected_files: string[]
+  priority_files: string[]
+  critical_files: string[]
+  actionable_files: string[]
+  unknown_nodes: string[]
+}
+
 export interface CidrDeployResult {
   pushed: string[]
   failed: Array<{ file: string; error: string }>

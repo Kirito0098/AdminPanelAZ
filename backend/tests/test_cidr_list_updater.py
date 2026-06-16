@@ -366,6 +366,26 @@ class CidrListUpdaterTests(unittest.TestCase):
         self.assertIn("cdn77-ips.txt", result["detected_files"])
         self.assertNotIn("hetzner-ips.txt", result["detected_files"])
 
+    def test_analyze_dpi_log_marks_mixed_akamai_as_weak_must(self):
+        dpi_log = "\n".join(
+            [
+                "[23:08:22.361] DPI checking(#SE.AKM-01)/INFO: alived: yes 🟢, reqtime: 733.6 ms",
+                "[23:08:37.363] DPI checking(#SE.AKM-01)/INFO: tcp 16-20: detected❗️, method: 1",
+                "[23:08:31.875] DPI checking(#PL.AKM-01)/INFO: tcp 16-20: not detected ✅, reqtime: 6370.7 ms",
+            ]
+        )
+
+        result = cidr_list_updater.analyze_dpi_log(dpi_log)
+
+        self.assertTrue(result["success"])
+        akamai = next(item for item in result["recommendations"] if item["file"] == "akamai-ips.txt")
+        self.assertEqual(akamai["level"], "must")
+        self.assertEqual(akamai["confidence"], "weak")
+        self.assertFalse(akamai["actionable"])
+        self.assertEqual(akamai["trigger_nodes"][0]["node_id"], "SE.AKM-01")
+        self.assertEqual(akamai["trigger_nodes"][0]["host"], "cdn.apple-mapkit.com")
+        self.assertNotIn("akamai-ips.txt", result["actionable_files"])
+
     def test_analyze_dpi_log_supports_dpi_detector_table_format(self):
         dpi_log = "\n".join(
             [
