@@ -23,7 +23,6 @@ import {
 import NodeSelector from '@/components/NodeSelector'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
@@ -63,8 +62,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const initials = user?.username?.slice(0, 2).toUpperCase() ?? '?'
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 px-2 py-4">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center gap-3 px-2 py-4">
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <Shield size={20} />
         </div>
@@ -74,7 +73,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       </div>
 
-      <div className="mx-2 mb-4 flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400">
+      <div className="mx-2 mb-4 flex shrink-0 items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400">
         <span className="relative flex h-2 w-2">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
@@ -83,7 +82,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <Radio size={12} className="ml-auto opacity-60" />
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1 px-2">
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2">
         {baseNavItems
           .filter((item) => {
             if ('featureAnyOf' in item && item.featureAnyOf?.length) {
@@ -114,8 +113,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         ))}
       </nav>
 
-      <div className="mt-auto space-y-3 p-2">
-        <Separator />
+      <div className="shrink-0 space-y-3 border-t bg-card p-2 pt-3">
         <div className="flex items-center justify-between px-1">
           <LiveClock />
           <Button variant="ghost" size="sm" onClick={() => toggleTheme()}>
@@ -151,12 +149,12 @@ export default function Layout() {
   return (
     <div className="flex min-h-screen bg-background">
       <ForcePasswordChange />
-      <aside className="hidden w-64 shrink-0 border-r bg-card lg:block">
+      <aside className="hidden h-screen w-64 shrink-0 overflow-hidden border-r bg-card lg:sticky lg:top-0 lg:block">
         <SidebarContent />
       </aside>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-72 p-4">
+        <SheetContent side="left" className="flex w-72 flex-col overflow-hidden p-4">
           <SheetHeader className="sr-only">
             <SheetTitle>Навигация</SheetTitle>
           </SheetHeader>
