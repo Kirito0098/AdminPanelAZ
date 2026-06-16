@@ -34,12 +34,12 @@ function nodeStatusLabel(status: CidrDeployPerNodeResult['status']): string {
 function DeployPerNodeResults({ perNode }: { perNode: CidrDeployPerNodeResult[] }) {
   return (
     <div className="rounded-lg border bg-card p-4 space-y-3">
-      <div className="text-sm font-medium">Результат развёртывания по нодам</div>
+      <div className="text-sm font-medium">Результат развёртывания по узлам</div>
       <div className="rounded-md border overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Нода</TableHead>
+              <TableHead>Узел</TableHead>
               <TableHead>Статус</TableHead>
               <TableHead className="text-right">Файлов</TableHead>
               <TableHead>Детали</TableHead>

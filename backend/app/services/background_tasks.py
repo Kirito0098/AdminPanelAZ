@@ -55,7 +55,7 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "cidr_db_refresh_dry_run": ("Пробный прогон CIDR БД…", "Подготовка обновления провайдеров…", 3),
     "cidr_estimate_from_db": ("Оценка CIDR из БД…", "Подготовка оценки…", 3),
     "cidr_generate_from_db": ("Генерация CIDR из БД…", "Подготовка генерации…", 3),
-    "cidr_deploy": ("Развёртывание CIDR на ноду…", "Подготовка развёртывания…", 3),
+    "cidr_deploy": ("Развёртывание CIDR на узел…", "Подготовка развёртывания…", 3),
     "antifilter_refresh": ("Обновление Antifilter…", "Подготовка Antifilter…", 3),
     "vpn_network_publish": ("Публикация панели…", "Запуск nginx-setup.sh…", 5),
     "config_bulk_op": ("Массовая операция с клиентами…", "Подготовка…", 3),

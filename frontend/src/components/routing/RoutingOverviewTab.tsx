@@ -118,7 +118,7 @@ export default function RoutingOverviewTab({ data, cidrDb, antifilter }: Routing
 
         <StatusPanel title="Pipeline CIDR" icon={GitBranch}>
           <p className="mb-3 text-xs text-muted-foreground">
-            Данные и списки сначала на контроллере; на ноды уходит только deploy (этап 3).
+            Данные и списки сначала на контроллере; на узлы уходит только deploy (этап 3).
           </p>
           <div className="space-y-3 text-sm">
             <div className="flex items-center justify-between">

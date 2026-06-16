@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
 from app.database import get_db
 from app.models import User, UserRole
 from app.schemas import MessageResponse
+from app.services.action_log import log_action
+from app.services.edit_files_transfer import run_edit_files_transfer
 from app.services.file_editor import EDITABLE_FILES, FileEditorService
 from app.services.node_manager import get_active_adapter
 
@@ -19,6 +21,15 @@ class FileContentUpdate(BaseModel):
 class BatchUpdate(BaseModel):
     files: dict[str, str] = {}
     run_doall: bool = True
+
+
+class TransferRequest(BaseModel):
+    file_keys: list[str] = Field(min_length=1)
+    target_node_ids: list[int] | None = None
+    all_online: bool = False
+    source_node_id: int | None = None
+    run_doall: bool = False
+    content_overrides: dict[str, str] | None = None
 
 
 def _filename_for_key(file_key: str) -> str:
@@ -78,3 +89,36 @@ def save_batch(
     if payload.run_doall:
         output = adapter.apply_config_changes()
     return MessageResponse(message="Файлы сохранены", detail=output)
+
+
+@router.post("/transfer")
+def transfer_edit_files(
+    payload: TransferRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    try:
+        result = run_edit_files_transfer(
+            db,
+            file_keys=payload.file_keys,
+            target_node_ids=payload.target_node_ids,
+            all_online=payload.all_online,
+            source_node_id=payload.source_node_id,
+            run_doall=payload.run_doall,
+            content_overrides=payload.content_overrides,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    log_action(
+        db,
+        action="edit_files_transfer",
+        user_id=user.id,
+        username=user.username,
+        details=(
+            f"from={result['source_node_name']};files={','.join(result['files'])};"
+            f"success={result['nodes_success']};failed={result['nodes_failed']};"
+            f"doall={payload.run_doall}"
+        ),
+    )
+    return result

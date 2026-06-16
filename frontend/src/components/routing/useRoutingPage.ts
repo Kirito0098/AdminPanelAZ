@@ -427,8 +427,8 @@ export function useRoutingPage() {
               selected_files,
             }),
           deployAllOnline
-            ? 'CIDR-файлы развёрнуты на все online-ноды'
-            : 'CIDR-файлы развёрнуты на выбранные ноды',
+            ? 'CIDR-файлы развёрнуты на все online-узлы'
+            : 'CIDR-файлы развёрнуты на выбранные узлы',
           3,
         )
         setDeployPreview(null)

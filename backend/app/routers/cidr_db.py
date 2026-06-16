@@ -482,7 +482,7 @@ def cidr_db_deploy(
         }
 
     triggered_by = f"manual:{user.username}"
-    task_id = create_cidr_task("cidr_deploy", "Развёртывание CIDR-файлов на ноду запущено")
+    task_id = create_cidr_task("cidr_deploy", "Развёртывание CIDR-файлов на узел запущено")
 
     def _deploy_runner(progress_callback):
         from app.database import SessionLocal
@@ -517,7 +517,7 @@ def cidr_db_deploy(
         "success": True,
         "queued": True,
         "task_id": task_id,
-        "message": "Развёртывание CIDR-файлов на ноду запущено",
+        "message": "Развёртывание CIDR-файлов на узел запущено",
     }
 
 

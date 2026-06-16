@@ -47,7 +47,7 @@ interface CidrPipelineTabProps {
 const workflowSteps = [
   { num: 1, text: 'Данные на контроллер (SQLite)' },
   { num: 2, text: 'Списки на контроллере' },
-  { num: 3, text: 'Списки на ноду' },
+  { num: 3, text: 'Списки на узел' },
 ]
 
 function nodeCheckboxLabel(node: Node): string {
@@ -165,9 +165,9 @@ export default function CidrPipelineTab({
         <Info size={16} className="mt-0.5 shrink-0 text-primary" />
         <div className="space-y-1 text-muted-foreground">
           <p>
-            <strong className="text-foreground">Контроллер → нода:</strong> сначала все данные сохраняются на
-            основном сервере (SQLite и файлы списков), затем на этапе 3 готовые списки отправляются на ноды
-            AntiZapret. До deploy файлы маршрутизации на нодах не меняются.
+            <strong className="text-foreground">Контроллер → узел:</strong> сначала все данные сохраняются на
+            основном сервере (SQLite и файлы списков), затем на этапе 3 готовые списки отправляются на узлы
+            AntiZapret. До deploy файлы маршрутизации на узлах не меняются.
           </p>
         </div>
       </div>
@@ -175,7 +175,7 @@ export default function CidrPipelineTab({
       <StatusPanel title="Этап 1 — Данные на контроллере (ingest)" icon={CloudDownload}>
         <p className="mb-4 text-sm text-muted-foreground">
           Загрузка из интернета в SQLite на контроллере. Можно обновить одного или нескольких провайдеров — не
-          обязательно все 12 сразу. Ноды не затрагиваются.
+          обязательно все 12 сразу. Узлы не затрагиваются.
         </p>
 
         <ProviderFileSelection
@@ -341,7 +341,7 @@ export default function CidrPipelineTab({
             </div>
             <p className="mb-3 text-xs text-muted-foreground">
               Резервные копии создаются перед сборкой списков (этап 2). Откат восстанавливает файлы на контроллере и
-              разворачивает их на ноды.
+              разворачивает их на узлы.
             </p>
             <div className="flex flex-wrap gap-2">
               {cidrDb!.runtime_backups!.slice(0, 5).map((backup) => (
@@ -361,14 +361,14 @@ export default function CidrPipelineTab({
         )}
       </StatusPanel>
 
-      <StatusPanel title="Этап 3 — Списки на ноду (deploy)" icon={Rocket}>
+      <StatusPanel title="Этап 3 — Списки на узел (deploy)" icon={Rocket}>
         <PipelineStageProgress
           task={pipelineTask}
           stage={3}
           starting={pendingMatchesStage(pendingPipelineAction, 3)}
         />
         <p className="mb-4 text-sm text-muted-foreground">
-          Отправка готовых списков с контроллера на выбранные ноды AntiZapret. Файлы провайдеров:{' '}
+          Отправка готовых списков с контроллера на выбранные узлы AntiZapret. Файлы провайдеров:{' '}
           {selectedProviderFiles.length} из {providers.length} (выбор на этапе 1).
         </p>
 
@@ -377,7 +377,7 @@ export default function CidrPipelineTab({
             <Info size={16} className="mt-0.5 shrink-0" />
             <span>
               Списки уже собраны на контроллере. Следующий шаг — <strong>Deploy</strong> на выбранные
-              ноды, затем включение провайдеров на вкладке «CIDR-провайдеры».
+              узлы, затем включение провайдеров на вкладке «CIDR-провайдеры».
             </span>
           </div>
         )}
@@ -392,15 +392,15 @@ export default function CidrPipelineTab({
               className="h-4 w-4 rounded border"
             />
             <Label htmlFor="deploy-all-online" className="text-sm cursor-pointer font-medium">
-              Все online-ноды ({onlineNodes.length})
+              Все online-узлы ({onlineNodes.length})
             </Label>
           </div>
 
           {!deployAllOnline && (
             <div className="space-y-2 pl-1">
-              <div className="text-xs text-muted-foreground">Выберите ноды для развёртывания:</div>
+              <div className="text-xs text-muted-foreground">Выберите узлы для развёртывания:</div>
               {nodes.length === 0 ? (
-                <div className="text-sm text-muted-foreground">Нет доступных нод</div>
+                <div className="text-sm text-muted-foreground">Нет доступных узлов</div>
               ) : (
                 nodes.map((node) => (
                   <div key={node.id} className="flex items-center gap-2">
@@ -456,7 +456,7 @@ export default function CidrPipelineTab({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Нода</TableHead>
+                  <TableHead>Узел</TableHead>
                   <TableHead>Статус</TableHead>
                   <TableHead className="text-right">Файлов</TableHead>
                 </TableRow>
@@ -519,7 +519,7 @@ export default function CidrPipelineTab({
           <Info size={14} className="mt-0.5 shrink-0" />
           <span>
             <strong className="text-foreground">Сгенерировать + doall</strong> — полный цикл: сборка файлов,
-            развёртывание на ноду и применение правил (doall.sh). Длительная операция.
+            развёртывание на узел и применение правил (doall.sh). Длительная операция.
           </span>
         </div>
       </StatusPanel>
@@ -563,8 +563,8 @@ export default function CidrPipelineTab({
         title="Очистить данные CIDR БД?"
         description={
           selectedProviderFiles.length > 0 && selectedProviderFiles.length < providers.length
-            ? `Будут удалены записи SQLite для ${selectedProviderFiles.length} выбранных провайдеров. Файлы на нодах не затрагиваются.`
-            : 'Будут удалены все записи провайдеров в SQLite на контроллере. Файлы на нодах не затрагиваются.'
+            ? `Будут удалены записи SQLite для ${selectedProviderFiles.length} выбранных провайдеров. Файлы на узлах не затрагиваются.`
+            : 'Будут удалены все записи провайдеров в SQLite на контроллере. Файлы на узлах не затрагиваются.'
         }
         confirmLabel="Очистить"
         destructive

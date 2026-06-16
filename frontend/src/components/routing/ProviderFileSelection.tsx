@@ -118,7 +118,7 @@ export default function ProviderFileSelection({
           <div className="text-sm font-semibold tracking-tight">Выбор провайдеров</div>
           <p className="text-xs text-muted-foreground max-w-xl">
             Отметьте одного или нескольких — необязательно обновлять все 12. Технический ID скрыт;
-            на ноде используются файлы вида <span className="font-mono">AP-…-include-ips.txt</span>.
+            на узле используются файлы вида <span className="font-mono">AP-…-include-ips.txt</span>.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

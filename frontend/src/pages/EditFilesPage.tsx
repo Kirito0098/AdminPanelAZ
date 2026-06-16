@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   Ban,
+  ArrowRightLeft,
   FileEdit,
   GitCompare,
   Globe,
@@ -22,8 +23,10 @@ import {
   getEditFiles,
   saveEditFile,
   saveEditFilesBatch,
+  transferEditFiles,
 } from '@/api/client'
 import DiffPanel from '@/components/edit-files/DiffPanel'
+import TransferFilesDialog from '@/components/edit-files/TransferFilesDialog'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import { NodeBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -137,7 +140,7 @@ function getFileMeta(key: string) {
 
 export default function EditFilesPage() {
   const { user } = useAuth()
-  const { activeNode } = useNode()
+  const { activeNode, nodes } = useNode()
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
@@ -157,6 +160,8 @@ export default function EditFilesPage() {
   const [diffBaseline, setDiffBaseline] = useState<'saved' | 'disk'>('saved')
   const [diskContent, setDiskContent] = useState<string | null>(null)
   const [diskCompareLoading, setDiskCompareLoading] = useState(false)
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferLoading, setTransferLoading] = useState(false)
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
@@ -353,6 +358,34 @@ export default function EditFilesPage() {
     }
   }
 
+  const handleTransfer = async (options: {
+    fileKeys: string[]
+    targetNodeIds: number[] | null
+    allOnline: boolean
+    runDoall: boolean
+    contentOverrides: Record<string, string> | null
+  }) => {
+    setTransferLoading(true)
+    try {
+      return await withInline(
+        () =>
+          transferEditFiles({
+            file_keys: options.fileKeys,
+            target_node_ids: options.targetNodeIds,
+            all_online: options.allOnline,
+            run_doall: options.runDoall,
+            content_overrides: options.contentOverrides,
+          }),
+        'Перенос файлов на узлы...',
+      )
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка переноса файлов')
+      throw err
+    } finally {
+      setTransferLoading(false)
+    }
+  }
+
   if (user?.role === 'viewer') {
     return (
       <div className="space-y-6">
@@ -392,16 +425,30 @@ export default function EditFilesPage() {
             </p>
           </div>
         </div>
-        <Button variant="outline" onClick={handleRefresh} disabled={loading || fileLoading}>
-          <RefreshCw size={16} className={loading || fileLoading ? 'animate-spin' : ''} />
-          Обновить
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {isAdmin && nodes.length > 1 && (
+            <Button
+              variant="outline"
+              onClick={() => setTransferOpen(true)}
+              disabled={nodeOffline || transferLoading || files.length === 0}
+            >
+              <ArrowRightLeft size={16} />
+              Перенести на узлы
+            </Button>
+          )}
+          <Button variant="outline" onClick={handleRefresh} disabled={loading || fileLoading}>
+            <RefreshCw size={16} className={loading || fileLoading ? 'animate-spin' : ''} />
+            Обновить
+          </Button>
+        </div>
       </div>
 
       <SettingsAlert variant="info" title="Редактирование на активном узле">
         Файлы читаются и записываются на <strong>{activeNode?.name ?? 'активном узле'}</strong>.
         Кнопка «Сохранить и применить» выполняет <strong>doall.sh</strong> и перезагружает правила
-        маршрутизации VPN — используйте её после изменения списков include/exclude.
+        маршрутизации VPN — используйте её после изменения списков include/exclude. Кнопка{' '}
+        <strong>«Перенести на узлы»</strong> копирует конфигурацию с активного узла на другие
+        online-узлы.
       </SettingsAlert>
 
       {nodeOffline && (
@@ -701,6 +748,19 @@ export default function EditFilesPage() {
           <DiffPanel ops={liveDiff.ops} mode={liveDiff.mode} compact maxLines={20} />
         )}
       </ConfirmDialog>
+
+      <TransferFilesDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        sourceNode={activeNode}
+        nodes={nodes}
+        files={files}
+        activeFileKey={activeKey}
+        editorContent={content}
+        hasUnsavedChanges={hasUnsavedChanges}
+        loading={transferLoading}
+        onTransfer={handleTransfer}
+      />
     </div>
   )
 }

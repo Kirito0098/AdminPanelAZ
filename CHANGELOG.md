@@ -10,11 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Пользовательская документация** — простые инструкции по разделам веб-панели: [`docs/README.md`](docs/README.md), модули меню (`konfiguracii.md`, `noc-monitoring.md`, …), подразделы настроек [`docs/nastrojki/`](docs/nastrojki/README.md).
+- **Редактор файлов — перенос на другие узлы** — копирование конфигурации AntiZapret с активного узла на один или несколько online-узлов: API `POST /api/edit-files/transfer` (`file_keys`, `target_node_ids` / `all_online`, `run_doall`, `content_overrides`); сервис `edit_files_transfer.py`; результат по каждому узлу в `per_node`; audit log `edit_files_transfer`. UI: кнопка **«Перенести на узлы»** в шапке страницы, диалог с выбором «все файлы» / «только открытый файл», целевых узлов и опционального doall.sh; предупреждение при несохранённых правках. Тесты: `test_edit_files_transfer.py`.
 
 ### Changed
 
 - [`README.md`](README.md) — длинные блоки NOC/трафик/узлы заменены ссылками на user docs.
 - [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) — карта UI ↔ user doc, актуальное дерево `docs/`.
+- **Редактор файлов — UX переноса** — действие переноса вынесено из панели редактора в шапку страницы (операция на уровне узла, а не отдельного файла); по умолчанию в диалоге выбраны все файлы; переработан UI диалога (схема «источник → цели», шаги, карточки узлов, primary-кнопка, сводка результата).
+- **Терминология UI** — единообразно **«узел / узлы»** вместо «нода / ноды» в редакторе файлов, CIDR Pipeline, провайдерах, deploy preview и связанных toast/backend-сообщениях (в коде по-прежнему `Node`, `node_id`).
 
 ### Removed
 

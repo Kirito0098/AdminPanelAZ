@@ -113,7 +113,7 @@ export default function ProvidersTab({
     )
   }
 
-  const nodeLabel = activeNode?.name ?? 'активной ноде'
+  const nodeLabel = activeNode?.name ?? 'активном узле'
 
   return (
     <>
@@ -128,7 +128,7 @@ export default function ProvidersTab({
         {needsDeploy && !needsCompile && (
           <div className="rounded-md border border-sky-500/40 bg-sky-500/10 px-4 py-3 text-sm text-sky-950 dark:text-sky-100">
             Списки собраны на контроллере. Выполните <strong>Этап 3 — Deploy</strong> на вкладке
-            «Pipeline» для ноды <strong>{nodeLabel}</strong>, затем включите нужных провайдеров для
+            «Pipeline» для узла <strong>{nodeLabel}</strong>, затем включите нужных провайдеров для
             маршрутизации AntiZapret.
           </div>
         )}
@@ -178,7 +178,7 @@ export default function ProvidersTab({
                   <TableHead>Провайдер</TableHead>
                   <TableHead>Категория</TableHead>
                   <TableHead className="text-right">CIDR (контроллер)</TableHead>
-                  <TableHead className="text-right">CIDR (нода)</TableHead>
+                  <TableHead className="text-right">CIDR (узел)</TableHead>
                   <TableHead className="text-right">CIDR (БД)</TableHead>
                   <TableHead>БД refresh</TableHead>
                   <TableHead>Статус</TableHead>
@@ -194,7 +194,7 @@ export default function ProvidersTab({
                   const enableBlocked = !p.has_source && !p.enabled
                   const rowHint = !p.has_source
                     ? onController
-                      ? 'нет на ноде — нужен deploy'
+                      ? 'нет на узле — нужен deploy'
                       : (dbMeta?.cidr_count ?? 0) > 0
                         ? 'нет файла — нужен этап 2'
                         : 'нет источника'
@@ -275,7 +275,7 @@ export default function ProvidersTab({
                               disabled={actionLoading || enableBlocked}
                               title={
                                 enableBlocked && onController
-                                  ? 'Сначала выполните Deploy на активную ноду'
+                                  ? 'Сначала выполните Deploy на активный узел'
                                   : enableBlocked
                                     ? 'Сначала соберите списки на контроллере (этап 2)'
                                     : undefined

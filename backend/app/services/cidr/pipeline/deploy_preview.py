@@ -164,9 +164,9 @@ def compute_deploy_preview(
     elif not preview_nodes:
         message = "Нет online-узлов для preview"
     elif any_changes:
-        message = "Обнаружены отличия — deploy изменит файлы на нодах"
+        message = "Обнаружены отличия — deploy изменит файлы на узлах"
     else:
-        message = "Файлы на нодах совпадают с контроллером — deploy не изменит маршруты"
+        message = "Файлы на узлах совпадают с контроллером — deploy не изменит маршруты"
 
     return {
         "success": len(errors) == 0,

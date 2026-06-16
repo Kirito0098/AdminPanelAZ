@@ -43,7 +43,7 @@ export default function DeployPreviewPanel({ preview, loading }: DeployPreviewPa
           <div className="bg-muted/40 px-3 py-2 text-sm font-medium">
             {node.node_name ?? `Узел #${node.node_id}`}
             <span className="ml-2 text-xs font-normal text-muted-foreground">
-              контроллер: {node.total_controller_routes ?? 0} маршр. · нода: {node.total_node_routes ?? 0} маршр.
+              контроллер: {node.total_controller_routes ?? 0} маршр. · узел: {node.total_node_routes ?? 0} маршр.
               {(node.total_added ?? 0) > 0 || (node.total_removed ?? 0) > 0 ? (
                 <>
                   {' '}
@@ -58,7 +58,7 @@ export default function DeployPreviewPanel({ preview, loading }: DeployPreviewPa
               <TableRow>
                 <TableHead>Файл</TableHead>
                 <TableHead className="text-right">Контроллер</TableHead>
-                <TableHead className="text-right">Нода</TableHead>
+                <TableHead className="text-right">Узел</TableHead>
                 <TableHead className="text-right">+ / −</TableHead>
               </TableRow>
             </TableHeader>
