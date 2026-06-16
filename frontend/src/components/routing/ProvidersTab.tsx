@@ -15,7 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import type { CidrDbStatus, CidrProviderInfo, Node } from '@/types'
 import { formatDt, formatCompactCount, pluralProviders, providerCategoryLabel, providerSlug, statusBadgeVariant, statusLabel } from './utils'
@@ -46,7 +45,7 @@ function dbCidrCount(cidrDb: CidrDbStatus | null, filename: string): number | nu
   return dbMeta.cidr_count
 }
 
-function CidrCountsCell({
+function CidrCountsGrid({
   cidrDb,
   provider,
 }: {
@@ -57,21 +56,119 @@ function CidrCountsCell({
   const controller = controllerCidrCount(cidrDb, provider.filename)
   const node = provider.has_source ? provider.cidr_count : null
 
+  const items = [
+    { label: 'БД', value: db },
+    { label: 'Контр.', value: controller },
+    { label: 'Узел', value: node },
+  ]
+
   return (
-    <div className="space-y-1 text-right font-mono tabular-nums text-xs">
-      <div className="flex items-center justify-end gap-1.5">
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground w-8">БД</span>
-        <span>{db != null ? formatCompactCount(db) : '—'}</span>
-      </div>
-      <div className="flex items-center justify-end gap-1.5">
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground w-8">Контр.</span>
-        <span>{controller != null ? formatCompactCount(controller) : '—'}</span>
-      </div>
-      <div className="flex items-center justify-end gap-1.5">
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground w-8">Узел</span>
-        <span>{node != null ? formatCompactCount(node) : '—'}</span>
-      </div>
+    <div className="grid grid-cols-3 divide-x divide-border rounded-md border bg-muted/20">
+      {items.map(({ label, value }) => (
+        <div key={label} className="px-2 py-1.5 text-center">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+          <div className="font-mono text-xs tabular-nums">
+            {value != null ? formatCompactCount(value) : '—'}
+          </div>
+        </div>
+      ))}
     </div>
+  )
+}
+
+interface ProviderListItemProps {
+  provider: CidrProviderInfo
+  cidrDb: CidrDbStatus | null
+  isAdmin: boolean
+  actionLoading: boolean
+  pipelineBusy: boolean
+  onToggle: (filename: string, enabled: boolean, name: string) => void
+  onEdit: (filename: string, name: string) => void
+}
+
+function ProviderListItem({
+  provider: p,
+  cidrDb,
+  isAdmin,
+  actionLoading,
+  pipelineBusy,
+  onToggle,
+  onEdit,
+}: ProviderListItemProps) {
+  const dbMeta = cidrDb?.providers?.[p.filename]
+  const onController = hasControllerArtifact(cidrDb, p.filename)
+  const enableBlocked = !p.has_source && !p.enabled
+  const rowHint = !p.has_source
+    ? onController
+      ? 'нет на узле — deploy'
+      : (dbMeta?.cidr_count ?? 0) > 0
+        ? 'нет файла — сборка'
+        : 'нет источника'
+    : null
+
+  return (
+    <article
+      className="flex flex-col gap-2 px-3 py-2.5"
+      title={`ID: ${providerSlug(p.filename)} · ${p.filename}`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <h3 className="truncate text-sm font-medium">{p.name}</h3>
+          <Badge variant="outline" className="shrink-0 text-[10px]">
+            {providerCategoryLabel(p.category)}
+          </Badge>
+        </div>
+        <Badge variant={p.enabled ? 'default' : 'secondary'} className="shrink-0 text-[10px]">
+          {p.enabled ? 'Включён' : 'Выключен'}
+        </Badge>
+      </div>
+
+      <CidrCountsGrid cidrDb={cidrDb} provider={p} />
+
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+          <Badge variant={statusBadgeVariant(dbMeta?.refresh_status)} className="text-[10px]">
+            {statusLabel(dbMeta?.refresh_status)}
+          </Badge>
+          <span className="text-muted-foreground">{formatDt(dbMeta?.last_refreshed_at)}</span>
+          {rowHint && (
+            <span className="text-amber-600 dark:text-amber-400">{rowHint}</span>
+          )}
+        </div>
+
+        {isAdmin && (
+          <div className="flex shrink-0 gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              disabled={actionLoading || pipelineBusy}
+              title="Редактировать файл списка провайдера на узле"
+              onClick={() => onEdit(p.filename, p.name)}
+            >
+              <Pencil size={12} className="mr-1" />
+              Редактировать
+            </Button>
+            <Button
+              size="sm"
+              variant={p.enabled ? 'outline' : 'default'}
+              className="h-7 px-2 text-xs"
+              disabled={actionLoading || enableBlocked}
+              title={
+                enableBlocked && onController
+                  ? 'Сначала выполните Deploy на активный узел'
+                  : enableBlocked
+                    ? 'Сначала соберите списки на контроллере (этап 2)'
+                    : undefined
+              }
+              onClick={() => onToggle(p.filename, !p.enabled, p.name)}
+            >
+              {p.enabled ? 'Отключить' : 'Включить'}
+            </Button>
+          </div>
+        )}
+      </div>
+    </article>
   )
 }
 
@@ -143,6 +240,11 @@ export default function ProvidersTab({
       )
     })
   }, [providers, cidrDb, search, statusFilter, categoryFilter, quickFilter])
+
+  const providerColumns = useMemo(() => {
+    const mid = Math.ceil(filtered.length / 2)
+    return [filtered.slice(0, mid), filtered.slice(mid)]
+  }, [filtered])
 
   if (providers.length === 0) {
     return (
@@ -315,115 +417,36 @@ export default function ProvidersTab({
             файл · <strong>Узел</strong> — файл на VPN-сервере
           </p>
 
-          <div className="rounded-md border overflow-hidden">
-            <div className="max-h-[min(70vh,600px)] overflow-auto">
-              <Table>
-                <TableHeader className="sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                  <TableRow>
-                    <TableHead className="min-w-[140px]">Провайдер</TableHead>
-                    <TableHead>Категория</TableHead>
-                    <TableHead className="text-right min-w-[100px]">CIDR</TableHead>
-                    <TableHead>БД refresh</TableHead>
-                    <TableHead>Маршрутизация</TableHead>
-                    {isAdmin && <TableHead className="text-right min-w-[160px]">Действия</TableHead>}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={isAdmin ? 6 : 5}
-                        className="h-24 text-center text-sm text-muted-foreground"
-                      >
-                        Нет провайдеров по выбранным фильтрам
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filtered.map((p, idx) => {
-                      const dbMeta = cidrDb?.providers?.[p.filename]
-                      const onController = hasControllerArtifact(cidrDb, p.filename)
-                      const enableBlocked = !p.has_source && !p.enabled
-                      const rowHint = !p.has_source
-                        ? onController
-                          ? 'нет на узле — deploy'
-                          : (dbMeta?.cidr_count ?? 0) > 0
-                            ? 'нет файла — сборка'
-                            : 'нет источника'
-                        : null
-
-                      return (
-                        <TableRow
+          <div className="max-h-[min(75vh,720px)] overflow-auto">
+            {filtered.length === 0 ? (
+              <div className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
+                Нет провайдеров по выбранным фильтрам
+              </div>
+            ) : (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {providerColumns.map((column, colIdx) =>
+                  column.length > 0 ? (
+                    <div key={colIdx} className="divide-y rounded-md border bg-card">
+                      {column.map((p) => (
+                        <ProviderListItem
                           key={p.filename}
-                          className={cn(idx % 2 === 1 && 'bg-muted/30')}
-                        >
-                          <TableCell title={`ID: ${providerSlug(p.filename)} · ${p.filename}`}>
-                            <div className="font-medium">{p.name}</div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{providerCategoryLabel(p.category)}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            <CidrCountsCell cidrDb={cidrDb} provider={p} />
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={statusBadgeVariant(dbMeta?.refresh_status)}>
-                              {statusLabel(dbMeta?.refresh_status)}
-                            </Badge>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              {formatDt(dbMeta?.last_refreshed_at)}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={p.enabled ? 'default' : 'secondary'}>
-                              {p.enabled ? 'Включён' : 'Выключен'}
-                            </Badge>
-                            {rowHint && (
-                              <span className="ml-2 text-xs text-amber-600 dark:text-amber-400">
-                                {rowHint}
-                              </span>
-                            )}
-                          </TableCell>
-                          {isAdmin && (
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={actionLoading || pipelineBusy}
-                                  title="Редактировать файл списка провайдера на узле"
-                                  onClick={() => {
-                                    setEditorFilename(p.filename)
-                                    setEditorName(p.name)
-                                  }}
-                                >
-                                  <Pencil size={14} className="mr-1" />
-                                  Редактировать
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant={p.enabled ? 'outline' : 'default'}
-                                  disabled={actionLoading || enableBlocked}
-                                  title={
-                                    enableBlocked && onController
-                                      ? 'Сначала выполните Deploy на активный узел'
-                                      : enableBlocked
-                                        ? 'Сначала соберите списки на контроллере (этап 2)'
-                                        : undefined
-                                  }
-                                  onClick={() => onToggle(p.filename, !p.enabled, p.name)}
-                                >
-                                  {p.enabled ? 'Отключить' : 'Включить'}
-                                </Button>
-                              </div>
-                            </TableCell>
-                          )}
-                        </TableRow>
-                      )
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                          provider={p}
+                          cidrDb={cidrDb}
+                          isAdmin={isAdmin}
+                          actionLoading={actionLoading}
+                          pipelineBusy={pipelineBusy}
+                          onToggle={onToggle}
+                          onEdit={(filename, name) => {
+                            setEditorFilename(filename)
+                            setEditorName(name)
+                          }}
+                        />
+                      ))}
+                    </div>
+                  ) : null,
+                )}
+              </div>
+            )}
           </div>
         </div>
       </StatusPanel>
