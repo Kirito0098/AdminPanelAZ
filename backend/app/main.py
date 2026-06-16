@@ -16,6 +16,7 @@ from app.database import Base, SessionLocal, engine, run_db_migrations
 from app.cidr_database import CidrBase, cidr_engine, run_cidr_db_migrations
 from app.models import User, UserRole, VpnConfig, VpnType
 from app.routers import (
+    alert_rules,
     auth,
     backups,
     cidr_db,
@@ -118,6 +119,9 @@ def seed_database():
 async def lifespan(_: FastAPI):
     from pathlib import Path
 
+    from app.services.health_checks import mark_app_started
+
+    mark_app_started()
     seed_database()
     app_root = Path(__file__).resolve().parents[1]
     db_url = settings.database_url
@@ -190,6 +194,7 @@ app.include_router(configs_bulk.router, prefix="/api")
 app.include_router(config_tags.router, prefix="/api")
 app.include_router(client_templates.router, prefix="/api")
 app.include_router(monitoring.router, prefix="/api")
+app.include_router(alert_rules.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(maintenance.router, prefix="/api")
 app.include_router(backups.router, prefix="/api")

@@ -20,11 +20,11 @@ import {
   AreaChart,
   CartesianGrid,
   Legend,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
+import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import { Navigate } from 'react-router-dom'
 import { ApiError, getBandwidthChart, getServerInterfaces, getServerMetrics } from '@/api/client'
 import { NodeBadge } from '@/components/NodeSelector'
@@ -54,6 +54,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { PercentBar } from '@/components/ui/percent-bar'
 import { cn } from '@/lib/utils'
 import type { BandwidthChart, ServerMetrics } from '@/types'
 
@@ -76,9 +77,9 @@ const GROUP_LABELS: Record<string, string> = {
 }
 
 function getUsageBarColor(percent: number) {
-  if (percent >= 80) return 'bg-destructive'
-  if (percent >= 60) return 'bg-amber-500'
-  return 'bg-emerald-500'
+  if (percent >= 80) return 'fill-destructive'
+  if (percent >= 60) return 'fill-amber-500'
+  return 'fill-emerald-500'
 }
 
 function getUsageTextColor(percent: number) {
@@ -128,12 +129,11 @@ function ResourceGauge({ label, value, icon: Icon, sub, unit = '%' }: ResourceGa
             {Number.isFinite(value) ? `${Math.round(value)}${unit}` : '—'}
           </span>
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-secondary">
-          <div
-            className={cn('h-full transition-all duration-500', getUsageBarColor(clamped))}
-            style={{ width: `${clamped}%` }}
-          />
-        </div>
+        <PercentBar
+          value={clamped}
+          className="h-2 transition-all duration-500"
+          barClassName={getUsageBarColor(clamped)}
+        />
       </CardContent>
     </Card>
   )
@@ -477,8 +477,9 @@ export default function ServerMonitorPage() {
                   className="py-8"
                 />
               ) : chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <ChartResponsive height={300}>
+                  {({ width, height }) => (
+                <AreaChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="bwRx" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor={CHART_RX} stopOpacity={0.35} />
@@ -510,17 +511,8 @@ export default function ServerMonitorPage() {
                         name === 'rx' ? 'Приём (RX)' : 'Передача (TX)',
                       ]}
                       labelFormatter={(label) => `Период: ${label}`}
-                      contentStyle={{
-                        borderRadius: '8px',
-                        border: '1px solid hsl(var(--border))',
-                        background: 'hsl(var(--popover))',
-                        fontSize: '12px',
-                      }}
                     />
-                    <Legend
-                      formatter={(value) => (value === 'rx' ? 'Приём (RX)' : 'Передача (TX)')}
-                      wrapperStyle={{ fontSize: '12px' }}
-                    />
+                    <Legend formatter={(value) => (value === 'rx' ? 'Приём (RX)' : 'Передача (TX)')} />
                     <Area
                       type="monotone"
                       dataKey="rx"
@@ -538,7 +530,8 @@ export default function ServerMonitorPage() {
                       strokeWidth={2}
                     />
                   </AreaChart>
-                </ResponsiveContainer>
+                  )}
+                </ChartResponsive>
               ) : (
                 <EmptyState
                   icon={Network}

@@ -55,8 +55,8 @@ const SECTION_TITLES: Record<SettingsSection, { title: string; description: stri
     description: 'Создание, восстановление и автоматизация бэкапов панели',
   },
   monitoring: {
-    title: 'Оповещения о нагрузке',
-    description: 'Пороги CPU/RAM и Telegram-оповещения при перегрузке сервера',
+    title: 'Мониторинг и алерты',
+    description: 'Пороги CPU/RAM, alert rules и Telegram-оповещения',
   },
   vpn_network: {
     title: 'Сеть и публикация',

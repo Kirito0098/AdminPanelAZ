@@ -7,11 +7,11 @@ import {
   Legend,
   Line,
   LineChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
+import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import { ApiError, getPanelResourceCurrent, getPanelResourceHistory } from '@/api/client'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
@@ -34,13 +34,6 @@ const RANGE_LABELS: Record<'1d' | '7d' | '30d', string> = {
   '1d': '1 день',
   '7d': '7 дней',
   '30d': '30 дней',
-}
-
-const TOOLTIP_STYLE = {
-  borderRadius: '8px',
-  border: '1px solid hsl(var(--border))',
-  background: 'hsl(var(--popover))',
-  fontSize: '12px',
 }
 
 type Period = '1d' | '7d' | '30d'
@@ -376,8 +369,9 @@ export default function PanelResourceHistoryCharts({
                   {showHostCharts && (
                     <div>
                       <p className="mb-2 text-sm font-medium">Хост контроллера: CPU / RAM / Диск (%)</p>
-                      <ResponsiveContainer width="100%" height={240}>
-                        <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <ChartResponsive height={240}>
+                        {({ width, height }) => (
+                        <AreaChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                           <defs>
                             <linearGradient id="panelHostCpu" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor={CHART_CPU} stopOpacity={0.3} />
@@ -418,13 +412,11 @@ export default function PanelResourceHistoryCharts({
                               return [`${Number(value).toFixed(1)}%`, labels[name] ?? name]
                             }}
                             labelFormatter={(label) => `Время: ${label}`}
-                            contentStyle={TOOLTIP_STYLE}
                           />
                           <Legend
                             formatter={(value) =>
                               value === 'hostCpu' ? 'CPU' : value === 'hostMemory' ? 'RAM' : 'Диск'
                             }
-                            wrapperStyle={{ fontSize: '12px' }}
                           />
                           <Area
                             type="monotone"
@@ -451,14 +443,16 @@ export default function PanelResourceHistoryCharts({
                             strokeWidth={2}
                           />
                         </AreaChart>
-                      </ResponsiveContainer>
+                        )}
+                      </ChartResponsive>
                     </div>
                   )}
 
                   <div>
                     <p className="mb-2 text-sm font-medium">Backend CPU (%)</p>
-                    <ResponsiveContainer width="100%" height={220}>
-                      <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <ChartResponsive height={220}>
+                      {({ width, height }) => (
+                    <AreaChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                         <defs>
                           <linearGradient id="panelCpu" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor={CHART_CPU} stopOpacity={0.3} />
@@ -477,7 +471,6 @@ export default function PanelResourceHistoryCharts({
                         <Tooltip
                           formatter={(value: number) => [`${Number(value).toFixed(1)}%`, 'CPU']}
                           labelFormatter={(label) => `Время: ${label}`}
-                          contentStyle={TOOLTIP_STYLE}
                         />
                         <Area
                           type="monotone"
@@ -488,13 +481,15 @@ export default function PanelResourceHistoryCharts({
                           strokeWidth={2}
                         />
                       </AreaChart>
-                    </ResponsiveContainer>
+                      )}
+                    </ChartResponsive>
                   </div>
 
                   <div>
                     <p className="mb-2 text-sm font-medium">Память процессов панели (MB)</p>
-                    <ResponsiveContainer width="100%" height={240}>
-                      <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <ChartResponsive height={240}>
+                      {({ width, height }) => (
+                    <AreaChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                         <defs>
                           <linearGradient id="panelRam" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor={CHART_RAM} stopOpacity={0.3} />
@@ -526,7 +521,6 @@ export default function PanelResourceHistoryCharts({
                             return [`${Number(value).toFixed(0)} MB`, labels[name] ?? name]
                           }}
                           labelFormatter={(label) => `Время: ${label}`}
-                          contentStyle={TOOLTIP_STYLE}
                         />
                         <Legend
                           formatter={(value) => {
@@ -539,7 +533,6 @@ export default function PanelResourceHistoryCharts({
                             }
                             return labels[value] ?? value
                           }}
-                          wrapperStyle={{ fontSize: '12px' }}
                         />
                         <Area
                           type="monotone"
@@ -591,13 +584,15 @@ export default function PanelResourceHistoryCharts({
                           strokeWidth={2}
                         />
                       </AreaChart>
-                    </ResponsiveContainer>
+                      )}
+                    </ChartResponsive>
                   </div>
 
                   <div>
                     <p className="mb-2 text-sm font-medium">Workers uvicorn</p>
-                    <ResponsiveContainer width="100%" height={180}>
-                      <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <ChartResponsive height={180}>
+                      {({ width, height }) => (
+                    <LineChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
                         <XAxis
                           dataKey="label"
@@ -616,7 +611,6 @@ export default function PanelResourceHistoryCharts({
                         <Tooltip
                           formatter={(value: number) => [value, 'Workers']}
                           labelFormatter={(label) => `Время: ${label}`}
-                          contentStyle={TOOLTIP_STYLE}
                         />
                         <Line
                           type="monotone"
@@ -627,7 +621,8 @@ export default function PanelResourceHistoryCharts({
                           dot={false}
                         />
                       </LineChart>
-                    </ResponsiveContainer>
+                      )}
+                    </ChartResponsive>
                   </div>
                 </>
               )}

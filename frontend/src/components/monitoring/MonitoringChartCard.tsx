@@ -1,6 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { MONITORING_CHART_HEIGHT } from '@/components/monitoring/monitoringChartTheme'
 import { cn } from '@/lib/utils'
 
 type MonitoringChartCardProps = {
@@ -27,7 +26,7 @@ export default function MonitoringChartCard({
         </CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent style={{ minHeight: MONITORING_CHART_HEIGHT }}>{children}</CardContent>
+      <CardContent className="monitoring-chart-panel">{children}</CardContent>
     </Card>
   )
 }
@@ -35,8 +34,9 @@ export default function MonitoringChartCard({
 export function MonitoringChartEmpty({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className={cn('flex items-center justify-center text-center text-sm text-muted-foreground')}
-      style={{ minHeight: MONITORING_CHART_HEIGHT }}
+      className={cn(
+        'monitoring-chart-panel flex items-center justify-center text-center text-sm text-muted-foreground',
+      )}
     >
       {children}
     </div>

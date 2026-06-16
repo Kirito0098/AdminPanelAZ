@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import { Button } from '@/components/ui/button'
 import Spinner from '@/components/ui/Spinner'
+import { cn } from '@/lib/utils'
 
 const baseTabs = [
   { to: '/', label: 'Дашборд', end: true },
@@ -60,8 +61,7 @@ export default function MiniShell() {
       </main>
 
       <nav
-        className="tg-mini-tabs"
-        style={{ gridTemplateColumns: `repeat(${tabs.length}, 1fr)` }}
+        className={cn('tg-mini-tabs', tabs.length > 3 ? 'tg-mini-tabs-cols-6' : 'tg-mini-tabs-cols-3')}
         aria-label="Mini app tabs"
       >
         {tabs.map((tab) => (

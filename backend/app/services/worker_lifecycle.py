@@ -73,3 +73,8 @@ def should_start_resource_monitor() -> bool:
 def should_start_noc_report_scheduler() -> bool:
     settings = get_settings()
     return settings.noc_report_enabled and get_feature_service().is_enabled("telegram")
+
+
+def should_start_alert_rules_worker() -> bool:
+    settings = get_settings()
+    return settings.alert_rules_enabled and get_feature_service().is_enabled("telegram")

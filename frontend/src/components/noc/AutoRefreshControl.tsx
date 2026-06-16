@@ -1,5 +1,6 @@
 import { Pause, Play, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { PercentBar } from '@/components/ui/percent-bar'
 import { cn } from '@/lib/utils'
 
 interface AutoRefreshControlProps {
@@ -33,9 +34,11 @@ export default function AutoRefreshControl({
       </Button>
       {enabled && (
         <span className="mono relative flex h-9 min-w-[4rem] items-center justify-center overflow-hidden rounded-md border bg-muted px-3 text-xs">
-          <span
-            className="absolute bottom-0 left-0 top-0 bg-primary/20 transition-all"
-            style={{ width: `${(countdown / intervalSec) * 100}%` }}
+          <PercentBar
+            value={countdown}
+            max={intervalSec}
+            className="absolute inset-0 h-full rounded-none bg-transparent"
+            barClassName="fill-primary/20 transition-all"
           />
           <span className="relative">{countdown}с</span>
         </span>

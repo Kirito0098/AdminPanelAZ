@@ -673,8 +673,39 @@ def _migrate_webhook_delivery_destination_type() -> None:
         logger.info("DB migration: added webhook_delivery.destination_type")
 
 
+def _migrate_alert_rules_table() -> None:
+    inspector = inspect(engine)
+    if "alert_rules" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE alert_rules (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    name VARCHAR(128) NOT NULL,
+                    metric VARCHAR(64) NOT NULL,
+                    operator VARCHAR(8) NOT NULL DEFAULT 'gt',
+                    threshold FLOAT NOT NULL,
+                    node_id INTEGER,
+                    cooldown_minutes INTEGER NOT NULL DEFAULT 30,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    last_triggered_at DATETIME,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    FOREIGN KEY(node_id) REFERENCES nodes (id)
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_alert_rules_node_id ON alert_rules (node_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_alert_rules_enabled ON alert_rules (enabled)"))
+    logger.info("DB migration: created alert_rules table")
+
+
 def run_db_migrations() -> None:
     """Lightweight SQLite migrations for columns added after initial deploy."""
+    _migrate_alert_rules_table()
     _migrate_node_sync_groups_table()
     _migrate_vpn_configs_ha_links()
     _migrate_vpn_configs_node_scope()

@@ -6,15 +6,17 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.models import Node, NodeStatus
+from app.models import Node, NodeStatus, NodeSyncGroup, VpnConfig, VpnType
 from app.schemas import (
     GlobalDashboardSummary,
     MonitoringNodeSummary,
     MonitoringOverview,
     MonitoringService,
     OpenVpnClient,
+    VpnConfigHaInfo,
     WireGuardPeer,
 )
+from app.services.node_sync.groups import build_ha_metadata
 from app.services.ip_geo import lookup_ips_geo, parse_client_endpoint
 from app.services.node_manager import get_active_node, get_adapter_for_node
 from app.services.node_compare_metrics import extract_cidr_routes_count, get_traffic_totals_by_node
@@ -214,6 +216,135 @@ def build_monitoring_overview(db: Session) -> MonitoringOverview:
     return build_monitoring_overview_for_node(db, node)
 
 
+_HaLookupKey = tuple[int, str, str]
+_AggregationKey = tuple[str, ...]
+
+
+def _build_ha_monitoring_lookup(db: Session) -> dict[_HaLookupKey, tuple[_AggregationKey, VpnConfigHaInfo]]:
+    configs = (
+        db.query(VpnConfig)
+        .filter(
+            (VpnConfig.sync_group_id.isnot(None)) | (VpnConfig.ha_primary_config_id.isnot(None)),
+        )
+        .all()
+    )
+    if not configs:
+        return {}
+
+    primary_ids = {config.ha_primary_config_id for config in configs if config.ha_primary_config_id}
+    primaries = {
+        config.id: config
+        for config in db.query(VpnConfig).filter(VpnConfig.id.in_(primary_ids)).all()
+    } if primary_ids else {}
+
+    group_ids = {config.sync_group_id for config in configs if config.sync_group_id}
+    for config in configs:
+        if config.ha_primary_config_id:
+            primary = primaries.get(config.ha_primary_config_id)
+            if primary and primary.sync_group_id:
+                group_ids.add(primary.sync_group_id)
+    groups = {
+        group.id: group
+        for group in db.query(NodeSyncGroup).filter(NodeSyncGroup.id.in_(group_ids)).all()
+    } if group_ids else {}
+
+    lookup: dict[_HaLookupKey, tuple[_AggregationKey, VpnConfigHaInfo]] = {}
+    for config in configs:
+        sync_group_id = config.sync_group_id
+        if config.ha_primary_config_id:
+            primary = primaries.get(config.ha_primary_config_id)
+            sync_group_id = primary.sync_group_id if primary else sync_group_id
+        if not sync_group_id:
+            continue
+        group = groups.get(sync_group_id)
+        meta = build_ha_metadata(group)
+        if not meta:
+            continue
+        protocol = config.vpn_type.value
+        client_lower = config.client_name.lower()
+        agg_key = ("ha", sync_group_id, protocol, client_lower)
+        lookup[(config.node_id, client_lower, protocol)] = (agg_key, VpnConfigHaInfo(**meta))
+    return lookup
+
+
+def _aggregation_key_for_client(
+    *,
+    node_id: int | None,
+    client_name: str,
+    protocol: str,
+    ha_lookup: dict[_HaLookupKey, tuple[_AggregationKey, VpnConfigHaInfo]],
+) -> tuple[_AggregationKey, VpnConfigHaInfo | None]:
+    client_lower = client_name.lower()
+    if node_id is not None:
+        entry = ha_lookup.get((node_id, client_lower, protocol))
+        if entry:
+            return entry
+    return (("solo", node_id or 0, protocol, client_lower), None)
+
+
+def _aggregate_ha_openvpn_clients(
+    clients: list[OpenVpnClient],
+    ha_lookup: dict[_HaLookupKey, tuple[_AggregationKey, VpnConfigHaInfo]],
+) -> list[OpenVpnClient]:
+    grouped: dict[_AggregationKey, list[OpenVpnClient]] = {}
+    ha_by_key: dict[_AggregationKey, VpnConfigHaInfo] = {}
+    for client in clients:
+        agg_key, ha = _aggregation_key_for_client(
+            node_id=client.node_id,
+            client_name=client.common_name,
+            protocol=VpnType.openvpn.value,
+            ha_lookup=ha_lookup,
+        )
+        grouped.setdefault(agg_key, []).append(client)
+        if ha:
+            ha_by_key[agg_key] = ha
+
+    aggregated: list[OpenVpnClient] = []
+    for agg_key, group_clients in grouped.items():
+        chosen = max(group_clients, key=lambda item: (item.bytes_received + item.bytes_sent, item.connected_since_ts))
+        ha = ha_by_key.get(agg_key)
+        updates: dict = {"ha": ha}
+        if ha:
+            updates["node_name"] = None
+        aggregated.append(chosen.model_copy(update=updates))
+    return aggregated
+
+
+def _aggregate_ha_wireguard_peers(
+    peers: list[WireGuardPeer],
+    ha_lookup: dict[_HaLookupKey, tuple[_AggregationKey, VpnConfigHaInfo]],
+) -> list[WireGuardPeer]:
+    grouped: dict[_AggregationKey, list[WireGuardPeer]] = {}
+    ha_by_key: dict[_AggregationKey, VpnConfigHaInfo] = {}
+    for peer in peers:
+        client_name = (peer.client_name or "").strip() or peer.public_key
+        agg_key, ha = _aggregation_key_for_client(
+            node_id=peer.node_id,
+            client_name=client_name,
+            protocol=VpnType.wireguard.value,
+            ha_lookup=ha_lookup,
+        )
+        grouped.setdefault(agg_key, []).append(peer)
+        if ha:
+            ha_by_key[agg_key] = ha
+
+    aggregated: list[WireGuardPeer] = []
+    for agg_key, group_peers in grouped.items():
+        chosen = max(
+            group_peers,
+            key=lambda item: (
+                1 if _wg_is_online(item) else 0,
+                item.transfer_rx + item.transfer_tx,
+            ),
+        )
+        ha = ha_by_key.get(agg_key)
+        updates: dict = {"ha": ha}
+        if ha:
+            updates["node_name"] = None
+        aggregated.append(chosen.model_copy(update=updates))
+    return aggregated
+
+
 def build_federated_monitoring_overview(db: Session) -> MonitoringOverview:
     node_payloads = _collect_nodes_monitoring_data(db)
     lookup_ips: list[str | None] = []
@@ -245,6 +376,12 @@ def build_federated_monitoring_overview(db: Session) -> MonitoringOverview:
         all_openvpn.extend(enrich_openvpn_clients(ovpn_clients, geo_map, node_id=node.id, node_name=node.name))
         all_wireguard.extend(enrich_wireguard_peers(wireguard_peers, geo_map, node_id=node.id, node_name=node.name))
         nodes_summary.append(summary)
+
+    ha_lookup = _build_ha_monitoring_lookup(db)
+    all_openvpn = _aggregate_ha_openvpn_clients(all_openvpn, ha_lookup)
+    all_wireguard = _aggregate_ha_wireguard_peers(all_wireguard, ha_lookup)
+    total_connected_openvpn = len(all_openvpn)
+    total_connected_wireguard = sum(1 for peer in all_wireguard if _wg_is_online(peer))
 
     nodes = [payload["node"] for payload in node_payloads]
     active_node = None

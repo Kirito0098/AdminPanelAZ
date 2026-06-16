@@ -328,6 +328,7 @@ class OpenVpnClient(BaseModel):
     geo_label: str | None = None
     node_id: int | None = None
     node_name: str | None = None
+    ha: VpnConfigHaInfo | None = None
 
 
 class WireGuardPeer(BaseModel):
@@ -348,6 +349,7 @@ class WireGuardPeer(BaseModel):
     geo_label: str | None = None
     node_id: int | None = None
     node_name: str | None = None
+    ha: VpnConfigHaInfo | None = None
 
 
 class MonitoringNodeSummary(BaseModel):
@@ -387,6 +389,36 @@ class GeoRoutingHintResponse(BaseModel):
     nodes: list[GeoRoutingNodeHint] = Field(default_factory=list)
 
 
+class NodeDefaultLimits(BaseModel):
+    limit_value: float | None = None
+    limit_unit: str | None = None
+    limit_period_days: int | None = None
+    limit_human: str | None = None
+    limit_period_label: str | None = None
+
+
+class NodeDefaultPolicyResponse(BaseModel):
+    node_id: int
+    node_name: str
+    route_mode: str | None = None
+    openvpn: NodeDefaultLimits = Field(default_factory=NodeDefaultLimits)
+    wireguard: NodeDefaultLimits = Field(default_factory=NodeDefaultLimits)
+    updated_at: datetime | None = None
+    updated_by: str | None = None
+
+
+class NodeDefaultPolicyUpdate(BaseModel):
+    route_mode: str | None = None
+    openvpn_limit_value: float | None = Field(default=None, gt=0)
+    openvpn_limit_unit: str | None = "GB"
+    openvpn_limit_period_days: int | None = None
+    openvpn_clear_limit: bool = False
+    wireguard_limit_value: float | None = Field(default=None, gt=0)
+    wireguard_limit_unit: str | None = "GB"
+    wireguard_limit_period_days: int | None = None
+    wireguard_clear_limit: bool = False
+
+
 class NodePolicySummary(BaseModel):
     node_id: int
     node_name: str
@@ -394,6 +426,9 @@ class NodePolicySummary(BaseModel):
     wireguard_policies: int = 0
     blocked_clients: int = 0
     traffic_limited_clients: int = 0
+    default_openvpn_limit_human: str | None = None
+    default_wireguard_limit_human: str | None = None
+    default_route_mode: str | None = None
 
 
 class GlobalDashboardSummary(BaseModel):
@@ -567,6 +602,74 @@ class MonitorSettingsUpdate(BaseModel):
     cooldown_minutes: int | None = Field(default=None, ge=1, le=1440)
 
 
+class AlertMetricInfo(BaseModel):
+    id: str
+    label: str
+    requires_node: bool = False
+
+
+class AlertRuleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    metric: str
+    operator: str
+    threshold: float
+    node_id: int | None = None
+    cooldown_minutes: int
+    enabled: bool
+    last_triggered_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AlertRuleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    metric: str
+    operator: str = "gt"
+    threshold: float
+    node_id: int | None = None
+    cooldown_minutes: int = Field(default=30, ge=1, le=1440)
+    enabled: bool = True
+
+
+class AlertRuleUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    metric: str | None = None
+    operator: str | None = None
+    threshold: float | None = None
+    node_id: int | None = None
+    cooldown_minutes: int | None = Field(default=None, ge=1, le=1440)
+    enabled: bool | None = None
+
+
+class AlertRuleEvaluateResult(BaseModel):
+    rule_id: int
+    name: str
+    metric: str
+    value: float | None = None
+    threshold: float
+    operator: str
+    triggered: bool
+    skipped_reason: str | None = None
+
+
+class AlertRuleEvaluateResponse(BaseModel):
+    evaluated: int
+    triggered: int
+    results: list[AlertRuleEvaluateResult]
+
+
+class GeoIpStatusResponse(BaseModel):
+    loaded: bool
+    source: Literal["local", "ip-api"]
+    city_mmdb_path: str | None = None
+    asn_mmdb_path: str | None = None
+    city_mmdb_exists: bool = False
+    asn_mmdb_exists: bool = False
+
+
 class RetentionSettingsResponse(BaseModel):
     enabled: bool = True
     interval_hours: int = 24
@@ -583,6 +686,62 @@ class RetentionSettingsUpdate(BaseModel):
     action_log_retention_days: int | None = Field(default=None, ge=1, le=3650)
     resource_metrics_retention_days: int | None = Field(default=None, ge=1, le=3650)
     panel_resource_metrics_retention_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class SecretRotationItemResponse(BaseModel):
+    secret_id: str
+    label: str
+    description: str
+    storage: str
+    env_key: str | None = None
+    env_path: str | None = None
+    configured: bool
+    masked_current: str
+    auto_generate: bool
+    requires_restart: bool
+    requires_relogin: bool
+
+
+class SecretRotationEnvChangePreview(BaseModel):
+    path: str
+    key: str
+    masked_new_value: str
+
+
+class SecretRotationPreviewResponse(BaseModel):
+    secret_id: str
+    label: str
+    new_value: str
+    masked_new_value: str
+    masked_current: str
+    preview_token: str
+    confirm_phrase: str
+    warnings: list[str]
+    env_change: SecretRotationEnvChangePreview | None = None
+    storage: str
+    requires_relogin: bool
+    requires_restart: bool
+
+
+class SecretRotationPreviewRequest(BaseModel):
+    secret_id: str
+    value: str | None = None
+
+
+class SecretRotationApplyRequest(BaseModel):
+    secret_id: str
+    new_value: str
+    preview_token: str
+    confirm: str = Field(min_length=1)
+
+
+class SecretRotationApplyResponse(BaseModel):
+    secret_id: str
+    label: str
+    message: str
+    requires_relogin: bool
+    next_steps: list[str]
+    reencrypt_stats: dict[str, int] | None = None
 
 
 class RouteBudgetInfo(BaseModel):

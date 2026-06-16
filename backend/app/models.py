@@ -42,6 +42,7 @@ DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
     "cidr_deploy_failed": True,
     "cidr_ingest_partial": True,
     "noc_report": True,
+    "alert_rule": True,
 }
 
 
@@ -555,6 +556,39 @@ class WebAuthnCredential(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="webauthn_credentials")
+
+
+class AlertRuleOperator(str, enum.Enum):
+    gt = "gt"
+    gte = "gte"
+    lt = "lt"
+    lte = "lte"
+    eq = "eq"
+
+
+class AlertRuleMetric(str, enum.Enum):
+    ovpn_online_total = "ovpn_online_total"
+    wg_online_total = "wg_online_total"
+    nodes_online = "nodes_online"
+    nodes_offline = "nodes_offline"
+    node_offline_seconds = "node_offline_seconds"
+    traffic_collector_lag_seconds = "traffic_collector_lag_seconds"
+
+
+class AlertRule(Base):
+    __tablename__ = "alert_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    metric: Mapped[AlertRuleMetric] = mapped_column(Enum(AlertRuleMetric))
+    operator: Mapped[AlertRuleOperator] = mapped_column(Enum(AlertRuleOperator), default=AlertRuleOperator.gt)
+    threshold: Mapped[float] = mapped_column(Float)
+    node_id: Mapped[int | None] = mapped_column(ForeignKey("nodes.id"), nullable=True, index=True)
+    cooldown_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class WebhookDelivery(Base):

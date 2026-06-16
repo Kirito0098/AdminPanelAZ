@@ -10,6 +10,7 @@ def test_light_health(api_test_env):
     body = response.json()
     assert body["status"] == "ok"
     assert body["app"]
+    assert "started_at" in body
 
 
 def test_deep_health(api_test_env):

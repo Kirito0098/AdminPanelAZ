@@ -31,6 +31,7 @@ import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Switch } from '@/components/ui/switch'
 import { useNotifications } from '@/context/NotificationContext'
 import type { ActiveWebSession, AuditStreamSettings, EventWebhookSettings, ScannerBan, SecuritySettings } from '@/types'
+import SecretsRotationWizard from '@/components/settings/SecretsRotationWizard'
 
 export default function SecurityTab() {
   const { success, error: notifyError } = useNotifications()
@@ -800,6 +801,8 @@ export default function SecurityTab() {
           </div>
         </CardContent>
       </Card>
+
+      <SecretsRotationWizard />
     </div>
   )
 }

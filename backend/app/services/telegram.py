@@ -50,6 +50,7 @@ def send_tg_document(
     caption: str = "",
     *,
     filename: str | None = None,
+    content_type: str = "application/gzip",
     run_async: bool = True,
     timeout_seconds: int = 120,
 ) -> bool:
@@ -78,10 +79,11 @@ def send_tg_document(
 
             upload_name = (filename or "").strip() or (file_path or "").strip().split("/")[-1] or "backup.tar.gz"
             body.extend(f"--{boundary}\r\n".encode("utf-8"))
+            mime = (content_type or "application/octet-stream").strip()
             body.extend(
                 (
                     f'Content-Disposition: form-data; name="document"; filename="{upload_name}"\r\n'
-                    "Content-Type: application/gzip\r\n\r\n"
+                    f"Content-Type: {mime}\r\n\r\n"
                 ).encode("utf-8")
             )
             body.extend(file_bytes)

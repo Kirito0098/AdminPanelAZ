@@ -60,12 +60,12 @@
 | **2** | Admin productivity | 2–4 нед. | 🟠 | ✅ |
 | **3** | Multi-node обзор | 2–3 нед. | 🟠 | ✅ |
 | **4** | CIDR безопасность | 2–3 нед. | 🟡 | ✅ |
-| **5** | Node Sync / HA | 3–5 нед. | 🟠 | ◐ |
+| **5** | Node Sync / HA | 3–5 нед. | 🟠 | ✅ |
 | **6** | Self-service | 2–4 нед. | 🟡 | ✅ |
-| **7** | Мониторинг и алерты | 2–3 нед. | 🟡 | ◐ |
+| **7** | Мониторинг и алерты | 2–3 нед. | 🟡 | ✅ |
 | **8** | Ops и интеграции | по мере нужды | 🟡 | ✅ |
-| **9** | Security / enterprise | перед публичным prod | 🟢 | ◐ |
-| **10** | Масштаб | при росте нагрузки | 🟡→🟢 | ⬜ |
+| **9** | Security / enterprise | перед публичным prod | 🟢 | ✅ |
+| **10** | Масштаб | при росте нагрузки | 🟡→🟢 | ◐ |
 
 *\*Ориентир для одного разработчика; параллельте задачи внутри этапа, где нет зависимости.*
 
@@ -131,7 +131,7 @@
 | 3.1 | Global dashboard (сводка всех узлов) | §4 | P1 | 🟠 | ✅ |
 | 3.2 | Сравнение узлов side-by-side | §4 | P2 | 🟠 | ✅ |
 | 3.3 | Geo-routing hint (подсказка «ближе node Y») | §4 | P2 | 🟡 | ✅ |
-| 3.4 | Политики per-node (лимиты EU vs RU) | §4 | P2 | 🟢 | ◐ |
+| 3.4 | Политики per-node (лимиты EU vs RU) | §4 | P2 | 🟢 | ✅ |
 
 **DoD:**
 - [x] Главная или отдельная страница: online/t health по всем узлам без switch active node
@@ -173,7 +173,7 @@
 | 5.3 | Verify parity (списки клиентов + checksums) | §10 | P1 | 🟡 | ✅ |
 | 5.4 | Auto-sync при create/delete клиента | §10 | P2 | 🟡 | ✅ |
 | 5.5 | Reconcile worker (split-brain) | §10 | P2 | 🟢–🟡 | ✅ |
-| 5.6 | HA в Dashboard и NOC (одна карточка на группу) | §10 | P2 | 🟢 | ◐ |
+| 5.6 | HA в Dashboard и NOC (одна карточка на группу) | §10 | P2 | 🟢 | ✅ |
 
 **DoD MVP (5.1–5.3):**
 - [x] Создана HA-группа с shared domain
@@ -184,7 +184,7 @@
 **DoD v2 (5.4–5.6):**
 - [x] Create client на primary → автоматически на replica
 - [x] Reconcile алертит при расхождении >15 мин
-- [~] NOC: агрегация online по HA-группе (Dashboard badge и dedup configs — ✅; federated NOC по-прежнему по узлам)
+- [x] NOC: агрегация online по HA-группе (Dashboard badge, dedup configs, federated NOC по sync group)
 
 **Порядок:** строго 5.1 → 5.2 → 5.3 → (DNS) → 5.4 → 5.5 → 5.6
 
@@ -217,14 +217,16 @@
 
 | # | Задача | § | P | Perf | Статус |
 |---|--------|---|---|------|--------|
-| 7.1 | Локальная GeoIP БД | §5 | P1 | 🟡 | ◐ |
+| 7.1 | Локальная GeoIP БД | §5 | P1 | 🟡 | ✅ |
 | 7.2 | Scheduled reports в TG | §7 | P1 | 🟡 | ✅ |
-| 7.3 | Правила алертов (кастомные пороги) | §5 | P2 | 🟡 | ⬜ |
-| 7.4 | Отчёты PDF/TG (weekly) | §5 | P2 | 🟡 | ⬜ |
+| 7.3 | Правила алертов (кастомные пороги) | §5 | P2 | 🟡 | ✅ |
+| 7.4 | Отчёты PDF/TG (weekly) | §5 | P2 | 🟡 | ✅ |
 
 **DoD:**
-- [~] NOC работает при недоступности ip-api.com — да, если загружены MMDB (`data/geoip/*.mmdb`); иначе fallback на ip-api
+- [x] NOC работает при недоступности ip-api.com — при загруженных MMDB (`data/geoip/*.mmdb`); onboarding в README + UI статус
 - [x] Ежедневная/еженедельная сводка в TG admin
+- [x] Кастомные правила алертов (7.3)
+- [x] PDF weekly reports (7.4)
 
 ---
 
@@ -257,14 +259,15 @@
 
 | # | Задача | § | P | Perf | Статус |
 |---|--------|---|---|------|--------|
-| 9.1 | CSP hardening (nonce) | §6 | P2 | 🟢 | ◐ |
+| 9.1 | CSP hardening (nonce) | §6 | P2 | 🟢 | ✅ |
 | 9.2 | WebAuthn / passkeys | §6 | P2 | 🟢 | ✅ |
 | 9.3 | Audit export + SIEM | §6 | P2 | 🟡 | ✅ |
-| 9.4 | Secrets rotation UI | §6 | P3 | 🟢 | ⬜ |
+| 9.4 | Secrets rotation UI | §6 | P3 | 🟢 | ✅ |
 
 **DoD:**
-- [~] CSP без `'unsafe-inline'` на основных страницах — nonce для `script-src` ✅; `style-src 'unsafe-inline'` пока остаётся
+- [x] CSP без `'unsafe-inline'` на основных страницах — nonce для scripts; style-src hardened
 - [x] Passkeys для admin optional alongside TOTP
+- [x] Secrets rotation wizard UI (9.4)
 
 ---
 
@@ -278,12 +281,14 @@
 |---|--------|---|---|------|--------|
 | 10.1 | PostgreSQL вместо SQLite | §2 | P3 | 🟡→🟢 | ⬜ |
 | 10.2 | Полноценный i18n (RU + EN) | §1 | P3 | 🟢 | ◐ |
-| 10.3 | Plugin / hook architecture | §9 | P3 | 🟡 | ⬜ |
-| 10.4 | Inline-режим бота | §7 | P3 | 🟡 | ⬜ |
+| 10.3 | Plugin / hook architecture | §9 | P3 | 🟡 | ✅ |
+| 10.4 | Inline-режим бота | §7 | P3 | 🟡 | ✅ |
 
 **DoD:**
 - [ ] Миграция SQLite → PG документирована, dual-support или one-way
-- [~] EN locale для web + bot — словарь бота (`telegram_bot_i18n.py`) есть; веб-панель без react-i18next
+- [~] EN locale для web + bot — словарь бота (`telegram_bot_i18n.py`) ✅; веб-панель без react-i18next
+- [x] Plugin hooks registry (10.3)
+- [x] Inline bot (10.4)
 
 ---
 
@@ -359,7 +364,7 @@ Runbook (8) · Import CSV (8) · Сравнение узлов (3) · HA auto-sy
 
 ### P3 — по мере роста
 
-PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rotation (9)
+PostgreSQL (10) · i18n (10) — см. [матрицу](#матрица-все-идеи-по-приоритету); inline bot, plugin, secrets rotation — ✅
 
 </details>
 
@@ -692,7 +697,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** данные уже scoped by `node_id`.
 
-- [~] ◐ **Частично** — сводка `NodePolicySummarySection`; per-node scope в БД, без отдельного wizard лимитов
+- [x] ✅ **Реализовано** — `NodePolicyWizard`, `NodePolicySummarySection`; per-node scope в БД + edit wizard лимитов EU/RU
 
 ---
 
@@ -746,7 +751,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** RAM ~50–100 MB; lookup быстрее HTTP.
 
-- [~] ◐ **Частично** — `geoip_local.py`; нужны MMDB в `data/geoip/`, иначе fallback ip-api
+- [x] ✅ **Реализовано** — `geoip_local.py`, README onboarding, UI статус «loaded / fallback ip-api» в Settings → Maintenance
 
 ---
 
@@ -762,7 +767,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** worker 1–5 мин по агрегатам.
 
-- [ ] ⬜ **Не начато**
+- [x] ✅ **Реализовано** — `AlertRule`, alert worker, AdminNotify, UI Settings → Monitoring
 
 ---
 
@@ -778,7 +783,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** генерация по расписанию, не в hot path.
 
-- [ ] ⬜ **Не начато** — PDF weekly; TG-сводки есть (7.2)
+- [x] ✅ **Реализовано** — weekly PDF/TG report, worker + опциональная доставка в TG; TG-сводки (7.2) отдельно
 
 ---
 
@@ -862,7 +867,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** re-login всех после смены JWT secret.
 
-- [ ] ⬜ **Не начато**
+- [x] ✅ **Реализовано** — Secrets rotation wizard UI, guided flow + docs
 
 ---
 
@@ -878,7 +883,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** nonce на HTML response.
 
-- [~] ◐ **Частично** — nonce для scripts; `style-src 'unsafe-inline'` остаётся
+- [x] ✅ **Реализовано** — nonce для scripts; style-src hardened, audit inline styles
 
 ---
 
@@ -914,7 +919,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** TTL-кэш inline results.
 
-- [ ] ⬜ **Не начато**
+- [x] ✅ **Реализовано** — inline query handler, TTL-кэш inline results
 
 ---
 
@@ -1066,7 +1071,7 @@ PostgreSQL (10) · i18n (10) · Inline-бот (10) · Plugin (10) · Secrets rot
 
 **Производительность:** strict timeout / subprocess для плагинов.
 
-- [ ] ⬜ **Не начато**
+- [x] ✅ **Реализовано** — minimal plugin/hook registry для notify backends
 
 ---
 
@@ -1125,7 +1130,7 @@ flowchart LR
 | Background tasks | `background_tasks.py` | Длинный sync с прогрессом | ✅ |
 | Multi-deploy CIDR | `cidr/pipeline/orchestrator.py` | Паттерн «orchestrator → N узлов» | ✅ |
 | WG reconcile | `wg_policy_sync_worker.py` | Паттерн периодической сверки | ✅ |
-| **Node Sync (MVP + v2)** | `services/node_sync/`, `routers/node_sync.py` | Sync Group, push, verify, auto-sync, reconcile | ✅ / ◐ NOC |
+| **Node Sync (MVP + v2)** | `services/node_sync/`, `routers/node_sync.py` | Sync Group, push, verify, auto-sync, reconcile | ✅ |
 | **Документация** | [`NodeSync.md`](NodeSync.md) | API, ограничения, DNS | ✅ |
 
 ### Что было добавлено (реализовано)
@@ -1137,7 +1142,7 @@ flowchart LR
 | `services/node_sync/` | push / verify / client_sync / reconcile | ✅ |
 | UI «Узлы» | `NodeSyncGroupSection` — группа, push, verify | ✅ |
 | Dashboard HA | badge, dedup linked configs | ✅ |
-| NOC HA-группы | агрегация online по группе | ◐ |
+| NOC HA-группы | агрегация online по группе | ✅ |
 
 ### Ограничения (важно знать заранее)
 
@@ -1240,7 +1245,7 @@ flowchart LR
 
 **Производительность:** агрегация при чтении; без новых collectors.
 
-- [~] ◐ **Частично** — HA badge на Dashboard; NOC federated по узлам, не по группам
+- [x] ✅ **Реализовано** — HA badge на Dashboard; NOC federated по sync group (одна строка на logical client)
 
 ---
 
@@ -1328,7 +1333,7 @@ flowchart LR
 | **Sync Group (HA)** | 5 | ✅ | 🟢 | Средняя | Модель failover-пары |
 | **HA manual push** | 5 | ✅ | 🟠 | Средняя–высокая | Замена ручного client.sh 8 |
 | **HA verify parity** | 5 | ✅ | 🟡 | Средняя | Безопасный 2-й IP в DNS |
-| Локальная GeoIP | 7 | ◐ | 🟡 | Средняя | Стабильность NOC |
+| Локальная GeoIP | 7 | ✅ | 🟡 | Средняя | Стабильность NOC |
 | TG user commands | 6 | ✅ | 🟡 | Средняя | Self-service в TG |
 | Scheduled reports TG | 7 | ✅ | 🟡 | Низкая | Проактивный мониторинг |
 | Dry-run CIDR | 4 | ✅ | 🟡 | Средняя | Безопасный deploy |
@@ -1341,20 +1346,20 @@ flowchart LR
 | Runbook UI | 8 | ✅ |
 | Import CSV | 8 | ✅ |
 | Сравнение узлов | 3 | ✅ |
-| Политики per-node | 3 | ◐ |
+| Политики per-node | 3 | ✅ |
 | Rolling update | 8 | ✅ |
 | Geo-routing hint | 3 | ✅ |
 | **HA auto-sync** | 5 | ✅ |
 | **HA reconcile worker** | 5 | ✅ |
-| **HA Dashboard/NOC** | 5 | ◐ |
-| Правила алертов | 7 | ⬜ |
-| Отчёты | 7 | ⬜ |
+| **HA Dashboard/NOC** | 5 | ✅ |
+| Правила алертов | 7 | ✅ |
+| Отчёты | 7 | ✅ |
 | Mini App warper/CIDR | 8 | ✅ |
 | Custom provider wizard | 4 | ✅ |
 | OpenAPI | 8 | ✅ |
 | Event webhooks | 8 | ✅ |
 | WebAuthn | 9 | ✅ |
-| CSP hardening | 9 | ◐ |
+| CSP hardening | 9 | ✅ |
 | Audit SIEM | 9 | ✅ |
 
 ### P3 — 5 идей · [Этапы 9–10](#этапы-реализации-roadmap)
@@ -1363,9 +1368,9 @@ flowchart LR
 |------|------|--------|
 | PostgreSQL | 10 | ⬜ |
 | i18n | 10 | ◐ |
-| Inline-бот | 10 | ⬜ |
-| Plugin architecture | 10 | ⬜ |
-| Secrets rotation UI | 9 | ⬜ |
+| Inline-бот | 10 | ✅ |
+| Plugin architecture | 10 | ✅ |
+| Secrets rotation UI | 9 | ✅ |
 
 ---
 
@@ -1380,12 +1385,12 @@ flowchart LR
 | 2 | Admin productivity | ✅ |
 | 3 | Multi-node обзор | ✅ |
 | 4 | CIDR безопасность | ✅ |
-| 5 | Node Sync / HA | ◐ |
+| 5 | Node Sync / HA | ✅ |
 | 6 | Self-service | ✅ |
-| 7 | Мониторинг и алерты | ◐ |
+| 7 | Мониторинг и алерты | ✅ |
 | 8 | Ops и интеграции | ✅ |
-| 9 | Security / enterprise | ◐ |
-| 10 | Масштаб | ⬜ |
+| 9 | Security / enterprise | ✅ |
+| 10 | Масштаб | ◐ |
 
 ---
 

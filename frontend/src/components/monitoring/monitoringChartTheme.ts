@@ -16,33 +16,15 @@ export const MONITORING_SLICE_COLORS = [
   'hsl(210, 16%, 46%)',
 ]
 
-export const monitoringChartTooltipStyle = {
-  backgroundColor: 'hsl(var(--popover))',
-  border: '1px solid hsl(var(--border))',
-  borderRadius: '8px',
-  color: 'hsl(var(--popover-foreground))',
-  fontSize: '12px',
-}
-
-export const monitoringChartTooltipLabelStyle = {
-  color: 'hsl(var(--popover-foreground))',
-  fontWeight: 600,
-  marginBottom: 4,
-}
-
-export const monitoringChartTooltipItemStyle = {
-  color: 'hsl(var(--popover-foreground))',
-}
-
-export const monitoringChartTooltipProps = {
-  contentStyle: monitoringChartTooltipStyle,
-  labelStyle: monitoringChartTooltipLabelStyle,
-  itemStyle: monitoringChartTooltipItemStyle,
-  wrapperStyle: { outline: 'none', zIndex: 50 },
-}
+/** Recharts tooltip styling lives in index.css (.recharts-default-tooltip). */
+export const monitoringChartTooltipProps = {}
 
 export function getMonitoringSliceColor(index: number) {
   return MONITORING_SLICE_COLORS[index % MONITORING_SLICE_COLORS.length]
+}
+
+export function getMonitoringSliceDotClass(index: number) {
+  return `monitoring-slice-dot-${index % MONITORING_SLICE_COLORS.length}`
 }
 
 export function getProtocolBarColor(name: string) {

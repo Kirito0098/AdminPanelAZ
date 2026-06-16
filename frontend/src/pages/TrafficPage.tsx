@@ -61,6 +61,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { PercentBar } from '@/components/ui/percent-bar'
 import { cn } from '@/lib/utils'
 import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficOverview } from '@/types'
 
@@ -134,17 +135,11 @@ type TrafficShareBarProps = {
 }
 
 function TrafficShareBar({ value, max }: TrafficShareBarProps) {
-  const percent = max > 0 ? Math.min((value / max) * 100, 100) : 0
   return (
     <div className="flex items-center gap-2">
-      <div className="h-1.5 min-w-[4rem] flex-1 overflow-hidden rounded-full bg-secondary">
-        <div
-          className="h-full rounded-full bg-primary transition-all duration-300"
-          style={{ width: `${percent}%` }}
-        />
-      </div>
+      <PercentBar value={value} max={max} className="h-1.5 min-w-[4rem] flex-1" />
       <span className="mono w-10 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
-        {percent.toFixed(0)}%
+        {max > 0 ? Math.min((value / max) * 100, 100).toFixed(0) : '0'}%
       </span>
     </div>
   )

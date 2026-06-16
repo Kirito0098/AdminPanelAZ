@@ -132,9 +132,9 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
       },
       {
         id: 'monitoring',
-        label: 'Оповещения о нагрузке',
+        label: 'Мониторинг и алерты',
         icon: Activity,
-        description: 'Пороги CPU/RAM и Telegram при перегрузке',
+        description: 'CPU/RAM, alert rules и Telegram',
         settingsTab: 'monitoring',
       },
     ],

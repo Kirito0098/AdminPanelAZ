@@ -8,6 +8,7 @@ from app.services import geoip_local
 from app.services.ip_geo import (
     _geo_cache,
     build_geo_label,
+    get_geoip_status,
     is_local_geoip_loaded,
     lookup_ip_geo,
     lookup_ips_geo,
@@ -20,6 +21,9 @@ from app.services.ip_geo import (
 def setup_function():
     _geo_cache.clear()
     geoip_local.reset_geoip_readers()
+    import app.services.ip_geo as ip_geo_module
+
+    ip_geo_module._local_geo_initialized = False
 
 
 def test_strip_protocol_prefix():
@@ -129,3 +133,44 @@ def test_is_local_geoip_loaded_false_without_mmdb_file():
             geoip_asn_mmdb_path=__import__("pathlib").Path("data/geoip/missing-asn.mmdb"),
         )
         assert is_local_geoip_loaded() is False
+
+
+def test_get_geoip_status_reports_fallback_without_mmdb(tmp_path):
+    from app.config import Settings
+
+    city_path = tmp_path / "data" / "geoip" / "GeoLite2-City.mmdb"
+    asn_path = tmp_path / "data" / "geoip" / "GeoLite2-ASN.mmdb"
+
+    with patch("app.services.ip_geo.get_settings") as mock_settings:
+        mock_settings.return_value = Settings(
+            geoip_city_mmdb_path=city_path,
+            geoip_asn_mmdb_path=asn_path,
+        )
+        status = get_geoip_status()
+
+    assert status["loaded"] is False
+    assert status["source"] == "ip-api"
+    assert status["city_mmdb_exists"] is False
+    assert status["asn_mmdb_exists"] is False
+    assert str(city_path) == status["city_mmdb_path"]
+
+
+def test_maintenance_geoip_status_endpoint(api_test_env):
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api_test_env["app"])
+    resp = client.get("/api/maintenance/geoip-status", headers=api_test_env["admin_headers"])
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["loaded"] is False
+    assert body["source"] == "ip-api"
+    assert "city_mmdb_path" in body
+    assert body["city_mmdb_exists"] is False
+
+
+def test_maintenance_geoip_status_requires_admin(api_test_env):
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api_test_env["app"])
+    resp = client.get("/api/maintenance/geoip-status", headers=api_test_env["viewer_headers"])
+    assert resp.status_code == 403

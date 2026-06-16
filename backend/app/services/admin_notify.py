@@ -18,6 +18,7 @@ from app.services.admin_notify_settings_text import (
 )
 from app.services.feature_guards import get_feature_service
 from app.services.notify_time import format_notify_when
+from app.services.notify_backends import dispatch_admin_notify, register_notify_backend
 from app.services.telegram import send_tg_message
 from app.services.traffic_limit import (
     format_traffic_limit_period_label,
@@ -48,6 +49,7 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("cidr_deploy_failed", "Ошибка развёртывания CIDR"),
     ("cidr_ingest_partial", "Частичное обновление CIDR БД"),
     ("noc_report", "NOC: ежедневная/еженедельная сводка"),
+    ("alert_rule", "Alert rule: срабатывание порога"),
 ]
 
 CLIENT_BLOCK_NOTIFY_EVENTS = frozenset({
@@ -403,8 +405,13 @@ class AdminNotifyService:
 
             text = _prepend_node_context(text, node_id=node_id, node_name=node_name)
 
-            for user in notify_users:
-                send_tg_message(bot_token, user.telegram_id, text)
+            dispatch_admin_notify(
+                db,
+                event_type=event_type,
+                text=text,
+                recipients=notify_users,
+                bot_token=bot_token,
+            )
         except Exception as exc:
             self.logger.warning("TG admin notify error: %s", exc)
 
@@ -908,6 +915,14 @@ class AdminNotifyService:
                 f"📊 {metric}",
                 when,
             )
+        if event_type == "alert_rule":
+            rule_name = _fmt_code(target_name)
+            condition = details or "—"
+            return _format_notify_system(
+                "🚨 <b>Alert rule</b>",
+                f"📋 {rule_name}\n📊 {condition}",
+                when,
+            )
         if event_type == "cidr_deploy_failed":
             action = details or "Развёртывание CIDR завершилось с ошибкой"
             if actor_username:
@@ -981,5 +996,20 @@ class AdminNotifyService:
                 self.logger.warning("Resource monitor error: %s", exc)
                 time.sleep(60)
 
+
+def _telegram_notify_backend(
+    *,
+    db: Session,
+    event_type: str,
+    text: str,
+    recipients: list,
+    bot_token: str,
+    **kwargs,
+) -> None:
+    for user in recipients:
+        send_tg_message(bot_token, user.telegram_id, text)
+
+
+register_notify_backend("telegram", _telegram_notify_backend)
 
 admin_notify_service = AdminNotifyService()

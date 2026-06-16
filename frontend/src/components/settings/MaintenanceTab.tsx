@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { Database, FolderOpen, Play, RotateCcw, ServerCrash } from 'lucide-react'
-import { ApiError, getRetentionSettings, recreateProfiles, restartService, runDoall, updateRetentionSettings } from '@/api/client'
+import { useCallback, useEffect, useState } from 'react'
+import { Database, FolderOpen, Globe, Play, RefreshCw, RotateCcw, ServerCrash } from 'lucide-react'
+import { ApiError, getGeoIpStatus, getRetentionSettings, recreateProfiles, restartService, runDoall, updateRetentionSettings } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -16,7 +17,7 @@ import {
 } from '@/components/ui/select'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
-import type { AppSettings, RetentionSettings } from '@/types'
+import type { AppSettings, GeoIpStatus, RetentionSettings } from '@/types'
 
 const SERVICES = [
   'openvpn-server@antizapret-udp',
@@ -38,12 +39,26 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
   const [busy, setBusy] = useState<string | null>(null)
   const [retention, setRetention] = useState<RetentionSettings | null>(null)
   const [retentionSaving, setRetentionSaving] = useState(false)
+  const [geoIpStatus, setGeoIpStatus] = useState<GeoIpStatus | null>(null)
+  const [geoIpLoading, setGeoIpLoading] = useState(false)
+
+  const loadGeoIpStatus = useCallback(async () => {
+    setGeoIpLoading(true)
+    try {
+      setGeoIpStatus(await getGeoIpStatus())
+    } catch {
+      setGeoIpStatus(null)
+    } finally {
+      setGeoIpLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     void getRetentionSettings()
       .then(setRetention)
       .catch(() => setRetention(null))
-  }, [])
+    void loadGeoIpStatus()
+  }, [loadGeoIpStatus])
 
   const saveRetention = async () => {
     if (!retention) return
@@ -209,6 +224,67 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Globe size={18} />
+            GeoIP
+          </CardTitle>
+          <CardDescription>
+            Локальная MaxMind GeoLite2 для NOC без ip-api.com.{' '}
+            <a
+              href="https://github.com/Kirito0098/AdminPanelAZ/blob/main/docs/GeoIP.md"
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline-offset-4 hover:underline"
+            >
+              Инструкция по загрузке MMDB
+            </a>{' '}
+            (на сервере: <code className="mono text-xs">docs/GeoIP.md</code>)
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3">
+            {geoIpStatus ? (
+              <Badge variant={geoIpStatus.loaded ? 'default' : 'secondary'}>
+                GeoIP: {geoIpStatus.loaded ? 'loaded' : 'fallback ip-api'}
+              </Badge>
+            ) : (
+              <Badge variant="outline">GeoIP: статус неизвестен</Badge>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={geoIpLoading}
+              onClick={() => void loadGeoIpStatus()}
+            >
+              <RefreshCw size={14} className={geoIpLoading ? 'animate-spin' : ''} />
+              Обновить статус
+            </Button>
+          </div>
+          {geoIpStatus && (
+            <div className="space-y-2 text-xs text-muted-foreground">
+              <div>
+                City MMDB:{' '}
+                <code className="mono rounded bg-muted px-1 py-0.5">{geoIpStatus.city_mmdb_path ?? '—'}</code>{' '}
+                ({geoIpStatus.city_mmdb_exists ? 'файл найден' : 'файл не найден'})
+              </div>
+              <div>
+                ASN MMDB:{' '}
+                <code className="mono rounded bg-muted px-1 py-0.5">{geoIpStatus.asn_mmdb_path ?? '—'}</code>{' '}
+                ({geoIpStatus.asn_mmdb_exists ? 'файл найден' : 'файл не найден'})
+              </div>
+            </div>
+          )}
+          {geoIpStatus && !geoIpStatus.loaded && (
+            <SettingsAlert variant="warning" title="Fallback ip-api">
+              Положите GeoLite2-City.mmdb (и опционально GeoLite2-ASN.mmdb) в data/geoip/ и перезапустите панель.
+            </SettingsAlert>
+          )}
+        </CardContent>
+      </Card>
 
       {settings && (
         <Card>

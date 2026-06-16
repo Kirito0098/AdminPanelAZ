@@ -129,6 +129,7 @@ HELP_LINES_CONFIGS = (
     "• /myconfigs — ваши конфиги",
     "• /configs — список конфигов",
     "• /config &lt;имя&gt; — выбор протокола и отправка файла",
+    "• @bot &lt;имя&gt; — inline: ссылка или файл конфига",
     "• /traffic — трафик ваших клиентов",
     "• OpenVPN / WireGuard / AmneziaWG — отдельные группы",
 )
@@ -198,6 +199,29 @@ CONFIG_GROUP_NOT_FOUND = "Группа конфигов не найдена."
 CONFIG_FILE_NOT_FOUND = "Файл конфигурации не найден."
 BTN_CONFIG_BACK = "◀️ К протоколам"
 BTN_CONFIG_PICK_ANOTHER = "📤 Ещё файл"
+
+# --- Inline mode ---
+
+INLINE_MINI_APP_TITLE = "📱 AdminPanelAZ Mini App"
+INLINE_MINI_APP_DESC = "Открыть панель в Telegram"
+INLINE_MINI_APP_MESSAGE = (
+    "📱 <b>AdminPanelAZ Mini App</b>\n\n"
+    "Откройте панель для управления конфигами:\n"
+    "<code>{mini_app_url}</code>"
+)
+INLINE_UNLINKED_TITLE = "🔗 Привязка аккаунта"
+INLINE_UNLINKED_DESC = "Telegram не привязан к панели"
+INLINE_CONFIG_TITLE = "📄 {name} ({vpn_type})"
+INLINE_CONFIG_DESC = "{name} · {vpn_type} · {filename}"
+INLINE_CONFIG_ARTICLE_DESC = "Конфиг {vpn_type}"
+INLINE_CONFIG_MESSAGE = (
+    "📄 <b>{name}</b>\n"
+    "Тип: <code>{vpn_type}</code>\n\n"
+    "Mini App: <code>{mini_app_url}</code>"
+)
+INLINE_EMPTY_TITLE = "🔍 Ничего не найдено"
+INLINE_EMPTY_DESC = "Запрос: {query}"
+INLINE_EMPTY_MESSAGE = "Конфиги по запросу <code>{query}</code> не найдены."
 
 # --- /settings root ---
 

@@ -17,7 +17,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import type { OpenVpnClient, WireGuardPeer } from '@/types'
+import type { OpenVpnClient, VpnConfigHaInfo, WireGuardPeer } from '@/types'
 
 export type MonitoringConnectionRow = {
   key: string
@@ -25,6 +25,7 @@ export type MonitoringConnectionRow = {
   clientName: string
   online: boolean
   nodeName?: string | null
+  ha?: VpnConfigHaInfo | null
   address: string
   geoLabel: string | null
   vpnIp: string
@@ -53,11 +54,12 @@ export function buildMonitoringConnectionRows(
   if (options.showOpenVpn) {
     for (const client of openvpnClients) {
       rows.push({
-        key: `ovpn-${client.node_id ?? 'node'}-${client.common_name}-${client.real_address}`,
+        key: `ovpn-${client.ha?.sync_group_id ?? client.node_id ?? 'node'}-${client.common_name}-${client.real_address}`,
         protocol: 'openvpn',
         clientName: client.common_name,
         online: true,
         nodeName: client.node_name,
+        ha: client.ha,
         address: getConnectionDisplayAddress(client),
         geoLabel: getConnectionGeoLabel(client),
         vpnIp: client.virtual_address,
@@ -72,11 +74,12 @@ export function buildMonitoringConnectionRows(
     for (const peer of wireguardPeers) {
       const online = options.isWireGuardOnline(peer)
       rows.push({
-        key: `wg-${peer.node_id ?? 'node'}-${peer.interface}-${peer.public_key}`,
+        key: `wg-${peer.ha?.sync_group_id ?? peer.node_id ?? 'node'}-${peer.interface}-${peer.public_key}`,
         protocol: 'wireguard',
         clientName: peer.client_name || '—',
         online,
         nodeName: peer.node_name,
+        ha: peer.ha,
         address: getConnectionDisplayAddress(peer, 'endpoint'),
         geoLabel: getConnectionGeoLabel(peer),
         vpnIp: peer.allowed_ips || '—',
@@ -142,7 +145,13 @@ function ConnectionCard({ row, showNodeColumn }: { row: MonitoringConnectionRow;
           <p className="font-mono text-sm text-muted-foreground">{row.vpnIp}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {showNodeColumn && <NodeScopeBadge nodeName={row.nodeName} />}
+          {row.ha ? (
+            <Badge variant="outline" className="gap-1 text-xs">
+              HA: {row.ha.shared_domain} ({row.ha.node_count} узл.)
+            </Badge>
+          ) : (
+            showNodeColumn && <NodeScopeBadge nodeName={row.nodeName} />
+          )}
           <Badge variant={row.protocol === 'openvpn' ? 'default' : 'secondary'} className="text-xs">
             {row.protocol === 'openvpn' ? 'OpenVPN' : 'WireGuard'}
           </Badge>
@@ -235,7 +244,17 @@ export default function MonitoringConnectionsList({ rows, showNodeColumn }: Moni
                     </Badge>
                   </div>
                 </TableCell>
-                {showNodeColumn && <TableCell className="text-sm">{row.nodeName || '—'}</TableCell>}
+                {showNodeColumn && (
+                  <TableCell className="text-sm">
+                    {row.ha ? (
+                      <Badge variant="outline" className="gap-1 text-xs">
+                        HA: {row.ha.shared_domain} ({row.ha.node_count} узл.)
+                      </Badge>
+                    ) : (
+                      row.nodeName || '—'
+                    )}
+                  </TableCell>
+                )}
                 <TableCell>
                   <div className="space-y-1">
                     <Link

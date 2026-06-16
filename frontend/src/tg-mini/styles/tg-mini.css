@@ -133,6 +133,20 @@ body.tg-mini-app {
   text-align: center;
 }
 
+.tg-mini-tabs-cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.tg-mini-tabs-cols-6 {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+#tg-mini-boot {
+  margin: 1rem;
+  color: hsl(var(--foreground));
+  font-family: system-ui, sans-serif;
+}
+
 .tg-mini-panel {
   padding: 1rem;
   border: 1px solid hsl(var(--border));

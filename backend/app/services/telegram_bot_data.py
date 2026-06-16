@@ -44,3 +44,12 @@ def find_config_by_name(db: Session, user: User, name: str) -> VpnConfig | None:
         if config.client_name.lower() == normalized:
             return config
     return None
+
+
+def search_user_configs(db: Session, user: User, query: str, *, limit: int = 20) -> list[VpnConfig]:
+    configs = list_user_configs(db, user)
+    normalized = (query or "").strip().lower()
+    if not normalized:
+        return configs[:limit]
+    matched = [config for config in configs if normalized in config.client_name.lower()]
+    return matched[:limit]

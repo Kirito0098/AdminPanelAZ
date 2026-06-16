@@ -262,7 +262,8 @@ export default function MonitoringPage() {
         address.includes(searchQuery) ||
         geo.includes(searchQuery) ||
         c.virtual_address.toLowerCase().includes(searchQuery) ||
-        (c.node_name || '').toLowerCase().includes(searchQuery)
+        (c.node_name || '').toLowerCase().includes(searchQuery) ||
+        (c.ha?.shared_domain || '').toLowerCase().includes(searchQuery)
       )
     })
   }, [openvpnClients, searchQuery])
@@ -281,7 +282,8 @@ export default function MonitoringPage() {
         (p.allowed_ips ?? '').toLowerCase().includes(searchQuery) ||
         p.interface.toLowerCase().includes(searchQuery) ||
         p.public_key.toLowerCase().includes(searchQuery) ||
-        (p.node_name || '').toLowerCase().includes(searchQuery)
+        (p.node_name || '').toLowerCase().includes(searchQuery) ||
+        (p.ha?.shared_domain || '').toLowerCase().includes(searchQuery)
       )
     })
   }, [wireguardPeers, searchQuery])

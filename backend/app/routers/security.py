@@ -9,8 +9,16 @@ from app.models import User
 from app.services.action_log import log_action
 from app.services.ip_restriction import ip_restriction_service
 from app.services.public_download_settings import is_public_download_enabled, set_public_download_enabled
-from app.schemas import ActiveWebSessionResponse
+from app.schemas import (
+    ActiveWebSessionResponse,
+    SecretRotationApplyRequest,
+    SecretRotationApplyResponse,
+    SecretRotationItemResponse,
+    SecretRotationPreviewRequest,
+    SecretRotationPreviewResponse,
+)
 from app.services.active_web_session import active_web_session_service
+from app.services.secrets_rotation import SecretsRotationService
 from app.services.event_webhooks import event_webhook_service
 from app.services.audit_stream import audit_stream_service
 from app.services.security import SecurityService
@@ -326,3 +334,50 @@ def revoke_active_session(
     if not active_web_session_service.revoke_session(db, session_id):
         raise HTTPException(status_code=404, detail="Сессия не найдена")
     return {"message": "Сессия отозвана"}
+
+
+@router.get("/secrets-rotation", response_model=list[SecretRotationItemResponse])
+def list_secrets_rotation(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    return SecretsRotationService().list_secrets(db)
+
+
+@router.post("/secrets-rotation/preview", response_model=SecretRotationPreviewResponse)
+def preview_secrets_rotation(
+    payload: SecretRotationPreviewRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    try:
+        return SecretsRotationService().preview(db, payload.secret_id, value=payload.value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/secrets-rotation/apply", response_model=SecretRotationApplyResponse)
+def apply_secrets_rotation(
+    payload: SecretRotationApplyRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    try:
+        result = SecretsRotationService().apply(
+            db,
+            payload.secret_id,
+            new_value=payload.new_value,
+            preview_token=payload.preview_token,
+            confirm=payload.confirm,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="secrets_rotation_apply",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"secret_id={payload.secret_id}",
+        )
+    return result

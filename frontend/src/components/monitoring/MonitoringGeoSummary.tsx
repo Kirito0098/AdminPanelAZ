@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Building2, MapPin } from 'lucide-react'
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
+import { Cell, Pie, PieChart, Tooltip } from 'recharts'
+import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import {
   buildGeoPieSlices,
   collectMonitoringGeoConnections,
@@ -10,8 +11,10 @@ import MonitoringChartCard, { MonitoringChartEmpty } from '@/components/monitori
 import {
   MONITORING_CHART_HEIGHT,
   getMonitoringSliceColor,
+  getMonitoringSliceDotClass,
   monitoringChartTooltipProps,
 } from '@/components/monitoring/monitoringChartTheme'
+import { cn } from '@/lib/utils'
 import type { OpenVpnClient, WireGuardPeer } from '@/types'
 
 type MonitoringGeoSummaryProps = {
@@ -39,10 +42,7 @@ function GeoDonutLegend({ slices, total }: { slices: GeoPieSlice[]; total: numbe
         const othersCount = slice.breakdown?.length ?? 0
         return (
           <li key={slice.name} className="flex items-start gap-2 text-sm">
-            <span
-              className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
-              style={{ backgroundColor: getMonitoringSliceColor(index) }}
-            />
+            <span className={cn('mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full', getMonitoringSliceDotClass(index))} />
             <div className="min-w-0 flex-1">
               <p className="truncate font-medium leading-snug">
                 {slice.name}
@@ -90,12 +90,10 @@ function GeoDonutCard({ title, description, icon, slices, total }: GeoDonutCardP
   return (
     <MonitoringChartCard title={title} description={description} icon={icon}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
-        <div
-          className="relative mx-auto w-full max-w-[260px] shrink-0"
-          style={{ height: MONITORING_CHART_HEIGHT }}
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
+        <div className="monitoring-chart-frame relative mx-auto w-full max-w-[260px] shrink-0">
+          <ChartResponsive className="h-full">
+            {({ width, height }) => (
+          <PieChart width={width} height={height}>
               <Pie
                 data={slices}
                 cx="50%"
@@ -122,7 +120,8 @@ function GeoDonutCard({ title, description, icon, slices, total }: GeoDonutCardP
                 }}
               />
             </PieChart>
-          </ResponsiveContainer>
+            )}
+          </ChartResponsive>
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
             <span className="text-2xl font-bold tabular-nums">{total}</span>
             <span className="text-xs text-muted-foreground">подключений</span>

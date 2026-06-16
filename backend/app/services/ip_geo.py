@@ -165,6 +165,36 @@ def is_local_geoip_loaded() -> bool:
     return geoip_local.is_geoip_db_loaded()
 
 
+def _resolve_geoip_path(path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    if path.is_absolute():
+        return path
+    app_root = Path(__file__).resolve().parents[2]
+    return app_root / path
+
+
+def get_geoip_status() -> dict[str, bool | str | None]:
+    """Return local GeoIP DB onboarding status for admin UI."""
+    _ensure_local_geo_loaded()
+    from app.services import geoip_local
+
+    settings = get_settings()
+    resolved_city = _resolve_geoip_path(Path(settings.geoip_city_mmdb_path))
+    resolved_asn = _resolve_geoip_path(
+        Path(settings.geoip_asn_mmdb_path) if settings.geoip_asn_mmdb_path else None
+    )
+    loaded = geoip_local.is_geoip_db_loaded()
+    return {
+        "loaded": loaded,
+        "source": "local" if loaded else "ip-api",
+        "city_mmdb_path": str(resolved_city) if resolved_city else None,
+        "asn_mmdb_path": str(resolved_asn) if resolved_asn else None,
+        "city_mmdb_exists": bool(resolved_city and resolved_city.is_file()),
+        "asn_mmdb_exists": bool(resolved_asn and resolved_asn.is_file()),
+    }
+
+
 def _lookup_local_geo(lookup_ip: str) -> dict[str, str | None] | None:
     _ensure_local_geo_loaded()
     from app.services import geoip_local

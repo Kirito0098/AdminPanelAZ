@@ -8,7 +8,7 @@ import threading
 from sqlalchemy.orm import Session
 
 from app.models import Node, OpenVpnAccessPolicy, WgAccessPolicy
-from app.services.access_policy import AccessPolicyService
+from app.services.access_policy import AccessPolicyService, is_node_default_policy_client
 from app.services.admin_notify import admin_notify_service
 from app.services.traffic_limit import (
     TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED,
@@ -37,6 +37,7 @@ class TrafficLimitNotifyService:
             .filter_by(node_id=node.id)
             .filter(WgAccessPolicy.traffic_limit_bytes.isnot(None))
             .all()
+            if not is_node_default_policy_client(row.client_name)
         ]
         ovpn_clients = [
             row.client_name
@@ -44,6 +45,7 @@ class TrafficLimitNotifyService:
             .filter_by(node_id=node.id)
             .filter(OpenVpnAccessPolicy.traffic_limit_bytes.isnot(None))
             .all()
+            if not is_node_default_policy_client(row.client_name)
         ]
         for client_name in wg_clients:
             try:

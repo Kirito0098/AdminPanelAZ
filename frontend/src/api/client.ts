@@ -375,6 +375,20 @@ export async function getNodePolicySummary() {
   return apiFetch<import('../types').NodePolicySummary[]>('/client-access/policy-summary-by-node')
 }
 
+export async function getNodeDefaultPolicy(nodeId: number) {
+  return apiFetch<import('../types').NodeDefaultPolicy>(`/client-access/node-defaults/${nodeId}`)
+}
+
+export async function updateNodeDefaultPolicy(
+  nodeId: number,
+  payload: import('../types').NodeDefaultPolicyUpdate,
+) {
+  return apiFetch<import('../types').NodeDefaultPolicy>(`/client-access/node-defaults/${nodeId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function openMonitoringStream(
   onData: (data: import('../types').MonitoringOverview) => void,
   onError?: (message: string) => void,
@@ -1079,6 +1093,34 @@ export async function updateMonitorSettings(data: Partial<import('../types').Mon
   })
 }
 
+export async function getAlertMetrics() {
+  return apiFetch<import('../types').AlertMetricInfo[]>('/alert-rules/metrics')
+}
+
+export async function getAlertRules() {
+  return apiFetch<import('../types').AlertRule[]>('/alert-rules')
+}
+
+export async function createAlertRule(data: import('../types').AlertRuleCreatePayload) {
+  return apiFetch<import('../types').AlertRule>('/alert-rules', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateAlertRule(ruleId: number, data: Partial<import('../types').AlertRuleCreatePayload>) {
+  return apiFetch<import('../types').AlertRule>(`/alert-rules/${ruleId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteAlertRule(ruleId: number) {
+  return apiFetch<{ message: string }>(`/alert-rules/${ruleId}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function getLatestChangelog() {
   return apiFetch<import('../types').LatestChangelog>('/system/latest-changelog')
 }
@@ -1231,6 +1273,16 @@ export async function getFeatureToggles() {
   return apiFetch<import('../types').FeatureTogglesResponse>('/feature-toggles')
 }
 
+export async function getLightHealth() {
+  return apiFetch<{
+    status: string
+    app: string
+    env: string
+    resource_profile: string
+    started_at?: string
+  }>('/health')
+}
+
 export async function updateFeatureToggles(toggles: Record<string, boolean>) {
   return apiFetch<import('../types').FeatureTogglesResponse>('/feature-toggles', {
     method: 'PUT',
@@ -1256,6 +1308,10 @@ export async function applyResourceProfile(profile: string) {
 
 export async function getRetentionSettings() {
   return apiFetch<import('../types').RetentionSettings>('/settings/retention')
+}
+
+export async function getGeoIpStatus() {
+  return apiFetch<import('../types').GeoIpStatus>('/maintenance/geoip-status')
 }
 
 export async function updateRetentionSettings(data: Partial<import('../types').RetentionSettings>) {
@@ -1400,6 +1456,29 @@ export async function postWarperSingbox(action: 'start' | 'stop' | 'restart') {
 
 export async function getSecuritySettings() {
   return apiFetch<import('../types').SecuritySettings>('/security')
+}
+
+export async function getSecretsRotationCatalog() {
+  return apiFetch<import('../types').SecretRotationItem[]>('/security/secrets-rotation')
+}
+
+export async function previewSecretsRotation(secretId: string, value?: string) {
+  return apiFetch<import('../types').SecretRotationPreview>('/security/secrets-rotation/preview', {
+    method: 'POST',
+    body: JSON.stringify({ secret_id: secretId, value: value || undefined }),
+  })
+}
+
+export async function applySecretsRotation(payload: {
+  secret_id: string
+  new_value: string
+  preview_token: string
+  confirm: string
+}) {
+  return apiFetch<import('../types').SecretRotationApplyResult>('/security/secrets-rotation/apply', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export async function updateSecuritySettings(

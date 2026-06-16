@@ -12,7 +12,7 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.models import AppSetting
 from app.services.cron_schedule import cron_matches_now
-from app.services.noc_report import send_noc_report
+from app.services.noc_report import send_noc_report, send_weekly_pdf_report
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,15 @@ def run_noc_report_once(*, period: str, cron_expr: str, now: datetime | None = N
             return {"status": "skipped", "reason": "already_ran", "period": period}
 
         result = send_noc_report(db, period=period)
+        if period == "weekly" and settings.noc_report_weekly_pdf_enabled:
+            pdf_result = send_weekly_pdf_report(db)
+            result["pdf"] = pdf_result
+            if pdf_result.get("status") == "sent":
+                logger.info(
+                    "NOC weekly PDF sent to %d/%d admin(s)",
+                    pdf_result.get("sent", 0),
+                    pdf_result.get("recipients", 0),
+                )
         if result.get("status") == "sent":
             _set_setting(db, last_run_key, now.isoformat())
             logger.info(

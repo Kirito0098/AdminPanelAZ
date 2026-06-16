@@ -15,11 +15,11 @@ import {
   AreaChart,
   CartesianGrid,
   Legend,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
+import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import { getTrafficClientSessions } from '@/api/client'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import EmptyState from '@/components/ui/EmptyState'
@@ -47,6 +47,8 @@ import {
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficClientSessions } from '@/types'
+
+import { PercentBar } from '@/components/ui/percent-bar'
 
 const CHART_VPN = 'hsl(187, 72%, 45%)'
 const CHART_ANTIZAPRET = 'hsl(38, 92%, 50%)'
@@ -110,20 +112,22 @@ type SplitBarProps = {
   label: string
   value: number
   total: number
-  color: string
+  variant: 'vpn' | 'antizapret'
 }
 
-function SplitBar({ label, value, total, color }: SplitBarProps) {
-  const percent = total > 0 ? Math.min((value / total) * 100, 100) : 0
+function SplitBar({ label, value, total, variant }: SplitBarProps) {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
         <span className="text-muted-foreground">{label}</span>
         <span className="mono font-medium tabular-nums">{formatBytes(value)}</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-secondary">
-        <div className="h-full rounded-full transition-all duration-300" style={{ width: `${percent}%`, background: color }} />
-      </div>
+      <PercentBar
+        value={value}
+        max={total}
+        className="h-2"
+        barClassName={variant === 'vpn' ? 'fill-[hsl(187,72%,45%)]' : 'fill-[hsl(38,92%,50%)]'}
+      />
     </div>
   )
 }
@@ -403,12 +407,12 @@ export default function TrafficClientFocusPanel({
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-3 rounded-lg border p-4">
                 <p className="text-sm font-medium">Разбивка VPN / AntiZapret</p>
-                <SplitBar label="VPN" value={selectedRow.total_bytes_vpn} total={selectedRow.total_bytes} color={CHART_VPN} />
+                <SplitBar label="VPN" value={selectedRow.total_bytes_vpn} total={selectedRow.total_bytes} variant="vpn" />
                 <SplitBar
                   label="AntiZapret"
                   value={selectedRow.total_bytes_antizapret}
                   total={selectedRow.total_bytes}
-                  color={CHART_ANTIZAPRET}
+                  variant="antizapret"
                 />
                 <div className="grid grid-cols-2 gap-3 pt-1 text-xs text-muted-foreground">
                   <span>
@@ -464,15 +468,11 @@ export default function TrafficClientFocusPanel({
                       )}
                     </div>
                     {limitPercent != null && (
-                      <div className="h-2 overflow-hidden rounded-full bg-secondary">
-                        <div
-                          className={cn(
-                            'h-full rounded-full transition-all duration-300',
-                            policy.traffic_limit_exceeded ? 'bg-destructive' : 'bg-primary',
-                          )}
-                          style={{ width: `${limitPercent}%` }}
-                        />
-                      </div>
+                      <PercentBar
+                        value={limitPercent}
+                        className="h-2"
+                        barClassName={policy.traffic_limit_exceeded ? 'fill-destructive' : 'fill-primary'}
+                      />
                     )}
                     {policy.traffic_limit_unblock_label && (
                       <p className="text-xs text-muted-foreground">Разблокировка: {policy.traffic_limit_unblock_label}</p>
@@ -583,8 +583,9 @@ export default function TrafficClientFocusPanel({
                 {chartLoading ? (
                   <Spinner label="Загрузка графика..." className="py-10" />
                 ) : chartPoints.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={280}>
-                    <AreaChart data={chartPoints} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <ChartResponsive height={280}>
+                    {({ width, height }) => (
+                    <AreaChart width={width} height={height} data={chartPoints} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="focusTrafficVpn" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor={CHART_VPN} stopOpacity={0.35} />
@@ -616,17 +617,8 @@ export default function TrafficClientFocusPanel({
                           name === 'vpn' ? 'VPN' : 'AntiZapret',
                         ]}
                         labelFormatter={(label) => `Период: ${label}`}
-                        contentStyle={{
-                          borderRadius: '8px',
-                          border: '1px solid hsl(var(--border))',
-                          background: 'hsl(var(--popover))',
-                          fontSize: '12px',
-                        }}
                       />
-                      <Legend
-                        formatter={(value) => (value === 'vpn' ? 'VPN' : 'AntiZapret')}
-                        wrapperStyle={{ fontSize: '12px' }}
-                      />
+                      <Legend formatter={(value) => (value === 'vpn' ? 'VPN' : 'AntiZapret')} />
                       <Area
                         type="monotone"
                         dataKey="vpn"
@@ -646,7 +638,8 @@ export default function TrafficClientFocusPanel({
                         name="antizapret"
                       />
                     </AreaChart>
-                  </ResponsiveContainer>
+                    )}
+                  </ChartResponsive>
                 ) : (
                   <EmptyState
                     icon={BarChart3}

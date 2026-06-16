@@ -8,11 +8,11 @@ import {
   Legend,
   Line,
   LineChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
+import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import MonitoringChartCard, { MonitoringChartEmpty } from '@/components/monitoring/MonitoringChartCard'
 import {
   MONITORING_CHART_HEIGHT,
@@ -87,13 +87,14 @@ export default function MonitoringCharts({ data }: MonitoringChartsProps) {
         {history.length < 2 ? (
           <MonitoringChartEmpty>Ожидание данных... (минимум 2 обновления)</MonitoringChartEmpty>
         ) : (
-          <ResponsiveContainer width="100%" height={MONITORING_CHART_HEIGHT}>
-            <LineChart data={history}>
+          <ChartResponsive height={MONITORING_CHART_HEIGHT}>
+            {({ width, height }) => (
+          <LineChart width={width} height={height} data={history}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
               <XAxis dataKey="time" tick={{ fontSize: 11 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
               <Tooltip {...monitoringChartTooltipProps} />
-              <Legend wrapperStyle={{ fontSize: '12px' }} />
+              <Legend />
               <Line
                 type="monotone"
                 dataKey="ovpn"
@@ -119,13 +120,15 @@ export default function MonitoringCharts({ data }: MonitoringChartsProps) {
                 dot={false}
               />
             </LineChart>
-          </ResponsiveContainer>
+            )}
+          </ChartResponsive>
         )}
       </MonitoringChartCard>
 
       <MonitoringChartCard title="Активные подключения" description="По протоколу" icon={BarChart3}>
-        <ResponsiveContainer width="100%" height={MONITORING_CHART_HEIGHT}>
-          <BarChart data={connectionsBar}>
+        <ChartResponsive height={MONITORING_CHART_HEIGHT}>
+          {({ width, height }) => (
+        <BarChart width={width} height={height} data={connectionsBar}>
             <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
             <XAxis dataKey="name" tick={{ fontSize: 11 }} />
             <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
@@ -136,7 +139,8 @@ export default function MonitoringCharts({ data }: MonitoringChartsProps) {
               ))}
             </Bar>
           </BarChart>
-        </ResponsiveContainer>
+          )}
+        </ChartResponsive>
       </MonitoringChartCard>
     </div>
   )

@@ -73,6 +73,23 @@ async def edit_message_text(
     return (await call_bot_api(bot_token, "editMessageText", payload=payload)) is not None
 
 
+async def answer_inline_query(
+    bot_token: str,
+    inline_query_id: str,
+    results: list[dict[str, Any]],
+    *,
+    cache_time: int = 0,
+    is_personal: bool = True,
+) -> bool:
+    payload: dict[str, Any] = {
+        "inline_query_id": inline_query_id,
+        "results": results,
+        "cache_time": max(0, int(cache_time)),
+        "is_personal": is_personal,
+    }
+    return (await call_bot_api(bot_token, "answerInlineQuery", payload=payload)) is not None
+
+
 async def answer_callback_query(
     bot_token: str,
     callback_query_id: str,
@@ -90,7 +107,7 @@ async def answer_callback_query(
 async def set_webhook(bot_token: str, url: str, *, secret_token: str | None = None) -> tuple[bool, str]:
     payload: dict[str, Any] = {
         "url": url,
-        "allowed_updates": ["message", "callback_query"],
+        "allowed_updates": ["message", "callback_query", "inline_query", "chosen_inline_result"],
         "drop_pending_updates": True,
     }
     if secret_token:
@@ -142,7 +159,7 @@ def delete_webhook_sync(bot_token: str) -> tuple[bool, str]:
 def set_webhook_sync(bot_token: str, url: str, *, secret_token: str | None = None) -> tuple[bool, str]:
     payload: dict[str, Any] = {
         "url": url,
-        "allowed_updates": ["message", "callback_query"],
+        "allowed_updates": ["message", "callback_query", "inline_query", "chosen_inline_result"],
         "drop_pending_updates": True,
     }
     if secret_token:

@@ -196,6 +196,7 @@ export interface OpenVpnClient {
   geo_label?: string | null
   node_id?: number | null
   node_name?: string | null
+  ha?: VpnConfigHaInfo | null
 }
 
 export interface WireGuardPeer {
@@ -216,6 +217,7 @@ export interface WireGuardPeer {
   geo_label?: string | null
   node_id?: number | null
   node_name?: string | null
+  ha?: VpnConfigHaInfo | null
 }
 
 export interface MonitoringNodeSummary {
@@ -262,6 +264,39 @@ export interface NodePolicySummary {
   wireguard_policies: number
   blocked_clients: number
   traffic_limited_clients: number
+  default_openvpn_limit_human?: string | null
+  default_wireguard_limit_human?: string | null
+  default_route_mode?: string | null
+}
+
+export interface NodeDefaultLimits {
+  limit_value?: number | null
+  limit_unit?: string | null
+  limit_period_days?: number | null
+  limit_human?: string | null
+  limit_period_label?: string | null
+}
+
+export interface NodeDefaultPolicy {
+  node_id: number
+  node_name: string
+  route_mode?: string | null
+  openvpn: NodeDefaultLimits
+  wireguard: NodeDefaultLimits
+  updated_at?: string | null
+  updated_by?: string | null
+}
+
+export interface NodeDefaultPolicyUpdate {
+  route_mode?: string | null
+  openvpn_limit_value?: number | null
+  openvpn_limit_unit?: string | null
+  openvpn_limit_period_days?: number | null
+  openvpn_clear_limit?: boolean
+  wireguard_limit_value?: number | null
+  wireguard_limit_unit?: string | null
+  wireguard_limit_period_days?: number | null
+  wireguard_clear_limit?: boolean
 }
 
 export interface GlobalDashboardSummary {
@@ -354,6 +389,36 @@ export interface MonitorSettings {
   cooldown_minutes: number
 }
 
+export interface AlertMetricInfo {
+  id: string
+  label: string
+  requires_node: boolean
+}
+
+export interface AlertRule {
+  id: number
+  name: string
+  metric: string
+  operator: string
+  threshold: number
+  node_id: number | null
+  cooldown_minutes: number
+  enabled: boolean
+  last_triggered_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AlertRuleCreatePayload {
+  name: string
+  metric: string
+  operator?: string
+  threshold: number
+  node_id?: number | null
+  cooldown_minutes?: number
+  enabled?: boolean
+}
+
 export interface RetentionSettings {
   enabled: boolean
   interval_hours: number
@@ -361,6 +426,15 @@ export interface RetentionSettings {
   action_log_retention_days: number
   resource_metrics_retention_days: number
   panel_resource_metrics_retention_days: number
+}
+
+export interface GeoIpStatus {
+  loaded: boolean
+  source: 'local' | 'ip-api'
+  city_mmdb_path: string | null
+  asn_mmdb_path: string | null
+  city_mmdb_exists: boolean
+  asn_mmdb_exists: boolean
 }
 
 export interface RouteBudgetInfo {
@@ -916,6 +990,50 @@ export interface SecuritySettings {
   qr_download_max_downloads: number
   qr_download_pin_set: boolean
   public_download_enabled: boolean
+}
+
+export interface SecretRotationItem {
+  secret_id: string
+  label: string
+  description: string
+  storage: string
+  env_key?: string | null
+  env_path?: string | null
+  configured: boolean
+  masked_current: string
+  auto_generate: boolean
+  requires_restart: boolean
+  requires_relogin: boolean
+}
+
+export interface SecretRotationEnvChangePreview {
+  path: string
+  key: string
+  masked_new_value: string
+}
+
+export interface SecretRotationPreview {
+  secret_id: string
+  label: string
+  new_value: string
+  masked_new_value: string
+  masked_current: string
+  preview_token: string
+  confirm_phrase: string
+  warnings: string[]
+  env_change?: SecretRotationEnvChangePreview | null
+  storage: string
+  requires_relogin: boolean
+  requires_restart: boolean
+}
+
+export interface SecretRotationApplyResult {
+  secret_id: string
+  label: string
+  message: string
+  requires_relogin: boolean
+  next_steps: string[]
+  reencrypt_stats?: Record<string, number> | null
 }
 
 export interface OpenVpnGroupOption {

@@ -14,18 +14,27 @@ from app.models import Node, NodeStatus, UserTrafficSample
 
 settings = get_settings()
 
+_APP_STARTED_AT: str = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+
+
+def mark_app_started() -> None:
+    global _APP_STARTED_AT
+    _APP_STARTED_AT = _utcnow_iso()
+
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 def build_light_health() -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "status": "ok",
         "app": settings.app_name,
         "env": settings.app_env,
         "resource_profile": settings.resource_profile,
+        "started_at": _APP_STARTED_AT,
     }
+    return payload
 
 
 def _sqlite_ok(engine, label: str) -> dict[str, Any]:

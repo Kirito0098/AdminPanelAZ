@@ -13,16 +13,16 @@
 |------|----------|--------|-------------|
 | **1** | Prod foundation | ✅ | Все 1.1–1.8; промпты — для доработок/regression |
 | **2** | Admin productivity | ✅ | Теги, шаблоны, bulk, AWG tab, сессии |
-| **3** | Multi-node обзор | ✅ | 3.4 per-node — ◐ (сводка, без wizard лимитов) |
+| **3** | Multi-node обзор | ✅ | 3.4 per-node wizard — ✅ |
 | **4** | CIDR безопасность | ✅ | dry-run, rollback, custom provider |
-| **5** | Node Sync / HA | ◐ | MVP + v2 в коде; ◐ NOC по HA-группам |
+| **5** | Node Sync / HA | ✅ | MVP + v2 + NOC HA-агрегация |
 | **6** | Self-service | ✅ | web + TG + reminders |
-| **7** | Мониторинг и алерты | ◐ | GeoIP ◐ (нужны MMDB); 7.3–7.4 ⬜ |
+| **7** | Мониторинг и алерты | ✅ | GeoIP onboarding, alert rules, PDF weekly |
 | **8** | Ops и интеграции | ✅ | runbook, CSV, rolling update, OpenAPI, webhooks, mini app |
-| **9** | Security / enterprise | ◐ | passkeys + audit ✅; CSP ◐; secrets rotation ⬜ |
-| **10** | Масштаб | ⬜ | i18n бота ◐; PG / plugin / inline ⬜ |
+| **9** | Security / enterprise | ✅ | passkeys, audit, CSP, secrets rotation |
+| **10** | Масштаб | ◐ | i18n бота ◐; PG ⬜; plugin + inline ✅ |
 
-**Что делать дальше (по приоритету backlog):** см. **[Backlog-otkryto.md](Backlog-otkryto.md)** — 7.3 · 5.6 · 7.1 · 9.1 · 9.4 · 10.1…
+**Что делать дальше (по приоритету backlog):** см. **[Backlog-otkryto.md](Backlog-otkryto.md)** — 10.1 · 10.2
 
 ---
 
@@ -239,7 +239,7 @@ cd backend && .venv/bin/pytest tests/ -q -k "tag or template or session or bulk"
 **Режим:** Ask → Agent  
 **DoD:** [Idei.md § Этап 3](Idei.md#этап-3--multi-node-обзор) — закрыт  
 
-> ◐ **3.4:** `NodePolicySummarySection` — сводка политик; отдельный UI задания лимитов EU/RU — backlog.
+> ✅ **3.4:** `NodePolicyWizard`, `NodePolicySummarySection` — per-node policy edit wizard.
 
 ### Подготовка (Ask)
 
@@ -310,14 +310,13 @@ cd backend && .venv/bin/pytest tests/ -q -k "cidr_pipeline or cidr_db_deploy"
 
 ---
 
-# Этап 5 — Node Sync / HA · ◐ **частично**
+# Этап 5 — Node Sync / HA · ✅ **реализовано**
 
 **Зависимости:** Этап 1; желательно Этап 3  
 **Режим:** Plan (обязательно) → Agent по подзадачам 5.1→5.3  
-**DoD MVP:** закрыт · **DoD v2:** закрыт, кроме NOC HA-агрегации  
+**DoD MVP:** закрыт · **DoD v2:** закрыт (включая NOC HA-агрегацию)  
 
-> ✅ MVP + v2: [`NodeSync.md`](NodeSync.md), `services/node_sync/*`, `NodeSyncGroupSection`.  
-> ◐ **5.6:** Dashboard HA badge есть; federated NOC пока по узлам, не по sync group.
+> ✅ MVP + v2 + 5.6: [`NodeSync.md`](NodeSync.md), `services/node_sync/*`, `NodeSyncGroupSection`, federated NOC по sync group.
 
 ### Подготовка (Plan)
 
@@ -407,13 +406,13 @@ cd backend && .venv/bin/pytest tests/ -q -k "telegram or tg_mini or traffic_limi
 
 ---
 
-# Этап 7 — Мониторинг и алерты · ◐ **частично**
+# Этап 7 — Мониторинг и алерты · ✅ **реализовано**
 
 **Зависимости:** Этап 1  
 **Режим:** Agent  
-**DoD:** [Idei.md § Этап 7](Idei.md#этап-7--мониторинг-и-алерты) — частично  
+**DoD:** [Idei.md § Этап 7](Idei.md#этап-7--мониторинг-и-алерты) — закрыт  
 
-> ✅ **7.2** `noc_report_scheduler.py` · ◐ **7.1** `geoip_local.py` (положите MMDB в `data/geoip/`) · ⬜ **7.3** alert rules · ⬜ **7.4** PDF reports  
+> ✅ **7.1** GeoIP onboarding · **7.2** `noc_report_scheduler.py` · **7.3** alert rules · **7.4** PDF weekly reports
 
 ### Промпт — доработка 7.1 (MMDB onboarding)
 
@@ -485,13 +484,13 @@ cd backend && .venv/bin/pytest tests/ -q -k "site_diagnostics or backup or webho
 
 ---
 
-# Этап 9 — Security / enterprise · ◐ **частично**
+# Этап 9 — Security / enterprise · ✅ **реализовано**
 
 **Зависимости:** Этап 1; перед публичным prod  
 **Режим:** Plan (CSP) → Agent  
-**DoD:** [Idei.md § Этап 9](Idei.md#этап-9--security--enterprise) — частично  
+**DoD:** [Idei.md § Этап 9](Idei.md#этап-9--security--enterprise) — закрыт  
 
-> ✅ passkeys, audit SIEM · ◐ CSP nonce (scripts ok, styles inline) · ⬜ secrets rotation wizard  
+> ✅ passkeys, audit SIEM, CSP hardening, secrets rotation wizard
 
 ### Промпт — доработка 9.1 (CSP styles)
 
@@ -526,13 +525,13 @@ cd backend && .venv/bin/pytest tests/ -q -k "security or http_security"
 
 ---
 
-# Этап 10 — Масштаб · ⬜ **не начато** (i18n бота ◐)
+# Этап 10 — Масштаб · ◐ **частично** (i18n бота ◐, PG ⬜)
 
 **Зависимости:** метрики SQLite bottleneck  
 **Режим:** Plan (обязательно для 10.1) → Agent  
-**DoD:** [Idei.md § Этап 10](Idei.md#этап-10--масштаб-и-экосистема) — открыт  
+**DoD:** [Idei.md § Этап 10](Idei.md#этап-10--масштаб-и-экосистема) — частично  
 
-> ⬜ PostgreSQL, plugin, inline bot · ◐ `telegram_bot_i18n.py` без веб-locale
+> ⬜ PostgreSQL · ◐ `telegram_bot_i18n.py` без веб-locale · ✅ plugin registry · ✅ inline bot
 
 ### Подготовка (Plan)
 

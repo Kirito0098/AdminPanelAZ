@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     content_security_policy: str = (
         "default-src 'self'; "
         "script-src 'self' https://telegram.org; "
-        "style-src 'self' 'unsafe-inline'; "
+        "style-src 'self'; "
         "img-src 'self' data: blob:; "
         "connect-src 'self' ws: wss:; "
         "frame-src 'self' https://oauth.telegram.org; "
@@ -144,6 +144,11 @@ class Settings(BaseSettings):
     noc_report_check_interval_seconds: int = 60
     noc_report_daily_cron: str = "0 8 * * *"
     noc_report_weekly_cron: str = "0 9 * * 1"
+    noc_report_weekly_pdf_enabled: bool = True
+    noc_report_weekly_pdf_tg_enabled: bool = True
+    noc_report_weekly_pdf_top_clients: int = 10
+    alert_rules_enabled: bool = True
+    alert_rules_check_interval_seconds: int = 60
     openapi_docs_enabled: bool = True
     openapi_docs_allowed_ips: str = ""
     config_csv_import_async_threshold: int = 100

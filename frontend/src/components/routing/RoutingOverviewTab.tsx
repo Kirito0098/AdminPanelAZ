@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { getRouteBudget } from '@/api/client'
 import MetricCard from '@/components/noc/MetricCard'
 import StatusPanel from '@/components/noc/StatusPanel'
+import { PercentBar } from '@/components/ui/percent-bar'
 import { Badge } from '@/components/ui/badge'
 import type { AntifilterStatus, CidrDbStatus, RouteBudgetInfo, RoutingOverview } from '@/types'
 import { formatDt, statusBadgeVariant, statusLabel } from './utils'
@@ -40,14 +41,11 @@ export default function RoutingOverviewTab({ data, cidrDb, antifilter }: Routing
               осталось {routeBudget.remaining ?? 0} из {routeBudget.limit}
             </Badge>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full bg-primary transition-all"
-              style={{
-                width: `${Math.min(100, Math.round(((routeBudget.used ?? 0) / Math.max(routeBudget.limit, 1)) * 100))}%`,
-              }}
-            />
-          </div>
+          <PercentBar
+            value={routeBudget.used ?? 0}
+            max={Math.max(routeBudget.limit ?? 1, 1)}
+            className="h-2"
+          />
           {routeBudget.warning && (
             <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{routeBudget.warning}</p>
           )}

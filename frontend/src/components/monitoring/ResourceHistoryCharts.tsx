@@ -7,11 +7,11 @@ import {
   Legend,
   Line,
   LineChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
+import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
@@ -149,8 +149,9 @@ export default function ResourceHistoryCharts({
 
               <div>
                 <p className="mb-2 text-sm font-medium">Загрузка CPU / RAM / Диск (%)</p>
-                <ResponsiveContainer width="100%" height={280}>
-                  <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <ChartResponsive height={280}>
+                  {({ width, height }) => (
+                <AreaChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="resCpu" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor={CHART_CPU} stopOpacity={0.3} />
@@ -191,18 +192,11 @@ export default function ResourceHistoryCharts({
                         return [`${Number(value).toFixed(1)}%`, labels[name] ?? name]
                       }}
                       labelFormatter={(label) => `Время: ${label}`}
-                      contentStyle={{
-                        borderRadius: '8px',
-                        border: '1px solid hsl(var(--border))',
-                        background: 'hsl(var(--popover))',
-                        fontSize: '12px',
-                      }}
                     />
                     <Legend
                       formatter={(value) =>
                         value === 'cpu' ? 'CPU' : value === 'memory' ? 'RAM' : 'Диск'
                       }
-                      wrapperStyle={{ fontSize: '12px' }}
                     />
                     <Area type="monotone" dataKey="cpu" name="cpu" stroke={CHART_CPU} fill="url(#resCpu)" strokeWidth={2} />
                     <Area
@@ -222,14 +216,16 @@ export default function ResourceHistoryCharts({
                       strokeWidth={2}
                     />
                   </AreaChart>
-                </ResponsiveContainer>
+                  )}
+                </ChartResponsive>
               </div>
 
               {chartData.some((p) => p.load_1 != null) && (
                 <div>
                   <p className="mb-2 text-sm font-medium">Load average (1 мин)</p>
-                  <ResponsiveContainer width="100%" height={180}>
-                    <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <ChartResponsive height={180}>
+                    {({ width, height }) => (
+                  <LineChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
                       <XAxis
                         dataKey="label"
@@ -242,12 +238,6 @@ export default function ResourceHistoryCharts({
                       <Tooltip
                         formatter={(value: number) => [Number(value).toFixed(2), 'Load 1m']}
                         labelFormatter={(label) => `Время: ${label}`}
-                        contentStyle={{
-                          borderRadius: '8px',
-                          border: '1px solid hsl(var(--border))',
-                          background: 'hsl(var(--popover))',
-                          fontSize: '12px',
-                        }}
                       />
                       <Line
                         type="monotone"
@@ -258,7 +248,8 @@ export default function ResourceHistoryCharts({
                         dot={false}
                       />
                     </LineChart>
-                  </ResponsiveContainer>
+                    )}
+                  </ChartResponsive>
                 </div>
               )}
             </div>

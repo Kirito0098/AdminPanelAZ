@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Puzzle, RefreshCw, Save } from 'lucide-react'
-import { ApiError, applyResourceProfile, getFeatureToggles, getResourceProfiles, updateFeatureToggles } from '@/api/client'
+import { ApiError, applyResourceProfile, getFeatureToggles, getLightHealth, getResourceProfiles, updateFeatureToggles } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
@@ -12,6 +12,13 @@ import { useNotifications } from '@/context/NotificationContext'
 import type { FeatureToggleItem, ResourceProfileImpact, ResourceProfileItem } from '@/types'
 
 const RESTART_BANNER_KEY = 'featureTogglesPendingRestart'
+const RESTART_BANNER_AT_KEY = 'featureTogglesPendingRestartAt'
+
+function parseIsoMs(value: string | null | undefined): number | null {
+  if (!value) return null
+  const ms = Date.parse(value)
+  return Number.isNaN(ms) ? null : ms
+}
 
 function workerLabel(key: string): string {
   const labels: Record<string, string> = {
@@ -44,7 +51,29 @@ export default function FeatureTogglesTab() {
 
   const markRestartPending = () => {
     sessionStorage.setItem(RESTART_BANNER_KEY, '1')
+    sessionStorage.setItem(RESTART_BANNER_AT_KEY, new Date().toISOString())
     setPendingRestart(true)
+  }
+
+  const clearRestartPending = () => {
+    sessionStorage.removeItem(RESTART_BANNER_KEY)
+    sessionStorage.removeItem(RESTART_BANNER_AT_KEY)
+    setPendingRestart(false)
+  }
+
+  const syncRestartBanner = async () => {
+    if (sessionStorage.getItem(RESTART_BANNER_KEY) !== '1') return
+    const pendingAtMs = parseIsoMs(sessionStorage.getItem(RESTART_BANNER_AT_KEY))
+    if (pendingAtMs == null) return
+    try {
+      const health = await getLightHealth()
+      const startedAtMs = parseIsoMs(health.started_at)
+      if (startedAtMs != null && startedAtMs >= pendingAtMs) {
+        clearRestartPending()
+      }
+    } catch {
+      // health check is best-effort; banner can be dismissed manually
+    }
   }
 
   const load = async () => {
@@ -55,6 +84,7 @@ export default function FeatureTogglesTab() {
       setDraft(Object.fromEntries(data.items.map((item) => [item.key, item.enabled])))
       setProfiles(profileData.items)
       setCurrentProfile(profileData.current_profile)
+      await syncRestartBanner()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить модули')
     } finally {
@@ -130,10 +160,17 @@ export default function FeatureTogglesTab() {
       <InlineProgressBar active={saving || applyingProfile !== null} label="Сохранение модулей..." />
 
       {pendingRestart && (
-        <SettingsAlert variant="warning" title="Перезапустите панель">
-          Изменения профиля или модулей записаны в <code className="text-xs">backend/.env</code>. Фоновые задачи
-          (traffic, CIDR, metrics) подхватятся только после перезапуска сервиса панели.
-        </SettingsAlert>
+        <div className="space-y-2">
+          <SettingsAlert variant="warning" title="Перезапустите панель">
+            Изменения профиля или модулей записаны в <code className="text-xs">backend/.env</code>. Фоновые задачи
+            (traffic, CIDR, metrics) подхватятся только после перезапуска сервиса панели.
+          </SettingsAlert>
+          <div className="flex justify-end">
+            <Button type="button" size="sm" variant="secondary" onClick={clearRestartPending}>
+              Перезапуск выполнен
+            </Button>
+          </div>
+        </div>
       )}
 
       <Card>

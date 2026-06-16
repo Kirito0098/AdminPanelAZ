@@ -165,6 +165,19 @@ def human_bytes(value: int | None) -> str | None:
     return f"{amount:.1f} {units[idx]}"
 
 
+def bytes_to_limit_parts(limit_bytes: int | None) -> tuple[float | None, str | None]:
+    if limit_bytes is None or limit_bytes < 1:
+        return None, None
+    for unit in ("tb", "gb", "mb", "kb", "b"):
+        multiplier = TRAFFIC_LIMIT_UNITS[unit]
+        if limit_bytes >= multiplier and limit_bytes % multiplier == 0:
+            value = limit_bytes / multiplier
+            if unit == "b":
+                return float(int(value)), "B"
+            return float(int(value)) if value == int(value) else value, unit.upper()
+    return float(limit_bytes), "B"
+
+
 def resolve_traffic_limit_state(*, traffic_limit_bytes, traffic_limit_period_days=None, consumed_bytes):
     limit = int(traffic_limit_bytes) if traffic_limit_bytes is not None else None
     consumed = max(int(consumed_bytes or 0), 0)

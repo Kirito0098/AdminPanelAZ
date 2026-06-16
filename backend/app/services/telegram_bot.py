@@ -35,6 +35,7 @@ from app.services.telegram_bot_handlers.ui import handle_unknown_text, nav_foote
 from app.services.telegram_bot_handlers.status import handle_status
 from app.services.telegram_bot_handlers.warper_status import handle_warper_status
 from app.services.telegram_bot_handlers.traffic import handle_traffic
+from app.services.telegram_bot_handlers.inline import handle_chosen_inline_result, handle_inline_query
 from app.services.telegram_bot_command_rate_limit import telegram_bot_command_rate_limit_service
 from app.services import telegram_bot_i18n as i18n
 
@@ -191,6 +192,16 @@ class TelegramBotService:
             await self._handle_callback(db, callback, mini_app_url=mini_app_url)
             return
 
+        inline_query = update.get("inline_query")
+        if inline_query:
+            await self._handle_inline_query(db, inline_query, mini_app_url=mini_app_url)
+            return
+
+        chosen = update.get("chosen_inline_result")
+        if chosen:
+            await self._handle_chosen_inline_result(db, chosen, mini_app_url=mini_app_url)
+            return
+
         message = update.get("message") or update.get("edited_message")
         if not message:
             return
@@ -254,6 +265,49 @@ class TelegramBotService:
             return
 
         await _dispatch_callback(ctx, data, message_id=message_id)
+
+    async def _handle_inline_query(
+        self,
+        db: Session,
+        inline_query: dict[str, Any],
+        *,
+        mini_app_url: str,
+    ) -> None:
+        from_user = inline_query.get("from") or {}
+        telegram_user_id = str(from_user.get("id", ""))
+        if not telegram_user_id:
+            return
+
+        ctx = _build_context(
+            db,
+            chat_id=telegram_user_id,
+            telegram_user_id=telegram_user_id,
+            mini_app_url=mini_app_url,
+        )
+        await handle_inline_query(ctx, inline_query)
+
+    async def _handle_chosen_inline_result(
+        self,
+        db: Session,
+        chosen: dict[str, Any],
+        *,
+        mini_app_url: str,
+    ) -> None:
+        from_user = chosen.get("from") or {}
+        telegram_user_id = str(from_user.get("id", ""))
+        if not telegram_user_id:
+            return
+
+        ctx = _build_context(
+            db,
+            chat_id=telegram_user_id,
+            telegram_user_id=telegram_user_id,
+            mini_app_url=mini_app_url,
+        )
+        if ctx.user is None:
+            return
+
+        await handle_chosen_inline_result(ctx, chosen)
 
 
 telegram_bot_service = TelegramBotService()

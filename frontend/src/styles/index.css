@@ -85,4 +85,70 @@
 .recharts-default-tooltip .recharts-tooltip-item-value,
 .recharts-default-tooltip .recharts-tooltip-item-separator {
   color: hsl(var(--popover-foreground)) !important;
+  font-size: 12px;
+}
+
+.recharts-tooltip-wrapper {
+  outline: none !important;
+  z-index: 50;
+}
+
+.recharts-legend-wrapper {
+  font-size: 12px;
+}
+
+.monitoring-chart-panel {
+  min-height: 220px;
+}
+
+.monitoring-chart-frame {
+  height: 220px;
+}
+
+.chart-responsive[data-h='180'] {
+  height: 180px;
+}
+
+.chart-responsive[data-h='220'] {
+  height: 220px;
+}
+
+.chart-responsive[data-h='240'] {
+  height: 240px;
+}
+
+.chart-responsive[data-h='280'] {
+  height: 280px;
+}
+
+.chart-responsive[data-h='300'] {
+  height: 300px;
+}
+
+.monitoring-slice-dot-0 {
+  background-color: hsl(187, 72%, 45%);
+}
+
+.monitoring-slice-dot-1 {
+  background-color: hsl(142, 71%, 45%);
+}
+
+.monitoring-slice-dot-2 {
+  background-color: hsl(217, 33%, 55%);
+}
+
+.monitoring-slice-dot-3 {
+  background-color: hsl(38, 92%, 50%);
+}
+
+.monitoring-slice-dot-4 {
+  background-color: hsl(280, 65%, 55%);
+}
+
+.monitoring-slice-dot-5 {
+  background-color: hsl(0, 72%, 58%);
+}
+
+.monitoring-slice-dot-6 {
+  background-color: hsl(210, 16%, 46%);
 }

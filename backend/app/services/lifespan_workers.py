@@ -21,6 +21,7 @@ from app.services.traffic.worker import run_traffic_collector_loop
 from app.services.wg_policy_sync_worker import run_wg_policy_sync_loop
 from app.services.user_reminder_worker import run_user_reminder_loop
 from app.services.noc_report_scheduler import run_noc_report_scheduler_loop
+from app.services.alert_rule_worker import run_alert_rules_loop
 from app.services.webhook_delivery_worker import run_webhook_delivery_loop
 from app.services.worker_lifecycle import (
     should_start_backup_scheduler,
@@ -39,6 +40,7 @@ from app.services.worker_lifecycle import (
     should_start_node_sync_reconcile,
     should_start_user_reminders,
     should_start_noc_report_scheduler,
+    should_start_alert_rules_worker,
 )
 
 TaskFactory = Callable[[], asyncio.Task]
@@ -63,6 +65,7 @@ def get_worker_startup_plan() -> dict[str, bool]:
         "resource_monitor": should_start_resource_monitor(),
         "user_reminders": should_start_user_reminders(),
         "noc_report_scheduler": should_start_noc_report_scheduler(),
+        "alert_rules": should_start_alert_rules_worker(),
     }
 
 
@@ -115,6 +118,8 @@ def spawn_background_tasks(
         tasks["user_reminders"] = create_task(run_user_reminder_loop())
     if plan["noc_report_scheduler"]:
         tasks["noc_report_scheduler"] = create_task(run_noc_report_scheduler_loop())
+    if plan["alert_rules"]:
+        tasks["alert_rules"] = create_task(run_alert_rules_loop())
 
     tasks["webhook_delivery"] = create_task(run_webhook_delivery_loop())
 

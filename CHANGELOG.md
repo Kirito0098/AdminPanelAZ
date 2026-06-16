@@ -7,11 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-16
+
 ### Added
+
+#### Backlog 2026-06-16 (этапы 3, 5, 7, 9, 10)
+
+- **Правила алертов (7.3)** — модель `AlertRule` (метрика, оператор, порог, cooldown, optional `node_id`); worker `alert_rule_worker.py` на DB aggregates (`ovpn_online_total`, `wg_online_total`, `nodes_offline`, `node_offline_seconds`, `traffic_collector_lag_seconds`); AdminNotify при срабатывании (`event_type=alert_rule`); UI **Настройки → Мониторинг и алерты** (`AlertRulesCard`); API `/api/alert-rules` (admin CRUD + `/metrics` + `/evaluate`).
+- **HA в NOC (5.6)** — federated overview (`scope=all`) дедуплицирует online-клиентов по `NodeSyncGroup` / `ha_primary_config_id`: одна строка на logical HA client, badge `HA: {domain} ({N} узл.)`; сводные totals — deduped, per-node summary — raw.
+- **GeoIP onboarding (7.1)** — [`docs/GeoIP.md`](docs/GeoIP.md): инструкция загрузки GeoLite2 City+ASN в `data/geoip/`; `GET /api/maintenance/geoip-status`; карточка статуса в **Настройки → Обслуживание** («GeoIP: loaded / fallback ip-api»).
+- **Weekly PDF-отчёты NOC (7.4)** — `noc_report_pdf.py` (reportlab): top clients (7д), инциденты из `AlertRule`, CIDR failures; cron на weekly tick; опциональная доставка PDF в TG (`send_tg_document`); env `NOC_REPORT_WEEKLY_PDF_*`.
+- **Wizard политик per-node (3.4)** — дефолтные лимиты/маршруты EU vs RU через `OpenVpnAccessPolicy` / `WgAccessPolicy` (sentinel `__node_default__`); API `GET/PUT /api/client-access/node-defaults/{node_id}`; `NodeDefaultPolicyWizard` на странице **Узлы**.
+- **Secrets rotation wizard (9.4)** — guided flow preview → confirm (`ROTATE`) → write для `SECRET_KEY`, `NODE_AGENT_API_KEY`, `telegram_bot_token`; re-login warning после смены JWT secret; re-encrypt node keys/TOTP; UI **Настройки → Безопасность** (`SecretsRotationWizard`); обновлены `SECURITY.md`, `README.md`.
+- **Plugin / hook registry (10.3)** — `plugin_registry.py`, `notify_backends.py`: `register_notify_backend`, `dispatch_admin_notify`; AdminNotify через registry (default: `telegram`); пример `notify_backend_example.py`.
+- **Telegram inline mode (10.4)** — `@bot query` → Mini App link / config file (`InlineQueryResultDocument`); TTL-кэш 60 с; webhook `inline_query` + `chosen_inline_result`; строки в `telegram_bot_i18n.py`.
+
+#### Установка и CI
+
 - **Простая установка (`install-easy.sh`)** — отдельный установщик для начинающих: понятные вопросы с пояснениями, минимум технических терминов. Мастер [`scripts/install-easy-wizard.sh`](scripts/install-easy-wizard.sh): тип установки (панель / панель+VPN / node agent), доступ в браузере (свой домен / DuckDNS / только локально), логин и пароль, размер сервера (1 GB / 2 GB+), автозапуск systemd и firewall. Меню: установка, удаление, переход к полному `install.sh`, справка. Флаг `--easy` в [`install.sh`](install.sh) вызывает тот же мастер.
 - **CI — install smoke** — job `install-smoke` в GitHub Actions: non-interactive установка через systemd, проверка `/api/health`, `/api/health/deep` и статики frontend; скрипт [`scripts/install-smoke-test.sh`](scripts/install-smoke-test.sh).
 
+#### Frontend (CSP-safe)
+
+- **`PercentBar`** — SVG progress fill без inline `style` (CSP-safe).
+- **`ChartResponsive`** — sizing Recharts через ResizeObserver без inline width/height.
+
+#### Тесты
+
+- `test_alert_rules.py`, `test_monitoring_overview_ha.py`, `test_node_default_policy.py`, `test_secrets_rotation.py`, `test_plugin_registry.py`, `test_telegram_inline.py`; расширены `test_ip_geo.py`, `test_http_security.py`, `test_noc_report.py`.
+
 ### Changed
+
+#### Backlog 2026-06-16
+
+- **CSP hardening (9.1)** — `style-src 'self'` (убран `'unsafe-inline'`); inline styles во frontend заменены на Tailwind/CSS/`PercentBar`/`ChartResponsive`; nonce для `script-src` без изменений.
+- **NOC federated overview** — HA aggregation в `build_federated_monitoring_overview`; поиск на `MonitoringPage` включает HA domain.
+- **AdminNotify** — доставка через hook registry (`dispatch_admin_notify`) вместо прямого цикла `send_tg_message`.
+- **Документация roadmap** — этапы 5, 7, 9 закрыты; обновлены [`docs/Backlog-otkryto.md`](docs/Backlog-otkryto.md), [`docs/Idei.md`](docs/Idei.md), [`docs/Etapy-prompty.md`](docs/Etapy-prompty.md). Открыто: **10.1** PostgreSQL, **10.2** i18n веб-панели.
+
+#### Установка
+
 - **README — установка** — простой установщик (`install-easy.sh`) указан первым в «Быстром старте»; полный `install.sh` — для расширенных настроек.
 - **Установка — non-interactive** — автогенерация пароля администратора, профиль **Minimal**, отключение локального AntiZapret, синхронизация admin в БД без интерактивного мастера; `--with-systemd` / `--with-daemon` переопределяют режим запуска из CLI.
 - **Мастер установки — defaults** — при `WIZ_ACCEPT_DEFAULTS`: Nginx пропускается (localhost), systemd, 1 uvicorn worker.
@@ -22,12 +57,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Установка — Let's Encrypt** — при недоступном DNS/порте 80 установка продолжается без HTTPS (`NGINX_FAIL_SOFT`); подсказка про `./scripts/nginx-setup.sh`.
 - **Мастер установки** — безопасные значения по умолчанию для `WIZ_TELEGRAM_*` / `WIZ_AUTO_BACKUP_*` при seed в БД.
 
+### Security
+- **CSP** — `style-src 'self'` на основных страницах; scripts — nonce (без изменений).
+- **Secrets rotation** — guided wizard с явным подтверждением `ROTATE`; без silent overwrite `.env`.
+
 ### Dependencies
+- **reportlab** — 4.2.5 (weekly NOC PDF).
 - **cryptography** — 44.0.0 → 46.0.3.
 
 ## [2.0.0] - 2026-06-16
 
-Major release: roadmap этапы 1–8 (и большая часть 9) — prod foundation, admin productivity, multi-node, CIDR safety, Node Sync HA, self-service, ops/security. Открытые пункты: [docs/Backlog-otkryto.md](docs/Backlog-otkryto.md).
+Major release: roadmap этапы 1–8 (и большая часть 9) — prod foundation, admin productivity, multi-node, CIDR safety, Node Sync HA, self-service, ops/security. Открытые пункты roadmap — см. [docs/Backlog-otkryto.md](docs/Backlog-otkryto.md).
 
 ### Added
 
@@ -554,7 +594,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 - Production-развёртывание: `install.sh`, daemon/watchdog, systemd, раздача UI из backend в prod-режиме.
 - OpenVPN management sockets, vnStat, WebSocket-мониторинг, Telegram Mini App, in-panel pytest.
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.9.0...v2.0.0
 [1.9.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.7.0...v1.8.0

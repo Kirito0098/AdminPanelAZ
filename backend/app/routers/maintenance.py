@@ -16,6 +16,7 @@ from app.schemas import (
     AdminNotifySettingsResponse,
     AdminNotifySettingsUpdate,
     BackgroundTaskResponse,
+    GeoIpStatusResponse,
     MessageResponse,
     ServiceRestartRequest,
     TelegramLinkCodeResponse,
@@ -472,3 +473,10 @@ def session_stats(db: Session = Depends(get_db), _: User = Depends(require_admin
         "active_web_session_ttl_seconds": cfg.active_web_session_ttl_seconds,
         "nightly_idle_restart_cron": cfg.nightly_idle_restart_cron,
     }
+
+
+@router.get("/maintenance/geoip-status", response_model=GeoIpStatusResponse)
+def geoip_status(_: User = Depends(require_admin)):
+    from app.services.ip_geo import get_geoip_status
+
+    return get_geoip_status()

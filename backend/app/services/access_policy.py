@@ -10,11 +10,23 @@ from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.traffic_limit import (
     TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED,
     TrafficLimitExceededError,
+    bytes_to_limit_parts,
+    format_traffic_limit_period_label,
     get_client_consumed_traffic_bytes,
     human_bytes,
+    parse_traffic_limit_bytes,
+    parse_traffic_limit_period_days,
     resolve_traffic_limit_state,
 )
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
+
+
+NODE_DEFAULT_POLICY_CLIENT = "__node_default__"
+NODE_ROUTE_MODES = frozenset({"route_all", "route_selective"})
+
+
+def is_node_default_policy_client(client_name: str | None) -> bool:
+    return (client_name or "").strip().lower() == NODE_DEFAULT_POLICY_CLIENT
 
 
 def _now() -> datetime:
@@ -395,6 +407,8 @@ class AccessPolicyService:
         excluded = (exclude_client or "").strip().lower()
         results: list[dict] = []
         for row in self.db.query(WgAccessPolicy).filter_by(node_id=node_id).all():
+            if is_node_default_policy_client(row.client_name):
+                continue
             if excluded and row.client_name == excluded:
                 continue
             state = self._wg_state(row, now)
@@ -631,6 +645,8 @@ class AccessPolicyService:
         self.wg_runtime_calls = 0
         rows = self.db.query(WgAccessPolicy).filter_by(node_id=target_node).all()
         for row in rows:
+            if is_node_default_policy_client(row.client_name):
+                continue
             before_blocked = bool(self._wg_state(row, now)["is_blocked"])
             before_reason = row.block_reason
             if self._cleanup_wg_temp_block(row, now):
@@ -705,6 +721,8 @@ class AccessPolicyService:
         wg_rows = self.db.query(WgAccessPolicy).filter_by(node_id=target_node).all()
         ovpn_rows = self.db.query(OpenVpnAccessPolicy).filter_by(node_id=target_node).all()
         for row in ovpn_rows:
+            if is_node_default_policy_client(row.client_name):
+                continue
             before = row.block_reason
             self.reconcile_openvpn(row.client_name)
             after_row = (
@@ -715,6 +733,8 @@ class AccessPolicyService:
             if after_row and after_row.block_reason != before:
                 changed += 1
         for row in wg_rows:
+            if is_node_default_policy_client(row.client_name):
+                continue
             before = row.block_reason
             self.reconcile_wg(row.client_name, apply_runtime=True)
             after_row = (
@@ -740,12 +760,156 @@ def _policy_row_flags(row: OpenVpnAccessPolicy | WgAccessPolicy) -> tuple[bool, 
     return blocked, limited
 
 
+def _route_mode_from_block_reason(block_reason: str | None) -> str | None:
+    if block_reason in NODE_ROUTE_MODES:
+        return block_reason
+    return None
+
+
+def _limits_from_policy_row(row: OpenVpnAccessPolicy | WgAccessPolicy | None) -> dict:
+    if row is None:
+        return {
+            "limit_value": None,
+            "limit_unit": None,
+            "limit_period_days": None,
+            "limit_human": None,
+            "limit_period_label": None,
+        }
+    value, unit = bytes_to_limit_parts(row.traffic_limit_bytes)
+    period_days = (
+        int(row.traffic_limit_period_days)
+        if row.traffic_limit_period_days in TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED
+        else None
+    )
+    return {
+        "limit_value": value,
+        "limit_unit": unit,
+        "limit_period_days": period_days,
+        "limit_human": human_bytes(row.traffic_limit_bytes),
+        "limit_period_label": format_traffic_limit_period_label(period_days),
+    }
+
+
+def _default_policy_updated_meta(
+    ovpn_row: OpenVpnAccessPolicy | None,
+    wg_row: WgAccessPolicy | None,
+) -> tuple[datetime | None, str | None]:
+    candidates = [row for row in (ovpn_row, wg_row) if row is not None]
+    if not candidates:
+        return None, None
+    latest = max(candidates, key=lambda row: row.updated_at or datetime.min.replace(tzinfo=timezone.utc))
+    return latest.updated_at, latest.updated_by
+
+
+def get_node_default_policy(db: Session, node_id: int) -> dict:
+    node = db.query(Node).filter_by(id=node_id).first()
+    if node is None:
+        raise ValueError("Узел не найден")
+
+    ovpn_row = (
+        db.query(OpenVpnAccessPolicy)
+        .filter_by(node_id=node_id, client_name=NODE_DEFAULT_POLICY_CLIENT)
+        .first()
+    )
+    wg_row = (
+        db.query(WgAccessPolicy)
+        .filter_by(node_id=node_id, client_name=NODE_DEFAULT_POLICY_CLIENT)
+        .first()
+    )
+    route_mode = _route_mode_from_block_reason(ovpn_row.block_reason if ovpn_row else None)
+    if route_mode is None and wg_row is not None:
+        route_mode = _route_mode_from_block_reason(wg_row.block_reason)
+    updated_at, updated_by = _default_policy_updated_meta(ovpn_row, wg_row)
+
+    return {
+        "node_id": node.id,
+        "node_name": node.name,
+        "route_mode": route_mode,
+        "openvpn": _limits_from_policy_row(ovpn_row),
+        "wireguard": _limits_from_policy_row(wg_row),
+        "updated_at": updated_at,
+        "updated_by": updated_by,
+    }
+
+
+def set_node_default_policy(
+    db: Session,
+    node_id: int,
+    *,
+    route_mode: str | None = None,
+    openvpn_limit_value: float | None = None,
+    openvpn_limit_unit: str | None = None,
+    openvpn_limit_period_days: int | None = None,
+    openvpn_clear_limit: bool = False,
+    wireguard_limit_value: float | None = None,
+    wireguard_limit_unit: str | None = None,
+    wireguard_limit_period_days: int | None = None,
+    wireguard_clear_limit: bool = False,
+    actor: str | None = None,
+) -> dict:
+    node = db.query(Node).filter_by(id=node_id).first()
+    if node is None:
+        raise ValueError("Узел не найден")
+
+    if route_mode is not None and route_mode not in NODE_ROUTE_MODES:
+        raise ValueError("route_mode должен быть route_all или route_selective")
+
+    ovpn_row = (
+        db.query(OpenVpnAccessPolicy)
+        .filter_by(node_id=node_id, client_name=NODE_DEFAULT_POLICY_CLIENT)
+        .first()
+    )
+    if ovpn_row is None:
+        ovpn_row = OpenVpnAccessPolicy(node_id=node_id, client_name=NODE_DEFAULT_POLICY_CLIENT)
+        db.add(ovpn_row)
+
+    wg_row = (
+        db.query(WgAccessPolicy)
+        .filter_by(node_id=node_id, client_name=NODE_DEFAULT_POLICY_CLIENT)
+        .first()
+    )
+    if wg_row is None:
+        wg_row = WgAccessPolicy(node_id=node_id, client_name=NODE_DEFAULT_POLICY_CLIENT)
+        db.add(wg_row)
+
+    if openvpn_clear_limit:
+        ovpn_row.traffic_limit_bytes = None
+        ovpn_row.traffic_limit_period_days = None
+    elif openvpn_limit_value is not None:
+        ovpn_row.traffic_limit_bytes = parse_traffic_limit_bytes(openvpn_limit_value, openvpn_limit_unit or "GB")
+        ovpn_row.traffic_limit_period_days = parse_traffic_limit_period_days(openvpn_limit_period_days)
+
+    if wireguard_clear_limit:
+        wg_row.traffic_limit_bytes = None
+        wg_row.traffic_limit_period_days = None
+    elif wireguard_limit_value is not None:
+        wg_row.traffic_limit_bytes = parse_traffic_limit_bytes(wireguard_limit_value, wireguard_limit_unit or "GB")
+        wg_row.traffic_limit_period_days = parse_traffic_limit_period_days(wireguard_limit_period_days)
+
+    if route_mode is not None:
+        ovpn_row.block_reason = route_mode
+        wg_row.block_reason = route_mode
+
+    ovpn_row.updated_by = actor
+    wg_row.updated_by = actor
+    db.commit()
+    return get_node_default_policy(db, node_id)
+
+
 def build_policy_summary_by_node(db: Session) -> list[dict]:
     nodes = db.query(Node).order_by(Node.id.asc()).all()
     summaries: list[dict] = []
     for node in nodes:
-        ovpn_rows = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id).all()
-        wg_rows = db.query(WgAccessPolicy).filter_by(node_id=node.id).all()
+        ovpn_rows = [
+            row
+            for row in db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id).all()
+            if not is_node_default_policy_client(row.client_name)
+        ]
+        wg_rows = [
+            row
+            for row in db.query(WgAccessPolicy).filter_by(node_id=node.id).all()
+            if not is_node_default_policy_client(row.client_name)
+        ]
         blocked_clients = 0
         traffic_limited_clients = 0
         for row in (*ovpn_rows, *wg_rows):
@@ -754,6 +918,8 @@ def build_policy_summary_by_node(db: Session) -> list[dict]:
                 blocked_clients += 1
             if limited:
                 traffic_limited_clients += 1
+
+        defaults = get_node_default_policy(db, node.id)
         summaries.append(
             {
                 "node_id": node.id,
@@ -762,6 +928,9 @@ def build_policy_summary_by_node(db: Session) -> list[dict]:
                 "wireguard_policies": len(wg_rows),
                 "blocked_clients": blocked_clients,
                 "traffic_limited_clients": traffic_limited_clients,
+                "default_openvpn_limit_human": defaults["openvpn"]["limit_human"],
+                "default_wireguard_limit_human": defaults["wireguard"]["limit_human"],
+                "default_route_mode": defaults["route_mode"],
             }
         )
     return summaries
