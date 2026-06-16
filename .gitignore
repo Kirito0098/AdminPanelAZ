@@ -1,26 +1,68 @@
-# Python
-backend/.venv/
+# =============================================================================
+# AdminPanelAZ — не коммитить runtime, секреты и артефакты сборки
+# Основные пути: backend/data/ (DATABASE_URL), backend/.env, .runtime/
+# =============================================================================
+
+# --- Secrets & environment (шаблоны *.env.example остаются в git) ---
+.env
+.env.*
+*.env
+!*.env.example
+!**/.env.example
+ddns.env
+.reinstall-backup/
+
+# --- SQLite & runtime databases (WAL mode включён в database.py) ---
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+
+# --- Runtime data: backend/data/ (primary — sqlite:///./data/ относительно backend/) ---
 backend/data/
-backend/__pycache__/
+
+# --- Runtime data: repo root data/ (только .gitkeep для onboarding-каталогов) ---
+/data/**
+!/data/**/.gitkeep
+
+# GeoIP MMDB (пользователь загружает сам; см. docs/GeoIP.md)
+*.mmdb
+
+# --- CIDR pipeline (legacy / дублирующие пути) ---
+backend/app/data/
+
+# --- mTLS / crypto material (generate-mtls-certs.sh → /etc/adminpanelaz по умолчанию) ---
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# --- Backup archives & temp payloads (backup-cli, restore, pipeline) ---
+*.tar.gz
+*.tar
+.tmp_*
+
+# --- Python ---
+backend/.venv/
 **/__pycache__/
 *.pyc
 .pytest_cache/
 **/.pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 .mypy_cache/
 .ruff_cache/
-.env
-backend/.env
-backend/node_agent.env
+*.egg-info/
+dist/
+build/
 
-# CIDR pipeline (generated lists, baselines, runtime backups, ingest staging CSV)
-# Correct path is backend/data/cidr/ (already under backend/data/)
-# Explicit: backend/data/cidr/staging/
-# Legacy compile path before paths.py fix:
-backend/app/data/
-
-# Node / frontend builds (install.sh, npm run build:all, UI «Обновления»)
+# --- Node / frontend builds ---
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
@@ -30,13 +72,15 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Runtime (logs, PIDs — см. ADMINPANELAZ_STATE_DIR / install → /var/lib/adminpanelaz)
+# --- Runtime logs, PIDs, local state (start.sh → .runtime/ или ADMINPANELAZ_STATE_DIR) ---
 .start.sh.pids
 .runtime/
+*.log
 
-# IDE / OS
+# --- IDE / OS ---
 .idea/
 .vscode/
+.cursor/
 *.swp
 *~
 .DS_Store
