@@ -1,6 +1,7 @@
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import type { ConfirmAction } from './useRoutingPage'
 import type { CidrDeployPreview } from '@/types'
+import { formatBackupLabel } from './utils'
 
 const confirmMeta: Record<
   Exclude<ConfirmAction, null>,
@@ -31,6 +32,14 @@ const confirmMeta: Record<
       'Ранее собранные файлы с контроллера будут отправлены на выбранные online-узлы (или все online) и синхронизированы с AntiZapret. Offline-узлы будут пропущены.',
     confirmLabel: 'Развернуть',
   },
+  'deploy-apply': {
+    title: 'Развернуть и применить маршрутизацию?',
+    description:
+      'Файлы CIDR будут развёрнуты на выбранные узлы, затем на каждом узле выполнятся doall.sh (правила маршрутизации) и client.sh 7 (перегенерация профилей WG/AWG с новыми CIDR). Длительная операция.',
+    confirmLabel: 'Развернуть + doall + client.sh 7',
+    destructive: true,
+    alertTitle: 'Длительная операция',
+  },
   'generate-doall': {
     title: 'Полный цикл: сборка, deploy и doall?',
     description:
@@ -56,6 +65,7 @@ interface ConfirmActionDialogProps {
   loading?: boolean
   deployPreview?: CidrDeployPreview | null
   rollbackStamp?: string | null
+  rollbackMtime?: number
 }
 
 export default function ConfirmActionDialog({
@@ -65,6 +75,7 @@ export default function ConfirmActionDialog({
   loading,
   deployPreview,
   rollbackStamp,
+  rollbackMtime,
 }: ConfirmActionDialogProps) {
   if (!action) return null
   const meta = confirmMeta[action]
@@ -73,7 +84,7 @@ export default function ConfirmActionDialog({
     action === 'deploy-only' && deployPreview
       ? `${meta.description} Preview: ${deployPreview.message}`
       : action === 'rollback-cidr' && rollbackStamp
-        ? `${meta.description} Копия: ${rollbackStamp}.`
+        ? `${meta.description} Копия от ${formatBackupLabel(rollbackStamp, rollbackMtime)}.`
         : meta.description
 
   return (

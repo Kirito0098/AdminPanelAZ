@@ -5,22 +5,49 @@ import react from '@vitejs/plugin-react'
 const CSP_NONCE_PLACEHOLDER = '%CSP_NONCE%'
 
 function cspNoncePlaceholder(): Plugin {
+  const injectNonce = (html: string) =>
+    html
+      .replace(
+        /(<meta\b[^>]*\bname=["']csp-nonce["'][^>]*\bcontent=["'])([^"']*)(["'])/i,
+        `$1${CSP_NONCE_PLACEHOLDER}$3`,
+      )
+      .replace(
+        /(<script\b(?![^>]*\bnonce=)[^>]*)(>)/gi,
+        `$1 nonce="${CSP_NONCE_PLACEHOLDER}"$2`,
+      )
+      .replace(
+        /(<link\b[^>]*\brel=["']modulepreload["'][^>]*)(>)/gi,
+        `$1 nonce="${CSP_NONCE_PLACEHOLDER}"$2`,
+      )
+
   return {
-    name: 'csp-nonce-placeholder',
+    name: 'csp-nonce-placeholder-pre',
     apply: 'build',
     transformIndexHtml: {
       order: 'pre',
-      handler(html) {
-        return html
-          .replace(
-            /(<script\b(?![^>]*\bnonce=)[^>]*)(>)/gi,
-            `$1 nonce="${CSP_NONCE_PLACEHOLDER}"$2`,
-          )
-          .replace(
-            /(<link\b[^>]*\brel=["']modulepreload["'][^>]*)(>)/gi,
-            `$1 nonce="${CSP_NONCE_PLACEHOLDER}"$2`,
-          )
-      },
+      handler: injectNonce,
+    },
+  }
+}
+
+function cspNoncePlaceholderPost(): Plugin {
+  const injectNonce = (html: string) =>
+    html
+      .replace(
+        /(<script\b(?![^>]*\bnonce=)[^>]*)(>)/gi,
+        `$1 nonce="${CSP_NONCE_PLACEHOLDER}"$2`,
+      )
+      .replace(
+        /(<link\b[^>]*\brel=["']modulepreload["'][^>]*)(>)/gi,
+        `$1 nonce="${CSP_NONCE_PLACEHOLDER}"$2`,
+      )
+
+  return {
+    name: 'csp-nonce-placeholder-post',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler: injectNonce,
     },
   }
 }
@@ -49,7 +76,7 @@ export default defineConfig(({ mode }) => {
   const isTgMini = mode === 'tg-mini'
 
   return {
-    plugins: [react(), cspNoncePlaceholder(), ...(isTgMini ? [tgMiniMoveScriptToBody()] : [])],
+    plugins: [react(), cspNoncePlaceholder(), cspNoncePlaceholderPost(), ...(isTgMini ? [tgMiniMoveScriptToBody()] : [])],
     base: isTgMini ? '/api/tg-mini/' : '/',
     resolve: {
       alias: {

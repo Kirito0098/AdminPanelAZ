@@ -1,9 +1,11 @@
-import { ArrowRight, CloudDownload, History, Info, Play, PlusCircle, Rocket, Shield, Sparkles, Trash2, Undo2 } from 'lucide-react'
+import { ArrowRight, CloudDownload, Info, PlusCircle, Rocket, Shield, Sparkles, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import ProviderFileSelection from '@/components/routing/ProviderFileSelection'
+import type { RoutingWorkflowState } from '@/components/routing/routingWorkflow'
 import StatusPanel from '@/components/noc/StatusPanel'
 import PipelineStageProgress from '@/components/routing/PipelineStageProgress'
 import DeployPreviewPanel from '@/components/routing/DeployPreviewPanel'
+import RuntimeBackupsPanel from '@/components/routing/RuntimeBackupsPanel'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -35,14 +37,22 @@ interface CidrPipelineTabProps {
   onRefreshAntifilter: () => void
   onGenerate: () => void
   onDeploy: () => void
-  onGenerateDoall: () => void
+  onDeployAndApply: () => void
   onClearDb: () => void | Promise<void>
   onOpenCustomWizard: () => void
   onLoadDeployPreview: () => void
   deployPreview: CidrDeployPreview | null
   deployPreviewLoading: boolean
   onRollback: (stamp: string) => void
+  recentRollbackStamp?: string | null
+  workflow?: RoutingWorkflowState
 }
+
+const pipelineStageNav = [
+  { id: 'pipeline-stage-1', num: 1, label: 'Ingest', icon: CloudDownload },
+  { id: 'pipeline-stage-2', num: 2, label: 'Compile', icon: Sparkles },
+  { id: 'pipeline-stage-3', num: 3, label: 'Deploy', icon: Rocket },
+] as const
 
 const workflowSteps = [
   { num: 1, text: 'Данные на контроллер (SQLite)' },
@@ -78,16 +88,22 @@ export default function CidrPipelineTab({
   onRefreshAntifilter,
   onGenerate,
   onDeploy,
-  onGenerateDoall,
+  onDeployAndApply,
   onClearDb,
   onOpenCustomWizard,
   onLoadDeployPreview,
   deployPreview,
   deployPreviewLoading,
   onRollback,
+  recentRollbackStamp,
+  workflow,
 }: CidrPipelineTabProps) {
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
+
+  const scrollToStage = (anchorId: string) => {
+    document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
   const onlineNodes = nodes.filter((n) => n.status === 'online')
   const deployDisabled =
     pipelineBusy ||
@@ -134,6 +150,36 @@ export default function CidrPipelineTab({
 
   return (
     <div className="space-y-6">
+      <div className="sticky top-0 z-20 -mx-1 rounded-lg border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="flex flex-wrap items-center gap-2">
+          {pipelineStageNav.map((item) => {
+            const step = workflow?.steps.find((s) => s.stage === item.num)
+            const isCurrent = workflow?.currentStage === item.num
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => scrollToStage(item.id)}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors hover:bg-muted',
+                  isCurrent && 'border-primary bg-primary/10 text-primary',
+                  step?.status === 'done' && !isCurrent && 'border-emerald-500/30 text-emerald-700 dark:text-emerald-400',
+                )}
+              >
+                <item.icon size={13} />
+                <span className="font-medium">{item.num}. {item.label}</span>
+              </button>
+            )
+          })}
+          {workflow?.currentStage === 4 && (
+            <span className="text-xs text-muted-foreground ml-auto">
+              Следующий шаг →{' '}
+              <strong className="text-foreground">включить провайдеров</strong>
+            </span>
+          )}
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-4 text-sm">
         {workflowSteps.map((step, i) => {
           const isActive = highlightedStage === step.num
@@ -172,6 +218,7 @@ export default function CidrPipelineTab({
         </div>
       </div>
 
+      <div id="pipeline-stage-1" className="scroll-mt-24">
       <StatusPanel title="Этап 1 — Данные на контроллере (ingest)" icon={CloudDownload}>
         <p className="mb-4 text-sm text-muted-foreground">
           Загрузка из интернета в SQLite на контроллере. Можно обновить одного или нескольких провайдеров — не
@@ -292,7 +339,9 @@ export default function CidrPipelineTab({
           </div>
         </div>
       </StatusPanel>
+      </div>
 
+      <div id="pipeline-stage-2" className="scroll-mt-24">
       <StatusPanel title="Этап 2 — Сборка списков на контроллере (compile)" icon={Sparkles}>
         <PipelineStageProgress
           task={pipelineTask}
@@ -334,33 +383,17 @@ export default function CidrPipelineTab({
         </div>
 
         {(cidrDb?.runtime_backups?.length ?? 0) > 0 && (
-          <div className="mt-4 rounded-md border p-4">
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-              <History size={14} />
-              Откат из runtime_backups
-            </div>
-            <p className="mb-3 text-xs text-muted-foreground">
-              Резервные копии создаются перед сборкой списков (этап 2). Откат восстанавливает файлы на контроллере и
-              разворачивает их на узлы.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {cidrDb!.runtime_backups!.slice(0, 5).map((backup) => (
-                <Button
-                  key={backup.stamp}
-                  size="sm"
-                  variant="outline"
-                  disabled={pipelineBusy}
-                  onClick={() => onRollback(backup.stamp)}
-                >
-                  <Undo2 size={14} className="mr-1.5" />
-                  {backup.stamp} ({backup.file_count})
-                </Button>
-              ))}
-            </div>
-          </div>
+          <RuntimeBackupsPanel
+            backups={cidrDb!.runtime_backups!}
+            pipelineBusy={pipelineBusy}
+            recentRollbackStamp={recentRollbackStamp}
+            onRollback={onRollback}
+          />
         )}
       </StatusPanel>
+      </div>
 
+      <div id="pipeline-stage-3" className="scroll-mt-24">
       <StatusPanel title="Этап 3 — Списки на узел (deploy)" icon={Rocket}>
         <PipelineStageProgress
           task={pipelineTask}
@@ -377,7 +410,7 @@ export default function CidrPipelineTab({
             <Info size={16} className="mt-0.5 shrink-0" />
             <span>
               Списки уже собраны на контроллере. Следующий шаг — <strong>Deploy</strong> на выбранные
-              узлы, затем включение провайдеров на вкладке «CIDR-провайдеры».
+              узлы, затем включение провайдеров на вкладке «Провайдеры».
             </span>
           </div>
         )}
@@ -496,7 +529,7 @@ export default function CidrPipelineTab({
 
         <DeployPreviewPanel preview={deployPreview} loading={deployPreviewLoading} />
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <Button
             size="sm"
             variant="outline"
@@ -505,24 +538,26 @@ export default function CidrPipelineTab({
           >
             Dry-run preview
           </Button>
-          <Button size="sm" disabled={deployDisabled} onClick={onDeploy}>
+          <Button size="sm" variant="secondary" disabled={deployDisabled} onClick={onDeploy}>
             <Rocket size={14} className="mr-1.5" />
             {deployAllOnline ? 'Развернуть на все online' : 'Развернуть на выбранные'}
           </Button>
-          <Button size="sm" variant="destructive" disabled={pipelineBusy} onClick={onGenerateDoall}>
-            <Play size={14} className="mr-1.5" />
-            Сгенерировать + doall
+          <Button size="sm" disabled={deployDisabled || pipelineBusy} onClick={onDeployAndApply}>
+            <Rocket size={14} className="mr-1.5" />
+            Развернуть + doall + client.sh 7
           </Button>
         </div>
 
         <div className="mt-3 flex items-start gap-2 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
           <Info size={14} className="mt-0.5 shrink-0" />
           <span>
-            <strong className="text-foreground">Сгенерировать + doall</strong> — полный цикл: сборка файлов,
-            развёртывание на узел и применение правил (doall.sh). Длительная операция.
+            <strong className="text-foreground">Развернуть</strong> — только отправка файлов на узел.{' '}
+            <strong className="text-foreground">+ doall + client.sh 7</strong> — после deploy применяет
+            правила маршрутизации и перегенерирует профили WireGuard/AmneziaWG с новыми CIDR.
           </span>
         </div>
       </StatusPanel>
+      </div>
 
       {(cidrDb?.history?.length ?? 0) > 0 && (
         <StatusPanel title="История обновлений БД" icon={CloudDownload}>

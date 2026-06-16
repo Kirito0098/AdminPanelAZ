@@ -78,13 +78,16 @@ def run_apply(
     *,
     sync_after: bool = True,
     apply_after: bool = False,
+    recreate_profiles_after: bool = False,
 ) -> dict[str, Any]:
-    """Sync CIDR providers and optionally run doall on the target node."""
+    """Sync CIDR providers, optionally run doall and recreate client profiles (client.sh 7)."""
     result: dict[str, Any] = {}
     if sync_after:
         result["sync"] = adapter.sync_cidr_providers()
     if apply_after:
         result["doall_output"] = adapter.apply_config_changes()
+    if recreate_profiles_after:
+        result["recreate_profiles_output"] = adapter.recreate_profiles()
     return result
 
 
@@ -153,6 +156,7 @@ def _deploy_single_node(
     files: list[str] | list[dict] | None,
     sync_after: bool,
     apply_after: bool,
+    recreate_profiles_after: bool = False,
 ) -> dict[str, Any]:
     """Push artifacts to one node, then optional sync/apply."""
     entry: dict[str, Any] = {
@@ -181,8 +185,13 @@ def _deploy_single_node(
         entry["error"] = f"Ошибка развёртывания: {len(failed)} файл(ов)"
         return entry
 
-    if apply_after:
-        apply_result = run_apply(adapter, sync_after=False, apply_after=True)
+    if apply_after or recreate_profiles_after:
+        apply_result = run_apply(
+            adapter,
+            sync_after=False,
+            apply_after=apply_after,
+            recreate_profiles_after=recreate_profiles_after,
+        )
         entry.update(apply_result)
     elif sync_after:
         apply_result = run_apply(adapter, sync_after=not bool(pushed), apply_after=False)
@@ -201,6 +210,7 @@ def run_multi_deploy(
     files: list[str] | list[dict] | None = None,
     sync_after: bool = True,
     apply_after: bool = False,
+    recreate_profiles_after: bool = False,
     triggered_by: str | None = None,
 ) -> dict[str, Any]:
     """Deploy CIDR artifacts to one or more nodes; offline nodes are skipped and logged."""
@@ -237,6 +247,7 @@ def run_multi_deploy(
             files=files,
             sync_after=sync_after,
             apply_after=apply_after,
+            recreate_profiles_after=recreate_profiles_after,
         )
         per_node.append(entry)
         all_pushed.extend(entry.get("pushed_files") or [])

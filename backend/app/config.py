@@ -38,6 +38,7 @@ class Settings(BaseSettings):
         "default-src 'self'; "
         "script-src 'self' https://telegram.org; "
         "style-src 'self'; "
+        "style-src-attr 'unsafe-inline'; "
         "img-src 'self' data: blob:; "
         "connect-src 'self' ws: wss:; "
         "frame-src 'self' https://oauth.telegram.org; "

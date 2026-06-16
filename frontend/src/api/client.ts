@@ -923,6 +923,7 @@ export async function deployCidrToNode(options?: {
   all_online?: boolean
   sync_after?: boolean
   apply_after?: boolean
+  recreate_profiles_after?: boolean
   selected_files?: string[] | null
 }) {
   return apiFetch<{ success: boolean; task_id: string; message: string }>('/routing/cidr-db/deploy', {
@@ -933,6 +934,7 @@ export async function deployCidrToNode(options?: {
       all_online: options?.all_online ?? false,
       sync_after: options?.sync_after ?? true,
       apply_after: options?.apply_after ?? false,
+      recreate_profiles_after: options?.recreate_profiles_after ?? false,
       selected_files: options?.selected_files ?? null,
     }),
   })

@@ -121,7 +121,19 @@ def apply_csp_nonce(base_csp: str, nonce: str | None, *, relaxed: bool = False) 
             directive = f"{directive} {nonce_token}".strip()
         return f"script-src {directive};"
 
-    return re.sub(r"script-src\s+([^;]+);", _patch_script_src, base_csp, count=1)
+    def _patch_style_src(match: re.Match[str]) -> str:
+        directive = match.group(1)
+        directive = directive.replace("'unsafe-inline'", "")
+        directive = re.sub(r"\s+", " ", directive).strip()
+        nonce_token = f"'nonce-{nonce}'"
+        if nonce_token not in directive:
+            directive = f"{directive} {nonce_token}".strip()
+        return f"style-src {directive};"
+
+    csp = re.sub(r"script-src\s+([^;]+);", _patch_script_src, base_csp, count=1)
+    if re.search(r"style-src\s+[^;]+;", csp):
+        csp = re.sub(r"style-src\s+([^;]+);", _patch_style_src, csp, count=1)
+    return csp
 
 
 def csp_for_path(path: str, base_csp: str, nonce: str | None = None, *, relaxed: bool = False) -> str:

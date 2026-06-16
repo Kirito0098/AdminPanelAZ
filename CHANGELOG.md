@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-06-16
+
 ### Added
 
 - **Пользовательская документация** — простые инструкции по разделам веб-панели: [`docs/README.md`](docs/README.md), модули меню (`konfiguracii.md`, `noc-monitoring.md`, …), подразделы настроек [`docs/nastrojki/`](docs/nastrojki/README.md).
 - **Редактор файлов — перенос на другие узлы** — копирование конфигурации AntiZapret с активного узла на один или несколько online-узлов: API `POST /api/edit-files/transfer` (`file_keys`, `target_node_ids` / `all_online`, `run_doall`, `content_overrides`); сервис `edit_files_transfer.py`; результат по каждому узлу в `per_node`; audit log `edit_files_transfer`. UI: кнопка **«Перенести на узлы»** в шапке страницы, диалог с выбором «все файлы» / «только открытый файл», целевых узлов и опционального doall.sh; предупреждение при несохранённых правках. Тесты: `test_edit_files_transfer.py`.
+- **Маршрутизация / CIDR — UX pipeline** — пошаговый гид **Ingest → Compile → Deploy → Провайдеры** (`RoutingWorkflowGuide`, `routingWorkflow.ts`): текущий шаг, кнопка «Следующий шаг», кликабельные этапы с переходом на вкладку/якорь; карточки быстрой навигации (`RoutingSectionCards`); синхронизация вкладок с URL (`?tab=overview|providers|pipeline`); описания под вкладками; липкая навигация по этапам 1–3 на вкладке Pipeline (`#pipeline-stage-1/2/3`).
+- **Маршрутизация / CIDR — провайдеры** — быстрые фильтры (все / включённые / ошибки / нужен deploy / нужна сборка); колонка CIDR объединена (**БД / Контр. / Узел**); кликабельные подсказки «нужен deploy / сборка» с переходом на Pipeline.
+- **Маршрутизация / CIDR — откат runtime_backups** — панель `RuntimeBackupsPanel`: человекочитаемые даты вместо `20260616T190446Z`, таблица вместо кнопок-«простыни», сворачиваемый список, плашка «Откат выполнен» после успешного rollback.
+- **CIDR deploy — apply после развёртывания** — флаг `recreate_profiles_after` в `POST /api/routing/cidr-db/deploy`; на этапе 3 кнопка **«Развернуть + doall + client.sh 7»** (deploy + doall.sh + перегенерация профилей WG/AWG).
+- **CSP — nonce для динамических `<style>`** — `style-src 'nonce-…'` в заголовке (как для scripts); `<meta name="csp-nonce">` и `initCspNonce()` → `window.__webpack_nonce__` для Radix scroll-lock; директива `style-src-attr 'unsafe-inline'` для позиционирования Radix Popper.
 
 ### Changed
 
@@ -18,10 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) — карта UI ↔ user doc, актуальное дерево `docs/`.
 - **Редактор файлов — UX переноса** — действие переноса вынесено из панели редактора в шапку страницы (операция на уровне узла, а не отдельного файла); по умолчанию в диалоге выбраны все файлы; переработан UI диалога (схема «источник → цели», шаги, карточки узлов, primary-кнопка, сводка результата).
 - **Терминология UI** — единообразно **«узел / узлы»** вместо «нода / ноды» в редакторе файлов, CIDR Pipeline, провайдерах, deploy preview и связанных toast/backend-сообщениях (в коде по-прежнему `Node`, `node_id`).
+- **Маршрутизация / CIDR — workflow** — после успешной сборки (compile) приоритет у этапа Deploy, а не у «1 провайдер ждёт сборки»; необязательные провайдеры без файла помечаются предупреждением, не блокируя deploy; корректные формы «1 провайдер / 2 провайдера / 5 провайдеров» (`pluralProviders`, `pluralFiles`).
+- **Маршрутизация / CIDR — layout** — детальная панель pipeline (`PipelineStatusBar`) перенесена на вкладку **Обзор**; гид и карточки навигации — над вкладками.
+- **Маршрутизация / CIDR — этап 3** — убрана кнопка **«Сгенерировать + doall»** (сборка — этап 2); отдельно **«Развернуть»** (только файлы) и **«Развернуть + doall + client.sh 7»** (полное применение на узле).
 
 ### Removed
 
 - **Roadmap-документы** — `docs/Idei.md`, `docs/Etapy-prompty.md`, `docs/Backlog-otkryto.md` (задача **10.1 PostgreSQL** снята с плана: для типичного деплоя SQLite достаточен).
+- **Провайдеры — кнопка «Загрузить»** — ingest CIDR только через выбор провайдеров на вкладке **Pipeline** (этап 1), не из таблицы провайдеров.
+
+### Fixed
+
+- **Маршрутизация / CIDR — workflow после compile** — тост «CIDR-файлы собраны», но гид оставался на этапе 2: исправлена логика `getRoutingWorkflowState` (приоритет deploy, `optionalCompileRemaining`).
+- **CSP — ошибки в консоли** — «Applying inline style violates style-src 'self'» при открытии диалогов/select (Radix): nonce на `<style>` + `style-src-attr` для inline positioning.
+
+### Security
+
+- **CSP** — `style-src 'self' 'nonce-…'` для runtime `<style>` (scroll-lock); `style-src-attr 'unsafe-inline'` только для атрибутов `style` (Radix Popper); scripts — nonce без изменений.
+
 ## [2.1.0] - 2026-06-16
 
 ### Added
@@ -609,7 +630,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 - Production-развёртывание: `install.sh`, daemon/watchdog, systemd, раздача UI из backend в prod-режиме.
 - OpenVPN management sockets, vnStat, WebSocket-мониторинг, Telegram Mini App, in-panel pytest.
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.9.0...v2.0.0
 [1.9.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v1.8.0...v1.9.0

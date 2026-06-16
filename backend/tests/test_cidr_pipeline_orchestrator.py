@@ -128,7 +128,21 @@ def test_run_apply_doall_only():
 
     adapter.sync_cidr_providers.assert_not_called()
     adapter.apply_config_changes.assert_called_once()
+    adapter.recreate_profiles.assert_not_called()
     assert result == {"doall_output": adapter.apply_config_changes.return_value}
+
+
+def test_run_apply_doall_and_recreate_profiles():
+    adapter = MagicMock()
+    adapter.apply_config_changes.return_value = "doall completed"
+    adapter.recreate_profiles.return_value = "profiles recreated"
+
+    result = run_apply(adapter, sync_after=False, apply_after=True, recreate_profiles_after=True)
+
+    adapter.apply_config_changes.assert_called_once()
+    adapter.recreate_profiles.assert_called_once()
+    assert result["doall_output"] == "doall completed"
+    assert result["recreate_profiles_output"] == "profiles recreated"
 
 
 def test_run_multi_deploy_apply_only_when_requested(mock_db):

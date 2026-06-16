@@ -68,6 +68,7 @@ class CidrDbDeployRequest(BaseModel):
     all_online: bool = False
     sync_after: bool = True
     apply_after: bool = False
+    recreate_profiles_after: bool = False
     selected_files: list[str] | None = None
 
 
@@ -497,6 +498,7 @@ def cidr_db_deploy(
                 files=payload.selected_files,
                 sync_after=payload.sync_after,
                 apply_after=payload.apply_after,
+                recreate_profiles_after=payload.recreate_profiles_after,
                 triggered_by=triggered_by,
             )
             if payload.target_node_id is not None and not payload.target_node_ids and not payload.all_online:

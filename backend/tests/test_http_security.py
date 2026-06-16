@@ -183,13 +183,14 @@ def test_tg_mini_path_skips_x_frame_options():
 def test_apply_csp_nonce_removes_unsafe_inline_from_script_src():
     base = (
         "default-src 'self'; script-src 'self' 'unsafe-inline' https://telegram.org; "
-        "style-src 'self';"
+        "style-src 'self'; style-src-attr 'unsafe-inline';"
     )
     csp = apply_csp_nonce(base, "abc123")
     assert "'unsafe-inline'" not in csp.split("style-src")[0]
     assert "'nonce-abc123'" in csp
-    assert "style-src 'self'" in csp
-    assert "'unsafe-inline'" not in csp
+    assert "style-src 'self' 'nonce-abc123'" in csp
+    assert "style-src-attr 'unsafe-inline'" in csp
+    assert "'unsafe-inline'" not in csp.split("style-src-attr")[0]
 
 
 def test_csp_for_path_with_nonce_on_tg_mini():

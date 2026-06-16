@@ -3,19 +3,25 @@ import { useEffect, useState } from 'react'
 import { getRouteBudget } from '@/api/client'
 import MetricCard from '@/components/noc/MetricCard'
 import StatusPanel from '@/components/noc/StatusPanel'
+import type { RoutingWorkflowState } from '@/components/routing/routingWorkflow'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { Badge } from '@/components/ui/badge'
 import type { AntifilterStatus, CidrDbStatus, RouteBudgetInfo, RoutingOverview } from '@/types'
-import { formatDt, statusBadgeVariant, statusLabel } from './utils'
+import { formatDt, pluralProviders, statusBadgeVariant, statusLabel } from './utils'
 
 interface RoutingOverviewTabProps {
   data: RoutingOverview
   cidrDb: CidrDbStatus | null
   antifilter: AntifilterStatus | null
+  workflow: RoutingWorkflowState
 }
 
-export default function RoutingOverviewTab({ data, cidrDb, antifilter }: RoutingOverviewTabProps) {
-  const enabledCount = data.providers.filter((p) => p.enabled).length
+export default function RoutingOverviewTab({
+  data,
+  cidrDb,
+  antifilter,
+  workflow,
+}: RoutingOverviewTabProps) {
   const stats = data.route_stats
   const [routeBudget, setRouteBudget] = useState<RouteBudgetInfo | null>(null)
 
@@ -51,13 +57,14 @@ export default function RoutingOverviewTab({ data, cidrDb, antifilter }: Routing
           )}
         </div>
       )}
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           label="Провайдеры активны"
-          value={enabledCount}
+          value={workflow.enabledCount}
           icon={Route}
           accent="cyan"
-          sub={`из ${data.providers.length}`}
+          sub={`из ${workflow.onNodeCount} на узле · ${data.providers.length} всего`}
         />
         <MetricCard
           label="Маршруты в config"
@@ -143,6 +150,26 @@ export default function RoutingOverviewTab({ data, cidrDb, antifilter }: Routing
               <span className="text-muted-foreground">Antifilter обновлён</span>
               <span>{formatDt(antifilter?.last_refreshed_at)}</span>
             </div>
+            {(workflow.pendingCompileCount > 0 || workflow.pendingDeployCount > 0) && (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-800 dark:text-amber-200 space-y-1">
+                {workflow.pendingCompileCount > 0 && !workflow.optionalCompileRemaining && (
+                  <div>{pluralProviders(workflow.pendingCompileCount)} ждут сборки (этап 2)</div>
+                )}
+                {workflow.optionalCompileRemaining && (
+                  <div>
+                    Сборка завершена ·{' '}
+                    {workflow.pendingCompileNames.length === 1
+                      ? `«${workflow.pendingCompileNames[0]}» без файла`
+                      : `${pluralProviders(workflow.pendingCompileCount)} без файла`}
+                    {' '}
+                    — необязательно
+                  </div>
+                )}
+                {workflow.pendingDeployCount > 0 && (
+                  <div>{pluralProviders(workflow.pendingDeployCount)} ждут deploy (этап 3)</div>
+                )}
+              </div>
+            )}
           </div>
         </StatusPanel>
       </div>
