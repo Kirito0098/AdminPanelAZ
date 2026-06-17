@@ -6,10 +6,12 @@ import { Button } from '@/components/ui/button'
 import { useNotifications } from '@/context/NotificationContext'
 import type { Node, WarperHealthResponse, WarperStatusResponse } from '@/types'
 import { cn } from '@/lib/utils'
-import { formatNodeLabel } from './utils'
+import { formatNodeLabel, formatOutboundMode } from './utils'
 
 interface StatusSectionProps {
   embedded?: boolean
+  compact?: boolean
+  showMetrics?: boolean
   health: WarperHealthResponse | null
   status: WarperStatusResponse | null
   loading: boolean
@@ -33,8 +35,15 @@ function readNested(obj: Record<string, unknown> | undefined, ...keys: string[])
   return current
 }
 
+function readBoolean(obj: Record<string, unknown> | undefined, key: string): boolean | null {
+  const value = obj?.[key]
+  return typeof value === 'boolean' ? value : null
+}
+
 export default function StatusSection({
   embedded = false,
+  compact = false,
+  showMetrics = false,
   health,
   status,
   loading,
@@ -47,8 +56,14 @@ export default function StatusSection({
   const statusData = status?.status ?? {}
   const outboundMode = readString(statusData, 'outbound_mode')
   const singbox = readNested(statusData, 'singbox') as Record<string, unknown> | null
+  const kresd = readNested(statusData, 'kresd') as Record<string, unknown> | null
   const fakeSubnet = readString(statusData, 'fake_subnet')
+  const subnet = readString(statusData, 'subnet')
+  const logLevel = readString(statusData, 'log_level')
+  const fullVpn = readBoolean(statusData, 'fullvpn')
+  const kresdPatched = kresd && typeof kresd.patched === 'boolean' ? kresd.patched : null
   const nodeLabel = formatNodeLabel(health, activeNode)
+  const metricsDense = embedded && (showMetrics || compact)
 
   async function handleToggle() {
     try {
@@ -80,11 +95,41 @@ export default function StatusSection({
           </div>
         )}
 
-        <dl className={cn('mb-4 grid gap-3 text-sm', embedded ? 'sm:grid-cols-2 lg:grid-cols-3' : 'sm:grid-cols-2')}>
+        <dl
+          className={cn(
+            'grid gap-3 text-sm',
+            !embedded && 'mb-4',
+            metricsDense
+              ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6'
+              : embedded || showMetrics
+                ? 'sm:grid-cols-2 lg:grid-cols-3'
+                : 'sm:grid-cols-2',
+          )}
+        >
+          {metricsDense && (
+            <div className="rounded-lg border bg-muted/20 p-3 xl:col-span-2">
+              <dt className="text-xs text-muted-foreground">Узел</dt>
+              <dd className="mt-1 truncate text-sm font-medium" title={nodeLabel}>
+                {nodeLabel}
+              </dd>
+            </div>
+          )}
+          {outboundMode && (showMetrics || !embedded) && !(compact && embedded) && (
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <dt className="text-xs text-muted-foreground">Режим выхода</dt>
+              <dd className="mt-1 text-sm font-medium">{formatOutboundMode(outboundMode)}</dd>
+            </div>
+          )}
           {fakeSubnet && (
             <div className="rounded-lg border bg-muted/20 p-3">
               <dt className="text-xs text-muted-foreground">Fake-подсеть</dt>
               <dd className="mt-1 font-mono text-sm">{fakeSubnet}</dd>
+            </div>
+          )}
+          {subnet && (
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <dt className="text-xs text-muted-foreground">Подсеть</dt>
+              <dd className="mt-1 font-mono text-sm">{subnet}</dd>
             </div>
           )}
           {singbox && typeof singbox.mtu === 'number' && (
@@ -93,7 +138,7 @@ export default function StatusSection({
               <dd className="mt-1 text-sm font-medium">{singbox.mtu}</dd>
             </div>
           )}
-          {singbox && typeof singbox.running === 'boolean' && (
+          {singbox && typeof singbox.running === 'boolean' && !(compact && embedded) && (
             <div className="rounded-lg border bg-muted/20 p-3">
               <dt className="text-xs text-muted-foreground">sing-box</dt>
               <dd className="mt-1">
@@ -103,8 +148,30 @@ export default function StatusSection({
               </dd>
             </div>
           )}
+          {kresdPatched != null && (
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <dt className="text-xs text-muted-foreground">kresd</dt>
+              <dd className="mt-1">
+                <Badge variant={kresdPatched ? 'success' : 'secondary'}>
+                  {kresdPatched ? 'Пропатчен' : 'Не пропатчен'}
+                </Badge>
+              </dd>
+            </div>
+          )}
+          {fullVpn != null && (
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <dt className="text-xs text-muted-foreground">FullVPN</dt>
+              <dd className="mt-1 text-sm font-medium">{fullVpn ? 'Включён' : 'Выключен'}</dd>
+            </div>
+          )}
+          {logLevel && (
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <dt className="text-xs text-muted-foreground">Уровень логов</dt>
+              <dd className="mt-1 font-mono text-sm uppercase">{logLevel}</dd>
+            </div>
+          )}
           {health?.health_error && (
-            <div className="rounded-lg border border-destructive/30 p-3 sm:col-span-2">
+            <div className="rounded-lg border border-destructive/30 p-3 sm:col-span-2 lg:col-span-full">
               <dt className="text-muted-foreground">Ошибка health</dt>
               <dd className="mt-1 text-destructive">{health.health_error}</dd>
             </div>

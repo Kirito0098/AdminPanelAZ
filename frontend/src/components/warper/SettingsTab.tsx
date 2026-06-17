@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw, Settings2 } from 'lucide-react'
+import {
+  Cloud,
+  Gauge,
+  Network,
+  Play,
+  RefreshCw,
+  Server,
+  Settings2,
+  Shield,
+  Square,
+  RotateCw,
+} from 'lucide-react'
 import {
   getWarperMode,
   getWarperSettingsOptions,
@@ -12,11 +23,11 @@ import {
   setWarperMtu,
   setWarperSubnet,
 } from '@/api/client'
-import StatusPanel from '@/components/noc/StatusPanel'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
   Select,
@@ -28,14 +39,18 @@ import {
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import type { WarperHealthResponse } from '@/types'
-import { formatOutboundMode, isWarperDisabled } from './utils'
+import { cn } from '@/lib/utils'
+import WarperSection, { WarperStatTile } from './WarperSection'
+import {
+  formatOutboundMode,
+  isWarperDisabled,
+  normalizeOutboundMode,
+  OUTBOUND_MODE_OPTIONS,
+  WARP_KEY_SOURCES,
+  type WarperOutboundMode,
+} from './utils'
 
 const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const
-const WARP_KEY_SOURCES = [
-  { value: 'auto', label: 'Автовыбор ключа' },
-  { value: 'system', label: 'Ключи AntiZapret' },
-  { value: 'generate', label: 'Новый ключ WARP' },
-] as const
 
 interface SettingsTabProps {
   health: WarperHealthResponse | null
@@ -54,12 +69,15 @@ export default function SettingsTab({ health }: SettingsTabProps) {
   const [subnet, setSubnet] = useState('')
   const [fullVpn, setFullVpn] = useState(false)
   const [warpKeySource, setWarpKeySource] = useState<(typeof WARP_KEY_SOURCES)[number]['value']>('auto')
+  const [modeDraft, setModeDraft] = useState<WarperOutboundMode>('warp')
   const [slaveHost, setSlaveHost] = useState('')
   const [slavePort, setSlavePort] = useState('8444')
   const [slaveKey, setSlaveKey] = useState('')
   const [wgConfigPath, setWgConfigPath] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+
+  const currentMode = normalizeOutboundMode(mode.outbound_mode ?? mode.mode)
 
   const load = useCallback(async () => {
     if (!health?.installed) {
@@ -82,6 +100,8 @@ export default function SettingsTab({ health }: SettingsTabProps) {
       if (typeof modeData.log_level === 'string') setLogLevel(modeData.log_level)
       if (typeof modeData.subnet === 'string') setSubnet(modeData.subnet)
       if (typeof modeData.fullvpn === 'boolean') setFullVpn(modeData.fullvpn)
+      const active = normalizeOutboundMode(modeData.outbound_mode ?? modeData.mode)
+      if (active) setModeDraft(active)
       if (configs.length > 0) {
         setWgConfigPath((current) => (current && configs.includes(current) ? current : configs[0]))
       }
@@ -206,108 +226,171 @@ export default function SettingsTab({ health }: SettingsTabProps) {
     }
   }
 
+  async function applySelectedMode() {
+    if (modeDraft === 'warp') return applyWarpMode()
+    if (modeDraft === 'slave') return applySlaveMode()
+    return applyWgMode()
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center py-12">
-        <Spinner />
+        <Spinner label="Загрузка настроек AZ-WARP..." />
       </div>
     )
   }
 
-  const outboundMode =
-    typeof mode.outbound_mode === 'string'
-      ? mode.outbound_mode
-      : typeof mode.mode === 'string'
-        ? mode.mode
-        : null
+  const modeIcons = { warp: Cloud, slave: Server, wg: Shield } as const
 
   return (
     <div className="space-y-4">
-      <StatusPanel title="Настройки AZ-WARP" icon={Settings2}>
-        {outboundMode && (
-          <div className="mb-4 rounded-lg border bg-muted/20 px-3 py-2 text-sm">
-            Текущий режим: <strong>{formatOutboundMode(outboundMode)}</strong>
-          </div>
-        )}
+      <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <Settings2 className="h-4 w-4 text-primary" />
+            Настройки AZ-WARP
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Режим выхода, сеть и параметры sing-box на активном узле.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {currentMode && (
+            <Badge variant="secondary">Сейчас: {formatOutboundMode(currentMode)}</Badge>
+          )}
+          {disabled && <Badge variant="warning">Только просмотр</Badge>}
+          <Button variant="secondary" size="sm" disabled={busy} onClick={() => void load()}>
+            <RefreshCw className="mr-1.5 h-4 w-4" />
+            Обновить
+          </Button>
+        </div>
+      </div>
 
-        <div className="mb-6 space-y-4 rounded-lg border p-4">
-          <div>
-            <label className="text-sm font-medium">Режим WARP</label>
-            <p className="mb-3 text-xs text-muted-foreground">
-              Cloudflare WARP с автовыбором или указанным источником ключей.
-            </p>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="min-w-[220px] flex-1">
-                <Select
-                  value={warpKeySource}
-                  onValueChange={(value) =>
-                    setWarpKeySource(value as (typeof WARP_KEY_SOURCES)[number]['value'])
-                  }
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <WarperStatTile
+          label="Режим выхода"
+          value={formatOutboundMode(currentMode)}
+          hint="Активная конфигурация WARP / Slave / WG"
+        />
+        <WarperStatTile label="MTU sing-box" value={mtu} hint="1280–1500" />
+        <WarperStatTile label="Уровень логов" value={logLevel} />
+        <WarperStatTile label="FullVPN" value={fullVpn ? 'Включён' : 'Выключен'} />
+      </div>
+
+      <WarperSection
+        title="Режим выхода"
+        icon={Cloud}
+        description="Выберите способ маршрутизации трафика и настройте параметры"
+      >
+        <div className="grid gap-3 md:grid-cols-3">
+          {OUTBOUND_MODE_OPTIONS.map((option) => {
+            const Icon = modeIcons[option.id]
+            const selected = modeDraft === option.id
+            const active = currentMode === option.id
+            return (
+              <button
+                key={option.id}
+                type="button"
+                disabled={disabled || busy}
+                onClick={() => setModeDraft(option.id)}
+                className={cn(
+                  'rounded-lg border p-4 text-left transition-colors',
+                  selected ? 'border-primary bg-primary/5 ring-1 ring-primary/30' : 'hover:bg-muted/30',
+                  disabled && 'opacity-60',
+                )}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-md bg-muted">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  {active && <Badge variant="success">Активен</Badge>}
+                </div>
+                <div className="mt-3 font-medium">{option.label}</div>
+                <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="mt-4 rounded-lg border bg-muted/10 p-4">
+          {modeDraft === 'warp' && (
+            <div className="space-y-3">
+              <Label>Источник WARP-ключа</Label>
+              <Select
+                value={warpKeySource}
+                onValueChange={(value) =>
+                  setWarpKeySource(value as (typeof WARP_KEY_SOURCES)[number]['value'])
+                }
+                disabled={disabled || busy}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WARP_KEY_SOURCES.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {WARP_KEY_SOURCES.find((item) => item.value === warpKeySource)?.description}
+              </p>
+              {warpKeys.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {warpKeys.map((key) => (
+                    <Badge key={key} variant="outline" className="font-mono text-xs">
+                      {key}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {modeDraft === 'slave' && (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="slave-host">Host</Label>
+                <Input
+                  id="slave-host"
+                  placeholder="1.2.3.4"
+                  value={slaveHost}
                   disabled={disabled || busy}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {WARP_KEY_SOURCES.map((item) => (
-                      <SelectItem key={item.value} value={item.value}>
-                        {item.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  onChange={(e) => setSlaveHost(e.target.value)}
+                />
               </div>
-              <Button disabled={disabled || busy} onClick={() => void applyWarpMode()}>
-                Применить WARP
-              </Button>
-            </div>
-            {warpKeys.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {warpKeys.map((key) => (
-                  <Badge key={key} variant="outline" className="font-mono text-xs">
-                    {key}
-                  </Badge>
-                ))}
+              <div className="space-y-1.5">
+                <Label htmlFor="slave-port">Port</Label>
+                <Input
+                  id="slave-port"
+                  type="number"
+                  placeholder="8444"
+                  value={slavePort}
+                  disabled={disabled || busy}
+                  onChange={(e) => setSlavePort(e.target.value)}
+                />
               </div>
-            )}
-          </div>
-
-          <div className="border-t pt-4">
-            <label className="text-sm font-medium">Режим Slave</label>
-            <p className="mb-3 text-xs text-muted-foreground">Маршрутизация через донор-сервер Shadowsocks.</p>
-            <div className="grid gap-2 sm:grid-cols-3">
-              <Input
-                placeholder="1.2.3.4"
-                value={slaveHost}
-                disabled={disabled || busy}
-                onChange={(e) => setSlaveHost(e.target.value)}
-              />
-              <Input
-                type="number"
-                placeholder="8444"
-                value={slavePort}
-                disabled={disabled || busy}
-                onChange={(e) => setSlavePort(e.target.value)}
-              />
-              <Input
-                placeholder="ss-key"
-                value={slaveKey}
-                disabled={disabled || busy}
-                onChange={(e) => setSlaveKey(e.target.value)}
-              />
+              <div className="space-y-1.5">
+                <Label htmlFor="slave-key">SS-key</Label>
+                <Input
+                  id="slave-key"
+                  placeholder="ss-key"
+                  value={slaveKey}
+                  disabled={disabled || busy}
+                  onChange={(e) => setSlaveKey(e.target.value)}
+                />
+              </div>
             </div>
-            <Button className="mt-3" variant="secondary" disabled={disabled || busy} onClick={() => void applySlaveMode()}>
-              Применить Slave
-            </Button>
-          </div>
+          )}
 
-          <div className="border-t pt-4">
-            <label className="text-sm font-medium">Режим WireGuard</label>
-            <p className="mb-3 text-xs text-muted-foreground">Собственный WG-конфиг из /root/ или /root/warper/.</p>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          {modeDraft === 'wg' && (
+            <div className="space-y-2">
+              <Label>Файл WireGuard</Label>
               {wgConfigs.length > 0 ? (
                 <Select value={wgConfigPath} onValueChange={setWgConfigPath} disabled={disabled || busy}>
-                  <SelectTrigger className="flex-1">
+                  <SelectTrigger>
                     <SelectValue placeholder="Выберите .conf" />
                   </SelectTrigger>
                   <SelectContent>
@@ -320,26 +403,30 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                 </Select>
               ) : (
                 <Input
-                  className="flex-1 font-mono text-sm"
+                  className="font-mono text-sm"
                   placeholder="/root/vpn.conf"
                   value={wgConfigPath}
                   disabled={disabled || busy}
                   onChange={(e) => setWgConfigPath(e.target.value)}
                 />
               )}
-              <Button disabled={disabled || busy} onClick={() => void applyWgMode()}>
-                Применить WG
-              </Button>
+              <p className="text-xs text-muted-foreground">Конфиги из /root/ и /root/warper/</p>
             </div>
-          </div>
-        </div>
+          )}
 
-        <div className="mb-6 grid gap-4 md:grid-cols-2">
-          <div className="space-y-3 rounded-lg border p-4">
-            <div className="flex items-center justify-between gap-3">
+          <Button className="mt-4" disabled={disabled || busy} onClick={() => void applySelectedMode()}>
+            Применить {formatOutboundMode(modeDraft)}
+          </Button>
+        </div>
+      </WarperSection>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <WarperSection title="Сеть WARP" icon={Network} description="FullVPN и подсеть маршрутизации">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
               <div>
                 <div className="text-sm font-medium">FullVPN</div>
-                <div className="text-xs text-muted-foreground">Полный VPN-туннель через AZ-WARP</div>
+                <p className="text-xs text-muted-foreground">Весь VPN-трафик через AZ-WARP</p>
               </div>
               <Switch
                 checked={fullVpn}
@@ -347,81 +434,87 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                 onCheckedChange={(checked) => void saveFullVpn(checked)}
               />
             </div>
-          </div>
-
-          <div className="space-y-2 rounded-lg border p-4">
-            <label className="text-sm font-medium">Подсеть WARP</label>
-            <div className="flex gap-2">
-              <Input
-                placeholder="172.16.0.0/24"
-                value={subnet}
-                disabled={disabled || busy}
-                onChange={(e) => setSubnet(e.target.value)}
-              />
-              <Button disabled={disabled || busy} onClick={() => void saveSubnet()}>
-                Сохранить
-              </Button>
+            <div className="space-y-2">
+              <Label htmlFor="warp-subnet">Подсеть WARP</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="warp-subnet"
+                  placeholder="172.16.0.0/24"
+                  value={subnet}
+                  disabled={disabled || busy}
+                  onChange={(e) => setSubnet(e.target.value)}
+                />
+                <Button disabled={disabled || busy} onClick={() => void saveSubnet()}>
+                  Сохранить
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
+        </WarperSection>
 
-        <div className="grid gap-6 md:grid-cols-2">
-          <div className="space-y-2 rounded-lg border p-4">
-            <label className="text-sm font-medium">MTU sing-box</label>
-            <div className="flex gap-2">
-              <Input
-                type="number"
-                min={1280}
-                max={1500}
-                value={mtu}
-                disabled={disabled || busy}
-                onChange={(e) => setMtu(e.target.value)}
-              />
-              <Button disabled={disabled || busy} onClick={() => void saveMtu()}>
-                Сохранить
-              </Button>
+        <WarperSection title="Параметры sing-box" icon={Gauge} description="MTU и уровень логирования">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="warper-mtu">MTU</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="warper-mtu"
+                  type="number"
+                  min={1280}
+                  max={1500}
+                  value={mtu}
+                  disabled={disabled || busy}
+                  onChange={(e) => setMtu(e.target.value)}
+                />
+                <Button disabled={disabled || busy} onClick={() => void saveMtu()}>
+                  Сохранить
+                </Button>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">Рекомендуется 1280–1500.</p>
-          </div>
-
-          <div className="space-y-2 rounded-lg border p-4">
-            <label className="text-sm font-medium">Уровень логов</label>
-            <div className="flex gap-2">
-              <Select value={logLevel} onValueChange={setLogLevel} disabled={disabled || busy}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LOG_LEVELS.map((level) => (
-                    <SelectItem key={level} value={level}>
-                      {level}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button disabled={disabled || busy} onClick={() => void saveLogLevel()}>
-                Сохранить
-              </Button>
+            <div className="space-y-2">
+              <Label>Уровень логов</Label>
+              <div className="flex gap-2">
+                <Select value={logLevel} onValueChange={setLogLevel} disabled={disabled || busy}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LOG_LEVELS.map((level) => (
+                      <SelectItem key={level} value={level}>
+                        {level}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button disabled={disabled || busy} onClick={() => void saveLogLevel()}>
+                  Сохранить
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
+        </WarperSection>
+      </div>
 
-        <div className="mt-6 space-y-2 rounded-lg border p-4">
-          <label className="text-sm font-medium">Управление sing-box</label>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" disabled={disabled || busy} onClick={() => void runSingbox('start')}>
-              Старт
-            </Button>
-            <Button size="sm" variant="secondary" disabled={disabled || busy} onClick={() => void runSingbox('stop')}>
-              Стоп
-            </Button>
-            <Button size="sm" disabled={disabled || busy} onClick={() => void runSingbox('restart')}>
-              <RefreshCw className="mr-1.5 h-4 w-4" />
-              Перезапуск
-            </Button>
-          </div>
+      <WarperSection
+        title="Управление sing-box"
+        icon={RotateCw}
+        description="Запуск, остановка и перезапуск службы"
+      >
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" disabled={disabled || busy} onClick={() => void runSingbox('start')}>
+            <Play className="mr-1.5 h-4 w-4" />
+            Старт
+          </Button>
+          <Button size="sm" variant="secondary" disabled={disabled || busy} onClick={() => void runSingbox('stop')}>
+            <Square className="mr-1.5 h-4 w-4" />
+            Стоп
+          </Button>
+          <Button size="sm" disabled={disabled || busy} onClick={() => void runSingbox('restart')}>
+            <RefreshCw className="mr-1.5 h-4 w-4" />
+            Перезапуск
+          </Button>
         </div>
-      </StatusPanel>
+      </WarperSection>
     </div>
   )
 }

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
+import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -20,6 +23,7 @@ WARPER_API_DIR = WARPER_DIR / "py"
 WARPER_API_INIT = WARPER_API_DIR / "warper_api" / "__init__.py"
 WARPER_IP_RANGES_FILE = WARPER_DIR / "ip-ranges.txt"
 WARPER_DOMAINS_FILE = WARPER_DIR / "domains.txt"
+WARPER_TRAFFIC_FILE = WARPER_DIR / "traffic.json"
 _BUILTIN_LIST_MARKERS = {
     "gemini": ("# --- GEMINI ---", "# --- END GEMINI ---"),
     "chatgpt": ("# --- CHATGPT ---", "# --- END CHATGPT ---"),
@@ -317,6 +321,91 @@ def _http_exception_from_service(exc: Exception) -> HTTPException:
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
+def _read_traffic_hourly_map() -> dict[str, dict[str, int]]:
+    if not WARPER_TRAFFIC_FILE.is_file():
+        return {}
+    try:
+        raw = json.loads(WARPER_TRAFFIC_FILE.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    hourly = raw.get("hourly") if isinstance(raw, dict) else None
+    if not isinstance(hourly, dict):
+        return {}
+    parsed: dict[str, dict[str, int]] = {}
+    for key, value in hourly.items():
+        if not isinstance(value, dict):
+            continue
+        try:
+            parsed[str(key)] = {
+                "rx": int(value.get("rx") or 0),
+                "tx": int(value.get("tx") or 0),
+            }
+        except (TypeError, ValueError):
+            continue
+    return parsed
+
+
+def _filter_traffic_hourly(hourly: dict[str, dict[str, int]], period: str) -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    items = sorted(hourly.items())
+    if period == "today":
+        prefix = now.strftime("%Y-%m-%dT")
+        filtered = [(key, value) for key, value in items if key.startswith(prefix)]
+    elif period == "week":
+        cutoff = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H")
+        filtered = [(key, value) for key, value in items if key >= cutoff]
+    elif period == "month":
+        cutoff = (now - timedelta(days=30)).strftime("%Y-%m-%dT%H")
+        filtered = [(key, value) for key, value in items if key >= cutoff]
+    else:
+        filtered = items
+    return [{"ts": key, "rx": value["rx"], "tx": value["tx"]} for key, value in filtered]
+
+
+def _format_traffic_chart_label(ts: str, period: str) -> str:
+    if period == "today":
+        hour = ts.split("T", 1)[1][:2] if "T" in ts else ts
+        return f"{hour}:00"
+    day = ts[:10]
+    try:
+        parsed = datetime.strptime(day, "%Y-%m-%d")
+        return parsed.strftime("%d.%m")
+    except ValueError:
+        return day[5:]
+
+
+def _build_traffic_chart(period: str) -> list[dict[str, Any]]:
+    hourly_points = _filter_traffic_hourly(_read_traffic_hourly_map(), period)
+    if not hourly_points:
+        return []
+
+    if period == "today":
+        return [
+            {
+                "label": _format_traffic_chart_label(point["ts"], period),
+                "rx": point["rx"],
+                "tx": point["tx"],
+            }
+            for point in hourly_points
+        ]
+
+    by_day: dict[str, dict[str, int]] = {}
+    for point in hourly_points:
+        day = str(point["ts"])[:10]
+        bucket = by_day.setdefault(day, {"rx": 0, "tx": 0})
+        bucket["rx"] += int(point["rx"])
+        bucket["tx"] += int(point["tx"])
+
+    return [
+        {
+            "label": _format_traffic_chart_label(day, period),
+            "rx": values["rx"],
+            "tx": values["tx"],
+        }
+        for day, values in sorted(by_day.items())
+    ]
+
+
 class WarperService:
     def __init__(self):
         self._api: Any | None = None
@@ -538,7 +627,11 @@ class WarperService:
         if period not in allowed:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Период должен быть одним из: {', '.join(sorted(allowed))}")
         api = self._api_client()
-        return _result_or_raise(api.get_traffic(period), default={})
+        payload = _result_or_raise(api.get_traffic(period), default={})
+        if not isinstance(payload, dict):
+            payload = {}
+        payload["chart"] = _build_traffic_chart(period)
+        return payload
 
     def get_logs(self, lines: int = 200) -> list[str]:
         lines = max(1, min(int(lines), 2000))
@@ -677,11 +770,47 @@ class WarperService:
 
     def singbox_action(self, action: Literal["start", "stop", "restart"]) -> dict[str, Any]:
         _ensure_no_conflict()
-        api = self._api_client()
-        method = getattr(api, f"singbox_{action}", None)
-        if method is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неизвестное действие sing-box")
-        return _result_or_raise(method(), default={"message": "OK"})
+        default = {"message": f"sing-box {action}: ok", "success": True}
+        try:
+            api = self._api_client()
+            method = getattr(api, f"singbox_{action}", None)
+            if callable(method):
+                return _result_or_raise(method(), default=default)
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+        return _singbox_systemctl(action)
+
+
+def _singbox_systemctl(action: Literal["start", "stop", "restart"]) -> dict[str, Any]:
+    """Fallback when warper_api singbox_* methods are missing or fail."""
+    try:
+        proc = subprocess.run(
+            ["systemctl", action, "sing-box"],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Таймаут: sing-box {action}",
+        ) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Не удалось выполнить systemctl {action} sing-box: {exc}",
+        ) from exc
+
+    if proc.returncode != 0:
+        stderr = (proc.stderr or proc.stdout or "").strip()
+        detail = f"sing-box {action}: ошибка"
+        if stderr:
+            detail = f"{detail} ({stderr[:300]})"
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
+
+    return {"message": f"sing-box {action}: ok", "success": True}
 
 
 _DOCTOR_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
@@ -766,7 +895,7 @@ def _safe_version(api: Any) -> str | None:
     return None
 
 
-def run_warper_action(action: str, **kwargs: Any) -> Any:
+def run_warper_action(operation: str, **kwargs: Any) -> Any:
     """Dispatch for node agent; converts service exceptions to HTTPException."""
     service = WarperService()
     actions = {
@@ -805,9 +934,14 @@ def run_warper_action(action: str, **kwargs: Any) -> Any:
         "set_log_level": lambda: service.set_log_level(kwargs["level"]),
         "singbox_action": lambda: service.singbox_action(kwargs["action"]),
     }
-    if action not in actions:
+    if operation not in actions:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown action")
     try:
-        return actions[action]()
+        return actions[operation]()
     except (WarperNotInstalledError, WarperConflictError, HTTPException) as exc:
         raise _http_exception_from_service(exc) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc) or "Ошибка WARPER",
+        ) from exc

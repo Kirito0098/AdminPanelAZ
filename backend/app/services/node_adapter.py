@@ -1112,7 +1112,7 @@ class RemoteNodeAdapter(NodeAdapter):
         return self._request("PUT", "/warper/settings/log-level", json={"level": level})
 
     def warper_singbox_action(self, action: str) -> dict:
-        return self._request("POST", f"/warper/singbox/{action}")
+        return self._request("POST", f"/warper/singbox/{action}", timeout=180.0)
 
     def rotate_api_key(self, new_api_key: str) -> dict[str, Any]:
         return self._request(

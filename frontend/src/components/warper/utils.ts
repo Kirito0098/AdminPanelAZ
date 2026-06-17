@@ -100,3 +100,39 @@ export function domainTypeLabel(type: string | undefined): string {
 }
 
 export type WarperTab = 'domains' | 'ip-ranges' | 'monitoring' | 'settings'
+
+export type WarperOutboundMode = 'warp' | 'slave' | 'wg'
+
+export const WARP_KEY_SOURCES = [
+  { value: 'auto', label: 'Автовыбор', description: 'WARP сам выберет доступный ключ' },
+  { value: 'system', label: 'AntiZapret', description: 'Ключи из настроек AntiZapret' },
+  { value: 'generate', label: 'Новый ключ', description: 'Сгенерировать новый WARP-ключ' },
+] as const
+
+export const OUTBOUND_MODE_OPTIONS: Array<{
+  id: WarperOutboundMode
+  label: string
+  description: string
+}> = [
+  {
+    id: 'warp',
+    label: 'WARP',
+    description: 'Cloudflare WARP — основной режим AZ-WARP',
+  },
+  {
+    id: 'slave',
+    label: 'Slave',
+    description: 'Выход через донор-сервер Shadowsocks',
+  },
+  {
+    id: 'wg',
+    label: 'WireGuard',
+    description: 'Собственный WG-конфиг на узле',
+  },
+]
+
+export function normalizeOutboundMode(value: unknown): WarperOutboundMode | null {
+  const mode = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (mode === 'warp' || mode === 'slave' || mode === 'wg') return mode
+  return null
+}

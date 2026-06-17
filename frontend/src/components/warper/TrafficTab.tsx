@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, BarChart3 } from 'lucide-react'
 import { getWarperTraffic } from '@/api/client'
 import StatusPanel from '@/components/noc/StatusPanel'
@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import type { WarperHealthResponse } from '@/types'
+import WarperTrafficChart, { type WarperTrafficChartPoint } from './WarperTrafficChart'
+import { WarperStatTile } from './WarperSection'
 import { formatBytes } from './utils'
 
 const PERIODS = [
@@ -29,8 +31,25 @@ function readTraffic(data: Record<string, unknown>) {
   return {
     rx: typeof data.period_rx === 'number' ? data.period_rx : typeof data.rx === 'number' ? data.rx : null,
     tx: typeof data.period_tx === 'number' ? data.period_tx : typeof data.tx === 'number' ? data.tx : null,
+    uptime: typeof data.uptime === 'string' ? data.uptime : null,
     summary: typeof data.summary === 'string' ? data.summary : null,
   }
+}
+
+function readChartPoints(data: Record<string, unknown>): WarperTrafficChartPoint[] {
+  const chart = data.chart
+  if (!Array.isArray(chart)) return []
+  const points: WarperTrafficChartPoint[] = []
+  for (const item of chart) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Record<string, unknown>
+    const label = typeof row.label === 'string' ? row.label : ''
+    const rx = typeof row.rx === 'number' ? row.rx : 0
+    const tx = typeof row.tx === 'number' ? row.tx : 0
+    if (!label) continue
+    points.push({ label, rx, tx })
+  }
+  return points
 }
 
 export default function TrafficTab({ health, embedded = false, hideTitle = false }: TrafficTabProps) {
@@ -62,63 +81,98 @@ export default function TrafficTab({ health, embedded = false, hideTitle = false
     void load()
   }, [load, activeNode?.id])
 
-  const { rx, tx, summary } = readTraffic(data)
+  const { rx, tx, uptime, summary } = readTraffic(data)
+  const chartPoints = useMemo(() => readChartPoints(data), [data])
+  const periodLabel = PERIODS.find((item) => item.key === period)?.label ?? period
 
   const body = (
     <>
-      <div className={`flex flex-wrap gap-2 ${embedded ? 'mb-3' : 'mb-4'}`}>
-        {PERIODS.map((item) => (
-          <Button
-            key={item.key}
-            size="sm"
-            variant={period === item.key ? 'default' : 'secondary'}
-            disabled={!health?.installed || loading}
-            onClick={() => setPeriod(item.key)}
-          >
-            {item.label}
-          </Button>
-        ))}
+      <div className={`flex flex-wrap items-center gap-2 ${embedded ? 'mb-4' : 'mb-4'}`}>
+        <div className="flex flex-wrap gap-2">
+          {PERIODS.map((item) => (
+            <Button
+              key={item.key}
+              size="sm"
+              variant={period === item.key ? 'default' : 'secondary'}
+              disabled={!health?.installed || loading}
+              onClick={() => setPeriod(item.key)}
+            >
+              {item.label}
+            </Button>
+          ))}
+        </div>
         <Button size="sm" variant="ghost" disabled={loading} onClick={() => void load()}>
           Обновить
         </Button>
       </div>
 
       {loading ? (
-        <div className={`flex justify-center ${embedded ? 'py-6' : 'py-10'}`}>
+        <div className={`flex justify-center ${embedded ? 'py-8' : 'py-10'}`}>
           <Spinner />
         </div>
       ) : !health?.installed ? (
         <p className="text-sm text-muted-foreground">Трафик доступен после установки AZ-WARP на узле.</p>
       ) : (
-        <div className={`grid gap-3 ${embedded ? 'grid-cols-1' : 'gap-4 sm:grid-cols-2'}`}>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Исходящий ↑</CardTitle>
-              <ArrowUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className={`font-bold ${embedded ? 'text-2xl' : 'text-3xl'}`}>
-                {tx == null ? '—' : formatBytes(tx)}
+        <div className="space-y-4">
+          {embedded ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+              <WarperStatTile
+                label="Исходящий ↑"
+                value={tx == null ? '—' : formatBytes(tx)}
+              />
+              <WarperStatTile
+                label="Входящий ↓"
+                value={rx == null ? '—' : formatBytes(rx)}
+              />
+              {uptime && <WarperStatTile label="Аптайм sing-box" value={uptime} />}
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Исходящий ↑</CardTitle>
+                  <ArrowUp className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{tx == null ? '—' : formatBytes(tx)}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Входящий ↓</CardTitle>
+                  <ArrowDown className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{rx == null ? '—' : formatBytes(rx)}</div>
+                </CardContent>
+              </Card>
+              {uptime && (
+                <Card className="sm:col-span-2 lg:col-span-2">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">Аптайм sing-box</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-lg font-semibold">{uptime}</div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+
+          <div className="rounded-lg border bg-muted/10 p-3 sm:p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium">График трафика</p>
+                <p className="text-xs text-muted-foreground">
+                  {periodLabel} · почасовая статистика singbox-tun
+                </p>
               </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Входящий ↓</CardTitle>
-              <ArrowDown className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className={`font-bold ${embedded ? 'text-2xl' : 'text-3xl'}`}>
-                {rx == null ? '—' : formatBytes(rx)}
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+            <WarperTrafficChart points={chartPoints} embedded={embedded} />
+          </div>
+
           {summary && (
-            <p
-              className={`rounded-lg border bg-muted/30 p-3 font-mono text-xs ${embedded ? '' : 'sm:col-span-2 text-sm'}`}
-            >
-              {summary}
-            </p>
+            <p className="rounded-lg border bg-muted/30 p-3 font-mono text-xs">{summary}</p>
           )}
         </div>
       )}

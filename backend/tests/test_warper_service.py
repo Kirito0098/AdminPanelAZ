@@ -1,5 +1,6 @@
 """Tests for WARPER service layer."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,6 +10,7 @@ from app.services.warper import (
     WarperConflictError,
     WarperNotInstalledError,
     WarperService,
+    _build_traffic_chart,
     _normalize_domain,
     detect_warper_installation,
     get_domain_lists_status,
@@ -259,3 +261,120 @@ def test_set_mode_warp_with_key_source(mock_api):
     ):
         service.set_mode_warp("system")
     mock_api.set_mode_warp.assert_called_once_with("system")
+
+
+def test_build_traffic_chart_today_hourly(tmp_path):
+    traffic_file = tmp_path / "traffic.json"
+    traffic_file.write_text(
+        json.dumps(
+            {
+                "hourly": {
+                    "2026-06-17T10": {"rx": 1000, "tx": 2000},
+                    "2026-06-17T11": {"rx": 500, "tx": 700},
+                    "2026-06-16T23": {"rx": 999, "tx": 999},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    with (
+        patch("app.services.warper.WARPER_TRAFFIC_FILE", traffic_file),
+        patch("app.services.warper.datetime") as mocked_dt,
+    ):
+        mocked_dt.now.return_value = __import__("datetime").datetime(2026, 6, 17, 12, 0, tzinfo=__import__("datetime").timezone.utc)
+        mocked_dt.strptime = __import__("datetime").datetime.strptime
+        mocked_dt.side_effect = lambda *args, **kwargs: __import__("datetime").datetime(*args, **kwargs)
+        chart = _build_traffic_chart("today")
+    assert chart == [
+        {"label": "10:00", "rx": 1000, "tx": 2000},
+        {"label": "11:00", "rx": 500, "tx": 700},
+    ]
+
+
+def test_get_traffic_includes_chart(mock_api, tmp_path):
+    traffic_file = tmp_path / "traffic.json"
+    traffic_file.write_text(
+        json.dumps({"hourly": {"2026-06-17T09": {"rx": 10, "tx": 20}}}),
+        encoding="utf-8",
+    )
+    mock_api.get_traffic.return_value = _FakeResult(
+        data={"period_rx": 10, "period_tx": 20, "period": "today"},
+    )
+    service = WarperService()
+    with (
+        patch("app.services.warper.WARPER_TRAFFIC_FILE", traffic_file),
+        patch("app.services.warper.datetime") as mocked_dt,
+        patch.object(service, "_api_client", return_value=mock_api),
+    ):
+        mocked_dt.now.return_value = __import__("datetime").datetime(2026, 6, 17, 12, 0, tzinfo=__import__("datetime").timezone.utc)
+        mocked_dt.strptime = __import__("datetime").datetime.strptime
+        mocked_dt.side_effect = lambda *args, **kwargs: __import__("datetime").datetime(*args, **kwargs)
+        payload = service.get_traffic("today")
+    assert payload["period_rx"] == 10
+    assert payload["chart"]
+
+
+def test_singbox_action_via_api(mock_api):
+    mock_api.singbox_restart.return_value = _FakeResult(message="sing-box restart: ok")
+    service = WarperService()
+    with (
+        patch("app.services.warper._ensure_no_conflict"),
+        patch.object(service, "_api_client", return_value=mock_api),
+    ):
+        result = service.singbox_action("restart")
+    assert result["success"] is True
+    mock_api.singbox_restart.assert_called_once()
+
+
+def test_singbox_action_api_failure_raises_502(mock_api):
+    mock_api.singbox_restart.return_value = _FakeResult(ok=False, message="sing-box restart: ошибка (unit failed)")
+    service = WarperService()
+    with (
+        patch("app.services.warper._ensure_no_conflict"),
+        patch.object(service, "_api_client", return_value=mock_api),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            service.singbox_action("restart")
+    assert exc.value.status_code == 502
+    assert "ошибка" in str(exc.value.detail).lower()
+
+
+def test_singbox_action_systemctl_fallback():
+    service = WarperService()
+    fake_proc = MagicMock(returncode=0, stdout="", stderr="")
+    with (
+        patch("app.services.warper._ensure_no_conflict"),
+        patch.object(service, "_api_client", side_effect=AttributeError("singbox_restart")),
+        patch("app.services.warper.subprocess.run", return_value=fake_proc) as run_mock,
+    ):
+        result = service.singbox_action("restart")
+    assert result["success"] is True
+    run_mock.assert_called_once_with(
+        ["systemctl", "restart", "sing-box"],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+
+
+def test_run_warper_action_singbox_dispatch():
+    service = WarperService()
+    with patch("app.services.warper.WarperService", return_value=service):
+        with patch.object(
+            service,
+            "singbox_action",
+            return_value={"message": "ok", "success": True},
+        ) as singbox_mock:
+            result = run_warper_action("singbox_action", action="restart")
+    assert result["success"] is True
+    singbox_mock.assert_called_once_with("restart")
+
+
+def test_run_warper_action_unknown_error_returns_502():
+    service = WarperService()
+    with patch("app.services.warper.WarperService", return_value=service):
+        with patch.object(service, "singbox_action", side_effect=RuntimeError("boom")):
+            with pytest.raises(HTTPException) as exc:
+                run_warper_action("singbox_action", action="restart")
+    assert exc.value.status_code == 502
+    assert "boom" in str(exc.value.detail)
