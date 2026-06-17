@@ -1,5 +1,25 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import {
+  ApiError,
+  applyRouting,
+  getAntizapretSettings,
+  updateAntizapretSettings,
+} from '@/api/client'
+import SettingsAlert from '@/components/settings/SettingsAlert'
+import ConfirmDialog from '@/components/shared/ConfirmDialog'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import EmptyState from '@/components/ui/EmptyState'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { InlineProgressBar } from '@/components/ui/ProgressBar'
+import Spinner from '@/components/ui/Spinner'
+import { Switch } from '@/components/ui/switch'
+import { useNode } from '@/context/NodeContext'
+import { useNotifications } from '@/context/NotificationContext'
+import { useProgress } from '@/context/ProgressContext'
+import { cn } from '@/lib/utils'
+import type { AntizapretSettingField } from '@/types'
 import type { LucideIcon } from 'lucide-react'
 import {
   ArrowRight,
@@ -17,28 +37,8 @@ import {
   Settings2,
   Shield,
 } from 'lucide-react'
-import {
-  ApiError,
-  applyRouting,
-  getAntizapretSettings,
-  updateAntizapretSettings,
-} from '@/api/client'
-import ConfirmDialog from '@/components/shared/ConfirmDialog'
-import SettingsAlert from '@/components/settings/SettingsAlert'
-import EmptyState from '@/components/ui/EmptyState'
-import Spinner from '@/components/ui/Spinner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { InlineProgressBar } from '@/components/ui/ProgressBar'
-import { Switch } from '@/components/ui/switch'
-import { useNode } from '@/context/NodeContext'
-import { useNotifications } from '@/context/NotificationContext'
-import { useProgress } from '@/context/ProgressContext'
-import { cn } from '@/lib/utils'
-import type { AntizapretSettingField } from '@/types'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 type FieldLayout = 'list' | 'grid'
 
@@ -573,7 +573,7 @@ export default function AntizapretConfigTab() {
               <Globe className="h-6 w-6" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Конфиг setup</h2>
+              <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Конфиг AntiZapret</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 Параметры файла{' '}
                 <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">setup</span> на
