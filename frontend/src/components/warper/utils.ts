@@ -35,6 +35,38 @@ export function parseBulkLines(text: string): string[] {
     .filter(Boolean)
 }
 
+export function countActiveTextLines(text: string): number {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#')).length
+}
+
+export function buildUserDomainsTextFromItems(
+  domains: Array<{ domain?: string | null; name?: string | null; type?: string | null } | string>,
+): string {
+  const lines = ['# Пользовательские домены:']
+  for (const item of domains) {
+    if (typeof item === 'string') {
+      lines.push(item)
+      continue
+    }
+    if (item.type && item.type !== 'user') continue
+    const label = item.domain ?? item.name
+    if (label) lines.push(label)
+  }
+  return `${lines.join('\n')}\n`
+}
+
+export function buildIpRangesTextFromItems(ranges: Array<string | Record<string, unknown>>): string {
+  const lines: string[] = []
+  for (const item of ranges) {
+    const label = typeof item === 'string' ? item : cidrLabel(item)
+    if (label) lines.push(label)
+  }
+  return lines.length ? `${lines.join('\n')}\n` : ''
+}
+
 export function cidrLabel(item: string | Record<string, unknown>): string {
   if (typeof item === 'string') return item
   const cidr = item.cidr ?? item.range ?? item.network

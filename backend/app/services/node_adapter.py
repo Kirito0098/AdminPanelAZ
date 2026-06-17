@@ -23,7 +23,7 @@ from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.server_monitor import ServerMonitorService
 from app.services.node_remote_cache import get_cached_monitoring_overview, monitoring_overview_cache_key
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
-from app.services.warper import WarperService
+from app.services.warper import WarperService, build_ip_ranges_text_from_items, build_user_domains_text_from_items
 
 _settings = get_settings()
 
@@ -200,6 +200,12 @@ class NodeAdapter(ABC):
     def set_warper_domain_list(self, name: str, *, enable: bool) -> dict: ...
 
     @abstractmethod
+    def get_warper_user_domains_text(self) -> str: ...
+
+    @abstractmethod
+    def save_warper_user_domains_text(self, text: str) -> dict: ...
+
+    @abstractmethod
     def get_warper_ip_ranges(self) -> list: ...
 
     @abstractmethod
@@ -207,6 +213,12 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def remove_warper_ip_range(self, cidr: str) -> dict: ...
+
+    @abstractmethod
+    def get_warper_ip_ranges_text(self) -> str: ...
+
+    @abstractmethod
+    def save_warper_ip_ranges_text(self, text: str) -> dict: ...
 
     @abstractmethod
     def sync_warper_ip_ranges(self) -> dict: ...
@@ -225,6 +237,24 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def get_warper_mode(self) -> dict: ...
+
+    @abstractmethod
+    def get_warper_settings_options(self) -> dict: ...
+
+    @abstractmethod
+    def set_warper_mode_warp(self, key_source: str | None = None) -> dict: ...
+
+    @abstractmethod
+    def set_warper_mode_slave(self, host: str, port: int, key: str) -> dict: ...
+
+    @abstractmethod
+    def set_warper_mode_wg(self, config_path: str) -> dict: ...
+
+    @abstractmethod
+    def set_warper_fullvpn(self, *, enable: bool) -> dict: ...
+
+    @abstractmethod
+    def set_warper_subnet(self, subnet: str) -> dict: ...
 
     @abstractmethod
     def set_warper_mtu(self, mtu: int) -> dict: ...
@@ -437,6 +467,12 @@ class LocalNodeAdapter(NodeAdapter):
     def set_warper_domain_list(self, name: str, *, enable: bool) -> dict:
         return self._warper.set_domain_list(name, enable=enable)
 
+    def get_warper_user_domains_text(self) -> str:
+        return self._warper.get_user_domains_text()
+
+    def save_warper_user_domains_text(self, text: str) -> dict:
+        return self._warper.save_user_domains_text(text)
+
     def get_warper_ip_ranges(self) -> list:
         return self._warper.list_ip_ranges()
 
@@ -445,6 +481,12 @@ class LocalNodeAdapter(NodeAdapter):
 
     def remove_warper_ip_range(self, cidr: str) -> dict:
         return self._warper.remove_ip_range(cidr)
+
+    def get_warper_ip_ranges_text(self) -> str:
+        return self._warper.get_ip_ranges_text()
+
+    def save_warper_ip_ranges_text(self, text: str) -> dict:
+        return self._warper.save_ip_ranges_text(text)
 
     def sync_warper_ip_ranges(self) -> dict:
         return self._warper.sync_ip_ranges()
@@ -463,6 +505,27 @@ class LocalNodeAdapter(NodeAdapter):
 
     def get_warper_mode(self) -> dict:
         return self._warper.get_mode()
+
+    def get_warper_settings_options(self) -> dict:
+        return {
+            "warp_keys": self._warper.list_warp_keys(),
+            "wg_configs": self._warper.list_wg_configs(),
+        }
+
+    def set_warper_mode_warp(self, key_source: str | None = None) -> dict:
+        return self._warper.set_mode_warp(key_source)
+
+    def set_warper_mode_slave(self, host: str, port: int, key: str) -> dict:
+        return self._warper.set_mode_slave(host, port, key)
+
+    def set_warper_mode_wg(self, config_path: str) -> dict:
+        return self._warper.set_mode_wg(config_path)
+
+    def set_warper_fullvpn(self, *, enable: bool) -> dict:
+        return self._warper.set_fullvpn(enable=enable)
+
+    def set_warper_subnet(self, subnet: str) -> dict:
+        return self._warper.set_subnet(subnet)
 
     def set_warper_mtu(self, mtu: int) -> dict:
         return self._warper.set_mtu(mtu)
@@ -938,6 +1001,31 @@ class RemoteNodeAdapter(NodeAdapter):
     def set_warper_domain_list(self, name: str, *, enable: bool) -> dict:
         return self._request("POST", f"/warper/domains/lists/{name}", json={"enable": enable})
 
+    def get_warper_user_domains_text(self) -> str:
+        try:
+            data = self._request("GET", "/warper/domains/text")
+            return str(data.get("content", ""))
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_405_METHOD_NOT_ALLOWED:
+                raise
+        data = self._request("GET", "/warper/domains")
+        user_text = data.get("user_text") if isinstance(data, dict) else None
+        if isinstance(user_text, str) and user_text:
+            return user_text
+        domains = data.get("domains", []) if isinstance(data, dict) else []
+        return build_user_domains_text_from_items(domains if isinstance(domains, list) else [])
+
+    def save_warper_user_domains_text(self, text: str) -> dict:
+        try:
+            return self._request("PUT", "/warper/domains/text", json={"text": text})
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_405_METHOD_NOT_ALLOWED:
+                raise
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Обновите node agent панели на узле — сохранение текстового файла доменов недоступно",
+            ) from exc
+
     def get_warper_ip_ranges(self) -> list:
         data = self._request("GET", "/warper/ip-ranges")
         return data.get("ranges", [])
@@ -949,6 +1037,31 @@ class RemoteNodeAdapter(NodeAdapter):
         from urllib.parse import quote
 
         return self._request("DELETE", f"/warper/ip-ranges/{quote(cidr, safe='')}")
+
+    def get_warper_ip_ranges_text(self) -> str:
+        try:
+            data = self._request("GET", "/warper/ip-ranges/text")
+            return str(data.get("content", ""))
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_405_METHOD_NOT_ALLOWED:
+                raise
+        data = self._request("GET", "/warper/ip-ranges")
+        content = data.get("content") if isinstance(data, dict) else None
+        if isinstance(content, str) and content:
+            return content
+        ranges = data.get("ranges", []) if isinstance(data, dict) else []
+        return build_ip_ranges_text_from_items(ranges if isinstance(ranges, list) else [])
+
+    def save_warper_ip_ranges_text(self, text: str) -> dict:
+        try:
+            return self._request("PUT", "/warper/ip-ranges/text", json={"text": text})
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_405_METHOD_NOT_ALLOWED:
+                raise
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Обновите node agent панели на узле — сохранение текстового файла подсетей недоступно",
+            ) from exc
 
     def sync_warper_ip_ranges(self) -> dict:
         return self._request("POST", "/warper/ip-ranges/sync")
@@ -968,6 +1081,29 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def get_warper_mode(self) -> dict:
         return self._request("GET", "/warper/settings/mode")
+
+    def get_warper_settings_options(self) -> dict:
+        return self._request("GET", "/warper/settings/options")
+
+    def set_warper_mode_warp(self, key_source: str | None = None) -> dict:
+        payload: dict[str, str | None] = {"key_source": key_source}
+        return self._request("POST", "/warper/settings/mode/warp", json=payload)
+
+    def set_warper_mode_slave(self, host: str, port: int, key: str) -> dict:
+        return self._request(
+            "POST",
+            "/warper/settings/mode/slave",
+            json={"host": host, "port": port, "key": key},
+        )
+
+    def set_warper_mode_wg(self, config_path: str) -> dict:
+        return self._request("POST", "/warper/settings/mode/wg", json={"config_path": config_path})
+
+    def set_warper_fullvpn(self, *, enable: bool) -> dict:
+        return self._request("PUT", "/warper/settings/fullvpn", json={"enable": enable})
+
+    def set_warper_subnet(self, subnet: str) -> dict:
+        return self._request("PUT", "/warper/settings/subnet", json={"subnet": subnet})
 
     def set_warper_mtu(self, mtu: int) -> dict:
         return self._request("PUT", "/warper/settings/mtu", json={"mtu": mtu})

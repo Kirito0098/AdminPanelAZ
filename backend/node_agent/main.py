@@ -455,6 +455,32 @@ class WarperLogLevelRequest(BaseModel):
     level: str = Field(..., min_length=1)
 
 
+class WarperTextSaveRequest(BaseModel):
+    text: str = ""
+
+
+class WarperModeWarpRequest(BaseModel):
+    key_source: str | None = None
+
+
+class WarperModeSlaveRequest(BaseModel):
+    host: str = Field(..., min_length=1)
+    port: int = Field(..., ge=1, le=65535)
+    key: str = Field(..., min_length=1)
+
+
+class WarperModeWgRequest(BaseModel):
+    config_path: str = Field(..., min_length=1)
+
+
+class WarperFullVpnRequest(BaseModel):
+    enable: bool
+
+
+class WarperSubnetRequest(BaseModel):
+    subnet: str = Field(..., min_length=1)
+
+
 @app.get("/warper/health")
 def warper_health(_: None = Depends(verify_api_key)):
     return run_warper_action("health")
@@ -480,7 +506,18 @@ def warper_domains_list(_: None = Depends(verify_api_key)):
     return {
         "domains": run_warper_action("list_domains"),
         "lists": run_warper_action("domain_lists_status"),
+        "user_text": run_warper_action("get_user_domains_text"),
     }
+
+
+@app.get("/warper/domains/text")
+def warper_domains_text_get(_: None = Depends(verify_api_key)):
+    return {"content": run_warper_action("get_user_domains_text")}
+
+
+@app.put("/warper/domains/text")
+def warper_domains_text_save(payload: WarperTextSaveRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("save_user_domains_text", text=payload.text)
 
 
 @app.post("/warper/domains")
@@ -510,7 +547,20 @@ def warper_domains_list_toggle(name: str, payload: WarperDomainListRequest, _: N
 
 @app.get("/warper/ip-ranges")
 def warper_ip_ranges_list(_: None = Depends(verify_api_key)):
-    return {"ranges": run_warper_action("list_ip_ranges")}
+    return {
+        "ranges": run_warper_action("list_ip_ranges"),
+        "content": run_warper_action("get_ip_ranges_text"),
+    }
+
+
+@app.get("/warper/ip-ranges/text")
+def warper_ip_ranges_text_get(_: None = Depends(verify_api_key)):
+    return {"content": run_warper_action("get_ip_ranges_text")}
+
+
+@app.put("/warper/ip-ranges/text")
+def warper_ip_ranges_text_save(payload: WarperTextSaveRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("save_ip_ranges_text", text=payload.text)
 
 
 @app.post("/warper/ip-ranges")
@@ -551,6 +601,39 @@ def warper_logs(lines: int = 200, _: None = Depends(verify_api_key)):
 @app.get("/warper/settings/mode")
 def warper_settings_mode(_: None = Depends(verify_api_key)):
     return run_warper_action("get_mode")
+
+
+@app.get("/warper/settings/options")
+def warper_settings_options(_: None = Depends(verify_api_key)):
+    return {
+        "warp_keys": run_warper_action("list_warp_keys"),
+        "wg_configs": run_warper_action("list_wg_configs"),
+    }
+
+
+@app.post("/warper/settings/mode/warp")
+def warper_settings_mode_warp(payload: WarperModeWarpRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_mode_warp", key_source=payload.key_source)
+
+
+@app.post("/warper/settings/mode/slave")
+def warper_settings_mode_slave(payload: WarperModeSlaveRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_mode_slave", host=payload.host, port=payload.port, key=payload.key)
+
+
+@app.post("/warper/settings/mode/wg")
+def warper_settings_mode_wg(payload: WarperModeWgRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_mode_wg", config_path=payload.config_path)
+
+
+@app.put("/warper/settings/fullvpn")
+def warper_settings_fullvpn(payload: WarperFullVpnRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_fullvpn", enable=payload.enable)
+
+
+@app.put("/warper/settings/subnet")
+def warper_settings_subnet(payload: WarperSubnetRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_subnet", subnet=payload.subnet)
 
 
 @app.put("/warper/settings/mtu")

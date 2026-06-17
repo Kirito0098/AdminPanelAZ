@@ -15,6 +15,7 @@ from app.schemas import (
     WarperDomainsBulkCreate,
     WarperDomainsBulkResponse,
     WarperDomainsResponse,
+    WarperFullVpnUpdate,
     WarperHealthResponse,
     WarperIpExportUpdate,
     WarperIpRangeCreate,
@@ -23,8 +24,15 @@ from app.schemas import (
     WarperLogLevelUpdate,
     WarperLogsResponse,
     WarperModeResponse,
+    WarperModeSlaveUpdate,
+    WarperModeWarpUpdate,
+    WarperModeWgUpdate,
     WarperMtuUpdate,
+    WarperSettingsOptionsResponse,
     WarperStatusResponse,
+    WarperSubnetUpdate,
+    WarperTextContentResponse,
+    WarperTextSaveRequest,
     WarperTrafficResponse,
 )
 from app.services.node_manager import get_active_adapter, get_active_node
@@ -92,6 +100,7 @@ def warper_domains_list(_: User = Depends(require_admin), db: Session = Depends(
     return WarperDomainsResponse(
         domains=adapter.get_warper_domains(),
         lists=WarperDomainListsStatus(**lists),
+        user_text=adapter.get_warper_user_domains_text(),
         **_node_meta(node),
     )
 
@@ -131,6 +140,24 @@ def warper_domains_list_toggle(
     return _action_response(adapter.set_warper_domain_list(name, enable=payload.enable), node)
 
 
+@router.get("/domains/text", response_model=WarperTextContentResponse)
+def warper_domains_text_get(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return WarperTextContentResponse(content=adapter.get_warper_user_domains_text(), **_node_meta(node))
+
+
+@router.put("/domains/text", response_model=WarperActionResponse)
+def warper_domains_text_save(
+    payload: WarperTextSaveRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.save_warper_user_domains_text(payload.text), node)
+
+
 @router.delete("/domains/{domain:path}", response_model=WarperActionResponse)
 def warper_domains_remove(
     domain: str,
@@ -153,7 +180,11 @@ def warper_domains_sync(_: User = Depends(require_admin), db: Session = Depends(
 def warper_ip_ranges_list(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
-    return WarperIpRangesResponse(ranges=adapter.get_warper_ip_ranges(), **_node_meta(node))
+    return WarperIpRangesResponse(
+        ranges=adapter.get_warper_ip_ranges(),
+        content=adapter.get_warper_ip_ranges_text(),
+        **_node_meta(node),
+    )
 
 
 @router.post("/ip-ranges", response_model=WarperActionResponse)
@@ -165,6 +196,24 @@ def warper_ip_ranges_add(
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     return _action_response(adapter.add_warper_ip_range(payload.cidr), node)
+
+
+@router.get("/ip-ranges/text", response_model=WarperTextContentResponse)
+def warper_ip_ranges_text_get(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return WarperTextContentResponse(content=adapter.get_warper_ip_ranges_text(), **_node_meta(node))
+
+
+@router.put("/ip-ranges/text", response_model=WarperActionResponse)
+def warper_ip_ranges_text_save(
+    payload: WarperTextSaveRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.save_warper_ip_ranges_text(payload.text), node)
 
 
 @router.delete("/ip-ranges/{cidr:path}", response_model=WarperActionResponse)
@@ -236,6 +285,73 @@ def warper_settings_mode(_: User = Depends(require_admin), db: Session = Depends
     node = get_active_node(db)
     mode = adapter.get_warper_mode()
     return WarperModeResponse(mode=mode if isinstance(mode, dict) else {}, **_node_meta(node))
+
+
+@router.get("/settings/options", response_model=WarperSettingsOptionsResponse)
+def warper_settings_options(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    options = adapter.get_warper_settings_options()
+    return WarperSettingsOptionsResponse(
+        warp_keys=options.get("warp_keys", []) if isinstance(options, dict) else [],
+        wg_configs=options.get("wg_configs", []) if isinstance(options, dict) else [],
+        **_node_meta(node),
+    )
+
+
+@router.post("/settings/mode/warp", response_model=WarperActionResponse)
+def warper_settings_mode_warp(
+    payload: WarperModeWarpUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_mode_warp(payload.key_source), node)
+
+
+@router.post("/settings/mode/slave", response_model=WarperActionResponse)
+def warper_settings_mode_slave(
+    payload: WarperModeSlaveUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_mode_slave(payload.host, payload.port, payload.key), node)
+
+
+@router.post("/settings/mode/wg", response_model=WarperActionResponse)
+def warper_settings_mode_wg(
+    payload: WarperModeWgUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_mode_wg(payload.config_path), node)
+
+
+@router.put("/settings/fullvpn", response_model=WarperActionResponse)
+def warper_settings_fullvpn(
+    payload: WarperFullVpnUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_fullvpn(enable=payload.enable), node)
+
+
+@router.put("/settings/subnet", response_model=WarperActionResponse)
+def warper_settings_subnet(
+    payload: WarperSubnetUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_subnet(payload.subnet), node)
 
 
 @router.put("/settings/mtu", response_model=WarperActionResponse)

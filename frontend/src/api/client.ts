@@ -1436,6 +1436,17 @@ export async function setWarperDomainList(name: string, enable: boolean) {
   })
 }
 
+export async function getWarperUserDomainsText() {
+  return apiFetch<import('../types').WarperTextContentResponse>('/warper/domains/text')
+}
+
+export async function saveWarperUserDomainsText(text: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/domains/text', {
+    method: 'PUT',
+    body: JSON.stringify({ text }),
+  })
+}
+
 export async function getWarperIpRanges() {
   return apiFetch<import('../types').WarperIpRangesResponse>('/warper/ip-ranges')
 }
@@ -1472,6 +1483,17 @@ export async function setWarperIpExport(enable: boolean) {
   })
 }
 
+export async function getWarperIpRangesText() {
+  return apiFetch<import('../types').WarperTextContentResponse>('/warper/ip-ranges/text')
+}
+
+export async function saveWarperIpRangesText(text: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/ip-ranges/text', {
+    method: 'PUT',
+    body: JSON.stringify({ text }),
+  })
+}
+
 export async function getWarperTraffic(period: import('../types').WarperTrafficPeriod = 'today') {
   return apiFetch<import('../types').WarperTrafficResponse>(`/warper/traffic?period=${encodeURIComponent(period)}`)
 }
@@ -1482,6 +1504,45 @@ export async function getWarperLogs(lines = 200) {
 
 export async function getWarperMode() {
   return apiFetch<import('../types').WarperModeResponse>('/warper/settings/mode')
+}
+
+export async function getWarperSettingsOptions() {
+  return apiFetch<import('../types').WarperSettingsOptionsResponse>('/warper/settings/options')
+}
+
+export async function setWarperModeWarp(keySource?: 'system' | 'generate' | null) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/mode/warp', {
+    method: 'POST',
+    body: JSON.stringify({ key_source: keySource ?? null }),
+  })
+}
+
+export async function setWarperModeSlave(host: string, port: number, key: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/mode/slave', {
+    method: 'POST',
+    body: JSON.stringify({ host, port, key }),
+  })
+}
+
+export async function setWarperModeWg(configPath: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/mode/wg', {
+    method: 'POST',
+    body: JSON.stringify({ config_path: configPath }),
+  })
+}
+
+export async function setWarperFullVpn(enable: boolean) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/fullvpn', {
+    method: 'PUT',
+    body: JSON.stringify({ enable }),
+  })
+}
+
+export async function setWarperSubnet(subnet: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/subnet', {
+    method: 'PUT',
+    body: JSON.stringify({ subnet }),
+  })
 }
 
 export async function setWarperMtu(mtu: number) {

@@ -66,6 +66,8 @@ def warper_api_client(tmp_path):
     mock_adapter.get_warper_doctor.return_value = [{"check": "sing-box", "status": "ok"}]
     mock_adapter.warper_toggle.return_value = {"message": "toggled"}
     mock_adapter.get_warper_domains.return_value = [{"domain": "example.com"}]
+    mock_adapter.get_warper_domain_lists.return_value = {"gemini": False, "chatgpt": False}
+    mock_adapter.get_warper_user_domains_text.return_value = "# Пользовательские домены:\nexample.com\n"
     mock_adapter.add_warper_domain.return_value = {"message": "added"}
     mock_adapter.remove_warper_domain.return_value = {"message": "removed"}
     mock_adapter.sync_warper_domains.return_value = {"message": "synced"}
@@ -108,7 +110,9 @@ def test_api_get_warper_domains(warper_api_client):
     response = client.get("/api/warper/domains", headers=headers)
     assert response.status_code == 200
     assert response.json()["domains"][0]["domain"] == "example.com"
+    assert response.json()["user_text"] == "# Пользовательские домены:\nexample.com\n"
     mock_adapter.get_warper_domains.assert_called_once()
+    mock_adapter.get_warper_user_domains_text.assert_called_once()
 
 
 def test_api_post_warper_domain(warper_api_client):

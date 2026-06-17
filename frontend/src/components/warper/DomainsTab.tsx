@@ -1,36 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Bot, Globe, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react'
+import { Bot, Globe, RefreshCw, RotateCcw, Save } from 'lucide-react'
 import {
-  addWarperDomain,
-  addWarperDomainsBulk,
   getWarperDomains,
-  removeWarperDomain,
+  saveWarperUserDomainsText,
   setWarperDomainList,
-  syncWarperDomains,
 } from '@/api/client'
 import StatusPanel from '@/components/noc/StatusPanel'
-import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
-import type { WarperDomainItem, WarperHealthResponse } from '@/types'
-import { domainTypeLabel, isWarperDisabled, parseBulkLines } from './utils'
-
-function typeBadgeVariant(type: string | undefined): 'default' | 'secondary' | 'outline' {
-  if (type === 'gemini' || type === 'chatgpt') return 'secondary'
-  return 'outline'
-}
-
-function domainLabel(item: WarperDomainItem | string): string {
-  if (typeof item === 'string') return item
-  return item.domain ?? item.name ?? ''
-}
+import type { WarperHealthResponse } from '@/types'
+import { buildUserDomainsTextFromItems, countActiveTextLines, isWarperDisabled } from './utils'
 
 const BUILTIN_LISTS = {
   gemini: { title: 'Google Gemini', description: 'Домены сервисов Gemini' },
@@ -47,38 +32,40 @@ export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps)
   const { success, error: notifyError } = useNotifications()
   const disabled = isWarperDisabled(health)
 
-  const [domains, setDomains] = useState<WarperDomainItem[]>([])
+  const [savedText, setSavedText] = useState('')
+  const [draftText, setDraftText] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-  const [newDomain, setNewDomain] = useState('')
-  const [bulkText, setBulkText] = useState('')
-  const [showBulk, setShowBulk] = useState(false)
-  const [adding, setAdding] = useState(false)
-  const [syncing, setSyncing] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [listBusy, setListBusy] = useState<string | null>(null)
   const [listStatus, setListStatus] = useState({ gemini: false, chatgpt: false })
-  const [removeTarget, setRemoveTarget] = useState<string | null>(null)
-  const [removing, setRemoving] = useState(false)
+
+  const dirty = draftText !== savedText
+  const domainCount = useMemo(() => countActiveTextLines(draftText), [draftText])
 
   const load = useCallback(async () => {
     if (!health?.installed) {
-      setDomains([])
+      setSavedText('')
+      setDraftText('')
       setLoading(false)
       setLoadError(null)
+      onDomainsChange?.(0)
       return
     }
     setLoading(true)
     setLoadError(null)
     try {
-      const data = await getWarperDomains()
-      const items = data.domains ?? []
-      setDomains(items)
+      const listsData = await getWarperDomains()
+      const content =
+        listsData.user_text?.trim() ||
+        buildUserDomainsTextFromItems(listsData.domains ?? [])
+      setSavedText(content)
+      setDraftText(content)
       setListStatus({
-        gemini: data.lists?.gemini ?? false,
-        chatgpt: data.lists?.chatgpt ?? false,
+        gemini: listsData.lists?.gemini ?? false,
+        chatgpt: listsData.lists?.chatgpt ?? false,
       })
-      onDomainsChange?.(items.length)
+      onDomainsChange?.(countActiveTextLines(content))
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Не удалось загрузить домены')
     } finally {
@@ -90,58 +77,18 @@ export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps)
     void load()
   }, [load, activeNode?.id, health?.installed])
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return domains
-    return domains.filter((item) => domainLabel(item).toLowerCase().includes(q))
-  }, [domains, search])
-
-  async function handleAdd() {
-    const value = newDomain.trim()
-    if (!value) return
-    setAdding(true)
+  async function handleSave() {
+    if (!dirty) return
+    setSaving(true)
     try {
-      await addWarperDomain(value)
-      success(`Домен ${value} добавлен`)
-      setNewDomain('')
-      await load()
+      const result = await saveWarperUserDomainsText(draftText)
+      setSavedText(draftText)
+      onDomainsChange?.(countActiveTextLines(draftText))
+      success(result.message ?? 'Домены сохранены')
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось добавить домен')
+      notifyError(err instanceof Error ? err.message : 'Не удалось сохранить домены')
     } finally {
-      setAdding(false)
-    }
-  }
-
-  async function handleBulkAdd() {
-    const items = parseBulkLines(bulkText)
-    if (items.length === 0) return
-    setAdding(true)
-    try {
-      const result = await addWarperDomainsBulk(items)
-      success(`Добавлено доменов: ${result.added_count}`)
-      if (result.errors?.length) {
-        notifyError(`Ошибок: ${result.errors.length}`)
-      }
-      setBulkText('')
-      setShowBulk(false)
-      await load()
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось импортировать домены')
-    } finally {
-      setAdding(false)
-    }
-  }
-
-  async function handleSync() {
-    setSyncing(true)
-    try {
-      await syncWarperDomains()
-      success('Домены синхронизированы. OVPN — переподключение; WG/AWG — обновите конфиг.')
-      await load()
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось синхронизировать домены')
-    } finally {
-      setSyncing(false)
+      setSaving(false)
     }
   }
 
@@ -160,22 +107,7 @@ export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps)
     }
   }
 
-  async function confirmRemove() {
-    if (!removeTarget) return
-    setRemoving(true)
-    try {
-      await removeWarperDomain(removeTarget)
-      success(`Домен ${removeTarget} удалён`)
-      setRemoveTarget(null)
-      await load()
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось удалить домен')
-    } finally {
-      setRemoving(false)
-    }
-  }
-
-  if (loading && domains.length === 0) {
+  if (loading && !savedText) {
     return (
       <div className="flex justify-center py-12">
         <Spinner />
@@ -189,8 +121,7 @@ export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps)
 
       <StatusPanel title="Встроенные списки" icon={Bot}>
         <p className="mb-3 text-sm text-muted-foreground">
-          Готовые наборы доменов. После включения нажмите «Синхронизировать», если домены не появились
-          сразу.
+          Готовые наборы доменов. Включаются отдельно от пользовательского списка ниже.
         </p>
         <div className="divide-y rounded-lg border">
           {(Object.keys(BUILTIN_LISTS) as Array<keyof typeof BUILTIN_LISTS>).map((name) => {
@@ -226,129 +157,46 @@ export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps)
         </div>
       </StatusPanel>
 
-      <StatusPanel title="Домены" icon={Globe}>
+      <StatusPanel title="Пользовательские домены" icon={Globe}>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Текстовый файл доменов с комментариями. Сохранение выполняет валидацию и одну синхронизацию с
+          kresd — без добавления по одному домену.
+        </p>
+
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">Всего: {domains.length}</Badge>
-          {search && <Badge variant="outline">Найдено: {filtered.length}</Badge>}
+          <Badge variant="secondary">Доменов: {domainCount}</Badge>
+          {dirty && <Badge variant="warning">Есть несохранённые изменения</Badge>}
           {disabled && <Badge variant="warning">Только просмотр</Badge>}
         </div>
 
-        <div className="mb-4 rounded-lg border bg-muted/20 p-3">
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              className="bg-background"
-              placeholder="example.com"
-              value={newDomain}
-              onChange={(e) => setNewDomain(e.target.value)}
-              disabled={disabled || adding}
-              onKeyDown={(e) => e.key === 'Enter' && void handleAdd()}
-            />
-            <Button disabled={disabled || adding || !newDomain.trim()} onClick={() => void handleAdd()}>
-              <Plus className="mr-1.5 h-4 w-4" />
-              Добавить
-            </Button>
-            <Button variant="outline" disabled={disabled} onClick={() => setShowBulk((v) => !v)}>
-              <Upload className="mr-1.5 h-4 w-4" />
-              Импорт
-            </Button>
-          </div>
-        </div>
+        <Textarea
+          value={draftText}
+          onChange={(e) => setDraftText(e.target.value)}
+          disabled={disabled || saving}
+          spellCheck={false}
+          className="min-h-[20rem] resize-y font-mono text-xs leading-relaxed"
+          placeholder={'# Пользовательские домены:\nexample.com\n*.cdn.example.com'}
+        />
 
-        {showBulk && (
-          <div className="mb-4 space-y-2 rounded-lg border bg-muted/20 p-3">
-            <p className="text-xs text-muted-foreground">По одному домену на строку (или через запятую).</p>
-            <Textarea
-              rows={5}
-              placeholder={'google.com\nopenai.com'}
-              value={bulkText}
-              disabled={disabled || adding}
-              onChange={(e) => setBulkText(e.target.value)}
-            />
-            <Button size="sm" disabled={disabled || adding || !bulkText.trim()} onClick={() => void handleBulkAdd()}>
-              Импортировать
-            </Button>
-          </div>
-        )}
-
-        <div className="mb-4 flex flex-wrap gap-2">
-          <div className="relative min-w-[200px] flex-1">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-8"
-              placeholder="Поиск..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button disabled={disabled || saving || !dirty} onClick={() => void handleSave()}>
+            <Save className="mr-1.5 h-4 w-4" />
+            {saving ? 'Сохранение…' : 'Сохранить'}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={disabled || saving || !dirty}
+            onClick={() => setDraftText(savedText)}
+          >
+            <RotateCcw className="mr-1.5 h-4 w-4" />
+            Сбросить
+          </Button>
+          <Button variant="secondary" size="sm" disabled={loading || saving} onClick={() => void load()}>
             <RefreshCw className="mr-1.5 h-4 w-4" />
             Обновить
           </Button>
-          <Button size="sm" onClick={() => void handleSync()} disabled={disabled || syncing}>
-            <RefreshCw className={`mr-1.5 h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-            Синхронизировать
-          </Button>
         </div>
-
-        {filtered.length === 0 ? (
-          <EmptyState title="Нет доменов" description="Добавьте домен или импортируйте список." />
-        ) : (
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2.5 font-medium">Домен</th>
-                  <th className="px-3 py-2.5 font-medium">Тип</th>
-                  <th className="px-3 py-2.5 font-medium">Статус</th>
-                  <th className="w-12 px-3 py-2.5" />
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((item) => {
-                  const label = domainLabel(item)
-                  const enabled = item.enabled !== false
-                  return (
-                    <tr key={label} className="border-t transition-colors hover:bg-muted/30">
-                      <td className="px-3 py-2.5 font-mono text-sm">{label}</td>
-                      <td className="px-3 py-2.5">
-                        <Badge variant={typeBadgeVariant(item.type)}>{domainTypeLabel(item.type)}</Badge>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <Badge variant={enabled ? 'success' : 'secondary'}>
-                          {enabled ? 'вкл.' : 'выкл.'}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          disabled={disabled || removing}
-                          onClick={() => setRemoveTarget(label)}
-                          aria-label={`Удалить ${label}`}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
       </StatusPanel>
-
-      <ConfirmDialog
-        open={Boolean(removeTarget)}
-        title="Удалить домен?"
-        description={removeTarget ? `Домен ${removeTarget} будет удалён из AZ-WARP.` : ''}
-        confirmLabel="Удалить"
-        destructive
-        loading={removing}
-        onConfirm={() => void confirmRemove()}
-        onOpenChange={(open) => !open && setRemoveTarget(null)}
-      />
     </div>
   )
 }

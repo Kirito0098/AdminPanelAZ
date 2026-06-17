@@ -215,3 +215,47 @@ def test_list_ip_ranges_fallback_to_file(mock_api, tmp_path):
     ):
         ranges = service.list_ip_ranges()
     assert ranges == ["91.108.4.0/22"]
+
+
+def test_get_user_domains_text_uses_api(mock_api):
+    mock_api.get_user_domains_text.return_value = "# user\nexample.com\n"
+    service = WarperService()
+    with patch.object(service, "_api_client", return_value=mock_api):
+        text = service.get_user_domains_text()
+    assert "example.com" in text
+
+
+def test_save_user_domains_text_calls_api(mock_api):
+    mock_api.save_user_domains_text.return_value = _FakeResult(data={"message": "saved"})
+    service = WarperService()
+    with (
+        patch("app.services.warper._ensure_no_conflict"),
+        patch.object(service, "_api_client", return_value=mock_api),
+    ):
+        result = service.save_user_domains_text("example.com\n")
+    assert result["message"] == "saved"
+    mock_api.save_user_domains_text.assert_called_once_with("example.com\n")
+
+
+def test_get_ip_ranges_text_fallback_to_file(mock_api, tmp_path):
+    ip_file = tmp_path / "ip-ranges.txt"
+    ip_file.write_text("10.0.0.0/8\n", encoding="utf-8")
+    service = WarperService()
+    with (
+        patch.object(service, "_api_client", return_value=mock_api),
+        patch("app.services.warper.WARPER_IP_RANGES_FILE", ip_file),
+    ):
+        del mock_api.get_ip_ranges_text
+        text = service.get_ip_ranges_text()
+    assert text == "10.0.0.0/8\n"
+
+
+def test_set_mode_warp_with_key_source(mock_api):
+    mock_api.set_mode_warp.return_value = _FakeResult(data={"message": "warp"})
+    service = WarperService()
+    with (
+        patch("app.services.warper._ensure_no_conflict"),
+        patch.object(service, "_api_client", return_value=mock_api),
+    ):
+        service.set_mode_warp("system")
+    mock_api.set_mode_warp.assert_called_once_with("system")

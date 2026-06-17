@@ -1,20 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Network, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Network, RefreshCw, RotateCcw, Save } from 'lucide-react'
 import {
-  addWarperIpRange,
   getWarperIpRanges,
-  removeWarperIpRange,
+  saveWarperIpRangesText,
   setWarperIpExport,
   setWarperIpRouteMode,
-  syncWarperIpRanges,
 } from '@/api/client'
-import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import StatusPanel from '@/components/noc/StatusPanel'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -25,7 +22,7 @@ import {
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import type { WarperHealthResponse } from '@/types'
-import { cidrLabel, isWarperDisabled } from './utils'
+import { buildIpRangesTextFromItems, countActiveTextLines, isWarperDisabled } from './utils'
 
 const ROUTE_MODES = [
   { value: 'antizapret', label: 'Только AntiZapret' },
@@ -42,25 +39,36 @@ export default function IpRangesTab({ health }: IpRangesTabProps) {
   const { success, error: notifyError } = useNotifications()
   const disabled = isWarperDisabled(health)
 
-  const [ranges, setRanges] = useState<Array<string | Record<string, unknown>>>([])
+  const [savedText, setSavedText] = useState('')
+  const [draftText, setDraftText] = useState('')
   const [loading, setLoading] = useState(true)
-  const [newCidr, setNewCidr] = useState('')
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const [routeMode, setRouteMode] = useState('antizapret')
   const [busy, setBusy] = useState(false)
-  const [removeTarget, setRemoveTarget] = useState<string | null>(null)
+
+  const dirty = draftText !== savedText
+  const rangeCount = useMemo(() => countActiveTextLines(draftText), [draftText])
 
   const load = useCallback(async () => {
     if (!health?.installed) {
-      setRanges([])
+      setSavedText('')
+      setDraftText('')
       setLoading(false)
+      setLoadError(null)
       return
     }
     setLoading(true)
+    setLoadError(null)
     try {
       const data = await getWarperIpRanges()
-      setRanges(data.ranges ?? [])
+      const content = data.content?.trim() || buildIpRangesTextFromItems(data.ranges ?? [])
+      setSavedText(content)
+      setDraftText(content)
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось загрузить подсети')
+      const message = err instanceof Error ? err.message : 'Не удалось загрузить подсети'
+      setLoadError(message)
+      notifyError(message)
     } finally {
       setLoading(false)
     }
@@ -70,32 +78,17 @@ export default function IpRangesTab({ health }: IpRangesTabProps) {
     void load()
   }, [load, activeNode?.id, health?.installed])
 
-  async function handleAdd() {
-    const value = newCidr.trim()
-    if (!value) return
-    setBusy(true)
+  async function handleSave() {
+    if (!dirty) return
+    setSaving(true)
     try {
-      await addWarperIpRange(value)
-      success(`Подсеть ${value} добавлена`)
-      setNewCidr('')
-      await load()
+      const result = await saveWarperIpRangesText(draftText)
+      setSavedText(draftText)
+      success(result.message ?? 'Подсети сохранены')
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось добавить подсеть')
+      notifyError(err instanceof Error ? err.message : 'Не удалось сохранить подсети')
     } finally {
-      setBusy(false)
-    }
-  }
-
-  async function handleSync() {
-    setBusy(true)
-    try {
-      await syncWarperIpRanges()
-      success('Подсети синхронизированы. OVPN — переподключение; WG/AWG — обновите конфиг.')
-      await load()
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось синхронизировать')
-    } finally {
-      setBusy(false)
+      setSaving(false)
     }
   }
 
@@ -123,22 +116,7 @@ export default function IpRangesTab({ health }: IpRangesTabProps) {
     }
   }
 
-  async function confirmRemove() {
-    if (!removeTarget) return
-    setBusy(true)
-    try {
-      await removeWarperIpRange(removeTarget)
-      success(`Подсеть ${removeTarget} удалена`)
-      setRemoveTarget(null)
-      await load()
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось удалить подсеть')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  if (loading && ranges.length === 0) {
+  if (loading && !savedText) {
     return (
       <div className="flex justify-center py-12">
         <Spinner />
@@ -148,29 +126,18 @@ export default function IpRangesTab({ health }: IpRangesTabProps) {
 
   return (
     <div className="space-y-4">
+      {loadError && <EmptyState title="Ошибка загрузки" description={loadError} />}
+
       <StatusPanel title="IP-подсети" icon={Network}>
         <p className="mb-4 text-sm text-muted-foreground">
-          CIDR-маршруты через sing-box. После изменений выполните синхронизацию.
+          CIDR-маршруты через sing-box. Редактируйте текстовый файл и сохраните одной кнопкой — валидация и
+          синхронизация выполняются на сервере.
         </p>
-
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row">
-          <Input
-            placeholder="91.108.4.0/22"
-            value={newCidr}
-            disabled={disabled || busy}
-            onChange={(e) => setNewCidr(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && void handleAdd()}
-          />
-          <Button disabled={disabled || busy || !newCidr.trim()} onClick={() => void handleAdd()}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            Добавить
-          </Button>
-        </div>
 
         <div className="mb-4 flex flex-wrap items-end gap-2">
           <div className="min-w-[220px] flex-1">
             <label className="mb-1 block text-xs text-muted-foreground">Режим маршрутизации</label>
-            <Select value={routeMode} onValueChange={setRouteMode} disabled={disabled || busy}>
+            <Select value={routeMode} onValueChange={setRouteMode} disabled={disabled || busy || saving}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -183,66 +150,51 @@ export default function IpRangesTab({ health }: IpRangesTabProps) {
               </SelectContent>
             </Select>
           </div>
-          <Button variant="secondary" size="sm" disabled={disabled || busy} onClick={() => void handleModeApply()}>
+          <Button variant="secondary" size="sm" disabled={disabled || busy || saving} onClick={() => void handleModeApply()}>
             Применить режим
           </Button>
-          <Button variant="outline" size="sm" disabled={disabled || busy} onClick={() => void handleExport(true)}>
+          <Button variant="outline" size="sm" disabled={disabled || busy || saving} onClick={() => void handleExport(true)}>
             Экспорт в AZ
           </Button>
-          <Button variant="outline" size="sm" disabled={disabled || busy} onClick={() => void handleExport(false)}>
+          <Button variant="outline" size="sm" disabled={disabled || busy || saving} onClick={() => void handleExport(false)}>
             Выкл. экспорт
-          </Button>
-          <Button size="sm" disabled={disabled || busy} onClick={() => void handleSync()}>
-            Синхронизировать
-          </Button>
-          <Button variant="ghost" size="sm" disabled={loading} onClick={() => void load()}>
-            <RefreshCw className="h-4 w-4" />
           </Button>
         </div>
 
-        <Badge variant="secondary" className="mb-3">
-          Подсетей: {ranges.length}
-        </Badge>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">Подсетей: {rangeCount}</Badge>
+          {dirty && <Badge variant="warning">Есть несохранённые изменения</Badge>}
+          {disabled && <Badge variant="warning">Только просмотр</Badge>}
+        </div>
 
-        {ranges.length === 0 ? (
-          <EmptyState title="Нет подсетей" description="Добавьте CIDR для маршрутизации через AZ-WARP." />
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {ranges.map((item) => {
-              const label = cidrLabel(item)
-              return (
-                <div
-                  key={label}
-                  className="flex items-center gap-1 rounded-md border bg-muted/30 px-2 py-1 font-mono text-sm"
-                >
-                  {label}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    disabled={disabled || busy}
-                    onClick={() => setRemoveTarget(label)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                  </Button>
-                </div>
-              )
-            })}
-          </div>
-        )}
+        <Textarea
+          value={draftText}
+          onChange={(e) => setDraftText(e.target.value)}
+          disabled={disabled || saving}
+          spellCheck={false}
+          className="min-h-[16rem] resize-y font-mono text-xs leading-relaxed"
+          placeholder={'# IP-подсети\n91.108.4.0/22\n2001:db8::/32'}
+        />
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button disabled={disabled || saving || !dirty} onClick={() => void handleSave()}>
+            <Save className="mr-1.5 h-4 w-4" />
+            {saving ? 'Сохранение…' : 'Сохранить'}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={disabled || saving || !dirty}
+            onClick={() => setDraftText(savedText)}
+          >
+            <RotateCcw className="mr-1.5 h-4 w-4" />
+            Сбросить
+          </Button>
+          <Button variant="secondary" size="sm" disabled={loading || saving} onClick={() => void load()}>
+            <RefreshCw className="mr-1.5 h-4 w-4" />
+            Обновить
+          </Button>
+        </div>
       </StatusPanel>
-
-      <ConfirmDialog
-        open={Boolean(removeTarget)}
-        title="Удалить подсеть?"
-        description={removeTarget ? `CIDR ${removeTarget} будет удалён.` : ''}
-        confirmLabel="Удалить"
-        destructive
-        loading={busy}
-        onConfirm={() => void confirmRemove()}
-        onOpenChange={(open) => !open && setRemoveTarget(null)}
-      />
     </div>
   )
 }

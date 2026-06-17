@@ -1121,6 +1121,7 @@ class WarperDomainListsStatus(BaseModel):
 class WarperDomainsResponse(BaseModel):
     domains: list[WarperDomainItem | dict]
     lists: WarperDomainListsStatus = Field(default_factory=WarperDomainListsStatus)
+    user_text: str | None = None
     node_id: int | None = None
     node_name: str | None = None
 
@@ -1164,6 +1165,7 @@ class WarperIpRangeCreate(BaseModel):
 
 class WarperIpRangesResponse(BaseModel):
     ranges: list[str | dict]
+    content: str | None = None
     node_id: int | None = None
     node_name: str | None = None
 
@@ -1202,6 +1204,45 @@ class WarperMtuUpdate(BaseModel):
 
 class WarperLogLevelUpdate(BaseModel):
     level: str = Field(..., min_length=1)
+
+
+class WarperTextContentResponse(BaseModel):
+    content: str = ""
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperTextSaveRequest(BaseModel):
+    text: str = ""
+
+
+class WarperSettingsOptionsResponse(BaseModel):
+    warp_keys: list[str] = Field(default_factory=list)
+    wg_configs: list[str] = Field(default_factory=list)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperModeWarpUpdate(BaseModel):
+    key_source: str | None = None
+
+
+class WarperModeSlaveUpdate(BaseModel):
+    host: str = Field(..., min_length=1)
+    port: int = Field(..., ge=1, le=65535)
+    key: str = Field(..., min_length=1)
+
+
+class WarperModeWgUpdate(BaseModel):
+    config_path: str = Field(..., min_length=1)
+
+
+class WarperFullVpnUpdate(BaseModel):
+    enable: bool
+
+
+class WarperSubnetUpdate(BaseModel):
+    subnet: str = Field(..., min_length=1)
 
 
 class TrafficClientRow(BaseModel):

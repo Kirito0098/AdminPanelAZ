@@ -1394,6 +1394,7 @@ export interface WarperDomainListsStatus {
 export interface WarperDomainsResponse {
   domains: WarperDomainItem[]
   lists?: WarperDomainListsStatus
+  user_text?: string | null
   node_id?: number | null
   node_name?: string | null
 }
@@ -1434,6 +1435,7 @@ export interface WarperDomainsBulkResponse {
 
 export interface WarperIpRangesResponse {
   ranges: Array<string | Record<string, unknown>>
+  content?: string | null
   node_id?: number | null
   node_name?: string | null
 }
@@ -1452,6 +1454,19 @@ export interface WarperLogsResponse {
 
 export interface WarperModeResponse {
   mode: Record<string, unknown>
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperTextContentResponse {
+  content: string
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperSettingsOptionsResponse {
+  warp_keys: string[]
+  wg_configs: string[]
   node_id?: number | null
   node_name?: string | null
 }

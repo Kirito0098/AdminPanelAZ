@@ -202,6 +202,111 @@ def _read_ip_ranges_file() -> list[str]:
     return ranges
 
 
+def _read_ip_ranges_file_text() -> str:
+    if not WARPER_IP_RANGES_FILE.is_file():
+        return ""
+    return WARPER_IP_RANGES_FILE.read_text(encoding="utf-8", errors="replace")
+
+
+def _extract_user_domains_text(text: str | None = None) -> str:
+    if text is None:
+        if not WARPER_DOMAINS_FILE.is_file():
+            return "# Пользовательские домены:\n"
+        text = WARPER_DOMAINS_FILE.read_text(encoding="utf-8", errors="replace")
+    lines_out: list[str] = []
+    in_gemini = False
+    in_chatgpt = False
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if stripped == _BUILTIN_LIST_MARKERS["gemini"][0]:
+            in_gemini, in_chatgpt = True, False
+            continue
+        if stripped == _BUILTIN_LIST_MARKERS["gemini"][1]:
+            in_gemini = False
+            continue
+        if stripped == _BUILTIN_LIST_MARKERS["chatgpt"][0]:
+            in_chatgpt, in_gemini = True, False
+            continue
+        if stripped == _BUILTIN_LIST_MARKERS["chatgpt"][1]:
+            in_chatgpt = False
+            continue
+        if in_gemini or in_chatgpt:
+            continue
+        lines_out.append(line)
+    body = "\n".join(lines_out).rstrip()
+    return f"{body}\n" if body else "# Пользовательские домены:\n"
+
+
+def _text_from_api_result(result: Any, *, fallback: str = "") -> str:
+    if isinstance(result, str):
+        return result
+    unwrapped = _result_or_raise(result, default=fallback)
+    if isinstance(unwrapped, str):
+        return unwrapped
+    if isinstance(unwrapped, dict):
+        for key in ("text", "content", "data"):
+            value = unwrapped.get(key)
+            if isinstance(value, str):
+                return value
+    return fallback
+
+
+def _normalize_string_list(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [raw]
+    if isinstance(raw, list):
+        items: list[str] = []
+        for item in raw:
+            if isinstance(item, str):
+                items.append(item)
+            elif isinstance(item, dict):
+                for key in ("path", "name", "id", "key", "value"):
+                    value = item.get(key)
+                    if isinstance(value, str) and value:
+                        items.append(value)
+                        break
+        return items
+    unwrapped = _result_or_raise(raw, default=[])
+    return _normalize_string_list(unwrapped)
+
+
+def build_user_domains_text_from_items(domains: list[Any]) -> str:
+    lines = ["# Пользовательские домены:"]
+    for item in domains:
+        if isinstance(item, str):
+            lines.append(item)
+            continue
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") not in {None, "user"}:
+            continue
+        domain = item.get("domain") or item.get("name")
+        if isinstance(domain, str) and domain.strip():
+            lines.append(domain.strip())
+    body = "\n".join(lines).rstrip()
+    return f"{body}\n"
+
+
+def build_ip_ranges_text_from_items(ranges: list[Any]) -> str:
+    lines: list[str] = []
+    for item in ranges:
+        if isinstance(item, str):
+            value = item.strip()
+            if value:
+                lines.append(value)
+            continue
+        if not isinstance(item, dict):
+            continue
+        cidr = item.get("cidr") or item.get("range") or item.get("network")
+        if isinstance(cidr, str) and cidr.strip():
+            lines.append(cidr.strip())
+    body = "\n".join(lines).rstrip()
+    return f"{body}\n" if body else ""
+
+
 def _http_exception_from_service(exc: Exception) -> HTTPException:
     if isinstance(exc, WarperNotInstalledError):
         return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
@@ -342,6 +447,48 @@ class WarperService:
         action = api.enable_list if enable else api.disable_list
         return _result_or_raise(action(list_name), default={"message": "OK"})
 
+    def get_user_domains_text(self) -> str:
+        api = self._api_client()
+        getter = getattr(api, "get_user_domains_text", None)
+        if callable(getter):
+            try:
+                return _text_from_api_result(getter(), fallback=_extract_user_domains_text())
+            except HTTPException:
+                return _extract_user_domains_text()
+        return _extract_user_domains_text()
+
+    def save_user_domains_text(self, text: str) -> dict[str, Any]:
+        _ensure_no_conflict()
+        api = self._api_client()
+        saver = getattr(api, "save_user_domains_text", None)
+        if not callable(saver):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="save_user_domains_text недоступен в warper_api",
+            )
+        return _result_or_raise(saver(text), default={"message": "OK"})
+
+    def get_ip_ranges_text(self) -> str:
+        api = self._api_client()
+        getter = getattr(api, "get_ip_ranges_text", None)
+        if callable(getter):
+            try:
+                return _text_from_api_result(getter(), fallback=_read_ip_ranges_file_text())
+            except HTTPException:
+                return _read_ip_ranges_file_text()
+        return _read_ip_ranges_file_text()
+
+    def save_ip_ranges_text(self, text: str) -> dict[str, Any]:
+        _ensure_no_conflict()
+        api = self._api_client()
+        saver = getattr(api, "save_ip_ranges_text", None)
+        if not callable(saver):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="save_ip_ranges_text недоступен в warper_api",
+            )
+        return _result_or_raise(saver(text), default={"message": "OK"})
+
     def list_ip_ranges(self) -> list[Any]:
         api = self._api_client()
         try:
@@ -409,17 +556,108 @@ class WarperService:
         else:
             unwrapped = _result_or_raise(mode, default={})
             payload = unwrapped if isinstance(unwrapped, dict) else {"mode": unwrapped}
-        for attr, key in (("get_mtu", "mtu"), ("get_log_level", "log_level")):
+        for attr, key in (("get_mtu", "mtu"), ("get_log_level", "log_level"), ("get_fullvpn", "fullvpn"), ("get_subnet", "subnet")):
             getter = getattr(api, attr, None)
             if not callable(getter):
                 continue
             try:
                 value = getter()
-                if isinstance(value, (str, int)):
+                if isinstance(value, bool):
                     payload[key] = value
+                elif isinstance(value, (str, int)):
+                    payload[key] = value
+                elif hasattr(value, "ok"):
+                    unwrapped = _result_or_raise(value, default=None)
+                    if unwrapped is not None:
+                        payload[key] = unwrapped
             except Exception:
                 continue
         return payload
+
+    def list_warp_keys(self) -> list[str]:
+        api = self._api_client()
+        lister = getattr(api, "list_warp_keys", None)
+        if not callable(lister):
+            return []
+        try:
+            return _normalize_string_list(lister())
+        except HTTPException:
+            return []
+
+    def list_wg_configs(self) -> list[str]:
+        api = self._api_client()
+        lister = getattr(api, "list_wg_configs", None)
+        if not callable(lister):
+            return []
+        try:
+            return _normalize_string_list(lister())
+        except HTTPException:
+            return []
+
+    def set_mode_warp(self, key_source: str | None = None) -> dict[str, Any]:
+        _ensure_no_conflict()
+        api = self._api_client()
+        setter = getattr(api, "set_mode_warp", None)
+        if not callable(setter):
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="set_mode_warp недоступен в warper_api")
+        if key_source is None:
+            return _result_or_raise(setter(), default={"message": "OK"})
+        allowed = {"system", "generate"}
+        source = key_source.strip().lower()
+        if source not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="key_source должен быть system или generate",
+            )
+        return _result_or_raise(setter(source), default={"message": "OK"})
+
+    def set_mode_slave(self, host: str, port: int, key: str) -> dict[str, Any]:
+        _ensure_no_conflict()
+        host_value = (host or "").strip()
+        key_value = (key or "").strip()
+        if not host_value or not key_value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите host и key")
+        if not 1 <= int(port) <= 65535:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Порт должен быть 1–65535")
+        api = self._api_client()
+        setter = getattr(api, "set_mode_slave", None)
+        if not callable(setter):
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="set_mode_slave недоступен в warper_api")
+        return _result_or_raise(setter(host_value, int(port), key_value), default={"message": "OK"})
+
+    def set_mode_wg(self, config_path: str) -> dict[str, Any]:
+        _ensure_no_conflict()
+        path_value = (config_path or "").strip()
+        if not path_value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите путь к .conf")
+        api = self._api_client()
+        setter = getattr(api, "set_mode_wg", None)
+        if not callable(setter):
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="set_mode_wg недоступен в warper_api")
+        return _result_or_raise(setter(path_value), default={"message": "OK"})
+
+    def set_fullvpn(self, *, enable: bool) -> dict[str, Any]:
+        _ensure_no_conflict()
+        api = self._api_client()
+        setter = getattr(api, "set_fullvpn", None)
+        if not callable(setter):
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="set_fullvpn недоступен в warper_api")
+        return _result_or_raise(setter(enable), default={"message": "OK"})
+
+    def set_subnet(self, subnet: str) -> dict[str, Any]:
+        _ensure_no_conflict()
+        subnet_value = (subnet or "").strip()
+        if not subnet_value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите подсеть")
+        try:
+            ipaddress.ip_network(subnet_value, strict=False)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Некорректная подсеть: {subnet}") from exc
+        api = self._api_client()
+        setter = getattr(api, "set_subnet", None)
+        if not callable(setter):
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="set_subnet недоступен в warper_api")
+        return _result_or_raise(setter(subnet_value), default={"message": "OK"})
 
     def set_mtu(self, mtu: int) -> dict[str, Any]:
         _ensure_no_conflict()
@@ -543,6 +781,17 @@ def run_warper_action(action: str, **kwargs: Any) -> Any:
         "sync_domains": lambda: service.sync_domains(),
         "add_domains_bulk": lambda: service.add_domains_bulk(kwargs["domains"]),
         "set_domain_list": lambda: service.set_domain_list(kwargs["name"], enable=kwargs["enable"]),
+        "get_user_domains_text": lambda: service.get_user_domains_text(),
+        "save_user_domains_text": lambda: service.save_user_domains_text(kwargs["text"]),
+        "get_ip_ranges_text": lambda: service.get_ip_ranges_text(),
+        "save_ip_ranges_text": lambda: service.save_ip_ranges_text(kwargs["text"]),
+        "list_warp_keys": lambda: service.list_warp_keys(),
+        "list_wg_configs": lambda: service.list_wg_configs(),
+        "set_mode_warp": lambda: service.set_mode_warp(kwargs.get("key_source")),
+        "set_mode_slave": lambda: service.set_mode_slave(kwargs["host"], kwargs["port"], kwargs["key"]),
+        "set_mode_wg": lambda: service.set_mode_wg(kwargs["config_path"]),
+        "set_fullvpn": lambda: service.set_fullvpn(enable=kwargs["enable"]),
+        "set_subnet": lambda: service.set_subnet(kwargs["subnet"]),
         "list_ip_ranges": lambda: service.list_ip_ranges(),
         "add_ip_range": lambda: service.add_ip_range(kwargs["cidr"]),
         "remove_ip_range": lambda: service.remove_ip_range(kwargs["cidr"]),
