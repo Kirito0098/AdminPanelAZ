@@ -31,6 +31,19 @@ def build_schema() -> list[dict[str, str]]:
     ]
 
 
+def read_setup_env_value(setup_path: Path, env_name: str, default: str = "") -> str:
+    try:
+        content = setup_path.read_text(encoding="utf-8")
+    except OSError:
+        return default
+    match = re.search(rf"^{re.escape(env_name)}=(.+)$", content, re.M | re.I)
+    return match.group(1).strip() if match else default
+
+
+def is_openvpn_verbose_log_enabled(setup_path: Path) -> bool:
+    return read_setup_env_value(setup_path, "OPENVPN_LOG", "n").lower() == "y"
+
+
 def read_antizapret_settings(setup_path: Path) -> dict[str, str]:
     """Read setup file and return {key: value} for all ANTIZAPRET_PARAMS."""
     try:

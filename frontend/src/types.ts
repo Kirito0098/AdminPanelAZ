@@ -993,6 +993,21 @@ export interface TrafficOverview {
   node_name?: string | null
 }
 
+export interface TrafficNeverConnectedRow {
+  common_name: string
+  protocol_type: string
+  created_at?: string | null
+  config_id?: number | null
+}
+
+export interface TrafficNeverConnectedResponse {
+  rows: TrafficNeverConnectedRow[]
+  summary: { users_count: number; rows_count: number }
+  timestamp: string
+  node_id?: number | null
+  node_name?: string | null
+}
+
 export interface ClientAccessPolicy {
   is_blocked: boolean
   block_mode: string

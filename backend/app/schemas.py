@@ -1314,6 +1314,26 @@ class TrafficOverview(BaseModel):
     node_name: str | None = None
 
 
+class TrafficNeverConnectedRow(BaseModel):
+    common_name: str
+    protocol_type: str
+    created_at: str | None = None
+    config_id: int | None = None
+
+
+class TrafficNeverConnectedSummary(BaseModel):
+    users_count: int = 0
+    rows_count: int = 0
+
+
+class TrafficNeverConnectedResponse(BaseModel):
+    rows: list[TrafficNeverConnectedRow]
+    summary: TrafficNeverConnectedSummary
+    timestamp: datetime
+    node_id: int | None = None
+    node_name: str | None = None
+
+
 class TrafficSessionSourceRow(BaseModel):
     client_ip: str
     display_address: str | None = None

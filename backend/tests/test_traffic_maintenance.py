@@ -43,6 +43,47 @@ def test_normalize_traffic_protocol_scope():
     assert normalize_traffic_protocol_scope("invalid") == "all"
 
 
+def test_never_connected_clients_lists_configs_without_traffic(maintenance_db):
+    db, node, admin = maintenance_db
+    db.add_all([
+        VpnConfig(
+            node_id=node.id,
+            client_name="alice",
+            vpn_type=VpnType.openvpn,
+            owner_id=admin.id,
+        ),
+        VpnConfig(
+            node_id=node.id,
+            client_name="alice",
+            vpn_type=VpnType.wireguard,
+            owner_id=admin.id,
+        ),
+        VpnConfig(
+            node_id=node.id,
+            client_name="bob",
+            vpn_type=VpnType.openvpn,
+            owner_id=admin.id,
+        ),
+        UserTrafficStatProtocol(
+            node_id=node.id,
+            common_name="alice",
+            protocol_type="openvpn",
+            total_received=100,
+            total_sent=50,
+        ),
+    ])
+    db.commit()
+
+    service = TrafficMaintenanceService(db, node.id)
+    rows, summary = service.get_never_connected_config_rows()
+    names = {(row["common_name"], row["protocol_type"]) for row in rows}
+    assert summary["rows_count"] == 2
+    assert summary["users_count"] == 2
+    assert ("alice", "wireguard") in names
+    assert ("bob", "openvpn") in names
+    assert ("alice", "openvpn") not in names
+
+
 def test_deleted_clients_excludes_active_configs(maintenance_db):
     db, node, admin = maintenance_db
     db.add(

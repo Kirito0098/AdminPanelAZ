@@ -1060,6 +1060,10 @@ export async function getDeletedClientTraffic() {
   }>('/traffic/deleted-clients')
 }
 
+export async function getNeverConnectedClientTraffic() {
+  return apiFetch<import('../types').TrafficNeverConnectedResponse>('/traffic/never-connected-clients')
+}
+
 export async function deleteDeletedClientTraffic(clientName: string) {
   return apiFetch('/traffic/delete-deleted-client', {
     method: 'POST',
@@ -1072,9 +1076,12 @@ export async function cleanupTrafficStatusLogs() {
 }
 
 export async function getTrafficCleanupSchedule() {
-  return apiFetch<{ period: string; label: string; available_periods: Record<string, string> }>(
-    '/traffic/cleanup-status-schedule',
-  )
+  return apiFetch<{
+    period: string
+    label: string
+    available_periods: Record<string, string>
+    openvpn_log_enabled: boolean
+  }>('/traffic/cleanup-status-schedule')
 }
 
 export async function setTrafficCleanupSchedule(period: string) {

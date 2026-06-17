@@ -115,6 +115,53 @@ class TrafficMaintenanceService:
         }
         return deleted_rows, summary
 
+    def get_never_connected_config_rows(
+        self,
+        allowed_client_names: set[str] | None = None,
+    ) -> tuple[list[dict], dict]:
+        stats_keys: set[tuple[str, str]] = set()
+        for row in self.db.query(UserTrafficStatProtocol).filter(
+            UserTrafficStatProtocol.node_id == self.node_id
+        ).all():
+            identity = normalize_traffic_client_identity(row.common_name)
+            proto = (row.protocol_type or "").strip().lower()
+            if identity and proto:
+                stats_keys.add((identity, proto))
+
+        configs = (
+            self.db.query(VpnConfig)
+            .filter(
+                VpnConfig.node_id == self.node_id,
+                VpnConfig.ha_primary_config_id.is_(None),
+            )
+            .order_by(VpnConfig.client_name.asc(), VpnConfig.vpn_type.asc())
+            .all()
+        )
+
+        rows_out: list[dict] = []
+        for cfg in configs:
+            name = (cfg.client_name or "").strip()
+            identity = normalize_traffic_client_identity(name)
+            if not identity:
+                continue
+            if allowed_client_names is not None and name not in allowed_client_names:
+                continue
+            proto = "wireguard" if cfg.vpn_type == VpnType.wireguard else "openvpn"
+            if (identity, proto) in stats_keys:
+                continue
+            rows_out.append({
+                "common_name": name,
+                "protocol_type": proto,
+                "created_at": cfg.created_at.isoformat() if cfg.created_at else None,
+                "config_id": cfg.id,
+            })
+
+        summary = {
+            "users_count": len({r["common_name"] for r in rows_out}),
+            "rows_count": len(rows_out),
+        }
+        return rows_out, summary
+
     def delete_persisted_traffic_rows_by_scope(self, protocol_scope: str) -> dict:
         scope = normalize_traffic_protocol_scope(protocol_scope)
 

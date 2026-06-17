@@ -8,7 +8,16 @@ from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, TrafficSessionState, User, UserRole
-from app.schemas import MessageResponse, TrafficClientRow, TrafficClientSessionsResponse, TrafficOverview, TrafficSummary
+from app.schemas import (
+    MessageResponse,
+    TrafficClientRow,
+    TrafficClientSessionsResponse,
+    TrafficNeverConnectedResponse,
+    TrafficNeverConnectedRow,
+    TrafficNeverConnectedSummary,
+    TrafficOverview,
+    TrafficSummary,
+)
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.self_service import get_owned_client_names
 from app.services.traffic.chart import fetch_traffic_chart
@@ -20,7 +29,8 @@ from app.services.traffic.maintenance import (
     normalize_traffic_client_identity,
     normalize_traffic_protocol_scope,
 )
-from app.services.wireguard_status import wireguard_peer_is_online
+from app.services.antizapret_settings import is_openvpn_verbose_log_enabled
+from app.services.node_adapter import LocalNodeAdapter
 
 router = APIRouter(prefix="/traffic", tags=["traffic"])
 settings = get_settings()
@@ -99,6 +109,17 @@ def _filter_client_names(names: set[str], allowed: set[str] | None) -> set[str]:
     return {name for name in names if name in allowed}
 
 
+def _openvpn_verbose_log_enabled(db: Session) -> bool:
+    try:
+        adapter = get_active_adapter(db)
+        if isinstance(adapter, LocalNodeAdapter):
+            return is_openvpn_verbose_log_enabled(adapter._service.base_path / "setup")
+        data = adapter._request("GET", "/traffic/setup-openvpn-log")
+        return bool(data.get("enabled"))
+    except Exception:
+        return False
+
+
 @router.get("/active-clients")
 def traffic_active_clients(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     node = get_active_node(db)
@@ -153,6 +174,24 @@ def deleted_client_traffic(_: User = Depends(require_admin), db: Session = Depen
     service = TrafficMaintenanceService(db, node.id)
     rows, summary = service.get_deleted_persisted_traffic_rows()
     return {"rows": rows, "summary": summary, "node_id": node.id, "node_name": node.name}
+
+
+@router.get("/never-connected-clients", response_model=TrafficNeverConnectedResponse)
+def never_connected_client_traffic(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    node = get_active_node(db)
+    allowed = _scoped_client_names(db, current_user, node.id)
+    service = TrafficMaintenanceService(db, node.id)
+    rows, summary = service.get_never_connected_config_rows(allowed)
+    return TrafficNeverConnectedResponse(
+        rows=[TrafficNeverConnectedRow(**row) for row in rows],
+        summary=TrafficNeverConnectedSummary(**summary),
+        timestamp=datetime.utcnow(),
+        node_id=node.id,
+        node_name=node.name,
+    )
 
 
 @router.get("/chart")
@@ -244,10 +283,12 @@ def get_cleanup_status_schedule(_: User = Depends(require_admin), db: Session = 
     period = _get_setting(db, "traffic_status_log_cleanup_period", "none")
     if period not in STATUS_CLEANUP_PERIODS:
         period = "none"
+    openvpn_log_enabled = _openvpn_verbose_log_enabled(db)
     return {
         "period": period,
         "label": STATUS_CLEANUP_PERIODS[period],
         "available_periods": STATUS_CLEANUP_PERIODS,
+        "openvpn_log_enabled": openvpn_log_enabled,
     }
 
 

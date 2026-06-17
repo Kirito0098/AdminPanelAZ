@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Activity,
   ArrowDownToLine,
   ArrowUpFromLine,
-  BarChart3,
+  ChevronDown,
   Clock,
   Database,
   HardDrive,
@@ -13,6 +13,7 @@ import {
   RotateCcw,
   Search,
   TrendingUp,
+  UserX,
   Users,
   Trash2,
 } from 'lucide-react'
@@ -21,6 +22,7 @@ import {
   cleanupTrafficStatusLogs,
   deleteDeletedClientTraffic,
   getDeletedClientTraffic,
+  getNeverConnectedClientTraffic,
   getTrafficChart,
   getTrafficCleanupSchedule,
   getTrafficActiveClients,
@@ -30,7 +32,7 @@ import {
   setTrafficCleanupSchedule,
 } from '@/api/client'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
-import TrafficClientFocusPanel from '@/components/traffic/TrafficClientFocusPanel'
+import TrafficClientDetails from '@/components/traffic/TrafficClientDetails'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import { NodeBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -63,15 +65,19 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { cn } from '@/lib/utils'
-import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficOverview } from '@/types'
+import type {
+  ClientAccessPolicy,
+  TrafficChartData,
+  TrafficClientRow,
+  TrafficNeverConnectedRow,
+  TrafficOverview,
+} from '@/types'
 
 const REFRESH_INTERVAL = 60
 
-const RANGE_LABELS: Record<string, string> = {
-  '1h': '1 час',
-  '1d': '24 часа',
-  '7d': '7 дней',
-  '30d': '30 дней',
+function isPageReload() {
+  const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+  return nav?.type === 'reload'
 }
 
 type SortKey = 'total_bytes' | 'traffic_7d' | 'traffic_1d' | 'total_received' | 'total_sent' | 'common_name'
@@ -148,25 +154,38 @@ function TrafficShareBar({ value, max }: TrafficShareBarProps) {
 type TrafficClientCardProps = {
   row: TrafficClientRow
   maxBytes: number
-  selected: boolean
-  onSelect: () => void
+  expanded: boolean
+  onToggle: () => void
+  children?: React.ReactNode
 }
 
-function TrafficClientCard({ row, maxBytes, selected, onSelect }: TrafficClientCardProps) {
+function TrafficClientCard({ row, maxBytes, expanded, onToggle, children }: TrafficClientCardProps) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <div
       className={cn(
-        'w-full rounded-lg border p-4 text-left transition-colors hover:bg-muted/40',
-        selected && 'border-primary/50 bg-primary/5',
+        'overflow-hidden rounded-lg border transition-colors',
+        expanded && 'border-primary/50',
       )}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate font-medium">{row.common_name}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{formatLastSeen(row.last_seen_at)}</p>
-        </div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          'w-full p-4 text-left transition-colors hover:bg-muted/40',
+          expanded && 'bg-primary/5',
+        )}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <ChevronDown
+              size={16}
+              className={cn('shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-180')}
+            />
+            <div className="min-w-0">
+              <p className="truncate font-medium">{row.common_name}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{formatLastSeen(row.last_seen_at)}</p>
+            </div>
+          </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant={getProtocolVariant(row.protocol_type)} className="text-[10px]">
             {getProtocolLabel(row.protocol_type)}
@@ -201,7 +220,11 @@ function TrafficClientCard({ row, maxBytes, selected, onSelect }: TrafficClientC
       <div className="mt-3">
         <TrafficShareBar value={row.total_bytes} max={maxBytes} />
       </div>
-    </button>
+      </button>
+      {expanded && children && (
+        <div className="border-t bg-muted/20 p-4">{children}</div>
+      )}
+    </div>
   )
 }
 
@@ -212,11 +235,12 @@ export default function TrafficPage() {
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal, inline, withInline } = useProgress()
   const [searchParams, setSearchParams] = useSearchParams()
-  const urlClientApplied = useRef(false)
   const [data, setData] = useState<TrafficOverview | null>(null)
   const [chartData, setChartData] = useState<TrafficChartData | null>(null)
-  const [selectedClient, setSelectedClient] = useState<string>(() => searchParams.get('client') ?? '')
-  const [focusOnly, setFocusOnly] = useState(false)
+  const [selectedClient, setSelectedClient] = useState<string>(() => {
+    if (isPageReload()) return ''
+    return searchParams.get('client') ?? ''
+  })
   const [clientPolicy, setClientPolicy] = useState<ClientAccessPolicy | null>(null)
   const [policyLoading, setPolicyLoading] = useState(false)
   const [chartRange, setChartRange] = useState('7d')
@@ -240,6 +264,12 @@ export default function TrafficPage() {
     }>
   >([])
   const [deletedSummary, setDeletedSummary] = useState<{ users_count: number; total_bytes: number } | null>(null)
+  const [neverConnectedRows, setNeverConnectedRows] = useState<TrafficNeverConnectedRow[]>([])
+  const [neverConnectedSummary, setNeverConnectedSummary] = useState<{ users_count: number; rows_count: number } | null>(
+    null,
+  )
+  const [neverConnectedExpanded, setNeverConnectedExpanded] = useState(false)
+  const [openvpnLogEnabled, setOpenvpnLogEnabled] = useState(false)
   const [cleanupPeriod, setCleanupPeriod] = useState('none')
   const [maintenanceLoading, setMaintenanceLoading] = useState(false)
 
@@ -256,12 +286,7 @@ export default function TrafficPage() {
         setLoadError(null)
         setSelectedClient((current) => {
           if (current && overview.rows.some((r) => r.common_name === current)) return current
-          if (!urlClientApplied.current) {
-            const urlClient = searchParams.get('client')
-            urlClientApplied.current = true
-            if (urlClient && overview.rows.some((r) => r.common_name === urlClient)) return urlClient
-          }
-          return current || overview.rows[0]?.common_name || ''
+          return ''
         })
         setCountdown(REFRESH_INTERVAL)
 
@@ -299,17 +324,15 @@ export default function TrafficPage() {
         if (initial) doneGlobal()
       }
     },
-    [startGlobal, doneGlobal, notifyError, searchParams],
+    [startGlobal, doneGlobal, notifyError],
   )
 
   useEffect(() => {
+    if (!isPageReload() || !searchParams.has('client')) return
     const next = new URLSearchParams(searchParams)
-    if (selectedClient) next.set('client', selectedClient)
-    else next.delete('client')
-    if (next.toString() !== searchParams.toString()) {
-      setSearchParams(next, { replace: true })
-    }
-  }, [selectedClient, searchParams, setSearchParams])
+    next.delete('client')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
 
   useEffect(() => {
     if (!selectedClient) {
@@ -360,20 +383,34 @@ export default function TrafficPage() {
     }
   }, [isAdmin])
 
+  const loadNeverConnectedClients = useCallback(async () => {
+    try {
+      const result = await getNeverConnectedClientTraffic()
+      setNeverConnectedRows(result.rows)
+      setNeverConnectedSummary(result.summary)
+    } catch {
+      setNeverConnectedRows([])
+      setNeverConnectedSummary(null)
+    }
+  }, [])
+
   const loadCleanupSchedule = useCallback(async () => {
     if (!isAdmin) return
     try {
       const schedule = await getTrafficCleanupSchedule()
       setCleanupPeriod(schedule.period)
+      setOpenvpnLogEnabled(schedule.openvpn_log_enabled)
     } catch {
       setCleanupPeriod('none')
+      setOpenvpnLogEnabled(false)
     }
   }, [isAdmin])
 
   useEffect(() => {
     void loadDeletedClients()
     void loadCleanupSchedule()
-  }, [loadDeletedClients, loadCleanupSchedule, activeNode?.id])
+    void loadNeverConnectedClients()
+  }, [loadDeletedClients, loadCleanupSchedule, loadNeverConnectedClients, activeNode?.id])
 
   useEffect(() => {
     loadChart()
@@ -399,10 +436,7 @@ export default function TrafficPage() {
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase()
-    let rows = [...(data?.rows ?? [])]
-    if (focusOnly && selectedClient) {
-      rows = rows.filter((r) => r.common_name === selectedClient)
-    }
+    const rows = [...(data?.rows ?? [])]
     const filtered = q
       ? rows.filter(
           (r) =>
@@ -418,12 +452,20 @@ export default function TrafficPage() {
       return (b[sortKey] as number) - (a[sortKey] as number)
     })
     return filtered
-  }, [data?.rows, search, sortKey, focusOnly, selectedClient])
+  }, [data?.rows, search, sortKey])
+
+  const selectedRow = useMemo(
+    () => data?.rows.find((r) => r.common_name === selectedClient) ?? null,
+    [data?.rows, selectedClient],
+  )
+
+  const toggleClient = (name: string) => {
+    setSelectedClient((current) => (current === name ? '' : name))
+  }
 
   const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== 'Enter' || filteredRows.length === 0) return
-    setSelectedClient(filteredRows[0].common_name)
-    setFocusOnly(true)
+    toggleClient(filteredRows[0].common_name)
   }
 
   const maxBytes = useMemo(
@@ -446,6 +488,7 @@ export default function TrafficPage() {
         await resetTraffic(resetScope)
         await load(false, true)
         await loadDeletedClients()
+        await loadNeverConnectedClients()
       }, 'Сброс статистики трафика...')
       success(`Статистика сброшена (${resetScope})`)
     } catch (err) {
@@ -462,6 +505,7 @@ export default function TrafficPage() {
       success(`Статистика «${clientName}» удалена`)
       await load(false, true)
       await loadDeletedClients()
+      await loadNeverConnectedClients()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка удаления')
     } finally {
@@ -499,6 +543,7 @@ export default function TrafficPage() {
   }
 
   const hasRows = (data?.rows?.length ?? 0) > 0
+  const showTrafficMaintenance = isAdmin && (openvpnLogEnabled || deletedRows.length > 0)
 
   return (
     <div className="space-y-6">
@@ -633,58 +678,6 @@ export default function TrafficPage() {
             />
           </div>
 
-          <TrafficClientFocusPanel
-            rows={data?.rows ?? []}
-            selectedClient={selectedClient}
-            onSelectClient={(name) => {
-              setSelectedClient(name)
-              if (name) setFocusOnly(true)
-            }}
-            focusOnly={focusOnly}
-            onFocusOnlyChange={setFocusOnly}
-            chartData={chartData}
-            chartLoading={chartLoading}
-            chartRange={chartRange}
-            onChartRangeChange={setChartRange}
-            policy={clientPolicy}
-            policyLoading={policyLoading}
-          />
-
-          {!selectedClient && (
-            <Card>
-              <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Activity size={18} />
-                    Общий график
-                  </CardTitle>
-                  <CardDescription>
-                    Выберите клиента выше для детального графика · {RANGE_LABELS[chartRange] ?? chartRange}
-                  </CardDescription>
-                </div>
-                <Select value={chartRange} onValueChange={setChartRange}>
-                  <SelectTrigger className="h-9 w-[120px] text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1h">1 час</SelectItem>
-                    <SelectItem value="1d">24 часа</SelectItem>
-                    <SelectItem value="7d">7 дней</SelectItem>
-                    <SelectItem value="30d">30 дней</SelectItem>
-                  </SelectContent>
-                </Select>
-              </CardHeader>
-              <CardContent>
-                <EmptyState
-                  icon={BarChart3}
-                  title="Клиент не выбран"
-                  description="Используйте блок «Мониторинг клиента» для просмотра графика конкретного пользователя"
-                  className="py-8"
-                />
-              </CardContent>
-            </Card>
-          )}
-
           <Card>
             <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -694,7 +687,7 @@ export default function TrafficPage() {
                 </CardTitle>
                 <CardDescription>
                   {hasRows
-                    ? `${filteredRows.length} из ${data?.rows.length ?? 0} клиентов · сортировка: ${SORT_LABELS[sortKey]}${focusOnly && selectedClient ? ` · фокус: ${selectedClient}` : ''}`
+                    ? `${filteredRows.length} из ${data?.rows.length ?? 0} клиентов · сортировка: ${SORT_LABELS[sortKey]}${selectedClient ? ` · раскрыт: ${selectedClient}` : ''}`
                     : 'Накопленные RX/TX, окна 1д / 7д / 30д'}
                   {summary?.latest_sample_at && (
                     <> · последний снимок {new Date(summary.latest_sample_at).toLocaleString('ru-RU')}</>
@@ -708,7 +701,7 @@ export default function TrafficPage() {
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
-                    placeholder="Поиск по имени... (Enter — выбрать)"
+                    placeholder="Поиск по имени... (Enter — раскрыть)"
                     className="h-9 pl-9 text-xs"
                   />
                 </div>
@@ -744,24 +737,37 @@ export default function TrafficPage() {
               ) : (
                 <>
                   <div className="space-y-3 lg:hidden">
-                    {filteredRows.map((r) => (
-                      <TrafficClientCard
-                        key={`${r.common_name}-${r.protocol_type}`}
-                        row={r}
-                        maxBytes={maxBytes}
-                        selected={selectedClient === r.common_name}
-                        onSelect={() => {
-                          setSelectedClient(r.common_name)
-                          setFocusOnly(true)
-                        }}
-                      />
-                    ))}
+                    {filteredRows.map((r) => {
+                      const expanded = selectedClient === r.common_name
+                      return (
+                        <TrafficClientCard
+                          key={`${r.common_name}-${r.protocol_type}`}
+                          row={r}
+                          maxBytes={maxBytes}
+                          expanded={expanded}
+                          onToggle={() => toggleClient(r.common_name)}
+                        >
+                          {expanded && selectedRow && (
+                            <TrafficClientDetails
+                              row={selectedRow}
+                              chartData={chartData}
+                              chartLoading={chartLoading}
+                              chartRange={chartRange}
+                              onChartRangeChange={setChartRange}
+                              policy={clientPolicy}
+                              policyLoading={policyLoading}
+                            />
+                          )}
+                        </TrafficClientCard>
+                      )
+                    })}
                   </div>
 
                   <div className="hidden overflow-x-auto rounded-md border lg:block">
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead className="w-8" />
                           <TableHead>Клиент</TableHead>
                           <TableHead>Протокол</TableHead>
                           <TableHead className="text-right">RX</TableHead>
@@ -776,19 +782,27 @@ export default function TrafficPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredRows.map((r) => (
-                          <TableRow
-                            key={`${r.common_name}-${r.protocol_type}`}
-                            className={cn(
-                              'cursor-pointer hover:bg-muted/50',
-                              selectedClient === r.common_name && 'bg-primary/5',
-                            )}
-                            onClick={() => {
-                              setSelectedClient(r.common_name)
-                              setFocusOnly(true)
-                            }}
-                          >
-                            <TableCell className="font-medium">{r.common_name}</TableCell>
+                        {filteredRows.map((r) => {
+                          const expanded = selectedClient === r.common_name
+                          return (
+                            <Fragment key={`${r.common_name}-${r.protocol_type}`}>
+                              <TableRow
+                                className={cn(
+                                  'cursor-pointer hover:bg-muted/50',
+                                  expanded && 'bg-primary/5',
+                                )}
+                                onClick={() => toggleClient(r.common_name)}
+                              >
+                                <TableCell className="w-8 px-2">
+                                  <ChevronDown
+                                    size={16}
+                                    className={cn(
+                                      'text-muted-foreground transition-transform',
+                                      expanded && 'rotate-180',
+                                    )}
+                                  />
+                                </TableCell>
+                                <TableCell className="font-medium">{r.common_name}</TableCell>
                             <TableCell>
                               <Badge variant={getProtocolVariant(r.protocol_type)} className="text-[10px]">
                                 {getProtocolLabel(r.protocol_type)}
@@ -821,13 +835,32 @@ export default function TrafficPage() {
                                 {formatLastSeen(r.last_seen_at)}
                               </span>
                             </TableCell>
-                            <TableCell>
-                              <Badge variant={r.is_active ? 'success' : 'secondary'} className="text-[10px]">
-                                {r.is_active ? 'Онлайн' : 'Офлайн'}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                                <TableCell>
+                                  <Badge variant={r.is_active ? 'success' : 'secondary'} className="text-[10px]">
+                                    {r.is_active ? 'Онлайн' : 'Офлайн'}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                              {expanded && selectedRow && (
+                                <TableRow className="bg-muted/20 hover:bg-muted/20">
+                                  <TableCell colSpan={12} className="p-0">
+                                    <div className="border-t border-primary/20 p-4">
+                                      <TrafficClientDetails
+                                        row={selectedRow}
+                                        chartData={chartData}
+                                        chartLoading={chartLoading}
+                                        chartRange={chartRange}
+                                        onChartRangeChange={setChartRange}
+                                        policy={clientPolicy}
+                                        policyLoading={policyLoading}
+                                      />
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </Fragment>
+                          )
+                        })}
                       </TableBody>
                     </Table>
                   </div>
@@ -836,38 +869,106 @@ export default function TrafficPage() {
             </CardContent>
           </Card>
 
-          {isAdmin && (
+          {neverConnectedRows.length > 0 && (
+            <Card>
+              <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <UserX size={18} />
+                    Есть конфиг, но никогда не подключался
+                  </CardTitle>
+                  <CardDescription>
+                    {neverConnectedSummary?.rows_count ?? neverConnectedRows.length} конфигов ·{' '}
+                    {neverConnectedSummary?.users_count ?? new Set(neverConnectedRows.map((r) => r.common_name)).size}{' '}
+                    клиентов без записей в статистике трафика
+                  </CardDescription>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1 shrink-0 text-xs"
+                  onClick={() => setNeverConnectedExpanded((v) => !v)}
+                >
+                  {neverConnectedExpanded ? 'Свернуть' : 'Развернуть'}
+                  <ChevronDown
+                    size={14}
+                    className={cn('transition-transform', neverConnectedExpanded && 'rotate-180')}
+                  />
+                </Button>
+              </CardHeader>
+              {neverConnectedExpanded && (
+                <CardContent>
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Клиент</TableHead>
+                          <TableHead>Протокол</TableHead>
+                          <TableHead>Конфиг создан</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {neverConnectedRows.map((row) => (
+                          <TableRow key={`${row.common_name}-${row.protocol_type}-${row.config_id ?? 'na'}`}>
+                            <TableCell className="font-medium">{row.common_name}</TableCell>
+                            <TableCell>
+                              <Badge variant={getProtocolVariant(row.protocol_type)} className="text-[10px]">
+                                {getProtocolLabel(row.protocol_type)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              <span className="inline-flex items-center gap-1">
+                                <Clock size={12} className="shrink-0" />
+                                {formatLastSeen(row.created_at)}
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              )}
+            </Card>
+          )}
+
+          {showTrafficMaintenance && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Обслуживание БД трафика</CardTitle>
                 <CardDescription>
-                  Удалённые клиенты, очистка OpenVPN-логов (кроме *-status.log)
+                  {openvpnLogEnabled
+                    ? 'Удалённые клиенты, очистка OpenVPN-логов (кроме *-status.log)'
+                    : 'Осиротевшая статистика клиентов без конфигов (OPENVPN_LOG=n — очистка .log не требуется)'}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="flex flex-wrap items-end gap-3">
-                  <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">Расписание очистки .log</Label>
-                    <Select
-                      value={cleanupPeriod}
-                      onValueChange={(v) => void handleCleanupScheduleChange(v)}
-                      disabled={maintenanceLoading}
-                    >
-                      <SelectTrigger className="h-9 w-[180px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Выключено</SelectItem>
-                        <SelectItem value="daily">Ежедневно</SelectItem>
-                        <SelectItem value="weekly">Еженедельно</SelectItem>
-                        <SelectItem value="monthly">Ежемесячно</SelectItem>
-                      </SelectContent>
-                    </Select>
+                {openvpnLogEnabled && (
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Расписание очистки .log</Label>
+                      <Select
+                        value={cleanupPeriod}
+                        onValueChange={(v) => void handleCleanupScheduleChange(v)}
+                        disabled={maintenanceLoading}
+                      >
+                        <SelectTrigger className="h-9 w-[180px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Выключено</SelectItem>
+                          <SelectItem value="daily">Ежедневно</SelectItem>
+                          <SelectItem value="weekly">Еженедельно</SelectItem>
+                          <SelectItem value="monthly">Ежемесячно</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => void handleCleanupLogs()} disabled={maintenanceLoading}>
+                      Очистить .log сейчас
+                    </Button>
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => void handleCleanupLogs()} disabled={maintenanceLoading}>
-                    Очистить .log сейчас
-                  </Button>
-                </div>
+                )}
 
                 <div>
                   <p className="mb-2 text-sm text-muted-foreground">

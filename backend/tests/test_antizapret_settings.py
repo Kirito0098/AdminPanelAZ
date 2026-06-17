@@ -15,6 +15,7 @@ from app.models import Node, NodeStatus, User, UserRole
 from app.services.antizapret_settings import (
     build_schema,
     filter_known_keys,
+    is_openvpn_verbose_log_enabled,
     normalize_flag,
     read_antizapret_settings,
     update_antizapret_settings,
@@ -75,6 +76,18 @@ class TestAntizapretSettingsService:
         result = update_antizapret_settings(setup, {"route_all": "y"})
         assert result["changes"] == 1
         assert read_antizapret_settings(setup)["route_all"] == "y"
+
+    def test_is_openvpn_verbose_log_enabled(self):
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tmp:
+            tmp.write("OPENVPN_LOG=n\n")
+            disabled_path = Path(tmp.name)
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tmp:
+            tmp.write("OPENVPN_LOG=y\n")
+            enabled_path = Path(tmp.name)
+
+        assert is_openvpn_verbose_log_enabled(disabled_path) is False
+        assert is_openvpn_verbose_log_enabled(enabled_path) is True
+        assert is_openvpn_verbose_log_enabled(Path("/nonexistent/setup")) is False
 
     def test_filter_known_keys(self):
         filtered = filter_known_keys({"route_all": "y", "unknown_key": "x"})
