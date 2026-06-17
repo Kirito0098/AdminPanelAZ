@@ -67,6 +67,12 @@ import type { Node, NodeMtlsStatus } from '@/types'
 import { Navigate } from 'react-router-dom'
 
 type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | 'disable-mtls' | null
+type BulkConfirmAction = 'delete' | 'enable-mtls' | null
+
+function getSelectedNodes(nodes: Node[], selectedNodeIds: number[]) {
+  const idSet = new Set(selectedNodeIds)
+  return nodes.filter((node) => idSet.has(node.id))
+}
 
 function isWrongVersionSslError(error: string) {
   return /WRONG_VERSION_NUMBER|wrong version number/i.test(error)
@@ -401,6 +407,124 @@ function NodeCard({
   )
 }
 
+type NodeBulkActionsBarProps = {
+  nodes: Node[]
+  selectedNodeIds: number[]
+  bulkBusy: boolean
+  rollingUpdating: boolean
+  rollPolling: boolean
+  onSelectAll: () => void
+  onClearSelection: () => void
+  onBulkHealth: () => void
+  onBulkRollingUpdate: () => void
+  onBulkEnableMtls: () => void
+  onBulkDelete: () => void
+}
+
+function NodeBulkActionsBar({
+  nodes,
+  selectedNodeIds,
+  bulkBusy,
+  rollingUpdating,
+  rollPolling,
+  onSelectAll,
+  onClearSelection,
+  onBulkHealth,
+  onBulkRollingUpdate,
+  onBulkEnableMtls,
+  onBulkDelete,
+}: NodeBulkActionsBarProps) {
+  const selected = getSelectedNodes(nodes, selectedNodeIds)
+  const remoteSelected = selected.filter((node) => !node.is_local)
+  const mtlsCandidates = remoteSelected.filter((node) => !node.mtls_enabled)
+  const allSelected = nodes.length > 0 && selectedNodeIds.length === nodes.length
+  const busy = bulkBusy || rollingUpdating || rollPolling
+
+  if (nodes.length === 0) return null
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
+      <span className="text-xs text-muted-foreground">
+        Выбрано: {selectedNodeIds.length} из {nodes.length}
+      </span>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 text-xs"
+        disabled={busy || allSelected}
+        onClick={onSelectAll}
+      >
+        Выбрать все
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 text-xs"
+        disabled={busy || selectedNodeIds.length === 0}
+        onClick={onClearSelection}
+      >
+        Сброс
+      </Button>
+      <div className="hidden h-5 w-px bg-border sm:block" />
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 text-xs"
+        disabled={busy || selectedNodeIds.length === 0}
+        onClick={onBulkHealth}
+      >
+        <HeartPulse size={12} />
+        Проверить здоровье
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 text-xs"
+        disabled={busy || selectedNodeIds.length === 0}
+        onClick={onBulkRollingUpdate}
+      >
+        {rollingUpdating || rollPolling ? (
+          <Loader2 size={12} className="animate-spin" />
+        ) : (
+          <Download size={12} />
+        )}
+        Rolling update
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 text-xs"
+        disabled={busy || mtlsCandidates.length === 0}
+        onClick={onBulkEnableMtls}
+        title={
+          mtlsCandidates.length === 0 && remoteSelected.length > 0
+            ? 'У выбранных удалённых узлов mTLS уже включён'
+            : undefined
+        }
+      >
+        <Shield size={12} />
+        Включить mTLS{mtlsCandidates.length > 0 ? ` (${mtlsCandidates.length})` : ''}
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="destructive"
+        className="h-7 text-xs"
+        disabled={busy || remoteSelected.length === 0}
+        onClick={onBulkDelete}
+      >
+        <Trash2 size={12} />
+        Удалить{remoteSelected.length > 0 ? ` (${remoteSelected.length})` : ''}
+      </Button>
+    </div>
+  )
+}
+
 export default function NodesPage() {
   const { user } = useAuth()
   const { activeNode, refresh, refreshNodes, activate } = useNode()
@@ -423,6 +547,8 @@ export default function NodesPage() {
   const [mtlsStatus, setMtlsStatus] = useState<NodeMtlsStatus | null>(null)
   const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([])
   const [rollingUpdating, setRollingUpdating] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkConfirmAction, setBulkConfirmAction] = useState<BulkConfirmAction>(null)
   const { task: rollTask, polling: rollPolling, startPoll: startRollPoll } = useBackgroundTaskPoll()
 
   const load = async () => {
@@ -666,14 +792,30 @@ export default function NodesPage() {
     )
   }
 
-  const handleRollingUpdate = async () => {
-    if (selectedNodeIds.length === 0) {
+  const selectAllNodes = () => {
+    setSelectedNodeIds(nodes.map((node) => node.id))
+  }
+
+  const clearNodeSelection = () => {
+    setSelectedNodeIds([])
+  }
+
+  const toggleSelectAllNodes = () => {
+    if (selectedNodeIds.length === nodes.length) {
+      clearNodeSelection()
+    } else {
+      selectAllNodes()
+    }
+  }
+
+  const handleRollingUpdate = async (nodeIds: number[]) => {
+    if (nodeIds.length === 0) {
       notifyError('Выберите хотя бы один узел')
       return
     }
     setRollingUpdating(true)
     try {
-      const result = await rollingNodeUpdate(selectedNodeIds)
+      const result = await rollingNodeUpdate(nodeIds)
       if (result.task_id) {
         startRollPoll(result.task_id, {
           onComplete: async (task) => {
@@ -693,6 +835,149 @@ export default function NodesPage() {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка rolling update')
       setRollingUpdating(false)
     }
+  }
+
+  const handleBulkHealth = async () => {
+    const selected = getSelectedNodes(nodes, selectedNodeIds)
+    if (selected.length === 0) {
+      notifyError('Выберите хотя бы один узел')
+      return
+    }
+
+    setBulkBusy(true)
+    let online = 0
+    let offline = 0
+    const errors: string[] = []
+
+    try {
+      for (const node of selected) {
+        try {
+          const result = await checkNodeHealth(node.id)
+          if (result.status === 'online') {
+            online += 1
+          } else {
+            offline += 1
+            const errDetail =
+              typeof result.health?.error === 'string' ? result.health.error : null
+            if (errDetail) {
+              errors.push(`${node.name}: ${errDetail}`)
+            }
+          }
+        } catch (err) {
+          offline += 1
+          errors.push(
+            `${node.name}: ${err instanceof ApiError ? err.message : 'ошибка проверки'}`,
+          )
+        }
+      }
+
+      await load()
+
+      if (offline === 0) {
+        success(`Проверка здоровья: ${online} узл(ов) онлайн`)
+      } else if (online === 0) {
+        notifyError(
+          errors.length > 0
+            ? `Все выбранные узлы offline. ${errors[0]}`
+            : `Все выбранные узлы offline (${offline})`,
+        )
+      } else {
+        warning(`Проверка здоровья: ${online} онлайн, ${offline} offline`)
+      }
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  const openBulkConfirm = (action: BulkConfirmAction) => {
+    const selected = getSelectedNodes(nodes, selectedNodeIds)
+    if (action === 'delete') {
+      const remoteSelected = selected.filter((node) => !node.is_local)
+      if (remoteSelected.length === 0) {
+        notifyError('Локальный узел нельзя удалить. Выберите удалённые узлы.')
+        return
+      }
+    }
+    if (action === 'enable-mtls') {
+      const mtlsCandidates = selected.filter((node) => !node.is_local && !node.mtls_enabled)
+      if (mtlsCandidates.length === 0) {
+        notifyError('Нет удалённых узлов без mTLS среди выбранных')
+        return
+      }
+    }
+    setBulkConfirmAction(action)
+  }
+
+  const closeBulkConfirm = () => {
+    setBulkConfirmAction(null)
+  }
+
+  const handleBulkConfirm = async () => {
+    const action = bulkConfirmAction
+    if (!action) return
+
+    const selected = getSelectedNodes(nodes, selectedNodeIds)
+    setConfirmLoading(true)
+    setBulkBusy(true)
+
+    try {
+      if (action === 'delete') {
+        const remoteSelected = selected.filter((node) => !node.is_local)
+        const failed: string[] = []
+        for (const node of remoteSelected) {
+          try {
+            await deleteNode(node.id)
+          } catch (err) {
+            failed.push(`${node.name}: ${err instanceof ApiError ? err.message : 'ошибка'}`)
+          }
+        }
+        closeBulkConfirm()
+        setSelectedNodeIds((prev) =>
+          prev.filter((id) => !remoteSelected.some((node) => node.id === id)),
+        )
+        await load()
+        await refresh()
+        if (failed.length === 0) {
+          success(`Удалено узлов: ${remoteSelected.length}`)
+        } else {
+          notifyError(`Удалено ${remoteSelected.length - failed.length} из ${remoteSelected.length}. ${failed[0]}`)
+        }
+      } else if (action === 'enable-mtls') {
+        const mtlsCandidates = selected.filter((node) => !node.is_local && !node.mtls_enabled)
+        let enabled = 0
+        const failed: string[] = []
+        for (const node of mtlsCandidates) {
+          try {
+            await enableNodeMtls(node.id)
+            enabled += 1
+            try {
+              await checkNodeHealth(node.id)
+            } catch {
+              // health after mTLS is best-effort
+            }
+          } catch (err) {
+            failed.push(`${node.name}: ${err instanceof ApiError ? err.message : 'ошибка'}`)
+          }
+        }
+        closeBulkConfirm()
+        await load()
+        await refresh()
+        if (failed.length === 0) {
+          success(`mTLS включён на ${enabled} узл(ах)`)
+        } else if (enabled === 0) {
+          notifyError(`Не удалось включить mTLS. ${failed[0]}`)
+        } else {
+          warning(`mTLS включён на ${enabled} из ${mtlsCandidates.length} узл(ов)`)
+        }
+      }
+    } finally {
+      setConfirmLoading(false)
+      setBulkBusy(false)
+    }
+  }
+
+  const handleRollingUpdateSelected = () => {
+    void handleRollingUpdate(selectedNodeIds)
   }
 
   const onlineCount = nodes.filter((n) => n.status === 'online').length
@@ -723,18 +1008,6 @@ export default function NodesPage() {
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
             Обновить
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => void handleRollingUpdate()}
-            disabled={rollingUpdating || rollPolling || selectedNodeIds.length === 0}
-          >
-            {rollingUpdating || rollPolling ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Download size={16} />
-            )}
-            Rolling update ({selectedNodeIds.length})
-          </Button>
           <Button onClick={openCreate}>
             <Plus size={16} />
             Добавить узел
@@ -762,10 +1035,20 @@ export default function NodesPage() {
       )}
 
       <InlineProgressBar
-        active={loading || healthLoading !== null || confirmLoading || submitting || rollingUpdating || rollPolling}
+        active={
+          loading ||
+          healthLoading !== null ||
+          confirmLoading ||
+          submitting ||
+          rollingUpdating ||
+          rollPolling ||
+          bulkBusy
+        }
         label={
           submitting
             ? 'Сохранение узла...'
+            : bulkBusy
+              ? 'Массовая операция...'
             : healthLoading !== null
               ? 'Проверка здоровья узла...'
               : confirmLoading
@@ -808,6 +1091,20 @@ export default function NodesPage() {
             />
           ) : (
             <>
+              <NodeBulkActionsBar
+                nodes={nodes}
+                selectedNodeIds={selectedNodeIds}
+                bulkBusy={bulkBusy}
+                rollingUpdating={rollingUpdating}
+                rollPolling={rollPolling}
+                onSelectAll={selectAllNodes}
+                onClearSelection={clearNodeSelection}
+                onBulkHealth={() => void handleBulkHealth()}
+                onBulkRollingUpdate={handleRollingUpdateSelected}
+                onBulkEnableMtls={() => openBulkConfirm('enable-mtls')}
+                onBulkDelete={() => openBulkConfirm('delete')}
+              />
+
               <div className="space-y-4 lg:hidden">
                 {nodes.map((node) => (
                   <NodeCard
@@ -834,7 +1131,21 @@ export default function NodesPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-10" />
+                      <TableHead className="w-10">
+                        <input
+                          type="checkbox"
+                          checked={nodes.length > 0 && selectedNodeIds.length === nodes.length}
+                          ref={(el) => {
+                            if (el) {
+                              el.indeterminate =
+                                selectedNodeIds.length > 0 && selectedNodeIds.length < nodes.length
+                            }
+                          }}
+                          onChange={toggleSelectAllNodes}
+                          aria-label="Выбрать все узлы"
+                          className="h-4 w-4 rounded border"
+                        />
+                      </TableHead>
                       <TableHead>Имя</TableHead>
                       <TableHead>Адрес</TableHead>
                       <TableHead>IP сервера</TableHead>
@@ -1113,6 +1424,63 @@ export default function NodesPage() {
         destructive={confirmAction === 'delete'}
         loading={confirmLoading}
         onConfirm={handleConfirm}
+      />
+
+      <ConfirmDialog
+        open={!!bulkConfirmAction}
+        onOpenChange={(open) => {
+          if (!open && !confirmLoading) closeBulkConfirm()
+        }}
+        title={
+          bulkConfirmAction === 'delete'
+            ? `Удалить ${getSelectedNodes(nodes, selectedNodeIds).filter((n) => !n.is_local).length} узл(ов)?`
+            : bulkConfirmAction === 'enable-mtls'
+              ? `Включить mTLS на ${
+                  getSelectedNodes(nodes, selectedNodeIds).filter((n) => !n.is_local && !n.mtls_enabled)
+                    .length
+                } узл(ах)?`
+              : ''
+        }
+        description={
+          bulkConfirmAction === 'delete' ? (
+            <>
+              Будут удалены только <strong>удалённые</strong> узлы из выбранных. Локальный сервер не
+              затрагивается.
+            </>
+          ) : bulkConfirmAction === 'enable-mtls' ? (
+            <>
+              Node agent на каждом узле будет перезапущен (~5–30 сек). Связь может кратковременно
+              прерваться.
+            </>
+          ) : undefined
+        }
+        alert={
+          bulkConfirmAction === 'delete'
+            ? {
+                variant: 'danger',
+                title: 'Необратимое действие',
+                children:
+                  'Узлы будут удалены из панели. Конфигурация VPN на серверах не затрагивается.',
+              }
+            : bulkConfirmAction === 'enable-mtls'
+              ? {
+                  variant: 'warning',
+                  title: 'Перезапуск node agent',
+                  children:
+                    'Операция выполняется последовательно для каждого выбранного узла без mTLS.',
+                }
+              : undefined
+        }
+        confirmLabel={
+          bulkConfirmAction === 'delete'
+            ? 'Удалить выбранные'
+            : bulkConfirmAction === 'enable-mtls'
+              ? 'Включить mTLS'
+              : 'Подтвердить'
+        }
+        destructive={bulkConfirmAction === 'delete'}
+        loading={confirmLoading}
+        onConfirm={handleBulkConfirm}
       />
 
       <NodeUpdateDialog

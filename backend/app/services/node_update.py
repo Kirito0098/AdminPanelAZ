@@ -272,9 +272,12 @@ def check_agent_updates(*, repo_root: Path | None = None) -> dict[str, Any]:
 
 def apply_node_update(
     *,
-    agent_version: str = "1.0.0",
+    agent_version: str | None = None,
     repo_root: Path | None = None,
 ) -> dict[str, Any]:
+    from app.services.node_health import NODE_AGENT_VERSION
+
+    agent_version = agent_version or NODE_AGENT_VERSION
     repo_root = repo_root or resolve_repo_root()
 
     before = {"agent_version": agent_version}

@@ -16,7 +16,7 @@ from app.paths import get_cidr_list_dir
 from app.services.antizapret import AntiZapretService
 from app.services.antizapret_settings import build_schema, filter_known_keys, is_openvpn_verbose_log_enabled, read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
-from app.services.node_health import build_health_payload
+from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_agent_provision import provision_mtls
 from app.services.node_agent_env import resolve_node_agent_env_file
 from app.services.node_update import (
@@ -56,7 +56,7 @@ validate_node_agent_key(NODE_AGENT_API_KEY, production=NODE_AGENT_MODE == "prod"
 service = AntiZapretService(base_path=ANTIZAPRET_PATH)
 cidr_service = CidrRoutingService(ANTIZAPRET_PATH, get_cidr_list_dir())
 monitor = ServerMonitorService()
-app = FastAPI(title="AntiZapret Node Agent", version="1.1.0")
+app = FastAPI(title="AntiZapret Node Agent", version=NODE_AGENT_VERSION)
 
 
 class NodeAgentIpAllowlistMiddleware(BaseHTTPMiddleware):

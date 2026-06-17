@@ -20,8 +20,11 @@ HEALTH_METADATA_KEYS = (
     "agent_version",
 )
 
+# Keep in sync with node agent HTTP API; shared by local adapter and node_agent/main.py.
+NODE_AGENT_VERSION = "1.1.0"
 
-def build_health_payload(service: AntiZapretService, *, agent_version: str = "1.0.0") -> dict:
+
+def build_health_payload(service: AntiZapretService, *, agent_version: str = NODE_AGENT_VERSION) -> dict:
     services = service.get_service_status()
     active_count = sum(1 for s in services if s.active)
     return {

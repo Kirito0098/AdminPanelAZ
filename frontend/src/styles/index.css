@@ -129,6 +129,17 @@
   font-size: 12px;
 }
 
+/* Radix Select viewport scrollbar hide (mirrors runtime <style> when nonce is passed). */
+[data-radix-select-viewport] {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+[data-radix-select-viewport]::-webkit-scrollbar {
+  display: none;
+}
+
 .monitoring-chart-panel {
   min-height: 220px;
 }

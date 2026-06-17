@@ -6,7 +6,7 @@ import pytest
 
 
 def test_build_health_payload_includes_service_counts():
-    from app.services.node_health import build_health_payload
+    from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 
     service = MagicMock()
     service.base_path = "/root/antizapret"
@@ -18,15 +18,32 @@ def test_build_health_payload_includes_service_counts():
         MagicMock(active=True),
     ]
 
-    payload = build_health_payload(service, agent_version="1.0.0")
+    payload = build_health_payload(service)
 
     assert payload["antizapret_path"] == "/root/antizapret"
     assert payload["antizapret_version"] == "v1.2.3"
     assert payload["server_ip"] == "203.0.113.10"
     assert payload["services_active"] == 2
     assert payload["services_total"] == 3
-    assert payload["agent_version"] == "1.0.0"
+    assert payload["agent_version"] == NODE_AGENT_VERSION
     assert payload["hostname"]
+
+
+def test_local_node_adapter_health_reports_node_agent_version():
+    from unittest.mock import MagicMock
+
+    from app.services.node_adapter import LocalNodeAdapter
+    from app.services.node_health import NODE_AGENT_VERSION
+
+    adapter = LocalNodeAdapter(service=MagicMock())
+    adapter._service.base_path = "/root/antizapret"
+    adapter._service.get_antizapret_version.return_value = "v1"
+    adapter._service.get_server_ip.return_value = "10.0.0.1"
+    adapter._service.get_service_status.return_value = []
+
+    payload = adapter.health_check()
+
+    assert payload["agent_version"] == NODE_AGENT_VERSION
 
 
 def test_traffic_worker_uses_correct_adapter_signature():

@@ -16,7 +16,7 @@ from app.services.node_mtls_certs import MtlsProvisionBundle
 from app.services.antizapret import AntiZapretService
 from app.services.antizapret_settings import read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
-from app.services.node_health import build_health_payload
+from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
@@ -295,7 +295,7 @@ class LocalNodeAdapter(NodeAdapter):
         self._monitor = ServerMonitorService()
 
     def health_check(self) -> dict[str, Any]:
-        return build_health_payload(self._service)
+        return build_health_payload(self._service, agent_version=NODE_AGENT_VERSION)
 
     def add_openvpn_client(self, client_name: str, cert_expire_days: int = 3650) -> str:
         return self._service.add_openvpn_client(client_name, cert_expire_days)
@@ -450,7 +450,7 @@ class LocalNodeAdapter(NodeAdapter):
         return check_agent_updates(repo_root=resolve_repo_root())
 
     def apply_update(self) -> dict[str, Any]:
-        return apply_node_update(repo_root=resolve_repo_root())
+        return apply_node_update(agent_version=NODE_AGENT_VERSION, repo_root=resolve_repo_root())
 
     def ensure_openvpn_ban_check(self) -> dict:
         return ensure_openvpn_ban_check(self._service.base_path)
