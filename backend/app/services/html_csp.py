@@ -29,9 +29,12 @@ def inject_csp_nonce(html: str, nonce: str) -> str:
 
     html = _SCRIPT_TAG_RE.sub(_add_nonce, html)
     html = _MODULEPRELOAD_RE.sub(_add_nonce, html)
+    def _replace_meta_nonce(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{nonce}{match.group(2)}"
+
     html = re.sub(
         r'(<meta\b[^>]*\bname=["\']csp-nonce["\'][^>]*\bcontent=["\'])[^"\']*(["\'])',
-        rf'\1{nonce}\2',
+        _replace_meta_nonce,
         html,
         count=1,
         flags=re.IGNORECASE,

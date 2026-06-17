@@ -211,6 +211,16 @@ def test_inject_csp_nonce_replaces_placeholder_and_adds_to_scripts():
     assert 'nonce="n1"' in out
 
 
+def test_inject_csp_nonce_meta_tag_with_digit_leading_nonce():
+    html = (
+        '<html><head>'
+        f'<meta name="csp-nonce" content="{CSP_NONCE_PLACEHOLDER}">'
+        '</head></html>'
+    )
+    out = inject_csp_nonce(html, "17abc_xyz")
+    assert 'content="17abc_xyz"' in out
+
+
 def test_spa_index_served_with_matching_csp_nonce(tmp_path):
     from fastapi import FastAPI, Request
     from starlette.middleware.base import BaseHTTPMiddleware
