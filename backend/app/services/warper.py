@@ -374,17 +374,16 @@ def _format_traffic_chart_label(ts: str, period: str) -> str:
         return day[5:]
 
 
-def _build_traffic_chart(period: str) -> list[dict[str, Any]]:
-    hourly_points = _filter_traffic_hourly(_read_traffic_hourly_map(), period)
+def _chart_points_from_hourly(hourly_points: list[dict[str, Any]], period: str) -> list[dict[str, Any]]:
     if not hourly_points:
         return []
 
     if period == "today":
         return [
             {
-                "label": _format_traffic_chart_label(point["ts"], period),
-                "rx": point["rx"],
-                "tx": point["tx"],
+                "label": _format_traffic_chart_label(str(point["ts"]), period),
+                "rx": int(point["rx"]),
+                "tx": int(point["tx"]),
             }
             for point in hourly_points
         ]
@@ -404,6 +403,44 @@ def _build_traffic_chart(period: str) -> list[dict[str, Any]]:
         }
         for day, values in sorted(by_day.items())
     ]
+
+
+def _synthetic_traffic_chart(payload: dict[str, Any], period: str) -> list[dict[str, Any]]:
+    rx = int(payload.get("period_rx") or payload.get("today_rx") or 0)
+    tx = int(payload.get("period_tx") or payload.get("today_tx") or 0)
+    if rx <= 0 and tx <= 0:
+        return []
+    labels = {"today": "Сегодня", "week": "Неделя", "month": "Месяц", "all": "Всё время"}
+    return [{"label": labels.get(period, period), "rx": rx, "tx": tx}]
+
+
+def _build_traffic_chart(period: str) -> list[dict[str, Any]]:
+    hourly_points = _filter_traffic_hourly(_read_traffic_hourly_map(), period)
+    return _chart_points_from_hourly(hourly_points, period)
+
+
+def enrich_warper_traffic_payload(payload: dict[str, Any], period: str) -> dict[str, Any]:
+    """Ensure chart data is present even when an older node agent omits it."""
+    chart = payload.get("chart")
+    if isinstance(chart, list) and chart:
+        return payload
+
+    hourly_points = payload.get("hourly_points")
+    if isinstance(hourly_points, list) and hourly_points:
+        rebuilt = _chart_points_from_hourly(hourly_points, period)
+        if rebuilt:
+            payload["chart"] = rebuilt
+            return payload
+
+    rebuilt = _build_traffic_chart(period)
+    if rebuilt:
+        payload["chart"] = rebuilt
+        return payload
+
+    synthetic = _synthetic_traffic_chart(payload, period)
+    if synthetic:
+        payload["chart"] = synthetic
+    return payload
 
 
 class WarperService:
@@ -630,7 +667,11 @@ class WarperService:
         payload = _result_or_raise(api.get_traffic(period), default={})
         if not isinstance(payload, dict):
             payload = {}
-        payload["chart"] = _build_traffic_chart(period)
+        hourly_points = _filter_traffic_hourly(_read_traffic_hourly_map(), period)
+        payload["hourly_points"] = hourly_points
+        payload["chart"] = _chart_points_from_hourly(hourly_points, period)
+        if not payload["chart"]:
+            payload["chart"] = _synthetic_traffic_chart(payload, period)
         return payload
 
     def get_logs(self, lines: int = 200) -> list[str]:

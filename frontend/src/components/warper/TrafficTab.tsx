@@ -36,20 +36,58 @@ function readTraffic(data: Record<string, unknown>) {
   }
 }
 
-function readChartPoints(data: Record<string, unknown>): WarperTrafficChartPoint[] {
+function readChartPoints(data: Record<string, unknown>, period: string): WarperTrafficChartPoint[] {
   const chart = data.chart
-  if (!Array.isArray(chart)) return []
-  const points: WarperTrafficChartPoint[] = []
-  for (const item of chart) {
-    if (!item || typeof item !== 'object') continue
-    const row = item as Record<string, unknown>
-    const label = typeof row.label === 'string' ? row.label : ''
-    const rx = typeof row.rx === 'number' ? row.rx : 0
-    const tx = typeof row.tx === 'number' ? row.tx : 0
-    if (!label) continue
-    points.push({ label, rx, tx })
+  if (Array.isArray(chart)) {
+    const points: WarperTrafficChartPoint[] = []
+    for (const item of chart) {
+      if (!item || typeof item !== 'object') continue
+      const row = item as Record<string, unknown>
+      const label = typeof row.label === 'string' ? row.label : ''
+      const rx = typeof row.rx === 'number' ? row.rx : 0
+      const tx = typeof row.tx === 'number' ? row.tx : 0
+      if (!label) continue
+      points.push({ label, rx, tx })
+    }
+    if (points.length > 0) return points
   }
-  return points
+
+  const hourly = data.hourly_points
+  if (Array.isArray(hourly) && hourly.length > 0) {
+    const points: WarperTrafficChartPoint[] = []
+    for (const item of hourly) {
+      if (!item || typeof item !== 'object') continue
+      const row = item as Record<string, unknown>
+      const ts = typeof row.ts === 'string' ? row.ts : ''
+      const rx = typeof row.rx === 'number' ? row.rx : 0
+      const tx = typeof row.tx === 'number' ? row.tx : 0
+      if (!ts) continue
+      const label =
+        period === 'today'
+          ? `${ts.split('T', 1)[1]?.slice(0, 2) ?? ts}:00`
+          : (() => {
+              const day = ts.slice(0, 10)
+              const parts = day.split('-')
+              return parts.length === 3 ? `${parts[2]}.${parts[1]}` : ts.slice(5)
+            })()
+      points.push({ label, rx, tx })
+    }
+    if (points.length > 0) return points
+  }
+
+  const rx = typeof data.period_rx === 'number' ? data.period_rx : typeof data.today_rx === 'number' ? data.today_rx : 0
+  const tx = typeof data.period_tx === 'number' ? data.period_tx : typeof data.today_tx === 'number' ? data.today_tx : 0
+  if (rx > 0 || tx > 0) {
+    const labels: Record<string, string> = {
+      today: 'Сегодня',
+      week: 'Неделя',
+      month: 'Месяц',
+      all: 'Всё время',
+    }
+    return [{ label: labels[period] ?? period, rx, tx }]
+  }
+
+  return []
 }
 
 export default function TrafficTab({ health, embedded = false, hideTitle = false }: TrafficTabProps) {
@@ -82,7 +120,7 @@ export default function TrafficTab({ health, embedded = false, hideTitle = false
   }, [load, activeNode?.id])
 
   const { rx, tx, uptime, summary } = readTraffic(data)
-  const chartPoints = useMemo(() => readChartPoints(data), [data])
+  const chartPoints = useMemo(() => readChartPoints(data, period), [data, period])
   const periodLabel = PERIODS.find((item) => item.key === period)?.label ?? period
 
   const body = (

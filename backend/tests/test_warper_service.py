@@ -13,6 +13,7 @@ from app.services.warper import (
     _build_traffic_chart,
     _normalize_domain,
     detect_warper_installation,
+    enrich_warper_traffic_payload,
     get_domain_lists_status,
     is_warper_installed,
     run_warper_action,
@@ -312,6 +313,28 @@ def test_get_traffic_includes_chart(mock_api, tmp_path):
         payload = service.get_traffic("today")
     assert payload["period_rx"] == 10
     assert payload["chart"]
+
+
+def test_enrich_warper_traffic_payload_builds_chart_from_hourly_points():
+    payload = {
+        "period_rx": 100,
+        "period_tx": 200,
+        "hourly_points": [
+            {"ts": "2026-06-17T10", "rx": 40, "tx": 60},
+            {"ts": "2026-06-17T11", "rx": 60, "tx": 140},
+        ],
+    }
+    enriched = enrich_warper_traffic_payload(payload, "today")
+    assert enriched["chart"] == [
+        {"label": "10:00", "rx": 40, "tx": 60},
+        {"label": "11:00", "rx": 60, "tx": 140},
+    ]
+
+
+def test_enrich_warper_traffic_payload_synthetic_from_totals():
+    payload = {"period_rx": 5900000, "period_tx": 5800000}
+    enriched = enrich_warper_traffic_payload(payload, "today")
+    assert enriched["chart"] == [{"label": "Сегодня", "rx": 5900000, "tx": 5800000}]
 
 
 def test_singbox_action_via_api(mock_api):

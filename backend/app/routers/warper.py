@@ -36,6 +36,7 @@ from app.schemas import (
     WarperTrafficResponse,
 )
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.warper import enrich_warper_traffic_payload
 
 router = APIRouter(prefix="/warper", tags=["warper"])
 
@@ -265,7 +266,11 @@ def warper_traffic(
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     data = adapter.get_warper_traffic(period)
-    return WarperTrafficResponse(data=data if isinstance(data, dict) else {"raw": data}, **_node_meta(node))
+    if isinstance(data, dict):
+        data = enrich_warper_traffic_payload(data, period)
+    else:
+        data = {"raw": data}
+    return WarperTrafficResponse(data=data, **_node_meta(node))
 
 
 @router.get("/logs", response_model=WarperLogsResponse)
