@@ -921,6 +921,18 @@ class NodeHealthResponse(BaseModel):
 class ActiveNodeResponse(BaseModel):
     node: NodeResponse
     active: bool = True
+    ha: "NodeHaContext | None" = None
+
+
+class NodeHaContext(BaseModel):
+    sync_group_id: int
+    group_name: str
+    shared_domain: str
+    role: str
+    primary_node_id: int
+    primary_node_name: str | None = None
+    sync_mode: str
+    sync_status: SyncStatus
 
 
 class NodeUpdateRequest(BaseModel):

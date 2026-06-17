@@ -12,6 +12,7 @@ from app.schemas import (
     ActiveNodeResponse,
     MessageResponse,
     NodeCreate,
+    NodeHaContext,
     NodeHealthResponse,
     NodeMtlsDisableResponse,
     NodeMtlsEnableResponse,
@@ -50,6 +51,7 @@ from app.services.ip_restriction import ip_restriction_service
 from app.services.node_update_roll import enqueue_node_update_roll
 from app.services.background_tasks import background_task_service
 from app.services.geo_routing_hint import build_geo_routing_hint
+from app.services.node_sync.groups import build_ha_node_context
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 settings = get_settings()
@@ -100,6 +102,14 @@ def _to_response(node: Node) -> NodeResponse:
         metadata=node_metadata_dict(node),
         created_at=node.created_at,
         updated_at=node.updated_at,
+    )
+
+
+def _active_node_response(db: Session, node: Node) -> ActiveNodeResponse:
+    ha_data = build_ha_node_context(db, node.id)
+    return ActiveNodeResponse(
+        node=_to_response(node),
+        ha=NodeHaContext(**ha_data) if ha_data else None,
     )
 
 
@@ -192,7 +202,7 @@ def get_active(
         health = check_node_health(node)
         update_node_from_health(node, health, db)
         db.refresh(node)
-    return ActiveNodeResponse(node=_to_response(node))
+    return _active_node_response(db, node)
 
 
 @router.get("/mtls/status", response_model=NodeMtlsStatusResponse)
@@ -405,7 +415,7 @@ def activate_node(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"name={node.name}, id={node.id}",
         )
-    return ActiveNodeResponse(node=_to_response(node))
+    return _active_node_response(db, node)
 
 
 def _get_node_or_404(node_id: int, db: Session) -> Node:

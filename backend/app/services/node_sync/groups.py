@@ -145,6 +145,43 @@ def find_sync_group_containing_node(
     return group, "replica"
 
 
+def build_ha_node_context(db: Session, node_id: int) -> dict[str, Any] | None:
+    group, role = find_sync_group_containing_node(db, node_id)
+    if not group or not role:
+        return None
+    primary = db.get(Node, group.primary_node_id)
+    return {
+        "sync_group_id": group.id,
+        "group_name": group.name,
+        "shared_domain": group.shared_domain,
+        "role": role,
+        "primary_node_id": group.primary_node_id,
+        "primary_node_name": primary.name if primary else None,
+        "sync_mode": group.sync_mode,
+        "sync_status": group.sync_status.value if hasattr(group.sync_status, "value") else str(group.sync_status),
+    }
+
+
+def require_ha_primary_for_client_ops(db: Session, *, node: Node | None = None) -> None:
+    """Reject client create/delete/cert mutations on HA replica nodes."""
+    if node is None:
+        from app.services.node_manager import get_active_node
+
+        node = get_active_node(db)
+    group, role = find_sync_group_containing_node(db, node.id)
+    if not group or role != "replica":
+        return
+    primary = db.get(Node, group.primary_node_id)
+    primary_name = primary.name if primary else str(group.primary_node_id)
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            f"Узел «{node.name}» — replica в HA-группе «{group.name}» ({group.shared_domain}). "
+            f"Создавайте и изменяйте клиентов на primary («{primary_name}»)."
+        ),
+    )
+
+
 def get_replica_nodes(db: Session, group: NodeSyncGroup) -> list[Node]:
     replica_ids = parse_replica_node_ids(group.replica_node_ids)
     if not replica_ids:

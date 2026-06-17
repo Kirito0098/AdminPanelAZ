@@ -32,6 +32,7 @@ import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
 import MetricCard from '@/components/noc/MetricCard'
+import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
@@ -58,6 +59,7 @@ import { NodeBadge } from '@/components/NodeSelector'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
+import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
@@ -70,6 +72,7 @@ export default function DashboardPage() {
   const wireguardEnabled = isEnabled('wireguard') || isEnabled('amneziawg')
   const canCreateClient = openvpnEnabled || wireguardEnabled
   const { activeNode } = useNode()
+  const haReplicaReadonly = useHaReplicaReadonly()
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
   const { task: importTask, polling: importPolling, startPoll: startImportPoll } = useBackgroundTaskPoll()
@@ -407,7 +410,7 @@ export default function DashboardPage() {
         <div className="flex flex-wrap gap-2">
           {user?.role === 'admin' && (
             <>
-              <Button variant="outline" onClick={handleSync} disabled={syncing}>
+              <Button variant="outline" onClick={handleSync} disabled={syncing || haReplicaReadonly}>
                 {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                 {syncing ? 'Синхронизация...' : 'Синхронизировать'}
               </Button>
@@ -418,7 +421,7 @@ export default function DashboardPage() {
               <Button
                 variant="outline"
                 onClick={() => csvInputRef.current?.click()}
-                disabled={csvImporting || importPolling}
+                disabled={csvImporting || importPolling || haReplicaReadonly}
               >
                 {csvImporting || importPolling ? (
                   <Loader2 size={16} className="animate-spin" />
@@ -446,7 +449,7 @@ export default function DashboardPage() {
                 setOwnerId(user?.id ?? null)
                 setShowForm(true)
               }}
-              disabled={quotaReached}
+              disabled={quotaReached || haReplicaReadonly}
             >
               <Plus size={16} />
               Новый клиент
@@ -461,6 +464,8 @@ export default function DashboardPage() {
           {importTask?.progress_percent != null && ` (${importTask.progress_percent}%)`}
         </SettingsAlert>
       )}
+
+      <HaReplicaBanner />
 
       <SettingsAlert variant="info" title="Конфигурации активного узла">
         Список клиентов привязан к узлу <strong>{activeNode?.name ?? summary?.node_name ?? 'не выбран'}</strong>
@@ -610,7 +615,7 @@ export default function DashboardPage() {
                       type="button"
                       variant="secondary"
                       size="sm"
-                      disabled={submitting}
+                      disabled={submitting || haReplicaReadonly}
                       onClick={() => void handleApplyTemplate(tpl)}
                     >
                       {tpl.name}
@@ -623,7 +628,7 @@ export default function DashboardPage() {
               <Button type="button" variant="outline" onClick={closeForm} disabled={submitting}>
                 Отмена
               </Button>
-              <Button type="submit" disabled={submitting}>
+              <Button type="submit" disabled={submitting || haReplicaReadonly}>
                 {submitting ? (
                   <>
                     <Loader2 size={16} className="animate-spin" />
@@ -697,7 +702,7 @@ export default function DashboardPage() {
               action={
                 <div className="flex flex-wrap justify-center gap-2">
                   {user?.role === 'admin' && (
-                    <Button variant="outline" onClick={handleSync} disabled={syncing}>
+                    <Button variant="outline" onClick={handleSync} disabled={syncing || haReplicaReadonly}>
                       {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                       Синхронизировать
                     </Button>
@@ -708,7 +713,7 @@ export default function DashboardPage() {
                         setOwnerId(user?.id ?? null)
                         setShowForm(true)
                       }}
-                      disabled={quotaReached}
+                      disabled={quotaReached || haReplicaReadonly}
                     >
                       <Plus size={16} />
                       Создать клиента

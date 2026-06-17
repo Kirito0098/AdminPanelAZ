@@ -16,6 +16,7 @@ from app.services.access_policy import (
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
+from app.services.node_sync.groups import require_ha_primary_for_client_ops
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.traffic_limit import (
     TrafficLimitExceededError,
@@ -47,6 +48,7 @@ class TrafficLimitRequest(BaseModel):
 
 def _service(db: Session) -> AccessPolicyService:
     node = get_active_node(db)
+    require_ha_primary_for_client_ops(db, node=node)
     return AccessPolicyService(
         db,
         antizapret_path=get_node_antizapret_path(db),
@@ -229,6 +231,7 @@ def openvpn_unblock(payload: BlockRequest, request: Request, db: Session = Depen
 
 @router.post("/openvpn/disconnect")
 def openvpn_disconnect(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    require_ha_primary_for_client_ops(db)
     result = get_active_adapter(db).disconnect_openvpn_client(payload.client_name)
     if not result.get("success"):
         raise HTTPException(status_code=404, detail=result.get("message", "Не удалось отключить"))

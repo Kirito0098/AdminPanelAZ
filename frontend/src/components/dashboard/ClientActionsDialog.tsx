@@ -60,6 +60,7 @@ import {
 } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
 import { useNode } from '@/context/NodeContext'
+import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import type { ClientAccessPolicy, ConfigTag, User, UserRole, VpnConfig } from '@/types'
 
 interface ClientActionsDialogProps {
@@ -159,6 +160,7 @@ export default function ClientActionsDialog({
   showQrDownloads = true,
 }: ClientActionsDialogProps) {
   const { activeNode } = useNode()
+  const haReplicaReadonly = useHaReplicaReadonly()
   const [promptMode, setPromptMode] = useState<PromptMode>(null)
   const [promptTitle, setPromptTitle] = useState('')
   const [promptMessage, setPromptMessage] = useState('')
@@ -339,7 +341,7 @@ export default function ClientActionsDialog({
           key: 'temp-block',
           label: 'Временная блокировка',
           icon: <Ban size={14} />,
-          hidden: !canManage,
+          hidden: !canManage || haReplicaReadonly,
           onClick: () =>
             askNumber(
               'Временная блокировка',
@@ -355,7 +357,7 @@ export default function ClientActionsDialog({
           key: 'unblock',
           label: 'Снять блокировку',
           icon: <Unlock size={14} />,
-          hidden: !canManage || !isBlocked,
+          hidden: !canManage || !isBlocked || haReplicaReadonly,
           onClick: () =>
             runAction('unblock', async () => {
               await openvpnUnblock(config.client_name)
@@ -366,7 +368,7 @@ export default function ClientActionsDialog({
           key: 'disconnect',
           label: 'Отключить сессию',
           icon: <Zap size={14} />,
-          hidden: !canManage,
+          hidden: !canManage || haReplicaReadonly,
           title: 'Принудительно отключить активную сессию',
           onClick: () =>
             askConfirm(
@@ -382,14 +384,14 @@ export default function ClientActionsDialog({
           key: 'renew-cert',
           label: 'Продлить сертификат',
           icon: <RefreshCw size={14} />,
-          hidden: !isOwner,
+          hidden: !isOwner || haReplicaReadonly,
           onClick: handleRenewCert,
         },
         {
           key: 'traffic-limit',
           label: 'Лимит трафика',
           icon: <Gauge size={14} />,
-          hidden: !canManage,
+          hidden: !canManage || haReplicaReadonly,
           onClick: () => {
             setLimitValue('10')
             setLimitUnit('GB')
@@ -403,7 +405,7 @@ export default function ClientActionsDialog({
           key: 'clear-traffic-limit',
           label: 'Снять лимит трафика',
           icon: <Gauge size={14} />,
-          hidden: !canManage || !hasTrafficLimit,
+          hidden: !canManage || !hasTrafficLimit || haReplicaReadonly,
           onClick: () =>
             askConfirm(
               'Снять лимит трафика',
@@ -420,7 +422,7 @@ export default function ClientActionsDialog({
           key: 'temp-block',
           label: 'Временная блокировка',
           icon: <Ban size={14} />,
-          hidden: !canManage,
+          hidden: !canManage || haReplicaReadonly,
           onClick: () =>
             askNumber(
               'Временная блокировка',
@@ -436,14 +438,14 @@ export default function ClientActionsDialog({
           key: 'unblock',
           label: 'Снять блокировку',
           icon: <Unlock size={14} />,
-          hidden: !canManage || !['temp', 'permanent', 'expired'].includes(blockMode),
+          hidden: !canManage || !['temp', 'permanent', 'expired'].includes(blockMode) || haReplicaReadonly,
           onClick: handleWgUnblock,
         },
         {
           key: 'extend-expiry',
           label: 'Продлить срок',
           icon: <RefreshCw size={14} />,
-          hidden: !canManage,
+          hidden: !canManage || haReplicaReadonly,
           onClick: () =>
             askNumber(
               'Продлить срок',
@@ -459,7 +461,7 @@ export default function ClientActionsDialog({
           key: 'traffic-limit',
           label: 'Лимит трафика',
           icon: <Gauge size={14} />,
-          hidden: !canManage,
+          hidden: !canManage || haReplicaReadonly,
           onClick: () => {
             setLimitValue('10')
             setLimitUnit('GB')
@@ -473,7 +475,7 @@ export default function ClientActionsDialog({
           key: 'clear-traffic-limit',
           label: 'Снять лимит трафика',
           icon: <Gauge size={14} />,
-          hidden: !canManage || !hasTrafficLimit,
+          hidden: !canManage || !hasTrafficLimit || haReplicaReadonly,
           onClick: () =>
             askConfirm(
               'Снять лимит трафика',
@@ -491,7 +493,7 @@ export default function ClientActionsDialog({
       key: 'permanent-block',
       label: 'Блокировать навсегда',
       icon: <Ban size={14} />,
-      hidden: !canManage || isBlocked,
+          hidden: !canManage || isBlocked || haReplicaReadonly,
       destructive: true,
       onClick: () =>
         askConfirm(
@@ -511,7 +513,7 @@ export default function ClientActionsDialog({
       key: 'delete',
       label: 'Удалить профиль',
       icon: <Trash2 size={14} />,
-      hidden: !canDelete,
+      hidden: !canDelete || haReplicaReadonly,
       destructive: true,
       onClick: () =>
         askConfirm('Подтверждение удаления', `Удалить профиль «${config.client_name}»?`, async () => {

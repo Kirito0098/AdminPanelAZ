@@ -27,7 +27,12 @@ from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_adapter import NodeAdapter
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.client_sync import maybe_replicate_create, maybe_replicate_delete
-from app.services.node_sync.groups import build_ha_metadata, find_sync_group_containing_node, find_sync_group_for_primary
+from app.services.node_sync.groups import (
+    build_ha_metadata,
+    find_sync_group_containing_node,
+    find_sync_group_for_primary,
+    require_ha_primary_for_client_ops,
+)
 from app.services.openvpn_cert import resolve_openvpn_cert_days_remaining
 from app.services.openvpn_group import (
     filter_openvpn_profile_files,
@@ -340,6 +345,7 @@ async def import_configs_csv(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    require_ha_primary_for_client_ops(db)
     content = await file.read()
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пуст")
@@ -374,6 +380,7 @@ def create_config(
     current_user: User = Depends(get_current_user),
 ):
     enforce_user_can_create_config(db, current_user)
+    require_ha_primary_for_client_ops(db)
     owner_id = payload.owner_id if current_user.role == UserRole.admin and payload.owner_id else current_user.id
     owner = db.query(User).filter(User.id == owner_id).first()
     if not owner:
@@ -467,6 +474,7 @@ def update_config(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Владелец не найден")
         config.owner_id = payload.owner_id
     if payload.cert_expire_days is not None and config.vpn_type == VpnType.openvpn:
+        require_ha_primary_for_client_ops(db)
         get_active_adapter(db).add_openvpn_client(config.client_name, payload.cert_expire_days)
         config.cert_expire_days = payload.cert_expire_days
 
@@ -488,6 +496,7 @@ def delete_config(
     if not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
+    require_ha_primary_for_client_ops(db)
     adapter = get_active_adapter(db)
     if config.vpn_type == VpnType.openvpn:
         adapter.delete_openvpn_client(config.client_name)
@@ -594,6 +603,7 @@ def create_one_time_link(
 @router.post("/sync", response_model=MessageResponse)
 def sync_from_antizapret(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     """Импорт существующих клиентов AntiZapret в базу данных."""
+    require_ha_primary_for_client_ops(db)
     admin = db.query(User).filter(User.role == UserRole.admin).first()
     if not admin:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Администратор не найден")

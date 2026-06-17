@@ -1,10 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import * as api from '@/api/client'
 import { useAuth } from '@/context/AuthContext'
-import type { Node } from '@/types'
+import type { Node, NodeHaContext } from '@/types'
 
 interface NodeContextValue {
   activeNode: Node | null
+  activeNodeHa: NodeHaContext | null
   nodes: Node[]
   loading: boolean
   refresh: () => Promise<void>
@@ -17,20 +18,24 @@ const NodeContext = createContext<NodeContextValue | null>(null)
 export function NodeProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
   const [activeNode, setActiveNode] = useState<Node | null>(null)
+  const [activeNodeHa, setActiveNodeHa] = useState<NodeHaContext | null>(null)
   const [nodes, setNodes] = useState<Node[]>([])
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
     if (!user) {
       setActiveNode(null)
+      setActiveNodeHa(null)
       setLoading(false)
       return
     }
     try {
-      const { node } = await api.getActiveNode()
-      setActiveNode(node)
+      const data = await api.getActiveNode()
+      setActiveNode(data.node)
+      setActiveNodeHa(data.ha ?? null)
     } catch {
       setActiveNode(null)
+      setActiveNodeHa(null)
     } finally {
       setLoading(false)
     }
@@ -49,8 +54,9 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
   }, [user])
 
   const activate = useCallback(async (id: number) => {
-    const { node } = await api.activateNode(id)
-    setActiveNode(node)
+    const data = await api.activateNode(id)
+    setActiveNode(data.node)
+    setActiveNodeHa(data.ha ?? null)
     await refreshNodes()
   }, [refreshNodes])
 
@@ -82,8 +88,8 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
   }, [user, refresh, refreshNodes])
 
   const value = useMemo(
-    () => ({ activeNode, nodes, loading, refresh, refreshNodes, activate }),
-    [activeNode, nodes, loading, refresh, refreshNodes, activate],
+    () => ({ activeNode, activeNodeHa, nodes, loading, refresh, refreshNodes, activate }),
+    [activeNode, activeNodeHa, nodes, loading, refresh, refreshNodes, activate],
   )
 
   return <NodeContext.Provider value={value}>{children}</NodeContext.Provider>

@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models import User
 from app.schemas import BulkConfigOpQueuedResponse, BulkConfigOpRequest
 from app.services.bulk_config_ops import enqueue_bulk_config_op
+from app.services.node_sync.groups import require_ha_primary_for_client_ops
 
 router = APIRouter(prefix="/configs/bulk", tags=["configs"])
 
@@ -21,6 +22,7 @@ def bulk_config_operation(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Укажите config_ids или tag_ids",
         )
+    require_ha_primary_for_client_ops(db)
     try:
         task_id = enqueue_bulk_config_op(
             db,

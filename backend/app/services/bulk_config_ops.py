@@ -18,7 +18,7 @@ from app.services.background_tasks import background_task_service
 from app.services.config_tags import resolve_config_ids_by_tags
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 from app.services.node_sync.client_sync import maybe_replicate_delete
-from app.services.node_sync.groups import find_sync_group_for_primary
+from app.services.node_sync.groups import find_sync_group_for_primary, require_ha_primary_for_client_ops
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +185,7 @@ def enqueue_bulk_config_op(
     actor: User,
 ) -> str:
     node = get_active_node(db)
+    require_ha_primary_for_client_ops(db, node=node)
     targets = resolve_config_ids_by_tags(db, node.id, tag_ids, base_config_ids=config_ids)
     if not targets:
         raise ValueError("Нет конфигураций для обработки")

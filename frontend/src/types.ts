@@ -19,6 +19,18 @@ export interface Node {
 export interface ActiveNode {
   node: Node
   active: boolean
+  ha?: NodeHaContext | null
+}
+
+export interface NodeHaContext {
+  sync_group_id: number
+  group_name: string
+  shared_domain: string
+  role: 'primary' | 'replica'
+  primary_node_id: number
+  primary_node_name?: string | null
+  sync_mode: string
+  sync_status: SyncStatus
 }
 
 export type SyncStatus = 'unknown' | 'synced' | 'pending' | 'failed'

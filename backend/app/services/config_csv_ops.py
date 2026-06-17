@@ -17,6 +17,7 @@ from app.models import User, UserRole, VpnConfig, VpnType
 from app.services.background_tasks import background_task_service
 from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.node_sync.groups import require_ha_primary_for_client_ops
 from app.services.node_sync.client_sync import maybe_replicate_create
 from app.services.node_sync.groups import find_sync_group_for_primary
 
@@ -187,6 +188,7 @@ def run_config_csv_import(
     db = SessionLocal()
     try:
         node = get_active_node(db)
+        require_ha_primary_for_client_ops(db, node=node)
         node_id = node.id
         users = db.query(User).filter(User.is_active.is_(True)).all()
         owner_by_username = {u.username: u.id for u in users}

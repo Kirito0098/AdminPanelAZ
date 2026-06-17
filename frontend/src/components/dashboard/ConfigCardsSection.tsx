@@ -32,7 +32,7 @@ import {
   type ClientFilter,
   type ProtocolTab,
 } from '@/lib/configCardUtils'
-import { useFeatureModules } from '@/context/FeatureModulesContext'
+import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import { useProgress } from '@/context/ProgressContext'
 import type { ClientAccessPolicy, ConfigTag, OpenVpnGroupOption, User, UserRole, VpnConfig } from '@/types'
 import { FileKey, Filter, Search, Shield, Tag, X } from 'lucide-react'
@@ -78,6 +78,7 @@ export default function ConfigCardsSection({
   onNotifyError,
 }: ConfigCardsSectionProps) {
   const { isEnabled } = useFeatureModules()
+  const haReplicaReadonly = useHaReplicaReadonly()
   const { trackBackgroundTask } = useProgress()
   const qrDownloadsEnabled = isEnabled('qr_downloads')
   const trafficLinkEnabled = isEnabled('traffic_sync')
@@ -509,16 +510,16 @@ export default function ConfigCardsSection({
                     <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={clearSelection}>
                       Сброс
                     </Button>
-                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => setBulkAction('block_temp')}>
+                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => setBulkAction('block_temp')}>
                       Block
                     </Button>
-                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => setBulkAction('unblock')}>
+                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => setBulkAction('unblock')}>
                       Unblock
                     </Button>
-                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => setBulkAction('renew_cert')}>
+                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => setBulkAction('renew_cert')}>
                       Renew cert
                     </Button>
-                    <Button type="button" size="sm" variant="destructive" className="h-7 text-xs" onClick={() => setBulkAction('delete')}>
+                    <Button type="button" size="sm" variant="destructive" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => setBulkAction('delete')}>
                       Delete
                     </Button>
                   </div>
@@ -560,10 +561,12 @@ export default function ConfigCardsSection({
                         onCopyName={() => void copyName(config.client_name)}
                         onDownload={(path, filename) => void handleCardDownload(config, path, filename)}
                         onQr={(path, filename) => void handleCardQr(config, path, filename)}
-                        onBlock={isAdmin ? () => openConfirm('block', config) : undefined}
-                        onUnblock={isAdmin ? () => openConfirm('unblock', config) : undefined}
+                        onBlock={isAdmin && !haReplicaReadonly ? () => openConfirm('block', config) : undefined}
+                        onUnblock={isAdmin && !haReplicaReadonly ? () => openConfirm('unblock', config) : undefined}
                         onDelete={
-                          isAdmin || userRole === 'user' ? () => openConfirm('delete', config) : undefined
+                          !haReplicaReadonly && (isAdmin || userRole === 'user')
+                            ? () => openConfirm('delete', config)
+                            : undefined
                         }
                         showQrDownloads={qrDownloadsEnabled}
                         showTrafficLink={trafficLinkEnabled}
