@@ -481,6 +481,10 @@ class WarperSubnetRequest(BaseModel):
     subnet: str = Field(..., min_length=1)
 
 
+class WarperCatalogNameRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+
+
 @app.get("/warper/health")
 def warper_health(_: None = Depends(verify_api_key)):
     return run_warper_action("health")
@@ -651,6 +655,41 @@ def warper_singbox_action(action: str, _: None = Depends(verify_api_key)):
     if action not in {"start", "stop", "restart"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Допустимо: start, stop, restart")
     return run_warper_action("singbox_action", action=action)
+
+
+@app.get("/warper/catalog/search")
+def warper_catalog_search(query: str = "", _: None = Depends(verify_api_key)):
+    return {"items": run_warper_action("catalog_search", query=query)}
+
+
+@app.get("/warper/catalog/installed")
+def warper_catalog_installed(_: None = Depends(verify_api_key)):
+    return {"items": run_warper_action("catalog_list_installed")}
+
+
+@app.get("/warper/catalog/show/{name}")
+def warper_catalog_show(name: str, _: None = Depends(verify_api_key)):
+    return run_warper_action("catalog_show", name=name)
+
+
+@app.post("/warper/catalog/add")
+def warper_catalog_add(payload: WarperCatalogNameRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("catalog_add", name=payload.name)
+
+
+@app.post("/warper/catalog/remove")
+def warper_catalog_remove(payload: WarperCatalogNameRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("catalog_remove", name=payload.name)
+
+
+@app.post("/warper/catalog/update")
+def warper_catalog_update(name: str = "", _: None = Depends(verify_api_key)):
+    return run_warper_action("catalog_update", name=name)
+
+
+@app.post("/warper/catalog/refresh")
+def warper_catalog_refresh(_: None = Depends(verify_api_key)):
+    return run_warper_action("catalog_refresh_cache")
 
 
 @app.get("/system/updates")

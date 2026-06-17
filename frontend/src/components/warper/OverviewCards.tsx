@@ -34,6 +34,16 @@ export default function OverviewCards({
   const statusData = status?.status ?? {}
   const outboundMode =
     typeof statusData.outbound_mode === 'string' ? statusData.outbound_mode : null
+  const subnetBlock =
+    statusData.subnet && typeof statusData.subnet === 'object'
+      ? (statusData.subnet as Record<string, unknown>)
+      : null
+  const fakeSubnet =
+    subnetBlock && typeof subnetBlock.fake === 'string'
+      ? subnetBlock.fake
+      : typeof statusData.fake_subnet === 'string'
+        ? statusData.fake_subnet
+        : null
   const tx = readNumber(trafficToday, 'period_tx', 'tx', 'upload')
   const rx = readNumber(trafficToday, 'period_rx', 'rx', 'download')
 
@@ -144,12 +154,12 @@ export default function OverviewCards({
         ))}
       </div>
 
-      {typeof statusData.fake_subnet === 'string' && (
+      {fakeSubnet && (
         <Card className="border-dashed">
           <CardContent className="flex flex-wrap items-center gap-2 py-4">
             <Network className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm text-muted-foreground">Fake-подсеть</span>
-            <code className="rounded-md bg-muted px-2 py-0.5 font-mono text-sm">{statusData.fake_subnet}</code>
+            <code className="rounded-md bg-muted px-2 py-0.5 font-mono text-sm">{fakeSubnet}</code>
             {outboundMode && (
               <span className="text-sm text-muted-foreground">
                 · режим <strong>{formatOutboundMode(outboundMode)}</strong>

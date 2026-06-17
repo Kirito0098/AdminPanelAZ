@@ -690,22 +690,55 @@ class WarperService:
         else:
             unwrapped = _result_or_raise(mode, default={})
             payload = unwrapped if isinstance(unwrapped, dict) else {"mode": unwrapped}
-        for attr, key in (("get_mtu", "mtu"), ("get_log_level", "log_level"), ("get_fullvpn", "fullvpn"), ("get_subnet", "subnet")):
-            getter = getattr(api, attr, None)
-            if not callable(getter):
-                continue
-            try:
-                value = getter()
-                if isinstance(value, bool):
-                    payload[key] = value
-                elif isinstance(value, (str, int)):
-                    payload[key] = value
-                elif hasattr(value, "ok"):
-                    unwrapped = _result_or_raise(value, default=None)
-                    if unwrapped is not None:
-                        payload[key] = unwrapped
-            except Exception:
-                continue
+
+        # Реальные параметры берём из полного status JSON (вложенные ключи).
+        try:
+            raw_status = _result_or_raise(api.get_status(), default={})
+        except Exception:
+            raw_status = {}
+        if isinstance(raw_status, dict):
+            singbox = raw_status.get("singbox") if isinstance(raw_status.get("singbox"), dict) else {}
+            subnet_block = raw_status.get("subnet") if isinstance(raw_status.get("subnet"), dict) else {}
+            outbound = raw_status.get("outbound_mode")
+            if isinstance(outbound, str) and outbound:
+                payload.setdefault("outbound_mode", outbound)
+                payload.setdefault("mode", outbound)
+            if isinstance(singbox.get("mtu"), int):
+                payload["mtu"] = singbox["mtu"]
+            if isinstance(singbox.get("log_level"), str):
+                payload["log_level"] = singbox["log_level"]
+            fake = subnet_block.get("fake")
+            if isinstance(fake, str) and fake:
+                payload["subnet"] = fake
+            fullvpn_raw = raw_status.get("fullvpn_warp_resolve")
+            if isinstance(fullvpn_raw, bool):
+                payload["fullvpn"] = fullvpn_raw
+            elif isinstance(fullvpn_raw, str):
+                payload["fullvpn"] = fullvpn_raw.strip().lower() in {"y", "yes", "1", "true", "on"}
+            if isinstance(raw_status.get("autopatch_enabled"), bool):
+                payload["autopatch"] = raw_status["autopatch_enabled"]
+            if isinstance(raw_status.get("warp_keys_source"), str):
+                payload.setdefault("warp_keys_source", raw_status["warp_keys_source"])
+
+        # Fallback на отдельные геттеры, если status не дал значений.
+        if "mtu" not in payload:
+            getter = getattr(api, "get_mtu", None)
+            if callable(getter):
+                try:
+                    value = getter()
+                    if isinstance(value, int):
+                        payload["mtu"] = value
+                except Exception:
+                    pass
+        if "log_level" not in payload:
+            getter = getattr(api, "get_log_level", None)
+            if callable(getter):
+                try:
+                    value = getter()
+                    if isinstance(value, str):
+                        payload["log_level"] = value
+                except Exception:
+                    pass
         return payload
 
     def list_warp_keys(self) -> list[str]:
@@ -822,6 +855,60 @@ class WarperService:
         except Exception:
             pass
         return _singbox_systemctl(action)
+
+    def _catalog_method(self, name: str):
+        api = self._api_client()
+        method = getattr(api, name, None)
+        if not callable(method):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"{name} недоступен в warper_api. Обновите AZ-WARP на узле (нужна версия ≥ 1.3.8).",
+            )
+        return method
+
+    def catalog_search(self, query: str = "") -> list[dict[str, Any]]:
+        method = self._catalog_method("catalog_search")
+        data = _result_or_raise(method((query or "").strip()), default=[])
+        return data if isinstance(data, list) else []
+
+    def catalog_show(self, name: str) -> dict[str, Any]:
+        list_name = (name or "").strip().lower()
+        if not list_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите имя категории")
+        method = self._catalog_method("catalog_show")
+        data = _result_or_raise(method(list_name), default={})
+        return data if isinstance(data, dict) else {}
+
+    def catalog_add(self, name: str) -> dict[str, Any]:
+        _ensure_no_conflict()
+        list_name = (name or "").strip().lower()
+        if not list_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите имя категории")
+        method = self._catalog_method("catalog_add")
+        return _result_or_raise(method(list_name), default={"message": "OK"})
+
+    def catalog_remove(self, name: str) -> dict[str, Any]:
+        _ensure_no_conflict()
+        list_name = (name or "").strip().lower()
+        if not list_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите имя категории")
+        method = self._catalog_method("catalog_remove")
+        return _result_or_raise(method(list_name), default={"message": "OK"})
+
+    def catalog_update(self, name: str = "") -> dict[str, Any]:
+        _ensure_no_conflict()
+        list_name = (name or "").strip().lower()
+        method = self._catalog_method("catalog_update")
+        return _result_or_raise(method(list_name), default={"message": "OK"})
+
+    def catalog_list_installed(self) -> list[dict[str, Any]]:
+        method = self._catalog_method("catalog_list_installed")
+        data = _result_or_raise(method(), default=[])
+        return data if isinstance(data, list) else []
+
+    def catalog_refresh_cache(self) -> dict[str, Any]:
+        method = self._catalog_method("catalog_refresh_cache")
+        return _result_or_raise(method(), default={"message": "OK"})
 
 
 def _singbox_systemctl(action: Literal["start", "stop", "restart"]) -> dict[str, Any]:
@@ -974,6 +1061,13 @@ def run_warper_action(operation: str, **kwargs: Any) -> Any:
         "set_mtu": lambda: service.set_mtu(kwargs["mtu"]),
         "set_log_level": lambda: service.set_log_level(kwargs["level"]),
         "singbox_action": lambda: service.singbox_action(kwargs["action"]),
+        "catalog_search": lambda: service.catalog_search(kwargs.get("query", "")),
+        "catalog_show": lambda: service.catalog_show(kwargs["name"]),
+        "catalog_add": lambda: service.catalog_add(kwargs["name"]),
+        "catalog_remove": lambda: service.catalog_remove(kwargs["name"]),
+        "catalog_update": lambda: service.catalog_update(kwargs.get("name", "")),
+        "catalog_list_installed": lambda: service.catalog_list_installed(),
+        "catalog_refresh_cache": lambda: service.catalog_refresh_cache(),
     }
     if operation not in actions:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown action")

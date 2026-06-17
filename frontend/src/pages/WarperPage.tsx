@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Activity, Globe, Network, Settings2 } from 'lucide-react'
+import { Activity, Globe, Library, Network, Settings2 } from 'lucide-react'
 import { getWarperDomains, getWarperHealth, getWarperStatus, getWarperTraffic } from '@/api/client'
+import CatalogTab from '@/components/warper/CatalogTab'
 import DomainsTab from '@/components/warper/DomainsTab'
 import IpRangesTab from '@/components/warper/IpRangesTab'
 import MonitoringTab from '@/components/warper/MonitoringTab'
@@ -93,6 +94,10 @@ export default function WarperPage() {
             <Globe className="h-4 w-4" />
             <span>Домены</span>
           </TabsTrigger>
+          <TabsTrigger value="catalog" className="gap-1.5 data-[state=active]:shadow-sm">
+            <Library className="h-4 w-4" />
+            <span>Каталог</span>
+          </TabsTrigger>
           <TabsTrigger value="ip-ranges" className="gap-1.5 data-[state=active]:shadow-sm">
             <Network className="h-4 w-4" />
             <span>IP-подсети</span>
@@ -109,6 +114,10 @@ export default function WarperPage() {
 
         <TabsContent value="domains" className="mt-0 focus-visible:outline-none">
           <DomainsTab health={health} onDomainsChange={setDomainCount} />
+        </TabsContent>
+
+        <TabsContent value="catalog" className="mt-0 focus-visible:outline-none">
+          <CatalogTab health={health} onDomainsChange={() => void load()} />
         </TabsContent>
 
         <TabsContent value="ip-ranges" className="mt-0 focus-visible:outline-none">

@@ -57,10 +57,22 @@ export default function StatusSection({
   const outboundMode = readString(statusData, 'outbound_mode')
   const singbox = readNested(statusData, 'singbox') as Record<string, unknown> | null
   const kresd = readNested(statusData, 'kresd') as Record<string, unknown> | null
-  const fakeSubnet = readString(statusData, 'fake_subnet')
-  const subnet = readString(statusData, 'subnet')
-  const logLevel = readString(statusData, 'log_level')
-  const fullVpn = readBoolean(statusData, 'fullvpn')
+  const subnetBlock = readNested(statusData, 'subnet') as Record<string, unknown> | null
+  // status JSON хранит подсеть в subnet.fake; поддерживаем и плоский fake_subnet как fallback.
+  const fakeSubnet =
+    (subnetBlock && typeof subnetBlock.fake === 'string' ? (subnetBlock.fake as string) : null) ??
+    readString(statusData, 'fake_subnet') ??
+    readString(statusData, 'subnet')
+  const logLevel =
+    (singbox && typeof singbox.log_level === 'string' ? (singbox.log_level as string) : null) ??
+    readString(statusData, 'log_level')
+  const fullVpnRaw = statusData?.['fullvpn_warp_resolve']
+  const fullVpn =
+    typeof fullVpnRaw === 'boolean'
+      ? fullVpnRaw
+      : typeof fullVpnRaw === 'string'
+        ? ['y', 'yes', '1', 'true', 'on'].includes(fullVpnRaw.trim().toLowerCase())
+        : readBoolean(statusData, 'fullvpn')
   const kresdPatched = kresd && typeof kresd.patched === 'boolean' ? kresd.patched : null
   const nodeLabel = formatNodeLabel(health, activeNode)
   const metricsDense = embedded && (showMetrics || compact)
@@ -124,12 +136,6 @@ export default function StatusSection({
             <div className="rounded-lg border bg-muted/20 p-3">
               <dt className="text-xs text-muted-foreground">Fake-подсеть</dt>
               <dd className="mt-1 font-mono text-sm">{fakeSubnet}</dd>
-            </div>
-          )}
-          {subnet && (
-            <div className="rounded-lg border bg-muted/20 p-3">
-              <dt className="text-xs text-muted-foreground">Подсеть</dt>
-              <dd className="mt-1 font-mono text-sm">{subnet}</dd>
             </div>
           )}
           {singbox && typeof singbox.mtu === 'number' && (

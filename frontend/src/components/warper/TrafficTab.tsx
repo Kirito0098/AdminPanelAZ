@@ -27,13 +27,32 @@ interface TrafficTabProps {
   hideTitle?: boolean
 }
 
+function readTrafficNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
 function readTraffic(data: Record<string, unknown>) {
   return {
-    rx: typeof data.period_rx === 'number' ? data.period_rx : typeof data.rx === 'number' ? data.rx : null,
-    tx: typeof data.period_tx === 'number' ? data.period_tx : typeof data.tx === 'number' ? data.tx : null,
+    rx:
+      readTrafficNumber(data.period_rx) ??
+      readTrafficNumber(data.rx) ??
+      readTrafficNumber(data.today_rx),
+    tx:
+      readTrafficNumber(data.period_tx) ??
+      readTrafficNumber(data.tx) ??
+      readTrafficNumber(data.today_tx),
     uptime: typeof data.uptime === 'string' ? data.uptime : null,
     summary: typeof data.summary === 'string' ? data.summary : null,
   }
+}
+
+function readChartNumber(value: unknown): number {
+  return readTrafficNumber(value) ?? 0
 }
 
 function readChartPoints(data: Record<string, unknown>, period: string): WarperTrafficChartPoint[] {
@@ -44,8 +63,8 @@ function readChartPoints(data: Record<string, unknown>, period: string): WarperT
       if (!item || typeof item !== 'object') continue
       const row = item as Record<string, unknown>
       const label = typeof row.label === 'string' ? row.label : ''
-      const rx = typeof row.rx === 'number' ? row.rx : 0
-      const tx = typeof row.tx === 'number' ? row.tx : 0
+      const rx = readChartNumber(row.rx)
+      const tx = readChartNumber(row.tx)
       if (!label) continue
       points.push({ label, rx, tx })
     }
@@ -59,8 +78,8 @@ function readChartPoints(data: Record<string, unknown>, period: string): WarperT
       if (!item || typeof item !== 'object') continue
       const row = item as Record<string, unknown>
       const ts = typeof row.ts === 'string' ? row.ts : ''
-      const rx = typeof row.rx === 'number' ? row.rx : 0
-      const tx = typeof row.tx === 'number' ? row.tx : 0
+      const rx = readChartNumber(row.rx)
+      const tx = readChartNumber(row.tx)
       if (!ts) continue
       const label =
         period === 'today'
@@ -75,8 +94,8 @@ function readChartPoints(data: Record<string, unknown>, period: string): WarperT
     if (points.length > 0) return points
   }
 
-  const rx = typeof data.period_rx === 'number' ? data.period_rx : typeof data.today_rx === 'number' ? data.today_rx : 0
-  const tx = typeof data.period_tx === 'number' ? data.period_tx : typeof data.today_tx === 'number' ? data.today_tx : 0
+  const rx = readChartNumber(data.period_rx) || readChartNumber(data.today_rx)
+  const tx = readChartNumber(data.period_tx) || readChartNumber(data.today_tx)
   if (rx > 0 || tx > 0) {
     const labels: Record<string, string> = {
       today: 'Сегодня',

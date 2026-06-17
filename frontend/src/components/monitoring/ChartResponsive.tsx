@@ -19,13 +19,13 @@ export function ChartResponsive({ height, className, children }: ChartResponsive
     const update = () =>
       setSize({
         width: Math.max(0, Math.floor(el.clientWidth)),
-        height: Math.max(0, Math.floor(el.clientHeight)),
+        height: Math.max(0, Math.floor(el.clientHeight)) || Math.max(0, height ?? 0),
       })
     update()
     const ro = new ResizeObserver(update)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [height])
 
   return (
     <div

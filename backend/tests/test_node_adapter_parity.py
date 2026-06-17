@@ -94,6 +94,13 @@ REMOTE_ADAPTER_ENDPOINTS: dict[str, str] = {
     "set_warper_mtu": "PUT /warper/settings/mtu",
     "set_warper_log_level": "PUT /warper/settings/log-level",
     "warper_singbox_action": "POST /warper/singbox/{action}",
+    "warper_catalog_search": "GET /warper/catalog/search",
+    "warper_catalog_show": "GET /warper/catalog/show/{name}",
+    "warper_catalog_add": "POST /warper/catalog/add",
+    "warper_catalog_remove": "POST /warper/catalog/remove",
+    "warper_catalog_update": "POST /warper/catalog/update",
+    "warper_catalog_list_installed": "GET /warper/catalog/installed",
+    "warper_catalog_refresh_cache": "POST /warper/catalog/refresh",
 }
 
 

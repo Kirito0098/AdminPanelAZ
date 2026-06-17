@@ -52,6 +52,11 @@ import {
 
 const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const
 
+function warpKeyBasename(path: string): string {
+  const parts = path.split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? path
+}
+
 interface SettingsTabProps {
   health: WarperHealthResponse | null
 }
@@ -226,12 +231,6 @@ export default function SettingsTab({ health }: SettingsTabProps) {
     }
   }
 
-  async function applySelectedMode() {
-    if (modeDraft === 'warp') return applyWarpMode()
-    if (modeDraft === 'slave') return applySlaveMode()
-    return applyWgMode()
-  }
-
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -314,109 +313,154 @@ export default function SettingsTab({ health }: SettingsTabProps) {
 
         <div className="mt-4 rounded-lg border bg-muted/10 p-4">
           {modeDraft === 'warp' && (
-            <div className="space-y-3">
-              <Label>Источник WARP-ключа</Label>
-              <Select
-                value={warpKeySource}
-                onValueChange={(value) =>
-                  setWarpKeySource(value as (typeof WARP_KEY_SOURCES)[number]['value'])
-                }
-                disabled={disabled || busy}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {WARP_KEY_SOURCES.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                {WARP_KEY_SOURCES.find((item) => item.value === warpKeySource)?.description}
-              </p>
+            <div className="space-y-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Label htmlFor="warp-key-source">Источник WARP-ключа</Label>
+                  <Select
+                    value={warpKeySource}
+                    onValueChange={(value) =>
+                      setWarpKeySource(value as (typeof WARP_KEY_SOURCES)[number]['value'])
+                    }
+                    disabled={disabled || busy}
+                  >
+                    <SelectTrigger id="warp-key-source" className="w-full lg:max-w-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WARP_KEY_SOURCES.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {WARP_KEY_SOURCES.find((item) => item.value === warpKeySource)?.description}
+                  </p>
+                </div>
+                <Button
+                  className="w-full shrink-0 lg:w-auto"
+                  disabled={disabled || busy}
+                  onClick={() => void applyWarpMode()}
+                >
+                  Применить WARP
+                </Button>
+              </div>
+
               {warpKeys.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {warpKeys.map((key) => (
-                    <Badge key={key} variant="outline" className="font-mono text-xs">
-                      {key}
-                    </Badge>
-                  ))}
+                <div className="rounded-md border bg-background/40 px-3 py-2.5">
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">
+                    Конфиги на узле ({warpKeys.length})
+                  </p>
+                  <ul className="grid gap-2 sm:grid-cols-2">
+                    {warpKeys.map((key) => (
+                      <li
+                        key={key}
+                        className="flex min-w-0 items-start gap-2 rounded-md border bg-muted/20 px-2.5 py-2"
+                      >
+                        <Cloud className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary/70" />
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">{warpKeyBasename(key)}</div>
+                          <div className="truncate font-mono text-[11px] text-muted-foreground" title={key}>
+                            {key}
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
           )}
 
           {modeDraft === 'slave' && (
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="slave-host">Host</Label>
-                <Input
-                  id="slave-host"
-                  placeholder="1.2.3.4"
-                  value={slaveHost}
-                  disabled={disabled || busy}
-                  onChange={(e) => setSlaveHost(e.target.value)}
-                />
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="slave-host">Host</Label>
+                  <Input
+                    id="slave-host"
+                    placeholder="1.2.3.4"
+                    value={slaveHost}
+                    disabled={disabled || busy}
+                    onChange={(e) => setSlaveHost(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="slave-port">Port</Label>
+                  <Input
+                    id="slave-port"
+                    type="number"
+                    placeholder="8444"
+                    value={slavePort}
+                    disabled={disabled || busy}
+                    onChange={(e) => setSlavePort(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="slave-key">SS-key</Label>
+                  <Input
+                    id="slave-key"
+                    placeholder="ss-key"
+                    value={slaveKey}
+                    disabled={disabled || busy}
+                    onChange={(e) => setSlaveKey(e.target.value)}
+                  />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="slave-port">Port</Label>
-                <Input
-                  id="slave-port"
-                  type="number"
-                  placeholder="8444"
-                  value={slavePort}
+              <div className="flex justify-end">
+                <Button
+                  className="w-full sm:w-auto"
                   disabled={disabled || busy}
-                  onChange={(e) => setSlavePort(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="slave-key">SS-key</Label>
-                <Input
-                  id="slave-key"
-                  placeholder="ss-key"
-                  value={slaveKey}
-                  disabled={disabled || busy}
-                  onChange={(e) => setSlaveKey(e.target.value)}
-                />
+                  onClick={() => void applySlaveMode()}
+                >
+                  Применить Slave
+                </Button>
               </div>
             </div>
           )}
 
           {modeDraft === 'wg' && (
-            <div className="space-y-2">
-              <Label>Файл WireGuard</Label>
-              {wgConfigs.length > 0 ? (
-                <Select value={wgConfigPath} onValueChange={setWgConfigPath} disabled={disabled || busy}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Выберите .conf" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {wgConfigs.map((path) => (
-                      <SelectItem key={path} value={path}>
-                        {path}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  className="font-mono text-sm"
-                  placeholder="/root/vpn.conf"
-                  value={wgConfigPath}
+            <div className="space-y-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Label htmlFor="wg-config">Файл WireGuard</Label>
+                  {wgConfigs.length > 0 ? (
+                    <Select value={wgConfigPath} onValueChange={setWgConfigPath} disabled={disabled || busy}>
+                      <SelectTrigger id="wg-config" className="w-full lg:max-w-lg font-mono text-sm">
+                        <SelectValue placeholder="Выберите .conf" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {wgConfigs.map((path) => (
+                          <SelectItem key={path} value={path} className="font-mono text-xs">
+                            {path}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      id="wg-config"
+                      className="font-mono text-sm"
+                      placeholder="/root/vpn.conf"
+                      value={wgConfigPath}
+                      disabled={disabled || busy}
+                      onChange={(e) => setWgConfigPath(e.target.value)}
+                    />
+                  )}
+                  <p className="text-xs text-muted-foreground">Конфиги из /root/ и /root/warper/</p>
+                </div>
+                <Button
+                  className="w-full shrink-0 lg:w-auto"
                   disabled={disabled || busy}
-                  onChange={(e) => setWgConfigPath(e.target.value)}
-                />
-              )}
-              <p className="text-xs text-muted-foreground">Конфиги из /root/ и /root/warper/</p>
+                  onClick={() => void applyWgMode()}
+                >
+                  Применить WireGuard
+                </Button>
+              </div>
             </div>
           )}
-
-          <Button className="mt-4" disabled={disabled || busy} onClick={() => void applySelectedMode()}>
-            Применить {formatOutboundMode(modeDraft)}
-          </Button>
         </div>
       </WarperSection>
 

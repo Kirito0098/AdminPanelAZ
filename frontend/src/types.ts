@@ -1473,6 +1473,39 @@ export interface WarperSettingsOptionsResponse {
 
 export type WarperTrafficPeriod = 'today' | 'week' | 'month' | 'all'
 
+export interface WarperCatalogItem {
+  name: string
+  popular?: boolean
+  installed?: boolean
+}
+
+export interface WarperCatalogSearchResponse {
+  items: WarperCatalogItem[]
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperCatalogShowResponse {
+  name: string
+  count: number
+  domains: string[]
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperCatalogInstalledItem {
+  name: string
+  domains_count?: number
+  added_at?: string
+  updated_at?: string
+}
+
+export interface WarperCatalogInstalledResponse {
+  items: WarperCatalogInstalledItem[]
+  node_id?: number | null
+  node_name?: string | null
+}
+
 export type SiteDiagnosticsStatus = 'ok' | 'warn' | 'fail'
 
 export interface SiteDiagnosticsCheck {

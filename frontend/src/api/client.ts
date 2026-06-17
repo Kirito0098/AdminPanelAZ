@@ -1563,6 +1563,42 @@ export async function postWarperSingbox(action: 'start' | 'stop' | 'restart') {
   return apiFetch<import('../types').WarperActionResponse>(`/warper/singbox/${action}`, { method: 'POST' })
 }
 
+export async function searchWarperCatalog(query = '') {
+  const params = query.trim() ? `?query=${encodeURIComponent(query.trim())}` : ''
+  return apiFetch<import('../types').WarperCatalogSearchResponse>(`/warper/catalog/search${params}`)
+}
+
+export async function getWarperCatalogInstalled() {
+  return apiFetch<import('../types').WarperCatalogInstalledResponse>('/warper/catalog/installed')
+}
+
+export async function showWarperCatalog(name: string) {
+  return apiFetch<import('../types').WarperCatalogShowResponse>(`/warper/catalog/show/${encodeURIComponent(name)}`)
+}
+
+export async function addWarperCatalog(name: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/catalog/add', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export async function removeWarperCatalog(name: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/catalog/remove', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export async function updateWarperCatalog(name = '') {
+  const params = name.trim() ? `?name=${encodeURIComponent(name.trim())}` : ''
+  return apiFetch<import('../types').WarperActionResponse>(`/warper/catalog/update${params}`, { method: 'POST' })
+}
+
+export async function refreshWarperCatalog() {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/catalog/refresh', { method: 'POST' })
+}
+
 export async function getSecuritySettings() {
   return apiFetch<import('../types').SecuritySettings>('/security')
 }

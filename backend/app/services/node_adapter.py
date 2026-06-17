@@ -265,6 +265,27 @@ class NodeAdapter(ABC):
     @abstractmethod
     def warper_singbox_action(self, action: str) -> dict: ...
 
+    @abstractmethod
+    def warper_catalog_search(self, query: str = "") -> list: ...
+
+    @abstractmethod
+    def warper_catalog_show(self, name: str) -> dict: ...
+
+    @abstractmethod
+    def warper_catalog_add(self, name: str) -> dict: ...
+
+    @abstractmethod
+    def warper_catalog_remove(self, name: str) -> dict: ...
+
+    @abstractmethod
+    def warper_catalog_update(self, name: str = "") -> dict: ...
+
+    @abstractmethod
+    def warper_catalog_list_installed(self) -> list: ...
+
+    @abstractmethod
+    def warper_catalog_refresh_cache(self) -> dict: ...
+
 
 class LocalNodeAdapter(NodeAdapter):
     def __init__(self, service: AntiZapretService | None = None, warper: WarperService | None = None):
@@ -535,6 +556,27 @@ class LocalNodeAdapter(NodeAdapter):
 
     def warper_singbox_action(self, action: str) -> dict:
         return self._warper.singbox_action(action)  # type: ignore[arg-type]
+
+    def warper_catalog_search(self, query: str = "") -> list:
+        return self._warper.catalog_search(query)
+
+    def warper_catalog_show(self, name: str) -> dict:
+        return self._warper.catalog_show(name)
+
+    def warper_catalog_add(self, name: str) -> dict:
+        return self._warper.catalog_add(name)
+
+    def warper_catalog_remove(self, name: str) -> dict:
+        return self._warper.catalog_remove(name)
+
+    def warper_catalog_update(self, name: str = "") -> dict:
+        return self._warper.catalog_update(name)
+
+    def warper_catalog_list_installed(self) -> list:
+        return self._warper.catalog_list_installed()
+
+    def warper_catalog_refresh_cache(self) -> dict:
+        return self._warper.catalog_refresh_cache()
 
 
 class RemoteNodeAdapter(NodeAdapter):
@@ -1113,6 +1155,31 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def warper_singbox_action(self, action: str) -> dict:
         return self._request("POST", f"/warper/singbox/{action}", timeout=180.0)
+
+    def warper_catalog_search(self, query: str = "") -> list:
+        data = self._request("GET", "/warper/catalog/search", params={"query": query}, timeout=60.0)
+        return data.get("items", []) if isinstance(data, dict) else []
+
+    def warper_catalog_show(self, name: str) -> dict:
+        from urllib.parse import quote
+
+        return self._request("GET", f"/warper/catalog/show/{quote(name, safe='')}", timeout=90.0)
+
+    def warper_catalog_add(self, name: str) -> dict:
+        return self._request("POST", "/warper/catalog/add", json={"name": name}, timeout=180.0)
+
+    def warper_catalog_remove(self, name: str) -> dict:
+        return self._request("POST", "/warper/catalog/remove", json={"name": name}, timeout=90.0)
+
+    def warper_catalog_update(self, name: str = "") -> dict:
+        return self._request("POST", "/warper/catalog/update", params={"name": name}, timeout=300.0)
+
+    def warper_catalog_list_installed(self) -> list:
+        data = self._request("GET", "/warper/catalog/installed")
+        return data.get("items", []) if isinstance(data, dict) else []
+
+    def warper_catalog_refresh_cache(self) -> dict:
+        return self._request("POST", "/warper/catalog/refresh", timeout=60.0)
 
     def rotate_api_key(self, new_api_key: str) -> dict[str, Any]:
         return self._request(

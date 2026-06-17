@@ -149,6 +149,10 @@
   height: 240px;
 }
 
+.chart-responsive[data-h='260'] {
+  height: 260px;
+}
+
 .chart-responsive[data-h='280'] {
   height: 280px;
 }

@@ -99,7 +99,7 @@ export function domainTypeLabel(type: string | undefined): string {
   }
 }
 
-export type WarperTab = 'domains' | 'ip-ranges' | 'monitoring' | 'settings'
+export type WarperTab = 'domains' | 'catalog' | 'ip-ranges' | 'monitoring' | 'settings'
 
 export type WarperOutboundMode = 'warp' | 'slave' | 'wg'
 

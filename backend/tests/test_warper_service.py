@@ -175,6 +175,27 @@ def test_get_mode_accepts_plain_string(mock_api):
     assert mode["log_level"] == "info"
 
 
+def test_get_mode_reads_nested_status_fields(mock_api):
+    mock_api.get_mode.return_value = "warp"
+    mock_api.get_status.return_value = _FakeResult(
+        data={
+            "outbound_mode": "warp",
+            "singbox": {"running": True, "mtu": 1400, "log_level": "debug"},
+            "subnet": {"fake": "198.20.0.0/24"},
+            "fullvpn_warp_resolve": "y",
+            "autopatch_enabled": True,
+        },
+    )
+    service = WarperService()
+    with patch.object(service, "_api_client", return_value=mock_api):
+        mode = service.get_mode()
+    assert mode["mtu"] == 1400
+    assert mode["log_level"] == "debug"
+    assert mode["subnet"] == "198.20.0.0/24"
+    assert mode["fullvpn"] is True
+    assert mode["autopatch"] is True
+
+
 def test_doctor_returns_checks_when_cli_fails(mock_api):
     mock_api.doctor.return_value = _FakeResult(
         ok=False,
@@ -335,6 +356,46 @@ def test_enrich_warper_traffic_payload_synthetic_from_totals():
     payload = {"period_rx": 5900000, "period_tx": 5800000}
     enriched = enrich_warper_traffic_payload(payload, "today")
     assert enriched["chart"] == [{"label": "Сегодня", "rx": 5900000, "tx": 5800000}]
+
+
+def test_catalog_search_returns_list(mock_api):
+    mock_api.catalog_search.return_value = _FakeResult(
+        data=[{"name": "tiktok", "popular": True, "installed": False}],
+    )
+    service = WarperService()
+    with patch.object(service, "_api_client", return_value=mock_api):
+        items = service.catalog_search("tik")
+    assert items == [{"name": "tiktok", "popular": True, "installed": False}]
+    mock_api.catalog_search.assert_called_once_with("tik")
+
+
+def test_catalog_show_requires_name(mock_api):
+    service = WarperService()
+    with patch.object(service, "_api_client", return_value=mock_api):
+        with pytest.raises(HTTPException) as exc:
+            service.catalog_show("")
+    assert exc.value.status_code == 400
+
+
+def test_catalog_add_calls_api(mock_api):
+    mock_api.catalog_add.return_value = _FakeResult(data={"message": "added"})
+    service = WarperService()
+    with (
+        patch("app.services.warper._ensure_no_conflict"),
+        patch.object(service, "_api_client", return_value=mock_api),
+    ):
+        result = service.catalog_add("TikTok")
+    assert result["message"] == "added"
+    mock_api.catalog_add.assert_called_once_with("tiktok")
+
+
+def test_catalog_method_missing_returns_502(mock_api):
+    service = WarperService()
+    with patch.object(service, "_api_client", return_value=mock_api):
+        del mock_api.catalog_list_installed
+        with pytest.raises(HTTPException) as exc:
+            service.catalog_list_installed()
+    assert exc.value.status_code == 502
 
 
 def test_singbox_action_via_api(mock_api):

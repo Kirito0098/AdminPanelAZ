@@ -8,6 +8,10 @@ from app.auth import require_admin
 from app.models import User
 from app.schemas import (
     WarperActionResponse,
+    WarperCatalogInstalledResponse,
+    WarperCatalogNameRequest,
+    WarperCatalogSearchResponse,
+    WarperCatalogShowResponse,
     WarperDoctorResponse,
     WarperDomainCreate,
     WarperDomainListsStatus,
@@ -394,3 +398,74 @@ def warper_singbox_action(
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     return _action_response(adapter.warper_singbox_action(action), node)
+
+
+@router.get("/catalog/search", response_model=WarperCatalogSearchResponse)
+def warper_catalog_search(
+    query: str = Query("", max_length=128),
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return WarperCatalogSearchResponse(items=adapter.warper_catalog_search(query), **_node_meta(node))
+
+
+@router.get("/catalog/installed", response_model=WarperCatalogInstalledResponse)
+def warper_catalog_installed(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return WarperCatalogInstalledResponse(items=adapter.warper_catalog_list_installed(), **_node_meta(node))
+
+
+@router.get("/catalog/show/{name}", response_model=WarperCatalogShowResponse)
+def warper_catalog_show(
+    name: str,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    data = adapter.warper_catalog_show(name)
+    payload = data if isinstance(data, dict) else {}
+    return WarperCatalogShowResponse(**payload, **_node_meta(node))
+
+
+@router.post("/catalog/add", response_model=WarperActionResponse)
+def warper_catalog_add(
+    payload: WarperCatalogNameRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_catalog_add(payload.name), node)
+
+
+@router.post("/catalog/remove", response_model=WarperActionResponse)
+def warper_catalog_remove(
+    payload: WarperCatalogNameRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_catalog_remove(payload.name), node)
+
+
+@router.post("/catalog/update", response_model=WarperActionResponse)
+def warper_catalog_update(
+    name: str = Query("", max_length=128),
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_catalog_update(name), node)
+
+
+@router.post("/catalog/refresh", response_model=WarperActionResponse)
+def warper_catalog_refresh(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_catalog_refresh_cache(), node)

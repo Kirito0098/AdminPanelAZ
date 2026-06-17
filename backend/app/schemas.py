@@ -1245,6 +1245,32 @@ class WarperSubnetUpdate(BaseModel):
     subnet: str = Field(..., min_length=1)
 
 
+class WarperCatalogNameRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+
+
+class WarperCatalogSearchResponse(BaseModel):
+    items: list[dict] = Field(default_factory=list)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperCatalogShowResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    name: str = ""
+    count: int = 0
+    domains: list[str] = Field(default_factory=list)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperCatalogInstalledResponse(BaseModel):
+    items: list[dict] = Field(default_factory=list)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
 class TrafficClientRow(BaseModel):
     common_name: str
     protocol_type: str
