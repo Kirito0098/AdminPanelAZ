@@ -21,10 +21,7 @@ from app.services.ip_geo import lookup_ips_geo, parse_client_endpoint
 from app.services.node_manager import get_active_node, get_adapter_for_node
 from app.services.node_compare_metrics import extract_cidr_routes_count, get_traffic_totals_by_node
 from app.services.resource_metrics import get_latest_samples_by_node
-
-
-def _wg_is_online(peer: WireGuardPeer) -> bool:
-    return bool(peer.latest_handshake)
+from app.services.wireguard_status import wireguard_peer_is_online as _wg_is_online
 
 
 def _node_status_value(node: Node) -> str:

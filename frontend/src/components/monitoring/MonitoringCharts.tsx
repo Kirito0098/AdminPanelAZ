@@ -13,6 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
+import { isWireGuardOnline } from '@/lib/wireguardStatus'
 import MonitoringChartCard, { MonitoringChartEmpty } from '@/components/monitoring/MonitoringChartCard'
 import {
   MONITORING_CHART_HEIGHT,
@@ -53,7 +54,7 @@ export default function MonitoringCharts({ data }: MonitoringChartsProps) {
   const [, bump] = useState(0)
 
   useEffect(() => {
-    const wgActive = data.wireguard_peers.filter((p) => p.latest_handshake).length
+    const wgActive = data.wireguard_peers.filter(isWireGuardOnline).length
     const point: HistoryPoint = {
       time: new Date(data.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       connections: data.openvpn_clients.length + wgActive,
@@ -70,7 +71,7 @@ export default function MonitoringCharts({ data }: MonitoringChartsProps) {
   const history = historyRef.current
 
   const connectionsBar = useMemo(() => {
-    const wgActive = data.wireguard_peers.filter((p) => p.latest_handshake).length
+    const wgActive = data.wireguard_peers.filter(isWireGuardOnline).length
     return [
       { name: 'OpenVPN', count: data.openvpn_clients.length },
       { name: 'WireGuard', count: wgActive },

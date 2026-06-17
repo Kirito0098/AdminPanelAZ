@@ -50,20 +50,17 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { cn } from '@/lib/utils'
+import { isWireGuardOnline } from '@/lib/wireguardStatus'
 import type {
   ActionLogEntry,
   ConnectionLogsSnapshot,
   OpenVpnEventProfile,
   OpenVpnSocketStatus,
   QrDownloadAuditEntry,
-  WireGuardPeer,
 } from '@/types'
 
 const REFRESH_INTERVAL = 30
 
-function isWireGuardOnline(peer: WireGuardPeer) {
-  return Boolean(peer.latest_handshake)
-}
 const LOG_PAGE_SIZE = 100
 
 type LogLevel = 'all' | 'error' | 'warn' | 'info'

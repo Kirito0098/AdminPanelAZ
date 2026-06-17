@@ -20,6 +20,7 @@ from app.services.traffic.maintenance import (
     normalize_traffic_client_identity,
     normalize_traffic_protocol_scope,
 )
+from app.services.wireguard_status import wireguard_peer_is_online
 
 router = APIRouter(prefix="/traffic", tags=["traffic"])
 settings = get_settings()
@@ -74,7 +75,9 @@ def _active_traffic_client_names(db: Session, node_id: int) -> set[str]:
         ovpn = adapter.parse_openvpn_status()
         wg = adapter.parse_wireguard_status()
         active_names = {c.common_name for c in ovpn}
-        active_names.update(p.client_name for p in wg if p.client_name)
+        active_names.update(
+            p.client_name for p in wg if p.client_name and wireguard_peer_is_online(p)
+        )
     except Exception:
         active_names = set()
 

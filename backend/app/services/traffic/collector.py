@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import TrafficSessionState, UserTrafficSample, UserTrafficStatProtocol
 from app.schemas import OpenVpnClient, WireGuardPeer
+from app.services.wireguard_status import wireguard_peer_is_online
 
 
 def _profile_from_log_name(log_name: str) -> str:
@@ -40,7 +41,7 @@ def build_status_rows(
         rows.append({"profile": profile, "traffic_clients": clients})
 
     for peer in wireguard_peers:
-        if not peer.client_name:
+        if not peer.client_name or not wireguard_peer_is_online(peer):
             continue
         profile = "antizapret-wg" if peer.interface == "antizapret" else "vpn-wg"
         rows.append({

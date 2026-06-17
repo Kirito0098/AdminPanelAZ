@@ -28,6 +28,7 @@ from app.services.monitoring_overview import (
     build_monitoring_overview,
 )
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.wireguard_status import wireguard_peer_is_online
 from app.services.node_remote_cache import (
     FEDERATED_OVERVIEW_CACHE_KEY,
     GLOBAL_DASHBOARD_CACHE_KEY,
@@ -227,7 +228,7 @@ def dashboard_summary(current_user: User = Depends(get_current_user), db: Sessio
     services = adapter.get_service_status()
     ovpn_clients = adapter.parse_openvpn_status()
     wg_peers = adapter.parse_wireguard_status()
-    wg_active = sum(1 for p in wg_peers if p.latest_handshake)
+    wg_active = sum(1 for p in wg_peers if wireguard_peer_is_online(p))
 
     return DashboardSummary(
         total_configs=len(configs),

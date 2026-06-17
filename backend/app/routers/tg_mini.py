@@ -55,6 +55,7 @@ from app.services.qr_download import QrDownloadService
 from app.services.security import SecurityService
 from app.services.telegram import send_tg_message
 from app.services.tg_mini_status import build_cidr_status_payload, build_warper_status_payload
+from app.services.wireguard_status import wireguard_peer_is_online
 
 router = APIRouter(prefix="/tg-mini", tags=["tg-mini"])
 settings = get_settings()
@@ -371,7 +372,7 @@ def mini_dashboard(current_user: User = Depends(get_current_user), db: Session =
     return {
         "total_configs": configs,
         "connected_openvpn": len(ovpn),
-        "connected_wireguard": sum(1 for p in wg if p.latest_handshake),
+        "connected_wireguard": sum(1 for p in wg if wireguard_peer_is_online(p)),
         "server_ip": adapter.get_server_ip(),
         "openvpn_clients": [c.model_dump() if hasattr(c, "model_dump") else c.__dict__ for c in ovpn[:20]],
         "wireguard_peers": [

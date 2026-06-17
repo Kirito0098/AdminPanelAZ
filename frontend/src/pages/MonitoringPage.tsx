@@ -60,7 +60,8 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { cn } from '@/lib/utils'
-import type { MonitoringNodeSummary, MonitoringOverview, ResourceHistory, WireGuardPeer } from '@/types'
+import { isWireGuardOnline } from '@/lib/wireguardStatus'
+import type { MonitoringNodeSummary, MonitoringOverview, ResourceHistory } from '@/types'
 
 const REFRESH_INTERVAL = 30
 
@@ -78,10 +79,6 @@ function dataSourceVariant(source?: string): 'default' | 'secondary' | 'outline'
   if (source === 'management_socket') return 'default'
   if (source === 'status_log') return 'secondary'
   return 'outline'
-}
-
-function isWireGuardOnline(peer: WireGuardPeer) {
-  return Boolean(peer.latest_handshake)
 }
 
 type SummaryCardProps = {

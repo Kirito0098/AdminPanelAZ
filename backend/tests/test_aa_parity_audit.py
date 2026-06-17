@@ -5,6 +5,7 @@ Adds targeted behavioral tests for AA modules that have no direct file copy
 (auth captcha threshold, traffic collector rows, wg subprocess errors).
 """
 
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from app.schemas import OpenVpnClient, WireGuardPeer
@@ -123,6 +124,7 @@ def test_traffic_collector_build_status_rows():
         allowed_ips="10.9.0.3/32",
         transfer_rx=300,
         transfer_tx=400,
+        latest_handshake=datetime.utcnow().isoformat(),
     )
 
     rows = build_status_rows([ovpn], [wg])

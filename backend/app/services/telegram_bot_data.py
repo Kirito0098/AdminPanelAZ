@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import User, VpnConfig, VpnType
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.wireguard_status import wireguard_peer_is_online
 
 
 def build_dashboard_summary(db: Session, user: User) -> dict:
@@ -22,7 +23,7 @@ def build_dashboard_summary(db: Session, user: User) -> dict:
     return {
         "total_configs": total_configs,
         "connected_openvpn": len(ovpn),
-        "connected_wireguard": sum(1 for p in wg if p.latest_handshake),
+        "connected_wireguard": sum(1 for p in wg if wireguard_peer_is_online(p)),
         "server_ip": adapter.get_server_ip(),
         "timestamp": datetime.utcnow().isoformat(),
     }
