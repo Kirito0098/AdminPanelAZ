@@ -263,6 +263,17 @@ wizard_derive_cors_origins() {
   WIZ_CORS_ORIGINS="$origins"
 }
 
+wizard_build_nginx_cors_origins() {
+  local domain="$1"
+  local https_port="$2"
+  local backend_port="$3"
+  local public_host="$domain"
+  if [[ "$https_port" != "443" ]]; then
+    public_host="${domain}:${https_port}"
+  fi
+  WIZ_CORS_ORIGINS="https://${public_host},http://${public_host},http://127.0.0.1:${backend_port},http://localhost:${backend_port}"
+}
+
 wizard_check_antizapret() {
   if [[ -d "$WIZ_ANTIZAPRET_PATH" && -f "$WIZ_ANTIZAPRET_PATH/client.sh" ]]; then
     print_success "AntiZapret найден: $WIZ_ANTIZAPRET_PATH"
@@ -319,10 +330,16 @@ wizard_ask_network() {
   fi
 
   wiz_step "Сеть и порты"
-  print_info "Рекомендуется: backend только на 127.0.0.1, наружу — через Nginx (шаг публикации)."
+  ui_info_box "Как устроен доступ" \
+    "Backend слушает только 127.0.0.1 — с других машин напрямую не откроется." \
+    "Наружу — через Nginx (настраивается на шаге «Публикация»)." \
+    "Enter — доступ только с localhost; IP или домен можно указать позже."
   echo
-  wiz_prompt "IP или домен для доступа к панели (для CORS и подсказок)" "$WIZ_SERVER_ADDRESS"
+  wiz_prompt "Внешний IP или домен (для CORS и подсказок; Enter — localhost)" "$WIZ_SERVER_ADDRESS"
   WIZ_SERVER_ADDRESS="$REPLY"
+  if [[ -z "$WIZ_SERVER_ADDRESS" ]]; then
+    print_info "По умолчанию: только localhost (127.0.0.1). Домен — на шаге публикации через Nginx."
+  fi
   wiz_prompt_port "Внутренний порт backend (только localhost)" "$WIZ_BACKEND_PORT"
   WIZ_BACKEND_PORT="$REPLY"
   WIZ_BACKEND_HOST="127.0.0.1"
@@ -500,7 +517,7 @@ wizard_ask_https() {
     if [[ "$WIZ_NGINX_MODE" == "le" ]]; then
       wiz_prompt "Email для Let's Encrypt (пусто — без email)" "$WIZ_NGINX_EMAIL"
       WIZ_NGINX_EMAIL="$REPLY"
-      wiz_prompt_port_no_conflict "Публичный HTTPS-порт (Nginx)" "$WIZ_HTTPS_PUBLIC_PORT" \
+      wiz_prompt_port_no_conflict "Публичный HTTPS-порт панели (nginx)" "$WIZ_HTTPS_PUBLIC_PORT" \
         "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT"
       WIZ_HTTPS_PUBLIC_PORT="$REPLY"
       wiz_prompt_port_no_conflict "Публичный HTTP-порт для ACME" "$WIZ_HTTP_ACME_PORT" \
@@ -510,7 +527,7 @@ wizard_ask_https() {
         print_warn "Let's Encrypt проверяет домен на порту 80. Нестандартный порт может потребовать DNS-challenge."
       fi
     else
-      wiz_prompt_port_no_conflict "Публичный HTTPS-порт (Nginx)" "$WIZ_HTTPS_PUBLIC_PORT" \
+      wiz_prompt_port_no_conflict "Публичный HTTPS-порт панели (nginx)" "$WIZ_HTTPS_PUBLIC_PORT" \
         "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT"
       WIZ_HTTPS_PUBLIC_PORT="$REPLY"
       wiz_prompt_port_no_conflict "Публичный HTTP-порт (редирект на HTTPS)" "$WIZ_HTTP_ACME_PORT" \
@@ -518,7 +535,7 @@ wizard_ask_https() {
       WIZ_HTTP_ACME_PORT="$REPLY"
     fi
     if [[ "$WIZ_APP_ENV" == "production" ]]; then
-      WIZ_CORS_ORIGINS="https://${WIZ_NGINX_DOMAIN},http://${WIZ_NGINX_DOMAIN},http://127.0.0.1:${WIZ_BACKEND_PORT},http://localhost:${WIZ_BACKEND_PORT}"
+      wizard_build_nginx_cors_origins "$WIZ_NGINX_DOMAIN" "$WIZ_HTTPS_PUBLIC_PORT" "$WIZ_BACKEND_PORT"
     fi
   elif [[ "$WIZ_NGINX_MODE" == "none" ]]; then
     WIZ_BACKEND_HOST="127.0.0.1"
@@ -878,7 +895,7 @@ wizard_show_summary() {
   ui_summary_row "Тип установки" "$install_label"
   ui_summary_row "AntiZapret" "$WIZ_ANTIZAPRET_PATH"
   if [[ "$WIZ_INSTALL_TYPE" != "node" ]]; then
-    ui_summary_row "Доступ" "${WIZ_SERVER_ADDRESS:--}"
+    ui_summary_row "Доступ" "${WIZ_SERVER_ADDRESS:-localhost (127.0.0.1)}"
     if [[ "$WIZ_DDNS_PROVIDER" != "none" ]]; then
       ui_summary_row "DDNS" "$WIZ_DDNS_PROVIDER ($(wizard_ddns_fqdn))"
       ui_summary_row "DDNS auto-update" "$WIZ_DDNS_CONFIGURE_UPDATE"

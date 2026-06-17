@@ -83,6 +83,21 @@ nginx_ensure_nginx() {
   apt-get install -y -qq nginx >/dev/null 2>&1
 }
 
+nginx_https_redirect_suffix() {
+  local https_port="${1:-443}"
+  if [[ "$https_port" == "443" ]]; then
+    printf ''
+  else
+    printf ':%s' "$https_port"
+  fi
+}
+
+nginx_public_origin_host() {
+  local domain="$1"
+  local https_port="${2:-443}"
+  printf '%s%s' "$domain" "$(nginx_https_redirect_suffix "$https_port")"
+}
+
 nginx_render_template() {
   local template="$1"
   local domain="$2"
@@ -91,10 +106,13 @@ nginx_render_template() {
   local ssl_key="${5:-}"
   local https_port="${6:-443}"
   local http_port="${7:-80}"
+  local https_redirect_suffix
+  https_redirect_suffix="$(nginx_https_redirect_suffix "$https_port")"
   sed \
     -e "s|__DOMAIN__|${domain}|g" \
     -e "s|__BACKEND_PORT__|${backend_port}|g" \
     -e "s|__HTTPS_PORT__|${https_port}|g" \
+    -e "s|__HTTPS_REDIRECT_SUFFIX__|${https_redirect_suffix}|g" \
     -e "s|__HTTP_PORT__|${http_port}|g" \
     -e "s|__SSL_CERT__|${ssl_cert}|g" \
     -e "s|__SSL_KEY__|${ssl_key}|g" \
@@ -104,13 +122,17 @@ nginx_render_template() {
 nginx_update_cors_for_domain() {
   local domain="$1"
   local scheme="${2:-https}"
-  local port
-  port="$(nginx_env_get BACKEND_PORT)"
-  port="${port:-8000}"
-  local origins="http://127.0.0.1:${port},http://localhost:${port}"
-  origins+=",${scheme}://${domain}"
+  local https_public_port="${3:-$(nginx_env_get HTTPS_PUBLIC_PORT)}"
+  https_public_port="${https_public_port:-443}"
+  local public_host
+  public_host="$(nginx_public_origin_host "$domain" "$https_public_port")"
+  local backend_port
+  backend_port="$(nginx_env_get BACKEND_PORT)"
+  backend_port="${backend_port:-8000}"
+  local origins="http://127.0.0.1:${backend_port},http://localhost:${backend_port}"
+  origins+=",${scheme}://${public_host}"
   if [[ "$scheme" == "https" ]]; then
-    origins+=",http://${domain}"
+    origins+=",http://${public_host}"
   fi
   origins+=",http://127.0.0.1:5173,http://localhost:5173"
   nginx_env_set CORS_ORIGINS "$origins"
@@ -120,14 +142,18 @@ nginx_apply_behind_proxy_env() {
   local domain="$1"
   local backend_port="$2"
   local scheme="${3:-https}"
+  local https_public_port="${4:-${HTTPS_PUBLIC_PORT:-443}}"
+  local http_acme_port="${5:-${HTTP_ACME_PORT:-80}}"
 
   nginx_env_set BACKEND_HOST "127.0.0.1"
   nginx_env_set BACKEND_PORT "$backend_port"
   nginx_env_set DOMAIN "$domain"
   nginx_env_set BEHIND_NGINX "true"
+  nginx_env_set HTTPS_PUBLIC_PORT "$https_public_port"
+  nginx_env_set HTTP_ACME_PORT "$http_acme_port"
   nginx_env_set TRUSTED_PROXY_IPS "127.0.0.1,::1"
   nginx_env_set FORWARDED_ALLOW_IPS "127.0.0.1,::1"
-  nginx_update_cors_for_domain "$domain" "$scheme"
+  nginx_update_cors_for_domain "$domain" "$scheme" "$https_public_port"
 }
 
 nginx_apply_direct_http_env() {

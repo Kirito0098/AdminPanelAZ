@@ -1316,7 +1316,7 @@ setup_nginx_if_selected() {
         "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
         "$domain" "$backend_port" "$cert" "$key" "$https_port" "$http_port")"
       nginx_install_site "$conf" "$domain"
-      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https"
+      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https" "$https_port" "$http_port"
       if [[ "$WIZ_APP_ENV" == "production" ]]; then
         nginx_env_set ENFORCE_HTTPS "true"
       fi
@@ -1340,7 +1340,7 @@ setup_nginx_if_selected() {
         "$domain" "$backend_port" "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" \
         "$https_port" "$http_port")"
       nginx_install_site "$conf" "$domain"
-      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https"
+      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https" "$https_port" "$http_port"
       if [[ "$WIZ_APP_ENV" == "production" ]]; then
         nginx_env_set ENFORCE_HTTPS "true"
       fi

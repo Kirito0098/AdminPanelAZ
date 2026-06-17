@@ -32,7 +32,7 @@ usage() {
   DOMAIN             Доменное имя
   EMAIL              Email для Let's Encrypt
   BACKEND_PORT       Порт uvicorn (по умолчанию 8000)
-  HTTPS_PUBLIC_PORT  Публичный HTTPS-порт Nginx (по умолчанию 443)
+  HTTPS_PUBLIC_PORT  Публичный HTTPS-порт панели (nginx, по умолчанию 443)
   HTTP_ACME_PORT     Публичный HTTP-порт (ACME/редирект, по умолчанию 80)
   NON_INTERACTIVE    true — пропускать prompts при заданных env
 EOF
@@ -77,7 +77,7 @@ prompt_public_ports() {
   local http_default="${HTTP_ACME_PORT:-80}"
   while true; do
     local reply=""
-    read -r -p "Публичный HTTPS-порт Nginx (1-65535) [$https_default]: " reply
+    read -r -p "Публичный HTTPS-порт панели (nginx, 1-65535) [$https_default]: " reply
     reply="${reply:-$https_default}"
     if [[ "$reply" =~ ^[0-9]+$ ]] && ((reply >= 1 && reply <= 65535)) && [[ "$reply" != "$BACKEND_PORT" ]]; then
       HTTPS_PUBLIC_PORT="$reply"
@@ -192,12 +192,16 @@ setup_nginx_letsencrypt() {
     "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
     "$domain" "$BACKEND_PORT" "$cert" "$key" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")"
   nginx_install_site "$conf" "$domain"
-  nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https"
+  nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
 
   systemctl enable --now snap.certbot.renew.timer 2>/dev/null || \
     systemctl enable --now certbot.timer 2>/dev/null || true
 
-  nginx_log "Nginx + Let's Encrypt настроен: https://${domain}/"
+  if [[ "$HTTPS_PUBLIC_PORT" == "443" ]]; then
+    nginx_log "Nginx + Let's Encrypt настроен: https://${domain}/"
+  else
+    nginx_log "Nginx + Let's Encrypt настроен: https://${domain}:${HTTPS_PUBLIC_PORT}/"
+  fi
   restart_panel_if_needed
 }
 
@@ -222,8 +226,12 @@ setup_nginx_selfsigned() {
     "$domain" "$BACKEND_PORT" "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" \
     "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")"
   nginx_install_site "$conf" "$domain"
-  nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https"
-  nginx_log "Nginx + самоподписанный SSL: https://${domain}/"
+  nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
+  if [[ "$HTTPS_PUBLIC_PORT" == "443" ]]; then
+    nginx_log "Nginx + самоподписанный SSL: https://${domain}/"
+  else
+    nginx_log "Nginx + самоподписанный SSL: https://${domain}:${HTTPS_PUBLIC_PORT}/"
+  fi
   restart_panel_if_needed
 }
 
@@ -259,8 +267,12 @@ setup_nginx_custom_certs() {
     "$domain" "$BACKEND_PORT" "$cert_path" "$key_path" \
     "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")"
   nginx_install_site "$conf" "$domain"
-  nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https"
-  nginx_log "Nginx + пользовательские сертификаты: https://${domain}/"
+  nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
+  if [[ "$HTTPS_PUBLIC_PORT" == "443" ]]; then
+    nginx_log "Nginx + пользовательские сертификаты: https://${domain}/"
+  else
+    nginx_log "Nginx + пользовательские сертификаты: https://${domain}:${HTTPS_PUBLIC_PORT}/"
+  fi
   restart_panel_if_needed
 }
 

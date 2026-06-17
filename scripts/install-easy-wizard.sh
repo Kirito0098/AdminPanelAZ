@@ -157,7 +157,7 @@ easy_ask_access() {
   WIZ_BACKEND_PORT="8000"
   wizard_derive_cors_origins "$WIZ_BACKEND_PORT"
   if [[ "$WIZ_NGINX_MODE" == "le" && -n "$WIZ_NGINX_DOMAIN" ]]; then
-    WIZ_CORS_ORIGINS="https://${WIZ_NGINX_DOMAIN},http://${WIZ_NGINX_DOMAIN},http://127.0.0.1:${WIZ_BACKEND_PORT},http://localhost:${WIZ_BACKEND_PORT}"
+    wizard_build_nginx_cors_origins "$WIZ_NGINX_DOMAIN" "$WIZ_HTTPS_PUBLIC_PORT" "$WIZ_BACKEND_PORT"
   fi
   echo
 }

@@ -1,5 +1,5 @@
 # AdminPanelAZ — Nginx reverse proxy (шаблон)
-# Плейсхолдеры: __DOMAIN__, __BACKEND_PORT__, __HTTPS_PORT__, __HTTP_PORT__, __SSL_CERT__, __SSL_KEY__
+# Плейсхолдеры: __DOMAIN__, __BACKEND_PORT__, __HTTPS_PORT__, __HTTPS_REDIRECT_SUFFIX__, __HTTP_PORT__, __SSL_CERT__, __SSL_KEY__
 
 map $http_upgrade $connection_upgrade {
     default upgrade;
@@ -16,7 +16,7 @@ server {
     }
 
     location / {
-        return 301 https://$host$request_uri;
+        return 301 https://$host__HTTPS_REDIRECT_SUFFIX__$request_uri;
     }
 }
 
