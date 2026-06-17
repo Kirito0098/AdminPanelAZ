@@ -142,6 +142,7 @@ def update_node_defaults(
             db,
             node_id,
             route_mode=payload.route_mode,
+            route_clear=payload.route_clear,
             openvpn_limit_value=payload.openvpn_limit_value,
             openvpn_limit_unit=payload.openvpn_limit_unit,
             openvpn_limit_period_days=payload.openvpn_limit_period_days,

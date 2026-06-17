@@ -760,6 +760,16 @@ def _policy_row_flags(row: OpenVpnAccessPolicy | WgAccessPolicy) -> tuple[bool, 
     return blocked, limited
 
 
+def _client_policy_hint(row: OpenVpnAccessPolicy | WgAccessPolicy, protocol: str) -> dict:
+    blocked, limited = _policy_row_flags(row)
+    return {
+        "client_name": row.client_name,
+        "protocol": protocol,
+        "is_blocked": blocked,
+        "limit_human": human_bytes(row.traffic_limit_bytes) if limited else None,
+    }
+
+
 def _route_mode_from_block_reason(block_reason: str | None) -> str | None:
     if block_reason in NODE_ROUTE_MODES:
         return block_reason
@@ -837,6 +847,7 @@ def set_node_default_policy(
     node_id: int,
     *,
     route_mode: str | None = None,
+    route_clear: bool = False,
     openvpn_limit_value: float | None = None,
     openvpn_limit_unit: str | None = None,
     openvpn_limit_period_days: int | None = None,
@@ -886,7 +897,12 @@ def set_node_default_policy(
         wg_row.traffic_limit_bytes = parse_traffic_limit_bytes(wireguard_limit_value, wireguard_limit_unit or "GB")
         wg_row.traffic_limit_period_days = parse_traffic_limit_period_days(wireguard_limit_period_days)
 
-    if route_mode is not None:
+    if route_clear:
+        if ovpn_row.block_reason in NODE_ROUTE_MODES:
+            ovpn_row.block_reason = None
+        if wg_row.block_reason in NODE_ROUTE_MODES:
+            wg_row.block_reason = None
+    elif route_mode is not None:
         ovpn_row.block_reason = route_mode
         wg_row.block_reason = route_mode
 
@@ -920,6 +936,8 @@ def build_policy_summary_by_node(db: Session) -> list[dict]:
                 traffic_limited_clients += 1
 
         defaults = get_node_default_policy(db, node.id)
+        client_hints = [_client_policy_hint(row, "openvpn") for row in ovpn_rows]
+        client_hints.extend(_client_policy_hint(row, "wireguard") for row in wg_rows)
         summaries.append(
             {
                 "node_id": node.id,
@@ -931,6 +949,7 @@ def build_policy_summary_by_node(db: Session) -> list[dict]:
                 "default_openvpn_limit_human": defaults["openvpn"]["limit_human"],
                 "default_wireguard_limit_human": defaults["wireguard"]["limit_human"],
                 "default_route_mode": defaults["route_mode"],
+                "client_hints": client_hints,
             }
         )
     return summaries

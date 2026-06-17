@@ -269,6 +269,13 @@ export interface GeoRoutingHint {
   nodes: GeoRoutingNodeHint[]
 }
 
+export interface NodeClientPolicyHint {
+  client_name: string
+  protocol: string
+  is_blocked?: boolean
+  limit_human?: string | null
+}
+
 export interface NodePolicySummary {
   node_id: number
   node_name: string
@@ -279,6 +286,7 @@ export interface NodePolicySummary {
   default_openvpn_limit_human?: string | null
   default_wireguard_limit_human?: string | null
   default_route_mode?: string | null
+  client_hints?: NodeClientPolicyHint[]
 }
 
 export interface NodeDefaultLimits {
@@ -301,6 +309,7 @@ export interface NodeDefaultPolicy {
 
 export interface NodeDefaultPolicyUpdate {
   route_mode?: string | null
+  route_clear?: boolean
   openvpn_limit_value?: number | null
   openvpn_limit_unit?: string | null
   openvpn_limit_period_days?: number | null

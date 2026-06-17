@@ -7,9 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-06-18
+
+### Added
+
+#### AZ-WARP (коммиты `Test AZ-warp`, 2026-06-17)
+
+- **API — домены и IP-диапазоны (текстовый режим)** — `GET/PUT /api/warper/domains/text`, `GET/PUT /api/warper/ip-ranges/text`; прокси в `WarperService` и node agent.
+- **API — настройки режима** — `GET /api/warper/settings/options`; переключение режима: `POST …/settings/mode/warp`, `…/mode/slave`, `…/mode/wg`; `PUT …/settings/fullvpn`, `…/settings/subnet` (списки WARP-ключей и WG-конфигов с узла).
+- **API — каталог приложений** — `GET /api/warper/catalog/search`, `…/installed`, `…/show/{name}`; `POST …/catalog/add`, `…/remove`, `…/update`, `…/refresh`.
+- **Node agent** — прокси warper-команд (domains, ip-ranges, settings, catalog, traffic) на удалённых узлах.
+- **UI — вкладка «Каталог»** — `CatalogTab`: поиск, установленные приложения, add/remove/update, обновление кэша.
+- **UI — «Домены» и «IP-диапазоны»** — компактные формы + текстовый редактор списков (`DomainsTab`, `IpRangesTab`).
+- **UI — «Настройки»** — выбор режима WARP / slave / WireGuard, full VPN, subnet, MTU, log level, sing-box actions (`SettingsTab`).
+- **UI — «Мониторинг» и «Трафик»** — переработанные `MonitoringTab`, `TrafficTab`, `StatusSection`; общий layout `WarperSection`.
+- **UI — график трафика** — `WarperTrafficChart` (Recharts), адаптация `ChartResponsive` под warper-данные.
+- **Тесты** — `test_warper_service.py` (+247 строк), расширены `test_warper_api.py`, `test_node_adapter_parity.py`.
+
+#### После AZ-WARP
+
+- **Узлы — массовые операции** — выбор нескольких узлов (select-all): health check, rolling update, mTLS, удаление.
+- **Версия node agent** — единая константа `NODE_AGENT_VERSION` **1.1.0** (local adapter, node agent, rolling update).
+- **HA replica — защита от дрейфа** — блокировка create/delete/renew/block клиентов на replica; `HaReplicaBanner`, `useHaReplicaReadonly`; роль HA в `GET /nodes/active`; на replica список клиентов — конфиги **primary**.
+- **Трафик — UX мониторинга** — inline-раскрытие деталей клиента (`TrafficClientDetails` вместо `TrafficClientFocusPanel`); блок «никогда не подключались»; скрытие обслуживания OpenVPN-лога при `OPENVPN_LOG=n`.
+- **Политики per-node — `client_hints`** — в `GET /api/client-access/policy-summary-by-node`: имя клиента, протокол, лимит, блокировка (UI таблицы обновлён).
+
 ### Changed
 
-- **Боковое меню — закреплённый футер** — профиль, часы, переключатель темы и «Выйти» всегда видны внизу сайдбара; прокручивается только список пунктов навигации (desktop и мобильная панель).
+- **Узлы — политики per-node** — блок «Политики per-node» временно скрыт со страницы **Узлы** (API и wizard в коде).
+
+### Fixed
+
+- **CSP — meta csp-nonce** — корректная подстановка nonce в `<meta name="csp-nonce">` (regex callback вместо backref, иначе ломались графики warper).
+- **WireGuard — онлайн-статус** — подключён только peer с handshake за последние **3 минуты** (`wireguardStatus.ts`, backend parsing).
+- **HA — sync fingerprints** — исправлен расчёт отпечатков в `node_sync/fingerprints.py` (`test_node_sync_fingerprints.py`).
+- **CSP — Radix Select** — nonce во viewport Select + scrollbar-стили.
+- **Установка — nginx/CORS** — публичный origin при нестандартном HTTPS-порте (`nginx_public_origin_host`, `__HTTPS_REDIRECT_SUFFIX__`, CORS в install-wizard).
+- **Главная — падение** — `ReferenceError: useFeatureModules is not defined` в `ConfigCardsSection`.
+- **Wizard политик per-node** — сброс маршрута «Не задано» (`route_clear`); сброс лимита при пустом поле.
+
+### Tests
+
+- `test_warper_service.py` — settings modes, catalog, domains/ip-ranges text, traffic.
+- `test_node_sync_fingerprints.py` — отпечатки HA sync group.
+- `test_http_security.py` — CSP nonce injection в meta-тег.
 
 ## [2.3.0] - 2026-06-16
 
@@ -24,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Парсер DPI** — извлечение `alived: yes/no/unknown`, `method: N`, enrichment узлов полями `host`, `checker_provider`, `checker_country`.
+- **Маршрутизация / CIDR — провайдеры** — широкая таблица заменена на двухколоночный grid карточек; тематические scrollbar-стили для таблиц.
 
 ### Tests
 
@@ -652,7 +694,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 - Production-развёртывание: `install.sh`, daemon/watchdog, systemd, раздача UI из backend в prod-режиме.
 - OpenVPN management sockets, vnStat, WebSocket-мониторинг, Telegram Mini App, in-panel pytest.
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.0.0...v2.1.0

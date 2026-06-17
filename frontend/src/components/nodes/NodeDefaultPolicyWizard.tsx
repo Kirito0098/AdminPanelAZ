@@ -82,11 +82,14 @@ export default function NodeDefaultPolicyWizard({
   const handleSave = async () => {
     if (nodeId == null) return
 
-    const payload: import('@/types').NodeDefaultPolicyUpdate = {
-      route_mode: routeMode || null,
+    const payload: import('@/types').NodeDefaultPolicyUpdate = {}
+    if (routeMode) {
+      payload.route_mode = routeMode
+    } else {
+      payload.route_clear = true
     }
 
-    if (ovpnClearLimit) {
+    if (ovpnClearLimit || !ovpnLimitValue.trim()) {
       payload.openvpn_clear_limit = true
     } else if (ovpnLimitValue.trim()) {
       const value = Number.parseFloat(ovpnLimitValue)
@@ -99,7 +102,7 @@ export default function NodeDefaultPolicyWizard({
       payload.openvpn_limit_period_days = ovpnLimitPeriod ? Number.parseInt(ovpnLimitPeriod, 10) : null
     }
 
-    if (wgClearLimit) {
+    if (wgClearLimit || !wgLimitValue.trim()) {
       payload.wireguard_clear_limit = true
     } else if (wgLimitValue.trim()) {
       const value = Number.parseFloat(wgLimitValue)

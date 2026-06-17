@@ -29,7 +29,6 @@ import {
   updateNode,
 } from '@/api/client'
 import NodeUpdateDialog from '@/components/NodeUpdateDialog'
-import NodePolicySummarySection from '@/components/nodes/NodePolicySummarySection'
 import NodeSyncGroupSection from '@/components/nodes/NodeSyncGroupSection'
 import { NodeBadge, NodeStatusBadge, statusLabels } from '@/components/NodeSelector'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
@@ -1022,8 +1021,6 @@ export default function NodesPage() {
       </SettingsAlert>
 
       {showMtlsStatus && <MtlsCaStatusAlert status={mtlsStatus} />}
-
-      <NodePolicySummarySection nodes={nodes.map((n) => ({ id: n.id, name: n.name, status: n.status }))} />
 
       <NodeSyncGroupSection nodes={nodes} />
 

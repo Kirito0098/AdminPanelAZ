@@ -409,6 +409,7 @@ class NodeDefaultPolicyResponse(BaseModel):
 
 class NodeDefaultPolicyUpdate(BaseModel):
     route_mode: str | None = None
+    route_clear: bool = False
     openvpn_limit_value: float | None = Field(default=None, gt=0)
     openvpn_limit_unit: str | None = "GB"
     openvpn_limit_period_days: int | None = None
@@ -417,6 +418,13 @@ class NodeDefaultPolicyUpdate(BaseModel):
     wireguard_limit_unit: str | None = "GB"
     wireguard_limit_period_days: int | None = None
     wireguard_clear_limit: bool = False
+
+
+class NodeClientPolicyHint(BaseModel):
+    client_name: str
+    protocol: str
+    is_blocked: bool = False
+    limit_human: str | None = None
 
 
 class NodePolicySummary(BaseModel):
@@ -429,6 +437,7 @@ class NodePolicySummary(BaseModel):
     default_openvpn_limit_human: str | None = None
     default_wireguard_limit_human: str | None = None
     default_route_mode: str | None = None
+    client_hints: list[NodeClientPolicyHint] = Field(default_factory=list)
 
 
 class GlobalDashboardSummary(BaseModel):

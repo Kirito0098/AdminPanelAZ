@@ -15,7 +15,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useNotifications } from '@/context/NotificationContext'
-import type { NodePolicySummary, NodeStatus } from '@/types'
+import type { NodeClientPolicyHint, NodePolicySummary, NodeStatus } from '@/types'
 
 type NodePolicySummarySectionProps = {
   nodes: Array<{ id: number; name: string; status: string }>
@@ -31,6 +31,14 @@ function defaultLimitsLabel(row: NodePolicySummary): string {
   }
   if (parts.length === 0) return '—'
   return parts.join(' · ')
+}
+
+function formatClientHint(hint: NodeClientPolicyHint): string {
+  const protocol = hint.protocol === 'wireguard' ? 'WG' : 'OVPN'
+  const parts = [hint.client_name, protocol]
+  if (hint.limit_human) parts.push(`лимит ${hint.limit_human}`)
+  if (hint.is_blocked) parts.push('заблок.')
+  return parts.join(', ')
 }
 
 export default function NodePolicySummarySection({ nodes }: NodePolicySummarySectionProps) {
@@ -90,7 +98,8 @@ export default function NodePolicySummarySection({ nodes }: NodePolicySummarySec
               Политики per-node
             </CardTitle>
             <CardDescription>
-              Дефолтные лимиты и маршруты OpenVPN/WireGuard по node_id (EU vs RU и т.д.)
+              Дефолтные лимиты и маршруты для новых клиентов. Счётчики OVPN/WG/Лимиты — политики
+              уже созданных клиентов (редактируются в карточке клиента).
             </CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={refreshing}>
@@ -117,12 +126,19 @@ export default function NodePolicySummarySection({ nodes }: NodePolicySummarySec
                 {rows.map((row) => (
                   <TableRow key={row.node_id}>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{row.node_name}</span>
-                        <NodeStatusBadge
-                          status={(statusById[row.node_id] ?? 'unknown') as NodeStatus}
-                          showLabel={false}
-                        />
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{row.node_name}</span>
+                          <NodeStatusBadge
+                            status={(statusById[row.node_id] ?? 'unknown') as NodeStatus}
+                            showLabel={false}
+                          />
+                        </div>
+                        {(row.client_hints?.length ?? 0) > 0 ? (
+                          <p className="text-xs text-muted-foreground">
+                            {row.client_hints!.map(formatClientHint).join(' · ')}
+                          </p>
+                        ) : null}
                       </div>
                     </TableCell>
                     <TableCell className="font-mono text-xs">{defaultLimitsLabel(row)}</TableCell>

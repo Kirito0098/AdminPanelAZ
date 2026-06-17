@@ -32,6 +32,7 @@ import {
   type ClientFilter,
   type ProtocolTab,
 } from '@/lib/configCardUtils'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import { useProgress } from '@/context/ProgressContext'
 import type { ClientAccessPolicy, ConfigTag, OpenVpnGroupOption, User, UserRole, VpnConfig } from '@/types'

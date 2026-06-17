@@ -78,6 +78,21 @@ def test_set_and_get_node_default_policy_eu_vs_ru(db_session):
     assert ru_defaults["wireguard"]["limit_human"] == "80.0 GB"
 
 
+def test_clear_node_default_route_mode(db_session):
+    session, eu, _ru = db_session
+
+    set_node_default_policy(
+        session,
+        eu.id,
+        route_mode="route_selective",
+        actor="admin",
+    )
+    assert get_node_default_policy(session, eu.id)["route_mode"] == "route_selective"
+
+    set_node_default_policy(session, eu.id, route_clear=True, actor="admin")
+    assert get_node_default_policy(session, eu.id)["route_mode"] is None
+
+
 def test_build_policy_summary_excludes_default_rows(db_session):
     session, eu, ru = db_session
 
@@ -110,6 +125,14 @@ def test_build_policy_summary_excludes_default_rows(db_session):
     assert by_name["eu-1"]["openvpn_policies"] == 1
     assert by_name["eu-1"]["blocked_clients"] == 1
     assert by_name["eu-1"]["default_openvpn_limit_human"] == "10.0 GB"
+    assert by_name["eu-1"]["client_hints"] == [
+        {
+            "client_name": "alice",
+            "protocol": "openvpn",
+            "is_blocked": True,
+            "limit_human": None,
+        }
+    ]
     assert by_name["ru-1"]["wireguard_policies"] == 1
     assert by_name["ru-1"]["traffic_limited_clients"] == 1
     assert by_name["ru-1"]["default_openvpn_limit_human"] is None
