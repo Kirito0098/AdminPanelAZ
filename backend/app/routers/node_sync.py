@@ -28,6 +28,7 @@ from app.services.node_sync.groups import (
     raise_if_preflight_errors,
     validate_sync_group_payload,
 )
+from app.services.node_sync.dissolve import dissolve_sync_group
 from app.services.node_sync.push_full import run_push_full
 from app.services.node_sync.verify import verify_sync_group
 
@@ -128,9 +129,12 @@ def delete_sync_group(
     group = db.get(NodeSyncGroup, group_id)
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sync group не найдена")
+    dissolve_sync_group(db, group)
     db.delete(group)
     db.commit()
-    return MessageResponse(message="Sync group удалена")
+    return MessageResponse(
+        message="Sync group расформирована: узлы независимы, конфиги и файлы на каждом сервере сохранены"
+    )
 
 
 @router.get("/{group_id}/status", response_model=NodeSyncGroupStatusResponse)

@@ -208,7 +208,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
     setActionLoading(deleteTarget.id)
     try {
       await deleteNodeSyncGroup(deleteTarget.id)
-      success('Sync Group удалена')
+      success('Sync Group расформирована: узлы независимы, конфиги на серверах сохранены')
       setDeleteTarget(null)
       await load()
     } catch (err) {
@@ -437,9 +437,9 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
-        title="Удалить Sync Group"
-        description={`Удалить группу «${deleteTarget?.name ?? ''}»? Узлы не будут затронуты.`}
-        confirmLabel="Удалить"
+        title="Расформировать Sync Group"
+        description={`Расформировать группу «${deleteTarget?.name ?? ''}»? Узлы станут независимыми: все конфиги и файлы на каждом сервере сохранятся, дальше работа с ними как с обычными нодами.`}
+        confirmLabel="Расформировать"
         destructive
         onConfirm={() => void handleDelete()}
         onCancel={() => setDeleteTarget(null)}

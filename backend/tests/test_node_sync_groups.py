@@ -134,4 +134,6 @@ def test_list_and_delete_sync_group(sync_nodes):
     assert listed.status_code == 200
     assert len(listed.json()) == 1
     assert deleted.status_code == 200
+    assert "расформирована" in deleted.json()["message"]
+    assert "сохранены" in deleted.json()["message"]
     assert after.json() == []

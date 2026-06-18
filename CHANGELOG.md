@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **HA — расформирование Sync Group** — при удалении группы синхронизации узлы переводятся в независимое состояние: снимаются HA-метки в БД (`sync_group_id`, `ha_primary_config_id`), shadow-записи на replica становятся обычными конфигами ноды; конфиги и файлы на VPN-серверах **не удаляются**. Сервис `node_sync/dissolve.py`; тесты `test_node_sync_dissolve.py`.
+
+### Changed
+
+- **UI — Sync Groups** — диалог и сообщения: «Расформировать» вместо «Удалить», пояснение что узлы остаются независимыми с сохранёнными конфигами.
+
 ## [2.4.0] - 2026-06-18
 
 ### Added
