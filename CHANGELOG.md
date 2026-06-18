@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **HA — расформирование Sync Group** — при удалении группы синхронизации узлы переводятся в независимое состояние: снимаются HA-метки в БД (`sync_group_id`, `ha_primary_config_id`), shadow-записи на replica становятся обычными конфигами ноды; конфиги и файлы на VPN-серверах **не удаляются**. Сервис `node_sync/dissolve.py`; тесты `test_node_sync_dissolve.py`.
+- **Личные настройки — часовой пояс** — персональный IANA-пояс у пользователя (`users.timezone`); выбор в «Настройки → Личные» или режим «как в браузере»; `TimezoneContext`, `lib/datetime.ts`; единое UTC-aware форматирование дат во всей панели и tg-mini; заголовок `X-Client-Timezone` в API для Telegram-уведомлений.
 
 ### Changed
 
