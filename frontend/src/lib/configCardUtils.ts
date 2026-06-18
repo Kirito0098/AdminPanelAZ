@@ -1,4 +1,5 @@
 import type { ClientAccessPolicy, VpnConfig } from '@/types'
+import { formatDate } from '@/lib/datetime'
 import { getProfileDownloadFilename } from '@/lib/profileDownloadName'
 
 export type ProtocolTab = 'openvpn' | 'wireguard' | 'amneziawg'
@@ -108,7 +109,7 @@ export function formatDateShort(value?: string | null): string {
   if (!value) return 'не ограничено'
   const d = parseAccessExpiresAt(value)
   if (!d) return value.split(' ')[0] || value
-  return d.toLocaleDateString('ru-RU')
+  return formatDate(d, undefined, value.split(' ')[0] || value)
 }
 
 export interface AccessMetaLine {
@@ -244,7 +245,7 @@ export function getConfigStatus(
 
 export function formatCreatedAt(value?: string | null): string {
   if (!value) return '—'
-  return new Date(value).toLocaleDateString('ru-RU')
+  return formatDate(value)
 }
 
 export function pickPrimaryFile(config: VpnConfig, tab?: ProtocolTab) {

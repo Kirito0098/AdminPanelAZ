@@ -16,6 +16,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { formatDate, formatDateTime, formatTime } from '@/lib/datetime'
 import type { ResourceHistory, ResourceHistoryPoint } from '@/types'
 
 const CHART_CPU = 'hsl(187, 72%, 45%)'
@@ -39,14 +40,13 @@ type ResourceHistoryChartsProps = {
 }
 
 function formatLabel(ts: string, period: Period) {
-  const d = new Date(ts)
   if (period === '1d') {
-    return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    return formatTime(ts, { hour: '2-digit', minute: '2-digit' })
   }
   if (period === '7d') {
-    return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    return formatDateTime(ts, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
   }
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+  return formatDate(ts, { day: '2-digit', month: '2-digit' })
 }
 
 function buildChartRows(points: ResourceHistoryPoint[], period: Period) {

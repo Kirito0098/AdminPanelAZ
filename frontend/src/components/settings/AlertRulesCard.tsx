@@ -17,6 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useNotifications } from '@/context/NotificationContext'
+import { formatDateTime } from '@/lib/datetime'
 import type { AlertMetricInfo, AlertRule, Node } from '@/types'
 
 const OPERATORS = [
@@ -250,7 +251,7 @@ export default function AlertRulesCard() {
                   </p>
                   {rule.last_triggered_at && (
                     <p className="text-xs text-muted-foreground">
-                      Последнее срабатывание: {new Date(rule.last_triggered_at).toLocaleString()}
+                      Последнее срабатывание: {formatDateTime(rule.last_triggered_at)}
                     </p>
                   )}
                 </div>

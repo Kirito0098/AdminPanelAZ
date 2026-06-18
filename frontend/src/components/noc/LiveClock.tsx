@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { formatTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 
 interface LiveClockProps {
@@ -9,7 +10,7 @@ export default function LiveClock({ className }: LiveClockProps) {
   const [time, setTime] = useState('')
 
   useEffect(() => {
-    const tick = () => setTime(new Date().toLocaleTimeString('ru-RU'))
+    const tick = () => setTime(formatTime(new Date()))
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)

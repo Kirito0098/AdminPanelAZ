@@ -13,6 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
+import { formatTime } from '@/lib/datetime'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 import MonitoringChartCard, { MonitoringChartEmpty } from '@/components/monitoring/MonitoringChartCard'
 import {
@@ -56,7 +57,7 @@ export default function MonitoringCharts({ data }: MonitoringChartsProps) {
   useEffect(() => {
     const wgActive = data.wireguard_peers.filter(isWireGuardOnline).length
     const point: HistoryPoint = {
-      time: new Date(data.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      time: formatTime(data.timestamp, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       connections: data.openvpn_clients.length + wgActive,
       ovpn: data.openvpn_clients.length,
       wg: wgActive,

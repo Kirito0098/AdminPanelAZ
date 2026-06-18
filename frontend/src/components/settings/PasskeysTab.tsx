@@ -8,6 +8,7 @@ import {
   renamePasskey,
   verifyPasskeyRegister,
 } from '@/api/client'
+import { formatDateTime } from '@/lib/datetime'
 import { registerPasskey } from '@/lib/passkeys'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -128,9 +129,9 @@ export default function PasskeysTab() {
                 <div>
                   <p className="font-medium">{item.nickname}</p>
                   <p className="text-xs text-muted-foreground">
-                    Создан: {new Date(item.created_at).toLocaleString('ru-RU')}
+                    Создан: {formatDateTime(item.created_at)}
                     {item.last_used_at
-                      ? ` · Последний вход: ${new Date(item.last_used_at).toLocaleString('ru-RU')}`
+                      ? ` · Последний вход: ${formatDateTime(item.last_used_at)}`
                       : ''}
                   </p>
                 </div>

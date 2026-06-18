@@ -40,6 +40,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { PercentBar } from '@/components/ui/percent-bar'
+import { formatDateTime } from '@/lib/datetime'
 import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficClientSessions } from '@/types'
 
 const CHART_VPN = 'hsl(187, 72%, 45%)'
@@ -68,7 +69,7 @@ function getProtocolVariant(protocol: string): 'default' | 'secondary' | 'outlin
 
 function formatLastSeen(value?: string | null) {
   if (!value) return '—'
-  return new Date(value).toLocaleString('ru-RU')
+  return formatDateTime(value)
 }
 
 function sessionSummaryHint(sessions: TrafficClientSessions | null) {

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import Spinner from '@/components/ui/Spinner'
+import { formatDateTime } from '@/lib/datetime'
 import {
   activateTgNode,
   checkTgNodeHealth,
@@ -35,7 +36,7 @@ function getNodeMeta(node: TgMiniNode) {
 
 function formatLastSeen(value?: string | null) {
   if (!value) return '—'
-  return new Date(value).toLocaleString()
+  return formatDateTime(value)
 }
 
 export default function Nodes() {

@@ -49,6 +49,7 @@ import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 import type {
@@ -369,7 +370,7 @@ function ActionLogCard({ entry }: ActionLogCardProps) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Badge variant="secondary">{entry.action}</Badge>
         <span className="text-xs text-muted-foreground">
-          {new Date(entry.created_at).toLocaleString('ru-RU')}
+          {formatDateTime(entry.created_at)}
         </span>
       </div>
       <p className="mt-2 text-sm font-medium">{entry.username || '—'}</p>
@@ -582,7 +583,7 @@ export default function LogsPage() {
             <p className="text-sm text-muted-foreground">
               Подключения, события OpenVPN, аудит QR и действия администраторов
               {connections?.timestamp && (
-                <> · обновлено {new Date(connections.timestamp).toLocaleString('ru-RU')}</>
+                <> · обновлено {formatDateTime(connections.timestamp)}</>
               )}
             </p>
           </div>
@@ -796,7 +797,7 @@ export default function LogsPage() {
                                 <TableCell>{String(p.client_name || '—')}</TableCell>
                                 <TableCell className="text-xs">
                                   {p.latest_handshake
-                                    ? new Date(p.latest_handshake).toLocaleString('ru-RU')
+                                    ? formatDateTime(p.latest_handshake)
                                     : '—'}
                                 </TableCell>
                               </TableRow>
@@ -811,7 +812,7 @@ export default function LogsPage() {
                             name={String(p.client_name || '—')}
                             handshake={
                               p.latest_handshake
-                                ? new Date(p.latest_handshake).toLocaleString('ru-RU')
+                                ? formatDateTime(p.latest_handshake)
                                 : '—'
                             }
                           />
@@ -977,7 +978,7 @@ export default function LogsPage() {
                             {filteredActions.map((a) => (
                               <TableRow key={a.id}>
                                 <TableCell className="text-xs whitespace-nowrap">
-                                  {new Date(a.created_at).toLocaleString('ru-RU')}
+                                  {formatDateTime(a.created_at)}
                                 </TableCell>
                                 <TableCell>{a.username || '—'}</TableCell>
                                 <TableCell>
@@ -1039,7 +1040,7 @@ export default function LogsPage() {
                           {qrDownloads.map((entry) => (
                             <TableRow key={entry.id}>
                               <TableCell className="text-xs whitespace-nowrap">
-                                {new Date(entry.created_at).toLocaleString('ru-RU')}
+                                {formatDateTime(entry.created_at)}
                               </TableCell>
                               <TableCell>
                                 <Badge variant="secondary">{entry.event_type}</Badge>
@@ -1071,7 +1072,7 @@ export default function LogsPage() {
                   <CardDescription>
                     Диагностика Unix-сокетов для событий OpenVPN на активном узле
                     {socketsTimestamp && (
-                      <> · обновлено {new Date(socketsTimestamp).toLocaleString('ru-RU')}</>
+                      <> · обновлено {formatDateTime(socketsTimestamp)}</>
                     )}
                   </CardDescription>
                 </CardHeader>

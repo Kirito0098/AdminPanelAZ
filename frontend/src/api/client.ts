@@ -8,6 +8,7 @@ export class ApiError extends Error {
   }
 }
 
+import { getActiveTimeZone } from '@/lib/datetime'
 import { clearWebSessionId, getWebSessionId } from '@/lib/webSession'
 
 function getToken(): string | null {
@@ -45,6 +46,10 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, retry
   if (token) headers.set('Authorization', `Bearer ${token}`)
   const sessionId = getWebSessionId()
   if (sessionId) headers.set('X-Web-Session-Id', sessionId)
+  if (!headers.has('X-Client-Timezone')) {
+    const tz = getActiveTimeZone()
+    if (tz) headers.set('X-Client-Timezone', tz)
+  }
 
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'include' })
   if (response.status === 401 && retry && !path.startsWith('/auth/')) {

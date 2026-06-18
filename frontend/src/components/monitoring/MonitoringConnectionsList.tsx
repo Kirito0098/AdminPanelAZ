@@ -16,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { OpenVpnClient, VpnConfigHaInfo, WireGuardPeer } from '@/types'
 
@@ -37,7 +38,7 @@ export type MonitoringConnectionRow = {
 
 function formatHandshake(value?: string | null) {
   if (!value) return '—'
-  return new Date(value).toLocaleString('ru-RU')
+  return formatDateTime(value)
 }
 
 export function buildMonitoringConnectionRows(

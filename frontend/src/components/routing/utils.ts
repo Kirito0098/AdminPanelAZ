@@ -1,10 +1,8 @@
+import { formatDateTime } from '@/lib/datetime'
+
 export function formatDt(value?: string | null) {
   if (!value) return '—'
-  try {
-    return new Date(value).toLocaleString('ru-RU')
-  } catch {
-    return value
-  }
+  return formatDateTime(value, undefined, value)
 }
 
 export function statusBadgeVariant(status?: string | null) {
@@ -173,13 +171,13 @@ export function parseBackupDate(stamp: string, mtime?: number): Date | null {
 export function formatBackupLabel(stamp: string, mtime?: number): string {
   const date = parseBackupDate(stamp, mtime)
   if (!date) return stamp
-  return date.toLocaleString('ru-RU', {
+  return formatDateTime(date, {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  })
+  }, stamp)
 }
 
 export function formatBackupRelative(stamp: string, mtime?: number): string {

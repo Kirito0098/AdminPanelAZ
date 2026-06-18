@@ -61,6 +61,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
+import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { Node, NodeMtlsStatus } from '@/types'
 import { Navigate } from 'react-router-dom'
@@ -156,7 +157,7 @@ function getNodeMeta(node: Node) {
 
 function formatLastSeen(lastSeen?: string | null) {
   if (!lastSeen) return null
-  return new Date(lastSeen).toLocaleString()
+  return formatDateTime(lastSeen)
 }
 
 type NodeActionsProps = {

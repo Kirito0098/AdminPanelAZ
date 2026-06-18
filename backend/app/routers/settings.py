@@ -13,7 +13,7 @@ from app.schemas import AppSettingsResponse, AppSettingsUpdate, MessageResponse,
 from app.services.admin_notify import admin_notify_service
 from app.services.env_file import EnvFileService
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
-from app.services.notify_time import get_client_timezone_from_request
+from app.services.notify_time import _normalize_timezone_name, get_client_timezone_from_request
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 settings = load_app_config()
@@ -68,6 +68,7 @@ def get_settings(current_user: User = Depends(get_current_user), db: Session = D
 
     return AppSettingsResponse(
         theme=current_user.theme,
+        timezone=current_user.timezone or "",
         app_name=_get_setting(db, "app_name", settings.app_name),
         antizapret_path=str(get_node_antizapret_path(db)),
         include_hosts=include_hosts,
@@ -91,6 +92,20 @@ def update_settings(
 
     if payload.theme is not None:
         current_user.theme = payload.theme
+        db.add(current_user)
+
+    if payload.timezone is not None:
+        tz_raw = payload.timezone.strip()
+        if tz_raw == "":
+            current_user.timezone = ""
+        else:
+            normalized = _normalize_timezone_name(tz_raw)
+            if normalized is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Неизвестный часовой пояс: {tz_raw}",
+                )
+            current_user.timezone = normalized
         db.add(current_user)
 
     if current_user.role.value == "admin":

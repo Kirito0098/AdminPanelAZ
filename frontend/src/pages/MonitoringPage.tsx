@@ -59,6 +59,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 import type { MonitoringNodeSummary, MonitoringOverview, ResourceHistory } from '@/types'
@@ -335,7 +336,7 @@ export default function MonitoringPage() {
                 ? 'Сводка активных VPN-подключений со всех узлов'
                 : 'Активные VPN-подключения OpenVPN и WireGuard в реальном времени'}
               {data?.timestamp && (
-                <> · обновлено {new Date(data.timestamp).toLocaleString('ru-RU')}</>
+                <> · обновлено {formatDateTime(data.timestamp)}</>
               )}
             </p>
           </div>

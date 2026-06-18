@@ -54,6 +54,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.user)
     theme: Mapped[str] = mapped_column(String(16), default="dark")
+    timezone: Mapped[str] = mapped_column(String(64), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     totp_secret_encrypted: Mapped[str | None] = mapped_column(String(512), nullable=True)

@@ -145,6 +145,7 @@ class UserResponse(UserBase):
     totp_enabled: bool = False
     telegram_id: str | None = None
     config_quota: int | None = None
+    timezone: str = ""
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -532,6 +533,7 @@ class PanelResourceCurrentResponse(BaseModel):
 
 class AppSettingsResponse(BaseModel):
     theme: str
+    timezone: str = ""
     app_name: str
     antizapret_path: str
     include_hosts: str = ""
@@ -545,6 +547,7 @@ class AppSettingsResponse(BaseModel):
 
 class AppSettingsUpdate(BaseModel):
     theme: str | None = None
+    timezone: str | None = None
     include_hosts: str | None = None
     exclude_hosts: str | None = None
     include_ips: str | None = None

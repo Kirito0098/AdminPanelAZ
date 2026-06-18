@@ -1,6 +1,7 @@
 import { CheckCircle2, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import { formatDateTime } from '@/lib/datetime'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -415,7 +416,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                 <p className="text-xs text-muted-foreground">Обновлён</p>
                 <p className="mt-1 text-sm font-medium">
                   {tg.settings?.webhook_set_at
-                    ? new Date(tg.settings.webhook_set_at).toLocaleString()
+                    ? formatDateTime(tg.settings.webhook_set_at)
                     : '—'}
                 </p>
               </div>

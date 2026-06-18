@@ -64,6 +64,7 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { PercentBar } from '@/components/ui/percent-bar'
+import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type {
   ClientAccessPolicy,
@@ -107,7 +108,7 @@ function getProtocolVariant(protocol: string): 'default' | 'secondary' | 'outlin
 
 function formatLastSeen(value?: string | null) {
   if (!value) return '—'
-  return new Date(value).toLocaleString('ru-RU')
+  return formatDateTime(value)
 }
 
 type SummaryCardProps = {
@@ -241,6 +242,7 @@ export default function TrafficPage() {
     if (isPageReload()) return ''
     return searchParams.get('client') ?? ''
   })
+  const [selectedProtocol, setSelectedProtocol] = useState<string>('')
   const [clientPolicy, setClientPolicy] = useState<ClientAccessPolicy | null>(null)
   const [policyLoading, setPolicyLoading] = useState(false)
   const [chartRange, setChartRange] = useState('7d')
@@ -286,6 +288,7 @@ export default function TrafficPage() {
         setLoadError(null)
         setSelectedClient((current) => {
           if (current && overview.rows.some((r) => r.common_name === current)) return current
+          setSelectedProtocol('')
           return ''
         })
         setCountdown(REFRESH_INTERVAL)
@@ -335,11 +338,10 @@ export default function TrafficPage() {
   }, [searchParams, setSearchParams])
 
   useEffect(() => {
-    if (!selectedClient) {
+    if (!selectedClient || !selectedProtocol) {
       setClientPolicy(null)
       return
     }
-    const row = data?.rows.find((r) => r.common_name === selectedClient)
     setPolicyLoading(true)
     void getClientPolicies(selectedClient)
       .then((policies) => {
@@ -348,12 +350,23 @@ export default function TrafficPage() {
           setClientPolicy(null)
           return
         }
-        const proto = row?.protocol_type?.toLowerCase()
+        const proto = selectedProtocol.toLowerCase()
         setClientPolicy(proto === 'wireguard' ? entry.wireguard : entry.openvpn)
       })
       .catch(() => setClientPolicy(null))
       .finally(() => setPolicyLoading(false))
-  }, [selectedClient, data?.rows])
+  }, [selectedClient, selectedProtocol, data?.rows])
+
+  // Resolve URL deep links (?client=<name>) which carry only the name into a
+  // concrete protocol so clients that exist for both OpenVPN and WireGuard
+  // expand the correct row instead of an arbitrary first match.
+  useEffect(() => {
+    if (!selectedClient || selectedProtocol) return
+    const matches = (data?.rows ?? []).filter((r) => r.common_name === selectedClient)
+    if (matches.length === 0) return
+    const best = matches.reduce((a, b) => (b.total_bytes > a.total_bytes ? b : a))
+    setSelectedProtocol(best.protocol_type)
+  }, [selectedClient, selectedProtocol, data?.rows])
 
   const loadChart = useCallback(async () => {
     if (!selectedClient) return
@@ -455,17 +468,26 @@ export default function TrafficPage() {
   }, [data?.rows, search, sortKey])
 
   const selectedRow = useMemo(
-    () => data?.rows.find((r) => r.common_name === selectedClient) ?? null,
-    [data?.rows, selectedClient],
+    () =>
+      data?.rows.find(
+        (r) => r.common_name === selectedClient && r.protocol_type === selectedProtocol,
+      ) ?? null,
+    [data?.rows, selectedClient, selectedProtocol],
   )
 
-  const toggleClient = (name: string) => {
-    setSelectedClient((current) => (current === name ? '' : name))
+  const toggleClient = (name: string, protocol: string) => {
+    if (selectedClient === name && selectedProtocol === protocol) {
+      setSelectedClient('')
+      setSelectedProtocol('')
+      return
+    }
+    setSelectedClient(name)
+    setSelectedProtocol(protocol)
   }
 
   const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== 'Enter' || filteredRows.length === 0) return
-    toggleClient(filteredRows[0].common_name)
+    toggleClient(filteredRows[0].common_name, filteredRows[0].protocol_type)
   }
 
   const maxBytes = useMemo(
@@ -572,7 +594,7 @@ export default function TrafficPage() {
             <p className="text-sm text-muted-foreground">
               Накопленная статистика RX/TX по клиентам VPN и AntiZapret
               {data?.timestamp && (
-                <> · обновлено {new Date(data.timestamp).toLocaleString('ru-RU')}</>
+                <> · обновлено {formatDateTime(data.timestamp)}</>
               )}
             </p>
           </div>
@@ -690,7 +712,7 @@ export default function TrafficPage() {
                     ? `${filteredRows.length} из ${data?.rows.length ?? 0} клиентов · сортировка: ${SORT_LABELS[sortKey]}${selectedClient ? ` · раскрыт: ${selectedClient}` : ''}`
                     : 'Накопленные RX/TX, окна 1д / 7д / 30д'}
                   {summary?.latest_sample_at && (
-                    <> · последний снимок {new Date(summary.latest_sample_at).toLocaleString('ru-RU')}</>
+                    <> · последний снимок {formatDateTime(summary.latest_sample_at)}</>
                   )}
                 </CardDescription>
               </div>
@@ -738,14 +760,15 @@ export default function TrafficPage() {
                 <>
                   <div className="space-y-3 lg:hidden">
                     {filteredRows.map((r) => {
-                      const expanded = selectedClient === r.common_name
+                      const expanded =
+                        selectedClient === r.common_name && selectedProtocol === r.protocol_type
                       return (
                         <TrafficClientCard
                           key={`${r.common_name}-${r.protocol_type}`}
                           row={r}
                           maxBytes={maxBytes}
                           expanded={expanded}
-                          onToggle={() => toggleClient(r.common_name)}
+                          onToggle={() => toggleClient(r.common_name, r.protocol_type)}
                         >
                           {expanded && selectedRow && (
                             <TrafficClientDetails
@@ -783,7 +806,8 @@ export default function TrafficPage() {
                       </TableHeader>
                       <TableBody>
                         {filteredRows.map((r) => {
-                          const expanded = selectedClient === r.common_name
+                          const expanded =
+                            selectedClient === r.common_name && selectedProtocol === r.protocol_type
                           return (
                             <Fragment key={`${r.common_name}-${r.protocol_type}`}>
                               <TableRow
@@ -791,7 +815,7 @@ export default function TrafficPage() {
                                   'cursor-pointer hover:bg-muted/50',
                                   expanded && 'bg-primary/5',
                                 )}
-                                onClick={() => toggleClient(r.common_name)}
+                                onClick={() => toggleClient(r.common_name, r.protocol_type)}
                               >
                                 <TableCell className="w-8 px-2">
                                   <ChevronDown

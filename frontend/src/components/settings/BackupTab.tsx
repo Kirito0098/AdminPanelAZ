@@ -24,6 +24,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { formatDateTime } from '@/lib/datetime'
 import type { BackupEntry, BackupSettings } from '@/types'
 
 function formatSize(bytes: number) {
@@ -295,7 +296,7 @@ export default function BackupTab() {
                     <TableRow key={b.file_name}>
                       <TableCell className="font-mono text-xs">{b.file_name}</TableCell>
                       <TableCell>{formatSize(b.size_bytes)}</TableCell>
-                      <TableCell>{new Date(b.created_at).toLocaleString('ru-RU')}</TableCell>
+                      <TableCell>{formatDateTime(b.created_at)}</TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
                           {b.components.map((c) => (

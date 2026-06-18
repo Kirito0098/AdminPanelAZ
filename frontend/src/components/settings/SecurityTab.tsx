@@ -30,6 +30,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Switch } from '@/components/ui/switch'
 import { useNotifications } from '@/context/NotificationContext'
+import { formatDateTime } from '@/lib/datetime'
 import type { ActiveWebSession, AuditStreamSettings, EventWebhookSettings, ScannerBan, SecuritySettings } from '@/types'
 import SecretsRotationWizard from '@/components/settings/SecretsRotationWizard'
 
@@ -316,7 +317,7 @@ export default function SecurityTab() {
                         <TableRow key={entry.ip}>
                           <TableCell className="font-mono">{entry.ip}</TableCell>
                           <TableCell>
-                            {new Date(entry.expires_at).toLocaleString('ru-RU')}
+                            {formatDateTime(entry.expires_at)}
                           </TableCell>
                           <TableCell>{entry.hours}</TableCell>
                           <TableCell>
@@ -527,7 +528,7 @@ export default function SecurityTab() {
                       <TableCell className="max-w-[200px] truncate text-xs" title={s.user_agent || ''}>
                         {s.user_agent || '—'}
                       </TableCell>
-                      <TableCell className="text-xs">{new Date(s.last_seen_at).toLocaleString('ru-RU')}</TableCell>
+                      <TableCell className="text-xs">{formatDateTime(s.last_seen_at)}</TableCell>
                       <TableCell>
                         <Button
                           size="sm"

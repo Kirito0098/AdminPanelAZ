@@ -22,6 +22,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useNotifications } from '@/context/NotificationContext'
+import { formatDateTime } from '@/lib/datetime'
 import type { GlobalDashboardSummary, NodeStatus } from '@/types'
 
 const REFRESH_INTERVAL_MS = 45_000
@@ -94,7 +95,7 @@ export default function GlobalDashboardSection() {
             <p className="text-sm text-muted-foreground">
               Сводка VPN-подключений и ресурсов без переключения активного узла
               {data.timestamp && (
-                <> · обновлено {new Date(data.timestamp).toLocaleString('ru-RU')}</>
+                <> · обновлено {formatDateTime(data.timestamp)}</>
               )}
             </p>
           </div>

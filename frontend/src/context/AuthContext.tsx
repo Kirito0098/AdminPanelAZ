@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/api/client'
 import { useSessionHeartbeat } from '@/hooks/useSessionHeartbeat'
+import { setActiveTimeZone } from '@/lib/datetime'
 import { applyThemeClass, getStoredTheme } from '@/lib/theme'
 import { storeWebSessionId } from '@/lib/webSession'
 import type { User } from '@/types'
@@ -40,6 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const me = await api.getMe()
       setUser(me)
       applyTheme(me.theme || getStoredTheme())
+      setActiveTimeZone(me.timezone || '')
     } catch {
       localStorage.removeItem('token')
       setUser(null)

@@ -9,6 +9,7 @@ import { NodeProvider } from './context/NodeContext'
 import { NotificationProvider } from './context/NotificationContext'
 import { ProgressProvider } from './context/ProgressContext'
 import { ThemeProvider } from './context/ThemeContext'
+import { TimezoneProvider } from './context/TimezoneContext'
 import DashboardPage from './pages/DashboardPage'
 import LoginPage from './pages/LoginPage'
 import MonitoringPage from './pages/MonitoringPage'
@@ -28,6 +29,7 @@ export default function App() {
     <AuthProvider>
       <FeatureModulesProvider>
       <ThemeProvider>
+      <TimezoneProvider>
         <NotificationProvider>
           <ProgressProvider>
             <NodeProvider>
@@ -62,6 +64,7 @@ export default function App() {
             </NodeProvider>
           </ProgressProvider>
         </NotificationProvider>
+      </TimezoneProvider>
       </ThemeProvider>
       </FeatureModulesProvider>
     </AuthProvider>

@@ -3,6 +3,7 @@ import { ApiError } from '@/api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
+import { formatDateTime } from '@/lib/datetime'
 import { getTgDashboard } from '@/tg-mini/api'
 import type { TgMiniDashboard } from '@/types'
 
@@ -125,7 +126,7 @@ export default function Dashboard() {
       </Card>
 
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">Обновлено: {new Date(data.timestamp).toLocaleString()}</p>
+        <p className="text-xs text-muted-foreground">Обновлено: {formatDateTime(data.timestamp)}</p>
         <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
           Обновить
         </Button>

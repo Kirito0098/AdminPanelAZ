@@ -1,12 +1,17 @@
 import { FormEvent } from 'react'
-import { KeyRound, Moon, Palette, Sun } from 'lucide-react'
+import { Clock, KeyRound, Moon, Palette, Sun } from 'lucide-react'
 import TwoFactorTab from '@/components/settings/TwoFactorTab'
 import PasskeysTab from '@/components/settings/PasskeysTab'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useTimezone } from '@/context/TimezoneContext'
+import { formatDateTime, getTimeZoneLabel } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
+
+const AUTO_TZ = '__auto__'
 
 interface PersonalTabProps {
   theme: 'light' | 'dark'
@@ -27,6 +32,7 @@ export default function PersonalTab({
   onNewPwdChange,
   onChangePassword,
 }: PersonalTabProps) {
+  const { timeZone, effectiveTimeZone, browserTimeZone, options, setTimeZone } = useTimezone()
   return (
     <div className="space-y-4">
       <Card>
@@ -73,6 +79,44 @@ export default function PersonalTab({
               </button>
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Clock size={18} />
+            Часовой пояс
+          </CardTitle>
+          <CardDescription>
+            Дата и время во всей панели будут отображаться в выбранном часовом поясе
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid max-w-md gap-2">
+            <Label htmlFor="timezone-select">Часовой пояс</Label>
+            <Select
+              value={timeZone || AUTO_TZ}
+              onValueChange={(value) => setTimeZone(value === AUTO_TZ ? '' : value)}
+            >
+              <SelectTrigger id="timezone-select">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={AUTO_TZ}>
+                  Как в браузере ({browserTimeZone} · {getTimeZoneLabel(browserTimeZone)})
+                </SelectItem>
+                {options.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Текущее время: {formatDateTime(new Date())} · {effectiveTimeZone}
+          </p>
         </CardContent>
       </Card>
 

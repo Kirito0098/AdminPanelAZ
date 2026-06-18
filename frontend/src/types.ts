@@ -110,6 +110,7 @@ export interface User {
   totp_enabled?: boolean
   telegram_id?: string | null
   config_quota?: number | null
+  timezone?: string
   created_at: string
 }
 
@@ -364,6 +365,7 @@ export interface ConnectionLogsSnapshot {
 
 export interface AppSettings {
   theme: string
+  timezone?: string
   app_name: string
   antizapret_path: string
   include_hosts: string

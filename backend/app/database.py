@@ -745,6 +745,7 @@ def run_db_migrations() -> None:
             ("telegram_id", "VARCHAR(32)"),
             ("tg_notify_events", "TEXT"),
             ("config_quota", "INTEGER"),
+            ("timezone", "VARCHAR(64) DEFAULT ''"),
         ],
     }
     with engine.begin() as conn:

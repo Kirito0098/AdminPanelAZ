@@ -55,6 +55,7 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { PercentBar } from '@/components/ui/percent-bar'
+import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { BandwidthChart, ServerMetrics } from '@/types'
 
@@ -423,7 +424,7 @@ export default function ServerMonitorPage() {
                 <div className="mono mt-2 text-2xl font-bold tracking-tight">{metrics?.uptime || '—'}</div>
                 {metrics?.timestamp && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Снимок: {new Date(metrics.timestamp).toLocaleString('ru-RU')}
+                    Снимок: {formatDateTime(metrics.timestamp)}
                   </p>
                 )}
               </CardContent>
