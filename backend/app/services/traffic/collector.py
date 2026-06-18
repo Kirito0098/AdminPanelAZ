@@ -15,6 +15,26 @@ def _profile_from_log_name(log_name: str) -> str:
     return base
 
 
+def _parse_status_timestamp(value, fallback: datetime) -> datetime:
+    """Parse a protocol-reported activity timestamp (e.g. WireGuard handshake).
+
+    Returns a naive UTC datetime clamped to ``fallback`` (scan time) so a real
+    last-connection time is used for ``last_seen_at`` instead of the moment the
+    collector happened to run. Falls back to ``fallback`` when the value is
+    missing or unparseable.
+    """
+    if not value:
+        return fallback
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return fallback
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    # Never report a future activity time (clock skew / rounding).
+    return min(parsed, fallback)
+
+
 def build_status_rows(
     openvpn_clients: list[OpenVpnClient],
     wireguard_peers: list[WireGuardPeer],
@@ -55,6 +75,7 @@ def build_status_rows(
                 "connected_since_ts": 0,
                 "session_kind": "wireguard",
                 "peer_public_key": peer.public_key,
+                "last_seen_iso": peer.latest_handshake,
             }],
         })
 
@@ -115,6 +136,11 @@ class TrafficCollectorService:
                 is_wireguard = str(profile).endswith("-wg")
                 protocol_type = "wireguard" if is_wireguard else "openvpn"
 
+                # Real last-connection time reported by the protocol (WireGuard
+                # handshake); OpenVPN clients in the status are connected right
+                # now, so they fall back to scan time.
+                client_seen = _parse_status_timestamp(client.get("last_seen_iso"), now)
+
                 session_state = sessions.get(session_key)
                 is_new = session_state is None
 
@@ -130,7 +156,7 @@ class TrafficCollectorService:
                         last_bytes_received=current_rx,
                         last_bytes_sent=current_tx,
                         is_active=True,
-                        last_seen_at=now,
+                        last_seen_at=client_seen,
                     )
                     self.db.add(session_state)
                     sessions[session_key] = session_state
@@ -147,7 +173,7 @@ class TrafficCollectorService:
                         delta_tx = max(current_tx, 0)
                     session_state.last_bytes_received = current_rx
                     session_state.last_bytes_sent = current_tx
-                    session_state.last_seen_at = now
+                    session_state.last_seen_at = client_seen
                     session_state.is_active = True
                     session_state.ended_at = None
 
@@ -158,8 +184,8 @@ class TrafficCollectorService:
                         node_id=self.node_id,
                         common_name=common_name,
                         protocol_type=protocol_type,
-                        first_seen_at=now,
-                        last_seen_at=now,
+                        first_seen_at=client_seen,
+                        last_seen_at=client_seen,
                     )
                     self.db.add(user_stat)
                     stats[stat_key] = user_stat
@@ -185,7 +211,11 @@ class TrafficCollectorService:
                 else:
                     user_stat.total_received_vpn = int(user_stat.total_received_vpn or 0) + max(delta_rx, 0)
                     user_stat.total_sent_vpn = int(user_stat.total_sent_vpn or 0) + max(delta_tx, 0)
-                user_stat.last_seen_at = now
+                user_stat.last_seen_at = (
+                    client_seen
+                    if user_stat.last_seen_at is None
+                    else max(user_stat.last_seen_at, client_seen)
+                )
                 if is_new:
                     user_stat.total_sessions = int(user_stat.total_sessions or 0) + 1
 

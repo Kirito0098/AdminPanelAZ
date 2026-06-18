@@ -11,7 +11,11 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import TrafficSessionState, UserTrafficSample, UserTrafficStatProtocol, VpnConfig, VpnType
-from app.services.traffic.collector import build_session_key, build_status_rows
+from app.services.traffic.collector import (
+    _parse_status_timestamp,
+    build_session_key,
+    build_status_rows,
+)
 
 
 def normalize_traffic_protocol_scope(protocol_scope: str | None) -> str:
@@ -272,6 +276,7 @@ class TrafficMaintenanceService:
 
                 current_rx = int(client.get("bytes_received") or 0)
                 current_tx = int(client.get("bytes_sent") or 0)
+                client_seen = _parse_status_timestamp(client.get("last_seen_iso"), now)
 
                 session_state = sessions_by_key.get(session_key)
                 if session_state is None:
@@ -286,7 +291,7 @@ class TrafficMaintenanceService:
                         last_bytes_received=current_rx,
                         last_bytes_sent=current_tx,
                         is_active=True,
-                        last_seen_at=now,
+                        last_seen_at=client_seen,
                         ended_at=None,
                     )
                     self.db.add(session_state)
@@ -301,7 +306,7 @@ class TrafficMaintenanceService:
                     session_state.last_bytes_received = current_rx
                     session_state.last_bytes_sent = current_tx
                     session_state.is_active = True
-                    session_state.last_seen_at = now
+                    session_state.last_seen_at = client_seen
                     session_state.ended_at = None
                     updated_sessions += 1
 
