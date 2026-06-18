@@ -605,6 +605,7 @@ class MonitorSettingsResponse(BaseModel):
     ram_threshold: int = 90
     interval_seconds: int = 60
     cooldown_minutes: int = 30
+    sustained_seconds: int = 180
 
 
 class MonitorSettingsUpdate(BaseModel):
@@ -612,6 +613,7 @@ class MonitorSettingsUpdate(BaseModel):
     ram_threshold: int | None = Field(default=None, ge=1, le=100)
     interval_seconds: int | None = Field(default=None, ge=10, le=3600)
     cooldown_minutes: int | None = Field(default=None, ge=1, le=1440)
+    sustained_seconds: int | None = Field(default=None, ge=0, le=3600)
 
 
 class AlertMetricInfo(BaseModel):

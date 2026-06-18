@@ -410,6 +410,7 @@ export interface MonitorSettings {
   ram_threshold: number
   interval_seconds: number
   cooldown_minutes: number
+  sustained_seconds: number
 }
 
 export interface AlertMetricInfo {

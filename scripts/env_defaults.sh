@@ -23,6 +23,7 @@ ensure_env_defaults() {
     _ensure_env_default "MONITOR_RAM_THRESHOLD" "90"
     _ensure_env_default "MONITOR_CHECK_INTERVAL_SECONDS" "60"
     _ensure_env_default "MONITOR_COOLDOWN_MINUTES" "30"
+    _ensure_env_default "MONITOR_SUSTAINED_SECONDS" "180"
     _ensure_env_default "CIDR_DB_SOURCE_FETCH_TIMEOUT" "90"
     _ensure_env_default "CIDR_DB_SOURCE_FETCH_RETRIES" "3"
     _ensure_env_default "FEATURE_OPENVPN_ENABLED" "true"

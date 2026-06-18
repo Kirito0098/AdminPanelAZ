@@ -184,6 +184,7 @@ def get_monitor_settings(_: User = Depends(require_admin)):
         ram_threshold=cfg.monitor_ram_threshold,
         interval_seconds=cfg.monitor_check_interval_seconds,
         cooldown_minutes=cfg.monitor_cooldown_minutes,
+        sustained_seconds=cfg.monitor_sustained_seconds,
     )
 
 
@@ -200,22 +201,29 @@ def update_monitor_settings(
     ram = payload.ram_threshold if payload.ram_threshold is not None else cfg.monitor_ram_threshold
     interval = payload.interval_seconds if payload.interval_seconds is not None else cfg.monitor_check_interval_seconds
     cooldown = payload.cooldown_minutes if payload.cooldown_minutes is not None else cfg.monitor_cooldown_minutes
+    sustained = (
+        payload.sustained_seconds
+        if payload.sustained_seconds is not None
+        else cfg.monitor_sustained_seconds
+    )
 
     env_service.set_env_value("MONITOR_CPU_THRESHOLD", str(cpu))
     env_service.set_env_value("MONITOR_RAM_THRESHOLD", str(ram))
     env_service.set_env_value("MONITOR_CHECK_INTERVAL_SECONDS", str(interval))
     env_service.set_env_value("MONITOR_COOLDOWN_MINUTES", str(cooldown))
+    env_service.set_env_value("MONITOR_SUSTAINED_SECONDS", str(sustained))
     os.environ["MONITOR_CPU_THRESHOLD"] = str(cpu)
     os.environ["MONITOR_RAM_THRESHOLD"] = str(ram)
     os.environ["MONITOR_CHECK_INTERVAL_SECONDS"] = str(interval)
     os.environ["MONITOR_COOLDOWN_MINUTES"] = str(cooldown)
+    os.environ["MONITOR_SUSTAINED_SECONDS"] = str(sustained)
     load_app_config.cache_clear()
 
     admin_notify_service.send_settings_change(
         db,
         actor_username=admin.username,
         settings_key="settings_monitor_update",
-        details=f"cpu={cpu}% ram={ram}% interval={interval}s cooldown={cooldown}min",
+        details=f"cpu={cpu}% ram={ram}% interval={interval}s cooldown={cooldown}min sustained={sustained}s",
         client_timezone=get_client_timezone_from_request(request),
     )
     updated = load_app_config()
@@ -224,6 +232,7 @@ def update_monitor_settings(
         ram_threshold=updated.monitor_ram_threshold,
         interval_seconds=updated.monitor_check_interval_seconds,
         cooldown_minutes=updated.monitor_cooldown_minutes,
+        sustained_seconds=updated.monitor_sustained_seconds,
     )
 
 

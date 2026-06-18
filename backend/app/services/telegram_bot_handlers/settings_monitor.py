@@ -20,6 +20,7 @@ _FIELD_LABELS = {
     "mon_ram": ("RAM порог, %", 1, 100),
     "mon_int": ("Интервал проверки, сек", 10, 3600),
     "mon_cd": ("Cooldown, мин", 1, 1440),
+    "mon_sust": ("Мин. длительность нагрузки, сек", 0, 3600),
 }
 
 _ASK_CALLBACKS = {
@@ -27,6 +28,7 @@ _ASK_CALLBACKS = {
     "ram": "mon_ram",
     "int": "mon_int",
     "cd": "mon_cd",
+    "sust": "mon_sust",
 }
 
 
@@ -54,7 +56,8 @@ def _format_monitor_menu(settings) -> str:
         f"Порог CPU: <code>{settings.cpu_threshold}%</code>\n"
         f"Порог RAM: <code>{settings.ram_threshold}%</code>\n"
         f"Интервал: <code>{settings.interval_seconds}</code> сек\n"
-        f"Cooldown: <code>{settings.cooldown_minutes}</code> мин\n\n"
+        f"Cooldown: <code>{settings.cooldown_minutes}</code> мин\n"
+        f"Длительность: <code>{settings.sustained_seconds}</code> сек\n\n"
         "<i>Значения сохраняются в .env; для полного применения может потребоваться перезапуск.</i>"
     )
 
@@ -69,6 +72,9 @@ def _monitor_keyboard() -> dict:
             [
                 inline_button("✏️ Интервал", callback_data="st:mon:ask:int"),
                 inline_button("✏️ Cooldown", callback_data="st:mon:ask:cd"),
+            ],
+            [
+                inline_button("✏️ Длительность", callback_data="st:mon:ask:sust"),
             ],
             [
                 inline_button("🔄 Обновить", callback_data="st:mon"),
@@ -158,6 +164,8 @@ async def handle_monitor_text(ctx: BotContext, text: str) -> bool:
         payload_kwargs["interval_seconds"] = value
     elif field == "mon_cd":
         payload_kwargs["cooldown_minutes"] = value
+    elif field == "mon_sust":
+        payload_kwargs["sustained_seconds"] = value
 
     try:
         _apply_monitor_patch(

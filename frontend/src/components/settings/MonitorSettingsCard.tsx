@@ -17,6 +17,7 @@ export default function MonitorSettingsCard() {
   const [ram, setRam] = useState(90)
   const [intervalSec, setIntervalSec] = useState(60)
   const [cooldownMin, setCooldownMin] = useState(30)
+  const [sustainedSec, setSustainedSec] = useState(180)
 
   useEffect(() => {
     getMonitorSettings()
@@ -25,6 +26,7 @@ export default function MonitorSettingsCard() {
         setRam(data.ram_threshold)
         setIntervalSec(data.interval_seconds)
         setCooldownMin(data.cooldown_minutes)
+        setSustainedSec(data.sustained_seconds)
       })
       .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки мониторинга'))
       .finally(() => setLoading(false))
@@ -39,11 +41,13 @@ export default function MonitorSettingsCard() {
         ram_threshold: ram,
         interval_seconds: intervalSec,
         cooldown_minutes: cooldownMin,
+        sustained_seconds: sustainedSec,
       })
       setCpu(updated.cpu_threshold)
       setRam(updated.ram_threshold)
       setIntervalSec(updated.interval_seconds)
       setCooldownMin(updated.cooldown_minutes)
+      setSustainedSec(updated.sustained_seconds)
       success('Настройки мониторинга сохранены')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
@@ -64,7 +68,7 @@ export default function MonitorSettingsCard() {
           Мониторинг CPU/RAM
         </CardTitle>
         <CardDescription>
-          Пороги Telegram-оповещений и интервал проверки ресурсов узла
+          Пороги Telegram-оповещений, длительность высокой нагрузки и интервал проверки ресурсов узла
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -113,6 +117,21 @@ export default function MonitorSettingsCard() {
                 value={cooldownMin}
                 onChange={(e) => setCooldownMin(Number(e.target.value))}
               />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="monitor-sustained">Мин. длительность высокой нагрузки, сек</Label>
+              <Input
+                id="monitor-sustained"
+                type="number"
+                min={0}
+                max={3600}
+                value={sustainedSec}
+                onChange={(e) => setSustainedSec(Number(e.target.value))}
+              />
+              <p className="text-xs text-muted-foreground">
+                Алерт отправляется только если CPU/RAM держатся выше порога не менее этого времени (0 — сразу).
+                При интервале 60 сек и значении 180 — около 3 подряд высоких замеров.
+              </p>
             </div>
           </div>
           <SettingsAlert variant="info" title="Применение">

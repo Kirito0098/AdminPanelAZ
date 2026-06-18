@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     monitor_ram_threshold: int = 90
     monitor_check_interval_seconds: int = 60
     monitor_cooldown_minutes: int = 30
+    monitor_sustained_seconds: int = 180
     traffic_db_stale_seconds: int = 600
     monitoring_overview_cache_ttl_seconds: int = 45
     cert_sync_enabled: bool = True

@@ -57,6 +57,23 @@ def persist_sample(db: Session, metrics: dict[str, Any] | None = None) -> PanelR
     return sample
 
 
+def persist_host_snapshot(
+    db: Session,
+    *,
+    cpu_percent: float,
+    memory_percent: float,
+) -> PanelResourceSample:
+    """Store host CPU/RAM snapshot for sustained resource alerts."""
+    sample = PanelResourceSample(
+        host_cpu_percent=float(cpu_percent),
+        host_memory_percent=float(memory_percent),
+    )
+    db.add(sample)
+    db.commit()
+    db.refresh(sample)
+    return sample
+
+
 def purge_old_samples(db: Session) -> int:
     cutoff = _utcnow() - timedelta(days=settings.panel_resource_metrics_retention_days)
     deleted = (
