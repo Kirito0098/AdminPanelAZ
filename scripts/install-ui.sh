@@ -200,18 +200,20 @@ ui_progress_done() {
 
 ui_show_main_menu() {
   ui_show_banner
-  ui_box_top "Выберите действие"
-  ui_box_line "  1) Новая установка"
-  ui_box_line "     Интерактивный мастер, настройка с нуля"
+  ui_box_top "Главное меню — что вы хотите сделать?"
+  ui_box_line "  1) Новая установка  (рекомендуется)"
+  ui_box_line "     Пошаговый мастер: настроит панель с нуля"
   ui_box_line "  2) Переустановка"
-  ui_box_line "     Резервная копия .env, удаление сервисов, новая установка"
-  ui_box_line "  3) Полное удаление"
-  ui_box_line "     Остановка сервисов, каталог проекта сохраняется"
+  ui_box_line "     Сохранит .env, удалит сервисы и поставит заново"
+  ui_box_line "  3) Удаление"
+  ui_box_line "     Остановит сервисы; каталог проекта останется"
   ui_box_line "  4) Удалить всё без следов"
-  ui_box_line "     Сервисы, конфиг, БД, каталог проекта и бэкапы"
+  ui_box_line "     Снесёт сервисы, конфиг, БД, проект и бэкапы"
   ui_box_line "  5) Справка"
-  ui_box_line "     Опции CLI и примеры запуска"
+  ui_box_line "     Список опций командной строки и примеры"
   ui_box_bottom
+  echo
+  print_info "Введите номер и нажмите Enter. По умолчанию — 1 (новая установка)."
 }
 
 ui_confirm() {
@@ -242,67 +244,104 @@ ui_confirm() {
 ui_show_help() {
   ui_show_banner
   cat <<'EOF'
-Использование: sudo ./install.sh [опции]
+AdminPanelAZ — веб-панель управления AntiZapret VPN.
+Этот скрипт ставит, обновляет и удаляет панель и/или агент узла.
 
-Единая точка входа для установки AdminPanelAZ.
-Без аргументов (TTY) - интерактивное меню.
+Использование:
+  sudo ./install.sh [опции]
 
-Для начинающих: sudo ./install-easy.sh (простой мастер с пояснениями).
+================================================================
+  БЫСТРЫЙ СТАРТ
+================================================================
+  Проще всего — запустить без опций, откроется меню с подсказками:
+      sudo ./install.sh
 
-Действия:
-  (меню)                Новая установка / переустановка / удаление / справка
-  --uninstall           Полное удаление сервисов (каталог проекта сохраняется)
-  --purge-all           Удалить всё без следов (сервисы, проект, бэкапы)
-  --purge               Вместе с --uninstall: удалить каталог проекта
-  --reinstall           Переустановка: удалить сервисы и установить заново
-  --easy                Простой мастер (как install-easy.sh)
+  Новичкам рекомендуем простой мастер с пояснениями на каждом шаге:
+      sudo ./install-easy.sh
 
-Опции установки:
-  --with-daemon         Запустить prod daemon через start.sh после установки
-  --with-systemd        Установить systemd unit (без мастера - флаг явный)
-  --with-node-agent     Добавить node agent к панели (без мастера - флаг явный)
-  --node-only           Только node agent на VPN-сервере (без панели)
-  --force               Перезаписать существующий backend/.env из .env.example
-  --non-interactive     Без интерактивного мастера (флаги и переменные окружения)
-  -y, --yes             Принять значения по умолчанию
-  --help, -h            Показать эту справку
+================================================================
+  1. ЧТО СДЕЛАТЬ (действие)
+================================================================
+  (без опций)         Открыть интерактивное меню (установка / удаление / справка)
+  --easy              Простой пошаговый мастер для новичков (= install-easy.sh)
+  --reinstall         Переустановить: сохранить .env, снести сервисы, поставить заново
+  --uninstall         Удалить сервисы и конфигурацию (каталог проекта остаётся)
+  --uninstall --purge Удалить сервисы + сам каталог проекта
+  --purge-all         Удалить ВСЁ без следов (сервисы, проект, БД, бэкапы)
 
-Без TTY (pipe, CI):
-  wget|curl | sudo bash без флагов НЕ поддерживается — мастер недоступен.
-  Скачайте скрипт: wget -qO /tmp/install.sh URL && sudo bash /tmp/install.sh
-  Или явные флаги: --non-interactive --with-systemd / --node-only --with-systemd
+================================================================
+  2. ЧТО УСТАНОВИТЬ (роль сервера)
+================================================================
+  (по умолчанию)      Панель управления — веб-интерфейс и API (controller)
+  --with-node-agent   Панель + локальный агент узла на этом же сервере
+  --node-only         Только агент узла для VPN-сервера (без панели)
 
-Переменные окружения:
-  INSTALL_FROM_GIT      URL репозитория (по умолчанию — основной репозиторий AdminPanelAZ)
-  INSTALL_TARGET        Каталог установки при клонировании (по умолчанию /opt/AdminPanelAZ)
-  INSTALL_USER          Пользователь systemd-сервисов (по умолчанию root)
+================================================================
+  3. КАК ЗАПУСКАТЬ ПОСЛЕ УСТАНОВКИ (автозапуск)
+================================================================
+  --with-systemd      Системный сервис, автозапуск при загрузке (рекомендуется)
+  --with-daemon       Фоновый процесс через start.sh (без systemd)
+  (ничего)            Не запускать — в конце покажем команды для ручного старта
 
-Без TTY (--non-interactive): мастер не запускается. Минимальная установка:
-  sudo ./install.sh --non-interactive --with-systemd -y
-Для production экспортируйте WIZ_* перед запуском (примеры):
-  WIZ_APP_ENV=production WIZ_NGINX_MODE=le WIZ_NGINX_DOMAIN=panel.example.com
-  WIZ_NGINX_EMAIL=admin@example.com WIZ_CONFIGURE_FIREWALL=true
-  WIZ_DDNS_PROVIDER=duckdns WIZ_DDNS_SUBDOMAIN=myhost WIZ_DDNS_TOKEN=...
-  WIZ_ADMIN_USERNAME=admin WIZ_ADMIN_PASSWORD=... WIZ_BACKEND_PORT=8000
-  WIZ_INSTALL_TYPE=controller|node  WIZ_RUN_MODE=systemd (через --with-systemd)
+================================================================
+  4. ПРОЧИЕ ОПЦИИ
+================================================================
+  --force             Перезаписать существующий backend/.env из шаблона .env.example
+  --non-interactive   Тихий режим без мастера (настройка только флагами и WIZ_*)
+  -y, --yes           Соглашаться со значениями по умолчанию (не задавать вопросов)
+  --help, -h          Показать эту справку
 
-Интерактивный режим:
-  Мастер задаёт тип (панель / панель+локальный AZ / node-only),
-  сеть, администратора, node agent, systemd/daemon и опции .env.
-  AntiZapret устанавливается отдельно в /root/antizapret (см. README).
+================================================================
+  ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
+================================================================
+  INSTALL_FROM_GIT    URL репозитория (по умолчанию — основной репозиторий AdminPanelAZ)
+  INSTALL_TARGET      Каталог установки при клонировании (по умолчанию /opt/AdminPanelAZ)
+  INSTALL_USER        Пользователь systemd-сервисов (по умолчанию root)
 
-Примеры:
+================================================================
+  УСТАНОВКА БЕЗ ТЕРМИНАЛА (CI / автоматизация)
+================================================================
+  Запуск «wget|curl | sudo bash» без флагов НЕ поддерживается:
+  без терминала мастер недоступен и тип установки определить нельзя.
+
+  Сначала скачайте скрипт, затем запустите:
+      wget -qO /tmp/install.sh <URL> && sudo bash /tmp/install.sh
+
+  Либо передайте явные флаги (минимальная установка панели):
+      sudo ./install.sh --non-interactive --with-systemd -y
+
+  Для production задайте настройки через переменные WIZ_* перед запуском:
+      WIZ_APP_ENV=production WIZ_NGINX_MODE=le WIZ_NGINX_DOMAIN=panel.example.com \
+      WIZ_NGINX_EMAIL=admin@example.com WIZ_CONFIGURE_FIREWALL=true \
+      WIZ_ADMIN_USERNAME=admin WIZ_ADMIN_PASSWORD=... WIZ_BACKEND_PORT=8000 \
+      WIZ_INSTALL_TYPE=controller \
+        sudo -E ./install.sh --non-interactive --with-systemd -y
+
+================================================================
+  ПРИМЕРЫ
+================================================================
+  # Новичкам — простой мастер
   sudo ./install-easy.sh
-  wget -qO /tmp/install-easy.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install-easy.sh
-  sudo bash /tmp/install-easy.sh
+
+  # Обычная установка с меню (из каталога проекта)
+  cd /opt/AdminPanelAZ && sudo ./install.sh
+
+  # Скачать и запустить мастер
   wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh
   sudo bash /tmp/install.sh
-  cd /opt/AdminPanelAZ && sudo ./install.sh
+
+  # Тихая установка панели как systemd-сервиса
   sudo ./install.sh --non-interactive --with-systemd -y
+
+  # Тихая установка только агента узла на VPN-сервере
   sudo ./install.sh --node-only --with-systemd -y
-  sudo ./install.sh --uninstall -y
-  sudo ./install.sh --uninstall --purge -y
-  sudo ./install.sh --reinstall
+
+  # Удаление / переустановка
+  sudo ./install.sh --uninstall -y           # удалить сервисы
+  sudo ./install.sh --uninstall --purge -y   # + удалить каталог проекта
+  sudo ./install.sh --reinstall              # переустановить с сохранением .env
+
+Примечание: AntiZapret устанавливается отдельно в /root/antizapret (см. README).
 EOF
 }
 
