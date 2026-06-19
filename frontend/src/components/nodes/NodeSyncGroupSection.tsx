@@ -1,7 +1,8 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { GitCompare, Loader2, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { GitCompare, Globe, Loader2, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
 import {
   ApiError,
+  applyNodeSyncGroupSharedDomain,
   createNodeSyncGroup,
   deleteNodeSyncGroup,
   getNodeSyncGroups,
@@ -239,6 +240,29 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
     )
   }
 
+  const runSharedDomainApply = useCallback(
+    async (groupId: number, domain: string) => {
+      setActionLoading(groupId)
+      try {
+        const accepted = await applyNodeSyncGroupSharedDomain(groupId)
+        success(accepted.message)
+        await load()
+        startPoll(accepted.task_id, {
+          onComplete: () => {
+            success(`Домен ${domain} применён на узлах (doall.sh + client.sh 7)`)
+            void load()
+          },
+          onError: (_task, message) => notifyError(message),
+        })
+      } catch (err) {
+        notifyError(err instanceof ApiError ? err.message : 'Ошибка применения shared domain')
+      } finally {
+        setActionLoading(null)
+      }
+    },
+    [load, notifyError, startPoll, success],
+  )
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     const primary = Number(primaryId)
@@ -255,15 +279,22 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         replica_node_ids: replicaIds,
         sync_mode: syncMode,
       }
+      const domainChanged = !editing || editing.shared_domain.trim() !== payload.shared_domain
+      let groupId: number
       if (editing) {
-        await updateNodeSyncGroup(editing.id, payload)
+        const updated = await updateNodeSyncGroup(editing.id, payload)
+        groupId = updated.id
         success('Sync Group обновлена')
       } else {
-        await createNodeSyncGroup(payload)
+        const created = await createNodeSyncGroup(payload)
+        groupId = created.id
         success('Sync Group создана')
       }
       setDialogOpen(false)
       await load()
+      if (domainChanged) {
+        await runSharedDomainApply(groupId, payload.shared_domain)
+      }
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения Sync Group')
     } finally {
@@ -416,6 +447,16 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                         >
                           <Upload size={14} />
                           Push full
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={actionLoading === group.id || group.sync_status === 'pending'}
+                          onClick={() => void runSharedDomainApply(group.id, group.shared_domain)}
+                          title="Записать домен в OPENVPN_HOST/WIREGUARD_HOST на всех узлах и выполнить doall.sh + client.sh 7"
+                        >
+                          <Globe size={14} />
+                          Домен → узлы
                         </Button>
                         <Button
                           variant="outline"

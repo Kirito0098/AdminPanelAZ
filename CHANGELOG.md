@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`node_sync/policy_sync.py`** — `replicate_policy_op` / `maybe_replicate_policy_op`: block/unblock, traffic limit, WG expiry; копирование policy row через `copy_single_client_policy`.
 - **`node_sync/config_sync.py`** — `replicate_config_files` / `maybe_replicate_config_files`; обёртка над `edit_files_transfer`; учёт `CONFIG_FINGERPRINT_EXCLUDE`.
 - **`node_sync/antizapret_sync.py`** — репликация `setup` (`filter_ha_replicable_settings`, `ANTIZAPRET_HA_SETTING_EXCLUDE`) и фоновый apply на replica (`enqueue_ha_routing_apply_replicas`).
+- **`node_sync/shared_domain.py`** — `apply_shared_domain_to_members`: запись `shared_domain` группы в `OPENVPN_HOST` / `WIREGUARD_HOST` (`/root/antizapret/setup`) на **primary и все replica**, затем `doall.sh` + `client.sh 7` на каждом узле. Эндпоинт `POST /nodes/sync-groups/{id}/apply-shared-domain` (фоновая задача `node_sync_shared_domain`); авто-запуск при создании группы и смене домена + кнопка «Домен → узлы» в UI.
 - **`node_sync/provider_sync.py`** — provider files и deploy после compile (`replicate_provider_content`, `deploy_compiled_providers_to_replicas`).
 - **`node_sync/client_ops_sync.py`** — `replicate_openvpn_disconnect` / `maybe_replicate_openvpn_disconnect` (best-effort: клиент не online на replica — не ошибка).
 - **`policy_import.copy_single_client_policy`** — точечное копирование policy row primary → replica.

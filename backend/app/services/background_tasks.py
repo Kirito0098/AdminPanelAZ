@@ -42,6 +42,7 @@ _PIPELINE_TASK_TYPES = {
     "config_bulk_op",
     "config_csv_import",
     "node_sync_push_full",
+    "node_sync_shared_domain",
     "node_update_roll",
 }
 
@@ -62,6 +63,7 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "config_bulk_op": ("Массовая операция с клиентами…", "Подготовка…", 3),
     "config_csv_import": ("Импорт CSV клиентов…", "Подготовка импорта…", 3),
     "node_sync_push_full": ("Синхронизация HA…", "Подготовка push-full…", 5),
+    "node_sync_shared_domain": ("Применение shared domain…", "Запись хостов в setup…", 5),
     "node_update_roll": ("Rolling update узлов…", "Подготовка очереди…", 3),
 }
 
@@ -82,6 +84,7 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "config_bulk_op": "Массовая операция завершена",
     "config_csv_import": "Импорт CSV завершён",
     "node_sync_push_full": "Синхронизация HA завершена",
+    "node_sync_shared_domain": "Shared domain применён на узлах",
     "node_update_roll": "Rolling update завершён",
 }
 

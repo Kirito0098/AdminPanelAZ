@@ -17,6 +17,7 @@
 | GET/POST | `/api/nodes/sync-groups` |
 | GET/PUT/DELETE | `/api/nodes/sync-groups/{id}` |
 | POST | `/api/nodes/sync-groups/{id}/push-full` |
+| POST | `/api/nodes/sync-groups/{id}/apply-shared-domain` |
 | POST | `/api/nodes/sync-groups/{id}/verify` |
 | GET | `/api/nodes/sync-groups/{id}/status` |
 
@@ -100,6 +101,10 @@ Node agent: `POST /backups/antizapret/restore`, `GET /backups/antizapret/downloa
 | Config files | `warper-include-ips.txt` и др. node-local файлы | `CONFIG_FINGERPRINT_EXCLUDE` в `fingerprints.py` |
 | Setup (`/root/antizapret/setup`) | `ANTIZAPRET_WARP`, `VPN_WARP` | `ANTIZAPRET_HA_SETTING_EXCLUDE` |
 | Setup | **`OPENVPN_HOST` / `WIREGUARD_HOST` реплицируются** (общий `shared_domain`) | — |
+
+### Apply shared domain (`POST …/apply-shared-domain`)
+
+Записывает `shared_domain` группы в `OPENVPN_HOST` и `WIREGUARD_HOST` в `/root/antizapret/setup` на **primary и всех replica**, затем на каждом узле выполняет `doall.sh` (apply_config_changes) + `client.sh 7` (recreate_profiles), чтобы новый хост попал в перегенерированные профили клиентов. Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается автоматически при создании группы и при изменении `shared_domain`, а также вручную кнопкой «Домен → узлы».
 | Verify / Push full | Excluded config не ломают паритет fingerprint `antizapret/config` | `fingerprints.py` |
 
 ### Partial failure

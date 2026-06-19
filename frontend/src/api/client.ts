@@ -677,6 +677,16 @@ export async function pushNodeSyncGroupFull(id: number) {
   }>(`/nodes/sync-groups/${id}/push-full`, { method: 'POST' })
 }
 
+export async function applyNodeSyncGroupSharedDomain(id: number) {
+  return apiFetch<{
+    task_id: string
+    group_id: number
+    message: string
+    queued?: boolean
+    status_url?: string | null
+  }>(`/nodes/sync-groups/${id}/apply-shared-domain`, { method: 'POST' })
+}
+
 export async function verifyNodeSyncGroup(id: number) {
   return apiFetch<import('../types').NodeSyncVerifyResult>(`/nodes/sync-groups/${id}/verify`, {
     method: 'POST',
