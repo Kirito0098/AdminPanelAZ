@@ -1,11 +1,16 @@
 """AZ-WARP (WARPER) management API."""
 
-from fastapi import APIRouter, Depends, Query
+import asyncio
+import json
+from collections.abc import Iterator
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.auth import require_admin
-from app.models import User
+from app.database import SessionLocal, get_db
+from app.auth import decode_access_token_username, require_admin
+from app.models import User, UserRole
 from app.schemas import (
     WarperActionResponse,
     WarperCatalogInstalledResponse,
@@ -38,6 +43,7 @@ from app.schemas import (
     WarperTextContentResponse,
     WarperTextSaveRequest,
     WarperTrafficResponse,
+    WarperUpdatesCheckResponse,
 )
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.warper import enrich_warper_traffic_payload
@@ -469,3 +475,73 @@ def warper_catalog_refresh(_: User = Depends(require_admin), db: Session = Depen
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     return _action_response(adapter.warper_catalog_refresh_cache(), node)
+
+
+@router.get("/updates/check", response_model=WarperUpdatesCheckResponse)
+def warper_updates_check(
+    force: bool = Query(False),
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    data = adapter.warper_check_for_updates(force=force)
+    return WarperUpdatesCheckResponse(**data, **_node_meta(node))
+
+
+@router.post("/updates/apply", response_model=WarperActionResponse)
+def warper_updates_apply(
+    timeout: int = Query(600, ge=60, le=900),
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_apply_update(timeout=timeout), node)
+
+
+def _admin_from_stream_token(token: str, db: Session) -> User:
+    username = decode_access_token_username(token)
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    user = db.query(User).filter(User.username == username).first()
+    if user is None or not user.is_active or user.role != UserRole.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    return user
+
+
+def _iter_warper_update_sse(adapter) -> Iterator[str]:
+    for event in adapter.warper_iter_update_stream():
+        yield f"data: {json.dumps(event, default=str)}\n\n"
+
+
+@router.get("/updates/stream")
+async def warper_updates_stream(
+    request: Request,
+    token: str = Query(..., description="JWT access token"),
+):
+    db = SessionLocal()
+    try:
+        _admin_from_stream_token(token, db)
+    finally:
+        db.close()
+
+    async def event_generator():
+        db = SessionLocal()
+        try:
+            adapter = get_active_adapter(db)
+            for chunk in _iter_warper_update_sse(adapter):
+                if await request.is_disconnected():
+                    break
+                yield chunk
+                await asyncio.sleep(0)
+        except Exception as exc:
+            yield f"data: {json.dumps({'event': 'error', 'detail': str(exc)}, default=str)}\n\n"
+        finally:
+            db.close()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

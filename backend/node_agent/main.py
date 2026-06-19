@@ -1,13 +1,14 @@
 """Lightweight AntiZapret node agent — runs on each VPN server node."""
 
 import ipaddress
+import json
 import os
 import secrets
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -30,7 +31,7 @@ from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.profile_files import profile_files_batch_key
 from app.services.server_monitor import ServerMonitorService
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
-from app.services.warper import run_warper_action
+from app.services.warper import WarperService, run_warper_action
 
 NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
@@ -695,6 +696,30 @@ def warper_catalog_update(name: str = "", _: None = Depends(verify_api_key)):
 @app.post("/warper/catalog/refresh")
 def warper_catalog_refresh(_: None = Depends(verify_api_key)):
     return run_warper_action("catalog_refresh_cache")
+
+
+@app.get("/warper/updates/check")
+def warper_updates_check(force: bool = False, _: None = Depends(verify_api_key)):
+    return run_warper_action("check_for_updates", force=force)
+
+
+@app.post("/warper/updates/apply")
+def warper_updates_apply(timeout: int = Query(600, ge=60, le=900), _: None = Depends(verify_api_key)):
+    return run_warper_action("apply_update", timeout=timeout)
+
+
+@app.get("/warper/updates/stream")
+def warper_updates_stream(_: None = Depends(verify_api_key)):
+    def event_generator():
+        service = WarperService()
+        for event in service.iter_update_stream_events():
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/system/updates")

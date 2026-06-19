@@ -101,6 +101,8 @@ REMOTE_ADAPTER_ENDPOINTS: dict[str, str] = {
     "warper_catalog_update": "POST /warper/catalog/update",
     "warper_catalog_list_installed": "GET /warper/catalog/installed",
     "warper_catalog_refresh_cache": "POST /warper/catalog/refresh",
+    "warper_check_for_updates": "GET /warper/updates/check",
+    "warper_apply_update": "POST /warper/updates/apply",
 }
 
 

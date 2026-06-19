@@ -9,6 +9,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any, Literal
 
 from fastapi import HTTPException, status
@@ -910,6 +911,56 @@ class WarperService:
         method = self._catalog_method("catalog_refresh_cache")
         return _result_or_raise(method(), default={"message": "OK"})
 
+    def _updates_method(self, name: str):
+        api = self._api_client()
+        method = getattr(api, name, None)
+        if not callable(method):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"{name} недоступен в warper_api. Обновите AZ-WARP на узле (нужна версия ≥ 1.4.0).",
+            )
+        return method
+
+    def check_for_updates(self, *, force: bool = False) -> dict[str, Any]:
+        result = self._updates_method("check_for_updates")(force=force)
+        if hasattr(result, "data") and isinstance(result.data, dict):
+            payload = dict(result.data)
+            message = getattr(result, "message", None)
+            if message:
+                payload["message"] = message
+            return payload
+        unwrapped = _result_or_raise(result, default={})
+        return unwrapped if isinstance(unwrapped, dict) else {"raw": unwrapped}
+
+    def apply_update(self, timeout: int = 600) -> dict[str, Any]:
+        timeout = max(60, min(int(timeout), 900))
+        return _result_or_raise(self._updates_method("update")(timeout=timeout), default={"message": "OK"})
+
+    def iter_update_stream_events(self) -> Iterator[dict[str, Any]]:
+        stream_fn = self._updates_method("update_stream")
+        proc, err = stream_fn()
+        if err:
+            yield {"event": "error", "detail": err}
+            return
+        if proc is None:
+            yield {"event": "error", "detail": "Не удалось запустить обновление"}
+            return
+        try:
+            stdout = proc.stdout
+            if stdout is None:
+                yield {"event": "error", "detail": "stdout обновления недоступен"}
+                return
+            for line in iter(stdout.readline, ""):
+                if line:
+                    yield {"event": "log", "line": line.rstrip("\n")}
+            rc = proc.wait(timeout=600)
+            yield {"event": "done", "return_code": rc, "success": rc == 0}
+        except Exception as exc:
+            yield {"event": "error", "detail": str(exc)}
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
 
 def _singbox_systemctl(action: Literal["start", "stop", "restart"]) -> dict[str, Any]:
     """Fallback when warper_api singbox_* methods are missing or fail."""
@@ -1068,6 +1119,8 @@ def run_warper_action(operation: str, **kwargs: Any) -> Any:
         "catalog_update": lambda: service.catalog_update(kwargs.get("name", "")),
         "catalog_list_installed": lambda: service.catalog_list_installed(),
         "catalog_refresh_cache": lambda: service.catalog_refresh_cache(),
+        "check_for_updates": lambda: service.check_for_updates(force=kwargs.get("force", False)),
+        "apply_update": lambda: service.apply_update(kwargs.get("timeout", 600)),
     }
     if operation not in actions:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown action")

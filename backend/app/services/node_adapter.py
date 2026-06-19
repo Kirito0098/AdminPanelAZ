@@ -286,6 +286,15 @@ class NodeAdapter(ABC):
     @abstractmethod
     def warper_catalog_refresh_cache(self) -> dict: ...
 
+    @abstractmethod
+    def warper_check_for_updates(self, *, force: bool = False) -> dict: ...
+
+    @abstractmethod
+    def warper_apply_update(self, timeout: int = 600) -> dict: ...
+
+    @abstractmethod
+    def warper_iter_update_stream(self): ...
+
 
 class LocalNodeAdapter(NodeAdapter):
     def __init__(self, service: AntiZapretService | None = None, warper: WarperService | None = None):
@@ -577,6 +586,15 @@ class LocalNodeAdapter(NodeAdapter):
 
     def warper_catalog_refresh_cache(self) -> dict:
         return self._warper.catalog_refresh_cache()
+
+    def warper_check_for_updates(self, *, force: bool = False) -> dict:
+        return self._warper.check_for_updates(force=force)
+
+    def warper_apply_update(self, timeout: int = 600) -> dict:
+        return self._warper.apply_update(timeout)
+
+    def warper_iter_update_stream(self):
+        return self._warper.iter_update_stream_events()
 
 
 class RemoteNodeAdapter(NodeAdapter):
@@ -1180,6 +1198,34 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def warper_catalog_refresh_cache(self) -> dict:
         return self._request("POST", "/warper/catalog/refresh", timeout=60.0)
+
+    def warper_check_for_updates(self, *, force: bool = False) -> dict:
+        return self._request("GET", "/warper/updates/check", params={"force": force}, timeout=30.0)
+
+    def warper_apply_update(self, timeout: int = 600) -> dict:
+        return self._request("POST", "/warper/updates/apply", params={"timeout": timeout}, timeout=float(timeout) + 30.0)
+
+    def warper_iter_update_stream(self):
+        import json
+
+        with httpx.stream(
+            "GET",
+            f"{self.base_url}/warper/updates/stream",
+            headers=self._headers(),
+            timeout=httpx.Timeout(660.0, connect=30.0),
+            **self._client_kwargs(),
+        ) as response:
+            if response.status_code >= 400:
+                detail = response.read().decode("utf-8", errors="replace")
+                yield {"event": "error", "detail": detail or f"HTTP {response.status_code}"}
+                return
+            for line in response.iter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                try:
+                    yield json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
 
     def rotate_api_key(self, new_api_key: str) -> dict[str, Any]:
         return self._request(

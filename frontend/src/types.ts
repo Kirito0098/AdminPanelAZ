@@ -1464,6 +1464,22 @@ export interface WarperActionResponse {
   [key: string]: unknown
 }
 
+export interface WarperUpdatesCheckResponse {
+  current?: string | null
+  remote?: string | null
+  update_available: boolean
+  error?: string | null
+  message?: string | null
+  node_id?: number | null
+  node_name?: string | null
+  node_host?: string | null
+}
+
+export type WarperUpdateStreamEvent =
+  | { event: 'log'; line: string }
+  | { event: 'done'; return_code?: number; success?: boolean }
+  | { event: 'error'; detail?: string }
+
 export interface WarperDomainsBulkResponse {
   added: string[]
   added_count: number

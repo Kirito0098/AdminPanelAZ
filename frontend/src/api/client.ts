@@ -1611,6 +1611,38 @@ export async function refreshWarperCatalog() {
   return apiFetch<import('../types').WarperActionResponse>('/warper/catalog/refresh', { method: 'POST' })
 }
 
+export async function checkWarperUpdates(force = false) {
+  const params = force ? '?force=true' : ''
+  return apiFetch<import('../types').WarperUpdatesCheckResponse>(`/warper/updates/check${params}`)
+}
+
+export async function applyWarperUpdate(timeout = 600) {
+  return apiFetch<import('../types').WarperActionResponse>(`/warper/updates/apply?timeout=${timeout}`, {
+    method: 'POST',
+  })
+}
+
+export function openWarperUpdateStream(
+  onEvent: (event: import('../types').WarperUpdateStreamEvent) => void,
+  onError?: (message: string) => void,
+): EventSource | null {
+  const token = getToken()
+  if (!token) return null
+  const url = `${API_BASE}/warper/updates/stream?token=${encodeURIComponent(token)}`
+  const source = new EventSource(url)
+  source.onmessage = (event) => {
+    try {
+      onEvent(JSON.parse(event.data) as import('../types').WarperUpdateStreamEvent)
+    } catch {
+      onError?.('Ошибка разбора потока обновления AZ-WARP')
+    }
+  }
+  source.onerror = () => {
+    onError?.('Соединение с потоком обновления прервано')
+  }
+  return source
+}
+
 export async function getSecuritySettings() {
   return apiFetch<import('../types').SecuritySettings>('/security')
 }

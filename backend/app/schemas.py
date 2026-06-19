@@ -1297,6 +1297,17 @@ class WarperCatalogInstalledResponse(BaseModel):
     node_name: str | None = None
 
 
+class WarperUpdatesCheckResponse(BaseModel):
+    current: str | None = None
+    remote: str | None = None
+    update_available: bool = False
+    error: str | None = None
+    message: str | None = None
+    node_id: int | None = None
+    node_name: str | None = None
+    node_host: str | None = None
+
+
 class TrafficClientRow(BaseModel):
     common_name: str
     protocol_type: str

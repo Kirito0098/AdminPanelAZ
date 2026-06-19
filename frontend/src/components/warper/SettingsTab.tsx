@@ -41,6 +41,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import type { WarperHealthResponse } from '@/types'
 import { cn } from '@/lib/utils'
 import WarperSection, { WarperStatTile } from './WarperSection'
+import WarperUpdatesSection from './WarperUpdatesSection'
 import {
   formatOutboundMode,
   isWarperDisabled,
@@ -559,6 +560,8 @@ export default function SettingsTab({ health }: SettingsTabProps) {
           </Button>
         </div>
       </WarperSection>
+
+      <WarperUpdatesSection health={health} />
     </div>
   )
 }

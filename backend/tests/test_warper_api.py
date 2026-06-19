@@ -71,6 +71,19 @@ def warper_api_client(tmp_path):
     mock_adapter.add_warper_domain.return_value = {"message": "added"}
     mock_adapter.remove_warper_domain.return_value = {"message": "removed"}
     mock_adapter.sync_warper_domains.return_value = {"message": "synced"}
+    mock_adapter.warper_check_for_updates.return_value = {
+        "current": "1.4.3",
+        "remote": "1.4.4",
+        "update_available": True,
+        "message": "Доступно обновление: 1.4.3 → 1.4.4",
+    }
+    mock_adapter.warper_apply_update.return_value = {"message": "updated", "success": True}
+    mock_adapter.warper_iter_update_stream.return_value = iter(
+        [
+            {"event": "log", "line": "Downloading..."},
+            {"event": "done", "return_code": 0, "success": True},
+        ]
+    )
 
     with (
         patch("app.config.get_settings", return_value=test_settings),
@@ -127,6 +140,26 @@ def test_api_sync_warper_domains(warper_api_client):
     response = client.post("/api/warper/domains/sync", headers=headers)
     assert response.status_code == 200
     mock_adapter.sync_warper_domains.assert_called_once()
+
+
+def test_api_warper_updates_check(warper_api_client):
+    client, headers, mock_adapter, node = warper_api_client
+    response = client.get("/api/warper/updates/check?force=true", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["update_available"] is True
+    assert data["current"] == "1.4.3"
+    assert data["remote"] == "1.4.4"
+    assert data["node_id"] == node.id
+    mock_adapter.warper_check_for_updates.assert_called_once_with(force=True)
+
+
+def test_api_warper_updates_apply(warper_api_client):
+    client, headers, mock_adapter, _node = warper_api_client
+    response = client.post("/api/warper/updates/apply?timeout=600", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["message"] == "updated"
+    mock_adapter.warper_apply_update.assert_called_once_with(timeout=600)
 
 
 def test_api_warper_requires_auth(warper_api_client):
