@@ -161,7 +161,7 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
         id: 'tests',
         label: 'Диагностика',
         icon: FlaskConical,
-        description: 'Runbook запуска и smoke-тесты backend (pytest)',
+        description: 'Runbook запуска и site-diagnostics',
         settingsTab: 'tests',
       },
     ],

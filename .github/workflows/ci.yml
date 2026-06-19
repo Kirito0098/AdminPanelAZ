@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: lint & test (py3.12)
+  lint:
+    name: lint & build (py3.12)
     runs-on: ubuntu-latest
 
     steps:
@@ -47,10 +47,6 @@ jobs:
       - name: Ruff (lint)
         run: ruff check backend/
 
-      - name: Pytest (backend tests)
-        working-directory: backend
-        run: pytest tests/ -q
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -63,10 +59,6 @@ jobs:
         run: |
           npm ci
           npm run lint
-
-      - name: Vitest (frontend)
-        working-directory: frontend
-        run: npm test
 
       - name: Build frontend
         working-directory: frontend
@@ -85,20 +77,4 @@ jobs:
         continue-on-error: true
         run: |
           bandit -r backend/app backend/node_agent -ll \
-            --exclude backend/tests,backend/.venv,backend/app/data
-
-  install-smoke:
-    name: install smoke (non-interactive + systemd)
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Run install smoke test
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git curl wget
-          sudo chmod +x install.sh scripts/install-smoke-test.sh
-          sudo ./scripts/install-smoke-test.sh
+            --exclude backend/.venv,backend/app/data

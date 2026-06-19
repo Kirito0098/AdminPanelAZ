@@ -40,7 +40,6 @@ from app.routers import (
     site_diagnostics,
     system,
     feature_toggles,
-    tests,
     tasks,
     tg_mini,
     traffic,
@@ -213,7 +212,6 @@ app.include_router(logs.router, prefix="/api")
 app.include_router(system.router, prefix="/api")
 app.include_router(tg_mini.router, prefix="/api")
 app.include_router(telegram_webhook.router, prefix="/api")
-app.include_router(tests.router, prefix="/api")
 app.include_router(site_diagnostics.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
 app.include_router(feature_toggles.router, prefix="/api")

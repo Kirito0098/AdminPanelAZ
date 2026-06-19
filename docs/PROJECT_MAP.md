@@ -66,7 +66,6 @@
 │   │   ├── services/            # бизнес-логика (~140 файлов)
 │   │   ├── middleware/          # rate limit, security, sessions
 │   │   └── static/tg_mini/      # собранный Mini App
-│   └── tests/                   # ~90 pytest-тестов
 ├── frontend/
 │   ├── src/
 │   │   ├── App.tsx              # маршруты веб-панели
@@ -143,7 +142,7 @@
 | `monitoring` | `MonitoringTab`, `AlertRulesCard` | [`nastrojki/monitoring-i-alerty.md`](nastrojki/monitoring-i-alerty.md) |
 | `modules` | `FeatureTogglesTab` | [`nastrojki/moduli.md`](nastrojki/moduli.md) |
 | `updates` | `UpdatesTab` | [`nastrojki/obnovleniya.md`](nastrojki/obnovleniya.md) |
-| `tests` | `RunbookTab`, `TestsTab` | [`nastrojki/diagnostika.md`](nastrojki/diagnostika.md) |
+| `tests` | `RunbookTab` | [`nastrojki/diagnostika.md`](nastrojki/diagnostika.md) |
 
 ---
 
@@ -299,16 +298,6 @@
 - CIDR: `backend/data/cidr/cidr.db`
 
 **Dev-порты:** backend `:8000`, frontend `:5173` (`start.sh`).
-
----
-
-## Тесты
-
-```bash
-cd backend && .venv/bin/pytest tests/
-```
-
-Тесты покрывают: CIDR pipeline, Telegram, traffic, nodes/mTLS, security, backups, warper, feature toggles.
 
 ---
 

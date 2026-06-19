@@ -1,4 +1,4 @@
-"""Thin wrapper over BackgroundTaskService for CIDR pipeline and pytest tasks."""
+"""Thin wrapper over BackgroundTaskService for CIDR pipeline tasks."""
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable

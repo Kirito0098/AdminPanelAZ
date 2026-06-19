@@ -264,14 +264,14 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
     FeatureToggleDefinition(
         key="diagnostics_tests",
         env_key="FEATURE_DIAGNOSTICS_TESTS_ENABLED",
-        label="Тесты и диагностика",
-        description="Runbook диагностики запуска и smoke-тесты backend (pytest).",
+        label="Диагностика",
+        description="Runbook диагностики запуска панели и site-diagnostics.",
         icon="🧪",
-        disable_hint="Вкладка тестов будет недоступна.",
+        disable_hint="Вкладка диагностики будет недоступна.",
         resource_impact_level="medium",
         default=True,
         group="app_module",
-        api_prefixes=("/api/tests", "/api/site-diagnostics"),
+        api_prefixes=("/api/site-diagnostics",),
         settings_tabs=("tests",),
     ),
     FeatureToggleDefinition(

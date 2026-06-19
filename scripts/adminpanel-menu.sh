@@ -195,39 +195,6 @@ panel_backup() {
   fi
 }
 
-panel_tests() {
-  local py pytest_bin
-  py="$(_menu_python)" || {
-    ui_fail "Python не найден"
-    return 1
-  }
-  if [[ -x "$VENV_PATH/bin/pytest" ]]; then
-    pytest_bin="$VENV_PATH/bin/pytest"
-  elif command -v pytest >/dev/null 2>&1; then
-    pytest_bin="$(command -v pytest)"
-  else
-    ui_fail "pytest не найден. Установите: $VENV_PATH/bin/pip install -r backend/requirements-dev.txt"
-    return 1
-  fi
-  if [[ ! -d "$ROOT_DIR/backend/tests" ]]; then
-    ui_fail "Каталог тестов не найден: $ROOT_DIR/backend/tests"
-    return 1
-  fi
-
-  ui_section "Автотесты (pytest)"
-  ui_info "Модульные тесты для проверки кода; на рабочем сервере запуск не обязателен."
-  printf "\n"
-  (cd "$ROOT_DIR/backend" && "$pytest_bin" tests/ -q --tb=no)
-  local code=$?
-  printf "\n"
-  if [[ "$code" -eq 0 ]]; then
-    ui_ok "Все тесты прошли"
-  else
-    ui_fail "Есть упавшие тесты (код: $code)"
-  fi
-  return "$code"
-}
-
 panel_diagnose() {
   if [[ ! -f "$SITE_DIAGNOSTICS" ]]; then
     ui_fail "Не найден $SITE_DIAGNOSTICS"
@@ -291,23 +258,21 @@ menu_backups_updates() {
   done
 }
 
-menu_diagnostics_tests() {
+menu_diagnostics() {
   while true; do
     clear || true
     _m_top
-    _m_title "Диагностика и тесты"
+    _m_title "Диагностика"
     _m_sep
     _m_item "1. Диагностика запуска сайта"
-    _m_item "2. Автотесты (pytest)"
     _m_sep
     _m_item "0. Назад"
     _m_bot
     printf "\n"
 
-    read -r -p "  Выберите действие [0-2]: " choice
+    read -r -p "  Выберите действие [0-1]: " choice
     case "$choice" in
       1) panel_diagnose; press_any_key ;;
-      2) panel_tests; press_any_key ;;
       0) break ;;
       *)
         ui_warn "Неверный выбор"
@@ -325,23 +290,21 @@ main_menu() {
     _m_sep
     _m_item "1. Сервис панели"
     _m_item "2. Резервные копии и обновления"
-    _m_item "3. Диагностика и тесты"
+    _m_item "3. Диагностика"
     _m_sep
     _m_item "7. Диагностика запуска сайта"
-    _m_item "8. Автотесты (pytest)"
     _m_sep
     _m_item "0. Выход"
     _m_bot
     printf "\n"
     ui_info "Установка: sudo ./install.sh (не этот скрипт)"
 
-    read -r -p "  Выберите действие [0-8]: " choice
+    read -r -p "  Выберите действие [0-7]: " choice
     case "$choice" in
       1) menu_service_panel ;;
       2) menu_backups_updates ;;
-      3) menu_diagnostics_tests ;;
+      3) menu_diagnostics ;;
       7) panel_diagnose; press_any_key ;;
-      8) panel_tests; press_any_key ;;
       0) exit 0 ;;
       *)
         ui_warn "Неверный выбор"
@@ -356,13 +319,12 @@ usage() {
 Использование: sudo ./scripts/adminpanel-menu.sh [опция]
 
 Интерактивное ops-меню (без мастера install.sh):
-  restart, update, backup, pytest, site diagnostics.
+  restart, update, backup, site diagnostics.
 
 Опции (как adminpanel.sh в AA):
   --restart     Перезапустить панель (systemd или start.sh)
   --update      git fetch + pull + pip (если есть обновления)
   --backup      Создать резервную копию (scripts/backup-cli.py)
-  --tests       Запустить pytest в backend/tests
   --diagnose    Диагностика запуска (scripts/site-diagnostics.sh)
   --help        Эта справка
 
@@ -381,10 +343,6 @@ main() {
       ;;
     --backup)
       panel_backup
-      ;;
-    --tests)
-      panel_tests
-      exit $?
       ;;
     --diagnose)
       panel_diagnose

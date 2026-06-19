@@ -32,7 +32,6 @@ _COMMIT_RETRY_DELAY_SEC = 0.1
 _EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="bg-task")
 
 _PIPELINE_TASK_TYPES = {
-    "pytest_run",
     "cidr_db_refresh",
     "cidr_db_refresh_dry_run",
     "cidr_estimate_from_db",
@@ -52,7 +51,6 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "routing_apply_replica": ("Применение маршрутизации на replica…", "Синхронизация провайдеров…", 5),
     "restart_service": ("Перезапуск службы…", "Перезапуск службы…", 10),
     "update_system": ("Обновление кода и зависимостей…", "Обновление: проверка репозитория…", 5),
-    "pytest_run": ("Запуск тестов…", "Подготовка pytest…", 5),
     "cidr_db_refresh": ("Обновление CIDR БД…", "Подготовка обновления провайдеров…", 3),
     "cidr_db_refresh_dry_run": ("Пробный прогон CIDR БД…", "Подготовка обновления провайдеров…", 3),
     "cidr_estimate_from_db": ("Оценка CIDR из БД…", "Подготовка оценки…", 3),
@@ -73,7 +71,6 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "routing_apply_replica": "Маршрутизация на replica применена",
     "restart_service": "Служба перезапущена",
     "update_system": "Обновление завершено",
-    "pytest_run": "Тесты завершены",
     "cidr_db_refresh": "CIDR БД обновлена",
     "cidr_db_refresh_dry_run": "Пробный прогон завершён",
     "cidr_estimate_from_db": "Оценка завершена",

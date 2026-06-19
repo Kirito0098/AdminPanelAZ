@@ -1746,27 +1746,10 @@ export async function openvpnDisconnect(clientName: string) {
   })
 }
 
-export async function collectTests() {
-  return apiFetch<{ tests: Array<{ id: string; title: string; description?: string }>; count: number }>(
-    '/tests/collect',
-  )
-}
-
-export async function runTests(testIds: string[] = []) {
-  return apiFetch<{ task_id: string; message: string }>('/tests/run', {
-    method: 'POST',
-    body: JSON.stringify({ test_ids: testIds }),
-  })
-}
-
 export async function runSiteDiagnostics() {
   return apiFetch<import('../types').SiteDiagnosticsReport>('/site-diagnostics/run', {
     method: 'POST',
   })
-}
-
-export async function getTestTask(taskId: string) {
-  return getBackgroundTask(taskId)
 }
 
 export async function applySystemUpdate() {
