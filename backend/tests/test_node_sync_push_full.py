@@ -227,6 +227,52 @@ def test_push_full_links_primary_configs_in_manual_full(sync_group_db):
     assert replica_config.ha_primary_config_id is None
 
 
+def test_push_full_copies_primary_hosts_to_replica(sync_group_db):
+    db, group, _primary, _replica = sync_group_db
+    primary_adapter, replica_adapter, adapter_for_node = _mock_adapters(group)
+    primary_adapter.get_antizapret_settings.return_value = {
+        "openvpn_host": "azxs123.duckdns.org",
+        "wireguard_host": "azxs123.duckdns.org",
+        "route_all": "n",
+    }
+
+    with _patch_adapter_for_node(adapter_for_node):
+        with patch("app.services.node_sync.push_full.verify_sync_group", return_value={"ready": True}):
+            result = run_push_full(db, group, auto_verify=False)
+
+    assert result["success"] is True
+    replica_adapter.update_antizapret_settings.assert_called_once_with(
+        {"openvpn_host": "azxs123.duckdns.org", "wireguard_host": "azxs123.duckdns.org"}
+    )
+    assert result["host_copy"] == [
+        {
+            "node_id": _replica.id,
+            "node_name": _replica.name,
+            "hosts": {
+                "openvpn_host": "azxs123.duckdns.org",
+                "wireguard_host": "azxs123.duckdns.org",
+            },
+        }
+    ]
+
+
+def test_push_full_skips_host_copy_when_primary_hosts_empty(sync_group_db):
+    db, group, _primary, _replica = sync_group_db
+    primary_adapter, replica_adapter, adapter_for_node = _mock_adapters(group)
+    primary_adapter.get_antizapret_settings.return_value = {
+        "openvpn_host": "",
+        "wireguard_host": "   ",
+    }
+
+    with _patch_adapter_for_node(adapter_for_node):
+        with patch("app.services.node_sync.push_full.verify_sync_group", return_value={"ready": True}):
+            result = run_push_full(db, group, auto_verify=False)
+
+    assert result["success"] is True
+    replica_adapter.update_antizapret_settings.assert_not_called()
+    assert result["host_copy"] == []
+
+
 def test_push_full_restore_failure(sync_group_db):
     db, group, _primary, _replica = sync_group_db
     primary_adapter = MagicMock()

@@ -90,8 +90,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Удаление пользователя** — `_purge_user_before_delete`: UserReminderLog, WebAuthnCredential.
 - **Push full** остаётся для bootstrap / disaster recovery, не для каждой правки config.
 
+### Changed
+
+- **HA Push full переносит `OPENVPN_HOST` / `WIREGUARD_HOST` с primary на replica** — `run_push_full` читает непустые хосты из `setup` primary и пишет их в `setup` каждой replica **перед** restore, так что `client.sh 7` (recreate_profiles) внутри restore регенерирует профили клиентов с правильным хостом. Архив `client.sh 8` файл `setup` не содержит, поэтому раньше в `manual_full` хосты по Push full не переносились. В `auto` хосты уже реплицируются автоматически при правке настроек на primary (`replicate_antizapret_settings` + `enqueue_ha_routing_apply_replicas` → doall + recreate). Результат Push full содержит `host_copy` (по узлам).
+
 ### Fixed
 
+- **HA: `OPENVPN_HOST` / `WIREGUARD_HOST` пустые в `/root/antizapret/setup` после изменения состава группы** — `NodeSyncGroupSection.tsx` запускал apply-shared-domain только при изменении `shared_domain`; добавление/смена replica (или primary) без смены домена оставляли новый узел с пустыми хостами. Теперь apply запускается также при изменении состава группы (primary или список replica). Текущее состояние лечится кнопкой «Домен → узлы».
 - **Удаление primary VPN-клиента** — `purge_ha_shadow_configs` в роутере и bulk delete (FK на `ha_primary_config_id`).
 - **`test_verify_primary_missing_returns_gracefully`** — корректный mock `db.get` без нарушения FK при `primary_node_id` missing.
 

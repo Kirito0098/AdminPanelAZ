@@ -279,7 +279,17 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         replica_node_ids: replicaIds,
         sync_mode: syncMode,
       }
-      const domainChanged = !editing || editing.shared_domain.trim() !== payload.shared_domain
+      const sortedIds = (ids: number[]) => [...ids].sort((a, b) => a - b)
+      const membersChanged =
+        editing != null &&
+        (editing.primary_node_id !== payload.primary_node_id ||
+          JSON.stringify(sortedIds(editing.replica_node_ids)) !==
+            JSON.stringify(sortedIds(payload.replica_node_ids)))
+      const domainChanged = editing != null && editing.shared_domain.trim() !== payload.shared_domain
+      // Hosts (OPENVPN_HOST/WIREGUARD_HOST) live in each member's setup and are only
+      // written by apply-shared-domain. Re-apply on create, on domain change, and on
+      // membership/primary change so a newly added replica also gets the hosts written.
+      const needsSharedDomainApply = !editing || domainChanged || membersChanged
       let groupId: number
       if (editing) {
         const updated = await updateNodeSyncGroup(editing.id, payload)
@@ -292,7 +302,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
       }
       setDialogOpen(false)
       await load()
-      if (domainChanged) {
+      if (needsSharedDomainApply) {
         await runSharedDomainApply(groupId, payload.shared_domain)
       }
     } catch (err) {

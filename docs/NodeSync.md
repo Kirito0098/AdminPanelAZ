@@ -7,7 +7,7 @@
 ## MVP (этап 5.1–5.3)
 
 - **Sync Group** — primary + 1+ replica, shared domain
-- **Push full** — `client.sh 8` на primary → transfer → restore на replica (как `setup.sh`)
+- **Push full** — `client.sh 8` на primary → transfer → restore на replica (как `setup.sh`). Дополнительно копирует непустые `OPENVPN_HOST` / `WIREGUARD_HOST` из `setup` primary на каждую replica **перед** restore, чтобы перегенерированные профили (`client.sh 7`) получили правильный хост.
 - **Verify** — списки OVPN/WG клиентов + checksums PKI/WG/config
 
 ## API
