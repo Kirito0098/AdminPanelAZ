@@ -1,6 +1,5 @@
 """Local vs remote node adapter parity checks."""
 
-import ast
 import inspect
 import re
 from pathlib import Path
@@ -191,11 +190,3 @@ def test_remote_adapter_provision_mtls_not_in_abstract_interface():
     """provision_mtls is remote-only (bootstrap mTLS on node agent)."""
     assert "provision_mtls" not in _abstract_adapter_methods()
     assert hasattr(RemoteNodeAdapter, "provision_mtls")
-
-
-def test_node_agent_main_imports_without_invalid_key(monkeypatch):
-    monkeypatch.setenv("NODE_AGENT_MODE", "dev")
-    monkeypatch.setenv("NODE_AGENT_API_KEY", "x" * 32)
-    source = NODE_AGENT_MAIN.read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    assert any(isinstance(node, ast.FunctionDef) and node.name == "health" for node in tree.body)

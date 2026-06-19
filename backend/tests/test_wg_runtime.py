@@ -40,3 +40,23 @@ def test_unblock_falls_back_to_syncconf_when_no_peer_specs(tmp_path: Path):
     sync_mock.assert_called_once_with("antizapret")
     assert result["success"] is True
     assert result["synced_count"] == 1
+
+
+def test_block_client_runtime_reports_subprocess_errors(tmp_path: Path):
+    config = tmp_path / "vpn.conf"
+    config.write_text(
+        "[Peer]\nPublicKey = peerkey\nAllowedIPs = 10.0.0.2/32\n",
+        encoding="utf-8",
+    )
+    files = {"vpn": config}
+
+    with patch.object(wg_runtime, "WG_CONFIG_FILES", files):
+        with patch.object(wg_runtime, "_collect_client_peers", return_value=[("vpn", "peerkey")]):
+            with patch.object(wg_runtime, "_run") as run_mock:
+                run_mock.return_value = MagicMock(returncode=1, stderr="permission denied")
+                result = wg_runtime.block_client_runtime("bob")
+
+    assert result["success"] is False
+    assert result["removed_count"] == 0
+    assert result["error_count"] == 1
+    assert "permission denied" in result["errors"][0]["stderr"]

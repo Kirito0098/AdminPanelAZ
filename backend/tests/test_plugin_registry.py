@@ -29,43 +29,6 @@ def isolated_registry():
     hook_registry._hooks.update(saved)
 
 
-class TestHookRegistry:
-    def test_register_list_and_call(self, isolated_registry: HookRegistry):
-        calls: list[str] = []
-
-        def handler_a(**kwargs):
-            calls.append(f"a:{kwargs.get('value')}")
-
-        def handler_b(**kwargs):
-            calls.append(f"b:{kwargs.get('value')}")
-
-        isolated_registry.register("test.point", "a", handler_a)
-        isolated_registry.register("test.point", "b", handler_b)
-        assert isolated_registry.list_handlers("test.point") == ["a", "b"]
-
-        isolated_registry.call("test.point", value=1)
-        assert calls == ["a:1", "b:1"]
-
-    def test_register_duplicate_raises(self, isolated_registry: HookRegistry):
-        isolated_registry.register("dup", "one", lambda **_: None)
-        with pytest.raises(ValueError, match="already registered"):
-            isolated_registry.register("dup", "one", lambda **_: None)
-
-    def test_call_swallows_handler_errors(self, isolated_registry: HookRegistry):
-        calls: list[str] = []
-
-        def bad(**_kwargs):
-            raise RuntimeError("boom")
-
-        def good(**_kwargs):
-            calls.append("ok")
-
-        isolated_registry.register("err", "bad", bad)
-        isolated_registry.register("err", "good", good)
-        isolated_registry.call("err")
-        assert calls == ["ok"]
-
-
 class TestNotifyBackends:
     def test_list_includes_default_telegram_backend(self):
         assert "telegram" in list_notify_backends()

@@ -73,6 +73,21 @@ def test_auth_rate_limit_blocks_after_threshold():
         assert exc.value.status_code == 429
 
 
+def test_login_captcha_after_three_failed_attempts():
+    from app.services.ip_restriction import ip_restriction_service
+
+    client_ip = "203.0.113.50"
+    ip_restriction_service.record_login_attempt(client_ip, success=True)
+
+    assert ip_restriction_service.login_needs_captcha(client_ip) is False
+    for _ in range(3):
+        ip_restriction_service.record_login_attempt(client_ip, success=False)
+    assert ip_restriction_service.login_needs_captcha(client_ip) is True
+
+    ip_restriction_service.record_login_attempt(client_ip, success=True)
+    assert ip_restriction_service.login_needs_captcha(client_ip) is False
+
+
 def test_security_headers_middleware():
     from app.main import app
 

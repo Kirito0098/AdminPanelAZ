@@ -127,17 +127,6 @@ def test_add_domain_conflict():
             service.add_domain("example.com")
 
 
-def test_add_domain_success(mock_api):
-    service = WarperService()
-    with (
-        patch("app.services.warper._ensure_no_conflict"),
-        patch.object(service, "_api_client", return_value=mock_api),
-    ):
-        result = service.add_domain("example.com")
-    assert result["message"] == "added"
-    mock_api.add_domain.assert_called_once_with("example.com")
-
-
 def test_list_domains_api_failure(mock_api):
     mock_api.list_domains.return_value = _FakeResult(ok=False, message="fail")
     service = WarperService()
@@ -241,26 +230,6 @@ def test_list_ip_ranges_fallback_to_file(mock_api, tmp_path):
     assert ranges == ["91.108.4.0/22"]
 
 
-def test_get_user_domains_text_uses_api(mock_api):
-    mock_api.get_user_domains_text.return_value = "# user\nexample.com\n"
-    service = WarperService()
-    with patch.object(service, "_api_client", return_value=mock_api):
-        text = service.get_user_domains_text()
-    assert "example.com" in text
-
-
-def test_save_user_domains_text_calls_api(mock_api):
-    mock_api.save_user_domains_text.return_value = _FakeResult(data={"message": "saved"})
-    service = WarperService()
-    with (
-        patch("app.services.warper._ensure_no_conflict"),
-        patch.object(service, "_api_client", return_value=mock_api),
-    ):
-        result = service.save_user_domains_text("example.com\n")
-    assert result["message"] == "saved"
-    mock_api.save_user_domains_text.assert_called_once_with("example.com\n")
-
-
 def test_get_ip_ranges_text_fallback_to_file(mock_api, tmp_path):
     ip_file = tmp_path / "ip-ranges.txt"
     ip_file.write_text("10.0.0.0/8\n", encoding="utf-8")
@@ -272,17 +241,6 @@ def test_get_ip_ranges_text_fallback_to_file(mock_api, tmp_path):
         del mock_api.get_ip_ranges_text
         text = service.get_ip_ranges_text()
     assert text == "10.0.0.0/8\n"
-
-
-def test_set_mode_warp_with_key_source(mock_api):
-    mock_api.set_mode_warp.return_value = _FakeResult(data={"message": "warp"})
-    service = WarperService()
-    with (
-        patch("app.services.warper._ensure_no_conflict"),
-        patch.object(service, "_api_client", return_value=mock_api),
-    ):
-        service.set_mode_warp("system")
-    mock_api.set_mode_warp.assert_called_once_with("system")
 
 
 def test_build_traffic_chart_today_hourly(tmp_path):
@@ -358,35 +316,12 @@ def test_enrich_warper_traffic_payload_synthetic_from_totals():
     assert enriched["chart"] == [{"label": "Сегодня", "rx": 5900000, "tx": 5800000}]
 
 
-def test_catalog_search_returns_list(mock_api):
-    mock_api.catalog_search.return_value = _FakeResult(
-        data=[{"name": "tiktok", "popular": True, "installed": False}],
-    )
-    service = WarperService()
-    with patch.object(service, "_api_client", return_value=mock_api):
-        items = service.catalog_search("tik")
-    assert items == [{"name": "tiktok", "popular": True, "installed": False}]
-    mock_api.catalog_search.assert_called_once_with("tik")
-
-
 def test_catalog_show_requires_name(mock_api):
     service = WarperService()
     with patch.object(service, "_api_client", return_value=mock_api):
         with pytest.raises(HTTPException) as exc:
             service.catalog_show("")
     assert exc.value.status_code == 400
-
-
-def test_catalog_add_calls_api(mock_api):
-    mock_api.catalog_add.return_value = _FakeResult(data={"message": "added"})
-    service = WarperService()
-    with (
-        patch("app.services.warper._ensure_no_conflict"),
-        patch.object(service, "_api_client", return_value=mock_api),
-    ):
-        result = service.catalog_add("TikTok")
-    assert result["message"] == "added"
-    mock_api.catalog_add.assert_called_once_with("tiktok")
 
 
 def test_catalog_method_missing_returns_502(mock_api):

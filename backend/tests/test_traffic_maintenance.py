@@ -157,3 +157,39 @@ def test_cleanup_openvpn_status_logs_now_missing_dir(tmp_path):
     ok, message = cleanup_openvpn_status_logs_now(missing)
     assert ok is True
     assert "0" in message
+
+
+def test_traffic_collector_build_status_rows():
+    from datetime import datetime
+
+    from app.schemas import OpenVpnClient, WireGuardPeer
+    from app.services.traffic.collector import build_status_rows
+
+    ovpn = OpenVpnClient(
+        common_name="alice",
+        profile="vpn-udp",
+        real_address="1.2.3.4:12345",
+        virtual_address="10.8.0.2",
+        bytes_received=100,
+        bytes_sent=200,
+        connected_since="2023-11-14 12:00:00",
+        connected_since_ts=1700000000,
+    )
+    wg = WireGuardPeer(
+        interface="vpn",
+        client_name="bob",
+        public_key="abc123",
+        endpoint="5.6.7.8:51820",
+        allowed_ips="10.9.0.3/32",
+        transfer_rx=300,
+        transfer_tx=400,
+        latest_handshake=datetime.utcnow().isoformat(),
+    )
+
+    rows = build_status_rows([ovpn], [wg])
+
+    assert len(rows) == 2
+    assert rows[0]["profile"] == "vpn-udp"
+    assert rows[0]["traffic_clients"][0]["session_kind"] == "openvpn"
+    assert rows[1]["profile"] == "vpn-wg"
+    assert rows[1]["traffic_clients"][0]["peer_public_key"] == "abc123"
