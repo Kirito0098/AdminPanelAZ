@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from datetime import datetime
@@ -9,11 +10,21 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from app.models import Node, NodeSyncGroup, SyncStatus
+from app.models import Node, NodeSyncGroup, SyncStatus, User, UserRole
+from app.services.config_import import import_clients_from_disk
 from app.services.node_adapter import LocalNodeAdapter, RemoteNodeAdapter
 from app.services.node_manager import get_adapter_for_node
-from app.services.node_sync.groups import parse_replica_node_ids, validate_sync_group_payload
+from app.services.node_sync.groups import (
+    is_auto_sync_enabled,
+    parse_replica_node_ids,
+    validate_sync_group_payload,
+)
+from app.services.node_sync.manual_link import link_primary_configs_to_group
 from app.services.node_sync.verify import verify_sync_group
+from app.services.policy_import import copy_access_policies_from_node
+from app.services.traffic.collector import collect_traffic_snapshot_for_node
+
+logger = logging.getLogger(__name__)
 
 
 def _read_backup_bytes(primary_adapter, backup_info: dict[str, str]) -> bytes:
@@ -58,6 +69,7 @@ def run_push_full(
     replica_ids = parse_replica_node_ids(group.replica_node_ids)
     restored: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
+    admin = db.query(User).filter(User.role == UserRole.admin).first()
 
     for index, replica_id in enumerate(replica_ids):
         percent = 40 + int((index / max(len(replica_ids), 1)) * 45)
@@ -78,6 +90,17 @@ def run_push_full(
             else:
                 result = replica_adapter.restore_antizapret_backup(archive_bytes, archive_name)
             restored.append({"node_id": replica_id, "node_name": replica_name, "result": result})
+            if admin and replica_node and primary_node:
+                import_clients_from_disk(db, replica_node, admin.id)
+                copy_access_policies_from_node(db, primary_node, replica_node)
+                try:
+                    collect_traffic_snapshot_for_node(db, replica_node.id)
+                except Exception as exc:
+                    logger.warning(
+                        "Traffic snapshot after push full failed on %s: %s",
+                        replica_name,
+                        exc,
+                    )
         except Exception as exc:
             failed.append({"node_id": replica_id, "node_name": replica_name, "error": str(exc)})
             group.sync_status = SyncStatus.failed
@@ -96,6 +119,8 @@ def run_push_full(
     group.sync_status = SyncStatus.synced
     group.last_sync_at = datetime.utcnow()
     group.last_sync_error = None
+    if not is_auto_sync_enabled(group):
+        link_primary_configs_to_group(db, group)
     db.commit()
 
     verify_result = None

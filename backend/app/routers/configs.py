@@ -25,8 +25,13 @@ from app.services.config_csv_ops import (
 from app.services.config_tags import get_tags_for_configs, resolve_config_ids_by_tags
 from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_adapter import NodeAdapter
+from app.services.config_import import import_clients_from_disk
 from app.services.node_manager import get_active_adapter, get_active_node
-from app.services.node_sync.client_sync import maybe_replicate_create, maybe_replicate_delete
+from app.services.node_sync.client_sync import (
+    maybe_replicate_create,
+    maybe_replicate_delete,
+    purge_ha_shadow_configs,
+)
 from app.services.node_sync.groups import (
     build_ha_metadata,
     find_sync_group_containing_node,
@@ -511,6 +516,7 @@ def delete_config(
     if sync_group:
         maybe_replicate_delete(db, node_id=node.id, primary_config=config)
 
+    purge_ha_shadow_configs(db, config.id)
     db.delete(config)
     db.commit()
     admin_notify_service.send_config_delete(
@@ -608,54 +614,5 @@ def sync_from_antizapret(db: Session = Depends(get_db), _: User = Depends(requir
     if not admin:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Администратор не найден")
 
-    imported = 0
-    node_id = _active_node_id(db)
-    adapter = get_active_adapter(db)
-    for client_name in adapter.list_openvpn_clients():
-        exists = (
-            db.query(VpnConfig)
-            .filter(
-                VpnConfig.node_id == node_id,
-                VpnConfig.client_name == client_name,
-                VpnConfig.vpn_type == VpnType.openvpn,
-            )
-            .first()
-        )
-        cert_days = resolve_openvpn_cert_days_remaining(adapter, client_name)
-        if not exists:
-            db.add(
-                VpnConfig(
-                    node_id=node_id,
-                    client_name=client_name,
-                    vpn_type=VpnType.openvpn,
-                    owner_id=admin.id,
-                    cert_expire_days=cert_days,
-                )
-            )
-            imported += 1
-        elif exists.cert_expire_days is None and cert_days is not None:
-            exists.cert_expire_days = cert_days
-
-    for client_name in adapter.list_wireguard_clients():
-        exists = (
-            db.query(VpnConfig)
-            .filter(
-                VpnConfig.node_id == node_id,
-                VpnConfig.client_name == client_name,
-                VpnConfig.vpn_type == VpnType.wireguard,
-            )
-            .first()
-        )
-        if not exists:
-            db.add(
-                VpnConfig(
-                    node_id=node_id,
-                    client_name=client_name,
-                    vpn_type=VpnType.wireguard,
-                    owner_id=admin.id,
-                )
-            )
-            imported += 1
-
-    db.commit()
+    imported = import_clients_from_disk(db, get_active_node(db), admin.id)
     return MessageResponse(message=f"Синхронизировано клиентов: {imported}")

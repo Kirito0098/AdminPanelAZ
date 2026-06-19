@@ -41,6 +41,7 @@ from app.services.node_manager import (
     get_adapter_for_node,
     get_api_key_plain,
     node_metadata_dict,
+    purge_node_related,
     set_active_node_id,
     store_api_key,
     update_node_from_health,
@@ -51,7 +52,7 @@ from app.services.ip_restriction import ip_restriction_service
 from app.services.node_update_roll import enqueue_node_update_roll
 from app.services.background_tasks import background_task_service
 from app.services.geo_routing_hint import build_geo_routing_hint
-from app.services.node_sync.groups import build_ha_node_context
+from app.services.node_sync.groups import build_ha_node_context, find_group_for_node
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 settings = get_settings()
@@ -269,7 +270,18 @@ def delete_node(
     if node.is_local:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Локальный узел нельзя удалить")
 
+    group = find_group_for_node(db, node.id)
+    if group:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Узел «{node.name}» входит в HA-группу «{group.name}». "
+                f"Сначала расформируйте группу (Sync Groups → удалить)."
+            ),
+        )
+
     active_id = get_active_node_id(db)
+    purge_node_related(db, node.id)
     db.delete(node)
     db.commit()
 

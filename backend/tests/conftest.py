@@ -9,12 +9,26 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+
+def register_sqlite_pragmas(engine) -> None:
+    """Match production SQLite connection settings in isolated test engines."""
+    from app.database import apply_sqlite_connection_pragmas
+
+    if not str(engine.url).startswith("sqlite"):
+        return
+
+    @event.listens_for(engine, "connect")
+    def _set_test_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        apply_sqlite_connection_pragmas(cursor)
+        cursor.close()
 
 
 def run_async(coro):
@@ -41,6 +55,7 @@ def db_session(tmp_path):
 
     db_path = tmp_path / "unit_test.db"
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    register_sqlite_pragmas(engine)
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine)
     session = Session()
@@ -74,6 +89,7 @@ def api_test_env(tmp_path, monkeypatch):
 
     db_path = tmp_path / "api_test.db"
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    register_sqlite_pragmas(engine)
     Base.metadata.create_all(bind=engine)
     run_db_migrations()
     TestingSession = sessionmaker(bind=engine)

@@ -6,8 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus, User, UserRole, VpnConfig, VpnType
-from app.services.node_sync.client_sync import replicate_client_create, replicate_client_delete
+from app.config import Settings
+from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus, User, UserActionLog, UserRole, VpnConfig, VpnType
+from app.services.node_sync.client_sync import maybe_replicate_create, replicate_client_create, replicate_client_delete
 from app.services.node_sync.groups import serialize_replica_node_ids
 
 
@@ -79,9 +80,65 @@ def test_replicate_client_delete_removes_shadows(auto_group_db):
     )
 
 
+def test_replicate_partial_failure_logs_action(auto_group_db, monkeypatch):
+    db, group, _primary, replica, primary_config = auto_group_db
+    replica2 = Node(name="replica2", host="10.0.0.3", port=9100, status=NodeStatus.online)
+    db.add(replica2)
+    db.commit()
+    group.replica_node_ids = serialize_replica_node_ids([replica.id, replica2.id])
+    db.commit()
+
+    adapter_ok = MagicMock()
+    adapter_fail = MagicMock()
+    adapter_fail.add_wireguard_client.side_effect = RuntimeError("disk full")
+
+    def get_adapter(node):
+        if node.id == replica.id:
+            return adapter_ok
+        return adapter_fail
+
+    monkeypatch.setattr(
+        "app.services.node_sync.client_sync.get_settings",
+        lambda: Settings(audit_log_enabled=True),
+    )
+
+    with patch("app.services.node_sync.client_sync.get_adapter_for_node", side_effect=get_adapter):
+        result = replicate_client_create(db, group, primary_config)
+
+    assert len(result["replicated"]) == 1
+    assert len(result["errors"]) == 1
+    log = (
+        db.query(UserActionLog)
+        .filter(UserActionLog.action == "ha_replicate_partial_failure")
+        .one()
+    )
+    assert "client=alice" in log.details
+    assert "successful_replicas=replica" in log.details
+    assert "failed_replicas=replica2" in log.details
+
+
 def test_manual_mode_skips_auto_replicate(auto_group_db):
     db, group, _primary, _replica, primary_config = auto_group_db
     group.sync_mode = "manual_full"
     db.commit()
     result = replicate_client_create(db, group, primary_config)
     assert result["skipped"] is True
+
+
+def test_manual_mode_maybe_create_links_primary_config(auto_group_db):
+    db, group, primary, _replica, primary_config = auto_group_db
+    group.sync_mode = "manual_full"
+    db.commit()
+
+    result = maybe_replicate_create(db, node_id=primary.id, primary_config=primary_config)
+
+    assert result is not None
+    assert result["linked"] is True
+    assert result["skipped"] is False
+    assert primary_config.sync_group_id == group.id
+    assert (
+        db.query(VpnConfig)
+        .filter(VpnConfig.ha_primary_config_id == primary_config.id)
+        .count()
+        == 0
+    )

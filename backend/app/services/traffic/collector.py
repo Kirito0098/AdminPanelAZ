@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import TrafficSessionState, UserTrafficSample, UserTrafficStatProtocol
+from app.models import Node, TrafficSessionState, UserTrafficSample, UserTrafficStatProtocol
 from app.schemas import OpenVpnClient, WireGuardPeer
 from app.services.wireguard_status import wireguard_peer_is_online
 
@@ -341,3 +341,19 @@ class TrafficCollectorService:
         q_stats.delete(synchronize_session=False)
         self.db.commit()
         return deleted
+
+
+def collect_traffic_snapshot_for_node(db: Session, node_id: int) -> dict:
+    """Fetch live status from node adapter and persist traffic snapshot (best-effort)."""
+    from app.services.node_manager import get_adapter_for_node
+
+    node = db.get(Node, node_id)
+    if node is None:
+        return {"samples_added": 0, "active_sessions": 0, "skipped": True}
+
+    adapter = get_adapter_for_node(node)
+    status_rows = build_status_rows(adapter.parse_openvpn_status(), adapter.parse_wireguard_status())
+    collector = TrafficCollectorService(db, node_id)
+    result = collector.persist_snapshot(status_rows)
+    result["skipped"] = False
+    return result

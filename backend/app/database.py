@@ -15,13 +15,19 @@ connect_args = {"check_same_thread": False, "timeout": 30} if _is_sqlite else {}
 engine = create_engine(settings.database_url, connect_args=connect_args)
 
 
+def apply_sqlite_connection_pragmas(cursor) -> None:
+    """Apply standard SQLite pragmas for panel databases (WAL, busy timeout, FK enforcement)."""
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=30000")
+    cursor.execute("PRAGMA foreign_keys=ON")
+
+
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
     if not _is_sqlite:
         return
     cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA busy_timeout=30000")
+    apply_sqlite_connection_pragmas(cursor)
     cursor.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

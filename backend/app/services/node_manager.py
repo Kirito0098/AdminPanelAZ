@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session
 from app.auth import get_password_hash, verify_password
 from app.config import get_settings
 from app.models import (
+    AlertRule,
     AppSetting,
+    ClientTemplate,
+    ConfigTag,
     Node,
     NodeResourceSample,
     NodeStatus,
@@ -185,7 +188,16 @@ def get_node_antizapret_path(db: Session) -> Path:
     return settings.antizapret_path
 
 
-def _purge_node_related(db: Session, node_id: int) -> None:
+def purge_node_related(db: Session, node_id: int) -> None:
+    config_ids = [
+        row[0] for row in db.query(VpnConfig.id).filter(VpnConfig.node_id == node_id).all()
+    ]
+    if config_ids:
+        db.query(VpnConfig).filter(VpnConfig.ha_primary_config_id.in_(config_ids)).update(
+            {VpnConfig.ha_primary_config_id: None},
+            synchronize_session=False,
+        )
+
     for model in (
         VpnConfig,
         TrafficSessionState,
@@ -194,6 +206,9 @@ def _purge_node_related(db: Session, node_id: int) -> None:
         OpenVpnAccessPolicy,
         NodeResourceSample,
         UserTrafficSample,
+        ConfigTag,
+        ClientTemplate,
+        AlertRule,
     ):
         db.query(model).filter(model.node_id == node_id).delete(synchronize_session=False)
 
@@ -201,7 +216,7 @@ def _purge_node_related(db: Session, node_id: int) -> None:
 def _remove_local_node(db: Session, local: Node) -> None:
     active_id = get_active_node_id(db)
     node_id = local.id
-    _purge_node_related(db, node_id)
+    purge_node_related(db, node_id)
     db.delete(local)
     db.commit()
     if active_id == node_id:

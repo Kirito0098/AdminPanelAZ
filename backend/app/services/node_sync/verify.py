@@ -33,7 +33,21 @@ def verify_sync_group(
             progress_callback(percent, stage, message)
 
     progress(5, "Проверка паритета…", "Primary")
-    primary_adapter = get_adapter_for_node(db.get(Node, group.primary_node_id))
+    primary_node = db.get(Node, group.primary_node_id)
+    if not primary_node or primary_node.status != NodeStatus.online:
+        result = {
+            "ready": False,
+            "shared_domain": group.shared_domain,
+            "primary_node_id": group.primary_node_id,
+            "replicas": [],
+            "summary": "primary offline или не найден",
+        }
+        group.last_verify_at = datetime.utcnow()
+        group.last_verify_result = json.dumps(result, ensure_ascii=False)
+        db.commit()
+        return result
+
+    primary_adapter = get_adapter_for_node(primary_node)
     primary_ovpn = set(primary_adapter.list_openvpn_clients())
     primary_wg = set(primary_adapter.list_wireguard_clients())
     primary_fp = primary_adapter.get_antizapret_fingerprints()

@@ -7,9 +7,12 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import Node, NodeSyncGroup, SyncStatus, VpnConfig, VpnType
+from app.services.action_log import log_action
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.groups import get_replica_nodes, is_auto_sync_enabled
+from app.services.node_sync.manual_link import link_primary_config_to_group
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +87,24 @@ def replicate_client_create(
         group.last_sync_error = None
 
     db.commit()
+
+    if errors and get_settings().audit_log_enabled:
+        successful_names: list[str] = []
+        for entry in replicated:
+            node = db.get(Node, entry["node_id"])
+            if node:
+                successful_names.append(node.name)
+        failed_names = [e["node_name"] for e in errors]
+        log_action(
+            db,
+            action="ha_replicate_partial_failure",
+            details=(
+                f"client={primary_config.client_name}, "
+                f"successful_replicas={','.join(successful_names) or '-'}, "
+                f"failed_replicas={','.join(failed_names)}"
+            ),
+        )
+
     return {"replicated": replicated, "errors": errors, "skipped": False}
 
 
@@ -142,7 +163,19 @@ def maybe_replicate_create(db: Session, *, node_id: int, primary_config: VpnConf
     group = find_sync_group_for_primary(db, node_id)
     if not group:
         return None
-    return replicate_client_create(db, group, primary_config)
+    if is_auto_sync_enabled(group):
+        return replicate_client_create(db, group, primary_config)
+    link_primary_config_to_group(db, group, primary_config)
+    return {"replicated": [], "skipped": False, "linked": True}
+
+
+def purge_ha_shadow_configs(db: Session, primary_config_id: int) -> int:
+    """Remove replica VpnConfig rows pointing at a primary (FK safety before primary delete)."""
+    return (
+        db.query(VpnConfig)
+        .filter(VpnConfig.ha_primary_config_id == primary_config_id)
+        .delete(synchronize_session=False)
+    )
 
 
 def maybe_replicate_delete(db: Session, *, node_id: int, primary_config: VpnConfig) -> dict[str, Any] | None:

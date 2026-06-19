@@ -10,9 +10,11 @@ from app.models import (
     RefreshToken,
     User,
     UserActionLog,
+    UserReminderLog,
     UserRole,
     ViewerConfigAccess,
     VpnConfig,
+    WebAuthnCredential,
 )
 from app.schemas import MessageResponse, UserCreate, UserResponse, UserUpdate
 from app.services.action_log import log_action
@@ -32,6 +34,8 @@ settings = get_settings()
 def _purge_user_before_delete(db: Session, user: User, successor: User) -> None:
     db.query(RefreshToken).filter(RefreshToken.user_id == user.id).delete(synchronize_session=False)
     db.query(ViewerConfigAccess).filter(ViewerConfigAccess.user_id == user.id).delete(synchronize_session=False)
+    db.query(UserReminderLog).filter(UserReminderLog.user_id == user.id).delete(synchronize_session=False)
+    db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete(synchronize_session=False)
     db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).update(
         {VpnConfig.owner_id: successor.id},
         synchronize_session=False,

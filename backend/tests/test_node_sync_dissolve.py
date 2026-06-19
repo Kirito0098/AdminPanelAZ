@@ -81,6 +81,53 @@ def test_dissolve_auto_promotes_replica_shadows_and_keeps_configs(ha_group_db):
     assert replica_configs[0].client_name == "alice"
 
 
+def test_dissolve_detaches_stray_replica_config(ha_group_db):
+    db, group, primary, replica, primary_config, shadow = ha_group_db
+    stray = VpnConfig(
+        node_id=replica.id,
+        client_name="orphan",
+        vpn_type=VpnType.wireguard,
+        owner_id=primary_config.owner_id,
+        sync_group_id=group.id,
+    )
+    db.add(stray)
+    db.commit()
+
+    result = dissolve_sync_group(db, group)
+
+    assert result["primary_configs_detached"] == 1
+    assert result["replica_configs_detached"] == 2
+
+    db.refresh(primary_config)
+    db.refresh(shadow)
+    db.refresh(stray)
+    assert primary_config.sync_group_id is None
+    assert shadow.sync_group_id is None
+    assert shadow.ha_primary_config_id is None
+    assert stray.sync_group_id is None
+    assert stray.ha_primary_config_id is None
+
+
+def test_dissolve_manual_full_detaches_primary_only(ha_group_db):
+    db, group, primary, replica, primary_config, shadow = ha_group_db
+    group.sync_mode = "manual_full"
+    db.delete(shadow)
+    db.commit()
+
+    result = dissolve_sync_group(db, group)
+
+    assert result["primary_configs_detached"] == 1
+    assert result["replica_configs_detached"] == 0
+    db.refresh(primary_config)
+    assert primary_config.sync_group_id is None
+    assert (
+        db.query(VpnConfig)
+        .filter(VpnConfig.node_id == replica.id)
+        .count()
+        == 0
+    )
+
+
 def test_dissolve_manual_promotes_shadows(ha_group_db):
     db, group, _primary, replica, primary_config, shadow = ha_group_db
     group.sync_mode = "manual_full"

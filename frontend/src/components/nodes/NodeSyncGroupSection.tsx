@@ -271,7 +271,14 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
               <TableBody>
                 {groups.map((group) => (
                   <TableRow key={group.id}>
-                    <TableCell className="font-medium">{group.name}</TableCell>
+                    <TableCell className="font-medium">
+                      {group.name}
+                      {group.sync_mode === 'manual_full' ? (
+                        <p className="mt-1 text-xs font-normal text-muted-foreground">
+                          После расформирования группы на replica выполните Конфигурации → Синхронизировать.
+                        </p>
+                      ) : null}
+                    </TableCell>
                     <TableCell>{group.shared_domain}</TableCell>
                     <TableCell>{group.primary_node_name ?? group.primary_node_id}</TableCell>
                     <TableCell>
@@ -410,6 +417,11 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                     <SelectItem value="auto">Auto — create/delete на все replica</SelectItem>
                   </SelectContent>
                 </Select>
+                {syncMode === 'manual_full' ? (
+                  <SettingsAlert variant="info">
+                    После расформирования группы на replica выполните Конфигурации → Синхронизировать.
+                  </SettingsAlert>
+                ) : null}
               </div>
             </div>
             <DialogFooter>

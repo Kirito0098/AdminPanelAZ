@@ -9,12 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SQLite — `PRAGMA foreign_keys=ON`** — включена проверка внешних ключей на каждом подключении к основной БД и CIDR-БД (`apply_sqlite_connection_pragmas`); рассинхрон ссылок ловится на уровне SQLite, как на Postgres.
 - **HA — расформирование Sync Group** — при удалении группы синхронизации узлы переводятся в независимое состояние: снимаются HA-метки в БД (`sync_group_id`, `ha_primary_config_id`), shadow-записи на replica становятся обычными конфигами ноды; конфиги и файлы на VPN-серверах **не удаляются**. Сервис `node_sync/dissolve.py`; тесты `test_node_sync_dissolve.py`.
 - **Личные настройки — часовой пояс** — персональный IANA-пояс у пользователя (`users.timezone`); выбор в «Настройки → Личные» или режим «как в браузере»; `TimezoneContext`, `lib/datetime.ts`; единое UTC-aware форматирование дат во всей панели и tg-mini; заголовок `X-Client-Timezone` в API для Telegram-уведомлений.
 
 ### Changed
 
+- **Узлы — удаление** — `purge_node_related` дополнен очисткой `ConfigTag`, `ClientTemplate`, `AlertRule` и отвязкой осиротевших `ha_primary_config_id` перед удалением конфигов узла.
+- **Пользователи — удаление** — `_purge_user_before_delete` удаляет `UserReminderLog` и `WebAuthnCredential` до `DELETE users`.
+- **Конфиги — удаление** — перед удалением primary вызывается `purge_ha_shadow_configs` (роутер и bulk-операции), чтобы FK не блокировали удаление при оставшихся HA-тенях.
 - **UI — Sync Groups** — диалог и сообщения: «Расформировать» вместо «Удалить», пояснение что узлы остаются независимыми с сохранёнными конфигами.
+
+### Tests
+
+- `test_sqlite_foreign_keys.py` — `foreign_keys=1` на тестовых SQLite engine.
+- `test_nodes_delete.py` — удаление узла с тегами, шаблонами и alert rules.
+- `test_user_delete.py` — удаление пользователя с passkey и reminder logs.
 
 ## [2.4.0] - 2026-06-18
 

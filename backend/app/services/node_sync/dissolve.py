@@ -19,6 +19,7 @@ def dissolve_sync_group(db: Session, group: NodeSyncGroup) -> dict[str, Any]:
         .filter(
             VpnConfig.sync_group_id == group.id,
             VpnConfig.ha_primary_config_id.is_(None),
+            VpnConfig.node_id == group.primary_node_id,
         )
         .all()
     )

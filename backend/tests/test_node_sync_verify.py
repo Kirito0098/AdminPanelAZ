@@ -84,3 +84,36 @@ def test_verify_mismatch_clients(sync_group_db):
     assert mismatch["only_primary"] == ["extra"]
     stored = json.loads(group.last_verify_result or "{}")
     assert stored["ready"] is False
+
+
+def test_verify_primary_offline_returns_gracefully(sync_group_db):
+    db, group, primary, _replica = sync_group_db
+    primary.status = NodeStatus.offline
+    db.commit()
+
+    with patch("app.services.node_sync.verify.get_adapter_for_node") as get_adapter:
+        result = verify_sync_group(db, group)
+
+    get_adapter.assert_not_called()
+    assert result["ready"] is False
+    assert result["summary"] == "primary offline или не найден"
+    assert result["replicas"] == []
+    stored = json.loads(group.last_verify_result or "{}")
+    assert stored["ready"] is False
+    assert stored["summary"] == "primary offline или не найден"
+    assert group.last_verify_at is not None
+
+
+def test_verify_primary_missing_returns_gracefully(sync_group_db):
+    db, group, _primary, _replica = sync_group_db
+    group.primary_node_id = 99999
+    db.commit()
+
+    with patch("app.services.node_sync.verify.get_adapter_for_node") as get_adapter:
+        result = verify_sync_group(db, group)
+
+    get_adapter.assert_not_called()
+    assert result["ready"] is False
+    assert result["summary"] == "primary offline или не найден"
+    stored = json.loads(group.last_verify_result or "{}")
+    assert stored["ready"] is False

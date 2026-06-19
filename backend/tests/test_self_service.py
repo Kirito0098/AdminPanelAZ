@@ -8,10 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 from app.auth import create_access_token, get_password_hash
-from app.models import AppSetting, User, UserRole, VpnConfig, VpnType
+from app.models import AppSetting, Node, User, UserRole, VpnConfig, VpnType
 from app.schemas import TrafficClientRow, TrafficSummary
 from app.services.self_service import (
     REMINDER_DEDUP_SECONDS,
+    count_user_configs,
     enforce_user_can_create_config,
     record_reminder_sent,
     reminder_recently_sent,
@@ -77,6 +78,41 @@ def test_config_quota_endpoint(api_test_env):
     assert body["used"] == 0
     assert body["limit"] == 2
     assert body["can_create"] is True
+
+
+def test_count_user_configs_dedupes_same_client_across_nodes(api_test_env):
+    db = api_test_env["session_factory"]()
+    node = api_test_env["node"]
+    other = Node(name="remote", host="10.0.0.9", port=9100)
+    db.add(other)
+    db.commit()
+    db.refresh(other)
+    panel_user = _create_panel_user(api_test_env["session_factory"], "dedup_user")
+    db.add_all(
+        [
+            VpnConfig(
+                node_id=node.id,
+                client_name="shared-client",
+                vpn_type=VpnType.openvpn,
+                owner_id=panel_user.id,
+            ),
+            VpnConfig(
+                node_id=other.id,
+                client_name="shared-client",
+                vpn_type=VpnType.openvpn,
+                owner_id=panel_user.id,
+            ),
+            VpnConfig(
+                node_id=other.id,
+                client_name="other-wg",
+                vpn_type=VpnType.wireguard,
+                owner_id=panel_user.id,
+            ),
+        ]
+    )
+    db.commit()
+    assert count_user_configs(db, panel_user.id) == 2
+    db.close()
 
 
 def test_config_create_quota_enforced(api_test_env):

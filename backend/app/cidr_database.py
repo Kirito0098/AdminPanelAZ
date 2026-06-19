@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import get_settings
+from app.database import apply_sqlite_connection_pragmas
 from app.paths import BACKEND_ROOT
 
 logger = logging.getLogger(__name__)
@@ -24,8 +25,7 @@ def _set_cidr_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
     if not _is_sqlite:
         return
     cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA busy_timeout=30000")
+    apply_sqlite_connection_pragmas(cursor)
     cursor.close()
 
 
@@ -122,8 +122,7 @@ def run_cidr_db_migrations() -> None:
 
     conn = sqlite3.connect(str(cidr_path), timeout=30)
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=30000")
+        apply_sqlite_connection_pragmas(conn.cursor())
         conn.execute("ATTACH DATABASE ? AS maindb", (str(main_path),))
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(

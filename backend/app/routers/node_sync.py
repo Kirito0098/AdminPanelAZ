@@ -24,11 +24,13 @@ from app.services.background_tasks import background_task_service
 from app.services.node_sync.groups import (
     apply_group_fields,
     group_to_dict,
+    is_auto_sync_enabled,
     parse_replica_node_ids,
     raise_if_preflight_errors,
     validate_sync_group_payload,
 )
 from app.services.node_sync.dissolve import dissolve_sync_group
+from app.services.node_sync.manual_link import link_primary_configs_to_group
 from app.services.node_sync.push_full import run_push_full
 from app.services.node_sync.verify import verify_sync_group
 
@@ -68,6 +70,8 @@ def create_sync_group(
     db.add(group)
     db.commit()
     db.refresh(group)
+    if not is_auto_sync_enabled(group):
+        link_primary_configs_to_group(db, group)
     return _to_response(group, db)
 
 

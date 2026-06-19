@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from app.cidr_database import resolve_cidr_db_path
+from app.database import apply_sqlite_connection_pragmas
 from app.config import get_settings
 from app.paths import BACKEND_ROOT, resolve_backend_path
 
@@ -94,8 +95,7 @@ def write_provider_cidr_csv(
 
 def _sqlite_connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), timeout=30)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=30000")
+    apply_sqlite_connection_pragmas(conn.cursor())
     return conn
 
 

@@ -45,14 +45,17 @@ def get_user_config_quota_limit(db: Session, user: User) -> int | None:
 
 
 def count_user_configs(db: Session, user_id: int) -> int:
-    return (
-        db.query(VpnConfig)
+    """Count logical configs for quota (dedupe same client_name+vpn_type across nodes)."""
+    pairs = (
+        db.query(VpnConfig.client_name, VpnConfig.vpn_type)
         .filter(
             VpnConfig.owner_id == user_id,
             VpnConfig.ha_primary_config_id.is_(None),
         )
-        .count()
+        .distinct()
+        .all()
     )
+    return len(pairs)
 
 
 def get_owned_client_names(db: Session, user: User, node_id: int | None = None) -> set[str]:
