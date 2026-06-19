@@ -72,7 +72,7 @@ from app.services.totp_service import (
     require_valid_totp,
     verify_totp_code,
 )
-from app.services.webauthn_service import user_has_passkeys, webauthn_service
+from app.services.webauthn_service import list_passkeys, user_has_passkeys, webauthn_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
@@ -571,7 +571,7 @@ def passkey_register_verify(
 
 @router.get("/passkeys", response_model=PasskeyListResponse)
 def passkey_list(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    rows = webauthn_service.list_passkeys(db, current_user.id)
+    rows = list_passkeys(db, current_user.id)
     return PasskeyListResponse(credentials=rows, count=len(rows))
 
 

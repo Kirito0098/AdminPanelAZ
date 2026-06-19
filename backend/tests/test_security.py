@@ -492,6 +492,108 @@ def test_login_requires_2fa_when_passkeys_configured():
     assert data.get("passkey_available") is True
 
 
+def test_authentication_verify_allows_zero_sign_count(db_session):
+    """Platform authenticators (e.g. Touch ID) often keep sign_count at 0."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from app.auth import get_password_hash
+    from app.models import User, UserRole, WebAuthnCredential
+    from app.services.webauthn_service import WebAuthnService, _store_challenge
+    from webauthn.helpers import bytes_to_base64url
+
+    user = User(
+        username="passkey_zero_sign",
+        password_hash=get_password_hash("secret123"),
+        role=UserRole.admin,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    credential_id = bytes_to_base64url(b"test-cred")
+    row = WebAuthnCredential(
+        user_id=user.id,
+        credential_id=credential_id,
+        public_key=bytes_to_base64url(b"public-key"),
+        sign_count=0,
+    )
+    db_session.add(row)
+    db_session.commit()
+    db_session.refresh(row)
+
+    session_key = "test-session"
+    _store_challenge(session_key, challenge=b"challenge-bytes-32-padded-ok!", purpose="authenticate", user_id=user.id)
+    service = WebAuthnService()
+    request = SimpleNamespace(
+        headers={"host": "localhost"},
+        url=SimpleNamespace(scheme="http"),
+    )
+    credential = {
+        "id": credential_id,
+        "rawId": credential_id,
+        "response": {"clientDataJSON": "e30", "authenticatorData": "e30", "signature": "e30"},
+    }
+    verified = SimpleNamespace(new_sign_count=0)
+    with patch("app.services.webauthn_service.verify_authentication_response", return_value=verified):
+        result = service.authentication_verify(
+            db_session,
+            user,
+            request,
+            credential=credential,
+            session_key=session_key,
+        )
+    assert result.id == row.id
+    assert result.sign_count == 0
+
+
+def test_authentication_options_skips_invalid_credentials(db_session):
+    from types import SimpleNamespace
+
+    from app.auth import get_password_hash
+    from app.models import User, UserRole, WebAuthnCredential
+    from app.services.webauthn_service import WebAuthnService
+    from webauthn.helpers import bytes_to_base64url
+
+    user = User(
+        username="passkey_options_user",
+        password_hash=get_password_hash("secret123"),
+        role=UserRole.admin,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    db_session.add_all(
+        [
+            WebAuthnCredential(
+                user_id=user.id,
+                credential_id="touch-id-cred",
+                public_key="dGVzdA",
+                sign_count=0,
+            ),
+            WebAuthnCredential(
+                user_id=user.id,
+                credential_id=bytes_to_base64url(b"valid-cred"),
+                public_key=bytes_to_base64url(b"public-key"),
+                sign_count=0,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    service = WebAuthnService()
+    request = SimpleNamespace(
+        headers={"host": "localhost"},
+        url=SimpleNamespace(scheme="http"),
+    )
+    options = service.authentication_options(db_session, user, request)
+    assert options["sessionKey"]
+    assert len(options["allowCredentials"]) == 1
+
+
 def test_passkey_register_options_requires_admin():
     from app.main import app
 

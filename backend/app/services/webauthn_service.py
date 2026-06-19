@@ -17,7 +17,7 @@ from webauthn import (
     verify_authentication_response,
     verify_registration_response,
 )
-from webauthn.helpers import base64url_to_bytes, bytes_to_base64url, options_to_json
+from webauthn.helpers import base64url_to_bytes, bytes_to_base64url, options_to_json_dict
 from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
     PublicKeyCredentialDescriptor,
@@ -103,7 +103,7 @@ def list_passkeys(db: Session, user_id: int) -> list[WebAuthnCredential]:
     )
 
 
-def _exclude_credentials(db: Session, user_id: int) -> list[PublicKeyCredentialDescriptor]:
+def _credential_descriptors_for_user(db: Session, user_id: int) -> list[PublicKeyCredentialDescriptor]:
     rows = db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user_id).all()
     descriptors: list[PublicKeyCredentialDescriptor] = []
     for row in rows:
@@ -114,6 +114,10 @@ def _exclude_credentials(db: Session, user_id: int) -> list[PublicKeyCredentialD
         except Exception:
             continue
     return descriptors
+
+
+def _exclude_credentials(db: Session, user_id: int) -> list[PublicKeyCredentialDescriptor]:
+    return _credential_descriptors_for_user(db, user_id)
 
 
 class WebAuthnService:
@@ -134,7 +138,7 @@ class WebAuthnService:
                 user_verification=UserVerificationRequirement.PREFERRED,
             ),
         )
-        payload = options_to_json(options)
+        payload = options_to_json_dict(options)
         payload["sessionKey"] = session_key
         return payload
 
@@ -188,10 +192,9 @@ class WebAuthnService:
         credentials = db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).all()
         if not credentials:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passkeys не настроены")
-        allow_credentials = [
-            PublicKeyCredentialDescriptor(id=base64url_to_bytes(row.credential_id))
-            for row in credentials
-        ]
+        allow_credentials = _credential_descriptors_for_user(db, user.id)
+        if not allow_credentials:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passkeys не настроены")
         challenge = secrets.token_bytes(32)
         key = session_key or secrets.token_urlsafe(24)
         _store_challenge(key, challenge=challenge, purpose="authenticate", user_id=user.id)
@@ -201,7 +204,7 @@ class WebAuthnService:
             allow_credentials=allow_credentials,
             user_verification=UserVerificationRequirement.PREFERRED,
         )
-        payload = options_to_json(options)
+        payload = options_to_json_dict(options)
         payload["sessionKey"] = key
         return payload
 
@@ -235,8 +238,6 @@ class WebAuthnService:
             credential_current_sign_count=row.sign_count,
             require_user_verification=False,
         )
-        if verification.new_sign_count <= row.sign_count:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Passkey отклонён")
         row.sign_count = verification.new_sign_count
         row.last_used_at = datetime.utcnow()
         db.commit()
