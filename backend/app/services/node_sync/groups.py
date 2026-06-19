@@ -133,6 +133,16 @@ def find_sync_group_for_primary(db: Session, node_id: int) -> NodeSyncGroup | No
     return db.query(NodeSyncGroup).filter(NodeSyncGroup.primary_node_id == node_id).first()
 
 
+def get_sync_group_for_primary_or_raise(db: Session, node_id: int) -> NodeSyncGroup:
+    group = find_sync_group_for_primary(db, node_id)
+    if not group:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"HA sync group for primary node {node_id} not found",
+        )
+    return group
+
+
 def find_sync_group_containing_node(
     db: Session,
     node_id: int,
@@ -162,23 +172,47 @@ def build_ha_node_context(db: Session, node_id: int) -> dict[str, Any] | None:
     }
 
 
+def _raise_ha_replica_forbidden(
+    db: Session,
+    *,
+    node_id: int,
+    operation_hint: str,
+) -> None:
+    group, role = find_sync_group_containing_node(db, node_id)
+    if not group or role != "replica":
+        return
+    node = db.get(Node, node_id)
+    node_name = node.name if node else str(node_id)
+    primary = db.get(Node, group.primary_node_id)
+    primary_name = primary.name if primary else str(group.primary_node_id)
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            f"Узел «{node_name}» — replica в HA-группе «{group.name}» ({group.shared_domain}). "
+            f"{operation_hint} на primary («{primary_name}»)."
+        ),
+    )
+
+
 def require_ha_primary_for_client_ops(db: Session, *, node: Node | None = None) -> None:
     """Reject client create/delete/cert mutations on HA replica nodes."""
     if node is None:
         from app.services.node_manager import get_active_node
 
         node = get_active_node(db)
-    group, role = find_sync_group_containing_node(db, node.id)
-    if not group or role != "replica":
-        return
-    primary = db.get(Node, group.primary_node_id)
-    primary_name = primary.name if primary else str(group.primary_node_id)
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=(
-            f"Узел «{node.name}» — replica в HA-группе «{group.name}» ({group.shared_domain}). "
-            f"Создавайте и изменяйте клиентов на primary («{primary_name}»)."
-        ),
+    _raise_ha_replica_forbidden(
+        db,
+        node_id=node.id,
+        operation_hint="Создавайте и изменяйте клиентов",
+    )
+
+
+def require_ha_primary_node(db: Session, node_id: int) -> None:
+    """Reject per-node mutations (e.g. node defaults) on HA replica nodes."""
+    _raise_ha_replica_forbidden(
+        db,
+        node_id=node_id,
+        operation_hint="Меняйте политику по умолчанию",
     )
 
 

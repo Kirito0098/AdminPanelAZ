@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models import Node, OpenVpnAccessPolicy, WgAccessPolicy
+from app.models import Node, OpenVpnAccessPolicy, VpnType, WgAccessPolicy
 
 _OVPN_POLICY_FIELDS = (
     "is_temp_blocked",
@@ -71,4 +71,57 @@ def copy_access_policies_from_node(db: Session, source_node: Node, target_node: 
         fields=_WG_POLICY_FIELDS,
     )
     db.commit()
+    return copied
+
+
+def copy_single_client_policy(
+    db: Session,
+    source_node: Node,
+    target_node: Node,
+    client_name: str,
+    *,
+    vpn_type,
+) -> int:
+    """Copy OVPN or WG access policy for one client from source to target (upsert)."""
+    copied = 0
+    if vpn_type == VpnType.openvpn:
+        source = (
+            db.query(OpenVpnAccessPolicy)
+            .filter_by(node_id=source_node.id, client_name=client_name)
+            .first()
+        )
+        if source is None:
+            return 0
+        target = (
+            db.query(OpenVpnAccessPolicy)
+            .filter_by(node_id=target_node.id, client_name=client_name)
+            .first()
+        )
+        if target is None:
+            target = OpenVpnAccessPolicy(node_id=target_node.id, client_name=client_name)
+            db.add(target)
+            copied = 1
+        _copy_policy_row(source, target, _OVPN_POLICY_FIELDS)
+        db.flush()
+        return copied
+
+    normalized = client_name.strip().lower()
+    source = (
+        db.query(WgAccessPolicy)
+        .filter_by(node_id=source_node.id, client_name=normalized)
+        .first()
+    )
+    if source is None:
+        return 0
+    target = (
+        db.query(WgAccessPolicy)
+        .filter_by(node_id=target_node.id, client_name=normalized)
+        .first()
+    )
+    if target is None:
+        target = WgAccessPolicy(node_id=target_node.id, client_name=normalized)
+        db.add(target)
+        copied = 1
+    _copy_policy_row(source, target, _WG_POLICY_FIELDS)
+    db.flush()
     return copied

@@ -1,14 +1,14 @@
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
 from app.database import get_db
-from app.models import User
+from app.models import BackgroundTask, User
 from app.schemas import (
     AntizapretSettingFieldSchema,
     AntizapretSettingsResponse,
@@ -19,8 +19,46 @@ from app.schemas import (
 from app.services.antizapret_settings import build_schema, filter_known_keys
 from app.services.background_tasks import background_task_service
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.node_sync.antizapret_sync import enqueue_ha_routing_apply_replicas, replicate_antizapret_settings
+from app.services.node_sync.config_sync import maybe_replicate_config_files
+from app.services.node_sync.groups import find_sync_group_for_primary, is_auto_sync_enabled
+from app.services.node_sync.provider_sync import deploy_compiled_providers_to_replicas, replicate_provider_content
 
 router = APIRouter(prefix="/routing", tags=["routing"])
+
+
+def _enqueue_routing_apply_tasks(
+    db: Session,
+    *,
+    created_by_username: str,
+) -> BackgroundTask | None:
+    """Enqueue routing apply on primary and HA replicas (independent background tasks)."""
+    if background_task_service.find_active_task("routing_apply"):
+        return None
+
+    def _callable(progress_updater=None):
+        from app.database import SessionLocal
+
+        worker_db = SessionLocal()
+        try:
+            adapter = get_active_adapter(worker_db)
+            return background_task_service.task_routing_apply(adapter, progress_updater)
+        finally:
+            worker_db.close()
+
+    task = background_task_service.enqueue_background_task(
+        "routing_apply",
+        _callable,
+        created_by_username=created_by_username,
+        queued_message="Применение маршрутизации поставлено в очередь",
+    )
+
+    active_node = get_active_node(db)
+    group = find_sync_group_for_primary(db, active_node.id)
+    if group and is_auto_sync_enabled(group):
+        enqueue_ha_routing_apply_replicas(db, group, created_by_username=created_by_username)
+
+    return task
 
 
 class ContentUpdate(BaseModel):
@@ -56,7 +94,12 @@ def save_provider(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    return get_active_adapter(db).save_provider_content(filename, payload.content)
+    result = get_active_adapter(db).save_provider_content(filename, payload.content)
+    active_node = get_active_node(db)
+    group = find_sync_group_for_primary(db, active_node.id)
+    if group and is_auto_sync_enabled(group):
+        replicate_provider_content(db, group, filename, payload.content)
+    return result
 
 
 @router.post("/providers/{filename}/enabled")
@@ -71,7 +114,14 @@ def toggle_provider(
 
 @router.post("/sync")
 def sync_providers(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    return get_active_adapter(db).sync_cidr_providers()
+    adapter = get_active_adapter(db)
+    result = adapter.sync_cidr_providers()
+    active_node = get_active_node(db)
+    group = find_sync_group_for_primary(db, active_node.id)
+    if group and is_auto_sync_enabled(group):
+        ha_deploy = deploy_compiled_providers_to_replicas(db, group, adapter, sync_result=result)
+        result = {**result, "ha_deploy": ha_deploy}
+    return result
 
 
 @router.get("/files/{file_key}")
@@ -86,7 +136,15 @@ def write_route_file(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    return get_active_adapter(db).write_route_file(file_key, payload.content)
+    result = get_active_adapter(db).write_route_file(file_key, payload.content)
+    maybe_replicate_config_files(
+        db,
+        node_id=get_active_node(db).id,
+        file_keys=[file_key],
+        run_doall=False,
+        content_overrides={file_key: payload.content},
+    )
+    return result
 
 
 @router.get("/results")
@@ -115,15 +173,25 @@ def get_antizapret_settings(_: User = Depends(require_admin), db: Session = Depe
 @router.put("/antizapret-settings", response_model=AntizapretSettingsUpdateResponse)
 def put_antizapret_settings(
     payload: dict[str, Any],
-    _: User = Depends(require_admin),
+    apply: bool = Query(False, description="После сохранения поставить apply в очередь (только HA auto)"),
+    admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     if not isinstance(payload, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ожидается JSON-объект")
+    filtered = filter_known_keys(payload)
     try:
-        result = get_active_adapter(db).update_antizapret_settings(filter_known_keys(payload))
+        result = get_active_adapter(db).update_antizapret_settings(filtered)
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав на запись") from exc
+
+    active_node = get_active_node(db)
+    group = find_sync_group_for_primary(db, active_node.id)
+    if group and is_auto_sync_enabled(group):
+        replicate_antizapret_settings(db, group, filtered)
+        if apply:
+            _enqueue_routing_apply_tasks(db, created_by_username=admin.username)
+
     return AntizapretSettingsUpdateResponse(**result)
 
 
@@ -139,22 +207,13 @@ def apply_routing(admin: User = Depends(require_admin), db: Session = Depends(ge
             },
         )
 
-    def _callable(progress_updater=None):
-        from app.database import SessionLocal
+    task = _enqueue_routing_apply_tasks(db, created_by_username=admin.username)
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Применение маршрутизации уже выполняется",
+        )
 
-        worker_db = SessionLocal()
-        try:
-            adapter = get_active_adapter(worker_db)
-            return background_task_service.task_routing_apply(adapter, progress_updater)
-        finally:
-            worker_db.close()
-
-    task = background_task_service.enqueue_background_task(
-        "routing_apply",
-        _callable,
-        created_by_username=admin.username,
-        queued_message="Применение маршрутизации поставлено в очередь",
-    )
     return background_task_service.build_accepted_payload(
         task,
         "Маршрутизация запущена в фоне (sync + doall.sh)",

@@ -458,12 +458,13 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {(importPolling || importTask) && (
-        <SettingsAlert variant="info" title="Импорт CSV">
-          {importTask?.progress_stage || importTask?.message || 'Импорт выполняется…'}
-          {importTask?.progress_percent != null && ` (${importTask.progress_percent}%)`}
-        </SettingsAlert>
-      )}
+      <SettingsAlert variant="info" title="Импорт CSV">
+        Обязательные колонки: client_name, vpn_type. Опционально: traffic_limit_bytes, traffic_limit_days
+        (1 / 7 / 30), block_mode (permanent, temp, temp:N). В HA auto политики реплицируются на replica.
+        {importTask?.progress_stage || importTask?.message
+          ? ` ${importTask.progress_stage || importTask.message}${importTask.progress_percent != null ? ` (${importTask.progress_percent}%)` : ''}`
+          : ''}
+      </SettingsAlert>
 
       <HaReplicaBanner />
 

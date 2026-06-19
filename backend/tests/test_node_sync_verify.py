@@ -105,11 +105,18 @@ def test_verify_primary_offline_returns_gracefully(sync_group_db):
 
 
 def test_verify_primary_missing_returns_gracefully(sync_group_db):
-    db, group, _primary, _replica = sync_group_db
-    group.primary_node_id = 99999
-    db.commit()
+    db, group, primary, _replica = sync_group_db
 
-    with patch("app.services.node_sync.verify.get_adapter_for_node") as get_adapter:
+    real_get = db.get
+
+    def get(model, ident, *args, **kwargs):
+        if model is Node and ident == group.primary_node_id:
+            return None
+        return real_get(model, ident, *args, **kwargs)
+
+    with patch.object(db, "get", side_effect=get), patch(
+        "app.services.node_sync.verify.get_adapter_for_node",
+    ) as get_adapter:
         result = verify_sync_group(db, group)
 
     get_adapter.assert_not_called()
@@ -117,3 +124,6 @@ def test_verify_primary_missing_returns_gracefully(sync_group_db):
     assert result["summary"] == "primary offline или не найден"
     stored = json.loads(group.last_verify_result or "{}")
     assert stored["ready"] is False
+    assert stored["summary"] == "primary offline или не найден"
+    assert group.last_verify_at is not None
+    assert primary.id == group.primary_node_id

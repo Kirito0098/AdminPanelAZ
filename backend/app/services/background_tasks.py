@@ -48,6 +48,7 @@ _PIPELINE_TASK_TYPES = {
 _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "run_doall": ("AntiZapret: применение изменений…", "AntiZapret: запуск doall.sh…", 5),
     "routing_apply": ("Применение маршрутизации…", "Синхронизация провайдеров…", 5),
+    "routing_apply_replica": ("Применение маршрутизации на replica…", "Синхронизация провайдеров…", 5),
     "restart_service": ("Перезапуск службы…", "Перезапуск службы…", 10),
     "update_system": ("Обновление кода и зависимостей…", "Обновление: проверка репозитория…", 5),
     "pytest_run": ("Запуск тестов…", "Подготовка pytest…", 5),
@@ -67,6 +68,7 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
 _TASK_DONE_PROGRESS: dict[str, str] = {
     "run_doall": "AntiZapret: изменения применены",
     "routing_apply": "Маршрутизация применена",
+    "routing_apply_replica": "Маршрутизация на replica применена",
     "restart_service": "Служба перезапущена",
     "update_system": "Обновление завершено",
     "pytest_run": "Тесты завершены",
@@ -419,6 +421,45 @@ class BackgroundTaskService:
             "message": "Маршрутизация применена (doall.sh)",
             "output": combined,
         }
+
+    def make_routing_apply_for_node_callable(self, node_id: int) -> BackgroundTaskCallable:
+        captured_node_id = int(node_id)
+
+        def _callable(progress_updater: Callable[[int, str, str | None], None] | None = None) -> dict[str, str]:
+            from app.models import Node
+            from app.services.node_manager import get_adapter_for_node
+
+            db = SessionLocal()
+            try:
+                node = db.get(Node, captured_node_id)
+                if node is None:
+                    raise RuntimeError(f"Node {captured_node_id} not found")
+
+                node_label = node.name or str(captured_node_id)
+
+                def _node_progress(percent: int, stage: str, message: str | None = None) -> None:
+                    if not progress_updater:
+                        return
+                    staged = f"{node_label}: {stage}" if stage else node_label
+                    msg = f"{node_label}: {message}" if message else None
+                    progress_updater(percent, staged, msg)
+
+                adapter = get_adapter_for_node(node)
+                result = self.task_routing_apply(adapter, _node_progress)
+                result["message"] = f"{node_label}: {result.get('message', 'Маршрутизация применена')}"
+                result["output"] = json.dumps(
+                    {
+                        "node_id": captured_node_id,
+                        "node_name": node.name,
+                        "log": result.get("output", ""),
+                    },
+                    ensure_ascii=False,
+                )
+                return result
+            finally:
+                db.close()
+
+        return _callable
 
     def task_update_system(self, progress_updater: Callable[[int, str, str | None], None] | None = None) -> dict[str, str]:
         from app.services.system_update import apply_controller_update

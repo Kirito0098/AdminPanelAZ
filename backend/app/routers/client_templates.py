@@ -24,6 +24,7 @@ from app.services.client_templates import (
 from app.services.feature_guards import get_feature_service
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.groups import require_ha_primary_for_client_ops
+from app.services.notify_time import get_client_timezone_from_request
 from app.services.self_service import enforce_user_can_create_config
 
 router = APIRouter(prefix="/client-templates", tags=["client-templates"])

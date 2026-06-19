@@ -75,6 +75,8 @@ export interface NodeSyncGroup {
   last_sync_task_id?: string | null
   last_sync_error?: string | null
   last_verify_result?: NodeSyncVerifyResult | null
+  /** Partial replication failures from API (when returned). */
+  warnings?: string[]
   created_at: string
   updated_at: string
 }

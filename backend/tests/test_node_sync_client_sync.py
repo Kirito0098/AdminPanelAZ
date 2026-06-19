@@ -46,7 +46,7 @@ def test_replicate_client_create_on_replicas(auto_group_db):
     db, group, _primary, replica, primary_config = auto_group_db
     adapter = MagicMock()
 
-    with patch("app.services.node_sync.client_sync.get_adapter_for_node", return_value=adapter):
+    with patch("app.services.node_sync.replicate.get_adapter_for_node", return_value=adapter):
         result = replicate_client_create(db, group, primary_config)
 
     assert result["skipped"] is False
@@ -66,7 +66,7 @@ def test_replicate_client_delete_removes_shadows(auto_group_db):
     db, group, _primary, replica, primary_config = auto_group_db
     adapter = MagicMock()
 
-    with patch("app.services.node_sync.client_sync.get_adapter_for_node", return_value=adapter):
+    with patch("app.services.node_sync.replicate.get_adapter_for_node", return_value=adapter):
         replicate_client_create(db, group, primary_config)
         result = replicate_client_delete(db, group, primary_config)
 
@@ -98,11 +98,11 @@ def test_replicate_partial_failure_logs_action(auto_group_db, monkeypatch):
         return adapter_fail
 
     monkeypatch.setattr(
-        "app.services.node_sync.client_sync.get_settings",
+        "app.services.node_sync.replicate.get_settings",
         lambda: Settings(audit_log_enabled=True),
     )
 
-    with patch("app.services.node_sync.client_sync.get_adapter_for_node", side_effect=get_adapter):
+    with patch("app.services.node_sync.replicate.get_adapter_for_node", side_effect=get_adapter):
         result = replicate_client_create(db, group, primary_config)
 
     assert len(result["replicated"]) == 1

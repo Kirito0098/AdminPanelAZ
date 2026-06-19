@@ -55,7 +55,28 @@
 | **Сохранить** | Записывает изменения на узел | После любых правок |
 | **Применить (doall.sh)** | Активирует настройки на VPN-сервере | Всегда после сохранения |
 
-> После **Сохранить** может появиться предупреждение «Требуется применение» — это значит, что нужно нажать **Применить (doall.sh)**.
+> После **Сохранить** может появиться предупреждение «Требуется применение» — это значит, что нужно нажать **Применить (doall.sh)**. UI **не** вызывает apply автоматически после сохранения.
+
+### HA-группа (`sync_mode=auto`)
+
+- **Сохранить** (`PUT /routing/antizapret-settings`) реплицирует те же ключи `setup` на все replica группы.
+- **Применить (doall.sh)** (`POST /routing/apply`) ставит в очередь apply на **primary** и **отдельную фоновую задачу на каждую replica**. Ошибка на одной replica не отменяет apply на primary.
+- Опционально для API/скриптов: `PUT /routing/antizapret-settings?apply=true` — после репликации настроек сразу enqueue apply (только admin, только при HA `sync_mode=auto` на primary). Ответ API — как у обычного PUT (результат primary).
+
+Подробнее про sync groups: [NodeSync.md](NodeSync.md).
+
+### `ANTIZAPRET_HA_SETTING_EXCLUDE`
+
+При репликации setup в `sync_mode=auto` панель фильтрует node-specific ключи (`filter_ha_replicable_settings`):
+
+| Реплицируется | Не реплицируется |
+|---------------|------------------|
+| Все ключи из `ANTIZAPRET_PARAMS`, включая `openvpn_host` → `OPENVPN_HOST`, `wireguard_host` → `WIREGUARD_HOST` (общий `shared_domain` в HA) | `ANTIZAPRET_WARP`, `VPN_WARP` |
+| Partial update: только поля из текущего PUT | Строки вне `ANTIZAPRET_PARAMS` (напр. `OPENVPN_LOG`) — panel API их не шлёт |
+
+Константа в коде: `ANTIZAPRET_HA_SETTING_EXCLUDE = {ANTIZAPRET_WARP, VPN_WARP}` (`antizapret_params.py`).
+
+**Почему WARP исключён:** WARPER slave и WARP-режим — per-node (см. [warper.md](warper.md), `warper-include-ips.txt` в `CONFIG_FINGERPRINT_EXCLUDE`). Hostname OpenVPN/WireGuard в HA **один** — реплицируется.
 
 ---
 
@@ -76,7 +97,7 @@
 
 - **Применить (doall.sh)** перезагружает правила маршрутизации — кратковременные перебои у подключённых клиентов возможны
 - Меняйте **безопасность сервера** только если понимаете последствия
-- Всегда проверяйте **активный узел** перед сохранением
+- Всегда проверяйте **активный узел** перед сохранением — в HA работайте на **primary**
 
 ---
 

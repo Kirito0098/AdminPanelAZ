@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     wg_policy_sync_interval_seconds: int = 120
     node_sync_reconcile_enabled: bool = True
     node_sync_reconcile_interval_seconds: int = 600
+    node_sync_auto_replicate_config_files: bool = True
+    node_sync_auto_replicate_policies: bool = True
+    node_sync_auto_heal: bool = False
+    node_sync_auto_heal_max_failures: int = 3
+    node_sync_replicate_doall: bool = True
     node_health_sync_enabled: bool = True
     node_health_sync_interval_seconds: int = 60
     resource_metrics_enabled: bool = True

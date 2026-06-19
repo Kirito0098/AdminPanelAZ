@@ -13,13 +13,15 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import SessionLocal
-from app.models import User, UserRole, VpnConfig, VpnType
+from app.models import OpenVpnAccessPolicy, User, UserRole, VpnConfig, VpnType, WgAccessPolicy
+from app.services.access_policy import AccessPolicyService
 from app.services.background_tasks import background_task_service
 from app.services.feature_guards import get_feature_service, require_vpn_type
-from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 from app.services.node_sync.groups import require_ha_primary_for_client_ops
 from app.services.node_sync.client_sync import maybe_replicate_create
-from app.services.node_sync.groups import find_sync_group_for_primary
+from app.services.node_sync.policy_sync import maybe_replicate_policy_op
+from app.services.traffic_limit import parse_traffic_limit_period_days
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +32,194 @@ CSV_HEADERS = (
     "owner_username",
     "cert_expire_days",
     "description",
+    "traffic_limit_bytes",
+    "traffic_limit_days",
+    "block_mode",
     "created_at",
     "updated_at",
 )
 
-IMPORT_HEADERS = ("client_name", "vpn_type", "owner_username", "cert_expire_days", "description")
+IMPORT_REQUIRED_HEADERS = ("client_name", "vpn_type")
+IMPORT_HEADERS = IMPORT_REQUIRED_HEADERS + (
+    "owner_username",
+    "cert_expire_days",
+    "description",
+    "traffic_limit_bytes",
+    "traffic_limit_days",
+    "block_mode",
+)
+
+
+def _encode_block_mode(policy) -> str:
+    if policy is None:
+        return ""
+    if getattr(policy, "is_permanent_blocked", False):
+        return "permanent"
+    if getattr(policy, "is_temp_blocked", False):
+        days = getattr(policy, "block_days", None)
+        return f"temp:{days}" if days else "temp"
+    return ""
+
+
+def _policy_row(db: Session, *, node_id: int, client_name: str, vpn_type: VpnType):
+    if vpn_type == VpnType.openvpn:
+        return (
+            db.query(OpenVpnAccessPolicy)
+            .filter(OpenVpnAccessPolicy.node_id == node_id, OpenVpnAccessPolicy.client_name == client_name)
+            .first()
+        )
+    lookup_name = client_name.strip().lower()
+    return (
+        db.query(WgAccessPolicy)
+        .filter(WgAccessPolicy.node_id == node_id, WgAccessPolicy.client_name == lookup_name)
+        .first()
+    )
+
+
+def _parse_block_mode(raw: str) -> tuple[str | None, int | None]:
+    value = (raw or "").strip().lower()
+    if not value:
+        return None, None
+    if value in {"permanent", "perm"}:
+        return "block_permanent", None
+    if value == "temp":
+        return "block_temp", 7
+    if value.startswith("temp:"):
+        days_raw = value.split(":", 1)[1].strip()
+        try:
+            days = int(days_raw)
+        except ValueError as exc:
+            raise ValueError("block_mode temp:N — N должно быть целым числом") from exc
+        if days < 1:
+            raise ValueError("block_mode temp:N — N должно быть ≥ 1")
+        return "block_temp", days
+    raise ValueError("block_mode: допустимо permanent, temp или temp:N")
+
+
+def _parse_policy_fields(row: dict[str, str]) -> dict[str, Any]:
+    limit_raw = row.get("traffic_limit_bytes", "").strip()
+    days_raw = row.get("traffic_limit_days", "").strip()
+    block_raw = row.get("block_mode", "").strip()
+
+    limit_bytes: int | None = None
+    if limit_raw:
+        try:
+            limit_bytes = int(limit_raw)
+        except ValueError as exc:
+            raise ValueError("traffic_limit_bytes должен быть целым числом") from exc
+        if limit_bytes < 1:
+            raise ValueError("traffic_limit_bytes должен быть ≥ 1")
+
+    period_days = parse_traffic_limit_period_days(days_raw) if days_raw else None
+    block_op, block_days = _parse_block_mode(block_raw)
+
+    return {
+        "limit_bytes": limit_bytes,
+        "period_days": period_days,
+        "block_op": block_op,
+        "block_days": block_days,
+    }
+
+
+def _apply_csv_policies_on_primary(
+    db: Session,
+    *,
+    node_id: int,
+    client_name: str,
+    vpn_type: VpnType,
+    actor_username: str,
+    policy_fields: dict[str, Any],
+) -> None:
+    limit_bytes = policy_fields.get("limit_bytes")
+    period_days = policy_fields.get("period_days")
+    block_op = policy_fields.get("block_op")
+    block_days = policy_fields.get("block_days")
+
+    if limit_bytes is None and block_op is None:
+        return
+
+    adapter = get_active_adapter(db)
+    svc = AccessPolicyService(
+        db,
+        antizapret_path=get_node_antizapret_path(db),
+        node_id=node_id,
+        adapter=adapter,
+    )
+
+    if limit_bytes is not None:
+        if vpn_type == VpnType.openvpn:
+            svc.openvpn_set_traffic_limit(
+                client_name,
+                limit_bytes,
+                period_days=period_days,
+                actor=actor_username,
+            )
+        else:
+            svc.wg_set_traffic_limit(
+                client_name,
+                limit_bytes,
+                period_days=period_days,
+                actor=actor_username,
+            )
+
+    if block_op == "block_temp":
+        days = int(block_days or 7)
+        if vpn_type == VpnType.openvpn:
+            svc.openvpn_temp_block(client_name, days, actor=actor_username)
+        else:
+            svc.wg_temp_block(client_name, days, actor=actor_username)
+    elif block_op == "block_permanent":
+        if vpn_type == VpnType.openvpn:
+            svc.openvpn_permanent_block(client_name, actor=actor_username)
+        else:
+            svc.wg_permanent_block(client_name, actor=actor_username)
+
+
+def _replicate_csv_policies(
+    db: Session,
+    *,
+    node_id: int,
+    client_name: str,
+    vpn_type: VpnType,
+    actor_username: str,
+    policy_fields: dict[str, Any],
+) -> None:
+    limit_bytes = policy_fields.get("limit_bytes")
+    period_days = policy_fields.get("period_days")
+    block_op = policy_fields.get("block_op")
+    block_days = policy_fields.get("block_days")
+
+    if limit_bytes is not None:
+        maybe_replicate_policy_op(
+            db,
+            node_id=node_id,
+            client_name=client_name,
+            vpn_type=vpn_type,
+            op="set_traffic_limit",
+            actor=actor_username,
+            limit_bytes=limit_bytes,
+            period_days=period_days,
+        )
+
+    if block_op == "block_temp":
+        maybe_replicate_policy_op(
+            db,
+            node_id=node_id,
+            client_name=client_name,
+            vpn_type=vpn_type,
+            op="block_temp",
+            actor=actor_username,
+            days=int(block_days or 7),
+        )
+    elif block_op == "block_permanent":
+        maybe_replicate_policy_op(
+            db,
+            node_id=node_id,
+            client_name=client_name,
+            vpn_type=vpn_type,
+            op="block_permanent",
+            actor=actor_username,
+        )
 
 
 def _normalize_vpn_type(raw: str) -> VpnType | None:
@@ -62,6 +247,10 @@ def iter_config_export_csv(db: Session, *, node_id: int):
         .all()
     )
     for config, owner_username in rows:
+        policy = _policy_row(db, node_id=node_id, client_name=config.client_name, vpn_type=config.vpn_type)
+        limit_bytes = policy.traffic_limit_bytes if policy and policy.traffic_limit_bytes is not None else ""
+        limit_days = policy.traffic_limit_period_days if policy and policy.traffic_limit_period_days is not None else ""
+        block_mode = _encode_block_mode(policy)
         writer.writerow(
             [
                 config.id,
@@ -70,6 +259,9 @@ def iter_config_export_csv(db: Session, *, node_id: int):
                 owner_username or "",
                 config.cert_expire_days if config.cert_expire_days is not None else "",
                 config.description or "",
+                limit_bytes,
+                limit_days,
+                block_mode,
                 config.created_at.isoformat() if config.created_at else "",
                 config.updated_at.isoformat() if config.updated_at else "",
             ]
@@ -85,7 +277,7 @@ def parse_import_csv(content: bytes) -> list[dict[str, str]]:
     if not reader.fieldnames:
         raise ValueError("CSV пуст или без заголовка")
     normalized_fields = {f.strip().lower(): f for f in reader.fieldnames if f}
-    missing = [h for h in IMPORT_HEADERS[:2] if h not in normalized_fields]
+    missing = [h for h in IMPORT_REQUIRED_HEADERS if h not in normalized_fields]
     if missing:
         raise ValueError(f"Отсутствуют обязательные колонки: {', '.join(missing)}")
 
@@ -111,6 +303,7 @@ def _import_single_row(
     node_id: int,
     default_owner_id: int,
     owner_by_username: dict[str, int],
+    actor_username: str,
 ) -> dict[str, Any]:
     client_name = row.get("client_name", "").strip()
     if not client_name:
@@ -171,9 +364,54 @@ def _import_single_row(
     db.commit()
     db.refresh(config)
 
-    group = find_sync_group_for_primary(db, node_id)
-    if group:
-        maybe_replicate_create(db, node_id=node_id, primary_config=config)
+    try:
+        policy_fields = _parse_policy_fields(row)
+    except ValueError as exc:
+        return {
+            "line": row.get("_line"),
+            "client_name": client_name,
+            "config_id": config.id,
+            "ok": False,
+            "error": str(exc),
+        }
+
+    try:
+        _apply_csv_policies_on_primary(
+            db,
+            node_id=node_id,
+            client_name=client_name,
+            vpn_type=vpn_type,
+            actor_username=actor_username,
+            policy_fields=policy_fields,
+        )
+    except Exception as exc:
+        return {
+            "line": row.get("_line"),
+            "client_name": client_name,
+            "config_id": config.id,
+            "ok": False,
+            "error": f"политика: {exc}",
+        }
+
+    maybe_replicate_create(db, node_id=node_id, primary_config=config)
+
+    try:
+        _replicate_csv_policies(
+            db,
+            node_id=node_id,
+            client_name=client_name,
+            vpn_type=vpn_type,
+            actor_username=actor_username,
+            policy_fields=policy_fields,
+        )
+    except Exception as exc:
+        return {
+            "line": row.get("_line"),
+            "client_name": client_name,
+            "config_id": config.id,
+            "ok": False,
+            "error": f"репликация политики: {exc}",
+        }
 
     return {"line": row.get("_line"), "client_name": client_name, "config_id": config.id, "ok": True}
 
@@ -208,6 +446,7 @@ def run_config_csv_import(
                 node_id=node_id,
                 default_owner_id=default_owner_id,
                 owner_by_username=owner_by_username,
+                actor_username=actor_username,
             )
         except Exception as exc:
             row_db.rollback()

@@ -17,10 +17,42 @@ from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
 from app.services.config_tags import resolve_config_ids_by_tags
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
-from app.services.node_sync.client_sync import maybe_replicate_delete, purge_ha_shadow_configs
+from app.services.node_sync.client_sync import maybe_replicate_cert_renew, maybe_replicate_delete, purge_ha_shadow_configs
+from app.services.node_sync.policy_sync import maybe_replicate_policy_op
 from app.services.node_sync.groups import find_sync_group_for_primary, require_ha_primary_for_client_ops
 
 logger = logging.getLogger(__name__)
+
+_BULK_POLICY_OPS = {
+    "block_temp": "block_temp",
+    "block_perm": "block_permanent",
+    "unblock": "unblock",
+}
+
+
+def _maybe_replicate_bulk_policy(
+    db: Session,
+    *,
+    node_id: int,
+    config: VpnConfig,
+    operation: str,
+    block_days: int,
+    actor_username: str,
+) -> None:
+    policy_op = _BULK_POLICY_OPS.get(operation)
+    if policy_op is None:
+        return
+    kwargs: dict[str, Any] = {"actor": actor_username}
+    if operation == "block_temp":
+        kwargs["days"] = block_days
+    maybe_replicate_policy_op(
+        db,
+        node_id=node_id,
+        client_name=config.client_name,
+        vpn_type=config.vpn_type,
+        op=policy_op,
+        **kwargs,
+    )
 
 
 def _run_single_op(
@@ -72,6 +104,12 @@ def _run_single_op(
             adapter.add_openvpn_client(name, renew_cert_days)
             config.cert_expire_days = renew_cert_days
             db.commit()
+            maybe_replicate_cert_renew(
+                db,
+                node_id=node_id,
+                primary_config=config,
+                cert_expire_days=renew_cert_days,
+            )
         elif operation == "delete":
             if config.vpn_type == VpnType.openvpn:
                 adapter.delete_openvpn_client(name)
@@ -94,6 +132,16 @@ def _run_single_op(
             db.commit()
         else:
             return {"config_id": config_id, "ok": False, "error": f"unknown op {operation}"}
+
+        if operation in _BULK_POLICY_OPS:
+            _maybe_replicate_bulk_policy(
+                db,
+                node_id=node_id,
+                config=config,
+                operation=operation,
+                block_days=block_days,
+                actor_username=actor_username,
+            )
 
         return {"config_id": config_id, "client_name": name, "ok": True}
     except Exception as exc:

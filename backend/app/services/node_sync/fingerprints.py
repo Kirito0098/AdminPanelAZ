@@ -5,7 +5,15 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-# Node-specific optional files — excluded from HA parity verify (e.g. AZ-WARP on one node only).
+# HA-local config files under {antizapret}/config/ — excluded from parity verify and
+# from blind full-directory push to replicas (node-specific state must not fail Verify
+# or overwrite peer nodes).
+#
+# Current entries:
+# - warper-include-ips.txt — WARPER slave routing on a single node (AZ-WARP); other
+#   replicas may omit this file or keep a different copy.
+#
+# Add new filenames here when a path is intentionally per-node in HA auto-sync.
 CONFIG_FINGERPRINT_EXCLUDE: frozenset[str] = frozenset({"warper-include-ips.txt"})
 
 

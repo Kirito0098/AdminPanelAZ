@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GitCompare, Loader2, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
 import {
   ApiError,
@@ -49,6 +49,20 @@ type NodeSyncGroupSectionProps = {
   nodes: Node[]
 }
 
+const AUTO_SYNC_POLL_MS = 30_000
+
+/** Target auto-sync scope (roadmap §3). */
+const AUTO_SYNC_OPERATIONS = [
+  'Создание / удаление VPN-клиентов (OVPN cert, WG peer + shadow VpnConfig)',
+  'Renew cert, блокировки (temp/permanent), unblock, лимиты трафика, срок WG',
+  'OpenVPN disconnect, метаданные клиента (description, owner)',
+  'Bulk block / renew / unblock, CSV import, шаблоны клиентов',
+  'Файлы AntiZapret config: настройки (списки), редактор, routing files + doall',
+  'Настройки setup (PUT antizapret-settings) и apply маршрутизации',
+  'CIDR providers: правки файлов, compile/deploy на replica',
+  'Политика узла по умолчанию (редактирование только на primary)',
+] as const
+
 const syncStatusLabels: Record<SyncStatus, string> = {
   unknown: 'Не синхронизировано',
   synced: 'Синхронизировано',
@@ -63,8 +77,25 @@ function syncStatusVariant(status: SyncStatus): 'default' | 'secondary' | 'destr
   return 'outline'
 }
 
+function AutoSyncModeDescription() {
+  return (
+    <SettingsAlert variant="info">
+      <p className="font-medium">Auto: все перечисленные операции на primary автоматически реплицируются на replica.</p>
+      <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm">
+        {AUTO_SYNC_OPERATIONS.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Не синхронизируются: warper-include-ips.txt, флаги ANTIZAPRET_WARP / VPN_WARP (локально на узле).
+        Push full — первичное выравнивание и восстановление после рассинхрона.
+      </p>
+    </SettingsAlert>
+  )
+}
+
 export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProps) {
-  const { success, error: notifyError } = useNotifications()
+  const { success, error: notifyError, warning: notifyWarning } = useNotifications()
   const { task, polling, startPoll } = useBackgroundTaskPoll()
   const [groups, setGroups] = useState<NodeSyncGroup[]>([])
   const [loading, setLoading] = useState(true)
@@ -84,18 +115,81 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
   const [syncMode, setSyncMode] = useState('manual_full')
 
   const onlineNodes = useMemo(() => nodes.filter((n) => n.status === 'online'), [nodes])
+  const prevSyncStatusRef = useRef<Map<number, SyncStatus>>(new Map())
+  const notifiedReplicationRef = useRef<Set<string>>(new Set())
+
+  const clearGroupReplicationNotices = (groupId: number) => {
+    for (const key of notifiedReplicationRef.current) {
+      if (key.startsWith(`warn:${groupId}:`) || key.startsWith(`failed:${groupId}:`)) {
+        notifiedReplicationRef.current.delete(key)
+      }
+    }
+  }
+
+  const reportReplicationIssues = useCallback(
+    (nextGroups: NodeSyncGroup[]) => {
+      for (const group of nextGroups) {
+        if (group.sync_mode !== 'auto') continue
+
+        for (const item of group.warnings ?? []) {
+          const key = `warn:${group.id}:${item}`
+          if (notifiedReplicationRef.current.has(key)) continue
+          notifyWarning(`«${group.name}»: ${item}`)
+          notifiedReplicationRef.current.add(key)
+        }
+
+        const prevStatus = prevSyncStatusRef.current.get(group.id)
+        const becameFailed =
+          group.sync_status === 'failed' && prevStatus !== undefined && prevStatus !== 'failed'
+        const errorText = group.last_sync_error?.trim()
+
+        if (becameFailed && errorText) {
+          const key = `failed:${group.id}:${errorText}`
+          if (!notifiedReplicationRef.current.has(key)) {
+            notifyWarning(`Репликация «${group.name}»: ${errorText}`)
+            notifiedReplicationRef.current.add(key)
+          }
+        }
+
+        if (group.sync_status === 'synced') {
+          clearGroupReplicationNotices(group.id)
+        }
+
+        prevSyncStatusRef.current.set(group.id, group.sync_status)
+      }
+    },
+    [notifyWarning],
+  )
+
+  const fetchGroups = useCallback(async () => getNodeSyncGroups(), [])
+
+  const applyGroups = useCallback(
+    (nextGroups: NodeSyncGroup[]) => {
+      reportReplicationIssues(nextGroups)
+      setGroups(nextGroups)
+    },
+    [reportReplicationIssues],
+  )
 
   const load = useCallback(async () => {
     setRefreshing(true)
     try {
-      setGroups(await getNodeSyncGroups())
+      applyGroups(await fetchGroups())
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки Sync Groups')
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [notifyError])
+  }, [applyGroups, fetchGroups, notifyError])
+
+  const pollAutoGroups = useCallback(async () => {
+    try {
+      applyGroups(await fetchGroups())
+    } catch {
+      // Background poll: errors surface on next manual refresh.
+    }
+  }, [applyGroups, fetchGroups])
 
   useEffect(() => {
     if (nodes.length < 2) {
@@ -104,6 +198,20 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
     }
     void load()
   }, [load, nodes.length])
+
+  const hasAutoGroups = useMemo(() => groups.some((g) => g.sync_mode === 'auto'), [groups])
+
+  useEffect(() => {
+    if (!hasAutoGroups || nodes.length < 2) return
+
+    const poll = () => {
+      if (document.visibilityState !== 'visible') return
+      void pollAutoGroups()
+    }
+
+    const interval = window.setInterval(poll, AUTO_SYNC_POLL_MS)
+    return () => window.clearInterval(interval)
+  }, [hasAutoGroups, nodes.length, pollAutoGroups])
 
   const openCreate = () => {
     setEditing(null)
@@ -277,6 +385,10 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                         <p className="mt-1 text-xs font-normal text-muted-foreground">
                           После расформирования группы на replica выполните Конфигурации → Синхронизировать.
                         </p>
+                      ) : group.sync_mode === 'auto' ? (
+                        <p className="mt-1 text-xs font-normal text-muted-foreground">
+                          Auto: правки на primary → replica (см. режим sync при редактировании).
+                        </p>
                       ) : null}
                     </TableCell>
                     <TableCell>{group.shared_domain}</TableCell>
@@ -414,13 +526,15 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="manual_full">Manual push (только Push full)</SelectItem>
-                    <SelectItem value="auto">Auto — create/delete на все replica</SelectItem>
+                    <SelectItem value="auto">Auto — репликация операций с primary</SelectItem>
                   </SelectContent>
                 </Select>
                 {syncMode === 'manual_full' ? (
                   <SettingsAlert variant="info">
                     После расформирования группы на replica выполните Конфигурации → Синхронизировать.
                   </SettingsAlert>
+                ) : syncMode === 'auto' ? (
+                  <AutoSyncModeDescription />
                 ) : null}
               </div>
             </div>

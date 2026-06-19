@@ -43,7 +43,7 @@ def test_openvpn_permanent_block(api_test_env):
 
     with patch("app.routers.client_access._service", return_value=mock_svc), patch(
         "app.routers.client_access.admin_notify_service.send_client_ban"
-    ):
+    ), patch("app.routers.client_access.maybe_replicate_policy_op") as mock_replicate:
         response = _client(api_test_env).post(
             "/api/client-access/openvpn/permanent-block",
             json={"client_name": "alice"},
@@ -52,6 +52,26 @@ def test_openvpn_permanent_block(api_test_env):
 
     assert response.status_code == 200
     mock_svc.openvpn_permanent_block.assert_called_once_with("alice", actor="api_admin")
+    mock_replicate.assert_called_once()
+    assert mock_replicate.call_args.kwargs["client_name"] == "alice"
+    assert mock_replicate.call_args.kwargs["op"] == "block_permanent"
+
+
+def test_openvpn_permanent_block_without_ha_group_does_not_replicate(api_test_env):
+    mock_svc = MagicMock()
+    mock_svc.openvpn_permanent_block.return_value = {"is_blocked": True}
+
+    with patch("app.routers.client_access._service", return_value=mock_svc), patch(
+        "app.routers.client_access.admin_notify_service.send_client_ban"
+    ), patch("app.services.node_sync.policy_sync.replicate_policy_op") as mock_replicate:
+        response = _client(api_test_env).post(
+            "/api/client-access/openvpn/permanent-block",
+            json={"client_name": "alice"},
+            headers=api_test_env["admin_headers"],
+        )
+
+    assert response.status_code == 200
+    mock_replicate.assert_not_called()
 
 
 def test_openvpn_unblock(api_test_env):

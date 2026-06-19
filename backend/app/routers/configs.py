@@ -28,8 +28,10 @@ from app.services.node_adapter import NodeAdapter
 from app.services.config_import import import_clients_from_disk
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.client_sync import (
+    maybe_replicate_cert_renew,
     maybe_replicate_create,
     maybe_replicate_delete,
+    maybe_replicate_config_metadata,
     purge_ha_shadow_configs,
 )
 from app.services.node_sync.groups import (
@@ -469,8 +471,15 @@ def update_config(
     if not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
+    require_ha_primary_for_client_ops(db)
+
+    metadata_changed = False
+    cert_renewed = False
+    renewed_days: int | None = None
+
     if payload.description is not None:
         config.description = payload.description
+        metadata_changed = True
     if payload.owner_id is not None:
         if current_user.role != UserRole.admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять владельца")
@@ -478,13 +487,27 @@ def update_config(
         if not owner:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Владелец не найден")
         config.owner_id = payload.owner_id
+        metadata_changed = True
     if payload.cert_expire_days is not None and config.vpn_type == VpnType.openvpn:
-        require_ha_primary_for_client_ops(db)
         get_active_adapter(db).add_openvpn_client(config.client_name, payload.cert_expire_days)
         config.cert_expire_days = payload.cert_expire_days
+        cert_renewed = True
+        renewed_days = payload.cert_expire_days
 
     db.commit()
     db.refresh(config)
+
+    node = get_active_node(db)
+    if cert_renewed and renewed_days is not None:
+        maybe_replicate_cert_renew(
+            db,
+            node_id=node.id,
+            primary_config=config,
+            cert_expire_days=renewed_days,
+        )
+    if metadata_changed:
+        maybe_replicate_config_metadata(db, node_id=node.id, primary_config=config)
+
     return _to_response(config, db, include_files=True)
 
 

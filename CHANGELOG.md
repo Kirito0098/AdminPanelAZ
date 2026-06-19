@@ -9,22 +9,117 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **SQLite — `PRAGMA foreign_keys=ON`** — включена проверка внешних ключей на каждом подключении к основной БД и CIDR-БД (`apply_sqlite_connection_pragmas`); рассинхрон ссылок ловится на уровне SQLite, как на Postgres.
-- **HA — расформирование Sync Group** — при удалении группы синхронизации узлы переводятся в независимое состояние: снимаются HA-метки в БД (`sync_group_id`, `ha_primary_config_id`), shadow-записи на replica становятся обычными конфигами ноды; конфиги и файлы на VPN-серверах **не удаляются**. Сервис `node_sync/dissolve.py`; тесты `test_node_sync_dissolve.py`.
-- **Личные настройки — часовой пояс** — персональный IANA-пояс у пользователя (`users.timezone`); выбор в «Настройки → Личные» или режим «как в браузере»; `TimezoneContext`, `lib/datetime.ts`; единое UTC-aware форматирование дат во всей панели и tg-mini; заголовок `X-Client-Timezone` в API для Telegram-уведомлений.
+#### HA auto-sync (`sync_mode=auto`) — инфраструктура
+
+- **`node_sync/replicate.py`** — центральный диспетчер `replicate_to_replicas`, `ReplicateResult`, `finalize_replicate_outcome` (partial failure → `sync_status=failed`, audit `ha_replicate_partial_failure`), `get_shadow_configs`, `iter_replica_adapters`, enum `ReplicateOperation` (в т.ч. `OPENVPN_DISCONNECT`).
+- **`node_sync/policy_sync.py`** — `replicate_policy_op` / `maybe_replicate_policy_op`: block/unblock, traffic limit, WG expiry; копирование policy row через `copy_single_client_policy`.
+- **`node_sync/config_sync.py`** — `replicate_config_files` / `maybe_replicate_config_files`; обёртка над `edit_files_transfer`; учёт `CONFIG_FINGERPRINT_EXCLUDE`.
+- **`node_sync/antizapret_sync.py`** — репликация `setup` (`filter_ha_replicable_settings`, `ANTIZAPRET_HA_SETTING_EXCLUDE`) и фоновый apply на replica (`enqueue_ha_routing_apply_replicas`).
+- **`node_sync/provider_sync.py`** — provider files и deploy после compile (`replicate_provider_content`, `deploy_compiled_providers_to_replicas`).
+- **`node_sync/client_ops_sync.py`** — `replicate_openvpn_disconnect` / `maybe_replicate_openvpn_disconnect` (best-effort: клиент не online на replica — не ошибка).
+- **`policy_import.copy_single_client_policy`** — точечное копирование policy row primary → replica.
+- **Настройки `NODE_SYNC_*`** (`.env.example`, `config.py`): `NODE_SYNC_AUTO_REPLICATE_CONFIG_FILES`, `NODE_SYNC_AUTO_REPLICATE_POLICIES`, `NODE_SYNC_REPLICATE_DOALL`, `NODE_SYNC_RECONCILE_*`, `NODE_SYNC_AUTO_HEAL`, `NODE_SYNC_AUTO_HEAL_MAX_FAILURES`.
+
+#### HA auto-sync — хуки API (primary → replica)
+
+| Область | Endpoint / действие | Модуль |
+|---------|---------------------|--------|
+| Политики клиента | `POST /client-access/*` (block, limit, expiry, defaults) | `policy_sync` |
+| VPN-клиенты | create / delete / PATCH cert / metadata | `client_sync` |
+| Bulk | block, renew, unblock, delete | `bulk_config_ops` |
+| Шаблоны | apply template | `client_templates` |
+| CSV import | import row + опц. политики | `config_csv_ops` |
+| OpenVPN disconnect | `POST /client-access/openvpn/disconnect` | `client_ops_sync` |
+| Настройки списков | `PATCH /settings` | `config_sync` |
+| Редактор файлов | `PUT /edit-files/*`, `POST /edit-files/batch` | `config_sync` |
+| Route files (Routing UI) | `PUT /routing/files/{file_key}` | `config_sync` (`run_doall=False`) |
+| AntiZapret setup | `PUT /routing/antizapret-settings` | `antizapret_sync` |
+| Routing apply | `POST /routing/apply` | `antizapret_sync` |
+| CIDR providers | `PUT /routing/providers/*`, `POST /routing/sync` | `provider_sync` |
+
+- **Guards primary-only** — `require_ha_primary_for_client_ops` на create/delete/renew/block/import; на replica — 403; список конфигов при активной replica — конфиги primary (`monitoring`, `configs`).
+
+#### HA auto-sync — reconcile и auto-heal
+
+- **`reconcile_worker`** — периодический Verify всех групп; при drift → `sync_status=failed`.
+- **Opt-in auto-heal** (`NODE_SYNC_AUTO_HEAL=false` по умолчанию) — incremental heal: `policy_sync`, `config_sync`, `antizapret_sync`; **без** auto Push full; notify после `NODE_SYNC_AUTO_HEAL_MAX_FAILURES` неудач.
+
+#### HA auto-sync — CSV import с политиками
+
+- Опциональные колонки импорта: `traffic_limit_bytes`, `traffic_limit_days`, `block_mode` (`permanent`, `temp`, `temp:N`).
+- После create: `AccessPolicyService` на primary → `maybe_replicate_create` → `maybe_replicate_policy_op` (как шаблоны).
+- Экспорт CSV включает те же колонки политик.
+- Пример: `docs/examples/vpn-configs-import.example.csv`.
+
+#### HA — расформирование Sync Group
+
+- **`node_sync/dissolve.py`** — при удалении группы: снятие `sync_group_id` / `ha_primary_config_id`, shadow → обычные конфиги; файлы на VPN-серверах **не удаляются**.
+
+#### UI — Node Sync / HA
+
+- **`NodeSyncGroupSection.tsx`** — полный список операций в `sync_mode=auto`; polling auto-групп; warning-toast при переходе в `sync_status=failed`; отображение `last_sync_error`.
+- **`HaReplicaBanner`**, **`useHaReplicaReadonly`** — replica read-only для client ops.
+- **`EditFilesPage.tsx`** — на primary+auto: alert про auto-replicate; «Перенести на узлы» помечен Fallback; на replica transfer скрыт.
+- **`DashboardPage.tsx`** — подсказка к импорту CSV (колонки политик, HA replicate).
+- Диалог «Расформировать» вместо «Удалить» для Sync Group.
+
+#### Прочее
+
+- **SQLite — `PRAGMA foreign_keys=ON`** — на каждом подключении к основной и CIDR-БД (`apply_sqlite_connection_pragmas`).
+- **Личные настройки — часовой пояс** — `users.timezone`, UI в «Настройки → Личные», `TimezoneContext`, `lib/datetime.ts`, заголовок `X-Client-Timezone` для Telegram.
+
+#### Документация
+
+- **`docs/NodeSync.md`** — v2: scope `auto`, partial failure, `NODE_SYNC_*`, route files, disconnect, CSV.
+- **`docs/edit-files.md`** — auto-replicate vs manual transfer (fallback).
+- **`docs/antizapret-config.md`** — `ANTIZAPRET_HA_SETTING_EXCLUDE`, HA scope setup.
+- **`docs/konfiguracii.md`** — формат CSV import с политиками.
+- **`reviews/HA-auto-sync-roadmap.md`**, **`reviews/HA-auto-sync-remaining.md`** — план, чеклист, статусы.
 
 ### Changed
 
-- **Узлы — удаление** — `purge_node_related` дополнен очисткой `ConfigTag`, `ClientTemplate`, `AlertRule` и отвязкой осиротевших `ha_primary_config_id` перед удалением конфигов узла.
-- **Пользователи — удаление** — `_purge_user_before_delete` удаляет `UserReminderLog` и `WebAuthnCredential` до `DELETE users`.
-- **Конфиги — удаление** — перед удалением primary вызывается `purge_ha_shadow_configs` (роутер и bulk-операции), чтобы FK не блокировали удаление при оставшихся HA-тенях.
-- **UI — Sync Groups** — диалог и сообщения: «Расформировать» вместо «Удалить», пояснение что узлы остаются независимыми с сохранёнными конфигами.
+- **`sync_mode=auto`** — не только create/delete клиентов: политики, config/route files, setup/apply, CIDR, OpenVPN disconnect, node defaults, CSV policies, opt-in auto-heal. Partial failure на replica **не откатывает** primary.
+- **`client_sync.py`** — create/delete/renew/metadata через `replicate_to_replicas`; `purge_ha_shadow_configs` перед delete primary.
+- **`bulk_config_ops.py`** — HA replicate для block/renew/unblock/delete.
+- **`reconcile_worker.py`** — классификация drift, incremental heal, notify.
+- **`groups.py`** — `require_ha_primary_for_client_ops`, `is_auto_sync_enabled`, preflight validate.
+- **`fingerprints.py`** — `CONFIG_FINGERPRINT_EXCLUDE` для node-local файлов (warper).
+- **`antizapret_params.py`** — `ANTIZAPRET_HA_SETTING_EXCLUDE`, `filter_ha_replicable_settings` (WARP-флаги excluded; `OPENVPN_HOST` / `WIREGUARD_HOST` реплицируются).
+- **Удаление узла** — `purge_node_related`: ConfigTag, ClientTemplate, AlertRule, отвязка `ha_primary_config_id`.
+- **Удаление пользователя** — `_purge_user_before_delete`: UserReminderLog, WebAuthnCredential.
+- **Push full** остаётся для bootstrap / disaster recovery, не для каждой правки config.
+
+### Fixed
+
+- **Удаление primary VPN-клиента** — `purge_ha_shadow_configs` в роутере и bulk delete (FK на `ha_primary_config_id`).
+- **`test_verify_primary_missing_returns_gracefully`** — корректный mock `db.get` без нарушения FK при `primary_node_id` missing.
 
 ### Tests
 
-- `test_sqlite_foreign_keys.py` — `foreign_keys=1` на тестовых SQLite engine.
-- `test_nodes_delete.py` — удаление узла с тегами, шаблонами и alert rules.
-- `test_user_delete.py` — удаление пользователя с passkey и reminder logs.
+#### HA auto-sync — unit / integration (103+ в `test_node_sync_*`)
+
+| Модуль | Файлы |
+|--------|-------|
+| Replicate / client | `test_node_sync_replicate.py`, `test_node_sync_client_sync.py`, `test_node_sync_manual_link.py` |
+| Policy | `test_node_sync_policy_sync.py`, `test_node_default_policy.py`, `test_client_templates_ha.py` |
+| Config files | `test_node_sync_config_sync.py`, `test_node_sync_config_hooks.py` |
+| AntiZapret | `test_node_sync_antizapret_sync.py`, `test_node_sync_antizapret_hooks.py`, `test_antizapret_ha_settings.py` |
+| CIDR / providers | `test_node_sync_provider_sync.py`, `test_node_sync_provider_hooks.py`, `test_node_sync_provider_deploy.py`, `test_cidr_ha_deploy_targets.py` |
+| Routing | `test_node_sync_routing_apply_hooks.py`, `test_node_sync_routing_sync_hooks.py`, `test_node_sync_routing_files_hooks.py` |
+| OpenVPN disconnect | `test_node_sync_openvpn_disconnect.py` |
+| CSV + policies | `test_config_csv_import_ha.py`, `test_config_csv_import_export.py` |
+| Reconcile / heal | `test_node_sync_reconcile.py` |
+| Verify / push / dissolve | `test_node_sync_verify.py`, `test_node_sync_push_full.py`, `test_node_sync_dissolve.py`, `test_node_sync_fingerprints.py` |
+| Guards / PATCH | `test_ha_replica_client_guard.py`, `test_configs_ha_patch.py`, `test_client_access_openvpn_block.py` |
+| Settings | `test_node_sync_config.py` |
+
+- **`test_sqlite_foreign_keys.py`** — `foreign_keys=1` на SQLite engine.
+- **`test_nodes_delete.py`**, **`test_user_delete.py`** — каскадная очистка при удалении узла/пользователя.
+
+#### E2E checklist (roadmap §7)
+
+- **Integration-proxy:** прогнан 2026-06-19, **103 passed** (mock adapters, `auto_group_db`).
+- **Live staging:** открыт — требует Sync Group + Push full + Verify на двух VPN-узлах (см. `reviews/HA-auto-sync-remaining.md` §4).
 
 ## [2.4.0] - 2026-06-18
 

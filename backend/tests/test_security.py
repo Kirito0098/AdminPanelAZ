@@ -98,22 +98,11 @@ def test_cors_allows_configured_origin():
     assert "http://localhost:5173" in (response.headers.get("access-control-allow-origin") or "")
 
 
-def test_refresh_token_flow():
-    from app.database import SessionLocal
-
-    db = SessionLocal()
+def test_refresh_token_flow(security_api_env):
+    db = security_api_env["session_factory"]()
     try:
-        user = db.query(User).filter(User.username == "admin").first()
-        if not user:
-            user = User(
-                username="test_refresh_user",
-                password_hash="x",
-                role=UserRole.admin,
-                is_active=True,
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
+        user = db.query(User).filter(User.username == security_api_env["admin_username"]).first()
+        assert user is not None
         raw, _ = create_refresh_token(db, user)
         validated = validate_refresh_token(db, raw)
         assert validated.id == user.id
@@ -136,22 +125,19 @@ def test_totp_verify_valid_code():
     assert verify_totp_code(user, code) is True
 
 
-def test_auth_refresh_endpoint():
-    from app.database import SessionLocal, run_db_migrations
-    from app.main import app
+def test_auth_refresh_endpoint(security_api_env):
     from app.models import ActiveWebSession
 
-    run_db_migrations()
-    db = SessionLocal()
+    db = security_api_env["session_factory"]()
     try:
-        user = db.query(User).filter(User.username == "admin").first()
+        user = db.query(User).filter(User.username == security_api_env["admin_username"]).first()
         assert user is not None
         raw, _ = create_refresh_token(db, user)
         before_count = db.query(ActiveWebSession).count()
     finally:
         db.close()
 
-    client = TestClient(app)
+    client = security_api_env["client"]
     response = client.post(
         "/api/auth/refresh",
         cookies={"refresh_token": raw},
@@ -161,34 +147,21 @@ def test_auth_refresh_endpoint():
     assert "access_token" in response.json()
     assert "web_session_id" not in response.json()
 
-    db = SessionLocal()
+    db = security_api_env["session_factory"]()
     try:
         assert db.query(ActiveWebSession).count() == before_count
     finally:
         db.close()
 
 
-def test_login_json_returns_web_session_id():
-    from app.auth import get_password_hash
-    from app.database import SessionLocal, run_db_migrations
-    from app.main import app
-
-    run_db_migrations()
-    test_password = "LoginSessionPass1"
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.username == "admin").first()
-        assert user is not None
-        user.password_hash = get_password_hash(test_password)
-        user.totp_enabled = False
-        db.commit()
-    finally:
-        db.close()
-
-    client = TestClient(app)
+def test_login_json_returns_web_session_id(security_api_env):
+    client = security_api_env["client"]
     response = client.post(
         "/api/auth/login/json",
-        json={"username": "admin", "password": test_password},
+        json={
+            "username": security_api_env["admin_username"],
+            "password": security_api_env["admin_password"],
+        },
     )
     assert response.status_code == 200
     data = response.json()
@@ -196,28 +169,23 @@ def test_login_json_returns_web_session_id():
     assert data.get("web_session_id")
 
 
-def test_login_requires_2fa_for_admin_with_totp():
-    from app.auth import get_password_hash
-    from app.database import SessionLocal
-    from app.main import app
-
-    test_password = "Test2FAPass1"
+def test_login_requires_2fa_for_admin_with_totp(security_api_env):
+    test_password = security_api_env["admin_password"]
     secret = generate_totp_secret()
-    db = SessionLocal()
+    db = security_api_env["session_factory"]()
     try:
-        user = db.query(User).filter(User.username == "admin").first()
+        user = db.query(User).filter(User.username == security_api_env["admin_username"]).first()
         assert user is not None
-        user.password_hash = get_password_hash(test_password)
         user.totp_enabled = True
         user.totp_secret_encrypted = encrypt_totp_secret(secret)
         db.commit()
     finally:
         db.close()
 
-    client = TestClient(app)
+    client = security_api_env["client"]
     response = client.post(
         "/api/auth/login/json",
-        json={"username": "admin", "password": test_password},
+        json={"username": security_api_env["admin_username"], "password": test_password},
     )
     assert response.status_code == 200
     data = response.json()
@@ -232,15 +200,86 @@ def test_login_requires_2fa_for_admin_with_totp():
     assert response2.status_code == 200
     assert response2.json().get("access_token")
 
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.username == "admin").first()
-        user.totp_enabled = False
-        user.totp_secret_encrypted = None
-        user.totp_backup_codes_encrypted = None
-        db.commit()
-    finally:
-        db.close()
+
+@pytest.fixture()
+def security_api_env(tmp_path):
+    """Isolated DB + TestClient for auth/security API tests (never touches production SQLite)."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.auth import get_password_hash
+    from app.config import Settings
+    from app.database import Base, get_db, run_db_migrations
+    from app.main import app
+    from app.models import User, UserRole
+
+    admin_username = "sec_admin"
+    admin_password = "SecAdminPass1"
+
+    db_path = tmp_path / "security_api.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    run_db_migrations()
+    TestingSession = sessionmaker(bind=engine)
+    session = TestingSession()
+
+    admin = User(
+        username=admin_username,
+        password_hash=get_password_hash(admin_password),
+        role=UserRole.admin,
+        is_active=True,
+    )
+    session.add(admin)
+    session.commit()
+
+    def override_get_db():
+        db = TestingSession()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    test_settings = Settings(
+        app_env="development",
+        enforce_password_policy=False,
+        auth_rate_limit_enabled=False,
+        api_rate_limit_enabled=False,
+        audit_log_enabled=False,
+        security_headers_enabled=True,
+        enforce_https=False,
+        behind_nginx=False,
+        active_web_session_tracking_enabled=True,
+    )
+
+    patches = (
+        patch("app.config.get_settings", return_value=test_settings),
+        patch("app.middleware.http_security.get_settings", return_value=test_settings),
+        patch("app.services.auth_rate_limit.get_settings", return_value=test_settings),
+        patch("app.services.ip_restriction.ip_restriction_service.login_needs_captcha", return_value=False),
+        patch("app.services.ip_restriction.ip_restriction_service.record_login_attempt", return_value=0),
+        patch("app.services.auth_rate_limit.auth_rate_limit_service.check", return_value=None),
+        patch("app.services.auth_rate_limit.auth_rate_limit_service.record_failure", return_value=None),
+        patch("app.services.auth_rate_limit.auth_rate_limit_service.record_success", return_value=None),
+        patch("app.services.active_web_session.get_settings", return_value=test_settings),
+    )
+    for item in patches:
+        item.start()
+
+    client = TestClient(app)
+    yield {
+        "client": client,
+        "session_factory": TestingSession,
+        "admin_username": admin_username,
+        "admin_password": admin_password,
+        "admin_id": admin.id,
+    }
+
+    for item in reversed(patches):
+        item.stop()
+    app.dependency_overrides.clear()
+    session.close()
 
 
 @pytest.fixture()
@@ -419,52 +458,40 @@ def test_viewer_access_endpoints_require_admin(viewer_config_client):
     assert put_response.status_code == 403
 
 
-def _first_admin(db):
-    user = db.query(User).filter(User.role == UserRole.admin).first()
-    assert user is not None, "admin user required for security tests"
-    return user
-
-
-def test_user_has_passkeys_helper():
-    from app.database import SessionLocal, run_db_migrations
+def test_user_has_passkeys_helper(db_session):
     from app.models import WebAuthnCredential
     from app.services.webauthn_service import user_has_passkeys
 
-    run_db_migrations()
-    db = SessionLocal()
-    try:
-        user = _first_admin(db)
-        db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete()
-        db.commit()
-        assert user_has_passkeys(db, user.id) is False
-        db.add(
-            WebAuthnCredential(
-                user_id=user.id,
-                credential_id="test-cred-id",
-                public_key="dGVzdA",
-                sign_count=0,
-            )
+    user = User(
+        username="passkey_helper_admin",
+        password_hash="x",
+        role=UserRole.admin,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    assert user_has_passkeys(db_session, user.id) is False
+    db_session.add(
+        WebAuthnCredential(
+            user_id=user.id,
+            credential_id="test-cred-id",
+            public_key="dGVzdA",
+            sign_count=0,
         )
-        db.commit()
-        assert user_has_passkeys(db, user.id) is True
-        db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete()
-        db.commit()
-    finally:
-        db.close()
+    )
+    db_session.commit()
+    assert user_has_passkeys(db_session, user.id) is True
 
 
-def test_login_requires_2fa_when_passkeys_configured():
-    from app.auth import get_password_hash
-    from app.database import SessionLocal, run_db_migrations
-    from app.main import app
+def test_login_requires_2fa_when_passkeys_configured(security_api_env):
     from app.models import WebAuthnCredential
 
-    run_db_migrations()
-    test_password = "PasskeyLogin1"
-    db = SessionLocal()
+    db = security_api_env["session_factory"]()
     try:
-        user = _first_admin(db)
-        user.password_hash = get_password_hash(test_password)
+        user = db.query(User).filter(User.username == security_api_env["admin_username"]).first()
+        assert user is not None
         user.totp_enabled = False
         user.totp_secret_encrypted = None
         db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete()
@@ -477,14 +504,16 @@ def test_login_requires_2fa_when_passkeys_configured():
             )
         )
         db.commit()
-        username = user.username
     finally:
         db.close()
 
-    client = TestClient(app)
+    client = security_api_env["client"]
     response = client.post(
         "/api/auth/login/json",
-        json={"username": username, "password": test_password},
+        json={
+            "username": security_api_env["admin_username"],
+            "password": security_api_env["admin_password"],
+        },
     )
     assert response.status_code == 200
     data = response.json()
@@ -602,17 +631,14 @@ def test_passkey_register_options_requires_admin():
     assert response.status_code == 401
 
 
-def test_passkey_login_verify_uses_service():
-    from app.auth import create_2fa_pending_token, get_password_hash
-    from app.database import SessionLocal, run_db_migrations
-    from app.main import app
+def test_passkey_login_verify_uses_service(security_api_env):
+    from app.auth import create_2fa_pending_token
     from app.models import WebAuthnCredential
 
-    run_db_migrations()
-    db = SessionLocal()
+    db = security_api_env["session_factory"]()
     try:
-        user = _first_admin(db)
-        user.password_hash = get_password_hash("PasskeyVerify1")
+        user = db.query(User).filter(User.username == security_api_env["admin_username"]).first()
+        assert user is not None
         user.totp_enabled = False
         db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete()
         db.add(
@@ -628,7 +654,7 @@ def test_passkey_login_verify_uses_service():
     finally:
         db.close()
 
-    client = TestClient(app)
+    client = security_api_env["client"]
     with patch("app.routers.auth.webauthn_service.authentication_verify") as verify_mock:
         verify_mock.return_value = MagicMock()
         response = client.post(

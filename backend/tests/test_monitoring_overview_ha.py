@@ -54,7 +54,7 @@ def ha_monitoring_db(db_session):
     db_session.commit()
 
     adapter = MagicMock()
-    with patch("app.services.node_sync.client_sync.get_adapter_for_node", return_value=adapter):
+    with patch("app.services.node_sync.replicate.get_adapter_for_node", return_value=adapter):
         replicate_client_create(db_session, group, ovpn_primary)
         replicate_client_create(db_session, group, wg_primary)
 

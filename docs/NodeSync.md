@@ -27,13 +27,113 @@ Node agent: `POST /backups/antizapret/restore`, `GET /backups/antizapret/downloa
 - DNS панель не настраивает — второй IP добавляется у регистратора вручную **после Verify ready=true**
 - Оба сервера должны быть установлены одинаковым `setup.sh`
 - Push full **destructive** на replica
-- Split-brain: изменения только на primary до auto-sync (v2); при failed push — `sync_status=failed`, повторить Push full
+- Split-brain: изменения только на primary; при failed sync — `sync_status=failed`, Push full или (в `auto`, opt-in) incremental auto-heal
 - **`manual_full`** (по умолчанию) — только Push full; клиенты на replica попадают в панель после Push full (импорт в БД + копирование политик + снимок трафика). HA-бейдж на карточках primary и единый список конфигов primary при активном узле в группе — **да** (`sync_group_id` на primary, без теней на replica). После расформирования группы на replica при необходимости: **Конфигурации → Синхронизировать**
+- **`auto`** — см. раздел [v2 — HA auto-sync](#v2--ha-auto-sync-этапы-ac) ниже
 
-## v2 (этап 5.4–5.6)
+## v2 — HA auto-sync (этапы A–C)
 
-- **Auto-sync** — `sync_mode=auto`: create/delete на primary реплицирует клиента на все replica; linked `VpnConfig` (`ha_primary_config_id`)
-- **Reconcile worker** — каждые 10 мин verify всех групп; при drift → `sync_status=failed` + admin notify
-- **Dashboard HA badge** — одна карточка клиента (logical primary), badge «HA: domain (N узл.)»; список configs при активном узле в группе показывает primary. В `auto` дополнительно теневые `VpnConfig` на replica (`ha_primary_config_id`); в `manual_full` — только `sync_group_id` на primary
+### Режимы `sync_mode`
 
-Настройки: `NODE_SYNC_RECONCILE_ENABLED`, `NODE_SYNC_RECONCILE_INTERVAL_SECONDS` (default 600).
+| Режим | Поведение | Когда использовать |
+|-------|-----------|-------------------|
+| **`manual_full`** (по умолчанию) | Авто-репликация **отключена**. Выравнивание только **Push full** (backup primary → restore на replica + импорт клиентов и политик в БД). Ручной перенос файлов — fallback. | Первая настройка HA, редкие правки, split-brain recovery |
+| **`auto`** | Изменения на **primary** автоматически реплицируются на все **online** replica группы. Primary — источник истины; на replica — теневые `VpnConfig` (`ha_primary_config_id`) с тем же `client_name`. | Повседневная работа: админ правит только primary |
+
+**Операционные правила (оба режима):**
+
+- Работайте с HA **только на primary** (на replica create/delete/renew/block и правки defaults — **403**).
+- Правки по SSH вне панели → drift; устранение: Push full или (в `auto`, opt-in) incremental auto-heal.
+- После split-brain, смены primary или состава группы — **Push full**.
+- DNS панель не настраивает — второй A-record добавляется у регистратора **после Verify ready=true**.
+
+### Что реплицируется в `sync_mode=auto`
+
+#### VPN-клиенты и политики доступа
+
+| Операция | Replica |
+|----------|---------|
+| Create / delete client | OVPN cert / WG peer + shadow `VpnConfig` |
+| Renew OpenVPN cert | Тот же `client_name`, новый срок |
+| Temp / permanent block, unblock | Та же политика в БД + runtime (iptables/WG) |
+| Set / clear traffic limit | Те же `traffic_limit_*` + reconcile runtime |
+| WG set-expiry | Тот же `expires_at` + runtime |
+| OpenVPN disconnect | Разрыв сессии на primary и replica (если клиент онлайн) |
+| PATCH: description, owner | Обновление shadow `VpnConfig` (метаданные панели) |
+| Bulk: block, renew, unblock | Как одиночные операции |
+| CSV import / template apply | Create + политики (лимит, block) из CSV или шаблона |
+| Node default policy | `PUT …/node-defaults/{primary_id}` → копия на replica (**только primary**, на replica node_id — 403) |
+
+**Consumed traffic (байты)** — **не** синхронизируются; считаются per node. Паритет — лимит, блок и policy row.
+
+#### Файлы AntiZapret (`/root/antizapret/config/`)
+
+| Операция | Replica |
+|----------|---------|
+| Списки в «Настройках» (домены/IP) | Те же файлы + опционально `doall.sh` |
+| Редактор файлов (один / batch) | Изменённые файлы + опционально `doall.sh` |
+| Routing UI (route files: include/exclude/forward/drop IPs) | Те же файлы на replica без `doall.sh` по умолчанию |
+| Routing UI (provider files) | Аналогично, если файл в scope HA |
+
+См. [edit-files.md](edit-files.md) — auto vs ручной перенос.
+
+#### Конфигурация AntiZapret (`setup`)
+
+| Операция | Replica |
+|----------|---------|
+| `PUT /routing/antizapret-settings` | Те же ключи `setup` (см. исключения ниже) |
+| `POST /routing/apply` | Фоновый apply (`doall.sh`) на каждой replica |
+
+См. [antizapret-config.md](antizapret-config.md).
+
+#### CIDR / providers
+
+| Операция | Replica |
+|----------|---------|
+| Ручное редактирование provider file | Файл `AP-*-include-ips.txt` |
+| `POST /routing/sync` (compile) | Deploy скомпилированных файлов на replica группы |
+
+### Исключения (не копировать / не перезаписывать)
+
+| Область | Исключение | Где задано |
+|---------|------------|------------|
+| Config files | `warper-include-ips.txt` и др. node-local файлы | `CONFIG_FINGERPRINT_EXCLUDE` в `fingerprints.py` |
+| Setup (`/root/antizapret/setup`) | `ANTIZAPRET_WARP`, `VPN_WARP` | `ANTIZAPRET_HA_SETTING_EXCLUDE` |
+| Setup | **`OPENVPN_HOST` / `WIREGUARD_HOST` реплицируются** (общий `shared_domain`) | — |
+| Verify / Push full | Excluded config не ломают паритет fingerprint `antizapret/config` | `fingerprints.py` |
+
+### Partial failure
+
+- Primary **не откатывается** при ошибке на одной replica.
+- `sync_status=failed`, `last_sync_error` — детали; audit `ha_replicate_partial_failure`.
+- UI: warning-toast при `sync_status=failed` (polling auto-групп) или при `warnings` в API.
+- **Auto-heal** (opt-in, `NODE_SYNC_AUTO_HEAL=true`): reconcile worker пытается incremental heal (`policy_sync` / `config_sync` / `antizapret_sync`); **никогда** auto Push full. После N неудач — notify + `failed`.
+
+### Reconcile worker
+
+- Периодический Verify всех групп (`NODE_SYNC_RECONCILE_*`, default каждые 600 с).
+- Drift → `sync_status=failed` + admin notify (в `auto` + auto-heal — notify после N неудачных heal).
+- Push full остаётся для bootstrap и disaster recovery.
+
+### Dashboard HA badge
+
+- Одна карточка клиента (logical primary), badge «HA: domain (N узл.)».
+- Список configs при активном узле в группе — primary.
+- В `auto` — теневые `VpnConfig` на replica; в `manual_full` — только `sync_group_id` на primary.
+
+### Настройки `NODE_SYNC_*` (`.env`)
+
+| Переменная | Default | Назначение |
+|------------|---------|------------|
+| `NODE_SYNC_RECONCILE_ENABLED` | `true` | Периодический reconcile worker |
+| `NODE_SYNC_RECONCILE_INTERVAL_SECONDS` | `600` | Интервал reconcile |
+| `NODE_SYNC_AUTO_REPLICATE_CONFIG_FILES` | `true` | Auto: репликация config files с primary |
+| `NODE_SYNC_AUTO_REPLICATE_POLICIES` | `true` | Auto: репликация политик доступа |
+| `NODE_SYNC_REPLICATE_DOALL` | `true` | Запускать `doall.sh` на replica после file sync |
+| `NODE_SYNC_AUTO_HEAL` | `false` | Opt-in incremental heal после drift |
+| `NODE_SYNC_AUTO_HEAL_MAX_FAILURES` | `3` | Notify после N неудачных heal |
+
+### Связанные документы
+
+- [edit-files.md](edit-files.md) — редактор файлов, HA auto vs manual transfer
+- [antizapret-config.md](antizapret-config.md) — setup, `ANTIZAPRET_HA_SETTING_EXCLUDE`

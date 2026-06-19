@@ -140,7 +140,7 @@ function getFileMeta(key: string) {
 
 export default function EditFilesPage() {
   const { user } = useAuth()
-  const { activeNode, nodes } = useNode()
+  const { activeNode, activeNodeHa, nodes } = useNode()
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
@@ -166,6 +166,10 @@ export default function EditFilesPage() {
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
   const isAdmin = user?.role === 'admin'
+  const isHaAutoPrimary =
+    activeNodeHa?.role === 'primary' && activeNodeHa.sync_mode === 'auto'
+  const isHaReplica = activeNodeHa?.role === 'replica'
+  const showTransferButton = isAdmin && nodes.length > 1 && !isHaReplica
   const hasUnsavedChanges = content !== savedContent
 
   const active = files.find((f) => f.key === activeKey)
@@ -426,15 +430,20 @@ export default function EditFilesPage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {isAdmin && nodes.length > 1 && (
-            <Button
-              variant="outline"
-              onClick={() => setTransferOpen(true)}
-              disabled={nodeOffline || transferLoading || files.length === 0}
-            >
-              <ArrowRightLeft size={16} />
-              Перенести на узлы
-            </Button>
+          {showTransferButton && (
+            <div className="flex flex-col items-start gap-0.5">
+              <Button
+                variant="outline"
+                onClick={() => setTransferOpen(true)}
+                disabled={nodeOffline || transferLoading || files.length === 0}
+              >
+                <ArrowRightLeft size={16} />
+                Перенести на узлы
+              </Button>
+              {isHaAutoPrimary && (
+                <span className="px-1 text-[10px] text-muted-foreground">Fallback</span>
+              )}
+            </div>
           )}
           <Button variant="outline" onClick={handleRefresh} disabled={loading || fileLoading}>
             <RefreshCw size={16} className={loading || fileLoading ? 'animate-spin' : ''} />
@@ -443,12 +452,27 @@ export default function EditFilesPage() {
         </div>
       </div>
 
+      {isHaAutoPrimary && (
+        <SettingsAlert variant="info" title="HA auto-sync: сохранение реплицирует на replica">
+          На primary в режиме <strong>auto</strong> кнопки «Сохранить» и «Сохранить и применить» автоматически
+          копируют изменённые файлы на все replica группы «{activeNodeHa.group_name}». «Сохранить и применить»
+          запускает <strong>doall.sh</strong> на primary; на replica doall выполняется, если включён{' '}
+          <strong>NODE_SYNC_REPLICATE_DOALL</strong> (по умолчанию — да). Ручной «Перенести на узлы» — только
+          fallback (split-brain, offline replica, узлы вне HA).
+        </SettingsAlert>
+      )}
+
       <SettingsAlert variant="info" title="Редактирование на активном узле">
         Файлы читаются и записываются на <strong>{activeNode?.name ?? 'активном узле'}</strong>.
         Кнопка «Сохранить и применить» выполняет <strong>doall.sh</strong> и перезагружает правила
-        маршрутизации VPN — используйте её после изменения списков include/exclude. Кнопка{' '}
-        <strong>«Перенести на узлы»</strong> копирует конфигурацию с активного узла на другие
-        online-узлы.
+        маршрутизации VPN — используйте её после изменения списков include/exclude.
+        {!isHaAutoPrimary && showTransferButton && (
+          <>
+            {' '}
+            Кнопка <strong>«Перенести на узлы»</strong> копирует конфигурацию с активного узла на другие
+            online-узлы.
+          </>
+        )}
       </SettingsAlert>
 
       {nodeOffline && (
@@ -674,6 +698,7 @@ export default function EditFilesPage() {
                   <p className="text-xs text-muted-foreground">
                     «Сохранить» записывает файл на узел. «Сохранить и применить» дополнительно
                     запускает doall.sh.
+                    {isHaAutoPrimary && ' В HA auto изменения автоматически попадут на replica.'}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <Button

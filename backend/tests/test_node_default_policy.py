@@ -1,13 +1,15 @@
 """Tests for per-node default access policies (EU vs RU wizard backend)."""
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Node, NodeStatus, OpenVpnAccessPolicy, WgAccessPolicy
+from app.models import Node, NodeStatus, NodeSyncGroup, OpenVpnAccessPolicy, WgAccessPolicy
 from app.services.access_policy import (
     NODE_DEFAULT_POLICY_CLIENT,
     build_policy_summary_by_node,
@@ -15,6 +17,8 @@ from app.services.access_policy import (
     is_node_default_policy_client,
     set_node_default_policy,
 )
+from app.services.node_sync.groups import serialize_replica_node_ids
+from app.services.node_sync.policy_sync import maybe_replicate_node_default_policy
 
 
 @pytest.fixture()
@@ -32,6 +36,29 @@ def db_session(tmp_path):
     session.refresh(ru)
     yield session, eu, ru
     session.close()
+
+
+def _ha_group(session, *, primary_node_id: int, replica_node_id: int, sync_mode: str = "auto") -> NodeSyncGroup:
+    group = NodeSyncGroup(
+        name="HA test",
+        shared_domain="vpn.example.com",
+        primary_node_id=primary_node_id,
+        replica_node_ids=serialize_replica_node_ids([replica_node_id]),
+        sync_mode=sync_mode,
+    )
+    session.add(group)
+    session.commit()
+    session.refresh(group)
+    return group
+
+
+@contextmanager
+def _ip_patches():
+    with patch("app.main.ip_restriction_service.should_hard_deny", return_value=False), patch(
+        "app.main.ip_restriction_service.get_settings",
+        return_value={"ip_restriction_enabled": False},
+    ), patch("app.main.ip_restriction_service.is_ip_allowed", return_value=True):
+        yield
 
 
 def test_is_node_default_policy_client():
@@ -165,8 +192,6 @@ def test_reconcile_wg_skips_default_row(db_session):
 
 
 def test_node_default_policy_api(api_test_env):
-    from fastapi.testclient import TestClient
-
     session = api_test_env["session_factory"]()
     eu = Node(name="eu-1", host="10.0.0.1", port=9100, is_local=False, status=NodeStatus.online)
     ru = Node(name="ru-1", host="10.0.0.2", port=9100, is_local=False, status=NodeStatus.online)
@@ -178,10 +203,7 @@ def test_node_default_policy_api(api_test_env):
     client = TestClient(api_test_env["app"])
     headers = api_test_env["admin_headers"]
 
-    with patch("app.main.ip_restriction_service.should_hard_deny", return_value=False), patch(
-        "app.main.ip_restriction_service.get_settings",
-        return_value={"ip_restriction_enabled": False},
-    ), patch("app.main.ip_restriction_service.is_ip_allowed", return_value=True):
+    with _ip_patches():
         put_resp = client.put(
             f"/api/client-access/node-defaults/{eu.id}",
             headers=headers,
@@ -220,3 +242,117 @@ def test_node_default_policy_api(api_test_env):
     assert summary["eu-1"]["default_route_mode"] == "route_selective"
     assert summary["ru-1"]["default_openvpn_limit_human"] == "200.0 GB"
     assert summary["ru-1"]["default_route_mode"] == "route_all"
+
+
+def test_replicate_node_default_policy_copies_both_protocols(db_session):
+    session, primary, replica = db_session
+    _ha_group(session, primary_node_id=primary.id, replica_node_id=replica.id)
+
+    set_node_default_policy(
+        session,
+        primary.id,
+        route_mode="route_selective",
+        openvpn_limit_value=100,
+        openvpn_limit_unit="GB",
+        wireguard_limit_value=50,
+        wireguard_limit_unit="GB",
+        wireguard_limit_period_days=30,
+        actor="admin",
+    )
+
+    result = maybe_replicate_node_default_policy(session, node_id=primary.id)
+    assert result is not None
+    assert result["skipped"] is False
+    assert result["errors"] == []
+    assert len(result["applied"]) == 1
+
+    replica_defaults = get_node_default_policy(session, replica.id)
+    assert replica_defaults["route_mode"] == "route_selective"
+    assert replica_defaults["openvpn"]["limit_human"] == "100.0 GB"
+    assert replica_defaults["wireguard"]["limit_human"] == "50.0 GB"
+    assert replica_defaults["wireguard"]["limit_period_days"] == 30
+
+
+def test_replicate_node_default_policy_skipped_when_manual_sync(db_session):
+    session, primary, replica = db_session
+    _ha_group(session, primary_node_id=primary.id, replica_node_id=replica.id, sync_mode="manual")
+
+    set_node_default_policy(
+        session,
+        primary.id,
+        openvpn_limit_value=10,
+        openvpn_limit_unit="GB",
+        actor="admin",
+    )
+
+    result = maybe_replicate_node_default_policy(session, node_id=primary.id)
+    assert result is None
+    assert get_node_default_policy(session, replica.id)["openvpn"]["limit_human"] is None
+
+
+def test_put_node_defaults_blocked_on_ha_replica(api_test_env):
+    session = api_test_env["session_factory"]()
+    primary = Node(name="primary-1", host="10.0.0.1", port=9100, is_local=False, status=NodeStatus.online)
+    replica = Node(name="replica-1", host="10.0.0.2", port=9100, is_local=False, status=NodeStatus.online)
+    session.add_all([primary, replica])
+    session.commit()
+    session.refresh(primary)
+    session.refresh(replica)
+    _ha_group(session, primary_node_id=primary.id, replica_node_id=replica.id)
+    replica_id = replica.id
+    session.close()
+
+    client = TestClient(api_test_env["app"])
+    headers = api_test_env["admin_headers"]
+
+    with _ip_patches():
+        resp = client.put(
+            f"/api/client-access/node-defaults/{replica_id}",
+            headers=headers,
+            json={"route_mode": "route_all", "openvpn_limit_value": 50, "openvpn_limit_unit": "GB"},
+        )
+
+    assert resp.status_code == 403
+    assert "replica" in resp.json()["detail"].lower()
+    assert "primary" in resp.json()["detail"].lower()
+
+
+def test_put_node_defaults_replicates_to_replica_in_auto_ha(api_test_env):
+    session = api_test_env["session_factory"]()
+    primary = Node(name="primary-2", host="10.0.0.3", port=9100, is_local=False, status=NodeStatus.online)
+    replica = Node(name="replica-2", host="10.0.0.4", port=9100, is_local=False, status=NodeStatus.online)
+    session.add_all([primary, replica])
+    session.commit()
+    session.refresh(primary)
+    session.refresh(replica)
+    _ha_group(session, primary_node_id=primary.id, replica_node_id=replica.id)
+    primary_id = primary.id
+    replica_id = replica.id
+    session.close()
+
+    client = TestClient(api_test_env["app"])
+    headers = api_test_env["admin_headers"]
+
+    with _ip_patches():
+        resp = client.put(
+            f"/api/client-access/node-defaults/{primary_id}",
+            headers=headers,
+            json={
+                "route_mode": "route_selective",
+                "openvpn_limit_value": 75,
+                "openvpn_limit_unit": "GB",
+                "wireguard_limit_value": 25,
+                "wireguard_limit_unit": "GB",
+            },
+        )
+
+    assert resp.status_code == 200
+
+    verify_session = api_test_env["session_factory"]()
+    try:
+        replica_defaults = get_node_default_policy(verify_session, replica_id)
+        assert replica_defaults["route_mode"] == "route_selective"
+        assert replica_defaults["openvpn"]["limit_human"] == "75.0 GB"
+        assert replica_defaults["wireguard"]["limit_human"] == "25.0 GB"
+    finally:
+        verify_session.close()

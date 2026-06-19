@@ -1,0 +1,5 @@
+client_name,vpn_type,owner_username,cert_expire_days,description,traffic_limit_bytes,traffic_limit_days,block_mode
+alice,openvpn,admin,3650,Marketing team,,,
+bob,wireguard,admin,,Field device,524288000,7,
+charlie,openvpn,admin,365,,,temp:14
+dave,wireguard,admin,,Blocked kiosk,,,permanent

@@ -21,14 +21,14 @@ def _set_active_node(session_factory, node_id: int) -> None:
         db.close()
 
 
-def _ha_group(session_factory, *, primary: Node, replica: Node) -> NodeSyncGroup:
+def _ha_group(session_factory, *, primary_node_id: int, replica_node_id: int) -> NodeSyncGroup:
     db = session_factory()
     try:
         group = NodeSyncGroup(
             name="HA test",
             shared_domain="vpn.example.com",
-            primary_node_id=primary.id,
-            replica_node_ids=serialize_replica_node_ids([replica.id]),
+            primary_node_id=primary_node_id,
+            replica_node_ids=serialize_replica_node_ids([replica_node_id]),
             sync_mode="auto",
         )
         db.add(group)
@@ -54,7 +54,7 @@ def test_active_node_includes_ha_context_for_replica(api_test_env):
     primary_id = primary.id
     db.close()
 
-    _ha_group(session_factory, primary=primary, replica=replica)
+    _ha_group(session_factory, primary_node_id=primary_id, replica_node_id=replica_id)
     _set_active_node(session_factory, replica_id)
 
     resp = client.get("/api/nodes/active", headers=headers)
@@ -77,9 +77,10 @@ def test_create_config_blocked_on_ha_replica(api_test_env):
     db.commit()
     db.refresh(replica)
     replica_id = replica.id
+    primary_id = primary.id
     db.close()
 
-    _ha_group(session_factory, primary=primary, replica=replica)
+    _ha_group(session_factory, primary_node_id=primary_id, replica_node_id=replica_id)
     _set_active_node(session_factory, replica_id)
 
     resp = client.post(
@@ -115,16 +116,17 @@ def test_delete_config_blocked_on_ha_replica(api_test_env):
     db.refresh(cfg)
     config_id = cfg.id
     replica_id = replica.id
+    primary_id = primary.id
     db.close()
 
-    _ha_group(session_factory, primary=primary, replica=replica)
+    _ha_group(session_factory, primary_node_id=primary_id, replica_node_id=replica_id)
     _set_active_node(session_factory, replica_id)
 
     resp = client.delete(f"/api/configs/{config_id}", headers=headers)
     assert resp.status_code == 403
 
 
-def test_update_description_allowed_on_ha_replica(api_test_env):
+def test_update_description_blocked_on_ha_replica(api_test_env):
     client = TestClient(api_test_env["app"])
     headers = api_test_env["admin_headers"]
     session_factory = api_test_env["session_factory"]
@@ -147,9 +149,10 @@ def test_update_description_allowed_on_ha_replica(api_test_env):
     db.refresh(cfg)
     config_id = cfg.id
     replica_id = replica.id
+    primary_id = primary.id
     db.close()
 
-    _ha_group(session_factory, primary=primary, replica=replica)
+    _ha_group(session_factory, primary_node_id=primary_id, replica_node_id=replica_id)
     _set_active_node(session_factory, replica_id)
 
     resp = client.patch(
@@ -157,5 +160,5 @@ def test_update_description_allowed_on_ha_replica(api_test_env):
         headers=headers,
         json={"description": "updated from replica view"},
     )
-    assert resp.status_code == 200
-    assert resp.json()["description"] == "updated from replica view"
+    assert resp.status_code == 403
+    assert "replica" in resp.json()["detail"].lower()

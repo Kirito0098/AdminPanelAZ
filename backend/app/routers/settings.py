@@ -12,7 +12,9 @@ from app.models import AppSetting, User
 from app.schemas import AppSettingsResponse, AppSettingsUpdate, MessageResponse, MonitorSettingsResponse, MonitorSettingsUpdate, RetentionSettingsResponse, RetentionSettingsUpdate
 from app.services.admin_notify import admin_notify_service
 from app.services.env_file import EnvFileService
+from app.services.file_editor import EDITABLE_FILES
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
+from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.notify_time import _normalize_timezone_name, get_client_timezone_from_request
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -40,6 +42,14 @@ _CONFIG_FILE_NAMES = (
     "exclude-ips.txt",
     "allow-ips.txt",
 )
+
+_SETTINGS_FIELD_TO_FILE_KEY: dict[str, str] = {
+    "include_hosts": "include_hosts",
+    "exclude_hosts": "exclude_hosts",
+    "include_ips": "include_ips",
+    "exclude_ips": "exclude_ips",
+    "allow_ips": "allow_ips",
+}
 
 
 def _read_config_files_parallel(adapter, filenames: tuple[str, ...]) -> dict[str, str]:
@@ -110,20 +120,16 @@ def update_settings(
 
     if current_user.role.value == "admin":
         adapter = get_active_adapter(db)
-        if payload.include_hosts is not None:
-            adapter.write_config_file("include-hosts.txt", payload.include_hosts)
-            config_changed = True
-        if payload.exclude_hosts is not None:
-            adapter.write_config_file("exclude-hosts.txt", payload.exclude_hosts)
-            config_changed = True
-        if payload.include_ips is not None:
-            adapter.write_config_file("include-ips.txt", payload.include_ips)
-            config_changed = True
-        if payload.exclude_ips is not None:
-            adapter.write_config_file("exclude-ips.txt", payload.exclude_ips)
-            config_changed = True
-        if payload.allow_ips is not None:
-            adapter.write_config_file("allow-ips.txt", payload.allow_ips)
+        changed_file_keys: list[str] = []
+        content_overrides: dict[str, str] = {}
+        payload_fields = payload.model_dump(exclude_unset=True)
+        for field_name, file_key in _SETTINGS_FIELD_TO_FILE_KEY.items():
+            if field_name not in payload_fields:
+                continue
+            content = payload_fields[field_name]
+            adapter.write_config_file(EDITABLE_FILES[file_key], content)
+            changed_file_keys.append(file_key)
+            content_overrides[file_key] = content
             config_changed = True
 
         if config_changed:
@@ -137,6 +143,13 @@ def update_settings(
                     detail=f"Ошибка применения настроек: {exc}",
                 ) from exc
             node = get_active_node(db)
+            maybe_replicate_config_files(
+                db,
+                node_id=node.id,
+                file_keys=changed_file_keys,
+                run_doall=True,
+                content_overrides=content_overrides,
+            )
             admin_notify_service.send_settings_change(
                 db,
                 actor_username=current_user.username,

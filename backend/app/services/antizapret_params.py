@@ -1,5 +1,9 @@
 """AntiZapret setup parameters schema (ported from AdminAntizapret 1.9.0)."""
 
+from __future__ import annotations
+
+from typing import Any
+
 ANTIZAPRET_PARAMS = [
     {
         "key": "route_all",
@@ -170,3 +174,11 @@ ANTIZAPRET_PARAMS = [
 ]
 
 KNOWN_SETTING_KEYS = frozenset(p["key"] for p in ANTIZAPRET_PARAMS)
+
+# Setup keys excluded from HA auto-replication (node-specific WARP). Hostnames replicate.
+ANTIZAPRET_HA_SETTING_EXCLUDE: frozenset[str] = frozenset({"ANTIZAPRET_WARP", "VPN_WARP"})
+
+
+def filter_ha_replicable_settings(updates: dict[str, Any]) -> dict[str, Any]:
+    """Drop node-specific WARP flags; keep shared-domain fields like openvpn_host."""
+    return {key: value for key, value in updates.items() if key not in ANTIZAPRET_HA_SETTING_EXCLUDE}

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.auth import require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import User
+from app.models import User, VpnType
 from app.schemas import NodeDefaultPolicyResponse, NodeDefaultPolicyUpdate, NodePolicySummary
 from app.services.access_policy import (
     AccessPolicyService,
@@ -16,7 +16,13 @@ from app.services.access_policy import (
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
-from app.services.node_sync.groups import require_ha_primary_for_client_ops
+from app.services.node_sync.groups import require_ha_primary_for_client_ops, require_ha_primary_node
+from app.services.node_sync.client_ops_sync import maybe_replicate_openvpn_disconnect
+from app.services.node_sync.policy_sync import (
+    PolicyOp,
+    maybe_replicate_node_default_policy,
+    maybe_replicate_policy_op,
+)
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.traffic_limit import (
     TrafficLimitExceededError,
@@ -70,6 +76,27 @@ def _client_ban_details(
     if block_until:
         parts.append(f"block_until={block_until}")
     return " ".join(parts)
+
+
+def _replicate_policy_after_success(
+    db: Session,
+    *,
+    client_name: str,
+    vpn_type: VpnType,
+    op: PolicyOp,
+    actor: str,
+    **kwargs,
+) -> None:
+    node = get_active_node(db)
+    maybe_replicate_policy_op(
+        db,
+        node_id=node.id,
+        client_name=client_name,
+        vpn_type=vpn_type,
+        op=op,
+        actor=actor,
+        **kwargs,
+    )
 
 
 def _notify_client_ban(
@@ -137,6 +164,7 @@ def update_node_defaults(
     db: Session = Depends(get_db),
     user: User = Depends(require_admin),
 ):
+    require_ha_primary_node(db, node_id)
     try:
         result = set_node_default_policy(
             db,
@@ -164,6 +192,7 @@ def update_node_defaults(
         details=f"node_id={node_id}",
         remote_addr=request.client.host,
     )
+    maybe_replicate_node_default_policy(db, node_id=node_id)
     return result
 
 
@@ -189,6 +218,14 @@ def openvpn_temp_block(payload: BlockRequest, request: Request, db: Session = De
         days=payload.days,
         block_until=result.get("block_until"),
     )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.openvpn,
+        op="block_temp",
+        actor=user.username,
+        days=payload.days,
+    )
     return result
 
 
@@ -204,6 +241,13 @@ def openvpn_perm_block(payload: BlockRequest, request: Request, db: Session = De
         client_name=payload.client_name,
         target_type="openvpn",
         action="permanent_block",
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.openvpn,
+        op="block_permanent",
+        actor=user.username,
     )
     return result
 
@@ -227,6 +271,13 @@ def openvpn_unblock(payload: BlockRequest, request: Request, db: Session = Depen
         target_type="openvpn",
         action="unblock",
     )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.openvpn,
+        op="unblock",
+        actor=user.username,
+    )
     return result
 
 
@@ -244,6 +295,8 @@ def openvpn_disconnect(payload: BlockRequest, request: Request, db: Session = De
         details=f"{payload.client_name} ({result.get('profile', '')})",
         remote_addr=request.client.host,
     )
+    node = get_active_node(db)
+    maybe_replicate_openvpn_disconnect(db, node_id=node.id, client_name=payload.client_name)
     return result
 
 
@@ -257,6 +310,15 @@ def wg_set_expiry(payload: ExpiryRequest, request: Request, db: Session = Depend
     result = _service(db).wg_set_expiry(payload.client_name, payload.days, extend=payload.extend, actor=user.username)
     log_action(db, action="wg_set_expiry", user_id=user.id, username=user.username,
                details=f"{payload.client_name} {payload.days}d", remote_addr=request.client.host)
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.wireguard,
+        op="set_wg_expiry",
+        actor=user.username,
+        days=payload.days,
+        extend=payload.extend,
+    )
     return result
 
 
@@ -277,6 +339,14 @@ def wg_temp_block(payload: BlockRequest, request: Request, db: Session = Depends
         days=payload.days,
         block_until=result.get("block_until"),
     )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.wireguard,
+        op="block_temp",
+        actor=user.username,
+        days=payload.days,
+    )
     return result
 
 
@@ -292,6 +362,13 @@ def wg_perm_block(payload: BlockRequest, request: Request, db: Session = Depends
         client_name=payload.client_name,
         target_type="wireguard",
         action="permanent_block",
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.wireguard,
+        op="block_permanent",
+        actor=user.username,
     )
     return result
 
@@ -316,6 +393,13 @@ def wg_unblock(payload: BlockRequest, request: Request, db: Session = Depends(ge
         client_name=payload.client_name,
         target_type="wireguard",
         action="unblock",
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.wireguard,
+        op="unblock",
+        actor=user.username,
     )
     return result
 
@@ -346,6 +430,15 @@ def openvpn_set_traffic_limit(
         details=f"{payload.client_name} {payload.limit_value}{payload.limit_unit}",
         remote_addr=request.client.host,
     )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.openvpn,
+        op="set_traffic_limit",
+        actor=user.username,
+        limit_bytes=limit_bytes,
+        period_days=period_days,
+    )
     return result
 
 
@@ -364,6 +457,13 @@ def openvpn_clear_traffic_limit(
         username=user.username,
         details=payload.client_name,
         remote_addr=request.client.host,
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.openvpn,
+        op="clear_traffic_limit",
+        actor=user.username,
     )
     return result
 
@@ -394,6 +494,15 @@ def wg_set_traffic_limit(
         details=f"{payload.client_name} {payload.limit_value}{payload.limit_unit}",
         remote_addr=request.client.host,
     )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.wireguard,
+        op="set_traffic_limit",
+        actor=user.username,
+        limit_bytes=limit_bytes,
+        period_days=period_days,
+    )
     return result
 
 
@@ -412,5 +521,12 @@ def wg_clear_traffic_limit(
         username=user.username,
         details=payload.client_name,
         remote_addr=request.client.host,
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.wireguard,
+        op="clear_traffic_limit",
+        actor=user.username,
     )
     return result

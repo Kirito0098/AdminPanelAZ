@@ -8,7 +8,9 @@ from app.models import ClientTemplate, User, UserRole, VpnConfig, VpnType
 from app.services.access_policy import AccessPolicyService
 from app.services.feature_guards import FeatureToggleService, require_vpn_type
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
-from app.services.traffic_limit import parse_traffic_limit_bytes
+from app.services.node_sync.client_sync import maybe_replicate_create
+from app.services.node_sync.policy_sync import maybe_replicate_policy_op
+from app.services.traffic_limit import parse_traffic_limit_bytes, parse_traffic_limit_period_days
 
 
 def list_templates(db: Session, node_id: int) -> list[ClientTemplate]:
@@ -127,11 +129,14 @@ def apply_template(
     db.commit()
     db.refresh(config)
 
+    limit_bytes: int | None = None
+    period_days: int | None = None
     if template.traffic_limit_value and template.traffic_limit_unit:
         limit_bytes = parse_traffic_limit_bytes(
             template.traffic_limit_value,
             template.traffic_limit_unit,
         )
+        period_days = parse_traffic_limit_period_days(template.traffic_limit_period_days)
         svc = AccessPolicyService(
             db,
             antizapret_path=get_node_antizapret_path(db),
@@ -142,15 +147,28 @@ def apply_template(
             svc.openvpn_set_traffic_limit(
                 client_name,
                 limit_bytes,
-                period_days=template.traffic_limit_period_days,
+                period_days=period_days,
                 actor=actor.username,
             )
         else:
             svc.wg_set_traffic_limit(
                 client_name,
                 limit_bytes,
-                period_days=template.traffic_limit_period_days,
+                period_days=period_days,
                 actor=actor.username,
             )
+
+    maybe_replicate_create(db, node_id=node.id, primary_config=config)
+    if limit_bytes is not None:
+        maybe_replicate_policy_op(
+            db,
+            node_id=node.id,
+            client_name=client_name,
+            vpn_type=template.vpn_type,
+            op="set_traffic_limit",
+            actor=actor.username,
+            limit_bytes=limit_bytes,
+            period_days=period_days,
+        )
 
     return config

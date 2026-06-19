@@ -9,7 +9,8 @@ from app.schemas import MessageResponse
 from app.services.action_log import log_action
 from app.services.edit_files_transfer import run_edit_files_transfer
 from app.services.file_editor import EDITABLE_FILES, FileEditorService
-from app.services.node_manager import get_active_adapter
+from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.node_sync.config_sync import maybe_replicate_config_files
 
 router = APIRouter(prefix="/edit-files", tags=["edit-files"])
 
@@ -73,6 +74,13 @@ def save_edit_file(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Файл сохранён, но doall.sh ошибка: {exc}") from exc
+    maybe_replicate_config_files(
+        db,
+        node_id=get_active_node(db).id,
+        file_keys=[file_key],
+        run_doall=True,
+        content_overrides={file_key: payload.content},
+    )
     return MessageResponse(message="Файл сохранён и применён", detail=output)
 
 
@@ -88,6 +96,13 @@ def save_batch(
     output = None
     if payload.run_doall:
         output = adapter.apply_config_changes()
+    maybe_replicate_config_files(
+        db,
+        node_id=get_active_node(db).id,
+        file_keys=list(payload.files.keys()),
+        run_doall=payload.run_doall,
+        content_overrides=dict(payload.files),
+    )
     return MessageResponse(message="Файлы сохранены", detail=output)
 
 
