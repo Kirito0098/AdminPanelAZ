@@ -443,7 +443,9 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         description="VPN-состояние на replica будет полностью перезаписано из primary (PKI, WireGuard, config). Продолжить?"
         confirmLabel="Push full"
         onConfirm={() => void handlePushFull()}
-        onCancel={() => setPushTarget(null)}
+        onOpenChange={(open) => {
+          if (!open && actionLoading === null) setPushTarget(null)
+        }}
         loading={actionLoading !== null}
       />
 
@@ -454,7 +456,9 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         confirmLabel="Расформировать"
         destructive
         onConfirm={() => void handleDelete()}
-        onCancel={() => setDeleteTarget(null)}
+        onOpenChange={(open) => {
+          if (!open && actionLoading === null) setDeleteTarget(null)
+        }}
         loading={actionLoading !== null}
       />
     </>
