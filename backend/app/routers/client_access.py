@@ -1,8 +1,5 @@
 import logging
 import os
-import threading
-import time
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -10,28 +7,23 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_admin
 from app.config import get_settings
-from app.database import SessionLocal, get_db
-from app.models import Node, User, VpnType
+from app.database import get_db
+from app.models import User, VpnType
 from app.schemas import NodeDefaultPolicyResponse, NodeDefaultPolicyUpdate, NodePolicySummary
 from app.services.access_policy import (
     AccessPolicyService,
     build_policy_summary_by_node,
-    clear_cooldown_ban,
     get_node_default_policy,
-    register_cooldown_ban,
     set_node_default_policy,
 )
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
-from app.services.node_manager import (
-    get_active_adapter,
-    get_active_node,
-    get_adapter_for_node,
-    get_node_antizapret_path,
-    node_metadata_dict,
-)
+from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 from app.services.node_sync.groups import require_ha_primary_for_client_ops, require_ha_primary_node
-from app.services.node_sync.client_ops_sync import maybe_replicate_openvpn_disconnect
+from app.services.node_sync.client_ops_sync import (
+    apply_openvpn_disconnect_on_node,
+    maybe_replicate_openvpn_disconnect,
+)
 from app.services.node_sync.policy_sync import (
     PolicyOp,
     maybe_replicate_node_default_policy,
@@ -55,41 +47,6 @@ settings = get_settings()
 DISCONNECT_COOLDOWN_SECONDS = max(
     0, int(os.environ.get("OPENVPN_DISCONNECT_COOLDOWN_SECONDS", "15"))
 )
-
-
-def _node_antizapret_path(node: Node) -> Path:
-    meta = node_metadata_dict(node)
-    raw = meta.get("antizapret_path")
-    return Path(str(raw)) if raw else settings.antizapret_path
-
-
-def _schedule_disconnect_cooldown_release(node_id: int, client_name: str) -> None:
-    """Lift the transient disconnect ban after the cooldown window."""
-
-    def _worker() -> None:
-        time.sleep(DISCONNECT_COOLDOWN_SECONDS)
-        clear_cooldown_ban(node_id, client_name)
-        db = SessionLocal()
-        try:
-            node = db.get(Node, node_id)
-            if node is None:
-                return
-            svc = AccessPolicyService(
-                db,
-                antizapret_path=_node_antizapret_path(node),
-                node_id=node.id,
-                node_name=node.name,
-                adapter=get_adapter_for_node(node),
-            )
-            svc.reconcile_openvpn(client_name)
-        except Exception:
-            logger.exception("disconnect cooldown release failed for %s", client_name)
-        finally:
-            db.close()
-
-    threading.Thread(
-        target=_worker, name=f"ovpn-cooldown-{client_name}", daemon=True
-    ).start()
 
 
 class BlockRequest(BaseModel):
@@ -343,27 +300,22 @@ def openvpn_unblock(payload: BlockRequest, request: Request, db: Session = Depen
 def openvpn_disconnect(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     node = get_active_node(db)
     client_name = payload.client_name
-    svc = _service(db)
-
-    # Briefly ban the client so its automatic reconnect is rejected (VPN app
-    # shows an error) instead of silently re-establishing the tunnel.
     cooldown = DISCONNECT_COOLDOWN_SECONDS
-    if cooldown > 0:
-        register_cooldown_ban(node.id, client_name, cooldown)
-        svc.reconcile_openvpn(client_name)
 
     try:
-        result = get_active_adapter(db).disconnect_openvpn_client(client_name)
-    except Exception:
-        if cooldown > 0:
-            clear_cooldown_ban(node.id, client_name)
-            svc.reconcile_openvpn(client_name)
-        raise
+        result = apply_openvpn_disconnect_on_node(
+            db,
+            node,
+            client_name,
+            cooldown_seconds=cooldown,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
 
     if not result.get("success"):
-        if cooldown > 0:
-            clear_cooldown_ban(node.id, client_name)
-            svc.reconcile_openvpn(client_name)
         raise HTTPException(status_code=404, detail=result.get("message", "Не удалось отключить"))
 
     log_action(
@@ -374,10 +326,12 @@ def openvpn_disconnect(payload: BlockRequest, request: Request, db: Session = De
         details=f"{client_name} ({result.get('profile', '')}) cooldown={cooldown}s",
         remote_addr=request.client.host,
     )
-    maybe_replicate_openvpn_disconnect(db, node_id=node.id, client_name=client_name)
-    if cooldown > 0:
-        _schedule_disconnect_cooldown_release(node.id, client_name)
-        result["cooldown_seconds"] = cooldown
+    maybe_replicate_openvpn_disconnect(
+        db,
+        node_id=node.id,
+        client_name=client_name,
+        cooldown_seconds=cooldown,
+    )
     return result
 
 

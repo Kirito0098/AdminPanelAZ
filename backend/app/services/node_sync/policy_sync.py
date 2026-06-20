@@ -9,8 +9,8 @@ from typing import Any, Literal
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Node, NodeSyncGroup, VpnConfig, VpnType
-from app.services.access_policy import NODE_DEFAULT_POLICY_CLIENT, AccessPolicyService
+from app.models import Node, NodeSyncGroup, OpenVpnAccessPolicy, VpnConfig, VpnType
+from app.services.access_policy import NODE_DEFAULT_POLICY_CLIENT, AccessPolicyService, is_node_default_policy_client
 from app.services.node_manager import get_adapter_for_node, node_metadata_dict
 from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes, is_auto_sync_enabled
 from app.services.node_sync.replicate import ReplicateOperation, ReplicateResult, finalize_replicate_outcome, get_shadow_configs
@@ -277,6 +277,12 @@ def heal_policy_drift(db: Session, group: NodeSyncGroup) -> dict[str, Any]:
     for replica_node in get_replica_nodes(db, group):
         try:
             copy_access_policies_from_node(db, primary_node, replica_node)
+            adapter = get_adapter_for_node(replica_node)
+            svc = _policy_service(db, replica_node, adapter)
+            for row in db.query(OpenVpnAccessPolicy).filter_by(node_id=replica_node.id).all():
+                if is_node_default_policy_client(row.client_name):
+                    continue
+                svc.reconcile_openvpn(row.client_name)
         except Exception as exc:
             logger.warning(
                 "HA policy heal failed on replica %s: %s",
