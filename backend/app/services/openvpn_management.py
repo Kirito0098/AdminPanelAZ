@@ -238,6 +238,15 @@ class OpenVpnManagementService:
 
     def read_event_source(self, profile_key: str) -> dict:
         socket_path = self.openvpn_socket_path(profile_key)
+        if not socket_path.exists():
+            return {
+                "raw": "",
+                "source_name": socket_path.name,
+                "exists": False,
+                "updated_at_ts": 0,
+                "source_type": "socket",
+            }
+
         log_cmd = "log all" if self.openvpn_log_tail_lines == 0 else f"log {self.openvpn_log_tail_lines}"
         raw_mgmt = self.query_openvpn_management_socket(
             socket_path,
@@ -245,20 +254,12 @@ class OpenVpnManagementService:
             max_response_bytes=self.openvpn_event_max_response_bytes,
         )
         payload = self.extract_event_payload_from_management(raw_mgmt)
-        if payload:
-            return {
-                "raw": payload,
-                "source_name": socket_path.name,
-                "exists": True,
-                "updated_at_ts": int(time.time()),
-                "source_type": "socket",
-            }
-
+        lines = [line for line in payload.splitlines() if line.strip()]
         return {
-            "raw": "",
+            "raw": payload,
             "source_name": socket_path.name,
-            "exists": False,
-            "updated_at_ts": 0,
+            "exists": True,
+            "updated_at_ts": int(time.time()) if lines else 0,
             "source_type": "socket",
         }
 
@@ -379,9 +380,16 @@ class OpenVpnManagementService:
             return clients, "status_log"
         return clients, "none"
 
+    def active_openvpn_profiles(self) -> tuple[str, ...]:
+        return tuple(
+            profile_key
+            for profile_key in OPENVPN_PROFILES
+            if self.openvpn_socket_path(profile_key).exists()
+        )
+
     def collect_events(self) -> list[dict]:
         rows: list[dict] = []
-        for profile_key in OPENVPN_PROFILES:
+        for profile_key in self.active_openvpn_profiles():
             source = self.read_event_source(profile_key)
             raw = source.get("raw") or ""
             lines = [line for line in raw.splitlines() if line.strip()]
@@ -389,7 +397,7 @@ class OpenVpnManagementService:
                 {
                     "profile": profile_key,
                     "source_name": source.get("source_name", ""),
-                    "exists": bool(source.get("exists")),
+                    "exists": True,
                     "updated_at_ts": int(source.get("updated_at_ts") or 0),
                     "line_count": len(lines),
                     "recent_lines": lines[-50:],

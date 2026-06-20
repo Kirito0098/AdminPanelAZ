@@ -31,6 +31,47 @@ def is_vnstat_available() -> bool:
         return False
 
 
+def _net_if_stats() -> dict:
+    try:
+        return psutil.net_if_stats()
+    except Exception:
+        return {}
+
+
+def interface_exists(name: str) -> bool:
+    name = (name or "").strip()
+    return bool(name) and name in _net_if_stats()
+
+
+def detect_primary_interface() -> str | None:
+    try:
+        proc = subprocess.run(
+            ["ip", "-4", "route", "show", "default"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        for line in (proc.stdout or "").splitlines():
+            parts = line.split()
+            if "dev" in parts:
+                idx = parts.index("dev")
+                if idx + 1 < len(parts):
+                    candidate = parts[idx + 1].strip()
+                    if interface_exists(candidate):
+                        return candidate
+    except Exception:
+        pass
+    stats = _net_if_stats()
+    for candidate in ("eth0", "ens3", "enp0s3", "eno1", "enp0s8"):
+        if candidate in stats:
+            return candidate
+    for name, st in stats.items():
+        if name != "lo" and st.isup:
+            return name
+    return None
+
+
 def collect_interface_groups() -> dict[str, list[str]]:
     default_groups = {
         "vpn": ["vpn", "vpn-udp", "vpn-tcp"],
@@ -59,16 +100,23 @@ def collect_interface_groups() -> dict[str, list[str]]:
                 candidates.add(token.strip())
     except Exception:
         pass
+    primary = detect_primary_interface()
+    main_group: list[str] = []
     vpn_group: list[str] = []
     antizapret_group: list[str] = []
     openvpn_group: list[str] = []
     wireguard_group: list[str] = []
 
     def _add_unique(target: list[str], value: str) -> None:
-        if value and value not in target:
+        if value and interface_exists(value) and value not in target:
             target.append(value)
 
+    if primary:
+        _add_unique(main_group, primary)
+
     for iface in sorted(candidates):
+        if not interface_exists(iface):
+            continue
         lowered = iface.lower()
         if not any(k in lowered for k in ("vpn", "wg", "wireguard", "awg", "amnezia", "antizapret")):
             continue
@@ -86,6 +134,7 @@ def collect_interface_groups() -> dict[str, list[str]]:
     for fallback in default_groups["antizapret"]:
         _add_unique(antizapret_group, fallback)
     return {
+        "main": main_group,
         "vpn": vpn_group,
         "antizapret": antizapret_group,
         "openvpn": openvpn_group,
@@ -247,11 +296,20 @@ class ServerMonitorService:
 
     def list_interfaces(self) -> dict:
         groups = collect_interface_groups()
+        primary = detect_primary_interface()
         all_ifaces: list[str] = []
+        if primary and interface_exists(primary):
+            all_ifaces.append(primary)
         for group in groups.values():
             for iface in group:
-                if iface not in all_ifaces:
+                if iface not in all_ifaces and interface_exists(iface):
                     all_ifaces.append(iface)
         if not all_ifaces:
-            all_ifaces = list(psutil.net_if_stats().keys())[:5] or ["eth0"]
-        return {"interfaces": all_ifaces, "groups": groups, "vnstat_available": is_vnstat_available()}
+            stats = _net_if_stats()
+            all_ifaces = [name for name in list(stats.keys())[:5] if name != "lo"] or ["eth0"]
+        return {
+            "interfaces": all_ifaces,
+            "groups": groups,
+            "primary_interface": primary,
+            "vnstat_available": is_vnstat_available(),
+        }

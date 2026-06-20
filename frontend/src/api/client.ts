@@ -1740,7 +1740,11 @@ export async function getServerMetrics(accurate = false) {
 }
 
 export async function getServerInterfaces() {
-  return apiFetch<{ interfaces: string[]; groups?: Record<string, string[]> }>('/server-monitor/interfaces')
+  return apiFetch<{
+    interfaces: string[]
+    groups?: Record<string, string[]>
+    primary_interface?: string | null
+  }>('/server-monitor/interfaces')
 }
 
 export async function getBandwidthChart(iface: string, range: string) {

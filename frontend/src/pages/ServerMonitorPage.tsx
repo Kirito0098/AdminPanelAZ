@@ -71,10 +71,18 @@ const RANGE_LABELS: Record<'1d' | '7d' | '30d', string> = {
 }
 
 const GROUP_LABELS: Record<string, string> = {
+  main: 'Основной',
   vpn: 'VPN',
   antizapret: 'AntiZapret',
   openvpn: 'OpenVPN',
   wireguard: 'WireGuard',
+}
+
+function formatInterfaceLabel(name: string, primaryInterface?: string | null) {
+  if (primaryInterface && name === primaryInterface) {
+    return `${name} (основной)`
+  }
+  return name
 }
 
 function getUsageBarColor(percent: number) {
@@ -182,8 +190,9 @@ export default function ServerMonitorPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [bwLoading, setBwLoading] = useState(false)
   const [wsConnected, setWsConnected] = useState(false)
-  const [iface, setIface] = useState('eth0')
+  const [iface, setIface] = useState('')
   const [ifaces, setIfaces] = useState<string[]>([])
+  const [primaryInterface, setPrimaryInterface] = useState<string | null>(null)
   const [interfaceGroups, setInterfaceGroups] = useState<Record<string, string[]>>({})
   const [range, setRange] = useState<'1d' | '7d' | '30d'>('1d')
   const [bwChart, setBwChart] = useState<BandwidthChart | null>(null)
@@ -197,7 +206,13 @@ export default function ServerMonitorPage() {
       const list = ifData.interfaces || []
       setIfaces(list)
       setInterfaceGroups(ifData.groups || {})
-      setIface((current) => (list.length && !list.includes(current) ? list[0] : current))
+      setPrimaryInterface(ifData.primary_interface ?? null)
+      setIface((current) => {
+        const preferred = ifData.primary_interface
+        if (preferred && list.includes(preferred)) return preferred
+        if (list.length && (!current || !list.includes(current))) return list[0]
+        return current || list[0] || ''
+      })
       return m
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Ошибка загрузки метрик'
@@ -238,7 +253,7 @@ export default function ServerMonitorPage() {
   }, [user?.role, iface, range, loadBandwidth, activeNode?.id])
 
   useEffect(() => {
-    if (user?.role !== 'admin') return
+    if (user?.role !== 'admin' || !iface) return
     const token = localStorage.getItem('token')
     if (!token) return
 
@@ -451,7 +466,7 @@ export default function ServerMonitorPage() {
                   <SelectContent>
                     {interfaceList.map((i) => (
                       <SelectItem key={i} value={i}>
-                        {i}
+                        {formatInterfaceLabel(i, primaryInterface)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -609,7 +624,9 @@ export default function ServerMonitorPage() {
                             )}
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <span className="font-mono text-sm font-medium">{name}</span>
+                              <span className="font-mono text-sm font-medium">
+                                {formatInterfaceLabel(name, primaryInterface)}
+                              </span>
                               {isSelected && (
                                 <Badge variant="default" className="text-[10px]">
                                   выбран
@@ -645,7 +662,9 @@ export default function ServerMonitorPage() {
                             const isSelected = name === iface
                             return (
                               <TableRow key={name} className={cn(isSelected && 'bg-primary/5')}>
-                                <TableCell className="font-mono text-sm font-medium">{name}</TableCell>
+                                <TableCell className="font-mono text-sm font-medium">
+                                  {formatInterfaceLabel(name, primaryInterface)}
+                                </TableCell>
                                 <TableCell>
                                   {groups.length > 0 ? (
                                     <div className="flex flex-wrap gap-1">

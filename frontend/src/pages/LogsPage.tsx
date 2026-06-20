@@ -487,15 +487,24 @@ export default function LogsPage() {
   )
   const totalConnections = openvpnClients.length + activeWireguardPeers.length
 
+  const activeEvents = useMemo(() => events.filter((p) => p.exists), [events])
+
   const selectedEventProfile = useMemo(() => {
     if (selectedProfile === 'all') return null
-    return events.find((p) => p.profile === selectedProfile) ?? null
-  }, [events, selectedProfile])
+    return activeEvents.find((p) => p.profile === selectedProfile) ?? null
+  }, [activeEvents, selectedProfile])
 
   const eventLines = useMemo(() => {
     if (selectedEventProfile) return selectedEventProfile.recent_lines
-    return events.flatMap((p) => p.recent_lines)
-  }, [events, selectedEventProfile])
+    return activeEvents.flatMap((p) => p.recent_lines)
+  }, [activeEvents, selectedEventProfile])
+
+  useEffect(() => {
+    if (selectedProfile === 'all') return
+    if (!activeEvents.some((p) => p.profile === selectedProfile)) {
+      setSelectedProfile('all')
+    }
+  }, [activeEvents, selectedProfile])
 
   const filteredActions = useMemo(() => {
     const q = actionSearch.trim().toLowerCase()
@@ -834,14 +843,14 @@ export default function LogsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {events.length === 0 ? (
+                {activeEvents.length === 0 ? (
                   <EmptyState
                     icon={Radio}
-                    title="Нет профилей OpenVPN"
+                    title="Нет активных профилей OpenVPN"
                     description={
                       nodeOffline
                         ? 'Узел офлайн — события management interface недоступны'
-                        : 'Профили появятся после настройки OpenVPN management socket'
+                        : 'Профили появятся, когда запущены сервисы OpenVPN с management socket'
                     }
                     className="py-10"
                   />
@@ -854,20 +863,19 @@ export default function LogsPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">Все профили</SelectItem>
-                          {events.map((p) => (
+                          {activeEvents.map((p) => (
                             <SelectItem key={p.profile} value={p.profile}>
                               {p.profile}
-                              {!p.exists ? ' (недоступен)' : ''}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                       {selectedEventProfile && (
                         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <Badge variant={selectedEventProfile.exists ? 'default' : 'outline'}>
-                            {selectedEventProfile.exists
+                          <Badge variant="default">
+                            {selectedEventProfile.line_count > 0
                               ? `${selectedEventProfile.line_count} строк`
-                              : 'Сокет недоступен'}
+                              : 'Нет событий'}
                           </Badge>
                           <span>{selectedEventProfile.source_name}</span>
                         </div>
@@ -876,12 +884,12 @@ export default function LogsPage() {
 
                     {selectedProfile === 'all' ? (
                       <div className="space-y-4">
-                        {events.map((profile) => (
+                        {activeEvents.map((profile) => (
                           <div key={profile.profile} className="rounded-lg border p-4">
                             <div className="mb-3 flex flex-wrap items-center gap-2">
                               <span className="font-medium">{profile.profile}</span>
-                              <Badge variant={profile.exists ? 'default' : 'outline'}>
-                                {profile.exists ? `${profile.line_count} строк` : 'Сокет недоступен'}
+                              <Badge variant="default">
+                                {profile.line_count > 0 ? `${profile.line_count} строк` : 'Нет событий'}
                               </Badge>
                               <span className="text-xs text-muted-foreground">{profile.source_name}</span>
                             </div>
@@ -898,11 +906,7 @@ export default function LogsPage() {
                       <LogViewer
                         lines={eventLines}
                         emptyTitle="Нет событий"
-                        emptyDescription={
-                          selectedEventProfile.exists
-                            ? 'Сокет доступен, но новых строк пока нет'
-                            : 'Management socket недоступен на этом профиле'
-                        }
+                        emptyDescription="Сокет доступен, но новых строк пока нет"
                         profileName={selectedEventProfile.profile}
                       />
                     ) : null}

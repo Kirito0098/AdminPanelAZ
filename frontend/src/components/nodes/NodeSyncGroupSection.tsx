@@ -93,10 +93,27 @@ function readinessBadge(group: NodeSyncGroup): ReadinessBadge {
   return { label: 'Не синхронизировано', variant: 'outline' }
 }
 
-function AutoSyncModeDescription() {
+function AutoSyncModeDescription({ compact = false }: { compact?: boolean }) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (compact && !expanded) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Правки на primary автоматически реплицируются на replica (клиенты, конфиги, routing, CIDR).{' '}
+        <button
+          type="button"
+          className="text-primary underline-offset-2 hover:underline"
+          onClick={() => setExpanded(true)}
+        >
+          Подробнее
+        </button>
+      </p>
+    )
+  }
+
   return (
-    <SettingsAlert variant="info">
-      <p className="font-medium">Auto: все перечисленные операции на primary автоматически реплицируются на replica.</p>
+    <SettingsAlert variant="info" className={compact ? 'p-3' : undefined}>
+      <p className="font-medium">Auto: операции на primary автоматически реплицируются на replica.</p>
       <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm">
         {AUTO_SYNC_OPERATIONS.map((item) => (
           <li key={item}>{item}</li>
@@ -106,6 +123,15 @@ function AutoSyncModeDescription() {
         Не синхронизируются: warper-include-ips.txt, флаги ANTIZAPRET_WARP / VPN_WARP (локально на узле).
         Push full — первичное выравнивание и восстановление после рассинхрона.
       </p>
+      {compact ? (
+        <button
+          type="button"
+          className="mt-2 text-xs text-primary underline-offset-2 hover:underline"
+          onClick={() => setExpanded(false)}
+        >
+          Свернуть
+        </button>
+      ) : null}
     </SettingsAlert>
   )
 }
@@ -608,129 +634,116 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <form onSubmit={(e) => void handleSubmit(e)}>
-            <DialogHeader>
+        <DialogContent className="flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+          <form
+            onSubmit={(e) => void handleSubmit(e)}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <DialogHeader className="shrink-0 space-y-1 px-6 pt-6">
               <DialogTitle>{editing ? 'Изменить Sync Group' : 'Создать Sync Group (HA)'}</DialogTitle>
               <DialogDescription>
                 {editing
-                  ? 'Узлы должны быть online и с одинаковой версией AntiZapret.'
-                  : 'Заполните 4 поля. Узлы должны быть online и на одинаковой версии AntiZapret. ' +
-                    'DNS на общий домен настраивается отдельно (A-записи на оба IP / health-check).'}
+                  ? 'Узлы online, одинаковая версия AntiZapret.'
+                  : 'Primary + replica, общий домен. DNS failover настраивается отдельно.'}
               </DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-1.5">
-                <Label htmlFor="sync-name">Название группы</Label>
-                <Input
-                  id="sync-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Например: EU-HA"
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  Произвольное имя только для удобства в админке.
-                </p>
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="sync-domain">Общий домен</Label>
-                <Input
-                  id="sync-domain"
-                  value={sharedDomain}
-                  onChange={(e) => setSharedDomain(e.target.value)}
-                  placeholder="vpn.example.com"
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  Один домен на оба узла — его пропишем в профили клиентов (OPENVPN_HOST /
-                  WIREGUARD_HOST). На этот домен вы настраиваете DNS failover.
-                </p>
-              </div>
-              <div className="grid gap-1.5">
-                <Label>Primary (главный узел)</Label>
-                <Select value={primaryId} onValueChange={setPrimaryId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Выберите primary узел" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {onlineNodes.map((node) => (
-                      <SelectItem key={node.id} value={String(node.id)}>
-                        {node.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Источник правды: клиенты, ключи и настройки берутся отсюда и копируются на replica.
-                </p>
-              </div>
-              <div className="grid gap-1.5">
-                <Label>Replica (резервные узлы, минимум 1)</Label>
-                <div className="flex flex-wrap gap-2">
-                  {onlineNodes
-                    .filter((node) => String(node.id) !== primaryId)
-                    .map((node) => (
-                      <Button
-                        key={node.id}
-                        type="button"
-                        size="sm"
-                        variant={replicaIds.includes(node.id) ? 'default' : 'outline'}
-                        onClick={() => toggleReplica(node.id)}
-                      >
-                        {node.name}
-                      </Button>
-                    ))}
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="sync-name">Название группы</Label>
+                  <Input
+                    id="sync-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="EU-HA"
+                    required
+                  />
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Нажмите на узлы, которые получат копию primary. Выбранные подсвечены.
-                </p>
-              </div>
-              <div className="grid gap-1.5">
-                <Label>Режим синхронизации</Label>
-                <Select value={syncMode} onValueChange={setSyncMode}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="manual_full">Ручной — синхронизация по кнопке</SelectItem>
-                    <SelectItem value="auto">Авто — правки на primary сразу уходят на replica</SelectItem>
-                  </SelectContent>
-                </Select>
-                {syncMode === 'manual_full' ? (
-                  <SettingsAlert variant="info">
-                    Изменения переносятся на replica только когда вы нажмёте «Синхронизировать».
-                    После расформирования группы на replica выполните Конфигурации → Синхронизировать.
-                  </SettingsAlert>
-                ) : syncMode === 'auto' ? (
-                  <AutoSyncModeDescription />
-                ) : null}
-              </div>
-              {!editing ? (
-                <div className="space-y-2">
-                  <div className="flex items-start justify-between gap-3 rounded-md border p-3">
-                    <div className="space-y-0.5">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="sync-domain">Общий домен</Label>
+                  <Input
+                    id="sync-domain"
+                    value={sharedDomain}
+                    onChange={(e) => setSharedDomain(e.target.value)}
+                    placeholder="vpn.example.com"
+                    required
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Primary</Label>
+                  <Select value={primaryId} onValueChange={setPrimaryId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Главный узел" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {onlineNodes.map((node) => (
+                        <SelectItem key={node.id} value={String(node.id)}>
+                          {node.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Replica (мин. 1)</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {onlineNodes
+                      .filter((node) => String(node.id) !== primaryId)
+                      .map((node) => (
+                        <Button
+                          key={node.id}
+                          type="button"
+                          size="sm"
+                          variant={replicaIds.includes(node.id) ? 'default' : 'outline'}
+                          onClick={() => toggleReplica(node.id)}
+                        >
+                          {node.name}
+                        </Button>
+                      ))}
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Режим синхронизации</Label>
+                  <Select value={syncMode} onValueChange={setSyncMode}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="manual_full">Ручной — по кнопке «Синхронизировать»</SelectItem>
+                      <SelectItem value="auto">Авто — правки с primary на replica</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {syncMode === 'manual_full' ? (
+                    <p className="text-xs text-muted-foreground">
+                      Изменения на replica только по кнопке «Синхронизировать».
+                    </p>
+                  ) : syncMode === 'auto' ? (
+                    <AutoSyncModeDescription key={String(dialogOpen)} compact />
+                  ) : null}
+                </div>
+                {!editing ? (
+                  <div className="space-y-2 rounded-md border p-3">
+                    <div className="flex items-center justify-between gap-3">
                       <Label htmlFor="auto-setup" className="cursor-pointer">
                         Сразу настроить группу
                       </Label>
-                      <p className="text-xs text-muted-foreground">
-                        После создания автоматически: домен → узлы, полная копия состояния на replica
-                        и проверка готовности.
-                      </p>
+                      <Switch id="auto-setup" checked={autoSetup} onCheckedChange={setAutoSetup} />
                     </div>
-                    <Switch id="auto-setup" checked={autoSetup} onCheckedChange={setAutoSetup} />
+                    {autoSetup ? (
+                      <p className="text-xs text-destructive">
+                        Replica будет перезаписана из primary (клиенты, ключи, конфиги). Выключите, если
+                        на replica есть нужные данные.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        После создания настройте группу кнопкой «Синхронизировать».
+                      </p>
+                    )}
                   </div>
-                  {autoSetup ? (
-                    <SettingsAlert variant="danger">
-                      Будет выполнена полная синхронизация (Push full): всё содержимое выбранных
-                      replica (клиенты, ключи, конфиги) будет <strong>удалено и заменено</strong>{' '}
-                      копией с primary. Выключите тумблер, если на replica есть нужные данные.
-                    </SettingsAlert>
-                  ) : null}
-                </div>
-              ) : null}
+                ) : null}
+              </div>
             </div>
-            <DialogFooter>
+            <DialogFooter className="shrink-0 border-t px-6 py-4">
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                 Отмена
               </Button>

@@ -36,6 +36,22 @@ for fallback in vpn vpn-tcp vpn-udp antizapret antizapret-tcp antizapret-udp; do
   add_iface "$fallback"
 done
 
+primary=""
+if command -v ip >/dev/null 2>&1; then
+  primary="$(ip -4 route show default 2>/dev/null | awk '/default/ {for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+fi
+if [[ -z "$primary" ]]; then
+  for candidate in eth0 ens3 enp0s3 eno1 enp0s8; do
+    if ip link show "$candidate" >/dev/null 2>&1; then
+      primary="$candidate"
+      break
+    fi
+  done
+fi
+if [[ -n "$primary" ]]; then
+  add_iface "$primary"
+fi
+
 if command -v wg >/dev/null 2>&1; then
   while read -r wg_iface; do
     add_iface "$wg_iface"
