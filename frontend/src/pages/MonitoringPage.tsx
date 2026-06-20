@@ -61,6 +61,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { formatDateTime } from '@/lib/datetime'
 import { isResourceCritical, metricBarClass } from '@/lib/metricColors'
+import { connectionSourceLabel } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 import type { MonitoringNodeSummary, MonitoringOverview, NodeStatus, ResourceHistory } from '@/types'
@@ -92,7 +93,7 @@ function writeStored(key: string, value: string) {
 
 function dataSourceLabel(source?: string) {
   if (source === 'federated') return 'Все узлы'
-  if (source === 'management_socket') return 'Management socket'
+  if (source === 'management_socket') return connectionSourceLabel('management_socket')
   if (source === 'status_log') return 'Status-логи'
   return 'Нет данных'
 }

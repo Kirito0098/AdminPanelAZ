@@ -50,6 +50,7 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { formatDateTime } from '@/lib/datetime'
+import { COL_HANDSHAKE, COL_REAL_IP, COL_VPN_IP, connectionSourceLabel } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 import type {
@@ -67,7 +68,7 @@ const LOG_PAGE_SIZE = 100
 type LogLevel = 'all' | 'error' | 'warn' | 'info'
 
 function dataSourceLabel(source?: string) {
-  if (source === 'management_socket') return 'Management socket'
+  if (source === 'management_socket') return connectionSourceLabel('management_socket')
   if (source === 'status_log') return 'Status-логи'
   return 'Нет данных'
 }
@@ -331,11 +332,11 @@ function ConnectionClientCard({ name, realIp, vpnIp }: ConnectionClientCardProps
       <p className="font-medium">{name}</p>
       <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
         <div>
-          <p className="text-muted-foreground">Real IP</p>
+          <p className="text-muted-foreground">{COL_REAL_IP}</p>
           <p className="font-mono">{realIp}</p>
         </div>
         <div>
-          <p className="text-muted-foreground">VPN IP</p>
+          <p className="text-muted-foreground">{COL_VPN_IP}</p>
           <p className="font-mono">{vpnIp}</p>
         </div>
       </div>
@@ -353,7 +354,7 @@ function WireGuardPeerCard({ name, handshake }: WireGuardPeerCardProps) {
     <div className="rounded-lg border p-3">
       <p className="font-medium">{name}</p>
       <div className="mt-2 text-xs">
-        <p className="text-muted-foreground">Handshake</p>
+        <p className="text-muted-foreground">{COL_HANDSHAKE}</p>
         <p>{handshake}</p>
       </div>
     </div>
@@ -740,8 +741,8 @@ export default function LogsPage() {
                           <TableHeader>
                             <TableRow>
                               <TableHead>Клиент</TableHead>
-                              <TableHead>Real IP</TableHead>
-                              <TableHead>VPN IP</TableHead>
+                              <TableHead>{COL_REAL_IP}</TableHead>
+                              <TableHead>{COL_VPN_IP}</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -797,7 +798,7 @@ export default function LogsPage() {
                           <TableHeader>
                             <TableRow>
                               <TableHead>Клиент</TableHead>
-                              <TableHead>Handshake</TableHead>
+                              <TableHead>{COL_HANDSHAKE}</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>

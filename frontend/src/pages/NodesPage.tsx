@@ -874,15 +874,15 @@ export default function NodesPage() {
       await load()
 
       if (offline === 0) {
-        success(`Проверка здоровья: ${online} узл(ов) онлайн`)
+        success(`Проверка здоровья: ${online} узл(ов) в сети`)
       } else if (online === 0) {
         notifyError(
           errors.length > 0
-            ? `Все выбранные узлы offline. ${errors[0]}`
-            : `Все выбранные узлы offline (${offline})`,
+            ? `Все выбранные узлы не в сети. ${errors[0]}`
+            : `Все выбранные узлы не в сети (${offline})`,
         )
       } else {
-        warning(`Проверка здоровья: ${online} онлайн, ${offline} offline`)
+        warning(`Проверка здоровья: ${online} в сети, ${offline} не в сети`)
       }
     } finally {
       setBulkBusy(false)
@@ -1067,7 +1067,7 @@ export default function NodesPage() {
             {loading
               ? 'Загрузка...'
               : nodes.length > 0
-                ? `${nodes.length} узл${nodes.length === 1 ? '' : nodes.length < 5 ? 'а' : 'ов'} · ${onlineCount} онлайн`
+                ? `${nodes.length} узл${nodes.length === 1 ? '' : nodes.length < 5 ? 'а' : 'ов'} · ${onlineCount} в сети`
                 : 'Узлы не найдены'}
           </CardDescription>
         </CardHeader>

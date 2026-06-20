@@ -2,6 +2,7 @@ import { ArrowRight, Check, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { RoutingTab, RoutingWorkflowState } from './routingWorkflow'
+import { ROUTING_TAB_UPDATE, STAGE_DEPLOY, WORKFLOW_CHAIN } from './routingLabels'
 import { pluralProviders } from './utils'
 
 interface RoutingWorkflowGuideProps {
@@ -12,11 +13,11 @@ interface RoutingWorkflowGuideProps {
 }
 
 function guideTitle(workflow: RoutingWorkflowState): string {
-  if (workflow.currentStage == null) return 'Pipeline готов'
+  if (workflow.currentStage == null) return 'Обновление завершено'
   if (workflow.currentStage === 3 && workflow.compileRecentlyCompleted) {
-    return 'Списки собраны — deploy на узел'
+    return `Списки собраны — ${STAGE_DEPLOY.toLowerCase()} на узел`
   }
-  return 'Текущий шаг pipeline'
+  return 'Текущий шаг обновления списков'
 }
 
 function guideHint(workflow: RoutingWorkflowState): string {
@@ -113,7 +114,7 @@ export default function RoutingWorkflowGuide({
 
       {!allDone && workflow.optionalCompileRemaining && workflow.currentStage === 3 && (
         <p className="mt-3 text-xs text-muted-foreground">
-          Этап 2 выполнен. Провайдеры без файла не блокируют deploy — их можно собрать позже.
+          Этап 2 выполнен. Провайдеры без файла не блокируют {STAGE_DEPLOY.toLowerCase()} — их можно собрать позже.
         </p>
       )}
     </div>

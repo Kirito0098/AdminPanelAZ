@@ -7,6 +7,7 @@ import type { RoutingWorkflowState } from '@/components/routing/routingWorkflow'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { Badge } from '@/components/ui/badge'
 import type { AntifilterStatus, CidrDbStatus, RouteBudgetInfo, RoutingOverview } from '@/types'
+import { STAGE_DEPLOY } from './routingLabels'
 import { formatDt, pluralProviders, statusBadgeVariant, statusLabel } from './utils'
 
 interface RoutingOverviewTabProps {
@@ -39,7 +40,7 @@ export default function RoutingOverviewTab({
             <div>
               <div className="text-sm font-medium">Бюджет маршрутов OpenVPN</div>
               <div className="text-xs text-muted-foreground">
-                По последней оценке CIDR pipeline
+                По последней оценке обновления CIDR
                 {routeBudget.finished_at ? ` · ${formatDt(routeBudget.finished_at)}` : ''}
               </div>
             </div>
@@ -123,9 +124,9 @@ export default function RoutingOverviewTab({
           </div>
         </StatusPanel>
 
-        <StatusPanel title="Pipeline CIDR" icon={GitBranch}>
+        <StatusPanel title="Обновление CIDR" icon={GitBranch}>
           <p className="mb-3 text-xs text-muted-foreground">
-            Данные и списки сначала на контроллере; на узлы уходит только deploy (этап 3).
+            Данные и списки сначала на контроллере; на узлы уходит только {STAGE_DEPLOY.toLowerCase()} (этап 3).
           </p>
           <div className="space-y-3 text-sm">
             <div className="flex items-center justify-between">
@@ -139,7 +140,7 @@ export default function RoutingOverviewTab({
               <span className="mono font-medium">{cidrDb?.total_cidrs ?? 0}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Последний refresh</span>
+              <span className="text-muted-foreground">Последняя загрузка</span>
               <span>{formatDt(cidrDb?.last_refresh_finished)}</span>
             </div>
             <div className="flex justify-between">
@@ -166,7 +167,7 @@ export default function RoutingOverviewTab({
                   </div>
                 )}
                 {workflow.pendingDeployCount > 0 && (
-                  <div>{pluralProviders(workflow.pendingDeployCount)} ждут deploy (этап 3)</div>
+                  <div>{pluralProviders(workflow.pendingDeployCount)} ждут {STAGE_DEPLOY.toLowerCase()} (этап 3)</div>
                 )}
               </div>
             )}

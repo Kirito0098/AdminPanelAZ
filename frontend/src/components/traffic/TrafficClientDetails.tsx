@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/table'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { formatDateTime } from '@/lib/datetime'
+import { COL_VPN_IP } from '@/lib/uiLabels'
 import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficClientSessions } from '@/types'
 
 const CHART_VPN = 'hsl(187, 72%, 45%)'
@@ -419,7 +420,7 @@ export default function TrafficClientDetails({
                     <TableHead>Адрес клиента</TableHead>
                     <TableHead className="text-right">Подключений</TableHead>
                     <TableHead className="text-right">Трафик</TableHead>
-                    <TableHead>VPN IP</TableHead>
+                    <TableHead>{COL_VPN_IP}</TableHead>
                     <TableHead>Последний раз</TableHead>
                     <TableHead>Статус</TableHead>
                   </TableRow>

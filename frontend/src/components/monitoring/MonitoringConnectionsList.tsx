@@ -19,6 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { formatDateTime } from '@/lib/datetime'
+import { COL_CONNECTED_SINCE, COL_HANDSHAKE, COL_VPN_IP } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import type { OpenVpnClient, VpnConfigHaInfo, WireGuardPeer } from '@/types'
 
@@ -199,7 +200,7 @@ function ConnectionCard({ row, showNodeColumn }: { row: MonitoringConnectionRow;
         </div>
         <div>
           <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {row.protocol === 'openvpn' ? 'Подключён с' : 'Handshake'}
+            {row.protocol === 'openvpn' ? COL_CONNECTED_SINCE : COL_HANDSHAKE}
           </p>
           <p className="inline-flex items-start gap-1.5 text-sm text-muted-foreground">
             <Clock size={14} className="mt-0.5 shrink-0" />
@@ -325,7 +326,7 @@ export default function MonitoringConnectionsList({ rows, showNodeColumn }: Moni
                 <SortHeader label="Клиент" sortKey="client" active={sortKey === 'client'} dir={sortDir} onSort={handleSort} />
               </TableHead>
               <TableHead className="min-w-[240px]">Адрес / локация</TableHead>
-              <TableHead className="min-w-[140px]">VPN IP</TableHead>
+              <TableHead className="min-w-[140px]">{COL_VPN_IP}</TableHead>
               <TableHead className="min-w-[110px] text-right">
                 <SortHeader label="RX" sortKey="traffic" active={sortKey === 'traffic'} dir={sortDir} onSort={handleSort} className="justify-end" />
               </TableHead>

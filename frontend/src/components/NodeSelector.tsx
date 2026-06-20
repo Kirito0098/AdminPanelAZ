@@ -13,13 +13,10 @@ import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { cn } from '@/lib/utils'
+import { NODE_STATUS_LABELS } from '@/lib/uiLabels'
 import type { NodeStatus } from '@/types'
 
-export const statusLabels: Record<NodeStatus, string> = {
-  online: 'Онлайн',
-  offline: 'Офлайн',
-  unknown: 'Неизвестно',
-}
+export const statusLabels = NODE_STATUS_LABELS
 
 const statusColors: Record<NodeStatus, string> = {
   online: 'bg-emerald-500',
@@ -91,7 +88,7 @@ export default function NodeSelector() {
               <span className="truncate">{node.name}</span>
               {node.is_local && (
                 <Badge variant="outline" className="ml-1 h-4 px-1 text-[10px]">
-                  local
+                  локальный
                 </Badge>
               )}
             </span>

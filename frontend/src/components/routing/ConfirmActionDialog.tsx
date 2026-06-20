@@ -29,14 +29,14 @@ const confirmMeta: Record<
   'deploy-only': {
     title: 'Развернуть CIDR на узлы?',
     description:
-      'Ранее собранные файлы с контроллера будут отправлены на выбранные online-узлы (или все online) и синхронизированы с AntiZapret. Offline-узлы будут пропущены. Правила маршрутизации не применяются — это делается после включения провайдеров.',
+      'Ранее собранные файлы с контроллера будут отправлены на выбранные узлы в сети (или все узлы в сети) и синхронизированы с AntiZapret. Узлы не в сети будут пропущены. Правила маршрутизации не применяются — это делается после включения провайдеров.',
     confirmLabel: 'Развернуть',
   },
   'generate-doall': {
-    title: 'Полный цикл: сборка, deploy и doall?',
+    title: 'Полный цикл: сборка, развёртывание и doall?',
     description:
       'CIDR-файлы будут собраны из БД, развёрнуты на узел и применены через doall.sh. Операция длительная.',
-    confirmLabel: 'Сгенерировать + doall',
+    confirmLabel: 'Сгенерировать и применить',
     destructive: true,
     alertTitle: 'Длительная операция',
   },
@@ -46,7 +46,7 @@ const confirmMeta: Record<
       'Файлы на контроллере будут восстановлены из выбранной резервной копии и развёрнуты на выбранные узлы. Операция в фоне.',
     confirmLabel: 'Откатить и развернуть',
     destructive: true,
-    alertTitle: 'Откат deploy',
+    alertTitle: 'Откат развёртывания',
   },
 }
 
@@ -74,7 +74,7 @@ export default function ConfirmActionDialog({
 
   const description =
     action === 'deploy-only' && deployPreview
-      ? `${meta.description} Preview: ${deployPreview.message}`
+      ? `${meta.description} Предпросмотр: ${deployPreview.message}`
       : action === 'rollback-cidr' && rollbackStamp
         ? `${meta.description} Копия от ${formatBackupLabel(rollbackStamp, rollbackMtime)}.`
         : meta.description

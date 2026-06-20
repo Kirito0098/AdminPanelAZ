@@ -54,7 +54,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useNotifications } from '@/context/NotificationContext'
+import { HA_PRIMARY, HA_PUSH_FULL, HA_REPLICA, nodeStatusRu } from '@/lib/uiLabels'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import type { Node, NodeSyncGroup, NodeSyncVerifyResult, SyncStatus } from '@/types'
 
@@ -66,14 +66,14 @@ const AUTO_SYNC_POLL_MS = 30_000
 
 /** Target auto-sync scope (roadmap §3). */
 const AUTO_SYNC_OPERATIONS = [
-  'Создание / удаление VPN-клиентов (OVPN cert, WG peer + shadow VpnConfig)',
-  'Renew cert, блокировки (temp/permanent), unblock, лимиты трафика, срок WG',
-  'OpenVPN disconnect, метаданные клиента (description, owner)',
-  'Bulk block / renew / unblock, CSV import, шаблоны клиентов',
-  'Файлы AntiZapret config: настройки (списки), редактор, routing files + doall',
-  'Настройки setup (PUT antizapret-settings) и apply маршрутизации',
-  'CIDR providers: правки файлов, compile/deploy на replica',
-  'Политика узла по умолчанию (редактирование только на primary)',
+  'Создание / удаление VPN-клиентов (сертификат OVPN, peer WG + shadow VpnConfig)',
+  'Продление сертификата, блокировки (временные/постоянные), разблокировка, лимиты трафика, срок WG',
+  'Отключение OpenVPN, метаданные клиента (описание, владелец)',
+  'Массовая блокировка / продление / разблокировка, импорт CSV, шаблоны клиентов',
+  'Файлы конфигурации AntiZapret: настройки (списки), редактор, файлы маршрутизации + doall',
+  'Настройки setup (PUT antizapret-settings) и применение маршрутизации',
+  'CIDR-провайдеры: правки файлов, сборка и развёртывание на реплику',
+  'Политика узла по умолчанию (редактирование только на основном узле)',
 ] as const
 
 function formatTimestamp(value?: string | null): string | null {
@@ -87,7 +87,7 @@ type ReadinessBadge = { label: string; variant: 'default' | 'secondary' | 'destr
 
 function readinessBadge(group: NodeSyncGroup): ReadinessBadge {
   if (group.sync_status === 'pending') return { label: 'Синхронизация…', variant: 'secondary' }
-  if (group.ready === true) return { label: 'Готово к failover', variant: 'default' }
+  if (group.ready === true) return { label: 'Готово к переключению', variant: 'default' }
   if (group.sync_status === 'failed') return { label: 'Ошибка синхронизации', variant: 'destructive' }
   if (group.ready === false) return { label: 'Есть расхождения', variant: 'destructive' }
   return { label: 'Не синхронизировано', variant: 'outline' }
@@ -99,7 +99,7 @@ function AutoSyncModeDescription({ compact = false }: { compact?: boolean }) {
   if (compact && !expanded) {
     return (
       <p className="text-xs text-muted-foreground">
-        Правки на primary автоматически реплицируются на replica (клиенты, конфиги, routing, CIDR).{' '}
+        Правки на основном узле автоматически реплицируются на реплику (клиенты, конфиги, маршрутизация, CIDR).{' '}
         <button
           type="button"
           className="text-primary underline-offset-2 hover:underline"
@@ -113,7 +113,7 @@ function AutoSyncModeDescription({ compact = false }: { compact?: boolean }) {
 
   return (
     <SettingsAlert variant="info" className={compact ? 'p-3' : undefined}>
-      <p className="font-medium">Auto: операции на primary автоматически реплицируются на replica.</p>
+      <p className="font-medium">Авто: операции на основном узле автоматически реплицируются на реплику.</p>
       <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm">
         {AUTO_SYNC_OPERATIONS.map((item) => (
           <li key={item}>{item}</li>
@@ -121,7 +121,7 @@ function AutoSyncModeDescription({ compact = false }: { compact?: boolean }) {
       </ul>
       <p className="mt-2 text-xs text-muted-foreground">
         Не синхронизируются: warper-include-ips.txt, флаги ANTIZAPRET_WARP / VPN_WARP (локально на узле).
-        Push full — первичное выравнивание и восстановление после рассинхрона.
+        {HA_PUSH_FULL} — первичное выравнивание и восстановление после рассинхрона.
       </p>
       {compact ? (
         <button
@@ -222,7 +222,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
     try {
       applyGroups(await fetchGroups())
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки Sync Groups')
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки групп синхронизации')
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -307,7 +307,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
   const runHaSetup = useCallback(
     async (group: NodeSyncGroup) => {
       setActionLoading(group.id)
-      setSetupStage(`Настройка «${group.name}»: домен → полная синхронизация replica → проверка…`)
+      setSetupStage(`Настройка «${group.name}»: домен → полная синхронизация реплики → проверка…`)
       try {
         const accepted = await setupNodeSyncGroup(group.id)
         await pollToCompletion(accepted.task_id)
@@ -317,10 +317,10 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         const updated = fresh.find((g) => g.id === group.id)
         if (updated?.last_verify_result) setVerifyResult(updated.last_verify_result)
         if (updated?.ready) {
-          success('HA-группа настроена и готова к DNS failover')
+          success('HA-группа настроена и готова к DNS-переключению')
         } else {
           notifyWarning(
-            `Настройка завершена. Verify нашёл расхождения: ${
+            `Настройка завершена. Проверка нашла расхождения: ${
               updated?.last_verify_result?.summary ?? 'см. «Проверить»'
             }`,
           )
@@ -360,7 +360,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
     event.preventDefault()
     const primary = Number(primaryId)
     if (!name.trim() || !sharedDomain.trim() || !primary || replicaIds.length === 0) {
-      notifyError('Заполните имя, домен, primary и хотя бы один replica')
+      notifyError('Заполните имя, домен, основной узел и хотя бы одну реплику')
       return
     }
     setSubmitting(true)
@@ -383,10 +383,10 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
       let savedGroup: NodeSyncGroup
       if (editing) {
         savedGroup = await updateNodeSyncGroup(editing.id, payload)
-        success('Sync Group обновлена')
+        success('Группа синхронизации обновлена')
       } else {
         savedGroup = await createNodeSyncGroup(payload)
-        success('Sync Group создана')
+        success('Группа синхронизации создана')
       }
       setDialogOpen(false)
       await load()
@@ -402,7 +402,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         await runDomainApply(savedGroup)
       }
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения Sync Group')
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения группы синхронизации')
     } finally {
       setSubmitting(false)
     }
@@ -414,9 +414,9 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
       const result = await verifyNodeSyncGroup(group.id)
       setVerifyResult(result)
       if (result.ready) {
-        success('Verify: готово к DNS failover')
+        success('Проверка: готово к DNS-переключению')
       } else {
-        notifyError(`Verify: ${result.summary}`)
+        notifyError(`Проверка: ${result.summary}`)
       }
       await load()
     } catch (err) {
@@ -448,7 +448,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
     setActionLoading(deleteTarget.id)
     try {
       await deleteNodeSyncGroup(deleteTarget.id)
-      success('Sync Group расформирована: узлы независимы, конфиги на серверах сохранены')
+      success('Группа синхронизации расформирована: узлы независимы, конфиги на серверах сохранены')
       setDeleteTarget(null)
       await load()
     } catch (err) {
@@ -467,11 +467,11 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
               <GitCompare size={18} />
-              Sync Groups (HA)
+              Группы синхронизации (HA)
             </CardTitle>
             <CardDescription>
-              Один домен на два узла: при падении primary DNS переключает на replica. Кнопка
-              «Синхронизировать» делает всё за раз — домен, копию состояния на replica и проверку.
+              Один домен на два узла: при падении основного DNS переключает на реплику. Кнопка
+              «Синхронизировать» делает всё за раз — домен, копию состояния на реплику и проверку.
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -492,7 +492,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
             value={task?.progress_percent}
           />
           {loading ? (
-            <Spinner label="Загрузка Sync Groups..." className="py-6" />
+            <Spinner label="Загрузка групп синхронизации..." className="py-6" />
           ) : groups.length === 0 ? (
             <SettingsAlert variant="info">
               HA-группа даёт отказоустойчивость: два узла отвечают на один домен с одинаковыми
@@ -505,8 +505,8 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                 <TableRow>
                   <TableHead>Группа</TableHead>
                   <TableHead>Домен</TableHead>
-                  <TableHead>Primary</TableHead>
-                  <TableHead>Replica</TableHead>
+                  <TableHead>{HA_PRIMARY}</TableHead>
+                  <TableHead>{HA_REPLICA}</TableHead>
                   <TableHead>Статус</TableHead>
                   <TableHead className="text-right">Действия</TableHead>
                 </TableRow>
@@ -518,11 +518,11 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                       {group.name}
                       {group.sync_mode === 'manual_full' ? (
                         <p className="mt-1 text-xs font-normal text-muted-foreground">
-                          После расформирования группы на replica выполните Конфигурации → Синхронизировать.
+                          После расформирования группы на реплике выполните Конфигурации → Синхронизировать.
                         </p>
                       ) : group.sync_mode === 'auto' ? (
                         <p className="mt-1 text-xs font-normal text-muted-foreground">
-                          Auto: правки на primary → replica (см. режим sync при редактировании).
+                          Авто: правки с основного на реплику (см. режим синхронизации при редактировании).
                         </p>
                       ) : null}
                     </TableCell>
@@ -568,7 +568,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                           size="sm"
                           disabled={actionLoading === group.id || group.sync_status === 'pending'}
                           onClick={() => setSetupTarget(group)}
-                          title="Записать домен на узлы, полностью синхронизировать replica из primary и проверить готовность — в один шаг"
+                          title="Записать домен на узлы, полностью синхронизировать реплику из основного узла и проверить готовность — в один шаг"
                         >
                           {actionLoading === group.id ? (
                             <Loader2 size={14} className="animate-spin" />
@@ -582,7 +582,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                           size="sm"
                           disabled={actionLoading === group.id}
                           onClick={() => void handleVerify(group)}
-                          title="Только проверить расхождения между primary и replica (без изменений)"
+                          title="Только проверить расхождения между основным узлом и репликой (без изменений)"
                         >
                           <ShieldCheck size={14} />
                           Проверить
@@ -613,15 +613,15 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
 
           {verifyResult ? (
             <SettingsAlert variant={verifyResult.ready ? 'info' : 'warning'}>
-              <strong>Verify:</strong> {verifyResult.summary}
+              <strong>Проверка:</strong> {verifyResult.summary}
               {verifyResult.replicas.some((r) => r.mismatches.length > 0) ? (
                 <ul className="mt-2 list-disc pl-5 text-sm">
                   {verifyResult.replicas.flatMap((replica) =>
                     replica.mismatches.map((m, idx) => (
                       <li key={`${replica.node_id}-${idx}`}>
                         {replica.node_name ?? replica.node_id}: {m.kind}
-                        {m.only_primary?.length ? ` (+primary: ${m.only_primary.join(', ')})` : ''}
-                        {m.only_replica?.length ? ` (+replica: ${m.only_replica.join(', ')})` : ''}
+                        {m.only_primary?.length ? ` (+только основной: ${m.only_primary.join(', ')})` : ''}
+                        {m.only_replica?.length ? ` (+только реплика: ${m.only_replica.join(', ')})` : ''}
                         {m.path ? ` [${m.path}]` : ''}
                       </li>
                     )),
@@ -640,11 +640,11 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
             className="flex min-h-0 flex-1 flex-col"
           >
             <DialogHeader className="shrink-0 space-y-1 px-6 pt-6">
-              <DialogTitle>{editing ? 'Изменить Sync Group' : 'Создать Sync Group (HA)'}</DialogTitle>
+              <DialogTitle>{editing ? 'Изменить группу синхронизации' : 'Создать HA-группу'}</DialogTitle>
               <DialogDescription>
                 {editing
-                  ? 'Узлы online, одинаковая версия AntiZapret.'
-                  : 'Primary + replica, общий домен. DNS failover настраивается отдельно.'}
+                  ? 'Узлы в сети, одинаковая версия AntiZapret.'
+                  : 'Основной + реплика, общий домен. DNS-переключение настраивается отдельно.'}
               </DialogDescription>
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
@@ -670,7 +670,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Primary</Label>
+                  <Label>{HA_PRIMARY}</Label>
                   <Select value={primaryId} onValueChange={setPrimaryId}>
                     <SelectTrigger>
                       <SelectValue placeholder="Главный узел" />
@@ -685,7 +685,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                   </Select>
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Replica (мин. 1)</Label>
+                  <Label>{HA_REPLICA} (мин. 1)</Label>
                   <div className="flex flex-wrap gap-2">
                     {onlineNodes
                       .filter((node) => String(node.id) !== primaryId)
@@ -710,12 +710,12 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="manual_full">Ручной — по кнопке «Синхронизировать»</SelectItem>
-                      <SelectItem value="auto">Авто — правки с primary на replica</SelectItem>
+                      <SelectItem value="auto">Авто — правки с основного на реплику</SelectItem>
                     </SelectContent>
                   </Select>
                   {syncMode === 'manual_full' ? (
                     <p className="text-xs text-muted-foreground">
-                      Изменения на replica только по кнопке «Синхронизировать».
+                      Изменения на реплике только по кнопке «Синхронизировать».
                     </p>
                   ) : syncMode === 'auto' ? (
                     <AutoSyncModeDescription key={String(dialogOpen)} compact />
@@ -731,8 +731,8 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                     </div>
                     {autoSetup ? (
                       <p className="text-xs text-destructive">
-                        Replica будет перезаписана из primary (клиенты, ключи, конфиги). Выключите, если
-                        на replica есть нужные данные.
+                        Реплика будет перезаписана из основного узла (клиенты, ключи, конфиги). Выключите, если
+                        на реплике есть нужные данные.
                       </p>
                     ) : (
                       <p className="text-xs text-muted-foreground">
@@ -763,7 +763,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         description="Выполним за один шаг всё, что нужно для отказоустойчивости группы."
         alert={{
           variant: 'danger',
-          title: 'Состояние replica будет перезаписано',
+          title: 'Состояние реплики будет перезаписано',
           children: (() => {
             const replicasWithClients = (setupTarget?.members ?? []).filter(
               (m) => m.role === 'replica' && m.client_count > 0,
@@ -772,12 +772,12 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
               <>
                 <ol className="list-decimal space-y-0.5 pl-5">
                   <li>Запись общего домена в OPENVPN_HOST / WIREGUARD_HOST на всех узлах.</li>
-                  <li>Полная копия PKI, WireGuard и конфигов с primary на replica.</li>
-                  <li>Проверка готовности к DNS failover.</li>
+                  <li>Полная копия PKI, WireGuard и конфигов с основного узла на реплику.</li>
+                  <li>Проверка готовности к DNS-переключению.</li>
                 </ol>
                 {replicasWithClients.length > 0 ? (
                   <p className="mt-2 font-medium">
-                    Текущие клиенты на replica будут заменены клиентами primary:{' '}
+                    Текущие клиенты на реплике будут заменены клиентами основного узла:{' '}
                     {replicasWithClients
                       .map((m) => `${m.node_name ?? m.node_id} — ${m.client_count}`)
                       .join(', ')}
@@ -806,7 +806,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
             </DialogTitle>
             <DialogDescription>
               Создайте у DNS-провайдера записи для домена на IP всех узлов группы и включите
-              health-check / failover, чтобы при падении одного узла трафик уходил на другой.
+              health-check для переключения, чтобы при падении одного узла трафик уходил на другой.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
@@ -819,7 +819,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <Badge variant={member.role === 'primary' ? 'default' : 'secondary'}>
-                        {member.role === 'primary' ? 'primary' : 'replica'}
+                        {member.role === 'primary' ? HA_PRIMARY.toLowerCase() : HA_REPLICA.toLowerCase()}
                       </Badge>
                       <span className="truncate text-sm font-medium">
                         {member.node_name ?? member.node_id}
@@ -831,7 +831,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                             : 'text-xs text-muted-foreground'
                         }
                       >
-                        {member.online ? 'online' : 'offline'}
+                        {member.online ? nodeStatusRu('online') : nodeStatusRu('offline')}
                       </span>
                     </div>
                     <code className="text-xs text-muted-foreground">{member.host ?? '—'}</code>
@@ -852,7 +852,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
             </div>
             <SettingsAlert variant="info">
               Пример: A-записи <code>{dnsTarget?.shared_domain}</code> на каждый IP выше. Для
-              автоматического переключения используйте DNS с health-check (failover-режим), а не
+              автоматического переключения используйте DNS с проверкой доступности (режим failover), а не
               простой round-robin. IP узла — это его адрес подключения в панели (host).
             </SettingsAlert>
           </div>
@@ -866,7 +866,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
-        title="Расформировать Sync Group"
+        title="Расформировать группу синхронизации"
         description={`Расформировать группу «${deleteTarget?.name ?? ''}»? Узлы станут независимыми: все конфиги и файлы на каждом сервере сохранятся, дальше работа с ними как с обычными нодами.`}
         confirmLabel="Расформировать"
         destructive

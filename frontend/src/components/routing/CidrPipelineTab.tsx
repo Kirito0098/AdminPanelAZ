@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import type { AntifilterStatus, CidrDbStatus, CidrDeployPreview, CidrPipelineTask, CidrProviderInfo, Node } from '@/types'
+import { STAGE_BUILD, STAGE_DEPLOY, STAGE_LOAD, nodeStatusRu } from './routingLabels'
 import { formatDt, getPipelineStage, isPipelineRunning, pendingMatchesStage, statusBadgeVariant, statusLabel, type PipelinePendingAction } from './utils'
 
 interface CidrPipelineTabProps {
@@ -48,9 +49,9 @@ interface CidrPipelineTabProps {
 }
 
 const pipelineStageNav = [
-  { id: 'pipeline-stage-1', num: 1, label: 'Ingest', icon: CloudDownload },
-  { id: 'pipeline-stage-2', num: 2, label: 'Compile', icon: Sparkles },
-  { id: 'pipeline-stage-3', num: 3, label: 'Deploy', icon: Rocket },
+  { id: 'pipeline-stage-1', num: 1, label: STAGE_LOAD, icon: CloudDownload },
+  { id: 'pipeline-stage-2', num: 2, label: STAGE_BUILD, icon: Sparkles },
+  { id: 'pipeline-stage-3', num: 3, label: STAGE_DEPLOY, icon: Rocket },
 ] as const
 
 const workflowSteps = [
@@ -60,8 +61,7 @@ const workflowSteps = [
 ]
 
 function nodeCheckboxLabel(node: Node): string {
-  const status =
-    node.status === 'online' ? 'online' : node.status === 'offline' ? 'offline' : node.status
+  const status = nodeStatusRu(node.status)
   return `${node.name}${node.is_local ? ' (локальная)' : ''} — ${status}`
 }
 
@@ -211,13 +211,13 @@ export default function CidrPipelineTab({
           <p>
             <strong className="text-foreground">Контроллер → узел:</strong> сначала все данные сохраняются на
             основном сервере (SQLite и файлы списков), затем на этапе 3 готовые списки отправляются на узлы
-            AntiZapret. До deploy файлы маршрутизации на узлах не меняются.
+            AntiZapret. До {STAGE_DEPLOY.toLowerCase()} файлы маршрутизации на узлах не меняются.
           </p>
         </div>
       </div>
 
       <div id="pipeline-stage-1" className="scroll-mt-24">
-      <StatusPanel title="Этап 1 — Данные на контроллере (ingest)" icon={CloudDownload}>
+      <StatusPanel title={`Этап 1 — ${STAGE_LOAD} данных на контроллер`} icon={CloudDownload}>
         <p className="mb-4 text-sm text-muted-foreground">
           Загрузка из интернета в SQLite на контроллере. Можно обновить одного или нескольких провайдеров — не
           обязательно все 12 сразу. Узлы не затрагиваются.
@@ -340,7 +340,7 @@ export default function CidrPipelineTab({
       </div>
 
       <div id="pipeline-stage-2" className="scroll-mt-24">
-      <StatusPanel title="Этап 2 — Сборка списков на контроллере (compile)" icon={Sparkles}>
+      <StatusPanel title={`Этап 2 — ${STAGE_BUILD} списков на контроллере`} icon={Sparkles}>
         <PipelineStageProgress
           task={pipelineTask}
           stage={2}
@@ -392,7 +392,7 @@ export default function CidrPipelineTab({
       </div>
 
       <div id="pipeline-stage-3" className="scroll-mt-24">
-      <StatusPanel title="Этап 3 — Списки на узел (deploy)" icon={Rocket}>
+      <StatusPanel title={`Этап 3 — ${STAGE_DEPLOY} списков на узел`} icon={Rocket}>
         <PipelineStageProgress
           task={pipelineTask}
           stage={3}
@@ -407,7 +407,7 @@ export default function CidrPipelineTab({
           <div className="mb-4 flex items-start gap-2 rounded-md border border-sky-500/40 bg-sky-500/10 px-4 py-3 text-sm text-sky-950 dark:text-sky-100">
             <Info size={16} className="mt-0.5 shrink-0" />
             <span>
-              Списки уже собраны на контроллере. Следующий шаг — <strong>Deploy</strong> на выбранные
+              Списки уже собраны на контроллере. Следующий шаг — <strong>{STAGE_DEPLOY.toLowerCase()}</strong> на выбранные
               узлы, затем включение провайдеров на вкладке «Провайдеры».
             </span>
           </div>
@@ -423,7 +423,7 @@ export default function CidrPipelineTab({
               className="h-4 w-4 rounded border"
             />
             <Label htmlFor="deploy-all-online" className="text-sm cursor-pointer font-medium">
-              Все online-узлы ({onlineNodes.length})
+              Все узлы в сети ({onlineNodes.length})
             </Label>
           </div>
 
@@ -459,7 +459,7 @@ export default function CidrPipelineTab({
         {cidrDb?.last_deploy && (
           <div className="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 text-sm">
             <div className="rounded-md border p-3">
-              <div className="text-xs text-muted-foreground">Последний deploy</div>
+              <div className="text-xs text-muted-foreground">Последнее {STAGE_DEPLOY.toLowerCase()}</div>
               <div className="font-medium">{formatDt(cidrDb.last_deploy.finished_at)}</div>
               <Badge variant={statusBadgeVariant(cidrDb.last_deploy.status)} className="mt-1">
                 {statusLabel(cidrDb.last_deploy.status)}
@@ -534,18 +534,18 @@ export default function CidrPipelineTab({
             disabled={deployDisabled}
             onClick={onLoadDeployPreview}
           >
-            Dry-run preview
+            Предпросмотр
           </Button>
           <Button size="sm" disabled={deployDisabled || pipelineBusy} onClick={onDeploy}>
             <Rocket size={14} className="mr-1.5" />
-            {deployAllOnline ? 'Развернуть на все online' : 'Развернуть на выбранные'}
+            {deployAllOnline ? 'Развернуть на все узлы в сети' : 'Развернуть на выбранные'}
           </Button>
         </div>
 
         <div className="mt-3 flex items-start gap-2 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
           <Info size={14} className="mt-0.5 shrink-0" />
           <span>
-            Deploy только отправляет файлы на узел. После включения провайдеров на вкладке «Провайдеры»
+            {STAGE_DEPLOY} только отправляет файлы на узел. После включения провайдеров на вкладке «Провайдеры»
             выполните <strong className="text-foreground">doall + client.sh 7</strong>, чтобы применить
             правила маршрутизации и обновить профили WireGuard/AmneziaWG.
           </span>
@@ -610,7 +610,7 @@ export default function CidrPipelineTab({
         alert={{
           variant: 'warning',
           title: 'Необратимо на контроллере',
-          children: 'После очистки потребуется повторный ingest из интернета.',
+          children: 'После очистки потребуется повторная загрузка из интернета.',
         }}
       />
     </div>

@@ -25,6 +25,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import type { EditFileTransferResult } from '@/api/client'
+import { ALL_NODES_ONLINE_PHRASE, NODES_ONLINE_PHRASE } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import type { EditFileEntry, Node } from '@/types'
 
@@ -288,7 +289,7 @@ export default function TransferFilesDialog({
                 <div className="truncate text-sm font-medium">
                   {targetCount > 0
                     ? allOnline
-                      ? `Все online (${onlineTargets.length})`
+                      ? `Все в сети (${onlineTargets.length})`
                       : `${targetCount} выбрано`
                     : 'Выберите узлы'}
                 </div>
@@ -387,7 +388,7 @@ export default function TransferFilesDialog({
                   className="h-7 text-xs"
                   onClick={selectAllOnlineNodes}
                 >
-                  Выбрать все online
+                  Выбрать все {NODES_ONLINE_PHRASE}
                 </Button>
               )}
             </div>
@@ -416,7 +417,7 @@ export default function TransferFilesDialog({
                   />
                   <div className="flex flex-1 items-center justify-between gap-2">
                     <div>
-                      <div className="text-sm font-medium">Все online-узлы</div>
+                      <div className="text-sm font-medium">{ALL_NODES_ONLINE_PHRASE}</div>
                       <div className="text-xs text-muted-foreground">
                         {onlineTargets.length} доступно для переноса
                       </div>
@@ -471,7 +472,7 @@ export default function TransferFilesDialog({
 
           {!canSubmit && (
             <p className="text-center text-xs text-muted-foreground">
-              Выберите файлы и хотя бы один online-узел для переноса
+              Выберите файлы и хотя бы один узел в сети для переноса
             </p>
           )}
 

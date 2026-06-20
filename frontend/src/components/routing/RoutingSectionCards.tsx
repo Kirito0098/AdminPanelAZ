@@ -1,6 +1,7 @@
 import { CloudDownload, FlaskConical, LayoutDashboard, Route } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+import { ROUTING_TAB_UPDATE, STAGE_BUILD, STAGE_DEPLOY, WORKFLOW_CHAIN } from './routingLabels'
 import type { RoutingTab, RoutingWorkflowState } from './routingWorkflow'
 
 interface RoutingSectionCardsProps {
@@ -44,7 +45,7 @@ export default function RoutingSectionCards({
     },
     {
       key: 'pipeline',
-      title: 'Pipeline',
+      title: ROUTING_TAB_UPDATE,
       icon: CloudDownload,
       value:
         workflow.currentStage != null && workflow.currentStage <= 3
@@ -52,10 +53,10 @@ export default function RoutingSectionCards({
           : 'Готов',
       sub:
         workflow.pendingCompileCount > 0
-          ? `${workflow.pendingCompileCount} к сборке`
+          ? `${workflow.pendingCompileCount} к ${STAGE_BUILD.toLowerCase()}`
           : workflow.pendingDeployCount > 0
-            ? `${workflow.pendingDeployCount} к deploy`
-            : 'Ingest → compile → deploy',
+            ? `${workflow.pendingDeployCount} к ${STAGE_DEPLOY.toLowerCase()}`
+            : WORKFLOW_CHAIN,
       accent:
         workflow.currentStage != null && workflow.currentStage <= 3
           ? 'border-l-sky-500'
@@ -80,7 +81,7 @@ export default function RoutingSectionCards({
           : 'Нет на узле',
       sub:
         workflow.pendingDeployCount > 0
-          ? `${workflow.pendingDeployCount} ждут deploy`
+          ? `${workflow.pendingDeployCount} ждут ${STAGE_DEPLOY.toLowerCase()}`
           : 'Включение списков для VPN',
       accent:
         workflow.currentStage === 4

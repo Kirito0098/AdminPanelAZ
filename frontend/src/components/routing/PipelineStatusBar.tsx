@@ -1,6 +1,7 @@
 import { AlertTriangle, CloudDownload, Database, FileOutput, Rocket, Shield } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { AntifilterStatus, CidrDbStatus, CidrDegradationAlert } from '@/types'
+import { STAGE_BUILD, STAGE_DEPLOY, STAGE_LOAD } from './routingLabels'
 import { formatDt, statusBadgeVariant, statusLabel } from './utils'
 
 function alertKey(alert: CidrDegradationAlert, index: number): string {
@@ -58,7 +59,7 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
             <CloudDownload size={16} />
           </div>
           <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">Последний ingest</div>
+            <div className="text-xs text-muted-foreground">Последняя {STAGE_LOAD.toLowerCase()}</div>
             <div className="text-sm font-medium">{formatDt(cidrDb?.last_refresh_finished)}</div>
             <div className="text-xs text-muted-foreground truncate">
               {cidrDb?.last_refresh_triggered_by ?? '—'}
@@ -71,7 +72,7 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
             <FileOutput size={16} />
           </div>
           <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">Последний compile</div>
+            <div className="text-xs text-muted-foreground">Последняя {STAGE_BUILD.toLowerCase()}</div>
             {lastCompile ? (
               <>
                 <div className="text-sm font-medium">{formatDt(lastCompile.finished_at)}</div>
@@ -94,7 +95,7 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
             <Rocket size={16} />
           </div>
           <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">Последний deploy</div>
+            <div className="text-xs text-muted-foreground">Последнее {STAGE_DEPLOY.toLowerCase()}</div>
             {lastDeploy ? (
               <>
                 <div className="text-sm font-medium">{formatDt(lastDeploy.finished_at)}</div>

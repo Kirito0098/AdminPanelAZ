@@ -43,7 +43,7 @@ export default function RoutingPageHeader({
             <NodeBadge name={nodeName} status={nodeStatus} />
           </div>
           <p className="text-sm text-muted-foreground">
-            CIDR-списки провайдеров, pipeline обновления и маршруты AntiZapret
+            CIDR-списки провайдеров, обновление списков и маршруты AntiZapret
           </p>
         </div>
       </div>

@@ -12,7 +12,7 @@ export default function DeployPreviewPanel({ preview, loading }: DeployPreviewPa
   if (loading) {
     return (
       <div className="mb-4 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-        Загрузка preview…
+        Загрузка предпросмотра…
       </div>
     )
   }
@@ -23,7 +23,7 @@ export default function DeployPreviewPanel({ preview, loading }: DeployPreviewPa
   return (
     <div className="mb-4 space-y-3 rounded-md border p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium">Dry-run preview</span>
+        <span className="text-sm font-medium">Предпросмотр развёртывания</span>
         {preview.has_changes ? (
           <Badge variant="secondary" className="gap-1">
             <AlertTriangle size={12} />

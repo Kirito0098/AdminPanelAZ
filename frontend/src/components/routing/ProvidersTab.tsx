@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Route, Search, Pencil, Play } from 'lucide-react'
 import ProviderEditorDialog from '@/components/routing/ProviderEditorDialog'
+import { ROUTING_TAB_UPDATE, STAGE_BUILD, STAGE_DEPLOY } from '@/components/routing/routingLabels'
 import type { RoutingTab, RoutingWorkflowState } from '@/components/routing/routingWorkflow'
 import { hasControllerArtifact, providerNeedsCompile, providerNeedsDeploy } from '@/components/routing/routingWorkflow'
 import StatusPanel from '@/components/noc/StatusPanel'
@@ -101,7 +102,7 @@ function ProviderListItem({
   const enableBlocked = !p.has_source && !p.enabled
   const rowHint = !p.has_source
     ? onController
-      ? 'нет на узле — deploy'
+      ? 'нет на узле — нужно развёртывание'
       : (dbMeta?.cidr_count ?? 0) > 0
         ? 'нет файла — сборка'
         : 'нет источника'
@@ -157,7 +158,7 @@ function ProviderListItem({
               disabled={actionLoading || enableBlocked}
               title={
                 enableBlocked && onController
-                  ? 'Сначала выполните Deploy на активный узел'
+                  ? `Сначала выполните ${STAGE_DEPLOY.toLowerCase()} на активный узел`
                   : enableBlocked
                     ? 'Сначала соберите списки на контроллере (этап 2)'
                     : undefined
@@ -268,8 +269,8 @@ export default function ProvidersTab({
     { id: 'enabled', label: 'Включённые', count: quickFilterCounts.enabled },
     { id: 'disabled', label: 'Выключенные', count: quickFilterCounts.disabled },
     { id: 'errors', label: 'Ошибки', count: quickFilterCounts.errors },
-    { id: 'needs_deploy', label: 'Нужен deploy', count: quickFilterCounts.needsDeployCount },
-    { id: 'needs_compile', label: 'Нужна сборка', count: quickFilterCounts.needsCompileCount },
+    { id: 'needs_deploy', label: `Нужно ${STAGE_DEPLOY.toLowerCase()}`, count: quickFilterCounts.needsDeployCount },
+    { id: 'needs_compile', label: `Нужна ${STAGE_BUILD.toLowerCase()}`, count: quickFilterCounts.needsCompileCount },
   ]
 
   return (
@@ -289,7 +290,7 @@ export default function ProvidersTab({
                 </button>
               ) : (
                 <>
-                  Сначала выполните <strong>Этап 2 — Сборка списков</strong> на вкладке «Pipeline».
+                  Сначала выполните <strong>Этап 2 — {STAGE_BUILD} списков</strong> на вкладке «{ROUTING_TAB_UPDATE}».
                 </>
               )}
             </div>
@@ -324,10 +325,10 @@ export default function ProvidersTab({
                   className="font-medium underline underline-offset-2"
                   onClick={() => onNavigateTab('pipeline', 'pipeline-stage-3')}
                 >
-                  Deploy на узел
+                  {STAGE_DEPLOY} на узел
                 </button>
               ) : (
-                'Deploy на узел'
+                `${STAGE_DEPLOY} на узел`
               )}
               .
             </div>
@@ -342,13 +343,13 @@ export default function ProvidersTab({
                     className="font-medium underline underline-offset-2 hover:text-sky-700 dark:hover:text-sky-50"
                     onClick={() => onNavigateTab('pipeline', 'pipeline-stage-3')}
                   >
-                    Выполните Deploy
+                    Выполните {STAGE_DEPLOY.toLowerCase()}
                   </button>{' '}
                   для узла <strong>{nodeLabel}</strong>, затем включите нужных провайдеров.
                 </>
               ) : (
                 <>
-                  Выполните <strong>Этап 3 — Deploy</strong> на вкладке «Pipeline» для узла{' '}
+                  Выполните <strong>Этап 3 — {STAGE_DEPLOY}</strong> на вкладке «{ROUTING_TAB_UPDATE}» для узла{' '}
                   <strong>{nodeLabel}</strong>.
                 </>
               )}

@@ -18,6 +18,7 @@ import RoutingPageHeader from '@/components/routing/RoutingPageHeader'
 import RoutingPageSkeleton from '@/components/routing/RoutingPageSkeleton'
 import RoutingSectionCards from '@/components/routing/RoutingSectionCards'
 import RoutingWorkflowGuide from '@/components/routing/RoutingWorkflowGuide'
+import { ROUTING_TAB_UPDATE, WORKFLOW_CHAIN } from '@/components/routing/routingLabels'
 import { getRoutingWorkflowState, type RoutingTab } from '@/components/routing/routingWorkflow'
 import { useRoutingPage } from '@/components/routing/useRoutingPage'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -30,7 +31,7 @@ const ROUTING_TABS: Array<{ id: RoutingTab; label: string; shortLabel: string; i
     label: 'Обзор',
     shortLabel: 'Обзор',
     icon: LayoutDashboard,
-    description: 'Сводка маршрутов, статус pipeline и быстрые переходы',
+    description: 'Сводка маршрутов, статус обновления списков и быстрые переходы',
   },
   {
     id: 'analysis',
@@ -41,10 +42,10 @@ const ROUTING_TABS: Array<{ id: RoutingTab; label: string; shortLabel: string; i
   },
   {
     id: 'pipeline',
-    label: 'Pipeline',
-    shortLabel: 'Pipeline',
+    label: ROUTING_TAB_UPDATE,
+    shortLabel: ROUTING_TAB_UPDATE,
     icon: CloudDownload,
-    description: 'Ingest → compile → deploy: обновление списков (администратор)',
+    description: `${WORKFLOW_CHAIN}: подготовка списков CIDR (администратор)`,
     adminOnly: true,
   },
   {

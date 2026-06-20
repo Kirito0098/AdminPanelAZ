@@ -155,7 +155,7 @@ export function useRoutingPage() {
       if (!isPipelineRunning(activeTask)) return
       const stage = getPipelineStage(activeTask.task_type) ?? 1
       const ingestKind = getIngestKind(activeTask.task_type) ?? undefined
-      attachPipelineTask(activeTask.task_id, stage, 'Операция pipeline завершена', {
+      attachPipelineTask(activeTask.task_id, stage, 'Операция обновления списков завершена', {
         initialTask: activeTask,
         ingestKind,
       })
@@ -437,7 +437,7 @@ export function useRoutingPage() {
               selected_files,
             }),
           deployAllOnline
-            ? 'CIDR-файлы развёрнуты на все online-узлы'
+            ? 'CIDR-файлы развёрнуты на все узлы в сети'
             : 'CIDR-файлы развёрнуты на выбранные узлы',
           3,
         )
@@ -506,7 +506,7 @@ export function useRoutingPage() {
         notifyError(preview.message)
       }
     } catch (err) {
-      notifyError(errorMessage(err, 'Ошибка preview deploy'))
+      notifyError(errorMessage(err, 'Ошибка предпросмотра развёртывания'))
     } finally {
       setDeployPreviewLoading(false)
     }

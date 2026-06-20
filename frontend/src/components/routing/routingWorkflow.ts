@@ -1,4 +1,5 @@
 import type { CidrDbStatus, CidrProviderInfo } from '@/types'
+import { STAGE_BUILD, STAGE_DEPLOY, STAGE_LOAD } from './routingLabels'
 import { pluralProviders } from './utils'
 
 export type RoutingTab = 'overview' | 'providers' | 'pipeline' | 'analysis'
@@ -100,15 +101,15 @@ function deploySummary(
   pendingCount: number,
   onNodeCount: number,
 ): string {
-  if (pendingCount > 0) return `${pluralProviders(pendingCount)} ждут deploy`
+  if (pendingCount > 0) return `${pluralProviders(pendingCount)} ждут ${STAGE_DEPLOY.toLowerCase()}`
   const deploy = cidrDb?.last_deploy
-  if (!deploy?.finished_at) return 'Deploy ещё не выполнялся'
-  if (deploy.status !== 'completed' && deploy.status !== 'ok') return 'Последний deploy с ошибками'
+  if (!deploy?.finished_at) return `${STAGE_DEPLOY} ещё не выполнялось`
+  if (deploy.status !== 'completed' && deploy.status !== 'ok') return `Последнее ${STAGE_DEPLOY.toLowerCase()} с ошибками`
   return `${pluralProviders(onNodeCount)} на узле`
 }
 
 function providersSummary(enabledCount: number, onNodeCount: number): string {
-  if (onNodeCount === 0) return 'Сначала выполните deploy'
+  if (onNodeCount === 0) return `Сначала выполните ${STAGE_DEPLOY.toLowerCase()}`
   if (enabledCount === 0) return 'Ни один провайдер не включён'
   return `${enabledCount} из ${onNodeCount} включено для маршрутизации`
 }
@@ -171,7 +172,7 @@ export function getRoutingWorkflowState(
     {
       stage: 1,
       label: 'Данные на контроллере',
-      shortLabel: 'Ingest',
+      shortLabel: STAGE_LOAD,
       tab: isAdmin ? 'pipeline' : 'overview',
       anchor: isAdmin ? 'pipeline-stage-1' : undefined,
       status: stageStatus(1),
@@ -180,7 +181,7 @@ export function getRoutingWorkflowState(
     {
       stage: 2,
       label: 'Сборка списков',
-      shortLabel: 'Compile',
+      shortLabel: STAGE_BUILD,
       tab: isAdmin ? 'pipeline' : 'overview',
       anchor: isAdmin ? 'pipeline-stage-2' : undefined,
       status: stageStatus(2),
@@ -194,8 +195,8 @@ export function getRoutingWorkflowState(
     },
     {
       stage: 3,
-      label: 'Deploy на узел',
-      shortLabel: 'Deploy',
+      label: `${STAGE_DEPLOY} на узел`,
+      shortLabel: STAGE_DEPLOY,
       tab: isAdmin ? 'pipeline' : 'overview',
       anchor: isAdmin ? 'pipeline-stage-3' : undefined,
       status: stageStatus(3),
@@ -251,7 +252,7 @@ export function getRoutingWorkflowState(
     nextAction = {
       label: 'Смотреть статус',
       tab: 'overview',
-      hint: 'Обновление pipeline выполняет администратор. Здесь — текущий прогресс.',
+      hint: 'Обновление списков выполняет администратор. Здесь — текущий прогресс.',
     }
   }
 

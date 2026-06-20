@@ -54,6 +54,7 @@ import {
   countDiffOps,
   formatDiffSummary,
 } from '@/lib/buildLightDiff'
+import { ALL_NODES_ONLINE_PHRASE, HA_AUTO_SYNC_TITLE } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import type { EditFileEntry } from '@/types'
 
@@ -441,7 +442,7 @@ export default function EditFilesPage() {
                 Перенести на узлы
               </Button>
               {isHaAutoPrimary && (
-                <span className="px-1 text-[10px] text-muted-foreground">Fallback</span>
+                <span className="px-1 text-[10px] text-muted-foreground">Резерв</span>
               )}
             </div>
           )}
@@ -453,12 +454,12 @@ export default function EditFilesPage() {
       </div>
 
       {isHaAutoPrimary && (
-        <SettingsAlert variant="info" title="HA auto-sync: сохранение реплицирует на replica">
-          На primary в режиме <strong>auto</strong> кнопки «Сохранить» и «Сохранить и применить» автоматически
-          копируют изменённые файлы на все replica группы «{activeNodeHa.group_name}». «Сохранить и применить»
-          запускает <strong>doall.sh</strong> на primary; на replica doall выполняется, если включён{' '}
+        <SettingsAlert variant="info" title={`${HA_AUTO_SYNC_TITLE}: сохранение реплицирует на реплику`}>
+          На основном узле в режиме <strong>авто</strong> кнопки «Сохранить» и «Сохранить и применить» автоматически
+          копируют изменённые файлы на все реплики группы «{activeNodeHa.group_name}». «Сохранить и применить»
+          запускает <strong>doall.sh</strong> на основном узле; на реплике doall выполняется, если включён{' '}
           <strong>NODE_SYNC_REPLICATE_DOALL</strong> (по умолчанию — да). Ручной «Перенести на узлы» — только
-          fallback (split-brain, offline replica, узлы вне HA).
+          резервный вариант (рассогласование, реплика не в сети, узлы вне HA).
         </SettingsAlert>
       )}
 
@@ -470,7 +471,7 @@ export default function EditFilesPage() {
           <>
             {' '}
             Кнопка <strong>«Перенести на узлы»</strong> копирует конфигурацию с активного узла на другие
-            online-узлы.
+            {ALL_NODES_ONLINE_PHRASE.toLowerCase()}.
           </>
         )}
       </SettingsAlert>
