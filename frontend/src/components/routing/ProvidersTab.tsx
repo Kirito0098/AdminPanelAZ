@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Route, Search, Pencil } from 'lucide-react'
+import { Route, Search, Pencil, Play } from 'lucide-react'
 import ProviderEditorDialog from '@/components/routing/ProviderEditorDialog'
 import type { RoutingTab, RoutingWorkflowState } from '@/components/routing/routingWorkflow'
 import { hasControllerArtifact, providerNeedsCompile, providerNeedsDeploy } from '@/components/routing/routingWorkflow'
@@ -28,6 +28,7 @@ interface ProvidersTabProps {
   onToggle: (filename: string, enabled: boolean, name: string) => void
   pipelineBusy?: boolean
   onNavigateTab?: (tab: RoutingTab, anchor?: string) => void
+  onApplyRouting?: () => void
   workflow?: RoutingWorkflowState
 }
 
@@ -181,6 +182,7 @@ export default function ProvidersTab({
   onToggle,
   pipelineBusy = false,
   onNavigateTab,
+  onApplyRouting,
   workflow,
 }: ProvidersTabProps) {
   const [search, setSearch] = useState('')
@@ -257,6 +259,9 @@ export default function ProvidersTab({
   }
 
   const nodeLabel = activeNode?.name ?? 'активном узле'
+  const onNodeCount = workflow?.onNodeCount ?? providers.filter((p) => p.has_source).length
+  const enabledCount = workflow?.enabledCount ?? providers.filter((p) => p.enabled).length
+  const showApplySection = isAdmin && onNodeCount > 0 && !needsDeploy
 
   const quickFilters: Array<{ id: QuickFilter; label: string; count?: number }> = [
     { id: 'all', label: 'Все', count: providers.length },
@@ -347,6 +352,45 @@ export default function ProvidersTab({
                   <strong>{nodeLabel}</strong>.
                 </>
               )}
+            </div>
+          )}
+
+          {showApplySection && (
+            <div
+              className={cn(
+                'rounded-md border px-4 py-3 text-sm',
+                enabledCount > 0
+                  ? 'border-primary/40 bg-primary/5 text-foreground'
+                  : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-950 dark:text-emerald-100',
+              )}
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  {enabledCount > 0 ? (
+                    <>
+                      <strong>{enabledCount}</strong> {enabledCount === 1 ? 'провайдер включён' : 'провайдеров включено'}.
+                      Примените doall, чтобы активировать маршруты с новыми CIDR на узле{' '}
+                      <strong>{nodeLabel}</strong>.
+                    </>
+                  ) : (
+                    <>
+                      Файлы списков уже на узле <strong>{nodeLabel}</strong>. Включите нужных провайдеров
+                      ниже — затем примените doall + client.sh 7.
+                    </>
+                  )}
+                </div>
+                {onApplyRouting && enabledCount > 0 && (
+                  <Button
+                    size="sm"
+                    disabled={pipelineBusy || actionLoading}
+                    onClick={onApplyRouting}
+                    className="shrink-0"
+                  >
+                    <Play size={14} className="mr-1.5" />
+                    Применить doall + client.sh 7
+                  </Button>
+                )}
+              </div>
             </div>
           )}
 

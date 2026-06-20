@@ -35,26 +35,6 @@ export default function RoutingSectionCards({
       accent: activeTab === 'overview' ? 'border-l-primary' : 'border-l-muted-foreground/30',
     },
     {
-      key: 'providers',
-      title: 'Провайдеры',
-      icon: Route,
-      value:
-        workflow.onNodeCount > 0
-          ? `${workflow.enabledCount}/${workflow.onNodeCount} вкл.`
-          : 'Нет на узле',
-      sub:
-        workflow.pendingDeployCount > 0
-          ? `${workflow.pendingDeployCount} ждут deploy`
-          : 'Включение списков для VPN',
-      accent:
-        workflow.currentStage === 4
-          ? 'border-l-amber-500'
-          : activeTab === 'providers'
-            ? 'border-l-primary'
-            : 'border-l-muted-foreground/30',
-      tone: workflow.currentStage === 4 ? 'text-amber-600 dark:text-amber-400' : undefined,
-    },
-    {
       key: 'analysis',
       title: 'Анализ',
       icon: FlaskConical,
@@ -89,6 +69,26 @@ export default function RoutingSectionCards({
             ? 'text-emerald-600 dark:text-emerald-400'
             : undefined,
       adminOnly: true,
+    },
+    {
+      key: 'providers',
+      title: 'Провайдеры',
+      icon: Route,
+      value:
+        workflow.onNodeCount > 0
+          ? `${workflow.enabledCount}/${workflow.onNodeCount} вкл.`
+          : 'Нет на узле',
+      sub:
+        workflow.pendingDeployCount > 0
+          ? `${workflow.pendingDeployCount} ждут deploy`
+          : 'Включение списков для VPN',
+      accent:
+        workflow.currentStage === 4
+          ? 'border-l-amber-500'
+          : activeTab === 'providers'
+            ? 'border-l-primary'
+            : 'border-l-muted-foreground/30',
+      tone: workflow.currentStage === 4 ? 'text-amber-600 dark:text-amber-400' : undefined,
     },
   ]
 

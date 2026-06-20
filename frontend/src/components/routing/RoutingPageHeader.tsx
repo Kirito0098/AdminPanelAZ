@@ -70,7 +70,7 @@ export default function RoutingPageHeader({
             </Button>
             <Button size="sm" disabled={pipelineBusy} onClick={onApplyDoall}>
               <Play size={14} className="mr-1.5" />
-              Применить (doall.sh)
+              Применить doall + client.sh 7
             </Button>
           </>
         )}

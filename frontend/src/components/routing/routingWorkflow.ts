@@ -243,7 +243,7 @@ export function getRoutingWorkflowState(
     nextAction = {
       label: 'Выбрать провайдеров',
       tab: 'providers',
-      hint: 'Включите нужные списки для маршрутизации через VPN.',
+      hint: 'Включите нужные списки, затем на вкладке «Провайдеры» выполните doall + client.sh 7.',
     }
   } else if (currentStage == null) {
     nextAction = null

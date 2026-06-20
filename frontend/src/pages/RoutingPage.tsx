@@ -33,13 +33,6 @@ const ROUTING_TABS: Array<{ id: RoutingTab; label: string; shortLabel: string; i
     description: 'Сводка маршрутов, статус pipeline и быстрые переходы',
   },
   {
-    id: 'providers',
-    label: 'Провайдеры',
-    shortLabel: 'Списки',
-    icon: Route,
-    description: 'Включение CIDR-списков для маршрутизации на активном узле',
-  },
-  {
     id: 'analysis',
     label: 'Анализ',
     shortLabel: 'Анализ',
@@ -53,6 +46,13 @@ const ROUTING_TABS: Array<{ id: RoutingTab; label: string; shortLabel: string; i
     icon: CloudDownload,
     description: 'Ingest → compile → deploy: обновление списков (администратор)',
     adminOnly: true,
+  },
+  {
+    id: 'providers',
+    label: 'Провайдеры',
+    shortLabel: 'Списки',
+    icon: Route,
+    description: 'Включение CIDR-списков для маршрутизации на активном узле',
   },
 ]
 
@@ -131,7 +131,7 @@ export default function RoutingPage() {
     retryFailedProviders,
     refreshAntifilter,
     deployCidr,
-    deployCidrAndApply,
+    applyRouting,
     clearCidrDbData,
     loadDeployPreview,
     deployPreview,
@@ -178,7 +178,7 @@ export default function RoutingPage() {
         onToggleAutoRefresh={() => setAutoRefresh((v) => !v)}
         onRefresh={() => load({ manual: true })}
         onSyncProviders={() => setConfirmAction('sync-providers')}
-        onApplyDoall={() => setConfirmAction('apply-doall')}
+        onApplyDoall={applyRouting}
       />
 
       <RoutingWorkflowGuide
@@ -218,20 +218,6 @@ export default function RoutingPage() {
           <RoutingOverviewTab data={data} cidrDb={cidrDb} antifilter={antifilter} workflow={workflow} />
         </TabsContent>
 
-        <TabsContent value="providers" className="mt-0">
-          <ProvidersTab
-            providers={data.providers}
-            cidrDb={cidrDb}
-            activeNode={activeNode}
-            isAdmin={isAdmin}
-            actionLoading={actionLoading}
-            pipelineBusy={pipelineBusy}
-            onToggle={toggleProvider}
-            onNavigateTab={navigateTab}
-            workflow={workflow}
-          />
-        </TabsContent>
-
         <TabsContent value="analysis" className="mt-0">
           <AnalysisTab providers={data.providers} onNavigateTab={navigateTab} />
         </TabsContent>
@@ -260,7 +246,6 @@ export default function RoutingPage() {
               onRefreshAntifilter={refreshAntifilter}
               onGenerate={() => setConfirmAction('generate-only')}
               onDeploy={deployCidr}
-              onDeployAndApply={deployCidrAndApply}
               onClearDb={clearCidrDbData}
               onOpenCustomWizard={() => setCustomWizardOpen(true)}
               onLoadDeployPreview={loadDeployPreview}
@@ -272,6 +257,21 @@ export default function RoutingPage() {
             />
           </TabsContent>
         )}
+
+        <TabsContent value="providers" className="mt-0">
+          <ProvidersTab
+            providers={data.providers}
+            cidrDb={cidrDb}
+            activeNode={activeNode}
+            isAdmin={isAdmin}
+            actionLoading={actionLoading}
+            pipelineBusy={pipelineBusy}
+            onToggle={toggleProvider}
+            onApplyRouting={isAdmin ? applyRouting : undefined}
+            onNavigateTab={navigateTab}
+            workflow={workflow}
+          />
+        </TabsContent>
       </Tabs>
 
       <ConfirmActionDialog

@@ -41,7 +41,6 @@ function errorMessage(err: unknown, fallback: string): string {
 export type ConfirmAction =
   | 'apply-doall'
   | 'deploy-only'
-  | 'deploy-apply'
   | 'generate-doall'
   | 'generate-only'
   | 'rollback-cidr'
@@ -382,7 +381,7 @@ export function useRoutingPage() {
 
     switch (action) {
       case 'apply-doall':
-        await withBackgroundTask(applyRouting, 'doall.sh выполнен')
+        await withBackgroundTask(applyRouting, 'doall + client.sh 7 выполнены')
         break
       case 'sync-providers':
         await withAction(syncRoutingProviders, 'Синхронизация выполнена', 'Синхронизация провайдеров...')
@@ -440,27 +439,6 @@ export function useRoutingPage() {
           deployAllOnline
             ? 'CIDR-файлы развёрнуты на все online-узлы'
             : 'CIDR-файлы развёрнуты на выбранные узлы',
-          3,
-        )
-        setDeployPreview(null)
-        break
-      }
-      case 'deploy-apply': {
-        const selected_files = resolveSelectedProviderPayload()
-        if (selected_files === undefined) return
-        await withPipelineAction(
-          () =>
-            deployCidrToNode({
-              all_online: deployAllOnline,
-              target_node_ids: deployAllOnline ? null : deployTargetNodeIds.length ? deployTargetNodeIds : null,
-              sync_after: true,
-              apply_after: true,
-              recreate_profiles_after: true,
-              selected_files,
-            }),
-          deployAllOnline
-            ? 'CIDR развёрнуты, doall и client.sh 7 выполнены на online-узлах'
-            : 'CIDR развёрнуты, doall и client.sh 7 выполнены на выбранных узлах',
           3,
         )
         setDeployPreview(null)
@@ -604,7 +582,7 @@ export function useRoutingPage() {
     retryFailedProviders,
     refreshAntifilter: () => withPipelineAction(refreshAntifilter, 'Antifilter синхронизирован', 1, 'antifilter'),
     deployCidr: () => setConfirmAction('deploy-only'),
-    deployCidrAndApply: () => setConfirmAction('deploy-apply'),
+    applyRouting: () => setConfirmAction('apply-doall'),
     loadDeployPreview,
     deployPreview,
     deployPreviewLoading,

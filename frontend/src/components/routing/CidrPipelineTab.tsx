@@ -37,7 +37,6 @@ interface CidrPipelineTabProps {
   onRefreshAntifilter: () => void
   onGenerate: () => void
   onDeploy: () => void
-  onDeployAndApply: () => void
   onClearDb: () => void | Promise<void>
   onOpenCustomWizard: () => void
   onLoadDeployPreview: () => void
@@ -88,7 +87,6 @@ export default function CidrPipelineTab({
   onRefreshAntifilter,
   onGenerate,
   onDeploy,
-  onDeployAndApply,
   onClearDb,
   onOpenCustomWizard,
   onLoadDeployPreview,
@@ -538,22 +536,18 @@ export default function CidrPipelineTab({
           >
             Dry-run preview
           </Button>
-          <Button size="sm" variant="secondary" disabled={deployDisabled} onClick={onDeploy}>
+          <Button size="sm" disabled={deployDisabled || pipelineBusy} onClick={onDeploy}>
             <Rocket size={14} className="mr-1.5" />
             {deployAllOnline ? 'Развернуть на все online' : 'Развернуть на выбранные'}
-          </Button>
-          <Button size="sm" disabled={deployDisabled || pipelineBusy} onClick={onDeployAndApply}>
-            <Rocket size={14} className="mr-1.5" />
-            Развернуть + doall + client.sh 7
           </Button>
         </div>
 
         <div className="mt-3 flex items-start gap-2 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
           <Info size={14} className="mt-0.5 shrink-0" />
           <span>
-            <strong className="text-foreground">Развернуть</strong> — только отправка файлов на узел.{' '}
-            <strong className="text-foreground">+ doall + client.sh 7</strong> — после deploy применяет
-            правила маршрутизации и перегенерирует профили WireGuard/AmneziaWG с новыми CIDR.
+            Deploy только отправляет файлы на узел. После включения провайдеров на вкладке «Провайдеры»
+            выполните <strong className="text-foreground">doall + client.sh 7</strong>, чтобы применить
+            правила маршрутизации и обновить профили WireGuard/AmneziaWG.
           </span>
         </div>
       </StatusPanel>
