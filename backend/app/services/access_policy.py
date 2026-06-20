@@ -1,5 +1,6 @@
 """Client block/expiry policies for OpenVPN and WireGuard (ported from AdminAntizapret 1.9.0)."""
 
+import time
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
@@ -23,6 +24,32 @@ from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 
 NODE_DEFAULT_POLICY_CLIENT = "__node_default__"
 NODE_ROUTE_MODES = frozenset({"route_all", "route_selective"})
+
+
+# Transient "cooldown" bans for the OpenVPN disconnect-kick feature: keep a
+# client banned for a few seconds so its client auto-reconnect is rejected (the
+# VPN app shows an error) instead of silently re-establishing the tunnel. This
+# is intentionally in-memory only (single panel process) and does not touch the
+# persistent block policy in the DB.
+_cooldown_bans: dict[tuple[int | None, str], float] = {}
+
+
+def register_cooldown_ban(node_id: int | None, client_name: str, seconds: float) -> None:
+    _cooldown_bans[(node_id, client_name)] = time.monotonic() + max(0.0, float(seconds))
+
+
+def clear_cooldown_ban(node_id: int | None, client_name: str) -> None:
+    _cooldown_bans.pop((node_id, client_name), None)
+
+
+def is_cooldown_ban_active(node_id: int | None, client_name: str) -> bool:
+    expiry = _cooldown_bans.get((node_id, client_name))
+    if expiry is None:
+        return False
+    if time.monotonic() >= expiry:
+        _cooldown_bans.pop((node_id, client_name), None)
+        return False
+    return True
 
 
 def is_node_default_policy_client(client_name: str | None) -> bool:
@@ -234,7 +261,12 @@ class AccessPolicyService:
         )
         banned = self.read_banned_clients()
         if row is None:
-            if client_name in banned:
+            want_ban = is_cooldown_ban_active(node_id, client_name)
+            has_ban = client_name in banned
+            if want_ban and not has_ban:
+                banned.add(client_name)
+                self.write_banned_clients(banned)
+            elif not want_ban and has_ban:
                 banned.discard(client_name)
                 self.write_banned_clients(banned)
             return
@@ -251,6 +283,8 @@ class AccessPolicyService:
             banned.add(client_name)
         else:
             banned.discard(client_name)
+        if is_cooldown_ban_active(node_id, client_name):
+            banned.add(client_name)
         if changed:
             self.db.commit()
         else:
