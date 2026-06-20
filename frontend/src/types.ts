@@ -60,6 +60,16 @@ export interface NodeSyncVerifyResult {
   summary: string
 }
 
+export interface NodeSyncGroupMember {
+  node_id: number
+  node_name?: string | null
+  role: 'primary' | 'replica'
+  host?: string | null
+  online: boolean
+  status: string
+  client_count: number
+}
+
 export interface NodeSyncGroup {
   id: number
   name: string
@@ -68,6 +78,8 @@ export interface NodeSyncGroup {
   primary_node_name?: string | null
   replica_node_ids: number[]
   replica_node_names: string[]
+  members?: NodeSyncGroupMember[]
+  ready?: boolean | null
   sync_mode: string
   sync_status: SyncStatus
   last_sync_at?: string | null

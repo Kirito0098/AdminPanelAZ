@@ -6,9 +6,10 @@ import json
 from typing import Any
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus
+from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus, VpnConfig
 from app.services.node_manager import node_metadata_dict
 
 
@@ -238,20 +239,67 @@ def build_ha_metadata(group: NodeSyncGroup | None) -> dict[str, Any] | None:
     }
 
 
+def _client_counts_by_node(db: Session, node_ids: list[int]) -> dict[int, int]:
+    """VpnConfig rows per node — used to warn before a destructive replica overwrite."""
+    if not node_ids:
+        return {}
+    rows = (
+        db.query(VpnConfig.node_id, func.count(VpnConfig.id))
+        .filter(VpnConfig.node_id.in_(node_ids))
+        .group_by(VpnConfig.node_id)
+        .all()
+    )
+    return {int(node_id): int(count) for node_id, count in rows}
+
+
+def _build_members(
+    group: NodeSyncGroup,
+    nodes_by_id: dict[int, Node],
+    replicas: list[int],
+    client_counts: dict[int, int],
+) -> list[dict[str, Any]]:
+    members: list[dict[str, Any]] = []
+    ordered = [(group.primary_node_id, "primary"), *((rid, "replica") for rid in replicas)]
+    for node_id, role in ordered:
+        node = nodes_by_id.get(node_id)
+        status_value = (
+            node.status.value if node and hasattr(node.status, "value") else (str(node.status) if node else "unknown")
+        )
+        members.append(
+            {
+                "node_id": node_id,
+                "node_name": node.name if node else None,
+                "role": role,
+                "host": node.host if node else None,
+                "online": bool(node and node.status == NodeStatus.online),
+                "status": status_value,
+                "client_count": int(client_counts.get(node_id, 0)),
+            }
+        )
+    return members
+
+
 def group_to_dict(group: NodeSyncGroup, db: Session) -> dict[str, Any]:
     replicas = parse_replica_node_ids(group.replica_node_ids)
+    member_ids = [group.primary_node_id, *replicas]
     nodes_by_id = {
         node.id: node
-        for node in db.query(Node).filter(Node.id.in_([group.primary_node_id, *replicas])).all()
+        for node in db.query(Node).filter(Node.id.in_(member_ids)).all()
     }
     primary = nodes_by_id.get(group.primary_node_id)
+    client_counts = _client_counts_by_node(db, member_ids)
     verify_result = None
     if group.last_verify_result:
         try:
             verify_result = json.loads(group.last_verify_result)
         except (TypeError, ValueError, json.JSONDecodeError):
             verify_result = None
+    ready = None
+    if isinstance(verify_result, dict) and "ready" in verify_result:
+        ready = bool(verify_result.get("ready"))
     return {
+        "members": _build_members(group, nodes_by_id, replicas, client_counts),
+        "ready": ready,
         "id": group.id,
         "name": group.name,
         "shared_domain": group.shared_domain,

@@ -32,6 +32,7 @@ from app.services.node_sync.groups import (
 from app.services.node_sync.dissolve import dissolve_sync_group
 from app.services.node_sync.manual_link import link_primary_configs_to_group
 from app.services.node_sync.push_full import run_push_full
+from app.services.node_sync.setup import make_group_setup_callable
 from app.services.node_sync.shared_domain import make_shared_domain_callable
 from app.services.node_sync.verify import verify_sync_group
 
@@ -238,6 +239,62 @@ def push_full_sync_group(
         task_id=task.id,
         group_id=group.id,
         message=str(payload.get("message") or "Полная синхронизация запущена"),
+        queued=bool(payload.get("queued", True)),
+        status_url=payload.get("status_url"),
+    )
+
+
+@router.post(
+    "/{group_id}/setup",
+    response_model=NodeSyncPushFullResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def setup_sync_group(
+    group_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """One-shot HA bring-up: shared domain → full push to replicas → verify (single task)."""
+    group = db.get(NodeSyncGroup, group_id)
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sync group не найдена")
+    if group.sync_status == SyncStatus.pending:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": "Синхронизация уже выполняется",
+                "last_sync_task_id": group.last_sync_task_id,
+            },
+        )
+
+    errors = validate_sync_group_payload(
+        db,
+        primary_node_id=group.primary_node_id,
+        replica_node_ids=parse_replica_node_ids(group.replica_node_ids),
+        exclude_group_id=group.id,
+    )
+    raise_if_preflight_errors(errors)
+
+    group.sync_status = SyncStatus.pending
+    group.last_sync_error = None
+
+    task = background_task_service.enqueue_background_task(
+        "node_sync_setup",
+        make_group_setup_callable(group.id),
+        created_by_username=admin.username,
+        queued_message="Настройка HA-группы поставлена в очередь",
+    )
+    group.last_sync_task_id = task.id
+    db.commit()
+
+    payload = background_task_service.build_accepted_payload(
+        task,
+        "Настройка HA запущена в фоне (домен → полная синхронизация → проверка)",
+    )
+    return NodeSyncPushFullResponse(
+        task_id=task.id,
+        group_id=group.id,
+        message=str(payload.get("message") or "Настройка HA запущена"),
         queued=bool(payload.get("queued", True)),
         status_url=payload.get("status_url"),
     )

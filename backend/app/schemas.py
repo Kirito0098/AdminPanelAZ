@@ -1014,6 +1014,16 @@ class NodeSyncVerifyResponse(BaseModel):
     summary: str = ""
 
 
+class NodeSyncGroupMember(BaseModel):
+    node_id: int
+    node_name: str | None = None
+    role: str
+    host: str | None = None
+    online: bool = False
+    status: str = "unknown"
+    client_count: int = 0
+
+
 class NodeSyncGroupResponse(BaseModel):
     id: int
     name: str
@@ -1022,6 +1032,8 @@ class NodeSyncGroupResponse(BaseModel):
     primary_node_name: str | None = None
     replica_node_ids: list[int] = []
     replica_node_names: list[str] = []
+    members: list[NodeSyncGroupMember] = []
+    ready: bool | None = None
     sync_mode: str
     sync_status: SyncStatus
     last_sync_at: datetime | None = None

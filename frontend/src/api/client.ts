@@ -677,6 +677,16 @@ export async function pushNodeSyncGroupFull(id: number) {
   }>(`/nodes/sync-groups/${id}/push-full`, { method: 'POST' })
 }
 
+export async function setupNodeSyncGroup(id: number) {
+  return apiFetch<{
+    task_id: string
+    group_id: number
+    message: string
+    queued?: boolean
+    status_url?: string | null
+  }>(`/nodes/sync-groups/${id}/setup`, { method: 'POST' })
+}
+
 export async function applyNodeSyncGroupSharedDomain(id: number) {
   return apiFetch<{
     task_id: string
