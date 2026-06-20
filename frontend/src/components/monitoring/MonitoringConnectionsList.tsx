@@ -1,5 +1,6 @@
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowDownToLine, ArrowUpFromLine, Clock, MapPin } from 'lucide-react'
+import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpFromLine, Clock, MapPin } from 'lucide-react'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import {
   getConnectionDisplayAddress,
@@ -8,6 +9,7 @@ import {
 } from '@/components/monitoring/ConnectionAddress'
 import EmptyState from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Table,
   TableBody,
@@ -19,6 +21,11 @@ import {
 import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { OpenVpnClient, VpnConfigHaInfo, WireGuardPeer } from '@/types'
+
+const PAGE_SIZE = 25
+
+type SortKey = 'client' | 'traffic' | 'time'
+type SortDir = 'asc' | 'desc'
 
 export type MonitoringConnectionRow = {
   key: string
@@ -33,7 +40,14 @@ export type MonitoringConnectionRow = {
   rx: number
   tx: number
   timeLabel: string
+  sortTime: number
   interfaceName?: string
+}
+
+function parseTime(value?: string | null): number {
+  if (!value) return 0
+  const ms = Date.parse(value)
+  return Number.isNaN(ms) ? 0 : ms
 }
 
 function formatHandshake(value?: string | null) {
@@ -67,6 +81,7 @@ export function buildMonitoringConnectionRows(
         rx: client.bytes_received,
         tx: client.bytes_sent,
         timeLabel: client.connected_since,
+        sortTime: parseTime(client.connected_since),
       })
     }
   }
@@ -87,6 +102,7 @@ export function buildMonitoringConnectionRows(
         rx: peer.transfer_rx,
         tx: peer.transfer_tx,
         timeLabel: formatHandshake(peer.latest_handshake),
+        sortTime: parseTime(peer.latest_handshake),
         interfaceName: peer.interface,
       })
     }
@@ -195,7 +211,68 @@ function ConnectionCard({ row, showNodeColumn }: { row: MonitoringConnectionRow;
   )
 }
 
+function SortHeader({
+  label,
+  sortKey,
+  active,
+  dir,
+  onSort,
+  className,
+}: {
+  label: string
+  sortKey: SortKey
+  active: boolean
+  dir: SortDir
+  onSort: (key: SortKey) => void
+  className?: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      className={cn(
+        'inline-flex items-center gap-1 transition-colors hover:text-foreground',
+        active ? 'text-foreground' : 'text-muted-foreground',
+        className,
+      )}
+    >
+      {label}
+      {active &&
+        (dir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
+    </button>
+  )
+}
+
 export default function MonitoringConnectionsList({ rows, showNodeColumn }: MonitoringConnectionsListProps) {
+  const [sortKey, setSortKey] = useState<SortKey>('traffic')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const [visible, setVisible] = useState(PAGE_SIZE)
+
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir(key === 'client' ? 'asc' : 'desc')
+    }
+    setVisible(PAGE_SIZE)
+  }
+
+  const sortedRows = useMemo(() => {
+    const factor = sortDir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      let cmp = 0
+      if (sortKey === 'client') cmp = a.clientName.localeCompare(b.clientName)
+      else if (sortKey === 'traffic') cmp = a.rx + a.tx - (b.rx + b.tx)
+      else cmp = a.sortTime - b.sortTime
+      if (cmp === 0) cmp = a.clientName.localeCompare(b.clientName)
+      return cmp * factor
+    })
+  }, [rows, sortKey, sortDir])
+
+  const visibleRows = sortedRows.slice(0, visible)
+  const hasMore = visibleRows.length < sortedRows.length
+
   if (rows.length === 0) {
     return (
       <EmptyState
@@ -209,8 +286,31 @@ export default function MonitoringConnectionsList({ rows, showNodeColumn }: Moni
 
   return (
     <>
+      <div className="mb-3 flex items-center justify-between gap-2 text-xs text-muted-foreground xl:hidden">
+        <span>
+          Показано {visibleRows.length} из {sortedRows.length}
+        </span>
+        <div className="inline-flex gap-1">
+          {(['traffic', 'time', 'client'] as SortKey[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => handleSort(key)}
+              className={cn(
+                'inline-flex items-center gap-1 rounded-md border px-2 py-1 transition-colors',
+                sortKey === key ? 'border-primary/40 bg-primary/5 text-foreground' : 'hover:text-foreground',
+              )}
+            >
+              {key === 'traffic' ? 'Трафик' : key === 'time' ? 'Время' : 'Имя'}
+              {sortKey === key &&
+                (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="space-y-3 xl:hidden">
-        {rows.map((row) => (
+        {visibleRows.map((row) => (
           <ConnectionCard key={row.key} row={row} showNodeColumn={showNodeColumn} />
         ))}
       </div>
@@ -221,16 +321,22 @@ export default function MonitoringConnectionsList({ rows, showNodeColumn }: Moni
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-[120px] text-xs uppercase tracking-wide">Протокол</TableHead>
               {showNodeColumn && <TableHead className="min-w-[120px]">Узел</TableHead>}
-              <TableHead className="min-w-[160px]">Клиент</TableHead>
+              <TableHead className="min-w-[160px]">
+                <SortHeader label="Клиент" sortKey="client" active={sortKey === 'client'} dir={sortDir} onSort={handleSort} />
+              </TableHead>
               <TableHead className="min-w-[240px]">Адрес / локация</TableHead>
               <TableHead className="min-w-[140px]">VPN IP</TableHead>
-              <TableHead className="min-w-[110px] text-right">RX</TableHead>
+              <TableHead className="min-w-[110px] text-right">
+                <SortHeader label="RX" sortKey="traffic" active={sortKey === 'traffic'} dir={sortDir} onSort={handleSort} className="justify-end" />
+              </TableHead>
               <TableHead className="min-w-[110px] text-right">TX</TableHead>
-              <TableHead className="min-w-[180px]">Активность</TableHead>
+              <TableHead className="min-w-[180px]">
+                <SortHeader label="Активность" sortKey="time" active={sortKey === 'time'} dir={sortDir} onSort={handleSort} />
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((row) => (
+            {visibleRows.map((row) => (
               <TableRow
                 key={row.key}
                 className={cn('align-top', row.online && row.protocol === 'wireguard' && 'bg-emerald-500/5')}
@@ -296,6 +402,17 @@ export default function MonitoringConnectionsList({ rows, showNodeColumn }: Moni
           </TableBody>
         </Table>
       </div>
+
+      {hasMore && (
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <span className="text-xs text-muted-foreground">
+            Показано {visibleRows.length} из {sortedRows.length}
+          </span>
+          <Button variant="outline" size="sm" onClick={() => setVisible((v) => v + PAGE_SIZE)}>
+            Показать ещё {Math.min(PAGE_SIZE, sortedRows.length - visibleRows.length)}
+          </Button>
+        </div>
+      )}
     </>
   )
 }

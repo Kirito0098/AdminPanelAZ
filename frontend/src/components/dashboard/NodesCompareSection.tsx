@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Columns3, Loader2 } from 'lucide-react'
+import { ChevronDown, Columns3, Loader2 } from 'lucide-react'
 import { ApiError, getNodesCompare } from '@/api/client'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import { NodeStatusBadge } from '@/components/NodeSelector'
@@ -16,6 +16,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useNotifications } from '@/context/NotificationContext'
+import { metricBarClass } from '@/lib/metricColors'
+import { cn } from '@/lib/utils'
 import type { GlobalDashboardSummary, MonitoringNodeSummary, NodeStatus } from '@/types'
 
 type CompareMetric = {
@@ -55,11 +57,20 @@ const METRICS: CompareMetric[] = [
   },
 ]
 
-export default function NodesCompareSection() {
+type NodesCompareSectionProps = {
+  collapsible?: boolean
+  defaultOpen?: boolean
+}
+
+export default function NodesCompareSection({
+  collapsible = false,
+  defaultOpen = false,
+}: NodesCompareSectionProps = {}) {
   const { error: notifyError } = useNotifications()
   const [data, setData] = useState<GlobalDashboardSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [open, setOpen] = useState(collapsible ? defaultOpen : true)
 
   const load = useCallback(async () => {
     setRefreshing(true)
@@ -75,11 +86,64 @@ export default function NodesCompareSection() {
   }, [notifyError])
 
   useEffect(() => {
+    if (!open) return
     void load()
-  }, [load])
+  }, [load, open])
 
   const nodes = data?.nodes_summary ?? []
   const metricRows = useMemo(() => METRICS, [])
+
+  if (collapsible) {
+    return (
+      <Card>
+        <CardHeader
+          className="flex cursor-pointer select-none flex-row items-center justify-between gap-3 space-y-0"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Columns3 size={18} />
+              Сравнение узлов
+            </CardTitle>
+            <CardDescription>Side-by-side метрики: online, CPU/RAM, трафик, CIDR</CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            {open && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void load()
+                }}
+                disabled={refreshing}
+              >
+                {refreshing ? <Loader2 size={14} className="animate-spin" /> : null}
+                Обновить
+              </Button>
+            )}
+            <ChevronDown
+              size={18}
+              className={cn('text-muted-foreground transition-transform', open && 'rotate-180')}
+            />
+          </div>
+        </CardHeader>
+        {open && (
+          <CardContent>
+            {loading && !data ? (
+              <Spinner label="Загрузка сравнения узлов..." className="py-6" />
+            ) : nodes.length < 2 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                Недостаточно узлов для сравнения
+              </p>
+            ) : (
+              <CompareTable nodes={nodes} metricRows={metricRows} />
+            )}
+          </CardContent>
+        )}
+      </Card>
+    )
+  }
 
   if (loading && !data) {
     return (
@@ -109,53 +173,73 @@ export default function NodesCompareSection() {
         </Button>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="min-w-[160px]">Метрика</TableHead>
-                {nodes.map((node) => (
-                  <TableHead key={node.node_id} className="min-w-[140px] text-center">
-                    <div className="flex flex-col items-center gap-1">
-                      <span className="font-medium">{node.node_name}</span>
-                      <NodeStatusBadge status={node.status as NodeStatus} showLabel={false} />
-                    </div>
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {metricRows.map((metric) => (
-                <TableRow key={metric.key}>
-                  <TableCell className="font-medium text-muted-foreground">{metric.label}</TableCell>
-                  {nodes.map((node) => (
-                    <TableCell key={`${metric.key}-${node.node_id}`} className="text-center">
-                      {metric.key === 'status' ? (
-                        <NodeStatusBadge status={node.status as NodeStatus} />
-                      ) : metric.key === 'cpu' || metric.key === 'ram' ? (
-                        <div className="mx-auto max-w-[120px] space-y-1">
-                          {metric.key === 'cpu' && node.cpu_percent != null ? (
-                            <Progress value={Math.min(100, node.cpu_percent)} className="h-2" />
-                          ) : null}
-                          {metric.key === 'ram' && node.memory_percent != null ? (
-                            <Progress value={Math.min(100, node.memory_percent)} className="h-2" />
-                          ) : null}
-                          <span className="text-xs font-mono">{metric.format(node)}</span>
-                        </div>
-                      ) : (
-                        <span className="font-mono text-xs">{metric.format(node)}</span>
-                      )}
-                      {node.error && metric.key === 'status' && (
-                        <p className="mt-1 text-[10px] text-destructive">{node.error}</p>
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <CompareTable nodes={nodes} metricRows={metricRows} />
       </CardContent>
     </Card>
+  )
+}
+
+function CompareTable({
+  nodes,
+  metricRows,
+}: {
+  nodes: MonitoringNodeSummary[]
+  metricRows: CompareMetric[]
+}) {
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="min-w-[160px]">Метрика</TableHead>
+            {nodes.map((node) => (
+              <TableHead key={node.node_id} className="min-w-[140px] text-center">
+                <div className="flex flex-col items-center gap-1">
+                  <span className="font-medium">{node.node_name}</span>
+                  <NodeStatusBadge status={node.status as NodeStatus} showLabel={false} />
+                </div>
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {metricRows.map((metric) => (
+            <TableRow key={metric.key}>
+              <TableCell className="font-medium text-muted-foreground">{metric.label}</TableCell>
+              {nodes.map((node) => (
+                <TableCell key={`${metric.key}-${node.node_id}`} className="text-center">
+                  {metric.key === 'status' ? (
+                    <NodeStatusBadge status={node.status as NodeStatus} />
+                  ) : metric.key === 'cpu' || metric.key === 'ram' ? (
+                    <div className="mx-auto max-w-[120px] space-y-1">
+                      {metric.key === 'cpu' && node.cpu_percent != null ? (
+                        <Progress
+                          value={Math.min(100, node.cpu_percent)}
+                          barClassName={metricBarClass(node.cpu_percent)}
+                          className="h-2"
+                        />
+                      ) : null}
+                      {metric.key === 'ram' && node.memory_percent != null ? (
+                        <Progress
+                          value={Math.min(100, node.memory_percent)}
+                          barClassName={metricBarClass(node.memory_percent)}
+                          className="h-2"
+                        />
+                      ) : null}
+                      <span className="text-xs font-mono">{metric.format(node)}</span>
+                    </div>
+                  ) : (
+                    <span className="font-mono text-xs">{metric.format(node)}</span>
+                  )}
+                  {node.error && metric.key === 'status' && (
+                    <p className="mt-1 text-[10px] text-destructive">{node.error}</p>
+                  )}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   )
 }

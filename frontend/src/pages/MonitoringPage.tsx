@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
-  Clock,
+  ChevronRight,
   Cpu,
   Globe,
   Hash,
@@ -27,10 +27,9 @@ import PanelResourceHistoryCharts from '@/components/monitoring/PanelResourceHis
 import ResourceHistoryCharts from '@/components/monitoring/ResourceHistoryCharts'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import ServiceMatrix from '@/components/noc/ServiceMatrix'
-import { NodeBadge } from '@/components/NodeSelector'
+import { NodeBadge, NodeStatusBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
-import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
@@ -38,6 +37,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import {
   Select,
@@ -60,14 +60,35 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { formatDateTime } from '@/lib/datetime'
+import { isResourceCritical, metricBarClass } from '@/lib/metricColors'
 import { cn } from '@/lib/utils'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
-import type { MonitoringNodeSummary, MonitoringOverview, ResourceHistory } from '@/types'
+import type { MonitoringNodeSummary, MonitoringOverview, NodeStatus, ResourceHistory } from '@/types'
 
 const REFRESH_INTERVAL = 30
+const STORAGE_PREFIX = 'noc-monitoring'
 
 type MonitoringScope = 'node' | 'all'
 type ProtocolFilter = 'all' | 'openvpn' | 'wireguard'
+
+function readStored<T extends string>(key: string, allowed: readonly T[]): T | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const value = window.localStorage.getItem(`${STORAGE_PREFIX}:${key}`)
+    return value && (allowed as readonly string[]).includes(value) ? (value as T) : null
+  } catch {
+    return null
+  }
+}
+
+function writeStored(key: string, value: string) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(`${STORAGE_PREFIX}:${key}`, value)
+  } catch {
+    /* ignore quota / privacy mode */
+  }
+}
 
 function dataSourceLabel(source?: string) {
   if (source === 'federated') return 'Все узлы'
@@ -92,7 +113,7 @@ type SummaryCardProps = {
 
 function SummaryCard({ label, value, icon: Icon, sub, accent }: SummaryCardProps) {
   return (
-    <Card>
+    <Card className="transition-colors hover:border-primary/30">
       <CardContent className="p-4">
         <div className="flex items-start justify-between">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
@@ -114,17 +135,61 @@ function formatMetricPercent(value?: number | null) {
 
 function MetricProgress({ value }: { value: number }) {
   const clamped = Math.min(100, Math.max(0, value))
-  return <Progress value={clamped} className="h-2" />
+  return <Progress value={clamped} barClassName={metricBarClass(value)} className="h-2" />
+}
+
+type ScopeToggleProps = {
+  value: MonitoringScope
+  onChange: (scope: MonitoringScope) => void
+  nodesOnline?: number
+  nodesTotal?: number
+}
+
+function ScopeToggle({ value, onChange, nodesOnline, nodesTotal }: ScopeToggleProps) {
+  const options: { id: MonitoringScope; label: string; icon: typeof Server }[] = [
+    { id: 'node', label: 'Активный узел', icon: Server },
+    { id: 'all', label: 'Все узлы', icon: Globe },
+  ]
+  return (
+    <div className="inline-flex h-9 items-center rounded-lg border bg-muted/40 p-0.5">
+      {options.map((opt) => {
+        const active = value === opt.id
+        const Icon = opt.icon
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(opt.id)}
+            className={cn(
+              'inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors',
+              active
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <Icon size={14} />
+            {opt.label}
+            {opt.id === 'all' && active && nodesTotal != null && (
+              <span className="ml-0.5 rounded bg-primary/10 px-1 text-[10px] font-semibold tabular-nums text-primary">
+                {nodesOnline ?? 0}/{nodesTotal}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 export default function MonitoringPage() {
   const { user } = useAuth()
-  const { activeNode, nodes, loading: nodesLoading } = useNode()
+  const { activeNode, nodes, loading: nodesLoading, activate } = useNode()
   const isAdmin = user?.role === 'admin'
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal } = useProgress()
-  const [scope, setScope] = useState<MonitoringScope>('node')
-  const [scopeInitialized, setScopeInitialized] = useState(false)
+  const [scope, setScope] = useState<MonitoringScope>(() => readStored('scope', ['node', 'all'] as const) ?? 'node')
+  const [scopeInitialized, setScopeInitialized] = useState(() => readStored('scope', ['node', 'all'] as const) != null)
   const [data, setData] = useState<MonitoringOverview | null>(null)
   const [liveLoading, setLiveLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -132,8 +197,10 @@ export default function MonitoringPage() {
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
   const [search, setSearch] = useState('')
-  const [onlineOnly, setOnlineOnly] = useState(true)
-  const [protocolFilter, setProtocolFilter] = useState<ProtocolFilter>('all')
+  const [onlineOnly, setOnlineOnly] = useState(() => readStored('onlineOnly', ['true', 'false'] as const) !== 'false')
+  const [protocolFilter, setProtocolFilter] = useState<ProtocolFilter>(
+    () => readStored('protocol', ['all', 'openvpn', 'wireguard'] as const) ?? 'all',
+  )
   const [resourcePeriod, setResourcePeriod] = useState<'1d' | '7d' | '30d'>('1d')
   const [panelResourcePeriod, setPanelResourcePeriod] = useState<'1d' | '7d' | '30d'>('1d')
   const [resourceHistory, setResourceHistory] = useState<ResourceHistory | null>(null)
@@ -174,6 +241,18 @@ export default function MonitoringPage() {
     if (nodes.length > 1) setScope('all')
     setScopeInitialized(true)
   }, [nodesLoading, nodes.length, scopeInitialized])
+
+  useEffect(() => {
+    if (scopeInitialized) writeStored('scope', scope)
+  }, [scope, scopeInitialized])
+
+  useEffect(() => {
+    writeStored('onlineOnly', String(onlineOnly))
+  }, [onlineOnly])
+
+  useEffect(() => {
+    writeStored('protocol', protocolFilter)
+  }, [protocolFilter])
 
   const loadResourceHistory = useCallback(
     async (period: '1d' | '7d' | '30d') => {
@@ -316,6 +395,50 @@ export default function MonitoringPage() {
     loadResourceHistory(resourcePeriod)
   }
 
+  const goToNode = useCallback(
+    (nodeId: number, nodeName: string) => {
+      const target = nodes.find((n) => n.id === nodeId)
+      if (target && target.id !== activeNode?.id) {
+        void activate(nodeId)
+          .then(() => success(`Активный узел: ${nodeName}`))
+          .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка активации узла'))
+      }
+      setScope('node')
+    },
+    [nodes, activeNode?.id, activate, success, notifyError],
+  )
+
+  const sortedNodeSummary = useMemo(() => {
+    const list = data?.nodes_summary ?? []
+    const rank = (status: string) => (status === 'online' ? 2 : status === 'offline' ? 0 : 1)
+    return [...list].sort((a, b) => {
+      const byStatus = rank(a.status) - rank(b.status)
+      if (byStatus !== 0) return byStatus
+      return a.node_name.localeCompare(b.node_name)
+    })
+  }, [data?.nodes_summary])
+
+  const nodeHealthIssues = useMemo(() => {
+    if (!isFederated) return { offline: [], overloaded: [] as string[] }
+    const list = data?.nodes_summary ?? []
+    const offline = list.filter((n) => n.status !== 'online').map((n) => n.node_name)
+    const overloaded = list
+      .filter(
+        (n) =>
+          n.status === 'online' &&
+          (isResourceCritical(n.cpu_percent) || isResourceCritical(n.memory_percent)),
+      )
+      .map((n) => {
+        const parts: string[] = []
+        if (isResourceCritical(n.cpu_percent)) parts.push(`CPU ${formatMetricPercent(n.cpu_percent)}`)
+        if (isResourceCritical(n.memory_percent)) parts.push(`RAM ${formatMetricPercent(n.memory_percent)}`)
+        return `${n.node_name} (${parts.join(', ')})`
+      })
+    return { offline, overloaded }
+  }, [isFederated, data?.nodes_summary])
+
+  const hasHealthIssues = nodeHealthIssues.offline.length > 0 || nodeHealthIssues.overloaded.length > 0
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -343,15 +466,12 @@ export default function MonitoringPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {hasMultipleNodes && (
-            <Select value={scope} onValueChange={(v) => setScope(v as MonitoringScope)}>
-              <SelectTrigger className="h-9 w-[180px] text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="node">Активный узел</SelectItem>
-                <SelectItem value="all">Все узлы</SelectItem>
-              </SelectContent>
-            </Select>
+            <ScopeToggle
+              value={scope}
+              onChange={setScope}
+              nodesOnline={data?.nodes_online}
+              nodesTotal={data?.nodes_total ?? nodes.length}
+            />
           )}
           <AutoRefreshControl
           enabled={autoRefresh}
@@ -381,6 +501,27 @@ export default function MonitoringPage() {
 
       <GeoRoutingHintBanner enabled={hasMultipleNodes} />
 
+      {isFederated && hasHealthIssues && (
+        <SettingsAlert
+          variant={nodeHealthIssues.offline.length > 0 ? 'danger' : 'warning'}
+          title="Требуют внимания"
+        >
+          <div className="space-y-1">
+            {nodeHealthIssues.offline.length > 0 && (
+              <p>
+                Недоступны ({nodeHealthIssues.offline.length}):{' '}
+                <strong>{nodeHealthIssues.offline.join(', ')}</strong>
+              </p>
+            )}
+            {nodeHealthIssues.overloaded.length > 0 && (
+              <p>
+                Высокая нагрузка: <strong>{nodeHealthIssues.overloaded.join(' · ')}</strong>
+              </p>
+            )}
+          </div>
+        </SettingsAlert>
+      )}
+
       {!isFederated && nodeOffline && (
         <SettingsAlert variant="warning" title="Узел офлайн">
           Активный узел недоступен. Данные подключений могут быть устаревшими или отсутствовать.
@@ -397,11 +538,35 @@ export default function MonitoringPage() {
       <InlineProgressBar active={refreshing} label="Обновление данных мониторинга..." />
 
       {liveLoading && !data && !loadError ? (
-        <Card>
-          <CardContent>
-            <Spinner label="Загрузка live-данных с узла..." className="py-12" />
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i}>
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between">
+                    <Skeleton className="h-3 w-24" />
+                    <Skeleton className="h-8 w-8 rounded-md" />
+                  </div>
+                  <Skeleton className="mt-3 h-7 w-16" />
+                  <Skeleton className="mt-2 h-3 w-28" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <Card>
+            <CardContent className="p-4">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="mt-4 h-48 w-full" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="space-y-3 p-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </CardContent>
+          </Card>
+        </div>
       ) : loadError && !data ? (
         <Card>
           <CardContent>
@@ -448,7 +613,7 @@ export default function MonitoringPage() {
                     Сводка по узлам
                   </CardTitle>
                   <CardDescription>
-                    Подключения и службы на каждом VPN-узле
+                    Подключения и службы на каждом VPN-узле · нажмите на узел, чтобы открыть его детально
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -468,54 +633,76 @@ export default function MonitoringPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {data.nodes_summary?.map((node: MonitoringNodeSummary) => (
-                          <TableRow key={node.node_id}>
-                            <TableCell className="font-medium">{node.node_name}</TableCell>
-                            <TableCell>
-                              <Badge variant={node.status === 'online' ? 'success' : 'secondary'} className="text-[10px]">
-                                {node.status === 'online' ? 'Online' : node.status}
-                              </Badge>
-                              {node.error && (
-                                <p className="mt-1 text-[11px] text-destructive">{node.error}</p>
+                        {sortedNodeSummary.map((node: MonitoringNodeSummary) => {
+                          const isActive = node.node_id === activeNode?.id
+                          return (
+                            <TableRow
+                              key={node.node_id}
+                              onClick={() => goToNode(node.node_id, node.node_name)}
+                              className={cn(
+                                'group cursor-pointer transition-colors',
+                                node.status === 'offline' && 'bg-destructive/5 hover:bg-destructive/10',
+                                isActive && 'bg-primary/5',
                               )}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-xs">{node.connected_openvpn}</TableCell>
-                            <TableCell className="text-right font-mono text-xs">{node.connected_wireguard}</TableCell>
-                            <TableCell className="text-right font-mono text-xs">
-                              {node.active_services}/{node.total_services}
-                            </TableCell>
-                            <TableCell className="min-w-[110px]">
-                              {node.cpu_percent != null ? (
-                                <div className="space-y-1">
-                                  <MetricProgress value={node.cpu_percent} />
-                                  <span className="text-[10px] text-muted-foreground">
-                                    {formatMetricPercent(node.cpu_percent)}
-                                  </span>
-                                </div>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">н/д</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="min-w-[110px]">
-                              {node.memory_percent != null ? (
-                                <div className="space-y-1">
-                                  <MetricProgress value={node.memory_percent} />
-                                  <span className="text-[10px] text-muted-foreground">
-                                    {formatMetricPercent(node.memory_percent)}
-                                  </span>
-                                </div>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">н/д</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-xs">
-                              {node.total_traffic_bytes != null ? formatBytes(node.total_traffic_bytes) : '—'}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-xs">
-                              {node.cidr_routes_count ?? '—'}
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                            >
+                              <TableCell className="font-medium">
+                                <span className="inline-flex items-center gap-1.5">
+                                  <ChevronRight
+                                    size={14}
+                                    className="text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+                                  />
+                                  {node.node_name}
+                                  {isActive && (
+                                    <Badge variant="outline" className="h-4 px-1 text-[10px]">
+                                      активный
+                                    </Badge>
+                                  )}
+                                </span>
+                              </TableCell>
+                              <TableCell>
+                                <NodeStatusBadge status={node.status as NodeStatus} />
+                                {node.error && (
+                                  <p className="mt-1 text-[11px] text-destructive">{node.error}</p>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-xs">{node.connected_openvpn}</TableCell>
+                              <TableCell className="text-right font-mono text-xs">{node.connected_wireguard}</TableCell>
+                              <TableCell className="text-right font-mono text-xs">
+                                {node.active_services}/{node.total_services}
+                              </TableCell>
+                              <TableCell className="min-w-[110px]">
+                                {node.cpu_percent != null ? (
+                                  <div className="space-y-1">
+                                    <MetricProgress value={node.cpu_percent} />
+                                    <span className="text-[10px] text-muted-foreground">
+                                      {formatMetricPercent(node.cpu_percent)}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">н/д</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="min-w-[110px]">
+                                {node.memory_percent != null ? (
+                                  <div className="space-y-1">
+                                    <MetricProgress value={node.memory_percent} />
+                                    <span className="text-[10px] text-muted-foreground">
+                                      {formatMetricPercent(node.memory_percent)}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">н/д</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-xs">
+                                {node.total_traffic_bytes != null ? formatBytes(node.total_traffic_bytes) : '—'}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-xs">
+                                {node.cidr_routes_count ?? '—'}
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
                       </TableBody>
                     </Table>
                   </div>
@@ -523,7 +710,7 @@ export default function MonitoringPage() {
               </Card>
             )}
 
-            {isFederated && hasMultipleNodes && <NodesCompareSection />}
+            {isFederated && hasMultipleNodes && <NodesCompareSection collapsible defaultOpen={false} />}
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
@@ -721,10 +908,27 @@ export default function MonitoringPage() {
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {data.nodes_summary?.map((node) => (
-                                <TableRow key={node.node_id}>
-                                  <TableCell>{node.node_name}</TableCell>
-                                  <TableCell>{node.status}</TableCell>
+                              {sortedNodeSummary.map((node) => (
+                                <TableRow
+                                  key={node.node_id}
+                                  onClick={() => goToNode(node.node_id, node.node_name)}
+                                  className={cn(
+                                    'group cursor-pointer transition-colors',
+                                    node.status === 'offline' && 'bg-destructive/5 hover:bg-destructive/10',
+                                  )}
+                                >
+                                  <TableCell className="font-medium">
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <ChevronRight
+                                        size={14}
+                                        className="text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+                                      />
+                                      {node.node_name}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell>
+                                    <NodeStatusBadge status={node.status as NodeStatus} />
+                                  </TableCell>
                                   <TableCell className="text-right font-mono text-xs">{node.active_services}</TableCell>
                                   <TableCell className="text-right font-mono text-xs">{node.total_services}</TableCell>
                                 </TableRow>
