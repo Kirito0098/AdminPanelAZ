@@ -31,8 +31,9 @@ import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Switch } from '@/components/ui/switch'
 import { useNotifications } from '@/context/NotificationContext'
 import { formatDateTime } from '@/lib/datetime'
-import type { ActiveWebSession, AuditStreamSettings, EventWebhookSettings, ScannerBan, SecuritySettings } from '@/types'
+import { LABEL_LAST_SEEN } from '@/lib/uiLabels'
 import SecretsRotationWizard from '@/components/settings/SecretsRotationWizard'
+import type { ActiveWebSession, AuditStreamSettings, EventWebhookSettings, ScannerBan, SecuritySettings } from '@/types'
 
 export default function SecurityTab() {
   const { success, error: notifyError } = useNotifications()
@@ -490,7 +491,7 @@ export default function SecurityTab() {
             Активные web-сессии
           </CardTitle>
           <CardDescription>
-            Вкладки панели с heartbeat. Revoke принудительно разлогинивает сессию при следующем heartbeat.
+            Вкладки панели с heartbeat. «Отозвать» принудительно разлогинивает сессию при следующем heartbeat.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -509,7 +510,7 @@ export default function SecurityTab() {
                     <TableHead>Пользователь</TableHead>
                     <TableHead>IP</TableHead>
                     <TableHead>User-Agent</TableHead>
-                    <TableHead>Last seen</TableHead>
+                    <TableHead>{LABEL_LAST_SEEN}</TableHead>
                     <TableHead />
                   </TableRow>
                 </TableHeader>
@@ -541,13 +542,13 @@ export default function SecurityTab() {
                               success('Сессия отозвана')
                               await load()
                             } catch (err) {
-                              notifyError(err instanceof ApiError ? err.message : 'Ошибка revoke')
+                              notifyError(err instanceof ApiError ? err.message : 'Ошибка отзыва сессии')
                             } finally {
                               setRevokingSession(null)
                             }
                           }}
                         >
-                          Revoke
+                          Отозвать
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -561,7 +562,7 @@ export default function SecurityTab() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Event webhooks</CardTitle>
+          <CardTitle>Webhooks событий</CardTitle>
           <CardDescription>
             HTTP POST на внешний URL при событиях журнала действий (HMAC-подпись в X-Webhook-Signature)
           </CardDescription>
@@ -654,7 +655,7 @@ export default function SecurityTab() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Audit SIEM stream</CardTitle>
+          <CardTitle className="text-base">Поток аудита в SIEM</CardTitle>
           <CardDescription>
             Полный поток UserActionLog в HTTP-коллектор (ELK) и/или syslog (Wazuh). Асинхронная доставка с буфером.
           </CardDescription>
@@ -729,7 +730,7 @@ export default function SecurityTab() {
           {(auditStream?.mode === 'syslog' || auditStream?.mode === 'both') && (
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="grid gap-2">
-                <Label htmlFor="audit-syslog-host">Syslog host</Label>
+                <Label htmlFor="audit-syslog-host">Хост syslog</Label>
                 <Input
                   id="audit-syslog-host"
                   value={auditSyslogHost}
@@ -780,7 +781,7 @@ export default function SecurityTab() {
                 }
               }}
             >
-              {savingAuditStream ? 'Сохранение…' : 'Сохранить audit stream'}
+              {savingAuditStream ? 'Сохранение…' : 'Сохранить поток аудита'}
             </Button>
             <Button
               variant="outline"

@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useNotifications } from '@/context/NotificationContext'
+import { LABEL_COOLDOWN_MIN } from '@/lib/uiLabels'
 
 export default function MonitorSettingsCard() {
   const { success, error: notifyError } = useNotifications()
@@ -108,7 +109,7 @@ export default function MonitorSettingsCard() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="monitor-cooldown">Cooldown оповещений, мин</Label>
+              <Label htmlFor="monitor-cooldown">{LABEL_COOLDOWN_MIN}</Label>
               <Input
                 id="monitor-cooldown"
                 type="number"

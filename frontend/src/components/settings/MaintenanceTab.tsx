@@ -248,7 +248,7 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
           <div className="flex flex-wrap items-center gap-3">
             {geoIpStatus ? (
               <Badge variant={geoIpStatus.loaded ? 'default' : 'secondary'}>
-                GeoIP: {geoIpStatus.loaded ? 'loaded' : 'fallback ip-api'}
+                GeoIP: {geoIpStatus.loaded ? 'локальная база' : 'резерв ip-api'}
               </Badge>
             ) : (
               <Badge variant="outline">GeoIP: статус неизвестен</Badge>
@@ -267,19 +267,19 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
           {geoIpStatus && (
             <div className="space-y-2 text-xs text-muted-foreground">
               <div>
-                City MMDB:{' '}
+                City (MMDB):{' '}
                 <code className="mono rounded bg-muted px-1 py-0.5">{geoIpStatus.city_mmdb_path ?? '—'}</code>{' '}
                 ({geoIpStatus.city_mmdb_exists ? 'файл найден' : 'файл не найден'})
               </div>
               <div>
-                ASN MMDB:{' '}
+                ASN (MMDB):{' '}
                 <code className="mono rounded bg-muted px-1 py-0.5">{geoIpStatus.asn_mmdb_path ?? '—'}</code>{' '}
                 ({geoIpStatus.asn_mmdb_exists ? 'файл найден' : 'файл не найден'})
               </div>
             </div>
           )}
           {geoIpStatus && !geoIpStatus.loaded && (
-            <SettingsAlert variant="warning" title="Fallback ip-api">
+            <SettingsAlert variant="warning" title="Резервный ip-api">
               Положите GeoLite2-City.mmdb (и опционально GeoLite2-ASN.mmdb) в data/geoip/ и перезапустите панель.
             </SettingsAlert>
           )}

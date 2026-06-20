@@ -155,13 +155,13 @@ export default function SecretsRotationWizard() {
             Ротация секретов
           </CardTitle>
           <CardDescription>
-            Guided wizard для SECRET_KEY, NODE_AGENT_API_KEY и Telegram bot token — с предпросмотром и
-            подтверждением (без silent overwrite .env)
+            Пошаговый мастер для SECRET_KEY, NODE_AGENT_API_KEY и токена Telegram-бота — с предпросмотром и
+            подтверждением (без тихой перезаписи .env)
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <SettingsAlert variant="info" title="Безопасный flow">
-            preview → confirm → write. Подробнее см. SECURITY.md в репозитории.
+            предпросмотр → подтверждение → запись. Подробнее см. SECURITY.md в репозитории.
           </SettingsAlert>
           <div className="grid gap-3 sm:grid-cols-3">
             {catalog.map((item) => (

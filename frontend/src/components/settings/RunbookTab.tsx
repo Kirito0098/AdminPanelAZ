@@ -171,12 +171,12 @@ const GUIDED_STEPS: Array<{ id: string; title: string; description: string }> = 
   },
   {
     id: 'nginx',
-    title: 'Nginx reverse-proxy',
+    title: 'Nginx (обратный прокси)',
     description: 'Конфиг, proxy_pass и nginx -t',
   },
   {
     id: 'firewall',
-    title: 'Firewall tools',
+    title: 'Инструменты firewall',
     description: 'iptables и ipset для защиты панели',
   },
   {
@@ -230,7 +230,7 @@ export default function RunbookTab() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Stethoscope size={18} />
-          Runbook: диагностика запуска
+          Сценарий проверки: диагностика запуска
         </CardTitle>
         <CardDescription>
           Обёртка над <code className="rounded bg-muted px-1 py-0.5 text-xs">site-diagnostics-cli</code> — guided

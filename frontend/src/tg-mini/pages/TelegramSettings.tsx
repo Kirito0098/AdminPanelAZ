@@ -10,6 +10,11 @@ import {
   testTgTelegram,
   updateTgTelegramSettings,
 } from '@/tg-mini/api'
+import {
+  LABEL_AUTH_MAX_AGE,
+  LABEL_BOT_USERNAME,
+  LABEL_CHAT_ID,
+} from '@/lib/uiLabels'
 import type { TelegramSettings } from '@/types'
 
 export default function TelegramSettings() {
@@ -89,7 +94,7 @@ export default function TelegramSettings() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Telegram (admin)</CardTitle>
+        <CardTitle className="text-base">Telegram (администратор)</CardTitle>
         <CardDescription>Настройки бота и уведомлений панели</CardDescription>
       </CardHeader>
       <CardContent>
@@ -105,7 +110,7 @@ export default function TelegramSettings() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="bot-username">Username бота</Label>
+            <Label htmlFor="bot-username">{LABEL_BOT_USERNAME}</Label>
             <Input
               id="bot-username"
               value={botUsername}
@@ -114,7 +119,7 @@ export default function TelegramSettings() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="auth-max-age">Max age (сек)</Label>
+            <Label htmlFor="auth-max-age">{LABEL_AUTH_MAX_AGE}</Label>
             <Input
               id="auth-max-age"
               value={authMaxAge}
@@ -122,7 +127,7 @@ export default function TelegramSettings() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="chat-id">Chat ID</Label>
+            <Label htmlFor="chat-id">{LABEL_CHAT_ID}</Label>
             <Input id="chat-id" value={chatId} onChange={(e) => setChatId(e.target.value)} />
           </div>
           <label className="flex items-center justify-between gap-3 text-sm">
@@ -142,7 +147,7 @@ export default function TelegramSettings() {
             />
           </label>
           {settings?.mini_app_url && (
-            <p className="text-xs text-muted-foreground break-all">Mini App URL: {settings.mini_app_url}</p>
+            <p className="text-xs text-muted-foreground break-all">URL мини-приложения: {settings.mini_app_url}</p>
           )}
           <div className="flex flex-wrap gap-2">
             <Button type="submit" disabled={saving}>

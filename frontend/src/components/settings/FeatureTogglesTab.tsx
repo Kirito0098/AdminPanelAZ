@@ -26,9 +26,9 @@ function workerLabel(key: string): string {
     node_health: 'Опрос узлов',
     resource_metrics: 'Метрики VPN-узлов',
     panel_resource_metrics: 'Метрики панели',
-    cidr_scheduler: 'CIDR scheduler',
+    cidr_scheduler: 'Планировщик CIDR',
     cert_sync: 'Синхронизация сертификатов',
-    resource_monitor: 'CPU/RAM monitor',
+    resource_monitor: 'Монитор CPU/RAM',
   }
   return labels[key] || key
 }
@@ -163,7 +163,7 @@ export default function FeatureTogglesTab() {
         <div className="space-y-2">
           <SettingsAlert variant="warning" title="Перезапустите панель">
             Изменения профиля или модулей записаны в <code className="text-xs">backend/.env</code>. Фоновые задачи
-            (traffic, CIDR, metrics) подхватятся только после перезапуска сервиса панели.
+            (трафик, CIDR, метрики) подхватятся только после перезапуска сервиса панели.
           </SettingsAlert>
           <div className="flex justify-end">
             <Button type="button" size="sm" variant="secondary" onClick={clearRestartPending}>
@@ -175,9 +175,9 @@ export default function FeatureTogglesTab() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Resource profiles</CardTitle>
+          <CardTitle className="text-base">Профили ресурсов</CardTitle>
           <CardDescription>
-            Пресеты для VDS с разным объёмом RAM. Minimal отключает traffic sync, metrics collectors, CIDR scheduler и
+            Пресеты для VDS с разным объёмом RAM. Minimal отключает синхронизацию трафика, сбор метрик, планировщик CIDR и
             опрос узлов.
           </CardDescription>
         </CardHeader>
@@ -226,7 +226,7 @@ export default function FeatureTogglesTab() {
               <p>CPU/диск: {lastImpact?.cpu_disk ?? activeProfileMeta?.impact?.cpu_disk}</p>
             )}
             {lastWorkersDisabled.length > 0 && (
-              <p>Отключённые workers: {lastWorkersDisabled.map(workerLabel).join(', ')}</p>
+              <p>Отключённые задачи: {lastWorkersDisabled.map(workerLabel).join(', ')}</p>
             )}
           </CardContent>
         )}

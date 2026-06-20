@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useNotifications } from '@/context/NotificationContext'
 import { formatDateTime } from '@/lib/datetime'
+import { LABEL_COOLDOWN_MIN } from '@/lib/uiLabels'
 import type { AlertMetricInfo, AlertRule, Node } from '@/types'
 
 const OPERATORS = [
@@ -62,7 +63,7 @@ export default function AlertRulesCard() {
         setMetric(metricsData[0].id)
       }
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки alert rules')
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки правил алертов')
     } finally {
       setLoading(false)
     }
@@ -122,7 +123,7 @@ export default function AlertRulesCard() {
   }
 
   if (loading) {
-    return <Spinner label="Загрузка alert rules..." className="py-8" />
+    return <Spinner label="Загрузка правил алертов..." className="py-8" />
   }
 
   return (
@@ -130,7 +131,7 @@ export default function AlertRulesCard() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <BellRing size={18} />
-          Alert rules
+          Правила алертов
         </CardTitle>
         <CardDescription>
           Кастомные пороги по метрикам панели и DB-агрегатам с Telegram AdminNotify
@@ -145,7 +146,7 @@ export default function AlertRulesCard() {
                 id="alert-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="OVPN online > 50"
+                placeholder="OpenVPN в сети > 50"
               />
             </div>
             <div className="space-y-2">
@@ -188,7 +189,7 @@ export default function AlertRulesCard() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="alert-cooldown">Cooldown, мин</Label>
+              <Label htmlFor="alert-cooldown">{LABEL_COOLDOWN_MIN}</Label>
               <Input
                 id="alert-cooldown"
                 type="number"
@@ -218,7 +219,7 @@ export default function AlertRulesCard() {
             )}
           </div>
           <SettingsAlert variant="info" title="Примеры">
-            «OVPN online &gt; 50» · «узел offline &gt; 5 min» (порог 300 сек для node_offline_seconds)
+            «OpenVPN в сети &gt; 50» · «узел не в сети &gt; 5 мин» (порог 300 сек для node_offline_seconds)
           </SettingsAlert>
           <Button type="submit" disabled={saving}>
             <Plus size={16} />
@@ -246,8 +247,8 @@ export default function AlertRulesCard() {
                     {metrics.find((item) => item.id === rule.metric)?.label || rule.metric}{' '}
                     {OPERATORS.find((item) => item.id === rule.operator)?.label || rule.operator}{' '}
                     {rule.threshold}
-                    {rule.node_id ? ` · node #${rule.node_id}` : ''}
-                    {rule.cooldown_minutes ? ` · cooldown ${rule.cooldown_minutes}m` : ''}
+                    {rule.node_id ? ` · узел #${rule.node_id}` : ''}
+                    {rule.cooldown_minutes ? ` · пауза ${rule.cooldown_minutes} мин` : ''}
                   </p>
                   {rule.last_triggered_at && (
                     <p className="text-xs text-muted-foreground">

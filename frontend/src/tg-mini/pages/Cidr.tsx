@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import { statusLabel } from '@/components/routing/utils'
+import { ROUTING_TAB_UPDATE } from '@/lib/uiLabels'
 import { getTgCidrStatus } from '@/tg-mini/api'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
@@ -47,7 +49,7 @@ export default function Cidr() {
   return (
     <div className="tg-mini-stack">
       <section className="tg-mini-card">
-        <h2 className="tg-mini-section-title">CIDR pipeline</h2>
+        <h2 className="tg-mini-section-title">{ROUTING_TAB_UPDATE} CIDR</h2>
         <dl className="tg-mini-dl">
           <div>
             <dt>Всего CIDR</dt>
@@ -55,7 +57,7 @@ export default function Cidr() {
           </div>
           <div>
             <dt>Последнее обновление</dt>
-            <dd>{data?.last_refresh_status ?? '—'}</dd>
+            <dd>{statusLabel(data?.last_refresh_status)}</dd>
           </div>
           <div>
             <dt>Завершено</dt>

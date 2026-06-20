@@ -62,7 +62,7 @@ export default function MiniShell() {
 
       <nav
         className={cn('tg-mini-tabs', tabs.length > 3 ? 'tg-mini-tabs-cols-6' : 'tg-mini-tabs-cols-3')}
-        aria-label="Mini app tabs"
+        aria-label="Навигация мини-приложения"
       >
         {tabs.map((tab) => (
           <NavLink

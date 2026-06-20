@@ -35,3 +35,16 @@ export const HA_PRIMARY = 'Основной'
 export const HA_REPLICA = 'Реплика'
 export const HA_PUSH_FULL = 'Полная синхронизация'
 export const HA_AUTO_SYNC_TITLE = 'Авто-синхронизация HA'
+
+/** Telegram / уведомления. */
+export const LABEL_TELEGRAM_ID = 'ID Telegram'
+export const LABEL_CHAT_ID = 'ID чата'
+export const LABEL_BOT_USERNAME = 'Имя бота (@username)'
+export const LABEL_AUTH_MAX_AGE = 'Макс. возраст авторизации (сек)'
+
+/** Настройки / безопасность. */
+export const LABEL_LAST_SEEN = 'Последняя активность'
+export const LABEL_COOLDOWN_MIN = 'Пауза повтора, мин'
+
+/** CIDR (вкладка mini app и др.). */
+export const ROUTING_TAB_UPDATE = 'Обновление'

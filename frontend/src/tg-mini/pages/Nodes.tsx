@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import Spinner from '@/components/ui/Spinner'
 import { formatDateTime } from '@/lib/datetime'
+import { LABEL_LAST_SEEN } from '@/lib/uiLabels'
 import {
   activateTgNode,
   checkTgNodeHealth,
@@ -167,8 +168,8 @@ export default function Nodes() {
                   </p>
                   {meta.serverIp && <p>IP сервера: {meta.serverIp}</p>}
                   {meta.servicesLabel && <p>Службы: {meta.servicesLabel}</p>}
-                  {meta.agentVersion && <p>Node agent: {meta.agentVersion}</p>}
-                  <p className="text-xs">Контакт: {formatLastSeen(node.last_seen_at)}</p>
+                  {meta.agentVersion && <p>Агент узла: {meta.agentVersion}</p>}
+                  <p className="text-xs">{LABEL_LAST_SEEN}: {formatLastSeen(node.last_seen_at)}</p>
                   {meta.lastError && <p className="text-xs text-destructive">{meta.lastError}</p>}
                 </div>
                 <div className="flex flex-wrap gap-2">

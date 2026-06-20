@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
 import { formatDateTime } from '@/lib/datetime'
+import { NODE_STATUS_LABELS } from '@/lib/uiLabels'
 import { getTgDashboard } from '@/tg-mini/api'
 import type { TgMiniDashboard } from '@/types'
 
@@ -98,7 +99,7 @@ export default function Dashboard() {
             data.openvpn_clients.map((client, index) => (
               <div key={index} className="tg-mini-client-row">
                 <span>{String(client.common_name || '—')}</span>
-                <span className="text-emerald-500">online</span>
+                <span className="text-emerald-500">{NODE_STATUS_LABELS.online}</span>
               </div>
             ))
           )}

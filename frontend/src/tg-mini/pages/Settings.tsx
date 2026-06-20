@@ -7,6 +7,7 @@ import Spinner from '@/components/ui/Spinner'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import TelegramSettings from '@/tg-mini/pages/TelegramSettings'
 import { getTgAdminNotify, testTgAdminNotify, updateTgAdminNotify } from '@/tg-mini/api'
+import { LABEL_TELEGRAM_ID } from '@/lib/uiLabels'
 import type { AdminNotifySettings } from '@/types'
 
 export default function Settings() {
@@ -102,7 +103,7 @@ export default function Settings() {
         <CardContent>
           <form className="space-y-4" onSubmit={(e) => void handleSaveNotify(e)}>
             <div className="space-y-2">
-              <Label htmlFor="telegram-id">Telegram ID</Label>
+              <Label htmlFor="telegram-id">{LABEL_TELEGRAM_ID}</Label>
               <p id="telegram-id" className="text-sm font-mono">
                 {telegramId || '—'}
               </p>
