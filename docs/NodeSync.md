@@ -67,6 +67,8 @@ Node agent: `POST /backups/antizapret/restore`, `GET /backups/antizapret/downloa
 
 **Consumed traffic (байты)** — **не** синхронизируются; считаются per node. Паритет — лимит, блок и policy row.
 
+> **Мониторинг трафика** при этом умеет показывать **суммарный** объём логического клиента по всем узлам группы (UI-агрегация, хранение остаётся per node). Лимит трафика по-прежнему проверяется по каждому узлу отдельно. См. [traffic-monitoring.md](traffic-monitoring.md).
+
 #### Файлы AntiZapret (`/root/antizapret/config/`)
 
 | Операция | Replica |

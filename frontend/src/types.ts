@@ -976,6 +976,14 @@ export interface AuditStreamSettings {
   format: 'json' | 'cef'
 }
 
+export interface TrafficHaNodeBreakdown {
+  node_id: number
+  node_name: string
+  total_bytes: number
+  traffic_7d: number
+  is_active: boolean
+}
+
 export interface TrafficClientRow {
   common_name: string
   protocol_type: string
@@ -995,6 +1003,9 @@ export interface TrafficClientRow {
   first_seen_at?: string | null
   last_seen_at?: string | null
   is_active: boolean
+  ha?: VpnConfigHaInfo | null
+  ha_aggregated?: boolean
+  ha_node_breakdown?: TrafficHaNodeBreakdown[] | null
 }
 
 export interface TrafficSummary {
@@ -1011,12 +1022,22 @@ export interface TrafficSummary {
   db_is_stale: boolean
 }
 
+export interface TrafficHaContext {
+  sync_group_id: number
+  group_name: string
+  shared_domain: string
+  node_count: number
+  member_node_ids: number[]
+  aggregation_mode: string
+}
+
 export interface TrafficOverview {
   rows: TrafficClientRow[]
   summary: TrafficSummary
   timestamp: string
   node_id?: number | null
   node_name?: string | null
+  ha_context?: TrafficHaContext | null
 }
 
 export interface TrafficNeverConnectedRow {
@@ -1361,6 +1382,16 @@ export interface TrafficSessionItem {
   bytes_sent: number
   total_bytes: number
   is_active: boolean
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface TrafficSessionNodeSummary {
+  node_id: number
+  node_name: string
+  sessions_count: number
+  total_bytes: number
+  is_active: boolean
 }
 
 export interface TrafficClientSessions {
@@ -1372,6 +1403,8 @@ export interface TrafficClientSessions {
   recent_sessions: TrafficSessionItem[]
   node_id?: number | null
   node_name?: string | null
+  ha_aggregated?: boolean
+  nodes?: TrafficSessionNodeSummary[] | null
 }
 
 export interface AntizapretSettingField {

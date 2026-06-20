@@ -6,7 +6,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import Node, TrafficSessionState, UserTrafficSample, UserTrafficStatProtocol
-from app.schemas import OpenVpnClient, WireGuardPeer
+from app.schemas import (
+    OpenVpnClient,
+    TrafficClientRow,
+    TrafficHaNodeBreakdown,
+    TrafficSummary,
+    VpnConfigHaInfo,
+    WireGuardPeer,
+)
 from app.services.wireguard_status import wireguard_peer_is_online
 
 
@@ -229,27 +236,130 @@ class TrafficCollectorService:
         self.db.commit()
         return {"samples_added": samples_added, "active_sessions": len(seen_keys)}
 
-    def get_summary(self, active_names: set[str], stale_seconds: int = 600) -> tuple[list[dict], dict]:
+    def get_summary(
+        self,
+        active_names: set[str],
+        stale_seconds: int = 600,
+        *,
+        node_ids: list[int] | None = None,
+        ha_info: VpnConfigHaInfo | None = None,
+        node_names: dict[int, str] | None = None,
+        active_by_node: dict[int, set[str]] | None = None,
+    ) -> tuple[list[TrafficClientRow], TrafficSummary]:
+        """Aggregate persisted traffic stats into per-client rows.
+
+        When ``node_ids`` spans more than one node (an HA Sync Group), rows for
+        the same logical client (``common_name`` + ``protocol_type``, matched
+        case-insensitively) are summed across nodes and tagged with ``ha`` /
+        ``ha_aggregated`` metadata plus a per-node breakdown.
+        """
         now = datetime.utcnow()
-        rows_out: list[dict] = []
+        scope_ids = node_ids or [self.node_id]
+        node_names = node_names or {}
 
-        stats = self.db.query(UserTrafficStatProtocol).filter(
-            UserTrafficStatProtocol.node_id == self.node_id
-        ).order_by(UserTrafficStatProtocol.total_received.desc()).all()
+        def _node_active(node_id: int, name: str) -> bool:
+            if active_by_node is not None:
+                return name in active_by_node.get(node_id, set())
+            return name in active_names
 
-        recent_usage = self._recent_usage()
+        stats = (
+            self.db.query(UserTrafficStatProtocol)
+            .filter(UserTrafficStatProtocol.node_id.in_(scope_ids))
+            .order_by(UserTrafficStatProtocol.total_received.desc())
+            .all()
+        )
 
+        recent_usage = self._recent_usage(scope_ids)
+
+        aggregates: dict[tuple[str, str], dict] = {}
+        order: list[tuple[str, str]] = []
+
+        for row in stats:
+            client_lower = (row.common_name or "").lower()
+            protocol = row.protocol_type
+            key = (client_lower, protocol)
+            agg = aggregates.get(key)
+            if agg is None:
+                agg = {
+                    "display_name": row.common_name,
+                    "display_bytes": -1,
+                    "protocol_type": protocol,
+                    "rx": 0,
+                    "tx": 0,
+                    "rx_vpn": 0,
+                    "tx_vpn": 0,
+                    "rx_az": 0,
+                    "tx_az": 0,
+                    "traffic_1d": 0,
+                    "traffic_7d": 0,
+                    "traffic_30d": 0,
+                    "total_sessions": 0,
+                    "first_seen_at": None,
+                    "last_seen_at": None,
+                    "is_active": False,
+                    "breakdown": [],
+                }
+                aggregates[key] = agg
+                order.append(key)
+
+            rx = int(row.total_received or 0)
+            tx = int(row.total_sent or 0)
+            row_total = rx + tx
+            if row_total > agg["display_bytes"]:
+                agg["display_bytes"] = row_total
+                agg["display_name"] = row.common_name
+
+            agg["rx"] += rx
+            agg["tx"] += tx
+            agg["rx_vpn"] += int(row.total_received_vpn or 0)
+            agg["tx_vpn"] += int(row.total_sent_vpn or 0)
+            agg["rx_az"] += int(row.total_received_antizapret or 0)
+            agg["tx_az"] += int(row.total_sent_antizapret or 0)
+            agg["total_sessions"] += int(row.total_sessions or 0)
+
+            recent = recent_usage.get((row.node_id, client_lower, protocol), {})
+            node_1d = int(recent.get("days_1", 0))
+            node_7d = int(recent.get("days_7", 0))
+            node_30d = int(recent.get("days_30", 0))
+            agg["traffic_1d"] += node_1d
+            agg["traffic_7d"] += node_7d
+            agg["traffic_30d"] += node_30d
+
+            if row.first_seen_at is not None:
+                if agg["first_seen_at"] is None or row.first_seen_at < agg["first_seen_at"]:
+                    agg["first_seen_at"] = row.first_seen_at
+            if row.last_seen_at is not None:
+                if agg["last_seen_at"] is None or row.last_seen_at > agg["last_seen_at"]:
+                    agg["last_seen_at"] = row.last_seen_at
+
+            node_active = _node_active(row.node_id, row.common_name)
+            if node_active:
+                agg["is_active"] = True
+
+            if ha_info is not None:
+                agg["breakdown"].append(
+                    {
+                        "node_id": row.node_id,
+                        "node_name": node_names.get(row.node_id) or f"node-{row.node_id}",
+                        "total_bytes": row_total,
+                        "traffic_7d": node_7d,
+                        "is_active": node_active,
+                    }
+                )
+
+        rows_out: list[TrafficClientRow] = []
         total_rx = total_tx = 0
         total_rx_vpn = total_tx_vpn = 0
         total_rx_az = total_tx_az = 0
 
-        for row in stats:
-            rx = int(row.total_received or 0)
-            tx = int(row.total_sent or 0)
-            rx_vpn = int(row.total_received_vpn or 0)
-            tx_vpn = int(row.total_sent_vpn or 0)
-            rx_az = int(row.total_received_antizapret or 0)
-            tx_az = int(row.total_sent_antizapret or 0)
+        for key in order:
+            agg = aggregates[key]
+            rx = agg["rx"]
+            tx = agg["tx"]
+            rx_vpn = agg["rx_vpn"]
+            tx_vpn = agg["tx_vpn"]
+            rx_az = agg["rx_az"]
+            tx_az = agg["tx_az"]
             total_rx += rx
             total_tx += tx
             total_rx_vpn += rx_vpn
@@ -257,68 +367,82 @@ class TrafficCollectorService:
             total_rx_az += rx_az
             total_tx_az += tx_az
 
-            recent = recent_usage.get((row.common_name, row.protocol_type), {})
-            is_active = row.common_name in active_names
+            breakdown = None
+            if ha_info is not None and agg["breakdown"]:
+                breakdown = [
+                    TrafficHaNodeBreakdown(**item)
+                    for item in sorted(
+                        agg["breakdown"], key=lambda i: i["total_bytes"], reverse=True
+                    )
+                ]
 
-            rows_out.append({
-                "common_name": row.common_name,
-                "protocol_type": row.protocol_type,
-                "total_received": rx,
-                "total_sent": tx,
-                "total_bytes": rx + tx,
-                "total_received_vpn": rx_vpn,
-                "total_sent_vpn": tx_vpn,
-                "total_bytes_vpn": rx_vpn + tx_vpn,
-                "total_received_antizapret": rx_az,
-                "total_sent_antizapret": tx_az,
-                "total_bytes_antizapret": rx_az + tx_az,
-                "traffic_1d": int(recent.get("days_1", 0)),
-                "traffic_7d": int(recent.get("days_7", 0)),
-                "traffic_30d": int(recent.get("days_30", 0)),
-                "total_sessions": int(row.total_sessions or 0),
-                "first_seen_at": row.first_seen_at.isoformat() if row.first_seen_at else None,
-                "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
-                "is_active": is_active,
-            })
+            rows_out.append(
+                TrafficClientRow(
+                    common_name=agg["display_name"],
+                    protocol_type=agg["protocol_type"],
+                    total_received=rx,
+                    total_sent=tx,
+                    total_bytes=rx + tx,
+                    total_received_vpn=rx_vpn,
+                    total_sent_vpn=tx_vpn,
+                    total_bytes_vpn=rx_vpn + tx_vpn,
+                    total_received_antizapret=rx_az,
+                    total_sent_antizapret=tx_az,
+                    total_bytes_antizapret=rx_az + tx_az,
+                    traffic_1d=agg["traffic_1d"],
+                    traffic_7d=agg["traffic_7d"],
+                    traffic_30d=agg["traffic_30d"],
+                    total_sessions=agg["total_sessions"],
+                    first_seen_at=agg["first_seen_at"].isoformat() if agg["first_seen_at"] else None,
+                    last_seen_at=agg["last_seen_at"].isoformat() if agg["last_seen_at"] else None,
+                    is_active=agg["is_active"],
+                    ha=ha_info,
+                    ha_aggregated=ha_info is not None,
+                    ha_node_breakdown=breakdown,
+                )
+            )
 
-        latest_sample = self.db.query(func.max(UserTrafficSample.created_at)).filter(
-            UserTrafficSample.node_id == self.node_id
-        ).scalar()
+        latest_sample = (
+            self.db.query(func.max(UserTrafficSample.created_at))
+            .filter(UserTrafficSample.node_id.in_(scope_ids))
+            .scalar()
+        )
         db_age_seconds = None
         if latest_sample:
             db_age_seconds = max(int((now - latest_sample).total_seconds()), 0)
 
-        summary = {
-            "users_count": len(rows_out),
-            "active_users_count": sum(1 for r in rows_out if r["is_active"]),
-            "total_received": total_rx,
-            "total_sent": total_tx,
-            "total_received_vpn": total_rx_vpn,
-            "total_sent_vpn": total_tx_vpn,
-            "total_received_antizapret": total_rx_az,
-            "total_sent_antizapret": total_tx_az,
-            "latest_sample_at": latest_sample.isoformat() if latest_sample else None,
-            "db_age_seconds": db_age_seconds,
-            "db_is_stale": db_age_seconds is not None and db_age_seconds > stale_seconds,
-        }
+        summary = TrafficSummary(
+            users_count=len(rows_out),
+            active_users_count=sum(1 for r in rows_out if r.is_active),
+            total_received=total_rx,
+            total_sent=total_tx,
+            total_received_vpn=total_rx_vpn,
+            total_sent_vpn=total_tx_vpn,
+            total_received_antizapret=total_rx_az,
+            total_sent_antizapret=total_tx_az,
+            latest_sample_at=latest_sample.isoformat() if latest_sample else None,
+            db_age_seconds=db_age_seconds,
+            db_is_stale=db_age_seconds is not None and db_age_seconds > stale_seconds,
+        )
         return rows_out, summary
 
-    def _recent_usage(self) -> dict:
+    def _recent_usage(self, node_ids: list[int] | None = None) -> dict:
         now = datetime.utcnow()
+        scope_ids = node_ids or [self.node_id]
         windows = {
             "days_1": now - timedelta(days=1),
             "days_7": now - timedelta(days=7),
             "days_30": now - timedelta(days=30),
         }
-        result: dict[tuple[str, str], dict[str, int]] = {}
+        result: dict[tuple[int, str, str], dict[str, int]] = {}
 
         for label, since in windows.items():
             samples = self.db.query(UserTrafficSample).filter(
-                UserTrafficSample.node_id == self.node_id,
+                UserTrafficSample.node_id.in_(scope_ids),
                 UserTrafficSample.created_at >= since,
             ).all()
             for s in samples:
-                key = (s.common_name, s.protocol_type)
+                key = (s.node_id, (s.common_name or "").lower(), s.protocol_type)
                 result.setdefault(key, {"days_1": 0, "days_7": 0, "days_30": 0})
                 result[key][label] += int(s.delta_received or 0) + int(s.delta_sent or 0)
 

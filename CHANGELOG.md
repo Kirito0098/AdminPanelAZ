@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Мониторинг трафика — суммарный объём по HA-группе
+
+- **Агрегация трафика по Sync Group** — если активный узел входит в HA-группу, страница **Мониторинг трафика** показывает **суммарный** объём по всем узлам группы (primary + replica) для каждого логического клиента (`common_name` + протокол): сумма `RX/TX/всего`, окна `1д/7д/30д` и сессий; `first_seen` = min, `last_seen` = max, `online` = активен на любом узле. График (`/traffic/chart`) и сессии (`/traffic/client-sessions`) сливаются по всем узлам группы.
+- **`traffic/ha_aggregate.py`** — `resolve_traffic_scope(db, node_id)`: solo-узел → `[node_id]`; узел в группе → все member-узлы + HA-метаданные (через `find_sync_group_containing_node`, `group_member_node_ids`, `build_ha_metadata`).
+- **API** — `TrafficClientRow` дополнен `ha` / `ha_aggregated` / `ha_node_breakdown` (разбивка по узлам); `TrafficOverview.ha_context`; `TrafficClientSessionsResponse.ha_aggregated` + `nodes`; в сессиях — `node_id` / `node_name`.
+- **UI** — бейдж «HA: domain (N узл.)» в строке и деталях клиента, блок «По узлам HA-группы» с разбивкой, инфо-баннер «Суммарный трафик HA-группы». Хранение статистики остаётся **per node**; лимиты трафика по-прежнему считаются по каждому узлу отдельно (фаза 2).
+
 #### HA auto-sync (`sync_mode=auto`) — инфраструктура
 
 - **`node_sync/replicate.py`** — центральный диспетчер `replicate_to_replicas`, `ReplicateResult`, `finalize_replicate_outcome` (partial failure → `sync_status=failed`, audit `ha_replicate_partial_failure`), `get_shadow_configs`, `iter_replica_adapters`, enum `ReplicateOperation` (в т.ч. `OPENVPN_DISCONNECT`).

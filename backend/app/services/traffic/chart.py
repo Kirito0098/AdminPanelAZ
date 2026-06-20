@@ -10,11 +10,12 @@ from app.models import UserTrafficSample
 
 def fetch_traffic_chart(
     db: Session,
-    node_id: int,
+    node_ids: int | list[int],
     client: str,
     range_key: str = "7d",
     protocol_filter: str = "all",
 ) -> dict:
+    scope_ids = [node_ids] if isinstance(node_ids, int) else list(node_ids)
     client = (client or "").strip()
     range_key = (range_key or "7d").strip().lower()
     protocol_filter = (protocol_filter or "all").strip().lower()
@@ -49,7 +50,7 @@ def fetch_traffic_chart(
         bucket = "month"
 
     query = db.query(UserTrafficSample).filter(
-        UserTrafficSample.node_id == node_id,
+        UserTrafficSample.node_id.in_(scope_ids),
         UserTrafficSample.common_name == client,
     )
     if since_dt is not None:

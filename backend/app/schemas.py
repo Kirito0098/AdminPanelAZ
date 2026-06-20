@@ -1308,6 +1308,14 @@ class WarperUpdatesCheckResponse(BaseModel):
     node_host: str | None = None
 
 
+class TrafficHaNodeBreakdown(BaseModel):
+    node_id: int
+    node_name: str
+    total_bytes: int = 0
+    traffic_7d: int = 0
+    is_active: bool = False
+
+
 class TrafficClientRow(BaseModel):
     common_name: str
     protocol_type: str
@@ -1327,6 +1335,9 @@ class TrafficClientRow(BaseModel):
     first_seen_at: str | None = None
     last_seen_at: str | None = None
     is_active: bool = False
+    ha: VpnConfigHaInfo | None = None
+    ha_aggregated: bool = False
+    ha_node_breakdown: list[TrafficHaNodeBreakdown] | None = None
 
 
 class TrafficSummary(BaseModel):
@@ -1343,12 +1354,22 @@ class TrafficSummary(BaseModel):
     db_is_stale: bool = False
 
 
+class TrafficHaContext(BaseModel):
+    sync_group_id: int
+    group_name: str
+    shared_domain: str
+    node_count: int
+    member_node_ids: list[int]
+    aggregation_mode: str = "sum"
+
+
 class TrafficOverview(BaseModel):
     rows: list[TrafficClientRow]
     summary: TrafficSummary
     timestamp: datetime
     node_id: int | None = None
     node_name: str | None = None
+    ha_context: TrafficHaContext | None = None
 
 
 class TrafficNeverConnectedRow(BaseModel):
@@ -1400,6 +1421,16 @@ class TrafficSessionItem(BaseModel):
     bytes_sent: int = 0
     total_bytes: int = 0
     is_active: bool = False
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class TrafficSessionNodeSummary(BaseModel):
+    node_id: int
+    node_name: str
+    sessions_count: int = 0
+    total_bytes: int = 0
+    is_active: bool = False
 
 
 class TrafficClientSessionsResponse(BaseModel):
@@ -1411,3 +1442,5 @@ class TrafficClientSessionsResponse(BaseModel):
     recent_sessions: list[TrafficSessionItem] = Field(default_factory=list)
     node_id: int | None = None
     node_name: str | None = None
+    ha_aggregated: bool = False
+    nodes: list[TrafficSessionNodeSummary] | None = None

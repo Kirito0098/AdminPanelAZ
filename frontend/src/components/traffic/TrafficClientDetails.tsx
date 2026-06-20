@@ -235,6 +235,11 @@ export default function TrafficClientDetails({
             Лимит превышен
           </Badge>
         )}
+        {row.ha && (
+          <Badge variant="outline" className="gap-1">
+            HA: {row.ha.shared_domain} ({row.ha.node_count} узл.)
+          </Badge>
+        )}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -247,6 +252,46 @@ export default function TrafficClientDetails({
         <MetricTile label="За 7 дней" value={formatBytes(row.traffic_7d)} />
         <MetricTile label="За 30 дней" value={formatBytes(row.traffic_30d)} />
       </div>
+
+      {row.ha_aggregated && row.ha_node_breakdown && row.ha_node_breakdown.length > 0 && (
+        <div className="space-y-3 rounded-lg border bg-background p-4">
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <BarChart3 size={16} />
+            По узлам HA-группы
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Итоговые цифры выше — сумма по всем узлам группы.
+          </p>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Узел</TableHead>
+                <TableHead className="text-right">Всего</TableHead>
+                <TableHead className="text-right">За 7 дней</TableHead>
+                <TableHead>Статус</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {row.ha_node_breakdown.map((node) => (
+                <TableRow key={node.node_id}>
+                  <TableCell className="text-sm">{node.node_name}</TableCell>
+                  <TableCell className="text-right font-mono text-xs tabular-nums">
+                    {formatBytes(node.total_bytes)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs tabular-nums">
+                    {formatBytes(node.traffic_7d)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={node.is_active ? 'success' : 'secondary'} className="text-[10px]">
+                      {node.is_active ? 'Онлайн' : 'Офлайн'}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-3 rounded-lg border bg-background p-4">

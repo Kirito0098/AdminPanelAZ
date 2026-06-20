@@ -43,11 +43,15 @@ def _duration_seconds(
 
 def fetch_client_sessions(
     db: Session,
-    node_id: int,
+    node_ids: int | list[int],
     client_name: str,
     *,
     recent_limit: int = 30,
+    node_names: dict[int, str] | None = None,
 ) -> dict:
+    scope_ids = [node_ids] if isinstance(node_ids, int) else list(node_ids)
+    node_names = node_names or {}
+    ha_aggregated = len(scope_ids) > 1
     client = (client_name or "").strip()
     if not client:
         return {"error": "client is required"}
@@ -56,7 +60,7 @@ def fetch_client_sessions(
     rows = (
         db.query(TrafficSessionState)
         .filter(
-            TrafficSessionState.node_id == node_id,
+            TrafficSessionState.node_id.in_(scope_ids),
             TrafficSessionState.common_name == client,
         )
         .order_by(TrafficSessionState.last_seen_at.desc().nullslast(), TrafficSessionState.id.desc())
@@ -64,6 +68,7 @@ def fetch_client_sessions(
     )
 
     total_sessions = len(rows)
+    node_stats: dict[int, dict] = {}
     by_ip: dict[str, dict] = defaultdict(
         lambda: {
             "client_ip": "",
@@ -84,6 +89,21 @@ def fetch_client_sessions(
         bucket = by_ip[client_ip]
         bucket["client_ip"] = client_ip
         bucket["sessions_count"] += 1
+
+        node_stat = node_stats.get(row.node_id)
+        if node_stat is None:
+            node_stat = {
+                "node_id": row.node_id,
+                "node_name": node_names.get(row.node_id) or f"node-{row.node_id}",
+                "sessions_count": 0,
+                "total_bytes": 0,
+                "is_active": False,
+            }
+            node_stats[row.node_id] = node_stat
+        node_stat["sessions_count"] += 1
+        node_stat["total_bytes"] += int(row.last_bytes_received or 0) + int(row.last_bytes_sent or 0)
+        if row.is_active:
+            node_stat["is_active"] = True
         if endpoint["display_address"] and not bucket["display_address"]:
             bucket["display_address"] = endpoint["display_address"]
         if row.virtual_address:
@@ -154,7 +174,17 @@ def fetch_client_sessions(
             "bytes_sent": tx,
             "total_bytes": rx + tx,
             "is_active": bool(row.is_active),
+            "node_id": row.node_id,
+            "node_name": node_names.get(row.node_id) or f"node-{row.node_id}",
         })
+
+    nodes = None
+    if ha_aggregated:
+        nodes = sorted(
+            node_stats.values(),
+            key=lambda item: int(item["total_bytes"] or 0),
+            reverse=True,
+        )
 
     return {
         "client": client,
@@ -163,4 +193,6 @@ def fetch_client_sessions(
         "unique_virtual_addresses": len(virtual_addresses),
         "by_source": by_source,
         "recent_sessions": recent_sessions,
+        "ha_aggregated": ha_aggregated,
+        "nodes": nodes,
     }

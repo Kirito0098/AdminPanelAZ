@@ -194,6 +194,11 @@ function TrafficClientCard({ row, maxBytes, expanded, onToggle, children }: Traf
           <Badge variant={row.is_active ? 'success' : 'secondary'} className="text-[10px]">
             {row.is_active ? 'Онлайн' : 'Офлайн'}
           </Badge>
+          {row.ha && (
+            <Badge variant="outline" className="text-[10px]">
+              HA: {row.ha.shared_domain} ({row.ha.node_count} узл.)
+            </Badge>
+          )}
         </div>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
@@ -629,11 +634,19 @@ export default function TrafficPage() {
         </div>
       </div>
 
-      <SettingsAlert variant="info" title="Данные активного узла">
-        Статистика трафика собирается с <strong>{activeNode?.name ?? data?.node_name ?? 'активного узла'}</strong>
-        {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
-        Коллектор обновляет БД каждые 30 с. Переключите узел в шапке или на странице «Узлы».
-      </SettingsAlert>
+      {data?.ha_context ? (
+        <SettingsAlert variant="info" title="Суммарный трафик HA-группы">
+          Активный узел входит в HA-группу <strong>{data.ha_context.group_name}</strong> ({data.ha_context.shared_domain}).
+          Показан <strong>суммарный</strong> объём трафика клиентов по всем {data.ha_context.node_count} узлам группы.
+          Лимиты трафика по-прежнему считаются по каждому узлу отдельно.
+        </SettingsAlert>
+      ) : (
+        <SettingsAlert variant="info" title="Данные активного узла">
+          Статистика трафика собирается с <strong>{activeNode?.name ?? data?.node_name ?? 'активного узла'}</strong>
+          {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
+          Коллектор обновляет БД каждые 30 с. Переключите узел в шапке или на странице «Узлы».
+        </SettingsAlert>
+      )}
 
       {nodeOffline && (
         <SettingsAlert variant="warning" title="Узел офлайн">

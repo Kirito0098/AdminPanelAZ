@@ -12,16 +12,19 @@ from app.schemas import (
     MessageResponse,
     TrafficClientRow,
     TrafficClientSessionsResponse,
+    TrafficHaContext,
     TrafficNeverConnectedResponse,
     TrafficNeverConnectedRow,
     TrafficNeverConnectedSummary,
     TrafficOverview,
     TrafficSummary,
 )
-from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node
+from app.models import Node
 from app.services.self_service import get_owned_client_names
 from app.services.traffic.chart import fetch_traffic_chart
 from app.services.traffic.collector import TrafficCollectorService
+from app.services.traffic.ha_aggregate import resolve_traffic_scope
 from app.services.traffic.sessions import fetch_client_sessions
 from app.services.traffic.maintenance import (
     TrafficMaintenanceService,
@@ -31,6 +34,7 @@ from app.services.traffic.maintenance import (
 )
 from app.services.antizapret_settings import is_openvpn_verbose_log_enabled
 from app.services.node_adapter import LocalNodeAdapter
+from app.services.wireguard_status import wireguard_peer_is_online
 
 router = APIRouter(prefix="/traffic", tags=["traffic"])
 settings = get_settings()
@@ -78,10 +82,10 @@ def _db_active_traffic_client_names(db: Session, node_id: int) -> set[str]:
     return {name for (name,) in rows if name}
 
 
-def _active_traffic_client_names(db: Session, node_id: int) -> set[str]:
+def _live_active_names_for_node(db: Session, node: Node) -> set[str]:
     active_names: set[str] = set()
     try:
-        adapter = get_active_adapter(db)
+        adapter = get_adapter_for_node(node)
         ovpn = adapter.parse_openvpn_status()
         wg = adapter.parse_wireguard_status()
         active_names = {c.common_name for c in ovpn}
@@ -92,9 +96,28 @@ def _active_traffic_client_names(db: Session, node_id: int) -> set[str]:
         active_names = set()
 
     if not active_names:
-        active_names = _db_active_traffic_client_names(db, node_id)
+        active_names = _db_active_traffic_client_names(db, node.id)
 
     return active_names
+
+
+def _active_traffic_client_names(db: Session, node_id: int) -> set[str]:
+    node = db.get(Node, node_id) or get_active_node(db)
+    return _live_active_names_for_node(db, node)
+
+
+def _active_names_by_node(db: Session, node_ids: list[int], *, live: bool) -> dict[int, set[str]]:
+    """Resolve active client names per node for an aggregation scope."""
+    result: dict[int, set[str]] = {}
+    for node_id in node_ids:
+        if live:
+            node = db.get(Node, node_id)
+            result[node_id] = (
+                _live_active_names_for_node(db, node) if node else _db_active_traffic_client_names(db, node_id)
+            )
+        else:
+            result[node_id] = _db_active_traffic_client_names(db, node_id)
+    return result
 
 
 def _scoped_client_names(db: Session, user: User, node_id: int) -> set[str] | None:
@@ -141,13 +164,23 @@ def traffic_overview(
 ):
     node = get_active_node(db)
     allowed = _scoped_client_names(db, current_user, node.id)
-    if live:
-        active_names = _filter_client_names(_active_traffic_client_names(db, node.id), allowed)
-    else:
-        active_names = _filter_client_names(_db_active_traffic_client_names(db, node.id), allowed)
+    scope = resolve_traffic_scope(db, node.id)
+
+    active_by_node = _active_names_by_node(db, scope.node_ids, live=live)
+    merged_active: set[str] = set()
+    for names in active_by_node.values():
+        merged_active.update(names)
+    merged_active = _filter_client_names(merged_active, allowed)
 
     collector = TrafficCollectorService(db, node.id)
-    rows, summary = collector.get_summary(active_names, settings.traffic_db_stale_seconds)
+    rows, summary = collector.get_summary(
+        merged_active,
+        settings.traffic_db_stale_seconds,
+        node_ids=scope.node_ids,
+        ha_info=scope.ha_info,
+        node_names=scope.node_names,
+        active_by_node=active_by_node,
+    )
     if allowed is not None:
         rows = [row for row in rows if row.common_name in allowed]
         summary.users_count = len(rows)
@@ -159,12 +192,23 @@ def traffic_overview(
         summary.total_received_antizapret = sum(row.total_received_antizapret for row in rows)
         summary.total_sent_antizapret = sum(row.total_sent_antizapret for row in rows)
 
+    ha_context = None
+    if scope.is_ha and scope.ha_info is not None:
+        ha_context = TrafficHaContext(
+            sync_group_id=scope.ha_info.sync_group_id,
+            group_name=scope.group_name or scope.ha_info.shared_domain,
+            shared_domain=scope.ha_info.shared_domain,
+            node_count=scope.ha_info.node_count,
+            member_node_ids=scope.node_ids,
+        )
+
     return TrafficOverview(
         rows=rows,
         summary=summary,
         timestamp=datetime.utcnow(),
         node_id=node.id,
         node_name=node.name,
+        ha_context=ha_context,
     )
 
 
@@ -206,7 +250,8 @@ def traffic_chart(
     allowed = _scoped_client_names(db, current_user, node.id)
     if allowed is not None and client not in allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
-    result = fetch_traffic_chart(db, node.id, client, range, protocol)
+    scope = resolve_traffic_scope(db, node.id)
+    result = fetch_traffic_chart(db, scope.node_ids, client, range, protocol)
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
     return result
@@ -223,7 +268,10 @@ def traffic_client_sessions(
     allowed = _scoped_client_names(db, current_user, node.id)
     if allowed is not None and client not in allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
-    result = fetch_client_sessions(db, node.id, client, recent_limit=limit)
+    scope = resolve_traffic_scope(db, node.id)
+    result = fetch_client_sessions(
+        db, scope.node_ids, client, recent_limit=limit, node_names=scope.node_names
+    )
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
     return TrafficClientSessionsResponse(
