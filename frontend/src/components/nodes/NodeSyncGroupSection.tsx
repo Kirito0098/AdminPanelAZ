@@ -54,6 +54,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useNotifications } from '@/context/NotificationContext'
 import { HA_PRIMARY, HA_PUSH_FULL, HA_REPLICA, nodeStatusRu } from '@/lib/uiLabels'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import type { Node, NodeSyncGroup, NodeSyncVerifyResult, SyncStatus } from '@/types'
