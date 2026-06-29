@@ -143,17 +143,22 @@ export default function UpdatesTab() {
           </CardHeader>
           <CardContent className="space-y-4">
             {changelog?.success && changelog.version && (
-              <div className="rounded-md border bg-muted/30 p-4 text-sm">
-                <p className="font-medium">
-                  CHANGELOG [{changelog.version}] — {changelog.date}
-                </p>
-                <div className="mt-3 space-y-3">
+              <div className="rounded-lg border bg-muted/30 p-4 text-sm">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs font-semibold text-primary">
+                    v{changelog.version}
+                  </span>
+                  <span className="text-muted-foreground">{changelog.date}</span>
+                </div>
+                <div className="mt-4 max-h-96 space-y-4 overflow-y-auto pr-1">
                   {(changelog.sections ?? []).map((section) => (
                     <div key={section.title}>
-                      <p className="font-medium text-muted-foreground">{section.title}</p>
-                      <ul className="mt-1 list-inside list-disc space-y-0.5">
+                      <p className="font-medium">{section.title}</p>
+                      <ul className="mt-1.5 space-y-1 pl-4">
                         {section.items.map((item) => (
-                          <li key={item}>{item}</li>
+                          <li key={item} className="list-disc text-muted-foreground marker:text-muted-foreground/60">
+                            {item}
+                          </li>
                         ))}
                       </ul>
                     </div>

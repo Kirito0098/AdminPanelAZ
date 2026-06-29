@@ -83,14 +83,21 @@ def latest_changelog(_: User = Depends(require_admin)):
     if not matches:
         return LatestChangelogResponse(success=False, message="CHANGELOG не содержит версий")
 
-    first = matches[0]
-    end = matches[1].start() if len(matches) > 1 else len(content)
-    block = content[first.start():end].strip()
-    version = first.group(1).strip()
-    date = first.group(2).strip()
+    release_match = next(
+        (m for m in matches if m.group(1).strip().lower() != "unreleased"),
+        None,
+    )
+    if release_match is None:
+        return LatestChangelogResponse(success=False, message="CHANGELOG не содержит релизов")
+
+    release_idx = matches.index(release_match)
+    end = matches[release_idx + 1].start() if release_idx + 1 < len(matches) else len(content)
+    block = content[release_match.start():end].strip()
+    version = release_match.group(1).strip()
+    date = release_match.group(2).strip()
 
     sections = []
-    section_pattern = re.compile(r"^#{3,4}\s+(.+)$", re.MULTILINE)
+    section_pattern = re.compile(r"^### (?![#])(.+)$", re.MULTILINE)
     sec_matches = list(section_pattern.finditer(block))
     for i, sm in enumerate(sec_matches):
         sec_end = sec_matches[i + 1].start() if i + 1 < len(sec_matches) else len(block)

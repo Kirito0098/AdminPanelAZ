@@ -85,3 +85,6 @@ pnpm-debug.log*
 *~
 .DS_Store
 Thumbs.db
+
+# --- Local screenshot tooling (credentials / panel URL — not for repo) ---
+scripts/capture-readme-screenshots.mjs
