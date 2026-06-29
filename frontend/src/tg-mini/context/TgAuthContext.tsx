@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { ApiError } from '@/api/client'
 import { applyThemeClass, normalizeTheme } from '@/lib/theme'
 import { clearTgToken, getTgSettings, getTgToken, setTgToken, tgAuth } from '@/tg-mini/api'
+import { getTelegramWebApp, TG_MINI_NO_INIT_DATA, waitForTelegramInitData } from '@/tg-mini/lib/telegramInitData'
 import type { TgMiniSettings } from '@/types'
 
 type AuthStatus = 'loading' | 'authenticated' | 'error' | 'no-telegram'
@@ -17,10 +18,6 @@ interface TgAuthContextValue {
 
 const TgAuthContext = createContext<TgAuthContextValue | null>(null)
 
-function getWebApp() {
-  return window.Telegram?.WebApp ?? null
-}
-
 export function TgAuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading')
   const [error, setError] = useState<string | null>(null)
@@ -34,20 +31,19 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const authenticate = useCallback(async () => {
-    const tg = getWebApp()
-    if (!tg?.initData) {
+    const tg = getTelegramWebApp()
+    const initData = await waitForTelegramInitData(tg)
+    if (!initData) {
       setStatus('no-telegram')
-      setError('Откройте приложение через Telegram')
+      setError(TG_MINI_NO_INIT_DATA)
       return
     }
-    tg.ready()
-    tg.expand()
     setStatus('loading')
     setError(null)
     try {
       const cached = getTgToken()
       if (!cached) {
-        const auth = await tgAuth(tg.initData)
+        const auth = await tgAuth(initData)
         setTgToken(auth.access_token)
       }
       await loadSettings()

@@ -9,36 +9,143 @@ from app.services.telegram_bot_data import find_config_by_name, list_user_config
 from app.services.telegram_bot_handlers.base import BotContext, inline_button, inline_keyboard, unlinked_message
 from app.services.telegram_config_send import send_config_for_user
 from app.services.telegram_profile_ui import (
+    GROUP_META,
     ProfileFileGroup,
     build_profile_file_groups,
     file_button_label,
     find_group,
+    file_preview_line,
+    protocol_group_key,
 )
 from app.services import telegram_bot_i18n as i18n
 
-_PAGE_SIZE = 8
+_PAGE_SIZE = 12
+_COLUMNS = 2
+_NAME_MAX_LEN = 24
+_VALID_FILTERS = frozenset({"all", "ovpn", "wg", "awg"})
+_FILTER_VPN_TYPE = {
+    "ovpn": VpnType.openvpn,
+    "wg": VpnType.wireguard,
+}
+_FILTER_LABELS = {
+    "all": i18n.CONFIGS_FILTER_ALL,
+    "ovpn": i18n.CONFIGS_FILTER_OVPN,
+    "wg": i18n.CONFIGS_FILTER_WG,
+    "awg": i18n.CONFIGS_FILTER_AWG,
+}
 
 
-def _configs_keyboard(configs: list, page: int) -> dict:
-    start = page * _PAGE_SIZE
-    chunk = configs[start : start + _PAGE_SIZE]
-    rows = [
-        [inline_button(f"{c.client_name} ({c.vpn_type.value})", callback_data=f"cfg:{c.id}")]
-        for c in chunk
+def parse_configs_callback(data: str) -> tuple[int, str]:
+    parts = data.split(":")
+    page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    filter_key = parts[2] if len(parts) > 2 and parts[2] in _VALID_FILTERS else "all"
+    return page, filter_key
+
+
+def _vpn_emoji(vpn_type: VpnType) -> str:
+    key = protocol_group_key(vpn_type.value)
+    return GROUP_META.get(key, ("📄", ""))[0]
+
+
+def _short_name(name: str, *, max_len: int = _NAME_MAX_LEN) -> str:
+    if len(name) <= max_len:
+        return name
+    return name[: max_len - 1] + "…"
+
+
+def _config_button_label(config: VpnConfig) -> str:
+    return f"{_vpn_emoji(config.vpn_type)} {_short_name(config.client_name)}"
+
+
+def _count_by_protocol(configs: list[VpnConfig]) -> dict[str, int]:
+    counts = {"ovpn": 0, "wg": 0, "awg": 0}
+    for config in configs:
+        key = protocol_group_key(config.vpn_type.value)
+        if key in counts:
+            counts[key] += 1
+    return counts
+
+
+def _filter_configs(configs: list[VpnConfig], filter_key: str) -> list[VpnConfig]:
+    if filter_key == "all":
+        return configs
+    if filter_key == "awg":
+        return [c for c in configs if protocol_group_key(c.vpn_type.value) == "awg"]
+    vpn_type = _FILTER_VPN_TYPE.get(filter_key)
+    if vpn_type is None:
+        return configs
+    return [c for c in configs if c.vpn_type == vpn_type]
+
+
+def _chunk_buttons(buttons: list[dict], columns: int = _COLUMNS) -> list[list[dict]]:
+    rows: list[list[dict]] = []
+    for index in range(0, len(buttons), columns):
+        rows.append(buttons[index : index + columns])
+    return rows
+
+
+def _build_filter_rows(counts: dict[str, int], current: str) -> list[list[dict]]:
+    active_types = [key for key in ("ovpn", "wg", "awg") if counts.get(key, 0) > 0]
+    if len(active_types) < 2:
+        return []
+
+    buttons: list[dict] = []
+    if current == "all":
+        buttons.append(inline_button("✓ 📁 Все", callback_data="configs:0:all"))
+    else:
+        buttons.append(inline_button("📁 Все", callback_data="configs:0:all"))
+
+    for key in active_types:
+        emoji, _title = GROUP_META[key]
+        count = counts[key]
+        label = f"✓ {emoji} {count}" if current == key else f"{emoji} {count}"
+        buttons.append(inline_button(label, callback_data=f"configs:0:{key}"))
+    return _chunk_buttons(buttons, columns=3)
+
+
+def _configs_preview(chunk: list[VpnConfig], start_index: int) -> str:
+    lines = [
+        f"{start_index + offset}. {_vpn_emoji(config.vpn_type)} <code>{config.client_name}</code>"
+        for offset, config in enumerate(chunk)
     ]
-    nav: list = []
-    if page > 0:
-        nav.append(inline_button("◀️", callback_data=f"configs:{page - 1}"))
-    if start + _PAGE_SIZE < len(configs):
-        nav.append(inline_button("▶️", callback_data=f"configs:{page + 1}"))
-    extra_rows = list(rows)
-    if nav:
-        extra_rows.append(nav)
-    return nav_footer_keyboard(refresh="nav:configs", extra_rows=extra_rows)
+    return "\n".join(lines)
+
+
+def _configs_keyboard(
+    configs: list[VpnConfig],
+    *,
+    page: int,
+    filter_key: str,
+) -> dict:
+    filtered = _filter_configs(configs, filter_key)
+    counts = _count_by_protocol(configs)
+    total_pages = max(1, (len(filtered) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * _PAGE_SIZE
+    chunk = filtered[start : start + _PAGE_SIZE]
+
+    rows: list[list[dict]] = []
+    rows.extend(_build_filter_rows(counts, filter_key))
+
+    config_buttons = [
+        inline_button(_config_button_label(config), callback_data=f"cfg:{config.id}") for config in chunk
+    ]
+    rows.extend(_chunk_buttons(config_buttons))
+
+    if total_pages > 1:
+        nav: list[dict] = []
+        if page > 0:
+            nav.append(inline_button("◀️", callback_data=f"configs:{page - 1}:{filter_key}"))
+        nav.append(inline_button(f"· {page + 1}/{total_pages} ·", callback_data=f"configs:{page}:{filter_key}"))
+        if start + _PAGE_SIZE < len(filtered):
+            nav.append(inline_button("▶️", callback_data=f"configs:{page + 1}:{filter_key}"))
+        rows.append(nav)
+
+    return nav_footer_keyboard(refresh=f"configs:{page}:{filter_key}", extra_rows=rows)
 
 
 def _back_to_configs_row() -> list:
-    return [inline_button(i18n.BTN_ALL_CONFIGS, callback_data="configs:0")]
+    return [inline_button(i18n.BTN_ALL_CONFIGS, callback_data="configs:0:all")]
 
 
 def _config_root_keyboard(ctx: BotContext, config_id: int, groups: list[ProfileFileGroup]) -> dict:
@@ -49,23 +156,20 @@ def _config_root_keyboard(ctx: BotContext, config_id: int, groups: list[ProfileF
         rows.append([inline_button(label, callback_data=f"cfgg:{config_id}:{group.key}")])
     rows.append(_back_to_configs_row())
     rows.append([inline_button(i18n.BTN_MENU_HOME, callback_data="nav:home")])
-    if ctx.mini_app_url:
-        rows.insert(0, [inline_button(i18n.BTN_OPEN_MINI_APP_CONFIG, url=ctx.mini_app_url)])
     return inline_keyboard(rows)
 
 
-def _config_group_keyboard(ctx: BotContext, config_id: int, group: ProfileFileGroup) -> dict:
-    rows: list[list] = []
-    line: list = []
-    for entry in group.files:
-        line.append(inline_button(file_button_label(entry.file), callback_data=f"cfgf:{config_id}:{entry.index}"))
-        if len(line) == 2:
-            rows.append(line)
-            line = []
-    if line:
-        rows.append(line)
-    rows.append([inline_button(i18n.BTN_CONFIG_BACK, callback_data=f"cfg:{config_id}")])
-    rows.append(_back_to_configs_row())
+def _config_group_keyboard(config_id: int, group: ProfileFileGroup) -> dict:
+    rows: list[list] = [
+        [inline_button(file_button_label(entry.file, index=offset), callback_data=f"cfgf:{config_id}:{entry.index}")]
+        for offset, entry in enumerate(group.files, start=1)
+    ]
+    rows.append(
+        [
+            inline_button(i18n.BTN_CONFIG_BACK, callback_data=f"cfg:{config_id}"),
+            inline_button(i18n.BTN_ALL_CONFIGS, callback_data="configs:0:all"),
+        ]
+    )
     rows.append([inline_button(i18n.BTN_MENU_HOME, callback_data="nav:home")])
     return inline_keyboard(rows)
 
@@ -76,8 +180,6 @@ def _after_send_keyboard(ctx: BotContext, config_id: int) -> dict:
         _back_to_configs_row(),
         [inline_button(i18n.BTN_MENU_HOME, callback_data="nav:home")],
     ]
-    if ctx.mini_app_url:
-        rows.insert(0, [inline_button(i18n.BTN_OPEN_MINI_APP_CONFIG, url=ctx.mini_app_url)])
     return inline_keyboard(rows)
 
 
@@ -128,7 +230,13 @@ async def _show_config_picker(
     )
 
 
-async def handle_configs(ctx: BotContext, *, page: int = 0, message_id: int | None = None) -> None:
+async def handle_configs(
+    ctx: BotContext,
+    *,
+    page: int = 0,
+    filter_key: str = "all",
+    message_id: int | None = None,
+) -> None:
     if ctx.user is None:
         await send_message(ctx.bot_token, ctx.chat_id, unlinked_message())
         return
@@ -138,10 +246,32 @@ async def handle_configs(ctx: BotContext, *, page: int = 0, message_id: int | No
         await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIGS_NONE)
         return
 
-    total_pages = max(1, (len(configs) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+    if filter_key not in _VALID_FILTERS:
+        filter_key = "all"
+
+    filtered = _filter_configs(configs, filter_key)
+    if not filtered:
+        filter_key = "all"
+        filtered = configs
+
+    total_pages = max(1, (len(filtered) + _PAGE_SIZE - 1) // _PAGE_SIZE)
     page = max(0, min(page, total_pages - 1))
-    text = i18n.CONFIGS_LIST.format(page=page + 1, total_pages=total_pages, count=len(configs))
-    markup = _configs_keyboard(configs, page)
+    start = page * _PAGE_SIZE
+    chunk = filtered[start : start + _PAGE_SIZE]
+
+    counts = _count_by_protocol(configs)
+    active_types = sum(1 for key in ("ovpn", "wg", "awg") if counts.get(key, 0) > 0)
+    hint = i18n.CONFIGS_FILTER_HINT if active_types > 1 and filter_key == "all" and len(configs) > _PAGE_SIZE else ""
+
+    text = i18n.CONFIGS_LIST.format(
+        filter_label=_FILTER_LABELS.get(filter_key, i18n.CONFIGS_FILTER_ALL),
+        page=page + 1,
+        total_pages=total_pages,
+        count=len(filtered),
+        hint=hint,
+        preview=_configs_preview(chunk, start),
+    )
+    markup = _configs_keyboard(configs, page=page, filter_key=filter_key)
     await send_or_edit(ctx, text, markup=markup, message_id=message_id)
 
 
@@ -197,14 +327,16 @@ async def handle_config_group_callback(
         await handle_config_file_send(ctx, config_id, group.files[0].index, message_id=message_id)
         return
 
+    preview = "\n".join(file_preview_line(offset, entry.file) for offset, entry in enumerate(group.files, start=1))
     text = i18n.CONFIG_PICK_FILE.format(
         name=config.client_name,
-        protocol=f"{group.emoji} {group.title}",
+        protocol=f"{group.emoji} <b>{group.title}</b>",
+        preview=preview,
     )
     await send_or_edit(
         ctx,
         text,
-        markup=_config_group_keyboard(ctx, config_id, group),
+        markup=_config_group_keyboard(config_id, group),
         message_id=message_id,
     )
 

@@ -211,3 +211,25 @@ def set_my_commands_sync(bot_token: str, commands: list[dict[str, str]]) -> tupl
             return False, str(data.get("description") or "setMyCommands failed")
     except Exception as exc:
         return False, str(exc)
+
+
+def set_chat_menu_button_sync(bot_token: str, *, text: str, url: str) -> tuple[bool, str]:
+    payload = {
+        "menu_button": {
+            "type": "web_app",
+            "text": text,
+            "web_app": {"url": url},
+        }
+    }
+    try:
+        with httpx.Client(timeout=_TIMEOUT) as client:
+            response = client.post(
+                _API_BASE.format(token=bot_token, method="setChatMenuButton"),
+                json=payload,
+            )
+            data = response.json()
+            if data.get("ok"):
+                return True, ""
+            return False, str(data.get("description") or "setChatMenuButton failed")
+    except Exception as exc:
+        return False, str(exc)

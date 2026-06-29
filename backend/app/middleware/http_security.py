@@ -137,13 +137,24 @@ def apply_csp_nonce(base_csp: str, nonce: str | None, *, relaxed: bool = False) 
 
 
 def csp_for_path(path: str, base_csp: str, nonce: str | None = None, *, relaxed: bool = False) -> str:
+    if is_tg_mini_path(path):
+        # telegram-web-app.js initializes via inline scripts; CSP nonces break initData in WebView.
+        csp = base_csp
+        stripped = re.sub(r"frame-ancestors[^;]*;?\s*", "", csp).strip()
+        if stripped and not stripped.endswith(";"):
+            stripped += ";"
+
+        def _patch_script_src(match: re.Match[str]) -> str:
+            directive = match.group(1)
+            if "'unsafe-inline'" not in directive:
+                directive = f"{directive} 'unsafe-inline'".strip()
+            return f"script-src {directive};"
+
+        stripped = re.sub(r"script-src\s+([^;]+);", _patch_script_src, stripped, count=1)
+        return f"{stripped} {TG_MINI_FRAME_ANCESTORS};".strip()
+
     csp = apply_csp_nonce(base_csp, nonce, relaxed=relaxed)
-    if not is_tg_mini_path(path):
-        return csp
-    stripped = re.sub(r"frame-ancestors[^;]*;?\s*", "", csp).strip()
-    if stripped and not stripped.endswith(";"):
-        stripped += ";"
-    return f"{stripped} {TG_MINI_FRAME_ANCESTORS};".strip()
+    return csp
 
 
 class HttpSecurityMiddleware(BaseHTTPMiddleware):

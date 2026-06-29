@@ -40,9 +40,17 @@ def inline_keyboard(rows: list[list[dict]]) -> dict:
     return {"inline_keyboard": rows}
 
 
-def inline_button(text: str, *, url: str | None = None, callback_data: str | None = None) -> dict:
-    button: dict[str, str] = {"text": text}
-    if url:
+def inline_button(
+    text: str,
+    *,
+    url: str | None = None,
+    callback_data: str | None = None,
+    web_app_url: str | None = None,
+) -> dict:
+    button: dict[str, str | dict[str, str]] = {"text": text}
+    if web_app_url:
+        button["web_app"] = {"url": web_app_url}
+    elif url:
         button["url"] = url
     elif callback_data:
         button["callback_data"] = callback_data

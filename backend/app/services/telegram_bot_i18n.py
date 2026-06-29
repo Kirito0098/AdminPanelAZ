@@ -65,6 +65,7 @@ BTN_SETTINGS_MAINTENANCE = "Обслуживание"
 
 BTN_MENU_STATUS = "📊 Статус"
 BTN_MENU_CONFIGS = "📁 Конфиги"
+BTN_MENU_TRAFFIC = "📈 Трафик"
 BTN_MENU_HELP = BTN_HELP
 BTN_MENU_HOME = "🏠 Главная"
 BTN_MENU_SETTINGS = "⚙️ Настройки"
@@ -75,6 +76,7 @@ BTN_MENU_WARPER = "🌐 AZ-WARP"
 MENU_ACTIONS: dict[str, str] = {
     BTN_MENU_STATUS: "status",
     BTN_MENU_CONFIGS: "configs",
+    BTN_MENU_TRAFFIC: "traffic",
     BTN_MENU_HELP: "help",
     BTN_MENU_HOME: "home",
     BTN_MENU_SETTINGS: "settings",
@@ -103,16 +105,20 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
 START_TITLE = "👋 <b>AdminPanelAZ Bot</b>"
 START_UNLINKED = (
     "{title}\n\n"
-    "Добро пожаловать! Привяжите аккаунт командой <code>/link &lt;код&gt;</code>.\n"
-    "Код можно получить в панели: раздел Telegram → вкладка «Интерактив»."
+    "Чтобы начать, привяжите аккаунт панели:\n"
+    "<code>/link &lt;код&gt;</code>\n\n"
+    "Код — в панели: Telegram → «Интерактив»."
 )
 START_LINKED = (
     "{title}\n\n"
-    "👤 <code>{username}</code>\n"
-    "🔑 {role}\n\n"
-    "Выберите действие — кнопки под сообщением или внизу чата.\n"
-    "Справка: /help"
+    "Добро пожаловать, <b>{username}</b>.\n"
+    "{role_display}"
 )
+START_ROLE_DISPLAY = {
+    "admin": "🔑 Администратор",
+    "user": "👤 Пользователь",
+    "viewer": "👁 Наблюдатель",
+}
 
 # --- /help ---
 
@@ -160,7 +166,17 @@ STATUS_BODY = (
 
 # --- /configs ---
 
-CONFIGS_LIST = "📁 <b>Конфигурации</b>\n\nСтр. {page}/{total_pages} · всего <b>{count}</b>\n\nВыберите клиента:"
+CONFIGS_LIST = (
+    "📁 <b>Конфигурации</b> · {filter_label}\n"
+    "Стр. {page}/{total_pages} · <b>{count}</b> клиент(ов){hint}\n\n"
+    "{preview}\n"
+    "<i>Выберите клиента ↓</i>"
+)
+CONFIGS_FILTER_ALL = "все типы"
+CONFIGS_FILTER_OVPN = "🔐 OpenVPN"
+CONFIGS_FILTER_WG = "🛡️ WireGuard"
+CONFIGS_FILTER_AWG = "🌀 AmneziaWG"
+CONFIGS_FILTER_HINT = "\n💡 Сузьте список кнопками типа VPN выше"
 CONFIGS_NONE = "📭 Конфигурации не найдены.\n\nСоздайте клиента в веб-панели или Mini App."
 
 # --- /traffic ---
@@ -193,7 +209,8 @@ CONFIG_PICK_PROTOCOL = (
 CONFIG_PICK_FILE = (
     "📄 <b>{name}</b>\n"
     "{protocol}\n\n"
-    "Выберите маршрут:"
+    "{preview}\n\n"
+    "<i>Выберите файл ↓</i>"
 )
 CONFIG_GROUP_NOT_FOUND = "Группа конфигов не найдена."
 CONFIG_FILE_NOT_FOUND = "Файл конфигурации не найден."

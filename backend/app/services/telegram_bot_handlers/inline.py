@@ -136,10 +136,6 @@ def _config_article_fallback(ctx: BotContext, config: VpnConfig) -> dict[str, An
             "parse_mode": "HTML",
         },
     }
-    if ctx.mini_app_url:
-        result["reply_markup"] = {
-            "inline_keyboard": [[{"text": i18n.BTN_OPEN_MINI_APP_CONFIG, "url": ctx.mini_app_url}]],
-        }
     return result
 
 

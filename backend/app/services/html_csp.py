@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 CSP_NONCE_PLACEHOLDER = "%CSP_NONCE%"
 
 _SCRIPT_TAG_RE = re.compile(
-    r"(<script\b(?![^>]*\bnonce=)[^>]*)(>)",
+    r'(<script\b(?![^>]*\bnonce=)(?![^>]*\bsrc=["\']https?://)[^>]*)(>)',
     re.IGNORECASE,
 )
 _MODULEPRELOAD_RE = re.compile(

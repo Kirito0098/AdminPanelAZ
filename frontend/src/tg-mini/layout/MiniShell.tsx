@@ -1,4 +1,5 @@
 import { Outlet } from 'react-router-dom'
+import { TG_MINI_NO_INIT_DATA } from '@/tg-mini/lib/telegramInitData'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import { Button } from '@/components/ui/button'
 import Spinner from '@/components/ui/Spinner'
@@ -20,7 +21,7 @@ export default function MiniShell() {
     return (
       <div className="tg-mini-center tg-mini-error-panel">
         <h1 className="text-lg font-semibold">AdminPanelAZ Mini</h1>
-        <p className="tg-mini-muted">{error || 'Откройте через Telegram'}</p>
+        <p className="tg-mini-muted tg-mini-error-text">{error || TG_MINI_NO_INIT_DATA}</p>
         {status === 'error' && (
           <Button type="button" onClick={() => void retryAuth()}>
             Повторить

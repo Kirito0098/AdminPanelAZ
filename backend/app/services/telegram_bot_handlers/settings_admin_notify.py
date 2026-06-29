@@ -221,6 +221,10 @@ async def handle_admin_notify_text(ctx: BotContext, text: str) -> bool:
         return True
 
     raw = (text or "").strip()
+    if raw in i18n.MENU_ACTIONS:
+        settings_fsm.clear_pending(ctx.telegram_user_id)
+        return False
+
     tg_id = "" if raw in {"-", "0", "clear", "очистить"} else raw
     if tg_id and not tg_id.isdigit():
         await send_message(ctx.bot_token, ctx.chat_id, "Telegram ID должен быть числом или «-» для очистки.")

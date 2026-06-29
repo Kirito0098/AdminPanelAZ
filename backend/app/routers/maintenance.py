@@ -324,11 +324,21 @@ def register_telegram_webhook(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setWebhook: {error}")
 
     from app.services.telegram_bot_handlers.menu import build_bot_commands
-    from app.services.telegram_api import set_my_commands_sync
+    from app.services.telegram_api import set_chat_menu_button_sync, set_my_commands_sync
 
     cmd_ok, cmd_error = set_my_commands_sync(bot_token, build_bot_commands())
     if not cmd_ok:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setMyCommands: {cmd_error}")
+
+    settings_resp = _telegram_settings_response(db, request)
+    if settings_resp.mini_app_url:
+        menu_ok, menu_error = set_chat_menu_button_sync(
+            bot_token,
+            text="Открыть",
+            url=settings_resp.mini_app_url,
+        )
+        if not menu_ok:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setChatMenuButton: {menu_error}")
 
     _set_setting(db, "telegram_webhook_set_at", datetime.now(timezone.utc).isoformat())
     db.commit()

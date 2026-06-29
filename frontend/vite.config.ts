@@ -12,7 +12,7 @@ function cspNoncePlaceholder(): Plugin {
         `$1${CSP_NONCE_PLACEHOLDER}$3`,
       )
       .replace(
-        /(<script\b(?![^>]*\bnonce=)[^>]*)(>)/gi,
+        /(<script\b(?![^>]*\bnonce=)(?![^>]*\bsrc=["']https?:\/\/)[^>]*)(>)/gi,
         `$1 nonce="${CSP_NONCE_PLACEHOLDER}"$2`,
       )
       .replace(
@@ -34,7 +34,7 @@ function cspNoncePlaceholderPost(): Plugin {
   const injectNonce = (html: string) =>
     html
       .replace(
-        /(<script\b(?![^>]*\bnonce=)[^>]*)(>)/gi,
+        /(<script\b(?![^>]*\bnonce=)(?![^>]*\bsrc=["']https?:\/\/)[^>]*)(>)/gi,
         `$1 nonce="${CSP_NONCE_PLACEHOLDER}"$2`,
       )
       .replace(

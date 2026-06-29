@@ -60,7 +60,7 @@ def file_variant_suffix(*, protocol: str, variant: str, path: str) -> str:
     return ""
 
 
-def file_button_label(file_item: dict[str, str]) -> str:
+def file_compact_label(file_item: dict[str, str], *, index: int | None = None) -> str:
     route = file_route_label(variant=file_item.get("variant", ""), path=file_item.get("path", ""))
     suffix = file_variant_suffix(
         protocol=file_item.get("protocol", ""),
@@ -69,11 +69,32 @@ def file_button_label(file_item: dict[str, str]) -> str:
     )
     proto = (file_item.get("protocol") or "").lower()
     if suffix:
-        return f"{route} · {suffix}"
-    if proto in {"wireguard", "amneziawg"}:
-        return route
-    download_name = file_item.get("download_filename") or file_item.get("filename") or route
-    return f"{route} · {download_name}"
+        detail = suffix
+    elif proto == "openvpn":
+        detail = "базовый"
+    else:
+        detail = route
+    label = f"{route} · {detail}"
+    if index is None:
+        return label
+    return f"{index}. {label}"
+
+
+def file_preview_line(index: int, file_item: dict[str, str]) -> str:
+    route = file_route_label(variant=file_item.get("variant", ""), path=file_item.get("path", ""))
+    suffix = file_variant_suffix(
+        protocol=file_item.get("protocol", ""),
+        variant=file_item.get("variant", ""),
+        path=file_item.get("path", ""),
+    )
+    download_name = file_item.get("download_filename") or file_item.get("filename") or "—"
+    route_mark = "🇷🇺" if route == "AZ" else "🌍"
+    tag = f"{route} · {suffix}" if suffix else route
+    return f"{index}. {route_mark} {tag} — <code>{download_name}</code>"
+
+
+def file_button_label(file_item: dict[str, str], *, index: int | None = None) -> str:
+    return file_compact_label(file_item, index=index)
 
 
 def file_caption(*, client_name: str, file_item: dict[str, str]) -> str:

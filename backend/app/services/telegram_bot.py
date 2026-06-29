@@ -130,8 +130,10 @@ async def _dispatch_callback(ctx: BotContext, data: str, *, message_id: int | No
         await handle_help(ctx, message_id=message_id)
         return
     if data.startswith("configs:"):
-        page = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
-        await handle_configs(ctx, page=page, message_id=message_id)
+        from app.services.telegram_bot_handlers.configs import handle_configs, parse_configs_callback
+
+        page, filter_key = parse_configs_callback(data)
+        await handle_configs(ctx, page=page, filter_key=filter_key, message_id=message_id)
         return
     if data.startswith("traffic:"):
         page = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
@@ -224,9 +226,9 @@ class TelegramBotService:
         )
 
         if not command:
-            if text.strip() and await handle_settings_text(ctx, text):
-                return
             if text.strip() and await handle_menu_text(ctx, text):
+                return
+            if text.strip() and await handle_settings_text(ctx, text):
                 return
             if text.strip():
                 await handle_unknown_text(ctx)

@@ -13,6 +13,7 @@ from app.services.telegram_bot_handlers.base import (
     reply_keyboard,
 )
 from app.services import telegram_bot_i18n as i18n
+from app.services.telegram_bot_handlers import settings_fsm
 
 _ADMIN_ACTIONS = frozenset({"settings", "nodes", "cidr", "warper"})
 
@@ -33,27 +34,55 @@ def _linked_user_menu_visible(ctx: BotContext) -> bool:
     return ctx.user is not None
 
 
+def _menu_button_specs(ctx: BotContext) -> list[list[tuple[str, str | None]]]:
+    """Rows of (label, action). action None = Mini App URL button."""
+    rows: list[list[tuple[str, str | None]]] = []
+    if ctx.mini_app_url:
+        rows.append([(i18n.BTN_OPEN_MINI_APP, None)])
+
+    rows.append(
+        [
+            (i18n.BTN_MENU_STATUS, "status"),
+            (i18n.BTN_MENU_CONFIGS, "configs"),
+        ]
+    )
+    rows.append(
+        [
+            (i18n.BTN_MENU_TRAFFIC, "traffic"),
+            (i18n.BTN_MENU_HELP, "help"),
+        ]
+    )
+
+    if _admin_menu_visible(ctx):
+        rows.append(
+            [
+                (i18n.BTN_MENU_SETTINGS, "settings"),
+                (i18n.BTN_MENU_NODES, "nodes"),
+            ]
+        )
+        module_row: list[tuple[str, str | None]] = []
+        if _cidr_visible(ctx):
+            module_row.append((i18n.BTN_MENU_CIDR, "cidr"))
+        if _warper_visible(ctx):
+            module_row.append((i18n.BTN_MENU_WARPER, "warper"))
+        if module_row:
+            rows.append(module_row)
+    return rows
+
+
 def build_reply_keyboard(ctx: BotContext) -> dict:
     if not _linked_user_menu_visible(ctx):
         return reply_keyboard([[reply_button(i18n.BTN_MENU_HELP)]])
 
-    row1 = [reply_button(i18n.BTN_MENU_STATUS), reply_button(i18n.BTN_MENU_CONFIGS)]
-    row2: list[dict] = []
-    if ctx.mini_app_url:
-        row2.append(reply_button(i18n.BTN_OPEN_MINI_APP, web_app_url=ctx.mini_app_url))
-    row2.append(reply_button(i18n.BTN_MENU_HELP))
-
-    rows = [row1, row2]
-    if _admin_menu_visible(ctx):
-        admin_row = [reply_button(i18n.BTN_MENU_SETTINGS), reply_button(i18n.BTN_MENU_NODES)]
-        rows.append(admin_row)
-        module_row: list[dict] = []
-        if _cidr_visible(ctx):
-            module_row.append(reply_button(i18n.BTN_MENU_CIDR))
-        if _warper_visible(ctx):
-            module_row.append(reply_button(i18n.BTN_MENU_WARPER))
-        if module_row:
-            rows.append(module_row)
+    rows: list[list[dict]] = []
+    for spec_row in _menu_button_specs(ctx):
+        row: list[dict] = []
+        for label, action in spec_row:
+            if action is None:
+                row.append(reply_button(label, web_app_url=ctx.mini_app_url))
+            else:
+                row.append(reply_button(label))
+        rows.append(row)
     return reply_keyboard(rows)
 
 
@@ -62,32 +91,14 @@ def build_main_inline_menu(ctx: BotContext) -> dict:
         return inline_keyboard([[inline_button(i18n.BTN_MENU_HELP, callback_data="nav:help")]])
 
     rows: list[list[dict]] = []
-    if ctx.mini_app_url:
-        rows.append([inline_button(i18n.BTN_OPEN_MINI_APP, url=ctx.mini_app_url)])
-
-    rows.append(
-        [
-            inline_button(i18n.BTN_MENU_STATUS, callback_data="nav:status"),
-            inline_button(i18n.BTN_MENU_CONFIGS, callback_data="nav:configs"),
-        ]
-    )
-    rows.append([inline_button(i18n.BTN_MENU_HELP, callback_data="nav:help")])
-
-    if _admin_menu_visible(ctx):
-        admin_row = [
-            inline_button(i18n.BTN_MENU_SETTINGS, callback_data="nav:settings"),
-            inline_button(i18n.BTN_MENU_NODES, callback_data="nav:nodes"),
-        ]
-        rows.append(admin_row)
-        module_row: list[dict] = []
-        if _cidr_visible(ctx):
-            module_row.append(inline_button(i18n.BTN_MENU_CIDR, callback_data="nav:cidr"))
-        if _warper_visible(ctx):
-            module_row.append(inline_button(i18n.BTN_MENU_WARPER, callback_data="nav:warper"))
-        if module_row:
-            rows.append(module_row)
-
-    rows.append([inline_button(i18n.BTN_MENU_HOME, callback_data="nav:home")])
+    for spec_row in _menu_button_specs(ctx):
+        row: list[dict] = []
+        for label, action in spec_row:
+            if action is None:
+                row.append(inline_button(label, web_app_url=ctx.mini_app_url))
+            else:
+                row.append(inline_button(label, callback_data=f"nav:{action}"))
+        rows.append(row)
     return inline_keyboard(rows)
 
 
@@ -142,6 +153,7 @@ async def handle_menu_text(ctx: BotContext, text: str) -> bool:
     action = i18n.MENU_ACTIONS.get((text or "").strip())
     if not action:
         return False
+    settings_fsm.clear_pending(ctx.telegram_user_id)
     await _dispatch_action(ctx, action)
     return True
 
@@ -152,5 +164,6 @@ async def handle_menu_callback(ctx: BotContext, data: str, *, message_id: int | 
     action = data[len("nav:") :]
     if not action:
         return True
+    settings_fsm.clear_pending(ctx.telegram_user_id)
     await _dispatch_action(ctx, action, message_id=message_id)
     return True
