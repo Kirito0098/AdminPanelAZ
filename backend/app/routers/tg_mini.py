@@ -15,7 +15,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.auth import create_access_token, get_current_user, require_admin
 from app.config import get_settings
@@ -73,7 +73,8 @@ class SendConfigRequest(BaseModel):
 
 class SendConfigV2Request(BaseModel):
     path: str | None = None
-    destination: Literal["self", "chat"] = "self"
+    destination: Literal["self", "owner"] = "self"
+    platform: Literal["ios", "mac", "windows", "android", "linux"] | None = None
 
 
 def _verify_telegram_init_data(init_data: str, bot_token: str, *, max_age: int = 300) -> dict:
@@ -129,39 +130,22 @@ def _get_accessible_config(db: Session, config_id: int, current_user: User) -> V
     return config
 
 
-def _resolve_send_chat_id(
-    db: Session,
-    current_user: User,
-    destination: Literal["self", "chat"],
-) -> str:
-    if destination == "chat":
-        if current_user.role.value != "admin":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только admin может отправлять в общий chat")
-        chat_id = _get_setting(db, "telegram_chat_id").strip()
-        if not chat_id:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Глобальный chat_id не настроен")
-        return chat_id
-    chat_id = (current_user.telegram_id or "").strip()
-    if not chat_id and current_user.role.value == "admin":
-        chat_id = _get_setting(db, "telegram_chat_id").strip()
-    if not chat_id:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram ID не привязан к вашему аккаунту")
-    return chat_id
-
-
 def _send_config_file(
     db: Session,
     config: VpnConfig,
     current_user: User,
     *,
     path: str | None,
-    destination: Literal["self", "chat"],
+    destination: Literal["self", "owner"],
+    install_platform: Literal["ios", "mac", "windows", "android", "linux"] | None = None,
 ) -> MessageResponse:
     from app.services.telegram_config_send import send_config_for_user
 
     token = _get_bot_token(db)
     if not token:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram не настроен")
+    if destination == "owner" and current_user.role.value != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     sent, error = send_config_for_user(
         db,
         config,
@@ -170,18 +154,30 @@ def _send_config_file(
         path=path,
         destination=destination,
         run_async=False,
+        install_platform=install_platform,
     )
     if sent == 0:
-        status_code = status.HTTP_404_NOT_FOUND if error == "Файлы конфигурации не найдены" else status.HTTP_502_BAD_GATEWAY
-        if error in {
+        status_code = status.HTTP_502_BAD_GATEWAY
+        if error == "Файлы конфигурации не найдены":
+            status_code = status.HTTP_404_NOT_FOUND
+        elif error == "Недостаточно прав":
+            status_code = status.HTTP_403_FORBIDDEN
+        elif error in {"У пользователя не привязан Telegram", "Владелец конфига не найден"}:
+            status_code = status.HTTP_400_BAD_REQUEST
+        elif error in {
             "Telegram не настроен",
             "Telegram ID не привязан к вашему аккаунту",
-            "Глобальный chat_id не настроен",
         }:
             status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        if error == "Только admin может отправлять в общий chat":
-            status_code = status.HTTP_403_FORBIDDEN
         raise HTTPException(status_code=status_code, detail=error or "Не удалось отправить конфиг")
+    if error:
+        return MessageResponse(message=error)
+    if destination == "owner":
+        if install_platform:
+            return MessageResponse(message="Конфиг и инструкция отправлены пользователю в Telegram")
+        return MessageResponse(message="Конфиг отправлен пользователю в Telegram")
+    if install_platform:
+        return MessageResponse(message="Конфиг и инструкция отправлены в Telegram")
     return MessageResponse(message="Конфиг отправлен в Telegram")
 
 
@@ -363,16 +359,17 @@ def mini_dashboard(current_user: User = Depends(get_current_user), db: Session =
     adapter = get_active_adapter(db)
     ovpn = adapter.parse_openvpn_status()
     wg = adapter.parse_wireguard_status()
+    wg_online = [p for p in wg if wireguard_peer_is_online(p)]
     node = get_active_node(db)
-    configs = (
-        db.query(VpnConfig)
-        .filter(VpnConfig.node_id == node.id, VpnConfig.owner_id == current_user.id)
-        .count()
-    )
+    configs_query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id)
+    if current_user.role.value != "admin":
+        configs_query = configs_query.filter(VpnConfig.owner_id == current_user.id)
+    configs = configs_query.count()
     return {
         "total_configs": configs,
         "connected_openvpn": len(ovpn),
-        "connected_wireguard": sum(1 for p in wg if wireguard_peer_is_online(p)),
+        "connected_wireguard": len(wg_online),
+        "total_wireguard_peers": len(wg),
         "server_ip": adapter.get_server_ip(),
         "openvpn_clients": [c.model_dump() if hasattr(c, "model_dump") else c.__dict__ for c in ovpn[:20]],
         "wireguard_peers": [
@@ -381,8 +378,9 @@ def mini_dashboard(current_user: User = Depends(get_current_user), db: Session =
                 "public_key": getattr(p, "public_key", ""),
                 "transfer_rx": getattr(p, "transfer_rx", 0),
                 "transfer_tx": getattr(p, "transfer_tx", 0),
+                "latest_handshake": getattr(p, "latest_handshake", None),
             }
-            for p in wg[:20]
+            for p in wg_online[:20]
         ],
         "timestamp": datetime.utcnow().isoformat(),
     }
@@ -391,7 +389,7 @@ def mini_dashboard(current_user: User = Depends(get_current_user), db: Session =
 @router.get("/configs")
 def mini_configs(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     node = get_active_node(db)
-    query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id)
+    query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id).options(joinedload(VpnConfig.owner))
     if current_user.role.value != "admin":
         query = query.filter(VpnConfig.owner_id == current_user.id)
     rows = query.all()
@@ -401,6 +399,9 @@ def mini_configs(current_user: User = Depends(get_current_user), db: Session = D
                 "id": c.id,
                 "client_name": c.client_name,
                 "vpn_type": c.vpn_type.value,
+                "owner_username": c.owner.username if c.owner else None,
+                "is_mine": c.owner_id == current_user.id,
+                "owner_telegram_linked": bool((c.owner.telegram_id or "").strip()) if c.owner else False,
             }
             for c in rows
         ]
@@ -429,7 +430,14 @@ def mini_send_config(
     db: Session = Depends(get_db),
 ):
     config = _get_accessible_config(db, config_id, current_user)
-    return _send_config_file(db, config, current_user, path=payload.path, destination=payload.destination)
+    return _send_config_file(
+        db,
+        config,
+        current_user,
+        path=payload.path,
+        destination=payload.destination,
+        install_platform=payload.platform,
+    )
 
 
 @router.get("/qr-link")
@@ -464,6 +472,7 @@ def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(ge
         "bot_configured": bool(token),
         "username": current_user.username,
         "role": current_user.role.value,
+        "theme": current_user.theme,
     }
 
 

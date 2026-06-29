@@ -1,34 +1,66 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ChevronRight, FileKey, Search } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import Spinner from '@/components/ui/Spinner'
+import ConfigActionDialog, { type ConfigFeedback } from '@/tg-mini/components/ConfigActionDialog'
+import { splitProfileFilesByRoute } from '@/tg-mini/lib/profileFiles'
+import MiniListToolbar, {
+  matchesProtocolFilter,
+  matchesSearchQuery,
+  type ProtocolFilter,
+} from '@/tg-mini/components/MiniListToolbar'
+import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
+import { guessInstallPlatform } from '@/tg-mini/lib/platformMeta'
+import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import { getTgConfigFiles, getTgConfigs, getTgQrLink, sendTgConfig } from '@/tg-mini/api'
-import type { TgMiniConfig, TgMiniConfigFile } from '@/types'
+import { copyText, openExternalLink, shareViaTelegram } from '@/tg-mini/lib/shareDownloadLink'
+import type { InstallPlatform, TgMiniConfig, TgMiniConfigFile, TgMiniQrLink } from '@/types'
+
+const canShareInTelegram = typeof window.Telegram?.WebApp?.shareUrl === 'function'
+
+function ConfigsSkeleton() {
+  return (
+    <div className="space-y-3" aria-busy="true" aria-label="Загрузка конфигов">
+      <div className="tg-mini-skeleton" style={{ height: '2.5rem' }} />
+      <div className="tg-mini-skeleton" style={{ height: '2.75rem' }} />
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className="tg-mini-skeleton tg-mini-skeleton-card" />
+      ))}
+    </div>
+  )
+}
+
+function ownerLabel(config: TgMiniConfig): string | null {
+  if (config.is_mine !== false) return null
+  return config.owner_username ? `@${config.owner_username}` : 'другой пользователь'
+}
 
 export default function Configs() {
   const { isAdmin } = useTgAuth()
   const [configs, setConfigs] = useState<TgMiniConfig[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [protocol, setProtocol] = useState<ProtocolFilter>('all')
   const [activeConfig, setActiveConfig] = useState<TgMiniConfig | null>(null)
   const [files, setFiles] = useState<TgMiniConfigFile[]>([])
   const [selectedPath, setSelectedPath] = useState('')
   const [sheetLoading, setSheetLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<ConfigFeedback | null>(null)
+  const [downloadLink, setDownloadLink] = useState<TgMiniQrLink | null>(null)
+  const [platform, setPlatform] = useState<InstallPlatform>(() => guessInstallPlatform())
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false
+    if (silent) {
+      setRefreshing(true)
+    } else {
+      setLoading(true)
+    }
     setError(null)
     try {
       const data = await getTgConfigs()
@@ -37,6 +69,7 @@ export default function Configs() {
       setError(err instanceof ApiError ? err.message : 'Ошибка загрузки')
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }, [])
 
@@ -44,16 +77,51 @@ export default function Configs() {
     void load()
   }, [load])
 
+  const protocolCounts = useMemo(
+    () => ({
+      all: configs.length,
+      openvpn: configs.filter((c) => c.vpn_type === 'openvpn').length,
+      wireguard: configs.filter((c) => c.vpn_type === 'wireguard').length,
+    }),
+    [configs],
+  )
+
+  const filteredConfigs = useMemo(
+    () =>
+      configs.filter(
+        (config) =>
+          matchesProtocolFilter(config.vpn_type, protocol) &&
+          matchesSearchQuery(config.client_name, search) &&
+          matchesSearchQuery(config.owner_username || '', search),
+      ),
+    [configs, protocol, search],
+  )
+
+  const resetFilters = () => {
+    setSearch('')
+    setProtocol('all')
+  }
+
+  const hasActiveFilters = search.trim().length > 0 || protocol !== 'all'
+  const isForeignConfig = Boolean(activeConfig && activeConfig.is_mine === false)
+
   const openActions = async (config: TgMiniConfig) => {
     setActiveConfig(config)
-    setMessage(null)
+    setFeedback(null)
+    setDownloadLink(null)
+    setPlatform(guessInstallPlatform())
     setSheetLoading(true)
     try {
       const data = await getTgConfigFiles(config.id)
       setFiles(data.files)
-      setSelectedPath(data.files[0]?.path || '')
+      const { vpn, antizapret } = splitProfileFilesByRoute(data.files)
+      const defaultFile = vpn[0] ?? antizapret[0] ?? data.files[0]
+      setSelectedPath(defaultFile?.path || '')
     } catch (err) {
-      setMessage(err instanceof ApiError ? err.message : 'Ошибка загрузки файлов')
+      setFeedback({
+        tone: 'error',
+        text: err instanceof ApiError ? err.message : 'Ошибка загрузки файлов',
+      })
       setFiles([])
     } finally {
       setSheetLoading(false)
@@ -64,132 +132,201 @@ export default function Configs() {
     setActiveConfig(null)
     setFiles([])
     setSelectedPath('')
-    setMessage(null)
+    setFeedback(null)
+    setDownloadLink(null)
   }
 
-  const handleSend = async (destination: 'self' | 'chat') => {
+  const handleSelectedPathChange = (path: string) => {
+    setSelectedPath(path)
+    setDownloadLink(null)
+    setFeedback(null)
+  }
+
+  const handleSend = async (destination: 'self' | 'owner') => {
     if (!activeConfig || !selectedPath) return
     setActionLoading(true)
-    setMessage(null)
+    setFeedback(null)
     try {
-      const result = await sendTgConfig(activeConfig.id, { path: selectedPath, destination })
-      setMessage(result.message)
+      const result = await sendTgConfig(activeConfig.id, {
+        path: selectedPath,
+        destination,
+        platform,
+      })
+      setFeedback({ tone: 'success', text: result.message })
     } catch (err) {
-      setMessage(err instanceof ApiError ? err.message : 'Ошибка отправки')
+      setFeedback({
+        tone: 'error',
+        text: err instanceof ApiError ? err.message : 'Ошибка отправки',
+      })
     } finally {
       setActionLoading(false)
     }
   }
 
-  const handleQrLink = async () => {
+  const handleCreateDownloadLink = async () => {
     if (!activeConfig || !selectedPath) return
     setActionLoading(true)
-    setMessage(null)
+    setFeedback(null)
+    setDownloadLink(null)
     try {
       const link = await getTgQrLink(activeConfig.id, selectedPath)
-      await navigator.clipboard.writeText(link.url)
-      setMessage('Ссылка скопирована в буфер обмена')
-      window.Telegram?.WebApp.openLink(link.url)
+      setDownloadLink(link)
+      const copied = await copyText(link.url)
+      setFeedback({
+        tone: 'success',
+        text: copied
+          ? 'Ссылка создана и скопирована — отправьте её в нужный чат'
+          : 'Ссылка создана — скопируйте или поделитесь ею',
+      })
+      window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
     } catch (err) {
-      setMessage(err instanceof ApiError ? err.message : 'Ошибка создания ссылки')
+      setFeedback({
+        tone: 'error',
+        text: err instanceof ApiError ? err.message : 'Ошибка создания ссылки',
+      })
     } finally {
       setActionLoading(false)
     }
   }
 
-  if (loading) {
-    return (
-      <div className="tg-mini-center">
-        <Spinner />
-      </div>
-    )
+  const handleCopyDownloadLink = async () => {
+    if (!downloadLink) return
+    const copied = await copyText(downloadLink.url)
+    setFeedback({
+      tone: copied ? 'success' : 'error',
+      text: copied ? 'Ссылка скопирована' : 'Не удалось скопировать — выделите ссылку вручную',
+    })
+  }
+
+  const handleShareDownloadLink = async () => {
+    if (!downloadLink) return
+    if (shareViaTelegram(downloadLink.url, `VPN-конфиг: ${activeConfig?.client_name ?? ''}`)) {
+      setFeedback({ tone: 'info', text: 'Выберите чат, куда отправить ссылку' })
+      return
+    }
+    const copied = await copyText(downloadLink.url)
+    setFeedback({
+      tone: 'info',
+      text: copied
+        ? 'Поделиться недоступно — ссылка скопирована, вставьте в чат вручную'
+        : 'Поделиться недоступно — скопируйте ссылку вручную',
+    })
+  }
+
+  const handleOpenDownloadLink = () => {
+    if (!downloadLink) return
+    openExternalLink(downloadLink.url)
+    setFeedback({
+      tone: 'info',
+      text: 'Ссылка открыта. Если она одноразовая — на другом устройстве уже не сработает',
+    })
+  }
+
+  if (loading && configs.length === 0) {
+    return <ConfigsSkeleton />
   }
 
   return (
-    <div className="space-y-3">
-      {error && <p className="text-destructive">{error}</p>}
-      {configs.length === 0 ? (
-        <p className="tg-mini-muted">Нет конфигов</p>
-      ) : (
-        configs.map((config) => (
-          <Card key={config.id}>
-            <CardContent className="p-4 flex items-center justify-between gap-3">
-              <div>
-                <div className="font-medium">{config.client_name}</div>
-                <div className="text-sm text-muted-foreground">{config.vpn_type}</div>
-              </div>
-              <Button type="button" size="sm" onClick={() => void openActions(config)}>
-                Действия
-              </Button>
-            </CardContent>
-          </Card>
-        ))
+    <div className="tg-mini-dashboard space-y-3">
+      <MiniPageHeader
+        title="Конфиги"
+        subtitle={
+          configs.length > 0
+            ? `${configs.length} ${configs.length === 1 ? 'конфиг' : configs.length < 5 ? 'конфига' : 'конфигов'}`
+            : 'Скачайте или отправьте свой VPN-профиль'
+        }
+        onRefresh={() => void load({ silent: true })}
+        refreshing={refreshing}
+      />
+
+      {error && <p className="text-destructive text-sm">{error}</p>}
+
+      {configs.length > 0 && (
+        <>
+          <MiniListToolbar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder={isAdmin ? 'Поиск по имени или владельцу…' : 'Поиск по имени…'}
+            protocol={protocol}
+            onProtocolChange={setProtocol}
+            protocolCounts={protocolCounts}
+          />
+
+          {hasActiveFilters && (
+            <p className="tg-mini-results-meta">
+              Показано {filteredConfigs.length}
+              {filteredConfigs.length !== configs.length ? ` из ${configs.length}` : ''}
+            </p>
+          )}
+        </>
       )}
 
-      <Dialog open={Boolean(activeConfig)} onOpenChange={(open) => !open && closeSheet()}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{activeConfig?.client_name}</DialogTitle>
-            <DialogDescription>Отправка конфига или одноразовая ссылка</DialogDescription>
-          </DialogHeader>
-
-          {sheetLoading ? (
-            <div className="tg-mini-center py-6">
-              <Spinner />
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {files.length > 1 && (
-                <select
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  value={selectedPath}
-                  onChange={(e) => setSelectedPath(e.target.value)}
+      {configs.length === 0 ? (
+        <div className="tg-mini-filter-empty">
+          <FileKey size={22} className="text-muted-foreground" aria-hidden />
+          <p className="text-sm font-medium">Нет конфигов</p>
+          <p className="text-xs text-muted-foreground">Профили появятся после создания в панели</p>
+        </div>
+      ) : filteredConfigs.length === 0 ? (
+        <div className="tg-mini-filter-empty">
+          <Search size={20} className="text-muted-foreground" aria-hidden />
+          <p className="text-sm font-medium">Ничего не найдено</p>
+          <p className="text-xs text-muted-foreground">Измените поиск или сбросьте фильтр</p>
+          <Button type="button" variant="outline" size="sm" className="mt-1" onClick={resetFilters}>
+            Сбросить
+          </Button>
+        </div>
+      ) : (
+        filteredConfigs.map((config) => {
+          const owner = ownerLabel(config)
+          return (
+            <Card key={config.id} className="tg-mini-config-card">
+              <CardContent className="p-0">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 p-4 text-left"
+                  onClick={() => void openActions(config)}
                 >
-                  {files.map((file) => (
-                    <option key={file.path} value={file.path}>
-                      {file.download_filename || file.filename || file.path}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {files.length === 1 && (
-                <p className="text-sm text-muted-foreground">
-                  {files[0].download_filename || files[0].filename || files[0].path}
-                </p>
-              )}
-              {message && <p className="text-sm">{message}</p>}
-            </div>
-          )}
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate font-medium">{config.client_name}</span>
+                      <span className={`tg-mini-protocol-badge ${vpnTypeBadgeClass(config.vpn_type)}`}>
+                        {vpnTypeLabel(config.vpn_type)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {owner ? `Владелец: ${owner}` : 'Получить в Telegram с инструкцией'}
+                    </p>
+                  </div>
+                  <ChevronRight size={18} className="shrink-0 text-muted-foreground" aria-hidden />
+                </button>
+              </CardContent>
+            </Card>
+          )
+        })
+      )}
 
-          <DialogFooter className="flex-col gap-2 sm:flex-col">
-            <Button
-              type="button"
-              disabled={actionLoading || sheetLoading || !selectedPath}
-              onClick={() => void handleSend('self')}
-            >
-              Отправить себе
-            </Button>
-            {isAdmin && (
-              <Button
-                type="button"
-                variant="outline"
-                disabled={actionLoading || sheetLoading || !selectedPath}
-                onClick={() => void handleSend('chat')}
-              >
-                Отправить в общий chat
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={actionLoading || sheetLoading || !selectedPath}
-              onClick={() => void handleQrLink()}
-            >
-              QR-ссылка
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfigActionDialog
+        config={activeConfig}
+        files={files}
+        selectedPath={selectedPath}
+        onSelectedPathChange={handleSelectedPathChange}
+        platform={platform}
+        onPlatformChange={setPlatform}
+        loading={sheetLoading}
+        actionLoading={actionLoading}
+        feedback={feedback}
+        downloadLink={downloadLink}
+        canShareLink={canShareInTelegram}
+        isForeignConfig={isForeignConfig}
+        ownerLabel={activeConfig ? ownerLabel(activeConfig) : null}
+        onClose={closeSheet}
+        onSend={(destination) => void handleSend(destination)}
+        onCreateDownloadLink={() => void handleCreateDownloadLink()}
+        onCopyDownloadLink={() => void handleCopyDownloadLink()}
+        onShareDownloadLink={handleShareDownloadLink}
+        onOpenDownloadLink={handleOpenDownloadLink}
+      />
     </div>
   )
 }

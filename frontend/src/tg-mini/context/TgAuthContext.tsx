@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ApiError } from '@/api/client'
+import { applyThemeClass, normalizeTheme } from '@/lib/theme'
 import { clearTgToken, getTgSettings, getTgToken, setTgToken, tgAuth } from '@/tg-mini/api'
 import type { TgMiniSettings } from '@/types'
 
@@ -28,6 +29,7 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
   const loadSettings = useCallback(async () => {
     const data = await getTgSettings()
     setSettings(data)
+    applyThemeClass(normalizeTheme(data.theme))
     return data
   }, [])
 

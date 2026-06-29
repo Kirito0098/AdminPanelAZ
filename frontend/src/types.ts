@@ -566,6 +566,7 @@ export interface TgMiniDashboard {
   total_configs: number
   connected_openvpn: number
   connected_wireguard: number
+  total_wireguard_peers: number
   server_ip: string | null
   openvpn_clients: Array<{ common_name?: string; [key: string]: unknown }>
   wireguard_peers: Array<{
@@ -573,14 +574,20 @@ export interface TgMiniDashboard {
     public_key: string
     transfer_rx: number
     transfer_tx: number
+    latest_handshake?: string | null
   }>
   timestamp: string
 }
+
+export type InstallPlatform = 'ios' | 'mac' | 'windows' | 'android' | 'linux'
 
 export interface TgMiniConfig {
   id: number
   client_name: string
   vpn_type: string
+  owner_username?: string | null
+  is_mine?: boolean
+  owner_telegram_linked?: boolean
 }
 
 export interface TgMiniConfigFile {
@@ -596,6 +603,7 @@ export interface TgMiniSettings {
   bot_configured: boolean
   username: string
   role: string
+  theme: 'light' | 'dark'
 }
 
 export interface TgMiniNode extends Node {
@@ -626,13 +634,41 @@ export interface TgMiniWarperStatus {
   node_host: string
   status: string
   raw: Record<string, unknown>
+  installed?: boolean
+  active?: boolean
+  version?: string | null
+  conflict_antizapret_warp?: boolean
+  health_error?: string | null
+  outbound_mode?: string | null
+  fake_subnet?: string | null
+  domain_count?: number | null
+  traffic_tx?: number | null
+  traffic_rx?: number | null
+  singbox_running?: boolean | null
+  kresd_patched?: boolean | null
+}
+
+export interface TgMiniCidrPipelineTask {
+  task_id?: string | number | null
+  task_type?: string | null
+  task_label?: string | null
+  status?: string | null
+  progress_percent?: number | null
+  progress_stage?: string | null
+  message?: string | null
 }
 
 export interface TgMiniCidrStatus {
   total_cidrs: number
   last_refresh_status?: string | null
   last_refresh_finished?: string | null
+  last_refresh_started?: string | null
   active_task?: string | null
+  pipeline_task?: TgMiniCidrPipelineTask | null
+  providers_loaded?: number | null
+  providers_total?: number | null
+  alerts_count?: number | null
+  has_compile_artifacts?: boolean | null
   last_compile?: Record<string, unknown> | null
   last_deploy?: Record<string, unknown> | null
 }

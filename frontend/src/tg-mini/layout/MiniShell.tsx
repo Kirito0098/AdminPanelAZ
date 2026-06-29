@@ -1,27 +1,11 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { Outlet } from 'react-router-dom'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import { Button } from '@/components/ui/button'
 import Spinner from '@/components/ui/Spinner'
-import { cn } from '@/lib/utils'
-
-const baseTabs = [
-  { to: '/', label: 'Дашборд', end: true },
-  { to: '/configs', label: 'Конфиги' },
-  { to: '/settings', label: 'Настройки' },
-]
+import MiniBottomNav from '@/tg-mini/components/MiniBottomNav'
 
 export default function MiniShell() {
   const { status, error, settings, isAdmin, retryAuth } = useTgAuth()
-  const tabs = isAdmin
-    ? [
-        baseTabs[0],
-        baseTabs[1],
-        { to: '/nodes', label: 'Узлы' },
-        { to: '/warper', label: 'WARP' },
-        { to: '/cidr', label: 'CIDR' },
-        baseTabs[2],
-      ]
-    : baseTabs
 
   if (status === 'loading') {
     return (
@@ -60,21 +44,7 @@ export default function MiniShell() {
         <Outlet />
       </main>
 
-      <nav
-        className={cn('tg-mini-tabs', tabs.length > 3 ? 'tg-mini-tabs-cols-6' : 'tg-mini-tabs-cols-3')}
-        aria-label="Навигация мини-приложения"
-      >
-        {tabs.map((tab) => (
-          <NavLink
-            key={tab.to}
-            to={tab.to}
-            end={tab.end}
-            className={({ isActive }) => `tg-mini-tab${isActive ? ' is-active' : ''}`}
-          >
-            {tab.label}
-          </NavLink>
-        ))}
-      </nav>
+      <MiniBottomNav isAdmin={isAdmin} />
     </div>
   )
 }

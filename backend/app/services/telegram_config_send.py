@@ -6,13 +6,14 @@ import os
 import tempfile
 from typing import Literal
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models import User, VpnConfig, VpnType
 from app.services.node_manager import get_active_adapter
 from app.services.profile_download_name import build_profile_download_filename
 from app.services.telegram_profile_ui import file_caption
-from app.services.telegram import send_tg_document
+from app.services.telegram import send_tg_document, send_tg_message
+from app.services.vpn_install_instructions import InstallPlatform, build_install_instruction_message
 
 
 def _download_name(config: VpnConfig, file_item: dict, selected_path: str) -> str:
@@ -33,6 +34,7 @@ def send_config_files_to_chat(
     path: str | None = None,
     send_all: bool = False,
     run_async: bool = False,
+    install_platform: InstallPlatform | None = None,
 ) -> tuple[int, str | None]:
     """Send profile file(s) as Telegram documents. Returns (sent_count, error_message)."""
     if not bot_token:
@@ -55,6 +57,7 @@ def send_config_files_to_chat(
         targets = [files[0]]
 
     sent = 0
+    last_file_item: dict | None = None
     for index, file_item in enumerate(targets):
         selected_path = file_item.get("path", "")
         if not selected_path:
@@ -85,6 +88,17 @@ def send_config_files_to_chat(
         if not ok:
             return sent, "Не удалось отправить файл в Telegram" if sent == 0 else None
         sent += 1
+        last_file_item = file_item
+
+    if install_platform and last_file_item and sent > 0:
+        instruction = build_install_instruction_message(
+            protocol=last_file_item.get("protocol", ""),
+            platform=install_platform,
+            client_name=config.client_name,
+        )
+        if instruction:
+            if not send_tg_message(bot_token, str(chat_id), instruction, run_async=run_async):
+                return sent, "Конфиг отправлен, но инструкция не доставлена"
 
     return sent, None
 
@@ -96,16 +110,26 @@ def send_config_for_user(
     *,
     bot_token: str,
     path: str | None = None,
-    destination: Literal["self", "chat"] = "self",
+    destination: Literal["self", "chat", "owner"] = "self",
     chat_id_override: str | int | None = None,
     send_all: bool = False,
     run_async: bool = False,
+    install_platform: InstallPlatform | None = None,
 ) -> tuple[int, str | None]:
     """Resolve destination chat and send config files."""
     from app.routers.maintenance import _get_setting
 
     if chat_id_override is not None:
         chat_id = chat_id_override
+    elif destination == "owner":
+        if user.role.value != "admin":
+            return 0, "Недостаточно прав"
+        owner = db.query(User).filter(User.id == config.owner_id).first()
+        if not owner:
+            return 0, "Владелец конфига не найден"
+        chat_id = (owner.telegram_id or "").strip()
+        if not chat_id:
+            return 0, "У пользователя не привязан Telegram"
     elif destination == "chat":
         if user.role.value != "admin":
             return 0, "Только admin может отправлять в общий chat"
@@ -127,4 +151,5 @@ def send_config_for_user(
         path=path,
         send_all=send_all,
         run_async=run_async,
+        install_platform=install_platform,
     )

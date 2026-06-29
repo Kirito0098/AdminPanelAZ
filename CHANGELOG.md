@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-06-30
+
 ### Added
 
 #### Мониторинг трафика — суммарный объём по HA-группе
@@ -82,7 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`docs/edit-files.md`** — auto-replicate vs manual transfer (fallback).
 - **`docs/antizapret-config.md`** — `ANTIZAPRET_HA_SETTING_EXCLUDE`, HA scope setup.
 - **`docs/konfiguracii.md`** — формат CSV import с политиками.
-- **`reviews/HA-auto-sync-roadmap.md`**, **`reviews/HA-auto-sync-remaining.md`** — план, чеклист, статусы.
+- **`docs/traffic-monitoring.md`** — секция HA-групп: суммарный трафик, бейджи, лимиты per node.
+- **`reviews/HA-auto-sync-roadmap.md`**, **`reviews/traffic-ha-aggregation-plan.md`** — план auto-sync и агрегации трафика.
 
 ### Changed
 
@@ -96,9 +99,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Удаление узла** — `purge_node_related`: ConfigTag, ClientTemplate, AlertRule, отвязка `ha_primary_config_id`.
 - **Удаление пользователя** — `_purge_user_before_delete`: UserReminderLog, WebAuthnCredential.
 - **Push full** остаётся для bootstrap / disaster recovery, не для каждой правки config.
-
-### Changed
-
 - **HA Push full переносит `OPENVPN_HOST` / `WIREGUARD_HOST` с primary на replica** — `run_push_full` читает непустые хосты из `setup` primary и пишет их в `setup` каждой replica **перед** restore, так что `client.sh 7` (recreate_profiles) внутри restore регенерирует профили клиентов с правильным хостом. Архив `client.sh 8` файл `setup` не содержит, поэтому раньше в `manual_full` хосты по Push full не переносились. В `auto` хосты уже реплицируются автоматически при правке настроек на primary (`replicate_antizapret_settings` + `enqueue_ha_routing_apply_replicas` → doall + recreate). Результат Push full содержит `host_copy` (по узлам).
 
 ### Fixed
@@ -132,7 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### E2E checklist (roadmap §7)
 
 - **Integration-proxy:** прогнан 2026-06-19, **103 passed** (mock adapters, `auto_group_db`).
-- **Live staging:** открыт — требует Sync Group + Push full + Verify на двух VPN-узлах (см. `reviews/HA-auto-sync-remaining.md` §4).
+- **Live staging:** открыт — требует Sync Group + Push full + Verify на двух VPN-узлах (см. `reviews/HA-auto-sync-roadmap.md`).
 
 ## [2.4.0] - 2026-06-18
 
@@ -821,7 +821,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 - Production-развёртывание: `install.sh`, daemon/watchdog, systemd, раздача UI из backend в prod-режиме.
 - OpenVPN management sockets, vnStat, WebSocket-мониторинг, Telegram Mini App, in-panel pytest.
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.1.0...v2.2.0

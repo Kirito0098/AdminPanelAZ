@@ -8,3 +8,17 @@ export function getStoredTheme(): 'light' | 'dark' {
   if (stored === 'light' || stored === 'dark') return stored
   return 'dark'
 }
+
+export function normalizeTheme(value?: string | null): 'light' | 'dark' {
+  return value === 'light' ? 'light' : 'dark'
+}
+
+/** Apply theme before React mounts in the Telegram Mini App WebView. */
+export function bootstrapMiniAppTheme(): void {
+  const tgScheme = window.Telegram?.WebApp?.colorScheme
+  if (tgScheme === 'light' || tgScheme === 'dark') {
+    applyThemeClass(tgScheme)
+    return
+  }
+  applyThemeClass(getStoredTheme())
+}

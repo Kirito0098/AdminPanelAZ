@@ -1,8 +1,11 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { bootstrapMiniAppTheme } from '@/lib/theme'
 import '@/styles/index.css'
 import '@/tg-mini/styles/tg-mini.css'
 import TgMiniApp from '@/tg-mini/App'
+
+bootstrapMiniAppTheme()
 
 const boot = document.getElementById('tg-mini-boot')
 if (boot) boot.remove()

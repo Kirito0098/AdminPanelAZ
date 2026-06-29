@@ -1,6 +1,7 @@
 import { ApiError } from '@/api/client'
 import type {
   AdminNotifySettings,
+  InstallPlatform,
   TelegramSettings,
   TgMiniAuthResponse,
   TgMiniConfig,
@@ -80,7 +81,7 @@ export async function getTgConfigFiles(configId: number): Promise<{ files: TgMin
 
 export async function sendTgConfig(
   configId: number,
-  data: { path?: string; destination: 'self' | 'chat' },
+  data: { path?: string; destination: 'self' | 'owner'; platform?: InstallPlatform },
 ): Promise<{ message: string }> {
   return tgFetch<{ message: string }>(`/configs/${configId}/send`, {
     method: 'POST',

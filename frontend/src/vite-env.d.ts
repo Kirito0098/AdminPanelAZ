@@ -15,10 +15,15 @@ interface TelegramWebApp {
   expand: () => void
   close: () => void
   openLink: (url: string) => void
+  shareUrl?: (url: string, text?: string) => void
+  HapticFeedback?: {
+    notificationOccurred: (type: 'error' | 'success' | 'warning') => void
+  }
   initData: string
   initDataUnsafe: Record<string, unknown>
   themeParams: Record<string, string | undefined>
   colorScheme: 'light' | 'dark'
+  platform?: string
 }
 
 interface Window {
