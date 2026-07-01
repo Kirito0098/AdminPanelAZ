@@ -16,6 +16,7 @@
 ### Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.6.0](#260---2026-07-02) — 2026-07-02
 - [2.5.0](#250---2026-06-30) — 2026-06-30
 - [2.4.0](#240---2026-06-18) — 2026-06-18
 - [2.3.0](#230---2026-06-16) — 2026-06-16
@@ -27,6 +28,12 @@
 ---
 
 ## [Unreleased]
+
+---
+
+## [2.6.0] - 2026-07-02
+
+> **Кратко:** UX/UI настроек и конфигураций, карточки клиентов с онлайн-статусом и адаптивной сеткой, журнал действий с группировкой, русские подписи, Telegram Mini App и Runbook/обновления из удалённого changelog.
 
 ### ✨ Added
 
@@ -77,7 +84,7 @@
 #### Конфигурации — страница Dashboard
 
 - **Hero-баннер** — метрики и pill-карточки вместо статичных info-alert (`DashboardPage.tsx`, `MetricCard.tsx`).
-- **Карточки клиентов** — компактные двухколоночные метаданные без растягивания пустого места; сетка **4 карточки в ряд** на `xl+` (`ConfigCardsSection.tsx`).
+- **Карточки клиентов** — адаптивная сетка **3 колонки на 1080p**, **4 колонки на 2K+** (брейкпоинт `2k`); одинаковая высота карточек и выравнивание кнопок внизу; «Удалить» — только иконка (`ConfigCardsSection.tsx`, `ConfigCard.tsx`, `tailwind.config.js`).
 - **Массовый выбор** — стилизованный чекбокс (`checkbox.tsx`); удаление тегов с выбранных конфигов.
 
 #### Редактор файлов
@@ -1070,7 +1077,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.2.0...v2.3.0
