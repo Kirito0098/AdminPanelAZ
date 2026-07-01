@@ -743,6 +743,12 @@ def run_db_migrations() -> None:
             ("host_memory_total_mb", "INTEGER DEFAULT 0"),
             ("host_disk_percent", "FLOAT DEFAULT 0"),
             ("host_load_1", "FLOAT"),
+            ("local_node_memory_mb", "INTEGER DEFAULT 0"),
+            ("total_stack_memory_mb", "INTEGER DEFAULT 0"),
+            ("local_vpn_core_memory_mb", "INTEGER DEFAULT 0"),
+            ("legacy_antizapret_memory_mb", "INTEGER DEFAULT 0"),
+            ("node_agent_memory_mb", "INTEGER DEFAULT 0"),
+            ("managed_vpn_memory_mb", "INTEGER DEFAULT 0"),
         ],
         "users": [
             ("totp_secret_encrypted", "VARCHAR(512)"),

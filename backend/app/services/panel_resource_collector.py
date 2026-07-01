@@ -1,4 +1,4 @@
-"""Collect AdminPanelAZ process metrics on the controller machine."""
+"""Collect RAM for AdminPanelAZ + local node and services the node manages on this host."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ import os
 import platform
 import time
 from datetime import datetime, timezone
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
 
 import psutil
 
@@ -15,6 +16,19 @@ from app.config import get_settings
 settings = get_settings()
 
 _CPU_READY = False
+_EXCLUDED_PATH_MARKERS = ("/opt/adminantizapret",)
+_MANAGED_VPN_PROCESS_NAMES = frozenset(
+    {
+        "openvpn",
+        "dnsmasq",
+        "stubby",
+        "dnscrypt-proxy",
+        "sing-box",
+        "xray",
+        "haproxy",
+    }
+)
+StackRole = Literal["panel", "node_agent", "managed_vpn"]
 
 
 def _utcnow() -> datetime:
@@ -35,35 +49,146 @@ def _safe_cmdline(proc: psutil.Process) -> str:
         return ""
 
 
-def _match_backend(cmd: str) -> bool:
-    if not cmd:
-        return False
-    if "uvicorn" in cmd and "app.main" in cmd:
-        return True
-    if "adminpanelaz" in cmd and ("uvicorn" in cmd or "app.main" in cmd):
-        return True
-    return False
+def _safe_name(proc: psutil.Process) -> str:
+    try:
+        return (proc.name() or "").lower()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return ""
 
 
-def _match_watchdog(cmd: str) -> bool:
-    if not cmd:
-        return False
-    if "start.sh" in cmd:
-        return True
-    return "watchdog" in cmd and "adminpanelaz" in cmd
+def _safe_exe(proc: psutil.Process) -> str:
+    try:
+        return (proc.exe() or "").lower()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return ""
 
 
-def _match_nginx(cmd: str) -> bool:
-    return bool(cmd) and "nginx" in cmd
+def _safe_cwd(proc: psutil.Process) -> str:
+    try:
+        return (proc.cwd() or "").lower()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+        return ""
 
 
-def _match_frontend_dev(cmd: str) -> bool:
-    if not cmd:
-        return False
-    panel_hint = "adminpanelaz" in cmd.replace("\\", "/")
-    if not panel_hint and "vite" not in cmd and "npm" not in cmd:
-        return False
-    return "vite" in cmd or "npm run dev" in cmd
+def _normalize_path(text: str) -> str:
+    return text.replace("\\", "/")
+
+
+def _path_contains(text: str, hint: str) -> bool:
+    return bool(hint) and hint in _normalize_path(text)
+
+
+def _path_contains_any(text: str, hints: list[str]) -> bool:
+    return any(_path_contains(text, hint) for hint in hints)
+
+
+def _is_excluded_path(text: str) -> bool:
+    normalized = _normalize_path(text)
+    return any(marker in normalized for marker in _EXCLUDED_PATH_MARKERS)
+
+
+def _repo_root_hints() -> list[str]:
+    from app.services.node_update import resolve_repo_root
+
+    hints: list[str] = []
+    root = resolve_repo_root()
+    if root is not None:
+        try:
+            hints.append(str(root.resolve()).lower())
+        except OSError:
+            hints.append(str(root).lower())
+    return hints
+
+
+def _antizapret_path_hints() -> list[str]:
+    hints: list[str] = []
+    for raw in (settings.antizapret_path, Path("/root/antizapret")):
+        try:
+            text = str(raw.resolve()).lower()
+        except OSError:
+            text = str(raw).lower()
+        if text and text not in hints:
+            hints.append(text)
+    return hints
+
+
+def _classify_stack_process(name: str, blob: str, cwd: str) -> StackRole | None:
+    """Classify process into AdminPanelAZ stack (panel / node agent / node-managed VPN)."""
+    if _is_excluded_path(blob) or _is_excluded_path(cwd):
+        return None
+
+    repo_hints = _repo_root_hints()
+    az_hints = _antizapret_path_hints()
+
+    if "start_node_agent" in blob or "node_agent/main" in blob or "node_agent.main" in blob:
+        return "node_agent"
+    if "node_agent" in blob and _path_contains_any(blob, repo_hints):
+        return "node_agent"
+    if "uvicorn" in blob and "node_agent" in blob:
+        return "node_agent"
+
+    if _path_contains_any(blob, repo_hints):
+        if "uvicorn" in blob and "app.main" in blob:
+            return "panel"
+        if "start.sh" in blob and "start_node_agent" not in blob:
+            return "panel"
+        if "watchdog" in blob and "adminpanelaz" in blob:
+            return "panel"
+        if "vite" in blob or "npm run dev" in blob:
+            return "panel"
+
+    if settings.behind_nginx and "nginx" in blob and _path_contains_any(blob, repo_hints):
+        return "panel"
+
+    if not settings.local_antizapret_enabled:
+        return None
+
+    if name in _MANAGED_VPN_PROCESS_NAMES or name.startswith("openvpn"):
+        return "managed_vpn"
+    if "wireguard" in blob or "wg-quick" in blob or blob.strip().startswith("wg "):
+        return "managed_vpn"
+    if _path_contains_any(blob, az_hints) or _path_contains_any(cwd, az_hints):
+        return "managed_vpn"
+
+    return None
+
+
+def _scan_stack_processes() -> dict[StackRole, list[psutil.Process]]:
+    stacks: dict[StackRole, list[psutil.Process]] = {
+        "panel": [],
+        "node_agent": [],
+        "managed_vpn": [],
+    }
+    seen: set[int] = set()
+
+    for proc in psutil.process_iter():
+        try:
+            if proc.pid in seen:
+                continue
+            cmd = _safe_cmdline(proc)
+            name = _safe_name(proc)
+            exe = _safe_exe(proc)
+            cwd = _safe_cwd(proc)
+            blob = f"{cmd} {exe} {cwd}"
+            role = _classify_stack_process(name, blob, cwd)
+            if role is None:
+                continue
+            stacks[role].append(proc)
+            seen.add(proc.pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+
+    current_pid = os.getpid()
+    if current_pid not in seen:
+        try:
+            proc = psutil.Process(current_pid)
+            role = _classify_stack_process(_safe_name(proc), f"{_safe_cmdline(proc)} {_safe_exe(proc)}", _safe_cwd(proc))
+            if role == "panel":
+                stacks["panel"].append(proc)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    return stacks
 
 
 def _proc_stats(procs: list[psutil.Process]) -> dict[str, Any]:
@@ -84,47 +209,61 @@ def _proc_stats(procs: list[psutil.Process]) -> dict[str, Any]:
     }
 
 
-def _scan_panel_processes() -> tuple[list[psutil.Process], list[psutil.Process], list[psutil.Process], list[psutil.Process]]:
+def _split_panel_stats(
+    panel_procs: list[psutil.Process],
+) -> tuple[dict[str, Any], int, int | None, int | None, int | None]:
     backend: list[psutil.Process] = []
     watchdog: list[psutil.Process] = []
     nginx: list[psutil.Process] = []
     frontend_dev: list[psutil.Process] = []
-    seen: set[int] = set()
 
-    candidates: list[psutil.Process] = []
-    try:
-        candidates.append(psutil.Process(os.getpid()))
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        pass
-
-    for proc in psutil.process_iter():
-        try:
-            if proc.pid in seen:
-                continue
-            cmd = _safe_cmdline(proc)
-            if not cmd:
-                continue
-            if _match_backend(cmd):
-                backend.append(proc)
-                seen.add(proc.pid)
-            elif _match_watchdog(cmd):
-                watchdog.append(proc)
-                seen.add(proc.pid)
-            elif settings.behind_nginx and _match_nginx(cmd):
-                nginx.append(proc)
-                seen.add(proc.pid)
-            elif _match_frontend_dev(cmd):
-                frontend_dev.append(proc)
-                seen.add(proc.pid)
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            continue
-
-    for proc in candidates:
-        if proc.pid not in seen and _match_backend(_safe_cmdline(proc)):
+    for proc in panel_procs:
+        cmd = _safe_cmdline(proc)
+        if _match_backend(cmd):
             backend.append(proc)
-            seen.add(proc.pid)
+        elif _match_watchdog(cmd):
+            watchdog.append(proc)
+        elif settings.behind_nginx and _match_nginx(cmd):
+            nginx.append(proc)
+        elif _match_frontend_dev(cmd):
+            frontend_dev.append(proc)
+        else:
+            backend.append(proc)
 
-    return backend, watchdog, nginx, frontend_dev
+    backend_stats = _proc_stats(backend)
+    watchdog_stats = _proc_stats(watchdog) if watchdog else None
+    nginx_stats = _proc_stats(nginx) if nginx else None
+    frontend_stats = _proc_stats(frontend_dev) if frontend_dev else None
+
+    workers = sum(1 for p in backend if "app.main" in _safe_cmdline(p))
+    if workers == 0:
+        workers = backend_stats["process_count"]
+
+    return (
+        backend_stats,
+        workers,
+        watchdog_stats["memory_mb"] if watchdog_stats else None,
+        nginx_stats["memory_mb"] if nginx_stats else None,
+        frontend_stats["memory_mb"] if frontend_stats else None,
+    )
+
+
+def _match_backend(cmd: str) -> bool:
+    return bool(cmd) and "uvicorn" in cmd and "app.main" in cmd
+
+
+def _match_watchdog(cmd: str) -> bool:
+    return bool(cmd) and "start.sh" in cmd and "start_node_agent" not in cmd
+
+
+def _match_nginx(cmd: str) -> bool:
+    return bool(cmd) and "nginx" in cmd
+
+
+def _match_frontend_dev(cmd: str) -> bool:
+    if not cmd:
+        return False
+    return "vite" in cmd or "npm run dev" in cmd
 
 
 def _collect_host_metrics() -> dict[str, Any]:
@@ -155,42 +294,45 @@ def _collect_host_metrics() -> dict[str, Any]:
 
 
 def collect_panel_metrics() -> dict[str, Any]:
-    """Live snapshot of panel-related processes on this machine."""
+    """RAM snapshot: AdminPanelAZ + local node agent + VPN services under ANTIZAPRET_PATH."""
     _ensure_cpu()
-    backend_procs, watchdog_procs, nginx_procs, frontend_dev_procs = _scan_panel_processes()
+    stacks = _scan_stack_processes()
 
-    backend = _proc_stats(backend_procs)
-    watchdog = _proc_stats(watchdog_procs) if watchdog_procs else None
-    nginx = _proc_stats(nginx_procs) if nginx_procs else None
-    frontend_dev = _proc_stats(frontend_dev_procs) if frontend_dev_procs else None
+    panel_stats = _proc_stats(stacks["panel"])
+    node_agent_stats = _proc_stats(stacks["node_agent"])
+    managed_vpn_stats = _proc_stats(stacks["managed_vpn"])
 
-    total_memory_mb = backend["memory_mb"]
-    if watchdog:
-        total_memory_mb += watchdog["memory_mb"]
-    if nginx:
-        total_memory_mb += nginx["memory_mb"]
-    if frontend_dev:
-        total_memory_mb += frontend_dev["memory_mb"]
+    backend_stats, workers, watchdog_mb, nginx_mb, frontend_dev_mb = _split_panel_stats(stacks["panel"])
 
-    workers = sum(1 for p in backend_procs if "app.main" in _safe_cmdline(p))
-    if workers == 0:
-        workers = backend["process_count"]
+    total_panel_memory_mb = panel_stats["memory_mb"]
+    node_agent_memory_mb = node_agent_stats["memory_mb"]
+    managed_vpn_memory_mb = managed_vpn_stats["memory_mb"]
+    local_node_memory_mb = node_agent_memory_mb + managed_vpn_memory_mb
+    total_stack_memory_mb = total_panel_memory_mb + local_node_memory_mb
 
     return {
         "timestamp": _utcnow(),
-        "backend_cpu_percent": backend["cpu_percent"],
-        "backend_memory_mb": backend["memory_mb"],
-        "backend_rss_mb": backend["rss_mb"],
+        "backend_cpu_percent": backend_stats["cpu_percent"],
+        "backend_memory_mb": backend_stats["memory_mb"],
+        "backend_rss_mb": backend_stats["rss_mb"],
         "backend_workers": workers,
-        "nginx_memory_mb": nginx["memory_mb"] if nginx else None,
-        "watchdog_memory_mb": watchdog["memory_mb"] if watchdog else None,
-        "frontend_dev_memory_mb": frontend_dev["memory_mb"] if frontend_dev else None,
-        "total_panel_memory_mb": total_memory_mb,
+        "nginx_memory_mb": nginx_mb,
+        "watchdog_memory_mb": watchdog_mb,
+        "frontend_dev_memory_mb": frontend_dev_mb,
+        "total_panel_memory_mb": total_panel_memory_mb,
+        "node_agent_memory_mb": node_agent_memory_mb,
+        "managed_vpn_memory_mb": managed_vpn_memory_mb,
+        "local_vpn_core_memory_mb": managed_vpn_memory_mb,
+        "legacy_antizapret_memory_mb": 0,
+        "local_node_memory_mb": local_node_memory_mb,
+        "total_stack_memory_mb": total_stack_memory_mb,
+        "local_node_on_host": bool(settings.local_antizapret_enabled),
+        "stack_note": "",
         "frontend_note": (
             "Статические файлы раздаёт backend (FastAPI)"
             if settings.serve_frontend
             else "Frontend dev-сервер (Vite) — только в режиме разработки"
-            if frontend_dev
+            if frontend_dev_mb
             else "Статические файлы раздаёт backend (FastAPI)"
         ),
         **_collect_host_metrics(),

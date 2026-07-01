@@ -500,6 +500,7 @@ export interface ResourceProfileItem {
   label: string
   description: string
   recommended_ram_gb?: number | null
+  panel_mb_delta?: number | null
   active: boolean
   impact?: ResourceProfileImpact
   workers_disabled?: string[]
@@ -516,12 +517,21 @@ export interface ChangelogSection {
   items: string[]
 }
 
+export interface ChangelogBlock {
+  version: string
+  date?: string
+  sections?: ChangelogSection[]
+}
+
 export interface LatestChangelog {
   success: boolean
   version?: string
   date?: string
   sections?: ChangelogSection[]
   message?: string
+  source?: string
+  latest_release?: ChangelogBlock | null
+  pending?: ChangelogBlock | null
 }
 
 export interface TelegramSettings {
@@ -1290,6 +1300,12 @@ export interface PanelResourceHistoryPoint {
   watchdog_memory_mb?: number | null
   frontend_dev_memory_mb?: number | null
   total_panel_memory_mb: number
+  local_node_memory_mb?: number
+  node_agent_memory_mb?: number
+  managed_vpn_memory_mb?: number
+  local_vpn_core_memory_mb?: number
+  legacy_antizapret_memory_mb?: number
+  total_stack_memory_mb?: number
   host_cpu_percent: number
   host_memory_percent: number
   host_memory_used_mb: number
@@ -1314,6 +1330,14 @@ export interface PanelResourceCurrent {
   watchdog_memory_mb?: number | null
   frontend_dev_memory_mb?: number | null
   total_panel_memory_mb: number
+  local_node_memory_mb?: number
+  node_agent_memory_mb?: number
+  managed_vpn_memory_mb?: number
+  local_vpn_core_memory_mb?: number
+  legacy_antizapret_memory_mb?: number
+  total_stack_memory_mb?: number
+  local_node_on_host?: boolean
+  stack_note?: string
   frontend_note: string
   host_cpu_percent: number
   host_memory_percent: number

@@ -382,13 +382,14 @@ FEATURE_TOGGLE_BY_ENV = {item.env_key: item for item in FEATURE_TOGGLES}
 
 RESOURCE_PROFILES: dict[str, dict] = {
     "minimal": {
-        "label": "Minimal (1 GB panel-only)",
+        "label": "Minimal (panel-only)",
         "description": "Минимум фоновых задач: без traffic/CIDR/metrics collectors, 1 worker.",
         "recommended_ram_gb": 1,
+        "panel_mb_delta": -40,
         "impact": {
-            "ram": "минимальная (−0…80 MB steady state)",
-            "cpu_disk": "заметно меньше: нет traffic/CIDR/metrics collectors и опроса узлов",
-            "note": "Panel-only на 1 GB без AntiZapret на том же хосте",
+            "ram": "меньше фоновых процессов панели; VPN на хосте не меняется",
+            "cpu_disk": "нет traffic/CIDR/metrics collectors и опроса узлов",
+            "note": "Для VDS без AntiZapret на том же хосте — только AdminPanelAZ",
         },
         "workers_disabled": [
             "traffic_collector",
@@ -430,10 +431,11 @@ RESOURCE_PROFILES: dict[str, dict] = {
         "label": "Standard",
         "description": "Баланс: traffic sync, health poll, retention; без тяжёлого CIDR auto-scheduler.",
         "recommended_ram_gb": 2,
+        "panel_mb_delta": -20,
         "impact": {
-            "ram": "умеренная",
+            "ram": "чуть меньше RAM панели, чем Full; VPN на хосте тот же",
             "cpu_disk": "traffic + metrics без nightly CIDR auto-scheduler",
-            "note": "Рекомендуется для панели с несколькими VPN-узлами",
+            "note": "Подходит, если CIDR по расписанию не нужен",
         },
         "workers_disabled": ["cidr_scheduler"],
         "toggles": {
@@ -465,12 +467,13 @@ RESOURCE_PROFILES: dict[str, dict] = {
     },
     "full": {
         "label": "Full",
-        "description": "Все фоновые задачи и разделы; рекомендуется 2+ GB RAM.",
+        "description": "Все фоновые задачи и разделы.",
         "recommended_ram_gb": 2,
+        "panel_mb_delta": 0,
         "impact": {
-            "ram": "выше (все collectors + CIDR scheduler)",
-            "cpu_disk": "полная фоновая нагрузка",
-            "note": "Combo panel+VPN на 1 GB не рекомендуется",
+            "ram": "максимум фоновых задач панели; VPN на хосте тот же",
+            "cpu_disk": "полная фоновая нагрузка collectors",
+            "note": "Цифры RAM — замер «панель + VPN на сервере» на карточке текущего профиля",
         },
         "workers_disabled": [],
         "toggles": {
@@ -589,6 +592,7 @@ class FeatureToggleService:
                 "label": meta["label"],
                 "description": meta["description"],
                 "recommended_ram_gb": meta.get("recommended_ram_gb"),
+                "panel_mb_delta": meta.get("panel_mb_delta", 0),
                 "impact": meta.get("impact", {}),
                 "workers_disabled": meta.get("workers_disabled", []),
                 "active": key == current,

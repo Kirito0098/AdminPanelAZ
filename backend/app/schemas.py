@@ -496,6 +496,12 @@ class PanelResourceHistoryPoint(BaseModel):
     watchdog_memory_mb: int | None = None
     frontend_dev_memory_mb: int | None = None
     total_panel_memory_mb: int
+    local_node_memory_mb: int = 0
+    node_agent_memory_mb: int = 0
+    managed_vpn_memory_mb: int = 0
+    local_vpn_core_memory_mb: int = 0
+    legacy_antizapret_memory_mb: int = 0
+    total_stack_memory_mb: int = 0
     host_cpu_percent: float = 0.0
     host_memory_percent: float = 0.0
     host_memory_used_mb: int = 0
@@ -520,6 +526,14 @@ class PanelResourceCurrentResponse(BaseModel):
     watchdog_memory_mb: int | None = None
     frontend_dev_memory_mb: int | None = None
     total_panel_memory_mb: int
+    local_node_memory_mb: int = 0
+    node_agent_memory_mb: int = 0
+    managed_vpn_memory_mb: int = 0
+    local_vpn_core_memory_mb: int = 0
+    legacy_antizapret_memory_mb: int = 0
+    total_stack_memory_mb: int = 0
+    local_node_on_host: bool = False
+    stack_note: str = ""
     frontend_note: str
     host_cpu_percent: float = 0.0
     host_memory_percent: float = 0.0
@@ -783,12 +797,21 @@ class ChangelogSection(BaseModel):
     items: list[str]
 
 
+class ChangelogBlockResponse(BaseModel):
+    version: str
+    date: str = ""
+    sections: list[ChangelogSection] = []
+
+
 class LatestChangelogResponse(BaseModel):
     success: bool = True
     version: str = ""
     date: str = ""
     sections: list[ChangelogSection] = []
     message: str = ""
+    source: str = ""
+    latest_release: ChangelogBlockResponse | None = None
+    pending: ChangelogBlockResponse | None = None
 
 
 class TelegramSettingsResponse(BaseModel):

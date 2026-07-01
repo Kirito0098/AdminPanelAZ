@@ -16,6 +16,8 @@ import {
   applyResourceProfile,
   getFeatureToggles,
   getLightHealth,
+  getPanelResourceCurrent,
+  getPanelResourceHistory,
   getResourceProfiles,
   updateFeatureToggles,
 } from '@/api/client'
@@ -29,6 +31,13 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
+import {
+  buildProfileLiveCopy,
+  formatComparedProfileHint,
+  formatMeasuredSubtitle,
+  summarizePanelResources,
+  type PanelResourceSummary,
+} from '@/lib/panelResourceStats'
 import { cn } from '@/lib/utils'
 import type { FeatureToggleItem, ResourceProfileImpact, ResourceProfileItem } from '@/types'
 
@@ -50,14 +59,13 @@ const PROFILE_META: Record<string, { icon: LucideIcon; stripe: string }> = {
   },
 }
 
-function formatRamHint(gb: number | null | undefined): string | null {
-  if (gb == null) return null
-  return `ориентир ~${gb} GB RAM`
-}
-
 const GROUP_STRIPE: Record<string, string> = {
   background: 'from-sky-500/70 to-sky-500/15',
   app_module: 'from-violet-500/70 to-violet-500/15',
+}
+
+function stripPresetRamLine(description: string): string {
+  return description.split(';')[0].trim().replace(/\.$/, '')
 }
 
 function parseIsoMs(value: string | null | undefined): number | null {
@@ -200,12 +208,16 @@ function ModuleToggleCard({
 function ProfileCard({
   profile,
   current,
+  currentProfileKey,
   applying,
+  ramSummary,
   onApply,
 }: {
   profile: ResourceProfileItem
   current: boolean
+  currentProfileKey: string
   applying: boolean
+  ramSummary: PanelResourceSummary | null
   onApply: () => void
 }) {
   const meta = PROFILE_META[profile.key] ?? {
@@ -213,8 +225,17 @@ function ProfileCard({
     stripe: 'from-muted to-muted/15',
   }
   const Icon = meta.icon
-  const ramHint = formatRamHint(profile.recommended_ram_gb)
   const workers = profile.workers_disabled ?? []
+  const liveCopy =
+    current && ramSummary?.hasData ? buildProfileLiveCopy(profile, ramSummary) : null
+  const description = liveCopy?.description ?? stripPresetRamLine(profile.description)
+  const impactRam = liveCopy?.ram ?? profile.impact?.ram
+  const impactCpuDisk = liveCopy?.cpuDisk ?? profile.impact?.cpu_disk
+  const impactNote = liveCopy?.note ?? profile.impact?.note
+  const subtitle =
+    current && ramSummary?.hasData
+      ? liveCopy?.subtitle ?? formatMeasuredSubtitle(ramSummary)
+      : formatComparedProfileHint(profile, ramSummary, currentProfileKey)
 
   return (
     <div
@@ -237,7 +258,7 @@ function ProfileCard({
             </div>
             <div className="min-w-0">
               <p className="font-semibold leading-tight">{profile.label}</p>
-              {ramHint && <p className="text-xs text-muted-foreground">{ramHint}</p>}
+              {subtitle && <p className="text-xs text-primary">{subtitle}</p>}
             </div>
           </div>
           {current && (
@@ -248,13 +269,13 @@ function ProfileCard({
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col">
-          <p className="line-clamp-2 text-sm leading-snug text-muted-foreground">{profile.description}</p>
+          <p className="line-clamp-2 text-sm leading-snug text-muted-foreground">{description}</p>
 
-          {profile.impact && (profile.impact.ram || profile.impact.cpu_disk || profile.impact.note) && (
+          {(impactRam || impactCpuDisk || impactNote) && (
             <div className="mt-2 space-y-0.5 rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs leading-snug text-muted-foreground">
-              {profile.impact.ram && <p className="line-clamp-1">RAM: {profile.impact.ram}</p>}
-              {profile.impact.cpu_disk && <p className="line-clamp-1">CPU/диск: {profile.impact.cpu_disk}</p>}
-              {profile.impact.note && <p className="line-clamp-1 text-foreground/80">{profile.impact.note}</p>}
+              {impactRam && <p className="line-clamp-2">RAM: {impactRam}</p>}
+              {impactCpuDisk && <p className="line-clamp-1">CPU/диск: {impactCpuDisk}</p>}
+              {impactNote && <p className="line-clamp-2 text-foreground/80">{impactNote}</p>}
             </div>
           )}
 
@@ -322,6 +343,7 @@ export default function FeatureTogglesTab() {
   )
   const [lastImpact, setLastImpact] = useState<ResourceProfileImpact | null>(null)
   const [lastWorkersDisabled, setLastWorkersDisabled] = useState<string[]>([])
+  const [ramSummary, setRamSummary] = useState<PanelResourceSummary | null>(null)
 
   const markRestartPending = () => {
     sessionStorage.setItem(RESTART_BANNER_KEY, '1')
@@ -350,6 +372,18 @@ export default function FeatureTogglesTab() {
     }
   }
 
+  const loadPanelRam = async () => {
+    try {
+      const [history, live] = await Promise.all([
+        getPanelResourceHistory('7d'),
+        getPanelResourceCurrent(),
+      ])
+      setRamSummary(summarizePanelResources(history.points, live))
+    } catch {
+      setRamSummary(null)
+    }
+  }
+
   const load = async () => {
     setLoading(true)
     try {
@@ -359,6 +393,7 @@ export default function FeatureTogglesTab() {
       setProfiles(profileData.items)
       setCurrentProfile(profileData.current_profile)
       await syncRestartBanner()
+      void loadPanelRam()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить модули')
     } finally {
@@ -438,7 +473,9 @@ export default function FeatureTogglesTab() {
 
   return (
     <div className="grid gap-4 md:grid-cols-2 md:items-start">
-      <InlineProgressBar active={saving || applyingProfile !== null} label="Сохранение..." className="md:col-span-2" />
+      <div className="md:col-span-2">
+        <InlineProgressBar active={saving || applyingProfile !== null} label="Сохранение..." />
+      </div>
 
       <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card p-4 md:col-span-2">
         <div className="pointer-events-none absolute -left-6 top-0 h-28 w-28 rounded-full bg-emerald-500/10 blur-2xl" />
@@ -451,12 +488,12 @@ export default function FeatureTogglesTab() {
                 Разделы и фоновые задачи
               </div>
               <p className="max-w-2xl text-sm text-muted-foreground">
-                Включайте только нужные функции. На 1–2 GB весь функционал обычно работает стабильно; профили ниже —
-                ориентир, если на том же сервере ещё и VPN.
+                Замер только стека AdminPanelAZ: панель, node agent и VPN-сервисы локальной ноды
+                (OpenVPN, <code className="text-xs">ANTIZAPRET_PATH</code>). Другие проекты на VDS не учитываются.
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
-              <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => void load()} disabled={saving}>
+              <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => { void load(); void loadPanelRam() }} disabled={saving}>
                 <RefreshCw size={14} />
                 Обновить
               </Button>
@@ -507,7 +544,7 @@ export default function FeatureTogglesTab() {
 
       <SectionHeading
         title="Профили ресурсов"
-        description="Готовые пресеты для VDS с разным объёмом памяти — переключают сразу несколько модулей"
+        description="Замер: AdminPanelAZ + локальная нода (agent + OpenVPN/AntiZapret на этом сервере)"
       />
 
       <Card className="overflow-hidden shadow-sm md:col-span-2">
@@ -515,8 +552,8 @@ export default function FeatureTogglesTab() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Режим экономии</CardTitle>
           <CardDescription>
-            Пресеты для разной нагрузки: Minimal экономит ресурсы, Full включает всё — в том числе на 1–2 GB, если
-            панель не делит память с тяжёлым VPN на том же хосте
+            Minimal и Standard экономят RAM панели (меньше collectors); VPN на том же хосте почти не меняется.
+            Цифры — живой замер на карточке текущего профиля.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -526,7 +563,9 @@ export default function FeatureTogglesTab() {
                 key={profile.key}
                 profile={profile}
                 current={profile.key === currentProfile}
+                currentProfileKey={currentProfile}
                 applying={applyingProfile === profile.key}
+                ramSummary={ramSummary}
                 onApply={() => void applyProfile(profile.key)}
               />
             ))}

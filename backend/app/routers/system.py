@@ -1,7 +1,5 @@
-import re
 import subprocess
 import time
-import urllib.request
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -15,11 +13,12 @@ from app.models import User
 from app.schemas import LatestChangelogResponse, MessageResponse
 from app.services.action_log import log_action
 from app.services.background_tasks import background_task_service
+from app.services.changelog_remote import build_changelog_response, fetch_remote_changelog_content
 
 router = APIRouter(prefix="/system", tags=["system"])
 APP_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = APP_ROOT.parent
-_CHANGELOG_CACHE: dict = {"data": None, "expires": 0.0}
+_CHANGELOG_CACHE: dict = {"content": None, "source": None, "expires": 0.0}
 
 
 def _repo_root() -> Path:
@@ -33,9 +32,7 @@ class ViewerAccessUpdate(BaseModel):
     config_groups: list[str] = []
 
 
-@router.get("/updates")
-def check_updates(_: User = Depends(require_admin)):
-    repo_root = _repo_root()
+def _git_update_status(repo_root: Path) -> dict:
     try:
         subprocess.run(["git", "fetch", "origin"], cwd=repo_root, capture_output=True, timeout=30, check=False)
         local = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_root, capture_output=True, text=True, check=False)
@@ -59,61 +56,31 @@ def check_updates(_: User = Depends(require_admin)):
         return {"error": str(exc), "updates_available": False}
 
 
+@router.get("/updates")
+def check_updates(_: User = Depends(require_admin)):
+    return _git_update_status(_repo_root())
+
+
 @router.get("/latest-changelog", response_model=LatestChangelogResponse)
 def latest_changelog(_: User = Depends(require_admin)):
     now = time.monotonic()
-    if _CHANGELOG_CACHE["data"] is not None and now < _CHANGELOG_CACHE["expires"]:
-        return _CHANGELOG_CACHE["data"]
+    repo_root = _repo_root()
+    status_payload = _git_update_status(repo_root)
+    updates_available = bool(status_payload.get("updates_available"))
 
-    changelog_path = PROJECT_ROOT / "CHANGELOG.md"
-    content = ""
-    if changelog_path.is_file():
-        content = changelog_path.read_text(encoding="utf-8")
-    else:
-        url = "https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/main/CHANGELOG.md"
+    content = _CHANGELOG_CACHE["content"]
+    source = _CHANGELOG_CACHE["source"]
+    if content is None or now >= _CHANGELOG_CACHE["expires"]:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "AdminPanelAZ/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                content = resp.read().decode("utf-8")
+            content, source = fetch_remote_changelog_content(repo_root)
+            _CHANGELOG_CACHE["content"] = content
+            _CHANGELOG_CACHE["source"] = source
+            _CHANGELOG_CACHE["expires"] = now + 600
         except Exception as exc:
             return LatestChangelogResponse(success=False, message=f"Не удалось загрузить CHANGELOG: {exc}")
 
-    version_pattern = re.compile(r"^## \[(.+?)\]\s*[–\-]\s*(.+)$", re.MULTILINE)
-    matches = list(version_pattern.finditer(content))
-    if not matches:
-        return LatestChangelogResponse(success=False, message="CHANGELOG не содержит версий")
-
-    release_match = next(
-        (m for m in matches if m.group(1).strip().lower() != "unreleased"),
-        None,
-    )
-    if release_match is None:
-        return LatestChangelogResponse(success=False, message="CHANGELOG не содержит релизов")
-
-    release_idx = matches.index(release_match)
-    end = matches[release_idx + 1].start() if release_idx + 1 < len(matches) else len(content)
-    block = content[release_match.start():end].strip()
-    version = release_match.group(1).strip()
-    date = release_match.group(2).strip()
-
-    sections = []
-    section_pattern = re.compile(r"^### (?![#])(.+)$", re.MULTILINE)
-    sec_matches = list(section_pattern.finditer(block))
-    for i, sm in enumerate(sec_matches):
-        sec_end = sec_matches[i + 1].start() if i + 1 < len(sec_matches) else len(block)
-        sec_text = block[sm.end():sec_end].strip()
-        items = [
-            line.lstrip("-* \t").strip()
-            for line in sec_text.splitlines()
-            if line.strip().startswith(("-", "*"))
-        ]
-        if items:
-            sections.append({"title": sm.group(1).strip(), "items": items})
-
-    result = LatestChangelogResponse(success=True, version=version, date=date, sections=sections)
-    _CHANGELOG_CACHE["data"] = result
-    _CHANGELOG_CACHE["expires"] = now + 600
-    return result
+    payload = build_changelog_response(content, updates_available=updates_available, source=source or "")
+    return LatestChangelogResponse(**payload)
 
 
 @router.post("/update", status_code=status.HTTP_202_ACCEPTED)

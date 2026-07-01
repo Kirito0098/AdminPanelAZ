@@ -39,8 +39,11 @@ RUNBOOK_STEPS: list[dict[str, str]] = [
     },
     {
         "id": "http",
-        "title": "HTTP-проверка",
-        "description": "Ответ /api/health на localhost",
+        "title": "Доступность панели",
+        "description": (
+            "Проверяет, отвечает ли панель. За Nginx — через ваш домен по HTTPS; "
+            "без Nginx — напрямую на localhost"
+        ),
     },
     {
         "id": "nginx",
@@ -567,12 +570,73 @@ def _check_http_probe(
     url = _http_probe_url(app_port)
 
     if _env_bool(env.get("BEHIND_NGINX")):
+        domain = (env.get("DOMAIN") or "").strip()
+        host = domain.split(":")[0] if domain else ""
+        if host and shutil.which("curl"):
+            public_url = f"https://{host}/api/health"
+            proc = run_cmd(["curl", "-sf", "--max-time", "5", public_url], 8.0)
+            if proc.returncode == 0:
+                _append_result(
+                    report,
+                    CheckResult(
+                        "ok",
+                        "Панель доступна снаружи через Nginx и HTTPS",
+                        detail=(
+                            f"Успешный ответ от {public_url}.\n\n"
+                            "Как устроена ваша схема (BEHIND_NGINX=true):\n"
+                            f"• Backend слушает только 127.0.0.1:{app_port} — с других машин к нему напрямую не подключиться.\n"
+                            "• Пользователи заходят в панель через Nginx по домену и HTTPS.\n"
+                            "• Проверка localhost (http://127.0.0.1/...) намеренно не выполнялась: "
+                            "она не показывает, открывается ли сайт для людей в браузере.\n\n"
+                            "Итог: внешний доступ работает — это главное для режима Nginx."
+                        ),
+                    ),
+                )
+                return
+            last_err = (proc.stderr or proc.stdout or "").strip()
+            _append_result(
+                report,
+                CheckResult(
+                    "warn",
+                    f"С домена не удалось получить ответ: {host}",
+                    detail=(
+                        f"Запрос к {public_url} не удался.\n"
+                        f"Техническая информация: {last_err[:300] or 'curl завершился с ошибкой'}\n\n"
+                        "BEHIND_NGINX=true: backend может быть запущен, но снаружи панель недоступна — "
+                        "часто из‑за Nginx, сертификата HTTPS или DNS."
+                    ),
+                    hint_ru=(
+                        "Проверьте: systemctl status nginx; nginx -t; сертификат для домена; "
+                        "что DOMAIN в .env совпадает с адресом в браузере; "
+                        "что DNS домена указывает на этот сервер."
+                    ),
+                ),
+            )
+            return
+
         _append_result(
             report,
             CheckResult(
-                "warn",
-                "HTTP-probe на 127.0.0.1 пропущен (BEHIND_NGINX=true)",
-                detail="Проверьте nginx и HTTPS отдельно",
+                "ok",
+                "Режим Nginx — пропуск проверки localhost это норма",
+                detail=(
+                    "В backend/.env включено BEHIND_NGINX=true — рекомендуемая схема для production.\n\n"
+                    "Что это значит:\n"
+                    f"• Приложение слушает только 127.0.0.1:{app_port} (localhost). "
+                    "С интернета к этому порту напрямую подключиться нельзя — так и задумано.\n"
+                    "• Снаружи панель открывается через Nginx: домен → HTTPS → прокси на localhost.\n\n"
+                    "Почему не проверяем http://127.0.0.1:{port}/api/health:\n"
+                    "• При ENFORCE_HTTPS такой запрос часто получает редирект на HTTPS, а не ответ «панель жива».\n"
+                    "• Для режима Nginx важнее шаги «HTTPS и домен» и «Обратный прокси», а не прямой localhost.\n\n"
+                    "Это не ошибка и не «поломка» — диагностика просто не дублирует проверку, "
+                    "которая не отражает реальный способ входа пользователей."
+                ).format(port=app_port),
+                hint_ru=(
+                    "Откройте панель в браузере по вашему домену. "
+                    "Если сайт открывается — всё в порядке. "
+                    "Если DOMAIN не задан в .env — задайте его (Настройки → Адрес сайта и HTTPS "
+                    "или scripts/nginx-setup.sh), тогда здесь появится проверка через домен."
+                ),
             ),
         )
         return
@@ -713,17 +777,18 @@ def _build_summary(report: DiagnosticsReport, ctx: DiagnosticsContext) -> None:
 
     _append_result(report, CheckResult(status, title, detail=summary_detail))
 
-    base_cmds = [
-        f"systemctl restart {ctx.service_name}",
-        f"journalctl -u {ctx.service_name} -n 50 --no-pager",
-    ]
-    for cmd in base_cmds:
-        if cmd not in report.recommended_commands:
-            report.recommended_commands.append(cmd)
+    if report.has_failures():
+        base_cmds = [
+            f"systemctl restart {ctx.service_name}",
+            f"journalctl -u {ctx.service_name} -n 50 --no-pager",
+        ]
+        for cmd in base_cmds:
+            if cmd not in report.recommended_commands:
+                report.recommended_commands.append(cmd)
 
-    diag_cmd = f"{ctx.install_dir}/scripts/site-diagnostics.sh"
-    if diag_cmd not in report.recommended_commands:
-        report.recommended_commands.append(diag_cmd)
+        diag_cmd = f"{ctx.install_dir}/scripts/site-diagnostics.sh"
+        if diag_cmd not in report.recommended_commands:
+            report.recommended_commands.append(diag_cmd)
 
 
 def run_site_diagnostics(
