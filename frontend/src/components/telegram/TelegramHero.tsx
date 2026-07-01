@@ -15,12 +15,12 @@ function overallStatus(tg: TelegramSettingsHook) {
     return { label: 'Не настроен', variant: 'secondary' as const, dot: 'bg-muted-foreground' }
   }
   if (tg.interactiveEnabled && !tg.webhookReady) {
-    return { label: 'Нужен webhook', variant: 'warning' as const, dot: 'bg-amber-500' }
+    return { label: 'Нужно подключить бота', variant: 'warning' as const, dot: 'bg-amber-500' }
   }
   if (tg.loginConfigured) {
-    return { label: 'Активен', variant: 'success' as const, dot: 'bg-emerald-500' }
+    return { label: 'Всё работает', variant: 'success' as const, dot: 'bg-emerald-500' }
   }
-  return { label: 'Частично', variant: 'warning' as const, dot: 'bg-amber-500' }
+  return { label: 'Настройка не завершена', variant: 'warning' as const, dot: 'bg-amber-500' }
 }
 
 export default function TelegramHero({ tg }: TelegramHeroProps) {
@@ -56,13 +56,13 @@ export default function TelegramHero({ tg }: TelegramHeroProps) {
             <p className="mt-1 text-sm text-muted-foreground">
               {botLabel ? (
                 <>
-                  Бот <span className="font-mono text-foreground">{botLabel}</span>
+                  Ваш бот: <span className="font-mono text-foreground">{botLabel}</span>
                   {tg.settings?.bot_token_set && (
-                    <span className="text-muted-foreground/60"> · токен задан</span>
+                    <span className="text-muted-foreground/60"> · подключён к панели</span>
                   )}
                 </>
               ) : (
-                'Бот, вход через Telegram, Mini App и уведомления'
+                'Вход через Telegram, мобильное приложение и уведомления о событиях'
               )}
             </p>
           </div>
@@ -75,7 +75,7 @@ export default function TelegramHero({ tg }: TelegramHeroProps) {
           </Button>
           {tg.loginConfigured && (
             <Button variant="secondary" size="sm" asChild>
-              <Link to="/login">Открыть /login</Link>
+              <Link to="/login">Проверить вход</Link>
             </Button>
           )}
         </div>

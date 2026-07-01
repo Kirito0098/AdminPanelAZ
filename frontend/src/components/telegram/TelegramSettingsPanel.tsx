@@ -88,7 +88,7 @@ function ToggleRow({
 
 export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: TelegramSettingsPanelProps) {
   if (tg.loading) {
-    return <Spinner label="Загрузка настроек Telegram..." className="py-12" />
+    return <Spinner label="Загрузка настроек..." className="py-12" />
   }
 
   const panelDomain = typeof window !== 'undefined' ? window.location.hostname : 'ваш-домен.example'
@@ -108,17 +108,18 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <LogIn size={18} />
-              Подключение входа через Telegram
+              Как подключить вход через Telegram
             </CardTitle>
             <CardDescription>
               {tg.loginConfigured
-                ? 'Бот настроен — на /login должна появиться кнопка «Log in with Telegram»'
-                : 'Пройдите шаги по порядку — статус обновится автоматически'}
+                ? 'Бот настроен — на странице входа должна появиться кнопка «Войти через Telegram»'
+                : 'Выполните шаги по порядку. Зелёная галочка появится, когда шаг выполнен'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <StepCard done={tg.loginConfigured} step={1} title="Создайте бота в @BotFather">
-              Команда <code>/newbot</code> → сохраните <strong>токен</strong> и <strong>username</strong> (без @).
+            <StepCard done={tg.loginConfigured} step={1} title="Создайте бота в Telegram">
+              Откройте @BotFather, отправьте команду <code>/newbot</code> и следуйте подсказкам. Сохраните{' '}
+              <strong>токен</strong> (длинная строка с цифрами) и <strong>имя бота</strong> (латиницей, без @).
               <Button variant="link" size="sm" className="h-auto p-0" asChild>
                 <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">
                   Открыть BotFather <ExternalLink className="ml-1 h-3 w-3" />
@@ -126,34 +127,34 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               </Button>
             </StepCard>
 
-            <StepCard done={tg.loginConfigured} step={2} title="Привяжите домен панели к боту">
-              В BotFather: <code>/setdomain</code> → выберите бота → домен{' '}
-              <code>{panelDomain}</code> (без https://).
+            <StepCard done={tg.loginConfigured} step={2} title="Привяжите адрес панели к боту">
+              В BotFather отправьте <code>/setdomain</code>, выберите своего бота и укажите адрес{' '}
+              <code>{panelDomain}</code> — только домен, без <code>https://</code>.
               <Button type="button" variant="secondary" size="sm" className="mt-2" onClick={() => void copyDomain()}>
                 <Copy className="mr-1.5 h-3.5 w-3.5" />
-                Копировать домен
+                Скопировать адрес
               </Button>
             </StepCard>
 
             <StepCard
               done={tg.loginConfigured}
               step={3}
-              title="Сохраните токен и username в панели"
+              title="Вставьте токен и имя бота в панель"
               action={
                 !tg.loginConfigured && onNavigate ? (
                   <Button type="button" size="sm" variant="secondary" onClick={() => onNavigate('bot')}>
-                    Перейти к настройке бота
+                    Перейти к данным бота
                   </Button>
                 ) : undefined
               }
             >
-              Оба поля обязательны для Login Widget и Mini App.
+              На вкладке «Данные бота» вставьте токен и имя — они нужны для входа и приложения в Telegram.
             </StepCard>
 
             <StepCard
               done={Boolean(tg.telegramId)}
               step={4}
-              title="Привяжите Telegram ID пользователю"
+              title="Привяжите свой Telegram к аккаунту"
               action={
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" size="sm" variant="secondary" asChild>
@@ -161,17 +162,19 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   </Button>
                   {onNavigate && (
                     <Button type="button" size="sm" variant="outline" onClick={() => onNavigate('interactive')}>
-                      Код /link в боте
+                      Привязать через бота
                     </Button>
                   )}
                 </div>
               }
             >
-              Числовой ID — у @userinfobot или через команду <code>/link</code> в боте.
+              Узнайте свой числовой ID у @userinfobot или привяжите аккаунт командой <code>/link</code> в чате с
+              ботом.
             </StepCard>
 
-            <StepCard done={tg.loginConfigured && Boolean(tg.telegramId)} step={5} title="Проверьте вход на /login">
-              Панель должна быть доступна по HTTPS с валидным сертификатом.
+            <StepCard done={tg.loginConfigured && Boolean(tg.telegramId)} step={5} title="Проверьте вход">
+              Откройте страницу входа и нажмите «Войти через Telegram». Панель должна работать по защищённому
+              соединению (HTTPS).
               {tg.loginConfigured && (
                 <Button type="button" variant="link" size="sm" className="h-auto p-0" asChild>
                   <Link to="/login">Открыть страницу входа →</Link>
@@ -180,12 +183,12 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
             </StepCard>
 
             {!tg.loginConfigured && (
-              <SettingsAlert variant="info" title="Если кнопка Telegram не появляется">
-                Проверьте username и токен, домен в BotFather (<code>{panelDomain}</code>), модуль Telegram в{' '}
+              <SettingsAlert variant="info" title="Кнопка входа не появляется?">
+                Проверьте: имя и токен бота, адрес <code>{panelDomain}</code> в BotFather, модуль Telegram в{' '}
                 <Link to="/settings" className="font-medium text-primary underline-offset-4 hover:underline">
                   Настройки → Модули
                 </Link>{' '}
-                и привязку Telegram ID.
+                и привязку вашего Telegram ID.
               </SettingsAlert>
             )}
           </CardContent>
@@ -199,14 +202,14 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               <div>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Send size={18} />
-                  Бот и авторизация
+                  Данные бота
                 </CardTitle>
                 <CardDescription className="mt-1.5">
-                  Токен, username и chat_id для Login Widget, Mini App и бэкапов
+                  Токен и имя из BotFather — нужны для входа, приложения и отправки сообщений
                 </CardDescription>
               </div>
               <div className="flex flex-wrap gap-2">
-                {tg.settings?.bot_token_set && <Badge variant="success">Токен задан</Badge>}
+                {tg.settings?.bot_token_set && <Badge variant="success">Токен сохранён</Badge>}
                 {tg.botUsername && <Badge variant="outline">@{tg.botUsername.replace(/^@/, '')}</Badge>}
               </div>
             </div>
@@ -228,21 +231,23 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                     placeholder={tg.settings?.bot_token_set ? '•••••••• (оставьте пустым)' : '123456:ABC...'}
                   />
                   <p className="text-xs text-muted-foreground">
-                    {tg.settings?.bot_token_set ? 'Введите новый только для замены' : 'Получите у @BotFather'}
+                    {tg.settings?.bot_token_set
+                      ? 'Оставьте пустым, если менять не нужно'
+                      : 'BotFather выдаёт его при создании бота'}
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="botUsername">Username бота</Label>
+                  <Label htmlFor="botUsername">Имя бота (username)</Label>
                   <Input
                     id="botUsername"
                     value={tg.botUsername}
                     onChange={(e) => tg.setBotUsername(e.target.value)}
                     placeholder="mybot"
                   />
-                  <p className="text-xs text-muted-foreground">Без @ — для Telegram Login Widget</p>
+                  <p className="text-xs text-muted-foreground">Латиницей, без символа @ — как в ссылке t.me/mybot</p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="authMaxAge">Макс. возраст авторизации (сек)</Label>
+                  <Label htmlFor="authMaxAge">Срок действия входа (секунды)</Label>
                   <Input
                     id="authMaxAge"
                     type="number"
@@ -251,33 +256,33 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                     value={tg.authMaxAge}
                     onChange={(e) => tg.setAuthMaxAge(e.target.value)}
                   />
-                  <p className="text-xs text-muted-foreground">Рекомендуется 300</p>
+                  <p className="text-xs text-muted-foreground">Сколько секунд действует кнопка «Войти через Telegram». Обычно хватает 300</p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="chatId">Chat ID (бэкапы)</Label>
+                  <Label htmlFor="chatId">ID чата для резервных копий</Label>
                   <Input
                     id="chatId"
                     value={tg.chatId}
                     onChange={(e) => tg.setChatId(e.target.value)}
                     placeholder="-1001234567890"
                   />
-                  <p className="text-xs text-muted-foreground">ID чата для архивов бэкапов</p>
+                  <p className="text-xs text-muted-foreground">Сюда бот будет присылать архивы бэкапов (личный чат или группа)</p>
                 </div>
               </div>
 
               <div className="space-y-3 border-t pt-4">
-                <p className="text-sm font-medium">Дополнительно</p>
+                <p className="text-sm font-medium">Сообщения от бота</p>
                 <ToggleRow
                   id="notifyEnabled"
-                  label="Уведомления администратору (глобально)"
-                  description="Master-switch для AdminNotify"
+                  label="Отправлять уведомления администратору"
+                  description="Общий переключатель — без него события не приходят в Telegram"
                   checked={tg.notifyEnabled}
                   onCheckedChange={tg.setNotifyEnabled}
                 />
                 <ToggleRow
                   id="notifyOnBackup"
-                  label="Отправлять бэкапы в Telegram"
-                  description="Архивы панели и client.sh 8 в chat_id"
+                  label="Присылать резервные копии в Telegram"
+                  description="Архивы панели отправляются в указанный ID чата"
                   checked={tg.notifyOnBackup}
                   onCheckedChange={tg.setNotifyOnBackup}
                 />
@@ -293,7 +298,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   onClick={() => void tg.handleTest()}
                   disabled={tg.testing || !tg.settings?.bot_token_set}
                 >
-                  {tg.testing ? 'Отправка...' : 'Тест в chat_id'}
+                  {tg.testing ? 'Отправка...' : 'Отправить тестовое сообщение'}
                 </Button>
               </div>
             </form>
@@ -306,30 +311,33 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Smartphone size={18} />
-              Telegram Mini App
+              Приложение в Telegram
             </CardTitle>
-            <CardDescription>Ссылка для кнопки меню бота в BotFather</CardDescription>
+            <CardDescription>
+              Панель открывается прямо в Telegram — удобно с телефона
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {!tg.loginConfigured && (
               <SettingsAlert variant="warning" title="Сначала настройте бота">
-                Сохраните токен и username на вкладке <strong>Бот</strong>. Убедитесь, что модуль Telegram включён в{' '}
+                Сохраните токен и имя на вкладке <strong>Данные бота</strong>. Убедитесь, что модуль Telegram
+                включён в{' '}
                 <Link to="/settings" className="font-medium text-primary underline-offset-4 hover:underline">
-                  Модули
+                  Настройки → Модули
                 </Link>
                 .
               </SettingsAlert>
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="miniAppUrl">URL Mini App</Label>
+              <Label htmlFor="miniAppUrl">Ссылка на приложение</Label>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Input
                   id="miniAppUrl"
                   readOnly
                   value={tg.settings?.mini_app_url || ''}
                   className="font-mono text-xs"
-                  placeholder={tg.loginConfigured ? 'Загрузка URL...' : 'Появится после настройки бота'}
+                  placeholder={tg.loginConfigured ? 'Загрузка ссылки...' : 'Появится после настройки бота'}
                 />
                 <Button
                   type="button"
@@ -342,18 +350,19 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   Копировать
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground">Эту ссылку нужно вставить в BotFather — см. инструкцию ниже</p>
             </div>
 
             <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-              <p className="font-medium text-foreground">Настройка в BotFather</p>
+              <p className="font-medium text-foreground">Как добавить кнопку в бота</p>
               <ol className="mt-2 list-decimal space-y-1 pl-5">
                 <li>
-                  Команда <code>/setmenubutton</code>
+                  В BotFather отправьте <code>/setmenubutton</code>
                 </li>
-                <li>Web App → вставьте URL выше</li>
-                <li>Откройте бота в Telegram и нажмите кнопку меню</li>
+                <li>Выберите своего бота → Web App → вставьте ссылку выше</li>
+                <li>Откройте бота в Telegram и нажмите кнопку меню внизу экрана</li>
               </ol>
-              <p className="mt-3 text-xs">Mini App работает только по HTTPS из клиента Telegram.</p>
+              <p className="mt-3 text-xs">Приложение работает только при открытии из Telegram и по защищённому соединению (HTTPS).</p>
             </div>
           </CardContent>
         </Card>
@@ -364,10 +373,10 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Bot size={18} />
-              Интерактивный бот
+              Команды бота
             </CardTitle>
             <CardDescription>
-              Команды /start, /status, /configs, /link и webhook для входящих сообщений
+              Бот отвечает в чате на команды вроде /start, /status и /link
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -375,9 +384,9 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               active={tg.savingInteractive || tg.registeringWebhook || tg.deletingWebhook}
               label={
                 tg.registeringWebhook
-                  ? 'Регистрация webhook...'
+                  ? 'Подключение...'
                   : tg.deletingWebhook
-                    ? 'Удаление webhook...'
+                    ? 'Отключение...'
                     : tg.savingInteractive
                       ? 'Сохранение...'
                       : undefined
@@ -385,15 +394,15 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
             />
 
             {!tg.settings?.bot_token_set && (
-              <SettingsAlert variant="warning" title="Нужен токен бота">
-                Настройте бота на вкладке <strong>Бот</strong>, затем включите интерактивный режим.
+              <SettingsAlert variant="warning" title="Сначала укажите токен бота">
+                Заполните данные на вкладке <strong>Данные бота</strong>, затем включите команды ниже.
               </SettingsAlert>
             )}
 
             <ToggleRow
               id="interactiveEnabled"
-              label="Команды и webhook"
-              description="/start, /status, /configs, /settings (admin), /cidr, /warper"
+              label="Отвечать на команды в Telegram"
+              description="Бот будет реагировать на /start, /status, /configs и другие команды"
               checked={tg.interactiveEnabled}
               disabled={tg.savingInteractive || !tg.settings?.bot_token_set}
               onCheckedChange={(checked) => void tg.handleSaveInteractive(checked)}
@@ -401,19 +410,19 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
 
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">Webhook</p>
+                <p className="text-xs text-muted-foreground">Связь с панелью</p>
                 <Badge variant={tg.webhookReady ? 'success' : 'secondary'} className="mt-1">
-                  {tg.webhookReady ? 'Зарегистрирован' : 'Не зарегистрирован'}
+                  {tg.webhookReady ? 'Подключено' : 'Не подключено'}
                 </Badge>
               </div>
               <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">Секрет</p>
+                <p className="text-xs text-muted-foreground">Защита соединения</p>
                 <p className="mt-1 text-sm font-medium">
-                  {tg.settings?.webhook_secret_set ? 'Задан' : '—'}
+                  {tg.settings?.webhook_secret_set ? 'Настроена' : '—'}
                 </p>
               </div>
               <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">Обновлён</p>
+                <p className="text-xs text-muted-foreground">Последнее подключение</p>
                 <p className="mt-1 text-sm font-medium">
                   {tg.settings?.webhook_set_at
                     ? formatDateTime(tg.settings.webhook_set_at)
@@ -429,10 +438,10 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                 onClick={() => void tg.handleRegisterWebhook()}
               >
                 {tg.registeringWebhook
-                  ? 'Регистрация...'
+                  ? 'Подключение...'
                   : tg.webhookReady
-                    ? 'Перерегистрировать'
-                    : 'Зарегистрировать webhook'}
+                    ? 'Переподключить'
+                    : 'Подключить бота к панели'}
               </Button>
               <Button
                 type="button"
@@ -440,20 +449,23 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                 disabled={tg.deletingWebhook || !tg.webhookReady}
                 onClick={() => void tg.handleDeleteWebhook()}
               >
-                {tg.deletingWebhook ? 'Удаление...' : 'Удалить webhook'}
+                {tg.deletingWebhook ? 'Отключение...' : 'Отключить'}
               </Button>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Для работы команд панель должна быть доступна из интернета по HTTPS.
+            </p>
 
             <div className="space-y-3 border-t pt-4">
               <div>
-                <Label>Привязка Telegram ID через бота</Label>
+                <Label>Привязать Telegram к аккаунту через бота</Label>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Одноразовый код → команда <code className="rounded bg-muted px-1">/link &lt;код&gt;</code> в чате с ботом
+                  Получите код ниже и отправьте боту команду <code className="rounded bg-muted px-1">/link &lt;код&gt;</code>
                 </p>
               </div>
               {tg.linkCode ? (
                 <div className="rounded-lg border border-dashed bg-muted/30 p-4">
-                  <p className="text-xs text-muted-foreground">Команда для бота</p>
+                  <p className="text-xs text-muted-foreground">Отправьте боту в Telegram</p>
                   <p className="mt-1 font-mono text-lg font-semibold tracking-wide">/link {tg.linkCode}</p>
                   <Button
                     type="button"
@@ -463,7 +475,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                     onClick={() => void tg.handleCopyLinkCode()}
                   >
                     <Copy size={14} className="mr-1.5" />
-                    Копировать
+                    Скопировать команду
                   </Button>
                 </div>
               ) : (
@@ -473,7 +485,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   onClick={() => void tg.handleGetLinkCode()}
                   disabled={!tg.settings?.bot_token_set}
                 >
-                  Получить код привязки
+                  Получить код для привязки
                 </Button>
               )}
             </div>
@@ -488,23 +500,24 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               <div>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Bell size={18} />
-                  Уведомления администратору
+                  Уведомления
                 </CardTitle>
                 <CardDescription className="mt-1.5">
-                  Per-user доставка на ваш Telegram ID
+                  Выберите, о каких событиях бот будет писать вам в личные сообщения
                 </CardDescription>
               </div>
               {tg.notifyEnabled && (
                 <Badge variant="outline">
-                  {tg.notifyEventsEnabled} / {tg.adminNotify?.events.length ?? 0} событий
+                  {tg.notifyEventsEnabled} из {tg.adminNotify?.events.length ?? 0}
                 </Badge>
               )}
             </div>
           </CardHeader>
           <CardContent>
             {!tg.notifyEnabled && (
-              <SettingsAlert variant="warning" title="Глобальные уведомления выключены" className="mb-4">
-                Включите переключатель на вкладке <strong>Бот</strong> — иначе события не отправляются.
+              <SettingsAlert variant="warning" title="Уведомления выключены" className="mb-4">
+                Включите общий переключатель на вкладке <strong>Данные бота</strong> — иначе сообщения не
+                отправляются.
               </SettingsAlert>
             )}
 
@@ -521,11 +534,13 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   onChange={(e) => tg.setTelegramId(e.target.value)}
                   placeholder="123456789"
                 />
-                <p className="text-xs text-muted-foreground">@userinfobot или при входе через Telegram</p>
+                <p className="text-xs text-muted-foreground">
+                  Узнайте у @userinfobot или при входе через Telegram — это число из цифр
+                </p>
               </div>
 
               <div className="space-y-3">
-                <Label>Типы событий</Label>
+                <Label>О чём сообщать</Label>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {tg.adminNotify?.events.map((event) => {
                     const enabled = tg.eventToggles[event.key] ?? false
@@ -551,7 +566,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
 
               <div className="flex flex-wrap gap-2 border-t pt-4">
                 <Button type="submit" disabled={tg.savingNotify}>
-                  {tg.savingNotify ? 'Сохранение...' : 'Сохранить подписки'}
+                  {tg.savingNotify ? 'Сохранение...' : 'Сохранить настройки'}
                 </Button>
                 <Button
                   type="button"
@@ -559,7 +574,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   onClick={() => void tg.handleTestAdminNotify()}
                   disabled={tg.testingNotify || !tg.adminNotify?.bot_token_set || !tg.telegramId}
                 >
-                  {tg.testingNotify ? 'Отправка...' : 'Тест моих уведомлений'}
+                  {tg.testingNotify ? 'Отправка...' : 'Проверить — отправить тест'}
                 </Button>
               </div>
             </form>

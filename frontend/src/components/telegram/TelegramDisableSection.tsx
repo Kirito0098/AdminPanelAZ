@@ -34,10 +34,10 @@ export default function TelegramDisableSection() {
 
   return (
     <>
-      <SettingsAlert variant="info" title="Полное отключение интеграции">
+      <SettingsAlert variant="info" title="Отключить Telegram?">
         <p>
-          Если Telegram не нужен, отключите модуль — панель перестанет принимать webhook, вызывать Bot API и
-          обслуживать Mini App. Токен и настройки сохранятся для повторного включения.
+          Если интеграция не нужна, можно выключить модуль — панель перестанет принимать сообщения от бота и
+          открывать приложение в Telegram. Все настройки сохранятся, их можно включить снова позже.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button type="button" size="sm" variant="secondary" onClick={() => setConfirmOpen(true)}>
@@ -57,7 +57,7 @@ export default function TelegramDisableSection() {
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="Отключить интеграцию Telegram?"
-        description="Webhook будет удалён у бота, интерактив и TG-уведомления выключены. Исходящие вызовы Bot API прекратятся."
+        description="Бот перестанет отвечать на команды и присылать уведомления. Для полного применения может понадобиться перезапуск панели."
         confirmLabel="Отключить"
         destructive
         loading={disabling}

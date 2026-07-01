@@ -6,15 +6,16 @@ import TelegramDisableSection from '@/components/telegram/TelegramDisableSection
 import TelegramHero from '@/components/telegram/TelegramHero'
 import TelegramOverviewCards from '@/components/telegram/TelegramOverviewCards'
 import TelegramSettingsPanel from '@/components/telegram/TelegramSettingsPanel'
+import { TELEGRAM_TAB_META } from '@/components/telegram/telegramLabels'
 import { useTelegramSettings, type TelegramSection } from '@/components/telegram/useTelegramSettings'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-const TELEGRAM_TABS: Array<{ id: TelegramSection; label: string; icon: typeof Send }> = [
-  { id: 'setup', label: 'Подключение', icon: LogIn },
-  { id: 'bot', label: 'Бот', icon: Send },
-  { id: 'miniapp', label: 'Mini App', icon: Smartphone },
-  { id: 'interactive', label: 'Интерактив', icon: Bot },
-  { id: 'notify', label: 'Уведомления', icon: Bell },
+const TELEGRAM_TABS: Array<{ id: TelegramSection; icon: typeof Send }> = [
+  { id: 'setup', icon: LogIn },
+  { id: 'bot', icon: Send },
+  { id: 'miniapp', icon: Smartphone },
+  { id: 'interactive', icon: Bot },
+  { id: 'notify', icon: Bell },
 ]
 
 const VALID_TABS = new Set(TELEGRAM_TABS.map((t) => t.id))
@@ -32,6 +33,8 @@ export default function TelegramPage() {
     setSearchParams({ tab: next }, { replace: true })
   }
 
+  const activeTabMeta = TELEGRAM_TAB_META[tab]
+
   return (
     <div className="space-y-5">
       <TelegramHero tg={tg} />
@@ -43,18 +46,26 @@ export default function TelegramPage() {
       <TelegramAlerts tg={tg} />
 
       <Tabs value={tab} onValueChange={(value) => navigateTab(value as TelegramSection)} className="space-y-4">
-        <TabsList className="flex h-auto flex-wrap gap-1 bg-muted/50 p-1">
-          {TELEGRAM_TABS.map((item) => (
-            <TabsTrigger key={item.id} value={item.id} className="gap-1.5">
-              <item.icon size={14} />
-              <span className="hidden sm:inline">{item.label}</span>
-              <span className="sm:hidden">{item.label.split(' ')[0]}</span>
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="space-y-2">
+          <TabsList className="flex h-auto flex-wrap gap-1 bg-muted/50 p-1">
+            {TELEGRAM_TABS.map((item) => {
+              const meta = TELEGRAM_TAB_META[item.id]
+              return (
+                <TabsTrigger key={item.id} value={item.id} className="gap-1.5">
+                  <item.icon size={14} />
+                  <span className="hidden sm:inline">{meta.label}</span>
+                  <span className="sm:hidden">{meta.shortLabel}</span>
+                </TabsTrigger>
+              )
+            })}
+          </TabsList>
+          {activeTabMeta && (
+            <p className="px-1 text-xs text-muted-foreground">{activeTabMeta.description}</p>
+          )}
+        </div>
 
         {TELEGRAM_TABS.map((item) => (
-          <TabsContent key={item.id} value={item.id}>
+          <TabsContent key={item.id} value={item.id} className="mt-0">
             <TelegramSettingsPanel tg={tg} activeTab={item.id} onNavigate={navigateTab} />
           </TabsContent>
         ))}

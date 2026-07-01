@@ -21,34 +21,43 @@ export default function TelegramOverviewCards({ tg, loading = false, onNavigate 
     tone?: string
   }> = [
     {
+      key: 'setup',
+      title: 'Вход в панель',
+      icon: LogIn,
+      value: tg.loginConfigured && tg.telegramId ? 'Готов' : tg.loginConfigured ? 'Почти готов' : 'Настроить',
+      sub: tg.telegramId ? `Ваш ID: ${tg.telegramId}` : 'Привяжите свой Telegram',
+      accent: tg.loginConfigured && tg.telegramId ? 'border-l-emerald-500' : 'border-l-muted-foreground/30',
+      tone: tg.loginConfigured && tg.telegramId ? 'text-emerald-600 dark:text-emerald-400' : undefined,
+    },
+    {
       key: 'bot',
-      title: 'Бот',
+      title: 'Данные бота',
       icon: Send,
-      value: tg.loginConfigured ? 'Готов' : tg.settings?.bot_token_set ? 'Частично' : 'Не задан',
-      sub: tg.botUsername ? `@${tg.botUsername.replace(/^@/, '')}` : 'Токен и username',
+      value: tg.loginConfigured ? 'Подключён' : tg.settings?.bot_token_set ? 'Не завершено' : 'Не настроен',
+      sub: tg.botUsername ? `@${tg.botUsername.replace(/^@/, '')}` : 'Токен и имя из BotFather',
       accent: tg.loginConfigured ? 'border-l-emerald-500' : 'border-l-amber-500',
       tone: tg.loginConfigured ? 'text-emerald-600 dark:text-emerald-400' : undefined,
     },
     {
       key: 'miniapp',
-      title: 'Mini App',
+      title: 'Приложение',
       icon: Smartphone,
-      value: tg.miniAppReady ? 'URL готов' : '—',
-      sub: tg.miniAppReady ? 'HTTPS из Telegram' : 'Нужен токен бота',
+      value: tg.miniAppReady ? 'Готово' : 'Не готово',
+      sub: tg.miniAppReady ? 'Открывается в Telegram' : 'Сначала настройте бота',
       accent: tg.miniAppReady ? 'border-l-primary' : 'border-l-muted-foreground/30',
     },
     {
       key: 'interactive',
-      title: 'Webhook',
+      title: 'Команды бота',
       icon: Bot,
       value: !tg.settings?.bot_token_set
         ? '—'
         : tg.interactiveEnabled
           ? tg.webhookReady
-            ? 'Активен'
-            : 'Не зарег.'
-          : 'Выключен',
-      sub: tg.interactiveEnabled ? 'Команды бота' : 'Интерактив выкл.',
+            ? 'Работает'
+            : 'Нужно подключить'
+          : 'Выключено',
+      sub: tg.interactiveEnabled ? '/start, /status и др.' : 'Ответы бота в чате',
       accent: tg.webhookReady ? 'border-l-emerald-500' : tg.interactiveEnabled ? 'border-l-amber-500' : 'border-l-muted-foreground/30',
       tone: tg.webhookReady ? 'text-emerald-600 dark:text-emerald-400' : undefined,
     },
@@ -56,20 +65,15 @@ export default function TelegramOverviewCards({ tg, loading = false, onNavigate 
       key: 'notify',
       title: 'Уведомления',
       icon: Bell,
-      value: tg.notifyEnabled ? String(tg.notifyEventsEnabled) : 'Выкл.',
+      value: tg.notifyEnabled
+        ? tg.notifyEventsEnabled > 0
+          ? `${tg.notifyEventsEnabled} включено`
+          : 'Включены'
+        : 'Выключены',
       sub: tg.notifyEnabled
-        ? `из ${tg.adminNotify?.events.length ?? 0} событий`
-        : 'Глобально выключены',
+        ? `из ${tg.adminNotify?.events.length ?? 0} типов событий`
+        : 'Сообщения от бота в личку',
       accent: tg.notifyEnabled && tg.notifyEventsEnabled > 0 ? 'border-l-sky-500' : 'border-l-muted-foreground/30',
-    },
-    {
-      key: 'setup',
-      title: 'Вход',
-      icon: LogIn,
-      value: tg.loginConfigured ? 'Доступен' : 'Настроить',
-      sub: tg.telegramId ? `ID: ${tg.telegramId}` : 'Привязка Telegram ID',
-      accent: tg.loginConfigured && tg.telegramId ? 'border-l-emerald-500' : 'border-l-muted-foreground/30',
-      tone: tg.loginConfigured ? 'text-emerald-600 dark:text-emerald-400' : undefined,
     },
   ]
 
