@@ -224,14 +224,14 @@ easy_ask_server_size() {
     return 0
   fi
 
-  easy_step "Размер сервера"
+  easy_step "Профиль ресурсов"
   ui_info_box "Оперативная память (RAM)" \
-    "На слабом сервере (1 GB) панель работает в облегчённом режиме." \
-    "На сервере 2 GB и больше — полный набор функций."
+    "Замер стека Full (панель + VPN на сервере): ≈411 MB (358+53)." \
+    "Средний стек за 7 дней: ~148 MB. Сторонние проекты на VDS не учитываются."
   echo
   easy_ask_choice "Сколько оперативной памяти (RAM) на этом сервере?" \
-    "1 GB — облегчённый режим (рекомендуется только для панели без VPN)" \
-    "2 GB или больше — обычный режим (рекомендуется)"
+    "1 GB — профиль Minimal (только панель, VPN на других серверах)" \
+    "1 GB и больше — Standard / Full (панель+VPN на одном VDS: ≈411 MB)"
 
   case "$REPLY" in
     1)
@@ -239,11 +239,20 @@ easy_ask_server_size() {
       WIZ_CIDR_DB_REFRESH_ENABLED="false"
       WIZ_TRAFFIC_SYNC_ENABLED="false"
       WIZ_UVICORN_WORKERS="1"
+      if [[ "$WIZ_REQUIRE_ANTIZAPRET" == true ]]; then
+        print_warn "На 1 GB с VPN на том же сервере может не хватить памяти. Лучше 1 GB+ или отдельный сервер для панели."
+      fi
       ;;
     *)
-      WIZ_RESOURCE_PROFILE="standard"
-      WIZ_CIDR_DB_REFRESH_ENABLED="true"
-      WIZ_TRAFFIC_SYNC_ENABLED="true"
+      if [[ "$WIZ_REQUIRE_ANTIZAPRET" == true ]]; then
+        WIZ_RESOURCE_PROFILE="full"
+        WIZ_CIDR_DB_REFRESH_ENABLED="true"
+        WIZ_TRAFFIC_SYNC_ENABLED="true"
+      else
+        WIZ_RESOURCE_PROFILE="standard"
+        WIZ_CIDR_DB_REFRESH_ENABLED="false"
+        WIZ_TRAFFIC_SYNC_ENABLED="true"
+      fi
       WIZ_UVICORN_WORKERS="1"
       ;;
   esac
@@ -322,6 +331,7 @@ easy_show_simple_summary() {
       ui_summary_row "Адрес в браузере" \
         "${WIZ_NGINX_DOMAIN:-http://127.0.0.1:${WIZ_BACKEND_PORT}/}"
       ui_summary_row "Логин" "$WIZ_ADMIN_USERNAME"
+      ui_summary_row "Профиль ресурсов" "${WIZ_RESOURCE_PROFILE:-standard}"
       ui_summary_row "Автозапуск" "Да (после перезагрузки сервера)"
       ;;
     node)

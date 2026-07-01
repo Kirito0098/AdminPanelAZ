@@ -787,11 +787,12 @@ wizard_ask_resource_profile() {
   fi
 
   wiz_step "Профиль ресурсов (VDS)"
-  echo "Выберите пресет для панели. Minimal рекомендуется для VDS 1 GB только под панель (без AntiZapret на том же хосте)."
+  echo "Замер стека Full (панель + локальная нода): ≈411 MB (358+53); среднее за 7 дн. ~148 MB."
+  echo "Minimal — для VDS 1 GB только под панель (без AntiZapret на том же хосте)."
   wiz_prompt_choice "Resource profile:" \
-    "Minimal — 1 GB panel-only (без traffic/CIDR collectors)" \
-    "Standard — баланс (рекомендуется 2 GB)" \
-    "Full — все фоновые задачи"
+    "Minimal — 1 GB, panel-only (без traffic/CIDR collectors)" \
+    "Standard — баланс (1 GB+, без CIDR scheduler)" \
+    "Full — все фоновые задачи (≈411 MB стек; 1 GB+ / лучше 2 GB с VPN на хосте)"
 
   case "$REPLY" in
     1) WIZ_RESOURCE_PROFILE="minimal" ;;

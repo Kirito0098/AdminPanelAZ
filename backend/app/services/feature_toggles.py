@@ -430,12 +430,12 @@ RESOURCE_PROFILES: dict[str, dict] = {
     "standard": {
         "label": "Standard",
         "description": "Баланс: traffic sync, health poll, retention; без тяжёлого CIDR auto-scheduler.",
-        "recommended_ram_gb": 2,
+        "recommended_ram_gb": 1,
         "panel_mb_delta": -20,
         "impact": {
             "ram": "чуть меньше RAM панели, чем Full; VPN на хосте тот же",
             "cpu_disk": "traffic + metrics без nightly CIDR auto-scheduler",
-            "note": "Подходит, если CIDR по расписанию не нужен",
+            "note": "Ориентир 1 GB+; замер стека — на карточке текущего профиля в UI",
         },
         "workers_disabled": ["cidr_scheduler"],
         "toggles": {
@@ -468,12 +468,12 @@ RESOURCE_PROFILES: dict[str, dict] = {
     "full": {
         "label": "Full",
         "description": "Все фоновые задачи и разделы.",
-        "recommended_ram_gb": 2,
+        "recommended_ram_gb": 1,
         "panel_mb_delta": 0,
         "impact": {
             "ram": "максимум фоновых задач панели; VPN на хосте тот же",
             "cpu_disk": "полная фоновая нагрузка collectors",
-            "note": "Цифры RAM — замер «панель + VPN на сервере» на карточке текущего профиля",
+            "note": "Замер «панель + VPN на сервере»: ≈411 MB (358+53); лучше 2 GB с запасом под ОС",
         },
         "workers_disabled": [],
         "toggles": {
