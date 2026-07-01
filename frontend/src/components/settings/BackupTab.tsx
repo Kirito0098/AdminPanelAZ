@@ -28,9 +28,17 @@ import { formatDateTime } from '@/lib/datetime'
 import type { BackupEntry, BackupSettings } from '@/types'
 
 function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024) return `${bytes} Б`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`
+}
+
+const COMPONENT_LABELS: Record<string, string> = {
+  database: 'База панели',
+  env: 'Настройки',
+  antizapret_lists: 'Списки AntiZapret',
+  antizapret_backup: 'Архив VPN',
+  configs: 'Конфиги',
 }
 
 export default function BackupTab() {
@@ -52,7 +60,7 @@ export default function BackupTab() {
   useEffect(() => {
     setLoading(true)
     load()
-      .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки бэкапов'))
+      .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить резервные копии'))
       .finally(() => setLoading(false))
   }, [])
 
@@ -60,7 +68,7 @@ export default function BackupTab() {
     try {
       const resp = await testBackupTelegram()
       trackBackgroundTask(resp.task_id, {
-        onComplete: () => success(resp.message || 'Бэкап отправлен в Telegram'),
+        onComplete: () => success(resp.message || 'Копия отправлена в Telegram'),
         onError: (task, message) => notifyError(task?.error || task?.message || message),
       })
     } catch (err) {
@@ -73,21 +81,21 @@ export default function BackupTab() {
       await withInline(async () => {
         await createBackup(includeConfigs, includeAntizapretBackup)
         await load()
-      }, 'Создание бэкапа...')
-      success('Бэкап создан')
+      }, 'Создание копии...')
+      success('Резервная копия создана')
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка создания бэкапа')
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось создать копию')
     }
   }
 
   const handleRestore = (fileName: string) => {
     confirm({
-      title: 'Восстановить из бэкапа?',
-      description: <>Архив «{fileName}» будет развёрнут на сервере панели.</>,
+      title: 'Восстановить из копии?',
+      description: <>Содержимое архива «{fileName}» заменит текущие данные на сервере.</>,
       alert: {
         variant: 'danger',
-        title: 'Перезапуск панели',
-        children: 'После восстановления необходимо перезапустить панель вручную. Текущие данные будут перезаписаны.',
+        title: 'Внимание',
+        children: 'Текущие настройки и данные панели будут перезаписаны. После восстановления нужно перезапустить панель.',
       },
       confirmLabel: 'Восстановить',
       destructive: true,
@@ -128,14 +136,14 @@ export default function BackupTab() {
     try {
       const updated = await updateBackupSettings({ telegram_on_backup: !settings.telegram_on_backup })
       setSettings(updated)
-      success('Настройки бэкапа обновлены')
+      success('Настройки резервного копирования обновлены')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
     }
   }
 
   if (loading) {
-    return <Spinner label="Загрузка бэкапов..." className="py-12" />
+    return <Spinner label="Загрузка резервных копий..." className="py-12" />
   }
 
   return (
@@ -146,10 +154,10 @@ export default function BackupTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Archive size={18} />
-            Создание бэкапа
+            Создать резервную копию
           </CardTitle>
           <CardDescription>
-            Бэкап БД панели, .env, списков AntiZapret и опционально полного архива VPN (client.sh 8) на активном узле
+            Сохранить настройки панели, базу данных и при необходимости файлы VPN на сервере
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -161,7 +169,10 @@ export default function BackupTab() {
                 onChange={(e) => setIncludeConfigs(e.target.checked)}
                 className="h-4 w-4 rounded border"
               />
-              Включить списки AntiZapret
+              <span>
+                Списки маршрутизации AntiZapret
+                <span className="mt-0.5 block text-xs text-muted-foreground">Дополнительные файлы маршрутов</span>
+              </span>
             </label>
             <label className="flex cursor-pointer items-center gap-2 text-sm">
               <input
@@ -170,7 +181,10 @@ export default function BackupTab() {
                 onChange={(e) => setIncludeAntizapretBackup(e.target.checked)}
                 className="h-4 w-4 rounded border"
               />
-              Бэкап AntiZapret (client.sh 8)
+              <span>
+                Полный архив VPN
+                <span className="mt-0.5 block text-xs text-muted-foreground">Все профили и настройки VPN на сервере</span>
+              </span>
             </label>
             {settings && (
               <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -180,15 +194,15 @@ export default function BackupTab() {
                   onChange={toggleTelegramBackup}
                   className="h-4 w-4 rounded border"
                 />
-                Отправлять в Telegram
+                Отправлять копию в Telegram
               </label>
             )}
             <Button onClick={handleCreate} className="sm:ml-auto">
-              Создать бэкап
+              Создать копию
             </Button>
             <Button variant="outline" onClick={() => void handleTestTelegram()}>
               <Send size={16} />
-              Создать и отправить в TG
+              Создать и отправить в Telegram
             </Button>
           </div>
         </CardContent>
@@ -197,8 +211,8 @@ export default function BackupTab() {
       {settings && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Автоматизация</CardTitle>
-            <CardDescription>Периодическое создание и ротация архивов</CardDescription>
+            <CardTitle className="text-base">Автоматические копии</CardTitle>
+            <CardDescription>Панель сама создаёт копии по расписанию и удаляет старые</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 rounded-md border p-4 md:grid-cols-3">
@@ -212,7 +226,7 @@ export default function BackupTab() {
                   }}
                   className="h-4 w-4 rounded border"
                 />
-                Авто-бэкап
+                Создавать копии автоматически
               </label>
               <label className="flex cursor-pointer items-center gap-2 text-sm">
                 <input
@@ -224,10 +238,10 @@ export default function BackupTab() {
                   }}
                   className="h-4 w-4 rounded border"
                 />
-                AntiZapret (client.sh 8) при авто-бэкапе
+                Включать полный архив VPN при авто-копии
               </label>
               <div className="space-y-2">
-                <Label htmlFor="backup-days">Интервал (дней)</Label>
+                <Label htmlFor="backup-days">Как часто (дней)</Label>
                 <Input
                   id="backup-days"
                   type="number"
@@ -241,7 +255,7 @@ export default function BackupTab() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="retention">Хранить архивов</Label>
+                <Label htmlFor="retention">Сколько копий хранить</Label>
                 <Input
                   id="retention"
                   type="number"
@@ -261,20 +275,20 @@ export default function BackupTab() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Архивы</CardTitle>
+          <CardTitle className="text-base">Сохранённые копии</CardTitle>
           <CardDescription>
-            {backups.length > 0 ? `${backups.length} архив${backups.length === 1 ? '' : backups.length < 5 ? 'а' : 'ов'}` : 'Список сохранённых копий'}
+            {backups.length > 0 ? `${backups.length} архив${backups.length === 1 ? '' : backups.length < 5 ? 'а' : 'ов'}` : 'Здесь появятся созданные резервные копии'}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {backups.length === 0 ? (
             <EmptyState
               icon={ArchiveX}
-              title="Архивов пока нет"
-              description="Создайте первый бэкап, чтобы защитить данные панели"
+              title="Копий пока нет"
+              description="Создайте первую резервную копию, чтобы не потерять настройки при сбое"
               action={
                 <Button onClick={handleCreate} variant="secondary">
-                  Создать бэкап
+                  Создать копию
                 </Button>
               }
               className="py-8"
@@ -284,10 +298,10 @@ export default function BackupTab() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Файл</TableHead>
+                    <TableHead>Имя файла</TableHead>
                     <TableHead>Размер</TableHead>
                     <TableHead>Дата</TableHead>
-                    <TableHead>Состав</TableHead>
+                    <TableHead>Что внутри</TableHead>
                     <TableHead />
                   </TableRow>
                 </TableHeader>
@@ -301,7 +315,7 @@ export default function BackupTab() {
                         <div className="flex flex-wrap gap-1">
                           {b.components.map((c) => (
                             <Badge key={c} variant="secondary">
-                              {c}
+                              {COMPONENT_LABELS[c] ?? c}
                             </Badge>
                           ))}
                         </div>
@@ -349,8 +363,8 @@ export default function BackupTab() {
         </CardContent>
       </Card>
 
-      <SettingsAlert variant="danger" title="Восстановление из бэкапа">
-        Восстановление перезапишет текущие данные панели. После операции необходимо перезапустить панель вручную.
+      <SettingsAlert variant="danger" title="О восстановлении">
+        Восстановление заменит текущие данные панели содержимым выбранной копии. После этого перезапустите панель.
       </SettingsAlert>
     </div>
   )

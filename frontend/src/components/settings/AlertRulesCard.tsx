@@ -63,7 +63,7 @@ export default function AlertRulesCard() {
         setMetric(metricsData[0].id)
       }
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки правил алертов')
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить правила уведомлений')
     } finally {
       setLoading(false)
     }
@@ -95,7 +95,7 @@ export default function AlertRulesCard() {
       })
       setRules((prev) => [...prev, created])
       setName('')
-      success('Правило алерта создано')
+      success('Правило уведомления создано')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка создания правила')
     } finally {
@@ -123,7 +123,7 @@ export default function AlertRulesCard() {
   }
 
   if (loading) {
-    return <Spinner label="Загрузка правил алертов..." className="py-8" />
+    return <Spinner label="Загрузка правил уведомлений..." className="py-8" />
   }
 
   return (
@@ -131,10 +131,10 @@ export default function AlertRulesCard() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <BellRing size={18} />
-          Правила алертов
+          Свои правила уведомлений
         </CardTitle>
         <CardDescription>
-          Кастомные пороги по метрикам панели и DB-агрегатам с Telegram AdminNotify
+          Дополнительные условия: например, слишком много клиентов в сети или сервер долго недоступен
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -146,11 +146,11 @@ export default function AlertRulesCard() {
                 id="alert-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="OpenVPN в сети > 50"
+                placeholder="Например: много клиентов OpenVPN"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="alert-metric">Метрика</Label>
+              <Label htmlFor="alert-metric">Что отслеживать</Label>
               <select
                 id="alert-metric"
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -165,7 +165,7 @@ export default function AlertRulesCard() {
               </select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="alert-operator">Условие</Label>
+              <Label htmlFor="alert-operator">Сравнение</Label>
               <select
                 id="alert-operator"
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -180,7 +180,7 @@ export default function AlertRulesCard() {
               </select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="alert-threshold">Порог</Label>
+              <Label htmlFor="alert-threshold">Пороговое значение</Label>
               <Input
                 id="alert-threshold"
                 type="number"
@@ -201,7 +201,7 @@ export default function AlertRulesCard() {
             </div>
             {selectedMetric?.requires_node && (
               <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="alert-node">Узел</Label>
+                <Label htmlFor="alert-node">Сервер VPN</Label>
                 <select
                   id="alert-node"
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -219,7 +219,7 @@ export default function AlertRulesCard() {
             )}
           </div>
           <SettingsAlert variant="info" title="Примеры">
-            «OpenVPN в сети &gt; 50» · «узел не в сети &gt; 5 мин» (порог 300 сек для node_offline_seconds)
+            «Клиентов OpenVPN больше 50» · «Сервер не отвечает дольше 5 минут»
           </SettingsAlert>
           <Button type="submit" disabled={saving}>
             <Plus size={16} />
@@ -229,7 +229,7 @@ export default function AlertRulesCard() {
 
         <div className="space-y-3">
           {rules.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Правила алертов пока не созданы.</p>
+            <p className="text-sm text-muted-foreground">Пока нет своих правил — используются только пороги нагрузки выше.</p>
           ) : (
             rules.map((rule) => (
               <div
@@ -240,14 +240,14 @@ export default function AlertRulesCard() {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">{rule.name}</span>
                     <Badge variant={rule.enabled ? 'default' : 'secondary'}>
-                      {rule.enabled ? 'активно' : 'выкл'}
+                      {rule.enabled ? 'включено' : 'выключено'}
                     </Badge>
                   </div>
                   <p className="text-sm text-muted-foreground">
                     {metrics.find((item) => item.id === rule.metric)?.label || rule.metric}{' '}
                     {OPERATORS.find((item) => item.id === rule.operator)?.label || rule.operator}{' '}
                     {rule.threshold}
-                    {rule.node_id ? ` · узел #${rule.node_id}` : ''}
+                    {rule.node_id ? ` · сервер #${rule.node_id}` : ''}
                     {rule.cooldown_minutes ? ` · пауза ${rule.cooldown_minutes} мин` : ''}
                   </p>
                   {rule.last_triggered_at && (

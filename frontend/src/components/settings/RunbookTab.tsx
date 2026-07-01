@@ -146,43 +146,43 @@ function StepCard({
 const GUIDED_STEPS: Array<{ id: string; title: string; description: string }> = [
   {
     id: 'systemd',
-    title: 'Systemd сервис',
-    description: 'Unit-файл, автозагрузка, состояние и journal',
+    title: 'Автозапуск панели',
+    description: 'Запускается ли панель при включении сервера',
   },
   {
     id: 'files',
-    title: 'Файлы проекта',
-    description: '.env, база данных, venv и скрипты запуска',
+    title: 'Нужные файлы',
+    description: 'Настройки, база данных и скрипты на месте',
   },
   {
     id: 'https',
     title: 'HTTPS и домен',
-    description: 'BEHIND_NGINX, ENFORCE_HTTPS и DOMAIN в .env',
+    description: 'Защищённое соединение и адрес сайта',
   },
   {
     id: 'port',
-    title: 'Порт backend',
-    description: 'Слушает ли uvicorn BACKEND_PORT',
+    title: 'Порт приложения',
+    description: 'Отвечает ли внутренний сервер панели',
   },
   {
     id: 'http',
-    title: 'HTTP-проверка',
-    description: 'Ответ /api/health на localhost',
+    title: 'Проверка ответа',
+    description: 'Открывается ли служебная страница здоровья',
   },
   {
     id: 'nginx',
-    title: 'Nginx (обратный прокси)',
-    description: 'Конфиг, proxy_pass и nginx -t',
+    title: 'Обратный прокси',
+    description: 'Правильно ли Nginx перенаправляет запросы',
   },
   {
     id: 'firewall',
-    title: 'Инструменты firewall',
-    description: 'iptables и ipset для защиты панели',
+    title: 'Защита сети',
+    description: 'Доступны ли средства блокировки на сервере',
   },
   {
     id: 'summary',
     title: 'Итог',
-    description: 'Сводка и рекомендуемые команды',
+    description: 'Сводка и что делать дальше',
   },
 ]
 
@@ -230,17 +230,15 @@ export default function RunbookTab() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Stethoscope size={18} />
-          Сценарий проверки: диагностика запуска
+          Проверка работы панели
         </CardTitle>
         <CardDescription>
-          Обёртка над <code className="rounded bg-muted px-1 py-0.5 text-xs">site-diagnostics-cli</code> — guided
-          steps для проверки systemd, файлов, порта, HTTP и nginx
+          Автоматически проверит сервис, файлы, сайт и сеть — подскажет, если что-то настроено неправильно
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <SettingsAlert variant="info" title="Только для controller">
-          Проверки выполняются на сервере панели (локальный install_dir). Для VPN-узлов используйте node agent и
-          разделы NOC/WARP.
+        <SettingsAlert variant="info" title="Проверка сервера панели">
+          Диагностика выполняется на компьютере, где установлена панель. Для VPN-узлов используйте разделы NOC и WARP.
         </SettingsAlert>
 
         <div className="flex flex-wrap gap-2">

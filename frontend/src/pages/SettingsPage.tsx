@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Settings } from 'lucide-react'
 import { ApiError, changePassword, createUser, deleteUser, getSettings, getUsers } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
@@ -11,14 +11,26 @@ import PersonalTab from '@/components/settings/PersonalTab'
 import SecurityTab from '@/components/settings/SecurityTab'
 import SettingsNav, {
   getDefaultSection,
+  getVisibleNavItems,
   isSectionAvailable,
   type SettingsSection,
 } from '@/components/settings/SettingsNav'
+import { getSectionMeta } from '@/components/settings/settingsLabels'
 import RunbookTab from '@/components/settings/RunbookTab'
 import UpdatesTab from '@/components/settings/UpdatesTab'
 import UsersTab from '@/components/settings/UsersTab'
 import VpnNetworkTab from '@/components/settings/VpnNetworkTab'
 import { NodeBadge } from '@/components/NodeSelector'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
@@ -27,53 +39,6 @@ import { useProgress } from '@/context/ProgressContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useTheme } from '@/context/ThemeContext'
 import type { AppSettings, User, UserRole } from '@/types'
-
-const SECTION_TITLES: Record<SettingsSection, { title: string; description: string }> = {
-  personal: {
-    title: 'Профиль',
-    description: 'Тема интерфейса, смена пароля и двухфакторная аутентификация',
-  },
-  users: {
-    title: 'Пользователи',
-    description: 'Управление учётными записями, ролями и доступом viewer',
-  },
-  security: {
-    title: 'Доступ к панели',
-    description: 'IP whitelist, защита от сканеров и активные баны',
-  },
-  config_delivery: {
-    title: 'Раздача конфигов',
-    description: 'Одноразовые QR-ссылки и публичные route-файлы для роутеров',
-  },
-  maintenance: {
-    title: 'Обслуживание',
-    description: 'Пересоздание профилей, путь AntiZapret и перезапуск VPN-служб',
-  },
-  backup: {
-    title: 'Резервные копии',
-    description: 'Создание, восстановление и автоматизация бэкапов панели',
-  },
-  monitoring: {
-    title: 'Мониторинг и алерты',
-    description: 'Пороги CPU/RAM, alert rules и Telegram-оповещения',
-  },
-  vpn_network: {
-    title: 'Сеть и публикация',
-    description: 'Публикация панели и reverse-proxy (фаза 17 — полный UI)',
-  },
-  modules: {
-    title: 'Модули',
-    description: 'Управление фоновыми задачами и разделами панели',
-  },
-  updates: {
-    title: 'Обновления',
-    description: 'Проверка и применение обновлений из git-репозитория',
-  },
-  tests: {
-    title: 'Диагностика',
-    description: 'Runbook запуска панели и проверка окружения',
-  },
-}
 
 export default function SettingsPage() {
   const { user } = useAuth()
@@ -183,7 +148,12 @@ export default function SettingsPage() {
     }
   }
 
-  const sectionMeta = SECTION_TITLES[activeSection]
+  const sectionMeta = getSectionMeta(activeSection)
+
+  const visibleNavItems = useMemo(
+    () => getVisibleNavItems(isAdmin, isSettingsTabEnabled, isEnabled),
+    [isAdmin, isSettingsTabEnabled, isEnabled],
+  )
 
   const renderSection = () => {
     switch (activeSection) {
@@ -251,14 +221,35 @@ export default function SettingsPage() {
           </div>
           <p className="text-sm text-muted-foreground">
             {isAdmin
-              ? 'Профиль, доступ, VPN, сервер и параметры панели'
-              : 'Тема интерфейса, смена пароля и двухфакторная аутентификация'}
+              ? 'Настройте профиль, доступ, VPN и работу панели — разделы сгруппированы по смыслу'
+              : 'Тема, пароль и дополнительная защита при входе'}
           </p>
         </div>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <aside className="w-full shrink-0 lg:sticky lg:top-4 lg:w-64">
+        <div className="space-y-3 lg:hidden">
+          <div className="space-y-2">
+            <Label htmlFor="settings-section-mobile">Раздел настроек</Label>
+            <Select value={activeSection} onValueChange={(value) => setActiveSection(value as SettingsSection)}>
+              <SelectTrigger id="settings-section-mobile">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectLabel>Выберите раздел</SelectLabel>
+                  {visibleNavItems.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <aside className="hidden w-full shrink-0 lg:block lg:sticky lg:top-4 lg:w-64">
           <div className="rounded-lg border bg-card p-2">
             <SettingsNav
               active={activeSection}
@@ -274,6 +265,9 @@ export default function SettingsPage() {
           <div className="rounded-lg border bg-muted/30 px-4 py-3">
             <h3 className="text-lg font-semibold tracking-tight">{sectionMeta.title}</h3>
             <p className="text-sm text-muted-foreground">{sectionMeta.description}</p>
+            {sectionMeta.hint && (
+              <p className="mt-2 text-sm text-muted-foreground/90">{sectionMeta.hint}</p>
+            )}
           </div>
           {renderSection()}
         </main>

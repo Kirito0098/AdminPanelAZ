@@ -68,19 +68,19 @@ export default function ConfigDeliveryTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <QrCode size={18} />
-            Раздача конфигов клиентам
+            Как клиенты получают VPN-профили
           </CardTitle>
           <CardDescription>
-            Публичные route-файлы для роутеров и одноразовые ссылки для скачивания профилей
+            Ссылки и QR-коды для телефона, готовые файлы для настройки роутера
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {openvpnEnabled && (
             <div className="space-y-4">
-              <h4 className="text-sm font-medium">Route-файлы для роутеров</h4>
+              <h4 className="text-sm font-medium">Файлы для роутеров</h4>
               <p className="text-sm text-muted-foreground">
                 Готовые списки маршрутов для Keenetic, MikroTik и TP-Link — скачайте или откройте
-                публичную ссылку для настройки роутера.
+                ссылку для настройки роутера.
               </p>
               <label className="flex cursor-pointer items-center gap-2 text-sm">
                 <input
@@ -91,11 +91,8 @@ export default function ConfigDeliveryTab() {
                   }
                   className="h-4 w-4 rounded border"
                 />
-                Разрешить публичное скачивание route-файлов без авторизации
+                Разрешить скачивание без входа в панель
               </label>
-              <p className="text-xs text-muted-foreground">
-                Публичные URL: /api/public/route-download/&#123;keenetic|mikrotik|tplink&#125;
-              </p>
               <RouteResultsPanel />
             </div>
           )}
@@ -105,7 +102,7 @@ export default function ConfigDeliveryTab() {
           {qrDownloadsEnabled && (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h4 className="text-sm font-medium">Одноразовые ссылки</h4>
+                <h4 className="text-sm font-medium">Ссылки и QR-коды</h4>
                 <Button variant="outline" size="sm" asChild>
                   <Link to="/logs?tab=qr-downloads">
                     <ClipboardList size={14} className="mr-1" />
@@ -115,17 +112,25 @@ export default function ConfigDeliveryTab() {
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>TTL одноразовой ссылки (сек)</Label>
+                  <Label>Срок действия ссылки (минут)</Label>
                   <Input
                     type="number"
-                    value={settings.qr_download_ttl_seconds}
+                    min={1}
+                    max={1440}
+                    value={Math.max(1, Math.round(settings.qr_download_ttl_seconds / 60))}
                     onChange={(e) =>
-                      setSettings({ ...settings, qr_download_ttl_seconds: Number(e.target.value) })
+                      setSettings({
+                        ...settings,
+                        qr_download_ttl_seconds: Math.max(60, Number(e.target.value) * 60),
+                      })
                     }
                   />
+                  <p className="text-xs text-muted-foreground">
+                    После этого времени ссылка перестанет работать
+                  </p>
                 </div>
                 <div className="space-y-2">
-                  <Label>Макс. скачиваний</Label>
+                  <Label>Сколько раз можно скачать</Label>
                   <div className="flex flex-wrap gap-4">
                     {([1, 3, 5] as const).map((n) => (
                       <label key={n} className="flex cursor-pointer items-center gap-2 text-sm">
@@ -142,12 +147,12 @@ export default function ConfigDeliveryTab() {
                   </div>
                 </div>
                 <div className="space-y-2 md:col-span-2">
-                  <Label>PIN для скачивания</Label>
+                  <Label>PIN-код для скачивания (необязательно)</Label>
                   <Input
                     type="password"
                     value={qrPin}
                     onChange={(e) => setQrPin(e.target.value)}
-                    placeholder="Пусто = без PIN"
+                    placeholder="Оставьте пустым, если PIN не нужен"
                   />
                 </div>
               </div>

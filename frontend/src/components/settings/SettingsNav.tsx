@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
+import { SECTION_META } from '@/components/settings/settingsLabels'
 
 export type SettingsSection =
   | 'personal'
@@ -56,114 +57,63 @@ interface NavGroup {
   items: NavItem[]
 }
 
+function navItem(
+  id: SettingsSection,
+  icon: LucideIcon,
+  extra?: Pick<NavItem, 'settingsTab' | 'adminOnly'>,
+): NavItem {
+  const meta = SECTION_META[id]
+  return {
+    id,
+    label: meta.title,
+    icon,
+    description: meta.description,
+    ...extra,
+  }
+}
+
 export const SETTINGS_NAV_GROUPS: NavGroup[] = [
   {
-    label: 'Профиль',
-    description: 'Личные настройки интерфейса и входа',
-    items: [
-      {
-        id: 'personal',
-        label: 'Профиль',
-        icon: User,
-        description: 'Тема, пароль и двухфакторная аутентификация',
-      },
-    ],
+    label: 'Личное',
+    description: 'Только ваш аккаунт',
+    items: [navItem('personal', User)],
   },
   {
-    label: 'Доступ',
-    description: 'Кто может войти в панель',
+    label: 'Кто может войти',
+    description: 'Учётные записи и защита',
     adminOnly: true,
     items: [
-      {
-        id: 'users',
-        label: 'Пользователи',
-        icon: Users,
-        description: 'Учётные записи, роли и доступ наблюдателей',
-        settingsTab: 'users',
-      },
-      {
-        id: 'security',
-        label: 'Доступ к панели',
-        icon: Shield,
-        description: 'IP whitelist, сканеры и активные баны',
-        settingsTab: 'security',
-      },
+      navItem('users', Users, { settingsTab: 'users' }),
+      navItem('security', Shield, { settingsTab: 'security' }),
     ],
   },
   {
     label: 'VPN',
-    description: 'Клиенты и службы на узле',
+    description: 'Профили клиентов и службы',
     adminOnly: true,
     items: [
-      {
-        id: 'config_delivery',
-        label: 'Раздача конфигов',
-        icon: QrCode,
-        description: 'QR-ссылки и публичные route-файлы',
-        settingsTab: 'qr_downloads',
-      },
-      {
-        id: 'maintenance',
-        label: 'Обслуживание',
-        icon: Wrench,
-        description: 'Профили клиентов, путь AntiZapret и перезапуск VPN',
-        settingsTab: 'maintenance',
-      },
+      navItem('config_delivery', QrCode, { settingsTab: 'qr_downloads' }),
+      navItem('maintenance', Wrench, { settingsTab: 'maintenance' }),
     ],
   },
   {
     label: 'Сервер',
-    description: 'Публикация, бэкапы и алерты',
+    description: 'Сайт, копии и уведомления',
     adminOnly: true,
     items: [
-      {
-        id: 'vpn_network',
-        label: 'Сеть и публикация',
-        icon: Globe,
-        description: 'HTTPS, домен и обратный прокси',
-        settingsTab: 'vpn_network',
-      },
-      {
-        id: 'backup',
-        label: 'Резервные копии',
-        icon: Archive,
-        description: 'Создание, восстановление и автоматизация бэкапов',
-        settingsTab: 'backup',
-      },
-      {
-        id: 'monitoring',
-        label: 'Мониторинг и алерты',
-        icon: Activity,
-        description: 'CPU/RAM, правила алертов и Telegram',
-        settingsTab: 'monitoring',
-      },
+      navItem('vpn_network', Globe, { settingsTab: 'vpn_network' }),
+      navItem('backup', Archive, { settingsTab: 'backup' }),
+      navItem('monitoring', Activity, { settingsTab: 'monitoring' }),
     ],
   },
   {
     label: 'Панель',
-    description: 'Функции и обновления панели',
+    description: 'Функции и обновления',
     adminOnly: true,
     items: [
-      {
-        id: 'modules',
-        label: 'Модули',
-        icon: Puzzle,
-        description: 'Фоновые задачи и разделы панели',
-      },
-      {
-        id: 'updates',
-        label: 'Обновления',
-        icon: Download,
-        description: 'Обновление из репозитория (git pull)',
-        settingsTab: 'updates',
-      },
-      {
-        id: 'tests',
-        label: 'Диагностика',
-        icon: FlaskConical,
-        description: 'Сценарий проверки запуска и диагностика сайта',
-        settingsTab: 'tests',
-      },
+      navItem('modules', Puzzle),
+      navItem('updates', Download, { settingsTab: 'updates' }),
+      navItem('tests', FlaskConical, { settingsTab: 'tests' }),
     ],
   },
 ]
@@ -255,10 +205,20 @@ export default function SettingsNav({
 
       {!isAdmin && (
         <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-3 text-xs text-muted-foreground">
-          <KeyRound size={14} className="mb-1.5 inline" /> Расширенные разделы доступны только администраторам
+          <KeyRound size={14} className="mb-1.5 inline" /> Остальные разделы настроек доступны только администратору
         </div>
       )}
     </nav>
+  )
+}
+
+export function getVisibleNavItems(
+  isAdmin: boolean,
+  isTabEnabled: (tab: string) => boolean,
+  isModuleEnabled: (key: string) => boolean = () => true,
+): NavItem[] {
+  return SETTINGS_NAV_GROUPS.flatMap((group) =>
+    group.items.filter((item) => isNavItemVisible(item, group, isAdmin, isTabEnabled, isModuleEnabled)),
   )
 }
 

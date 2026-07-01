@@ -16,9 +16,9 @@ import { useProgress } from '@/context/ProgressContext'
 import type { VpnNetworkPublishMode, VpnNetworkSettings } from '@/types'
 
 const MODE_LABELS: Record<string, string> = {
-  reverse_proxy: 'Nginx / прокси',
-  direct_http: 'Прямой HTTP',
-  local_http: 'Localhost HTTP',
+  reverse_proxy: 'Через Nginx с HTTPS',
+  direct_http: 'Напрямую по HTTP',
+  local_http: 'Только с этого компьютера',
 }
 
 function modeBadgeVariant(modeKey: string): 'default' | 'secondary' | 'outline' {
@@ -80,27 +80,27 @@ export default function VpnNetworkTab() {
     const httpsPort = Number(httpsPublicPort)
     const httpPort = Number(httpAcmePort)
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      notifyError('Некорректный BACKEND_PORT')
+      notifyError('Укажите корректный порт приложения (от 1 до 65535)')
       return
     }
     if (selectedModeInfo.requires_domain && !domain.trim()) {
-      notifyError('Укажите домен')
+      notifyError('Укажите адрес сайта (домен)')
       return
     }
 
     const isDirect = selectedMode === 'http_direct'
     confirm({
-      title: 'Применить публикацию панели?',
-      description: `Режим: ${selectedModeInfo.title}. Панель может быть недоступна несколько минут.`,
+      title: 'Применить настройки доступа?',
+      description: `Выбран режим: ${selectedModeInfo.title}. Сайт может быть недоступен несколько минут.`,
       alert: {
         variant: isDirect ? 'danger' : 'warning',
-        title: isDirect ? 'Прямой HTTP' : 'Изменение публикации',
+        title: isDirect ? 'Небезопасный режим' : 'Изменение способа доступа',
         children: isDirect
           ? (selectedModeInfo.warning ||
-            'Не используйте прямой HTTP в интернете. Включите блок на порту панели в разделе «Безопасность».')
-          : 'Будет запущен scripts/nginx-setup.sh на controller. Убедитесь, что DNS и firewall настроены.',
+            'Открывать панель напрямую по HTTP из интернета небезопасно. Включите ограничение по IP в разделе «Защита входа».')
+          : 'Будет настроен веб-сервер и защищённое соединение. Убедитесь, что домен указывает на этот сервер и порты открыты.',
       },
-      confirmLabel: 'Запустить публикацию',
+      confirmLabel: 'Применить',
       destructive: isDirect,
       onConfirm: async () => {
         setPublishing(true)
@@ -132,7 +132,7 @@ export default function VpnNetworkTab() {
   }
 
   if (loading && !settings) {
-    return <Spinner label="Загрузка настроек публикации..." className="py-12" />
+    return <Spinner label="Загрузка настроек сайта..." className="py-12" />
   }
 
   if (loadError && !settings) {
@@ -152,16 +152,13 @@ export default function VpnNetworkTab() {
 
   return (
     <div className="space-y-6">
-      <InlineProgressBar active={publishing} label="Применение настроек публикации..." />
+      <InlineProgressBar active={publishing} label="Применение настроек..." />
       <ConfirmDialogHost {...dialogProps} />
 
-      <header>
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Сеть и публикация</p>
-        <h2 className="mt-1 text-lg font-semibold">Порт, HTTPS и Nginx</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Как устроен доступ к панели: прямой HTTP на порту uvicorn или TLS на Nginx (reverse proxy).
-        </p>
-      </header>
+      <SettingsAlert variant="info" title="Как это работает">
+        Панель может открываться напрямую по порту или через веб-сервер с защищённым HTTPS. Ниже — текущий режим и
+        мастер для смены.
+      </SettingsAlert>
 
       <Card>
         <CardHeader className="pb-3">
@@ -178,14 +175,14 @@ export default function VpnNetworkTab() {
           </ul>
           <aside className="space-y-4 rounded-lg border bg-muted/30 p-4 text-sm">
             <div>
-              <p className="text-xs font-medium text-muted-foreground">Процесс панели (listen)</p>
+              <p className="text-xs font-medium text-muted-foreground">Внутренний адрес панели</p>
               <code className="mt-1 block break-all rounded bg-muted px-2 py-1 text-xs">
                 {settings.internal_url}
               </code>
             </div>
             {settings.primary_urls.length > 0 && (
               <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground">Вход в панель</p>
+                <p className="text-xs font-medium text-muted-foreground">Откройте панель в браузере</p>
                 {settings.primary_urls.map((row) => (
                   <a
                     key={row.url}
@@ -210,10 +207,10 @@ export default function VpnNetworkTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Globe size={18} />
-            Параметры из .env
+            Текущие параметры
           </CardTitle>
           <CardDescription>
-            Справочно: прямой HTTP, localhost-only или схема с Nginx — отражается этими переменными.
+            Справочно: как сейчас настроен доступ к панели (из файла настроек сервера)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -241,10 +238,10 @@ export default function VpnNetworkTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Rocket size={18} />
-            Мастер публикации
+            Настроить доступ к панели
           </CardTitle>
           <CardDescription>
-            Запускает <code>scripts/nginx-setup.sh</code> на controller в фоне. Операция только на этом сервере.
+            Выберите способ открытия панели в браузере и укажите домен при необходимости
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -274,7 +271,7 @@ export default function VpnNetworkTab() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="vpn-backend-port">BACKEND_PORT (uvicorn)</Label>
+              <Label htmlFor="vpn-backend-port">Порт приложения</Label>
               <Input
                 id="vpn-backend-port"
                 type="number"
@@ -283,10 +280,11 @@ export default function VpnNetworkTab() {
                 value={backendPort}
                 onChange={(e) => setBackendPort(e.target.value)}
               />
+              <p className="text-xs text-muted-foreground">Обычно 8000 — внутренний порт, на котором работает панель</p>
             </div>
             {selectedModeInfo?.requires_domain && (
               <div className="space-y-2">
-                <Label htmlFor="vpn-domain">DOMAIN</Label>
+                <Label htmlFor="vpn-domain">Адрес сайта (домен)</Label>
                 <Input
                   id="vpn-domain"
                   value={domain}
@@ -297,7 +295,7 @@ export default function VpnNetworkTab() {
             )}
             {selectedMode === 'nginx_le' && (
               <div className="space-y-2">
-                <Label htmlFor="vpn-email">EMAIL (Let&apos;s Encrypt)</Label>
+                <Label htmlFor="vpn-email">Email для сертификата</Label>
                 <Input
                   id="vpn-email"
                   type="email"
@@ -305,12 +303,13 @@ export default function VpnNetworkTab() {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="admin@example.com"
                 />
+                <p className="text-xs text-muted-foreground">Нужен для бесплатного HTTPS-сертификата Let&apos;s Encrypt</p>
               </div>
             )}
             {showNginxPorts && (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="vpn-https-port">HTTPS_PUBLIC_PORT</Label>
+                  <Label htmlFor="vpn-https-port">Порт HTTPS</Label>
                   <Input
                     id="vpn-https-port"
                     type="number"
@@ -319,9 +318,10 @@ export default function VpnNetworkTab() {
                     value={httpsPublicPort}
                     onChange={(e) => setHttpsPublicPort(e.target.value)}
                   />
+                  <p className="text-xs text-muted-foreground">Обычно 443 — защищённое соединение в браузере</p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="vpn-http-port">HTTP_ACME_PORT</Label>
+                  <Label htmlFor="vpn-http-port">Порт HTTP</Label>
                   <Input
                     id="vpn-http-port"
                     type="number"
@@ -330,13 +330,14 @@ export default function VpnNetworkTab() {
                     value={httpAcmePort}
                     onChange={(e) => setHttpAcmePort(e.target.value)}
                   />
+                  <p className="text-xs text-muted-foreground">Обычно 80 — для проверки домена при выпуске сертификата</p>
                 </div>
               </>
             )}
           </div>
 
           <Button onClick={handlePublish} disabled={publishing || backgroundTaskPolling}>
-            {publishing ? 'Запуск...' : 'Применить публикацию'}
+            {publishing ? 'Применение...' : 'Применить настройки'}
           </Button>
         </CardContent>
       </Card>
@@ -345,10 +346,10 @@ export default function VpnNetworkTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Terminal size={18} />
-            Ручная настройка
+            Настройка вручную на сервере
           </CardTitle>
           <CardDescription>
-            Альтернатива мастеру — выполните на сервере вручную.
+            Если мастер не подходит — эту команду можно выполнить в терминале на сервере
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
@@ -356,8 +357,7 @@ export default function VpnNetworkTab() {
             sudo ./{settings.nginx_setup_hint}
           </code>
           <p>
-            Первичная установка описана в <code>README.md</code> (разделы «Nginx + Let&apos;s Encrypt» и
-            «scripts/nginx-setup.sh»).
+            Подробная инструкция — в файле README на сервере, раздел про Nginx и HTTPS.
           </p>
         </CardContent>
       </Card>

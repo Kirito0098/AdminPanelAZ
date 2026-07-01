@@ -88,10 +88,10 @@ export default function PasskeysTab() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Fingerprint size={18} />
-          Passkeys
+          Вход по отпечатку или ключу
         </CardTitle>
         <CardDescription>
-          Фишинг-resistant вход через Touch ID, Windows Hello или USB-ключ (опционально вместе с TOTP)
+          Входите без пароля — через Touch ID, Face ID, Windows Hello или USB-ключ
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

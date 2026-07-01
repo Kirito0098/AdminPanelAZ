@@ -66,17 +66,17 @@ export default function MonitorSettingsCard() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Activity size={18} />
-          Мониторинг CPU/RAM
+          Нагрузка на сервер
         </CardTitle>
         <CardDescription>
-          Пороги Telegram-оповещений, длительность высокой нагрузки и интервал проверки ресурсов узла
+          Когда предупреждать в Telegram, если процессор или память долго загружены
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="monitor-cpu">Порог CPU, %</Label>
+              <Label htmlFor="monitor-cpu">Процессор (CPU), %</Label>
               <Input
                 id="monitor-cpu"
                 type="number"
@@ -85,9 +85,10 @@ export default function MonitorSettingsCard() {
                 value={cpu}
                 onChange={(e) => setCpu(Number(e.target.value))}
               />
+              <p className="text-xs text-muted-foreground">Уведомить, если загрузка выше этого значения</p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="monitor-ram">Порог RAM, %</Label>
+              <Label htmlFor="monitor-ram">Память (RAM), %</Label>
               <Input
                 id="monitor-ram"
                 type="number"
@@ -96,9 +97,10 @@ export default function MonitorSettingsCard() {
                 value={ram}
                 onChange={(e) => setRam(Number(e.target.value))}
               />
+              <p className="text-xs text-muted-foreground">Уведомить, если занято больше этого процента</p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="monitor-interval">Интервал проверки, сек</Label>
+              <Label htmlFor="monitor-interval">Как часто проверять (секунды)</Label>
               <Input
                 id="monitor-interval"
                 type="number"
@@ -120,7 +122,7 @@ export default function MonitorSettingsCard() {
               />
             </div>
             <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="monitor-sustained">Мин. длительность высокой нагрузки, сек</Label>
+              <Label htmlFor="monitor-sustained">Сколько держаться высокой нагрузке (секунды)</Label>
               <Input
                 id="monitor-sustained"
                 type="number"
@@ -130,13 +132,13 @@ export default function MonitorSettingsCard() {
                 onChange={(e) => setSustainedSec(Number(e.target.value))}
               />
               <p className="text-xs text-muted-foreground">
-                Алерт отправляется только если CPU/RAM держатся выше порога не менее этого времени (0 — сразу).
-                При интервале 60 сек и значении 180 — около 3 подряд высоких замеров.
+                Уведомление придёт только если нагрузка не снижается указанное время. 0 — сообщать сразу.
+                При проверке каждые 60 сек и значении 180 — примерно 3 замера подряд.
               </p>
             </div>
           </div>
-          <SettingsAlert variant="info" title="Применение">
-            Значения сохраняются в backend/.env. Для полного применения может потребоваться перезапуск панели.
+          <SettingsAlert variant="info" title="После сохранения">
+            Новые пороги начнут действовать сразу. В редких случаях может понадобиться перезапуск панели.
           </SettingsAlert>
           <Button type="submit" disabled={saving}>
             <Save size={16} />

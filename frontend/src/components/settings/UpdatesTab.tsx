@@ -56,7 +56,7 @@ export default function UpdatesTab() {
   const handleUpdate = () => {
     confirm({
       title: 'Применить обновление?',
-      description: 'Будет выполнен git pull, обновление pip/npm, сборка frontend и перезапуск панели.',
+      description: 'Загрузит новую версию панели, обновит зависимости и перезапустит сервис.',
       alert: {
         variant: 'warning',
         title: 'Перед обновлением',
@@ -101,7 +101,7 @@ export default function UpdatesTab() {
             <Download size={18} />
             Системные обновления
           </CardTitle>
-          <CardDescription>Git pull, pip/npm, сборка frontend и перезапуск панели</CardDescription>
+          <CardDescription>Скачать и установить последнюю версию с сервера разработчиков</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -110,19 +110,19 @@ export default function UpdatesTab() {
               Проверить
             </Button>
             {info?.updates_available ? (
-              <Badge variant="destructive">{info.commits_behind} коммит(ов) позади</Badge>
+              <Badge variant="destructive">Доступно обновлений: {info.commits_behind}</Badge>
             ) : (
-              <Badge variant="secondary">Актуально</Badge>
+              <Badge variant="secondary">У вас последняя версия</Badge>
             )}
           </div>
           {info && (
             <div className="grid gap-3 rounded-md border bg-muted/30 p-4 text-sm md:grid-cols-2">
               <div>
-                <span className="text-muted-foreground">Локальный: </span>
+                <span className="text-muted-foreground">Установленная версия: </span>
                 <code className="font-mono text-xs">{info.local_hash || '—'}</code>
               </div>
               <div>
-                <span className="text-muted-foreground">Удалённый: </span>
+                <span className="text-muted-foreground">Доступная версия: </span>
                 <code className="font-mono text-xs">{info.remote_hash || '—'}</code>
               </div>
             </div>
@@ -139,7 +139,7 @@ export default function UpdatesTab() {
         <Card className="border-destructive/20">
           <CardHeader>
             <CardTitle className="text-base text-destructive">Применить обновление</CardTitle>
-            <CardDescription>Загрузит и применит изменения из удалённого репозитория</CardDescription>
+            <CardDescription>Установит изменения и перезапустит панель</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {changelog?.success && changelog.version && (
@@ -167,7 +167,7 @@ export default function UpdatesTab() {
               </div>
             )}
             <SettingsAlert variant="warning" title="Перед обновлением">
-              Рекомендуется создать бэкап. После применения панель перезапустится автоматически (systemd или start.sh).
+              Рекомендуется создать резервную копию. Панель ненадолго перезапустится автоматически.
             </SettingsAlert>
             <Button variant="destructive" onClick={handleUpdate} disabled={updating}>
               {updating ? 'Обновление...' : 'Применить обновление'}

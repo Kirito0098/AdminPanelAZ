@@ -18,12 +18,8 @@ import {
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useNotifications } from '@/context/NotificationContext'
+import { ROLE_HINTS, ROLE_LABELS } from '@/components/settings/settingsLabels'
 import type { User, UserRole, VpnConfig } from '@/types'
-const roleLabels: Record<UserRole, string> = {
-  admin: 'Администратор',
-  user: 'Пользователь',
-  viewer: 'Просмотр',
-}
 
 interface UsersTabProps {
   users: User[]
@@ -214,7 +210,7 @@ export default function UsersTab({
             <UserPlus size={18} />
             Новый пользователь
           </CardTitle>
-          <CardDescription>Создание учётной записи с выбранной ролью</CardDescription>
+          <CardDescription>Логин, пароль и уровень доступа к панели</CardDescription>
         </CardHeader>
         <CardContent>
           <form noValidate onSubmit={onCreateUser} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -243,11 +239,12 @@ export default function UsersTab({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="user">Пользователь</SelectItem>
-                  <SelectItem value="viewer">Просмотр (viewer)</SelectItem>
-                  <SelectItem value="admin">Администратор</SelectItem>
+                  <SelectItem value="user">{ROLE_LABELS.user}</SelectItem>
+                  <SelectItem value="viewer">{ROLE_LABELS.viewer}</SelectItem>
+                  <SelectItem value="admin">{ROLE_LABELS.admin}</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">{ROLE_HINTS[newRole]}</p>
             </div>
             <div className="flex items-end">
               <Button type="submit">
@@ -299,7 +296,7 @@ export default function UsersTab({
                       <TableCell className="font-medium">{u.username}</TableCell>
                       <TableCell>
                         <Badge variant={u.role === 'admin' ? 'default' : 'secondary'}>
-                          {roleLabels[u.role] ?? u.role}
+                          {ROLE_LABELS[u.role] ?? u.role}
                         </Badge>
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">
@@ -342,10 +339,10 @@ export default function UsersTab({
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Eye size={18} />
-            Доступ к конфигам (viewer)
+            Доступ к конфигам (только просмотр)
           </CardTitle>
           <CardDescription>
-            Назначение групп конфигов для пользователей с ролью «Просмотр»
+            Укажите, какие VPN-клиенты может видеть пользователь с ролью «Только просмотр»
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -354,8 +351,8 @@ export default function UsersTab({
           ) : viewerUsers.length === 0 ? (
             <EmptyState
               icon={Eye}
-              title="Нет viewer-пользователей"
-              description="Создайте пользователя с ролью «Просмотр», чтобы назначить доступ к конфигам"
+              title="Нет пользователей с режимом «Только просмотр»"
+              description="Создайте пользователя с этой ролью, чтобы ограничить доступ только к выбранным конфигам"
               className="py-8"
             />
           ) : (
@@ -369,7 +366,7 @@ export default function UsersTab({
                 >
                   <div className="flex w-full items-center justify-between gap-2">
                     <span className="font-medium">{vu.username}</span>
-                    <Badge variant="secondary">{roleLabels.viewer}</Badge>
+                    <Badge variant="secondary">{ROLE_LABELS.viewer}</Badge>
                   </div>
                   <span className="text-sm text-muted-foreground">
                     Выдано групп: {countGranted(vu.id)} из {clientGroups.length}
@@ -387,7 +384,7 @@ export default function UsersTab({
           if (!open && !savingUser) setActiveEditor(null)
         }}
         title={activeEditor ? `Пользователь: ${activeEditor.username}` : 'Пользователь'}
-        description="Telegram ID и квота конфигов для self-service"
+        description="Привязка Telegram и лимит VPN-клиентов"
         icon={Users}
         footer={
           <>
@@ -427,7 +424,7 @@ export default function UsersTab({
                 placeholder="по умолчанию"
               />
               <p className="text-xs text-muted-foreground">
-                Максимум VPN-клиентов для role=user. Пусто или 0 — глобальный лимит из настроек.
+                Максимум VPN-клиентов, которых может создать этот пользователь. Пусто — общий лимит панели.
               </p>
             </div>
           )}
@@ -439,8 +436,8 @@ export default function UsersTab({
         onOpenChange={(open) => {
           if (!open && !savingAccess) setActiveViewer(null)
         }}
-        title={activeViewer ? `Доступ: ${activeViewer.username}` : 'Доступ viewer'}
-        description="Выберите клиентские группы, которые viewer может просматривать и скачивать"
+        title={activeViewer ? `Доступ: ${activeViewer.username}` : 'Доступ к конфигам'}
+        description="Отметьте клиентов, которых этот пользователь может просматривать и скачивать"
         icon={Eye}
         size="lg"
         className="max-w-2xl"

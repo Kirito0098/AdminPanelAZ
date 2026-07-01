@@ -118,10 +118,10 @@ export default function TwoFactorTab() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <ShieldCheck size={18} />
-          Двухфакторная аутентификация (2FA)
+          Дополнительная защита входа
         </CardTitle>
         <CardDescription>
-          TOTP для администраторов (Google Authenticator, Authy и др.)
+          Код из приложения на телефоне (Google Authenticator, Яндекс.Ключ и др.)
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -139,7 +139,7 @@ export default function TwoFactorTab() {
         {!enabled && !setupData && (
           <Button onClick={handleSetup} disabled={loading}>
             <KeyRound size={16} />
-            Настроить 2FA
+            Настроить защиту входа
           </Button>
         )}
 
@@ -183,7 +183,7 @@ export default function TwoFactorTab() {
         {enabled && (
           <div className="space-y-3">
             <div className="grid gap-2">
-              <Label htmlFor="2fa-code">Код 2FA</Label>
+              <Label htmlFor="2fa-code">Код из приложения</Label>
               <Input
                 id="2fa-code"
                 value={verifyCode}
@@ -193,7 +193,7 @@ export default function TwoFactorTab() {
             </div>
             <div className="flex flex-wrap gap-2">
               <Button variant="destructive" onClick={handleDisable} disabled={loading}>
-                Отключить 2FA
+                Отключить защиту входа
               </Button>
               <Button variant="outline" onClick={handleRegenerate} disabled={loading}>
                 Новые резервные коды
