@@ -337,11 +337,12 @@ export async function applyClientTemplate(
 }
 
 export async function bulkConfigOp(data: {
-  operation: 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert'
+  operation: 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert' | 'change_owner'
   config_ids?: number[]
   tag_ids?: number[]
   block_days?: number
   renew_cert_days?: number
+  owner_id?: number
 }) {
   return apiFetch<{ task_id: string; queued: boolean; status_url: string }>('/configs/bulk', {
     method: 'POST',

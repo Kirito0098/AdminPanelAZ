@@ -4,6 +4,7 @@ import {
   bulkConfigOp,
   createConfigTag,
   deleteConfig,
+  deleteConfigTag,
   getConfigTags,
   getOpenVpnGroup,
   openvpnPermanentBlock,
@@ -16,6 +17,7 @@ import {
 } from '@/api/client'
 import ConfigCard from '@/components/dashboard/ConfigCard'
 import ClientActionsDialog from '@/components/dashboard/ClientActionsDialog'
+import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import EmptyState from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/badge'
@@ -27,22 +29,29 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   configMatchesTab,
   getPolicyForConfig,
+  isConfigConnected,
   matchesFilter,
+  matchesPresenceFilter,
   protocolLabel,
+  type ClientConnectionMap,
   type ClientFilter,
+  type ClientPresenceFilter,
   type ProtocolTab,
 } from '@/lib/configCardUtils'
+import { configOwnerCandidates } from '@/lib/configOwners'
+import { cn } from '@/lib/utils'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import { useProgress } from '@/context/ProgressContext'
 import type { ClientAccessPolicy, ConfigTag, OpenVpnGroupOption, User, UserRole, VpnConfig } from '@/types'
-import { FileKey, Filter, Search, Shield, Tag, X } from 'lucide-react'
+import { FileKey, Filter, Search, Shield, Tag, Wifi, X } from 'lucide-react'
 
 interface ConfigCardsSectionProps {
   configs: VpnConfig[]
   policies: Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
   userRole: UserRole
   ownerCandidates?: User[]
+  connectionMap?: ClientConnectionMap | null
   filesLoading?: boolean
   onRefresh: () => Promise<void>
   onQr: (config: VpnConfig, path: string, filename: string) => Promise<void>
@@ -54,7 +63,7 @@ interface ConfigCardsSectionProps {
 const TAB_ORDER: ProtocolTab[] = ['openvpn', 'amneziawg', 'wireguard']
 
 type ConfirmAction = 'delete' | 'block' | 'unblock' | null
-type BulkAction = 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert' | null
+type BulkAction = 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert' | 'change_owner' | null
 type LoadingKey = `${number}-${'download' | 'qr' | 'block' | 'unblock' | 'delete'}` | null
 
 function useVisibleTabs(): ProtocolTab[] {
@@ -71,6 +80,7 @@ export default function ConfigCardsSection({
   policies,
   userRole,
   ownerCandidates = [],
+  connectionMap = null,
   filesLoading = false,
   onRefresh,
   onQr,
@@ -92,6 +102,7 @@ export default function ConfigCardsSection({
   }, [activeTab, visibleTabs])
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<ClientFilter>('all')
+  const [presenceFilter, setPresenceFilter] = useState<ClientPresenceFilter>('all')
   const [selectedConfig, setSelectedConfig] = useState<VpnConfig | null>(null)
   const [selectedTab, setSelectedTab] = useState<ProtocolTab>('openvpn')
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
@@ -107,8 +118,11 @@ export default function ConfigCardsSection({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [bulkAction, setBulkAction] = useState<BulkAction>(null)
   const [bulkDays, setBulkDays] = useState('7')
+  const [bulkOwnerId, setBulkOwnerId] = useState<number | null>(null)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [newTagName, setNewTagName] = useState('')
+  const [tagToDelete, setTagToDelete] = useState<ConfigTag | null>(null)
+  const [tagDeleteBusy, setTagDeleteBusy] = useState(false)
 
   const isAdmin = userRole === 'admin'
   const openvpnTabEnabled = isEnabled('openvpn')
@@ -147,12 +161,15 @@ export default function ConfigCardsSection({
           .filter((c) => matchesTagFilter(c))
           .filter((c) => !q || c.client_name.toLowerCase().includes(q))
           .filter((c) => matchesFilter(c, tab, filter, getPolicyForConfig(c, policies)))
+          .filter((c) =>
+            matchesPresenceFilter(c, tab, presenceFilter, getPolicyForConfig(c, policies), connectionMap),
+          )
           .sort((a, b) => a.client_name.localeCompare(b.client_name, 'ru'))
         return acc
       },
       {} as Record<ProtocolTab, VpnConfig[]>,
     )
-  }, [configs, search, filter, policies, tagFilterIds])
+  }, [configs, search, filter, presenceFilter, policies, tagFilterIds, connectionMap])
 
   const tabCounts = useMemo(
     () =>
@@ -309,6 +326,24 @@ export default function ConfigCardsSection({
     }
   }
 
+  const handleDeleteTag = async () => {
+    if (!tagToDelete) return
+    const deletedName = tagToDelete.name
+    setTagDeleteBusy(true)
+    try {
+      await deleteConfigTag(tagToDelete.id)
+      setAllTags((prev) => prev.filter((t) => t.id !== tagToDelete.id))
+      setTagFilterIds((prev) => prev.filter((id) => id !== tagToDelete.id))
+      setTagToDelete(null)
+      await onRefresh()
+      onNotifySuccess(`Тег «${deletedName}» удалён`)
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка удаления тега')
+    } finally {
+      setTagDeleteBusy(false)
+    }
+  }
+
   const toggleSelected = (configId: number, checked: boolean) => {
     setSelectedIds((prev) => {
       const next = new Set(prev)
@@ -325,12 +360,24 @@ export default function ConfigCardsSection({
 
   const clearSelection = () => setSelectedIds(new Set())
 
+  const openBulkAction = (action: Exclude<BulkAction, null>) => {
+    setBulkAction(action)
+    if (action === 'change_owner' && bulkOwnerId == null) {
+      const firstOwner = configOwnerCandidates(ownerCandidates)[0]
+      if (firstOwner) setBulkOwnerId(firstOwner.id)
+    }
+  }
+
   const runBulkAction = async () => {
     if (!bulkAction) return
     const configIds = [...selectedIds]
     const tagIds = tagFilterIds
     if (!configIds.length && !tagIds.length) {
       onNotifyError('Выберите клиентов или фильтр по тегу')
+      return
+    }
+    if (bulkAction === 'change_owner' && !bulkOwnerId) {
+      onNotifyError('Выберите нового владельца')
       return
     }
     setBulkBusy(true)
@@ -342,6 +389,7 @@ export default function ConfigCardsSection({
         tag_ids: tagIds,
         block_days: bulkAction === 'block_temp' ? days : undefined,
         renew_cert_days: bulkAction === 'renew_cert' ? days : undefined,
+        owner_id: bulkAction === 'change_owner' ? bulkOwnerId ?? undefined : undefined,
       })
       setBulkAction(null)
       clearSelection()
@@ -451,7 +499,7 @@ export default function ConfigCardsSection({
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                     <Filter size={13} />
-                    Статус
+                    Срок
                   </span>
                   {(
                     [
@@ -475,21 +523,75 @@ export default function ConfigCardsSection({
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Wifi size={13} />
+                    Состояние
+                  </span>
+                  {(
+                    [
+                      ['all', 'Все'],
+                      ['online', 'Онлайн'],
+                      ['offline', 'Офлайн'],
+                      ['blocked', 'Заблокированные'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <Button
+                      key={key}
+                      type="button"
+                      size="sm"
+                      variant={presenceFilter === key ? 'default' : 'outline'}
+                      onClick={() => setPresenceFilter(key)}
+                      className="h-7 text-xs"
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                     <Tag size={13} />
                     Теги
                   </span>
-                  {allTags.map((tag) => (
-                    <Button
-                      key={tag.id}
-                      type="button"
-                      size="sm"
-                      variant={tagFilterIds.includes(tag.id) ? 'default' : 'outline'}
-                      className="h-7 text-xs"
-                      onClick={() => toggleTagFilter(tag.id)}
-                    >
-                      {tag.name}
-                    </Button>
-                  ))}
+                  {allTags.map((tag) => {
+                    const active = tagFilterIds.includes(tag.id)
+                    return (
+                      <span
+                        key={tag.id}
+                        className={cn(
+                          'inline-flex h-7 items-stretch overflow-hidden rounded-md border text-xs',
+                          active
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-input bg-background',
+                        )}
+                      >
+                        <button
+                          type="button"
+                          className={cn('px-2 transition-colors', !active && 'hover:bg-muted')}
+                          onClick={() => toggleTagFilter(tag.id)}
+                        >
+                          {tag.name}
+                          {tag.config_count != null && tag.config_count > 0 ? (
+                            <span className={cn('ml-1 opacity-70', active && 'opacity-90')}>
+                              {tag.config_count}
+                            </span>
+                          ) : null}
+                        </button>
+                        <button
+                          type="button"
+                          title={`Удалить тег «${tag.name}»`}
+                          disabled={haReplicaReadonly || tagDeleteBusy}
+                          className={cn(
+                            'border-l px-1.5 transition-colors disabled:opacity-50',
+                            active
+                              ? 'border-primary-foreground/25 hover:bg-primary-foreground/10'
+                              : 'border-input hover:bg-destructive/10 hover:text-destructive',
+                          )}
+                          onClick={() => setTagToDelete(tag)}
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    )
+                  })}
                   <div className="flex items-center gap-1">
                     <Input
                       value={newTagName}
@@ -514,17 +616,29 @@ export default function ConfigCardsSection({
                     <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={clearSelection}>
                       Сброс
                     </Button>
-                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => setBulkAction('block_temp')}>
-                      Block
+                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => openBulkAction('block_temp')}>
+                      Заблокировать
                     </Button>
-                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => setBulkAction('unblock')}>
-                      Unblock
+                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => openBulkAction('unblock')}>
+                      Разблокировать
                     </Button>
-                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => setBulkAction('renew_cert')}>
-                      Renew cert
+                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => openBulkAction('renew_cert')}>
+                      Продлить сертификат
                     </Button>
-                    <Button type="button" size="sm" variant="destructive" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => setBulkAction('delete')}>
-                      Delete
+                    {ownerCandidates.length > 0 && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        disabled={haReplicaReadonly}
+                        onClick={() => openBulkAction('change_owner')}
+                      >
+                        Сменить владельца
+                      </Button>
+                    )}
+                    <Button type="button" size="sm" variant="destructive" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => openBulkAction('delete')}>
+                      Удалить
                     </Button>
                   </div>
                 )}
@@ -538,7 +652,7 @@ export default function ConfigCardsSection({
                     icon={FileKey}
                     title="Нет клиентов"
                     description={
-                      search || filter !== 'all'
+                      search || filter !== 'all' || presenceFilter !== 'all' || tagFilterIds.length > 0
                         ? `Нет результатов для «${protocolLabel(tab)}» с текущими фильтрами`
                         : `В категории ${protocolLabel(tab)} пока нет конфигураций`
                     }
@@ -574,6 +688,7 @@ export default function ConfigCardsSection({
                         }
                         showQrDownloads={qrDownloadsEnabled}
                         showTrafficLink={trafficLinkEnabled}
+                        isOnline={isConfigConnected(config.client_name, tab, connectionMap)}
                       />
                     ))}
                   </div>
@@ -667,6 +782,26 @@ export default function ConfigCardsSection({
       </ConfirmDialog>
 
       <ConfirmDialog
+        open={tagToDelete != null}
+        onOpenChange={(open) => {
+          if (!open && !tagDeleteBusy) setTagToDelete(null)
+        }}
+        title="Удалить тег?"
+        description={
+          <>
+            Тег «{tagToDelete?.name}» будет удалён без возможности восстановления.
+            {tagToDelete?.config_count != null && tagToDelete.config_count > 0
+              ? ` Он будет снят с ${tagToDelete.config_count} клиентов.`
+              : ''}
+          </>
+        }
+        confirmLabel="Удалить"
+        destructive
+        loading={tagDeleteBusy}
+        onConfirm={() => void handleDeleteTag()}
+      />
+
+      <ConfirmDialog
         open={bulkAction != null}
         onOpenChange={(open) => {
           if (!open && !bulkBusy) setBulkAction(null)
@@ -676,6 +811,8 @@ export default function ConfigCardsSection({
             ? 'Массовое удаление'
             : bulkAction === 'renew_cert'
               ? 'Массовое продление сертификатов'
+              : bulkAction === 'change_owner'
+                ? 'Массовая смена владельца'
               : bulkAction === 'block_temp'
                 ? 'Массовая блокировка'
                 : 'Массовая операция'
@@ -684,6 +821,9 @@ export default function ConfigCardsSection({
           <>
             Будет обработано выбранных: {selectedCount}
             {tagFilterIds.length > 0 ? ` + клиенты с выбранными тегами` : ''}. Операция выполняется в фоне.
+            {bulkAction === 'change_owner' && bulkOwnerId
+              ? ` Новый владелец: ${ownerCandidates.find((user) => user.id === bulkOwnerId)?.username ?? '—'}.`
+              : ''}
           </>
         }
         confirmLabel="Запустить"
@@ -705,6 +845,16 @@ export default function ConfigCardsSection({
               onChange={(e) => setBulkDays(e.target.value)}
             />
           </div>
+        )}
+        {bulkAction === 'change_owner' && ownerCandidates.length > 0 && (
+          <ConfigOwnerSelect
+            id="bulkOwner"
+            users={ownerCandidates}
+            value={bulkOwnerId}
+            onChange={setBulkOwnerId}
+            label="Новый владелец"
+            description="Будет назначен всем выбранным клиентам и клиентам с выбранными тегами."
+          />
         )}
       </ConfirmDialog>
     </>

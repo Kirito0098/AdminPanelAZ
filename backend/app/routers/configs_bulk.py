@@ -31,6 +31,7 @@ def bulk_config_operation(
             tag_ids=payload.tag_ids,
             block_days=payload.block_days or 7,
             renew_cert_days=payload.renew_cert_days or 3650,
+            owner_id=payload.owner_id,
             actor=admin,
         )
     except ValueError as exc:

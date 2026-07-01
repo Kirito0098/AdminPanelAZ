@@ -24,6 +24,7 @@ import {
   getConfigQuota,
   getConfigs,
   getDashboardSummary,
+  getMonitoring,
   getUsers,
   importConfigsCsv,
   syncConfigs,
@@ -62,6 +63,7 @@ import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
+import { buildClientConnectionMap, type ClientConnectionMap } from '@/lib/configCardUtils'
 import type { ClientAccessPolicy, ClientTemplate, DashboardSummary, SelfServiceQuota, User, VpnConfig, VpnType } from '@/types'
 
 export default function DashboardPage() {
@@ -99,6 +101,7 @@ export default function DashboardPage() {
   const [policies, setPolicies] = useState<
     Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
   >({})
+  const [connectionMap, setConnectionMap] = useState<ClientConnectionMap | null>(null)
   const [panelUsers, setPanelUsers] = useState<User[]>([])
   const [ownerId, setOwnerId] = useState<number | null>(null)
   const [templates, setTemplates] = useState<ClientTemplate[]>([])
@@ -160,6 +163,11 @@ export default function DashboardPage() {
       } else {
         setPolicies({})
       }
+      void getMonitoring('node')
+        .then((data) =>
+          setConnectionMap(buildClientConnectionMap(data.openvpn_clients, data.wireguard_peers)),
+        )
+        .catch(() => setConnectionMap(null))
       void loadProfileFiles(configsData)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки конфигураций')
@@ -731,6 +739,7 @@ export default function DashboardPage() {
           policies={policies}
           userRole={user.role}
           ownerCandidates={panelUsers}
+          connectionMap={connectionMap}
           filesLoading={loadingFiles}
           onRefresh={() => load({ silent: true })}
           onQr={handleQr}

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models import NodeStatus, SyncStatus, UserRole, VpnType
 
@@ -270,11 +270,18 @@ class ClientTemplateApplyRequest(BaseModel):
 
 
 class BulkConfigOpRequest(BaseModel):
-    operation: Literal["block_temp", "block_perm", "unblock", "delete", "renew_cert"]
+    operation: Literal["block_temp", "block_perm", "unblock", "delete", "renew_cert", "change_owner"]
     config_ids: list[int] = Field(default_factory=list)
     tag_ids: list[int] = Field(default_factory=list)
     block_days: int | None = Field(default=7, ge=1, le=3650)
     renew_cert_days: int | None = Field(default=3650, ge=1, le=3650)
+    owner_id: int | None = None
+
+    @model_validator(mode="after")
+    def validate_change_owner(self) -> "BulkConfigOpRequest":
+        if self.operation == "change_owner" and self.owner_id is None:
+            raise ValueError("Для смены владельца укажите owner_id")
+        return self
 
 
 class ActiveWebSessionResponse(BaseModel):

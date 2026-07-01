@@ -17,12 +17,15 @@ import {
   Trash2,
   Unlock,
   UserRound,
+  Wifi,
+  WifiOff,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { ClientAccessPolicy, UserRole, VpnConfig } from '@/types'
 import {
   buildAccessMeta,
   formatCreatedAt,
+  formatBlockStatus,
   getConfigStatus,
   getDownloadFilename,
   hasAzProfiles,
@@ -35,6 +38,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 
 type ActionKey = 'download' | 'qr' | 'block' | 'unblock' | 'delete'
@@ -58,6 +62,7 @@ interface ConfigCardProps {
   onDelete?: () => void
   showQrDownloads?: boolean
   showTrafficLink?: boolean
+  isOnline?: boolean | null
 }
 
 const statusIcons = {
@@ -72,7 +77,7 @@ interface MetaRow {
   icon: LucideIcon
   label: string
   value: string
-  tone?: 'default' | 'warning' | 'danger'
+  tone?: 'default' | 'warning' | 'danger' | 'success'
   wide?: boolean
 }
 
@@ -99,13 +104,21 @@ function metaRow(
   return { key, icon, label, value, tone, wide }
 }
 
-function isNoiseMetaLine(text: string, tone: 'active' | 'expiring' | 'expired'): boolean {
+function isNoiseMetaLine(
+  text: string,
+  tone: 'active' | 'expiring' | 'expired',
+  options: { hideTraffic?: boolean; hideBlock?: boolean } = {},
+): boolean {
+  if (options.hideTraffic && (text.startsWith('Трафик') || text.startsWith('Лимит'))) {
+    return true
+  }
+  if (options.hideBlock && text.startsWith('Блокировка')) {
+    return true
+  }
   if (tone === 'active') {
     if (text.startsWith('Блокировка: нет')) return true
     if (text.startsWith('Осталось: неизвестно')) return true
     if (text.startsWith('Отключение: не ограничено')) return true
-    if (text.startsWith('Трафик')) return true
-    if (text.startsWith('Лимит:')) return true
   }
   return false
 }
@@ -139,12 +152,31 @@ function formatTrafficMeta(policy: ClientAccessPolicy | undefined): MetaRow {
   return metaRow('traffic', Gauge, 'Трафик', `${consumed} · без лимита`, 'default')
 }
 
+function formatBlockMeta(policy: ClientAccessPolicy | undefined): MetaRow {
+  const block = formatBlockStatus(policy)
+  return metaRow('block', Shield, 'Блокировка', block.value, block.tone)
+}
+
+function formatConnectionMeta(online: boolean | null): MetaRow {
+  if (online === null) {
+    return metaRow('connection', Wifi, 'Подключение', '—')
+  }
+  return metaRow(
+    'connection',
+    online ? Wifi : WifiOff,
+    'Подключение',
+    online ? 'онлайн' : 'офлайн',
+    online ? 'success' : 'default',
+  )
+}
+
 function buildCompactMeta(
   config: VpnConfig,
   tab: ProtocolTab,
   policy: ClientAccessPolicy | undefined,
   isAdmin: boolean,
   tone: 'active' | 'expiring' | 'expired',
+  isOnline: boolean | null,
 ): MetaRow[] {
   const rows: MetaRow[] = [
     metaRow('created', Calendar, 'Создан', formatCreatedAt(config.created_at)),
@@ -170,11 +202,14 @@ function buildCompactMeta(
     rows.push(formatTrafficMeta(policy))
   }
 
+  rows.push(formatBlockMeta(policy))
+  rows.push(formatConnectionMeta(isOnline))
+
   const { lines } = buildAccessMeta(config, tab, policy)
   const keyMeta = config.vpn_type === 'openvpn' ? lines.slice(1) : lines
 
   for (const line of keyMeta) {
-    if (isNoiseMetaLine(line.text, tone)) continue
+    if (isNoiseMetaLine(line.text, tone, { hideTraffic: isAdmin, hideBlock: true })) continue
     const parsed = splitMetaText(line.text)
     if (!parsed.value && !parsed.label) continue
     rows.push(
@@ -200,6 +235,7 @@ function MetaLine({ row }: { row: MetaRow }) {
         row.wide && 'col-span-2',
         row.tone === 'danger' && 'text-destructive',
         row.tone === 'warning' && 'text-amber-700 dark:text-amber-300',
+        row.tone === 'success' && 'text-emerald-600 dark:text-emerald-400',
       )}
     >
       <Icon size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
@@ -211,6 +247,7 @@ function MetaLine({ row }: { row: MetaRow }) {
 
 function IconActionButton({
   title,
+  label,
   disabled,
   loading,
   onClick,
@@ -219,6 +256,7 @@ function IconActionButton({
   children,
 }: {
   title: string
+  label?: string
   disabled?: boolean
   loading?: boolean
   onClick: () => void
@@ -230,9 +268,9 @@ function IconActionButton({
     <Button
       type="button"
       variant="outline"
-      size="icon"
+      size={label ? 'sm' : 'icon'}
       className={cn(
-        'h-8 w-8 shrink-0',
+        label ? 'h-8 gap-1.5 px-2 text-xs' : 'h-8 w-8 shrink-0',
         destructive && 'text-destructive hover:bg-destructive/10 hover:text-destructive',
         className,
       )}
@@ -240,7 +278,37 @@ function IconActionButton({
       disabled={disabled}
       onClick={onClick}
     >
-      {loading ? <Loader2 size={14} className="animate-spin" /> : children}
+      {loading ? <Loader2 size={14} className="animate-spin shrink-0" /> : children}
+      {label ? <span className="whitespace-nowrap">{label}</span> : null}
+    </Button>
+  )
+}
+
+function IconActionLink({
+  title,
+  label,
+  to,
+  className,
+  children,
+}: {
+  title: string
+  label: string
+  to: string
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <Button
+      asChild
+      variant="outline"
+      size="sm"
+      className={cn('h-8 gap-1.5 px-2 text-xs', className)}
+      title={title}
+    >
+      <Link to={to}>
+        {children}
+        <span className="whitespace-nowrap">{label}</span>
+      </Link>
     </Button>
   )
 }
@@ -301,6 +369,7 @@ export default function ConfigCard({
   onDelete,
   showQrDownloads = true,
   showTrafficLink = false,
+  isOnline = null,
 }: ConfigCardProps) {
   const status = getConfigStatus(config, tab, policy)
   const StatusIcon = statusIcons[status.variant]
@@ -312,7 +381,7 @@ export default function ConfigCard({
   const isAdmin = userRole === 'admin'
   const canDelete = isAdmin || userRole === 'user'
   const isBlocked = policy?.is_blocked ?? false
-  const metaRows = buildCompactMeta(config, tab, policy, isAdmin, tone)
+  const metaRows = buildCompactMeta(config, tab, policy, isAdmin, tone, isOnline)
   const actionBusy = loadingAction != null
 
   const runFileAction = (
@@ -336,6 +405,7 @@ export default function ConfigCard({
     <Card
       className={cn(
         'relative overflow-hidden rounded-xl border shadow-sm transition-colors hover:border-primary/30 hover:shadow-md',
+        selected && showSelect && 'border-primary/40 bg-primary/5',
         tone === 'expired' && 'border-destructive/30',
         tone === 'expiring' && 'border-amber-500/30',
       )}
@@ -352,12 +422,11 @@ export default function ConfigCard({
       <CardHeader className="space-y-2 p-4 pb-2">
         <div className="flex items-start gap-2">
           {showSelect && (
-            <input
-              type="checkbox"
+            <Checkbox
               checked={selected}
-              onChange={(e) => onSelectChange?.(e.target.checked)}
-              className="mt-1 h-4 w-4 shrink-0 rounded border-input"
-              onClick={(e) => e.stopPropagation()}
+              onCheckedChange={onSelectChange}
+              aria-label={`Выбрать ${config.client_name}`}
+              className="mt-0.5"
             />
           )}
           <div className="min-w-0 flex-1">
@@ -462,93 +531,99 @@ export default function ConfigCard({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-1.5">
-            {primaryFile && showQrDownloads && (
-              <>
-                {hasBothProfiles ? (
-                  <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {primaryFile && showQrDownloads && (
+                <>
+                  {hasBothProfiles ? (
+                    <>
+                      <IconActionButton
+                        title={`QR VPN: ${getDownloadFilename(config, vpnFile!)}`}
+                        label="QR VPN"
+                        disabled={actionBusy}
+                        loading={loadingAction === 'qr'}
+                        onClick={() => runFileAction(vpnFile, onQr)}
+                      >
+                        <QrCode size={14} className="shrink-0" />
+                      </IconActionButton>
+                      <IconActionButton
+                        title={`QR AntiZapret: ${getDownloadFilename(config, azFile!)}`}
+                        label="QR AZ"
+                        disabled={actionBusy}
+                        loading={loadingAction === 'qr'}
+                        className="border-amber-500/40 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400"
+                        onClick={() => runFileAction(azFile, onQr)}
+                      >
+                        <QrCode size={14} className="shrink-0" />
+                      </IconActionButton>
+                    </>
+                  ) : (
                     <IconActionButton
-                      title={`QR VPN: ${getDownloadFilename(config, vpnFile!)}`}
+                      title={`QR: ${getDownloadFilename(config, primaryFile)}`}
+                      label="QR-код"
                       disabled={actionBusy}
                       loading={loadingAction === 'qr'}
-                      onClick={() => runFileAction(vpnFile, onQr)}
+                      onClick={() => runFileAction(primaryFile, onQr)}
                     >
-                      <QrCode size={14} />
+                      <QrCode size={14} className="shrink-0" />
                     </IconActionButton>
-                    <IconActionButton
-                      title={`QR AntiZapret: ${getDownloadFilename(config, azFile!)}`}
-                      disabled={actionBusy}
-                      loading={loadingAction === 'qr'}
-                      className="border-amber-500/40 text-amber-600 dark:text-amber-400"
-                      onClick={() => runFileAction(azFile, onQr)}
-                    >
-                      <QrCode size={14} />
-                    </IconActionButton>
-                  </>
-                ) : (
+                  )}
+                </>
+              )}
+
+              {showTrafficLink && (
+                <IconActionLink
+                  title="Статистика трафика"
+                  label="Трафик"
+                  to={`/traffic?client=${encodeURIComponent(config.client_name)}`}
+                >
+                  <BarChart3 size={14} className="shrink-0" />
+                </IconActionLink>
+              )}
+
+              <IconActionButton title="Все действия" label="Ещё" onClick={onOpenDetails}>
+                <MoreHorizontal size={14} className="shrink-0" />
+              </IconActionButton>
+            </div>
+
+            {(onBlock || onUnblock || onDelete) && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {isAdmin && !isBlocked && onBlock && (
                   <IconActionButton
-                    title={`QR: ${getDownloadFilename(config, primaryFile)}`}
+                    title="Заблокировать"
+                    label="Блок"
                     disabled={actionBusy}
-                    loading={loadingAction === 'qr'}
-                    onClick={() => runFileAction(primaryFile, onQr)}
+                    loading={loadingAction === 'block'}
+                    onClick={onBlock}
                   >
-                    <QrCode size={14} />
+                    <Ban size={14} className="shrink-0" />
                   </IconActionButton>
                 )}
-              </>
+                {isAdmin && isBlocked && onUnblock && (
+                  <IconActionButton
+                    title="Разблокировать"
+                    label="Разблок"
+                    disabled={actionBusy}
+                    loading={loadingAction === 'unblock'}
+                    onClick={onUnblock}
+                  >
+                    <Unlock size={14} className="shrink-0" />
+                  </IconActionButton>
+                )}
+                {canDelete && onDelete && (
+                  <IconActionButton
+                    title="Удалить"
+                    label="Удалить"
+                    destructive
+                    disabled={actionBusy}
+                    loading={loadingAction === 'delete'}
+                    onClick={onDelete}
+                  >
+                    <Trash2 size={14} className="shrink-0" />
+                  </IconActionButton>
+                )}
+              </div>
             )}
-
-            {showTrafficLink && (
-              <Button
-                asChild
-                variant="outline"
-                size="icon"
-                className="h-8 w-8 shrink-0"
-                title="Статистика трафика"
-              >
-                <Link to={`/traffic?client=${encodeURIComponent(config.client_name)}`}>
-                  <BarChart3 size={14} />
-                </Link>
-              </Button>
-            )}
-
-            <IconActionButton title="Все действия" onClick={onOpenDetails}>
-              <MoreHorizontal size={14} />
-            </IconActionButton>
-
-            <div className="ml-auto flex items-center gap-1">
-              {isAdmin && !isBlocked && onBlock && (
-                <IconActionButton
-                  title="Заблокировать"
-                  disabled={actionBusy}
-                  loading={loadingAction === 'block'}
-                  onClick={onBlock}
-                >
-                  <Ban size={14} />
-                </IconActionButton>
-              )}
-              {isAdmin && isBlocked && onUnblock && (
-                <IconActionButton
-                  title="Разблокировать"
-                  disabled={actionBusy}
-                  loading={loadingAction === 'unblock'}
-                  onClick={onUnblock}
-                >
-                  <Unlock size={14} />
-                </IconActionButton>
-              )}
-              {canDelete && onDelete && (
-                <IconActionButton
-                  title="Удалить"
-                  destructive
-                  disabled={actionBusy}
-                  loading={loadingAction === 'delete'}
-                  onClick={onDelete}
-                >
-                  <Trash2 size={14} />
-                </IconActionButton>
-              )}
-            </div>
           </div>
         </div>
       </CardContent>

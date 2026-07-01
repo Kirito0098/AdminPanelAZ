@@ -1,9 +1,11 @@
-import type { ClientAccessPolicy, VpnConfig } from '@/types'
+import type { ClientAccessPolicy, OpenVpnClient, VpnConfig, WireGuardPeer } from '@/types'
 import { formatDate } from '@/lib/datetime'
 import { getProfileDownloadFilename } from '@/lib/profileDownloadName'
+import { isWireGuardOnline } from '@/lib/wireguardStatus'
 
 export type ProtocolTab = 'openvpn' | 'wireguard' | 'amneziawg'
 export type ClientFilter = 'all' | 'active' | 'expiring' | 'expired'
+export type ClientPresenceFilter = 'all' | 'online' | 'offline' | 'blocked'
 
 type ProfileFile = VpnConfig['profile_files'][number]
 
@@ -215,6 +217,34 @@ export function matchesFilter(
   return true
 }
 
+export function isConfigBlocked(policy?: ClientAccessPolicy): boolean {
+  if (!policy) return false
+  if (policy.is_blocked) return true
+  const blockMode = (policy.block_mode || 'none').toLowerCase()
+  return (
+    blockMode === 'temp' ||
+    blockMode === 'permanent' ||
+    blockMode === 'expired' ||
+    blockMode === 'traffic_limit' ||
+    Boolean(policy.traffic_limit_exceeded)
+  )
+}
+
+export function matchesPresenceFilter(
+  config: VpnConfig,
+  tab: ProtocolTab,
+  filter: ClientPresenceFilter,
+  policy: ClientAccessPolicy | undefined,
+  connectionMap?: ClientConnectionMap | null,
+): boolean {
+  if (filter === 'all') return true
+  if (filter === 'blocked') return isConfigBlocked(policy)
+  const connected = isConfigConnected(config.client_name, tab, connectionMap)
+  if (filter === 'online') return connected === true
+  if (filter === 'offline') return connected === false
+  return true
+}
+
 export function getPolicyForConfig(
   config: VpnConfig,
   policies: Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>,
@@ -261,4 +291,77 @@ export function getProtocolBadgeVariant(tab: ProtocolTab): 'default' | 'secondar
   if (tab === 'openvpn') return 'default'
   if (tab === 'amneziawg') return 'secondary'
   return 'outline'
+}
+
+export type ClientConnectionMap = Record<string, { openvpn: boolean; wireguard: boolean }>
+
+export function buildClientConnectionMap(
+  openvpnClients: OpenVpnClient[],
+  wireguardPeers: WireGuardPeer[],
+): ClientConnectionMap {
+  const map: ClientConnectionMap = {}
+
+  for (const client of openvpnClients) {
+    const key = client.common_name.trim().toLowerCase()
+    if (!key) continue
+    map[key] = { openvpn: true, wireguard: map[key]?.wireguard ?? false }
+  }
+
+  for (const peer of wireguardPeers) {
+    const name = (peer.client_name || '').trim()
+    if (!name) continue
+    const key = name.toLowerCase()
+    const prev = map[key]
+    const wireguardOnline = isWireGuardOnline(peer) || (prev?.wireguard ?? false)
+    map[key] = { openvpn: prev?.openvpn ?? false, wireguard: wireguardOnline }
+  }
+
+  return map
+}
+
+export function isConfigConnected(
+  clientName: string,
+  tab: ProtocolTab,
+  connectionMap?: ClientConnectionMap | null,
+): boolean | null {
+  if (!connectionMap) return null
+  const entry = connectionMap[clientName.trim().toLowerCase()]
+  if (!entry) return false
+  return tab === 'openvpn' ? entry.openvpn : entry.wireguard
+}
+
+export function formatBlockStatus(policy?: ClientAccessPolicy): {
+  value: string
+  tone: 'default' | 'warning' | 'danger'
+} {
+  if (!policy) {
+    return { value: '—', tone: 'default' }
+  }
+
+  const blockMode = (policy.block_mode || 'none').toLowerCase()
+  const isBlocked = policy.is_blocked ?? false
+
+  if (blockMode === 'traffic_limit' || policy.traffic_limit_exceeded) {
+    let value = 'превышен лимит трафика'
+    if (policy.traffic_limit_unblock_label) {
+      value += ` · ${policy.traffic_limit_unblock_label}`
+    }
+    return { value, tone: 'danger' }
+  }
+  if (blockMode === 'temp') {
+    if (policy.block_duration_days != null) {
+      return { value: `на ${policy.block_duration_days} дн.`, tone: 'danger' }
+    }
+    if (policy.blocked_days_left != null && policy.blocked_days_left >= 0) {
+      return { value: `на ${policy.blocked_days_left} дн.`, tone: 'danger' }
+    }
+    return { value: 'временная', tone: 'danger' }
+  }
+  if (blockMode === 'permanent' || blockMode === 'expired') {
+    return { value: 'до ручной разблокировки', tone: 'danger' }
+  }
+  if (isBlocked) {
+    return { value: 'да', tone: 'danger' }
+  }
+  return { value: 'нет', tone: 'default' }
 }

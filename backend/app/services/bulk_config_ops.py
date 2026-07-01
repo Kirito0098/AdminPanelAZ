@@ -17,7 +17,12 @@ from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
 from app.services.config_tags import resolve_config_ids_by_tags
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
-from app.services.node_sync.client_sync import maybe_replicate_cert_renew, maybe_replicate_delete, purge_ha_shadow_configs
+from app.services.node_sync.client_sync import (
+    maybe_replicate_cert_renew,
+    maybe_replicate_config_metadata,
+    maybe_replicate_delete,
+    purge_ha_shadow_configs,
+)
 from app.services.node_sync.policy_sync import maybe_replicate_policy_op
 from app.services.node_sync.groups import find_sync_group_for_primary, require_ha_primary_for_client_ops
 
@@ -62,6 +67,7 @@ def _run_single_op(
     node_id: int,
     block_days: int,
     renew_cert_days: int,
+    owner_id: int | None,
     actor_username: str,
 ) -> dict[str, Any]:
     db = SessionLocal()
@@ -110,6 +116,15 @@ def _run_single_op(
                 primary_config=config,
                 cert_expire_days=renew_cert_days,
             )
+        elif operation == "change_owner":
+            if owner_id is None:
+                return {"config_id": config_id, "ok": False, "error": "owner_id required"}
+            owner = db.query(User).filter(User.id == owner_id).first()
+            if not owner:
+                return {"config_id": config_id, "ok": False, "error": "владелец не найден"}
+            config.owner_id = owner_id
+            db.commit()
+            maybe_replicate_config_metadata(db, node_id=node_id, primary_config=config)
         elif operation == "delete":
             if config.vpn_type == VpnType.openvpn:
                 adapter.delete_openvpn_client(name)
@@ -159,6 +174,7 @@ def run_bulk_config_op(
     tag_ids: list[int],
     block_days: int,
     renew_cert_days: int,
+    owner_id: int | None,
     actor_username: str,
     progress_updater: Callable[[int, str, str | None], None] | None = None,
 ) -> dict[str, Any]:
@@ -190,6 +206,7 @@ def run_bulk_config_op(
                 node_id=node.id,
                 block_days=block_days,
                 renew_cert_days=renew_cert_days,
+                owner_id=owner_id,
                 actor_username=actor_username,
             ): cid
             for cid in targets
@@ -231,6 +248,7 @@ def enqueue_bulk_config_op(
     tag_ids: list[int],
     block_days: int,
     renew_cert_days: int,
+    owner_id: int | None,
     actor: User,
 ) -> str:
     node = get_active_node(db)
@@ -239,12 +257,16 @@ def enqueue_bulk_config_op(
     if not targets:
         raise ValueError("Нет конфигураций для обработки")
 
+    if operation == "change_owner" and owner_id is None:
+        raise ValueError("Для смены владельца укажите owner_id")
+
     op_labels = {
         "block_temp": "Массовая временная блокировка",
         "block_perm": "Массовая постоянная блокировка",
         "unblock": "Массовая разблокировка",
         "delete": "Массовое удаление",
         "renew_cert": "Массовое продление сертификатов",
+        "change_owner": "Массовая смена владельца",
     }
 
     def task_callable(progress_updater=None):
@@ -254,6 +276,7 @@ def enqueue_bulk_config_op(
             tag_ids=tag_ids,
             block_days=block_days,
             renew_cert_days=renew_cert_days,
+            owner_id=owner_id,
             actor_username=actor.username,
             progress_updater=progress_updater,
         )
