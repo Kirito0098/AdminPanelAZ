@@ -1,4 +1,3 @@
-import { useEffect, useMemo, useState } from 'react'
 import {
   ApiError,
   bulkConfigOp,
@@ -15,17 +14,20 @@ import {
   wgTempBlock,
   wgUnblock,
 } from '@/api/client'
-import ConfigCard from '@/components/dashboard/ConfigCard'
 import ClientActionsDialog from '@/components/dashboard/ClientActionsDialog'
+import ConfigCard from '@/components/dashboard/ConfigCard'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import EmptyState from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
+import { useProgress } from '@/context/ProgressContext'
+import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import {
   configMatchesTab,
   getPolicyForConfig,
@@ -40,11 +42,9 @@ import {
 } from '@/lib/configCardUtils'
 import { configOwnerCandidates } from '@/lib/configOwners'
 import { cn } from '@/lib/utils'
-import { useFeatureModules } from '@/context/FeatureModulesContext'
-import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
-import { useProgress } from '@/context/ProgressContext'
 import type { ClientAccessPolicy, ConfigTag, OpenVpnGroupOption, User, UserRole, VpnConfig } from '@/types'
 import { FileKey, Filter, Search, Shield, Tag, Wifi, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 
 interface ConfigCardsSectionProps {
   configs: VpnConfig[]
@@ -659,7 +659,7 @@ export default function ConfigCardsSection({
                     className="py-10"
                   />
                 ) : (
-                  <div className="grid items-start gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                  <div className="grid items-start gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {filteredByTab[tab].map((config) => (
                       <ConfigCard
                         key={`${tab}-${config.id}`}
