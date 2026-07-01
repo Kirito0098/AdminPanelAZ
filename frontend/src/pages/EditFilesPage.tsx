@@ -6,6 +6,7 @@ import {
   FileEdit,
   GitCompare,
   Globe,
+  HelpCircle,
   Loader2,
   Network,
   RefreshCw,
@@ -36,6 +37,7 @@ import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -52,76 +54,119 @@ import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import {
   buildLightDiff,
   countDiffOps,
-  formatDiffSummary,
 } from '@/lib/buildLightDiff'
-import { ALL_NODES_ONLINE_PHRASE, HA_AUTO_SYNC_TITLE } from '@/lib/uiLabels'
+import { ALL_NODES_ONLINE_PHRASE } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import type { EditFileEntry } from '@/types'
 
 type FileGroup = 'hosts' | 'ips' | 'adblock'
 
-const FILE_META: Record<string, { description: string; icon: LucideIcon; group: FileGroup }> = {
+type FileMeta = {
+  description: string
+  hint: string
+  placeholder: string
+  icon: LucideIcon
+  group: FileGroup
+}
+
+const FILE_META: Record<string, FileMeta> = {
   include_hosts: {
-    description: 'Домены, трафик которых направляется через VPN',
+    description: 'Сайты, которые должны идти через VPN',
+    hint: 'Например: youtube.com, twitter.com',
+    placeholder: 'youtube.com\nexample.com\n\nОдин сайт — одна строка',
     icon: Globe,
     group: 'hosts',
   },
   exclude_hosts: {
-    description: 'Домены, исключённые из маршрутизации VPN',
+    description: 'Сайты, которые не нужно пускать через VPN',
+    hint: 'Локальные и внутренние ресурсы',
+    placeholder: 'bank.local\nintranet.company.ru\n\nОдин сайт — одна строка',
     icon: Globe,
     group: 'hosts',
   },
   remove_hosts: {
-    description: 'Домены для удаления из автоматически собранных списков',
+    description: 'Убрать сайт из автоматически собранных списков',
+    hint: 'Если сайт попал в список по ошибке',
+    placeholder: 'unwanted-site.com\n\nОдин сайт — одна строка',
     icon: Globe,
     group: 'hosts',
   },
   include_ips: {
-    description: 'IP и CIDR для включения в маршрутизацию',
+    description: 'IP-адреса, которые направлять через VPN',
+    hint: 'Можно указать диапазон: 10.0.0.0/24',
+    placeholder: '10.0.0.0/24\n203.0.113.5\n\nОдин адрес или диапазон — одна строка',
     icon: Network,
     group: 'ips',
   },
   exclude_ips: {
-    description: 'IP и CIDR, исключённые из маршрутизации',
+    description: 'IP-адреса вне маршрутизации VPN',
+    hint: 'Локальная сеть и служебные адреса',
+    placeholder: '192.168.0.0/24\n\nОдин адрес или диапазон — одна строка',
     icon: Network,
     group: 'ips',
   },
   allow_ips: {
-    description: 'Разрешённые IP-адреса для доступа',
+    description: 'Кому разрешён доступ к серверу',
+    hint: 'Белый список доверенных адресов',
+    placeholder: '203.0.113.10\n\nОдин IP — одна строка',
     icon: ShieldCheck,
     group: 'ips',
   },
   drop_ips: {
-    description: 'IP для блокировки исходящего трафика',
+    description: 'Заблокировать исходящие подключения на эти адреса',
+    hint: 'Трафик на эти IP не уйдёт с сервера',
+    placeholder: '0.0.0.0/0\n\nОдин адрес или диапазон — одна строка',
     icon: ShieldBan,
     group: 'ips',
   },
   forward_ips: {
-    description: 'IP для перенаправления через VPN-туннель',
+    description: 'Перенаправить трафик на эти адреса через VPN',
+    hint: 'Для отдельных IP вне списков доменов',
+    placeholder: '8.8.8.8\n1.1.1.1\n\nОдин IP — одна строка',
     icon: Zap,
     group: 'ips',
   },
   deny_ips: {
-    description: 'Запрет входящих подключений с указанных IP',
+    description: 'Запретить входящие подключения с этих адресов',
+    hint: 'Защита от нежелательных клиентов',
+    placeholder: '198.51.100.0/24\n\nОдин адрес или диапазон — одна строка',
     icon: Ban,
     group: 'ips',
   },
   include_adblock_hosts: {
-    description: 'Adblock — домены для включения в фильтрацию',
+    description: 'Дополнительно блокировать рекламу на этих сайтах',
+    hint: 'Расширяет стандартный список блокировки',
+    placeholder: 'ads.example.com\ntracker.site\n\nОдин сайт — одна строка',
     icon: ShieldBan,
     group: 'adblock',
   },
   exclude_adblock_hosts: {
-    description: 'Adblock — домены, исключённые из фильтрации',
+    description: 'Не блокировать рекламу на этих сайтах',
+    hint: 'Исключения из фильтра рекламы',
+    placeholder: 'my-site.com\n\nОдин сайт — одна строка',
     icon: ShieldCheck,
     group: 'adblock',
   },
 }
 
 const GROUP_LABELS: Record<FileGroup, string> = {
-  hosts: 'Домены',
-  ips: 'IP / CIDR',
-  adblock: 'Adblock',
+  hosts: 'Сайты',
+  ips: 'IP-адреса',
+  adblock: 'Блокировка рекламы',
+}
+
+const GROUP_HINTS: Record<FileGroup, string> = {
+  hosts: 'Какие сайты пускать или не пускать через VPN',
+  ips: 'Отдельные адреса и диапазоны',
+  adblock: 'Дополнительные правила фильтрации рекламы',
+}
+
+const DEFAULT_FILE_META: FileMeta = {
+  description: 'Список настроек VPN',
+  hint: 'По одной записи на строку',
+  placeholder: 'Введите значения — по одному на строку',
+  icon: FileEdit,
+  group: 'hosts',
 }
 
 function lineCount(text: string) {
@@ -129,14 +174,8 @@ function lineCount(text: string) {
   return text.split('\n').length
 }
 
-function getFileMeta(key: string) {
-  return (
-    FILE_META[key] ?? {
-      description: 'Конфигурационный файл AntiZapret',
-      icon: FileEdit,
-      group: 'hosts' as FileGroup,
-    }
-  )
+function getFileMeta(key: string): FileMeta {
+  return FILE_META[key] ?? DEFAULT_FILE_META
 }
 
 export default function EditFilesPage() {
@@ -204,11 +243,14 @@ export default function EditFilesPage() {
   const diffSummaryText = useMemo(() => {
     if (diffBaseline === 'disk' && diskContent != null) {
       if (!activeDiffCounts.added && !activeDiffCounts.removed) {
-        return 'Нет отличий от версии на узле'
+        return 'Совпадает с версией на сервере'
       }
-      return `Относительно узла: добавлено ${activeDiffCounts.added}, удалено ${activeDiffCounts.removed}`
+      return `На сервере: +${activeDiffCounts.added} / −${activeDiffCounts.removed} строк`
     }
-    return formatDiffSummary(liveDiffCounts)
+    if (!liveDiffCounts.added && !liveDiffCounts.removed) {
+      return 'Изменений пока нет'
+    }
+    return `Добавлено ${liveDiffCounts.added}, удалено ${liveDiffCounts.removed}`
   }, [activeDiffCounts, diffBaseline, diskContent, liveDiffCounts])
 
   const resetDiffBaseline = useCallback(() => {
@@ -318,7 +360,7 @@ export default function EditFilesPage() {
       )
       setSavedContent(content)
       resetDiffBaseline()
-      success('Файл сохранён на узле (без doall.sh)')
+      success('Список сохранён на сервере')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
     } finally {
@@ -334,7 +376,7 @@ export default function EditFilesPage() {
       await withInline(() => saveEditFile(activeKey, content), 'Сохранение и doall.sh...')
       setSavedContent(content)
       resetDiffBaseline()
-      success('Файл сохранён и применён (doall.sh)')
+      success('Изменения применены — VPN обновил правила маршрутизации')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
     } finally {
@@ -397,14 +439,14 @@ export default function EditFilesPage() {
         <EmptyState
           icon={FileEdit}
           title="Редактор недоступен"
-          description="Редактирование конфигурационных файлов недоступно для роли viewer."
+          description="Просмотр и редактирование списков VPN недоступны для вашей роли."
         />
       </div>
     )
   }
 
   if (loading && files.length === 0) {
-    return <Spinner label="Загрузка файлов..." className="py-16" />
+    return <Spinner label="Загрузка списков..." className="py-16" />
   }
 
   return (
@@ -421,12 +463,13 @@ export default function EditFilesPage() {
               <NodeBadge name={activeNode?.name} status={activeNode?.status} />
               {hasUnsavedChanges && (
                 <Badge variant="outline" className="border-amber-500/50 text-amber-600 dark:text-amber-400">
-                  Не сохранено
+                  Есть несохранённые правки
                 </Badge>
               )}
             </div>
             <p className="text-sm text-muted-foreground">
-              {files.length} конфигурационных файлов AntiZapret на активном узле
+              Списки сайтов и IP-адресов для VPN на сервере{' '}
+              <strong className="font-medium text-foreground">{activeNode?.name ?? 'не выбран'}</strong>
             </p>
           </div>
         </div>
@@ -439,10 +482,10 @@ export default function EditFilesPage() {
                 disabled={nodeOffline || transferLoading || files.length === 0}
               >
                 <ArrowRightLeft size={16} />
-                Перенести на узлы
+                Скопировать на другие серверы
               </Button>
               {isHaAutoPrimary && (
-                <span className="px-1 text-[10px] text-muted-foreground">Резерв</span>
+                <span className="px-1 text-[10px] text-muted-foreground">Запасной вариант</span>
               )}
             </div>
           )}
@@ -453,40 +496,88 @@ export default function EditFilesPage() {
         </div>
       </div>
 
+      <details className="group rounded-lg border bg-card text-sm">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 font-medium [&::-webkit-details-marker]:hidden">
+          <HelpCircle size={16} className="shrink-0 text-primary" />
+          Как пользоваться — 3 простых шага
+          <span className="ml-auto text-xs text-muted-foreground group-open:hidden">Показать</span>
+        </summary>
+        <div className="space-y-3 border-t px-4 py-3 text-muted-foreground">
+          <ol className="space-y-2.5">
+            <li className="flex gap-3">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                1
+              </span>
+              <span>
+                <strong className="text-foreground">Выберите список</strong> слева — сайты, IP-адреса или
+                блокировку рекламы.
+              </span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                2
+              </span>
+              <span>
+                <strong className="text-foreground">Добавьте или уберите записи</strong> — каждый сайт или
+                адрес с новой строки, без запятых.
+              </span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                3
+              </span>
+              <span>
+                <strong className="text-foreground">Нажмите «Сохранить и применить»</strong>, чтобы VPN
+                подхватил изменения. Просто «Сохранить» записывает список, но не обновляет маршруты.
+              </span>
+            </li>
+          </ol>
+          <p className="text-xs">
+            Перед правками нажмите <strong className="text-foreground">Обновить</strong>, чтобы загрузить
+            актуальную версию с сервера.
+          </p>
+        </div>
+      </details>
+
       {isHaAutoPrimary && (
-        <SettingsAlert variant="info" title={`${HA_AUTO_SYNC_TITLE}: сохранение реплицирует на реплику`}>
-          На основном узле в режиме <strong>авто</strong> кнопки «Сохранить» и «Сохранить и применить» автоматически
-          копируют изменённые файлы на все реплики группы «{activeNodeHa.group_name}». «Сохранить и применить»
-          запускает <strong>doall.sh</strong> на основном узле; на реплике doall выполняется, если включён{' '}
-          <strong>NODE_SYNC_REPLICATE_DOALL</strong> (по умолчанию — да). Ручной «Перенести на узлы» — только
-          резервный вариант (рассогласование, реплика не в сети, узлы вне HA).
+        <SettingsAlert variant="info" title="Изменения автоматически копируются на резервный сервер">
+          После сохранения списки синхронизируются с резервным узлом группы «{activeNodeHa.group_name}».
+          Кнопка «Скопировать на другие серверы» нужна только в особых случаях — например, если резервный
+          сервер был недоступен.
+          <details className="mt-2">
+            <summary className="cursor-pointer text-xs hover:text-foreground">Технические подробности</summary>
+            <p className="mt-1 text-xs">
+              Режим HA auto: «Сохранить» и «Сохранить и применить» реплицируют файлы на replica через
+              config_sync. «Сохранить и применить» запускает doall.sh на основном узле; на реплике — при
+              включённом NODE_SYNC_REPLICATE_DOALL (по умолчанию да).
+            </p>
+          </details>
         </SettingsAlert>
       )}
 
-      <SettingsAlert variant="info" title="Редактирование на активном узле">
-        Файлы читаются и записываются на <strong>{activeNode?.name ?? 'активном узле'}</strong>.
-        Кнопка «Сохранить и применить» выполняет <strong>doall.sh</strong> и перезагружает правила
-        маршрутизации VPN — используйте её после изменения списков include/exclude.
+      <SettingsAlert variant="info" title={`Работа идёт на сервере «${activeNode?.name ?? 'не выбран'}»`}>
+        Списки читаются и сохраняются на выбранном VPN-сервере. Кнопка{' '}
+        <strong>«Сохранить и применить»</strong> обновляет правила маршрутизации — это может занять
+        несколько минут.
         {!isHaAutoPrimary && showTransferButton && (
           <>
             {' '}
-            Кнопка <strong>«Перенести на узлы»</strong> копирует конфигурацию с активного узла на другие
+            Кнопка <strong>«Скопировать на другие серверы»</strong> переносит списки на другие узлы
             {ALL_NODES_ONLINE_PHRASE.toLowerCase()}.
           </>
         )}
       </SettingsAlert>
 
       {nodeOffline && (
-        <SettingsAlert variant="warning" title="Узел офлайн">
-          Активный узел недоступен. Чтение и сохранение файлов может быть невозможно. Проверьте связь
-          с node agent на странице «Узлы».
+        <SettingsAlert variant="warning" title="Сервер недоступен">
+          VPN-сервер не отвечает — просмотр и сохранение списков могут не работать. Проверьте связь на
+          странице «Узлы».
         </SettingsAlert>
       )}
 
       {nodeUnknown && !nodeOffline && (
-        <SettingsAlert variant="warning" title="Статус узла неизвестен">
-          Связь с узлом не подтверждена. Запустите проверку здоровья на странице «Узлы» перед
-          сохранением изменений.
+        <SettingsAlert variant="warning" title="Связь с сервером не подтверждена">
+          Статус сервера неизвестен. Перед сохранением проверьте его на странице «Узлы».
         </SettingsAlert>
       )}
 
@@ -510,8 +601,8 @@ export default function EditFilesPage() {
         <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
           <Card className="hidden lg:block">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Конфигурационные файлы</CardTitle>
-              <CardDescription>Выберите файл для редактирования</CardDescription>
+              <CardTitle className="text-sm">Что изменить?</CardTitle>
+              <CardDescription>Выберите нужный список</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 p-3">
               {(Object.keys(GROUP_LABELS) as FileGroup[]).map((group) => {
@@ -519,9 +610,10 @@ export default function EditFilesPage() {
                 if (groupFiles.length === 0) return null
                 return (
                   <div key={group} className="space-y-1">
-                    <p className="px-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      {GROUP_LABELS[group]}
-                    </p>
+                    <div className="px-2">
+                      <p className="text-xs font-medium text-foreground">{GROUP_LABELS[group]}</p>
+                      <p className="text-[11px] leading-snug text-muted-foreground">{GROUP_HINTS[group]}</p>
+                    </div>
                     {groupFiles.map((f) => {
                       const meta = getFileMeta(f.key)
                       const Icon = meta.icon
@@ -553,9 +645,6 @@ export default function EditFilesPage() {
                               >
                                 {meta.description}
                               </div>
-                              <div className={cn('mt-1 font-mono text-[10px]', isActive ? 'opacity-70' : 'text-muted-foreground/70')}>
-                                {f.filename}
-                              </div>
                             </div>
                           </div>
                         </button>
@@ -580,25 +669,34 @@ export default function EditFilesPage() {
                       </Badge>
                     )}
                   </CardTitle>
-                  <CardDescription className="font-mono text-xs">{active?.filename}</CardDescription>
                   {activeMeta && (
-                    <p className="text-sm text-muted-foreground">{activeMeta.description}</p>
+                    <>
+                      <p className="text-sm text-foreground">{activeMeta.description}</p>
+                      <p className="text-xs text-muted-foreground">{activeMeta.hint}</p>
+                    </>
+                  )}
+                  {active?.filename && (
+                    <details className="text-xs text-muted-foreground">
+                      <summary className="cursor-pointer hover:text-foreground">Имя файла на сервере</summary>
+                      <p className="mt-1 font-mono">{active.filename}</p>
+                    </details>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <Badge variant="outline" className="gap-1 font-mono tabular-nums">
-                    {stats.lines} строк
+                  <Badge variant="outline" className="gap-1 tabular-nums">
+                    {stats.lines} {stats.lines === 1 ? 'запись' : stats.lines < 5 ? 'записи' : 'записей'}
                   </Badge>
-                  <Badge variant="outline" className="gap-1 font-mono tabular-nums">
+                  <Badge variant="outline" className="gap-1 tabular-nums">
                     {formatBytes(stats.bytes)}
                   </Badge>
                 </div>
               </div>
 
               <div className="lg:hidden">
+                <Label className="mb-1.5 block text-xs text-muted-foreground">Какой список открыть?</Label>
                 <Select value={activeKey ?? undefined} onValueChange={selectFile}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Выберите файл" />
+                    <SelectValue placeholder="Выберите список" />
                   </SelectTrigger>
                   <SelectContent>
                     {(Object.keys(GROUP_LABELS) as FileGroup[]).map((group) =>
@@ -615,11 +713,11 @@ export default function EditFilesPage() {
 
             <CardContent className="space-y-4">
               {fileLoading ? (
-                <Spinner label="Загрузка содержимого..." className="py-16" />
+                <Spinner label="Загрузка списка..." className="py-16" />
               ) : fileError ? (
                 <EmptyState
                   icon={WifiOff}
-                  title="Не удалось загрузить файл"
+                  title="Не удалось загрузить список"
                   description={fileError}
                   action={
                     activeKey ? (
@@ -634,16 +732,16 @@ export default function EditFilesPage() {
                 <div className="space-y-4">
                   <EmptyState
                     icon={FileEdit}
-                    title="Файл пуст"
-                    description="Файл отсутствует на узле или не содержит строк. Вы можете добавить содержимое и сохранить."
+                    title="Список пока пуст"
+                    description="Здесь пока нет записей. Добавьте сайты или адреса — по одному на строку — и нажмите «Сохранить и применить»."
                     className="py-8"
                   />
                   {isAdmin && (
                     <Textarea
                       value={content}
                       onChange={(e) => setContent(e.target.value)}
-                      placeholder="Введите содержимое файла..."
-                      className="min-h-[20rem] resize-y border-zinc-800 bg-zinc-950 font-mono text-xs leading-relaxed text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-zinc-700"
+                      placeholder={activeMeta?.placeholder ?? 'Введите значения — по одному на строку'}
+                      className="min-h-[20rem] resize-y border-zinc-800 bg-zinc-950 font-mono text-sm leading-relaxed text-zinc-200 placeholder:text-zinc-500 focus-visible:ring-zinc-700"
                       spellCheck={false}
                     />
                   )}
@@ -653,7 +751,8 @@ export default function EditFilesPage() {
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   readOnly={!isAdmin}
-                  className="min-h-[28rem] resize-y border-zinc-800 bg-zinc-950 font-mono text-xs leading-relaxed text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-zinc-700"
+                  placeholder={activeMeta?.placeholder}
+                  className="min-h-[28rem] resize-y border-zinc-800 bg-zinc-950 font-mono text-sm leading-relaxed text-zinc-200 placeholder:text-zinc-500 focus-visible:ring-zinc-700"
                   spellCheck={false}
                 />
               )}
@@ -668,7 +767,7 @@ export default function EditFilesPage() {
                       aria-expanded={diffOpen}
                       onClick={() => setDiffOpen((open) => !open)}
                     >
-                      {diffOpen ? 'Скрыть diff' : 'Показать diff'}
+                      {diffOpen ? 'Скрыть изменения' : 'Показать изменения'}
                     </Button>
                     {isAdmin && (
                       <Button
@@ -683,7 +782,7 @@ export default function EditFilesPage() {
                         ) : (
                           <GitCompare size={16} />
                         )}
-                        Сравнить с диском
+                        Сравнить с сервером
                       </Button>
                     )}
                     <span className="text-xs text-muted-foreground">{diffSummaryText}</span>
@@ -696,10 +795,12 @@ export default function EditFilesPage() {
 
               {isAdmin && !fileLoading && !fileError && (
                 <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                  <p className="text-xs text-muted-foreground">
-                    «Сохранить» записывает файл на узел. «Сохранить и применить» дополнительно
-                    запускает doall.sh.
-                    {isHaAutoPrimary && ' В HA auto изменения автоматически попадут на replica.'}
+                  <p className="max-w-xl text-xs text-muted-foreground">
+                    <strong className="text-foreground">Сохранить</strong> — записать список на сервер без
+                    обновления VPN.{' '}
+                    <strong className="text-foreground">Сохранить и применить</strong> — обновить правила
+                    маршрутизации (может занять несколько минут).
+                    {isHaAutoPrimary && ' На резервный сервер списки скопируются автоматически.'}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <Button
@@ -708,12 +809,13 @@ export default function EditFilesPage() {
                       disabled={!hasUnsavedChanges || saving || nodeOffline}
                     >
                       <RotateCcw size={16} />
-                      Отменить
+                      Отменить правки
                     </Button>
                     <Button
                       variant="secondary"
                       onClick={handleSaveOnly}
                       disabled={!hasUnsavedChanges || saving || nodeOffline}
+                      title="Записать на сервер без обновления VPN"
                     >
                       {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                       Сохранить
@@ -721,6 +823,7 @@ export default function EditFilesPage() {
                     <Button
                       onClick={() => setConfirmApply(true)}
                       disabled={!hasUnsavedChanges || saving || nodeOffline}
+                      title="Записать и обновить правила VPN"
                     >
                       {saving ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
                       Сохранить и применить
@@ -731,8 +834,8 @@ export default function EditFilesPage() {
 
               {!isAdmin && user?.role === 'user' && (
                 <SettingsAlert variant="info" title="Только просмотр">
-                  Сохранение файлов доступно только администраторам. Вы можете просматривать содержимое
-                  конфигурации активного узла.
+                  Редактировать списки могут только администраторы. Вы можете посмотреть текущее
+                  содержимое на сервере {activeNode?.name ?? ''}.
                 </SettingsAlert>
               )}
             </CardContent>
@@ -745,26 +848,26 @@ export default function EditFilesPage() {
         onOpenChange={(open) => {
           if (!open && !saving) setConfirmApply(false)
         }}
-        title="Сохранить и применить изменения?"
+        title="Применить изменения к VPN?"
         description={
           <>
-            Файл <strong>{active?.filename}</strong> будет записан на узел{' '}
-            <strong>{activeNode?.name ?? 'активный'}</strong>, затем выполнен doall.sh.
+            Список <strong>{active?.title ?? active?.filename}</strong> будет записан на сервер{' '}
+            <strong>{activeNode?.name ?? 'активный'}</strong>, затем VPN обновит правила маршрутизации.
             {liveDiffCounts.added > 0 || liveDiffCounts.removed > 0 ? (
               <>
                 {' '}
-                Будет добавлено {liveDiffCounts.added} строк, удалено {liveDiffCounts.removed}.
+                Будет добавлено {liveDiffCounts.added} и удалено {liveDiffCounts.removed} записей.
               </>
             ) : null}
           </>
         }
         alert={{
           variant: 'warning',
-          title: 'Длительная операция',
+          title: 'Это может занять несколько минут',
           children:
-            'Это может занять несколько минут и перезагрузить правила маршрутизации VPN для всех клиентов.',
+            'Во время обновления правил VPN у клиентов возможны кратковременные перебои в работе.',
         }}
-        confirmLabel={saving ? 'Применение...' : 'Сохранить и doall.sh'}
+        confirmLabel={saving ? 'Применение...' : 'Сохранить и применить'}
         destructive
         loading={saving}
         onConfirm={handleSaveApply}

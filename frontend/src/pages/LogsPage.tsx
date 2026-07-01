@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   ArrowDownToLine,
+  ChevronDown,
+  ChevronRight,
   ClipboardList,
   Copy,
   Download,
@@ -50,6 +52,9 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { formatDateTime } from '@/lib/datetime'
+import { actionLogDetailsLabel } from '@/lib/actionLogDetails'
+import { actionLogLabel } from '@/lib/actionLogLabels'
+import { groupConsecutiveActionLogs, type ActionLogGroup } from '@/lib/groupActionLogs'
 import { COL_HANDSHAKE, COL_REAL_IP, COL_VPN_IP, connectionSourceLabel } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
@@ -363,22 +368,153 @@ function WireGuardPeerCard({ name, handshake }: WireGuardPeerCardProps) {
 
 type ActionLogCardProps = {
   entry: ActionLogEntry
+  nested?: boolean
 }
 
-function ActionLogCard({ entry }: ActionLogCardProps) {
+function formatActionDetails(entry: ActionLogEntry): string | null {
+  return actionLogDetailsLabel(entry.action, entry.details)
+}
+
+function ActionLogCard({ entry, nested = false }: ActionLogCardProps) {
+  const detailsText = formatActionDetails(entry)
   return (
-    <div className="rounded-lg border p-3">
+    <div className={cn('rounded-lg border p-3', nested && 'ml-4 border-dashed bg-muted/20')}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Badge variant="secondary">{entry.action}</Badge>
+        <Badge variant="secondary">{actionLogLabel(entry.action)}</Badge>
         <span className="text-xs text-muted-foreground">
           {formatDateTime(entry.created_at)}
         </span>
       </div>
       <p className="mt-2 text-sm font-medium">{entry.username || '—'}</p>
-      {entry.details && (
-        <p className="mt-1 break-words text-xs text-muted-foreground">{entry.details}</p>
+      {detailsText && (
+        <p className="mt-1 break-words text-xs text-muted-foreground">{detailsText}</p>
       )}
     </div>
+  )
+}
+
+type ActionLogGroupCardProps = {
+  group: ActionLogGroup
+  expanded: boolean
+  onToggle: () => void
+}
+
+function ActionLogGroupCard({ group, expanded, onToggle }: ActionLogGroupCardProps) {
+  const count = group.entries.length
+  if (count === 1) {
+    return <ActionLogCard entry={group.entries[0]} />
+  }
+
+  const newest = group.entries[0]
+  const oldest = group.entries[group.entries.length - 1]
+  const detailsText = actionLogDetailsLabel(group.action, group.details)
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/30"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <Badge variant="secondary">{actionLogLabel(group.action)}</Badge>
+            <Badge variant="outline">×{count}</Badge>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {formatDateTime(newest.created_at)}
+          </span>
+        </div>
+        <p className="mt-2 text-sm font-medium">{group.username || '—'}</p>
+        {detailsText ? (
+          <p className="mt-1 break-words text-xs text-muted-foreground">{detailsText}</p>
+        ) : null}
+        <p className="mt-2 text-xs text-muted-foreground">
+          {formatDateTime(oldest.created_at)} — {formatDateTime(newest.created_at)}
+        </p>
+      </button>
+      {expanded
+        ? group.entries.map((entry) => (
+            <ActionLogCard key={entry.id} entry={entry} nested />
+          ))
+        : null}
+    </div>
+  )
+}
+
+type ActionLogTableRowProps = {
+  entry: ActionLogEntry
+  nested?: boolean
+}
+
+function ActionLogTableRow({ entry, nested = false }: ActionLogTableRowProps) {
+  const detailsText = formatActionDetails(entry)
+  return (
+    <TableRow className={nested ? 'bg-muted/20' : undefined}>
+      <TableCell className={cn('text-xs whitespace-nowrap', nested && 'pl-8')}>
+        {formatDateTime(entry.created_at)}
+      </TableCell>
+      <TableCell>{entry.username || '—'}</TableCell>
+      <TableCell>
+        <Badge variant="secondary">{actionLogLabel(entry.action)}</Badge>
+      </TableCell>
+      <TableCell className="max-w-xs truncate text-xs text-muted-foreground" title={detailsText ?? undefined}>
+        {detailsText}
+      </TableCell>
+    </TableRow>
+  )
+}
+
+type ActionLogGroupTableRowsProps = {
+  group: ActionLogGroup
+  expanded: boolean
+  onToggle: () => void
+}
+
+function ActionLogGroupTableRows({ group, expanded, onToggle }: ActionLogGroupTableRowsProps) {
+  const count = group.entries.length
+  if (count === 1) {
+    return <ActionLogTableRow entry={group.entries[0]} />
+  }
+
+  const newest = group.entries[0]
+  const oldest = group.entries[group.entries.length - 1]
+  const detailsText = actionLogDetailsLabel(group.action, group.details)
+
+  return (
+    <Fragment>
+      <TableRow
+        className="cursor-pointer hover:bg-muted/30"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
+        <TableCell className="text-xs whitespace-nowrap">
+          <div className="flex items-center gap-2">
+            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <div>
+              <p>{formatDateTime(newest.created_at)}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {formatDateTime(oldest.created_at)} — {formatDateTime(newest.created_at)}
+              </p>
+            </div>
+            <Badge variant="outline" className="shrink-0">
+              ×{count}
+            </Badge>
+          </div>
+        </TableCell>
+        <TableCell>{group.username || '—'}</TableCell>
+        <TableCell>
+          <Badge variant="secondary">{actionLogLabel(group.action)}</Badge>
+        </TableCell>
+        <TableCell className="max-w-xs truncate text-xs text-muted-foreground" title={detailsText ?? undefined}>
+          {detailsText}
+        </TableCell>
+      </TableRow>
+      {expanded
+        ? group.entries.map((entry) => <ActionLogTableRow key={entry.id} entry={entry} nested />)
+        : null}
+    </Fragment>
   )
 }
 
@@ -404,6 +540,7 @@ export default function LogsPage() {
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
   const [selectedProfile, setSelectedProfile] = useState<string>('all')
   const [actionSearch, setActionSearch] = useState('')
+  const [expandedActionGroups, setExpandedActionGroups] = useState<Set<string>>(() => new Set())
   const [exportingActions, setExportingActions] = useState(false)
   const actionsLoadedRef = useRef(false)
 
@@ -514,9 +651,25 @@ export default function LogsPage() {
       (a) =>
         (a.username ?? '').toLowerCase().includes(q) ||
         a.action.toLowerCase().includes(q) ||
-        (a.details ?? '').toLowerCase().includes(q),
+        actionLogLabel(a.action).toLowerCase().includes(q) ||
+        (a.details ?? '').toLowerCase().includes(q) ||
+        (actionLogDetailsLabel(a.action, a.details) ?? '').toLowerCase().includes(q),
     )
   }, [actions, actionSearch])
+
+  const groupedActions = useMemo(
+    () => groupConsecutiveActionLogs(filteredActions),
+    [filteredActions],
+  )
+
+  const toggleActionGroup = useCallback((groupId: string) => {
+    setExpandedActionGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupId)) next.delete(groupId)
+      else next.add(groupId)
+      return next
+    })
+  }, [])
 
   const handleRefresh = () => load(true)
 
@@ -980,26 +1133,25 @@ export default function LogsPage() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {filteredActions.map((a) => (
-                              <TableRow key={a.id}>
-                                <TableCell className="text-xs whitespace-nowrap">
-                                  {formatDateTime(a.created_at)}
-                                </TableCell>
-                                <TableCell>{a.username || '—'}</TableCell>
-                                <TableCell>
-                                  <Badge variant="secondary">{a.action}</Badge>
-                                </TableCell>
-                                <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
-                                  {a.details}
-                                </TableCell>
-                              </TableRow>
+                            {groupedActions.map((group) => (
+                              <ActionLogGroupTableRows
+                                key={group.id}
+                                group={group}
+                                expanded={expandedActionGroups.has(group.id)}
+                                onToggle={() => toggleActionGroup(group.id)}
+                              />
                             ))}
                           </TableBody>
                         </Table>
                       </div>
                       <div className="space-y-2 md:hidden">
-                        {filteredActions.map((a) => (
-                          <ActionLogCard key={a.id} entry={a} />
+                        {groupedActions.map((group) => (
+                          <ActionLogGroupCard
+                            key={group.id}
+                            group={group}
+                            expanded={expandedActionGroups.has(group.id)}
+                            onToggle={() => toggleActionGroup(group.id)}
+                          />
                         ))}
                       </div>
                     </>
