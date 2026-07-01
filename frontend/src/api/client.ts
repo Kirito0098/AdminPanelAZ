@@ -726,12 +726,17 @@ export async function getBackups() {
   return apiFetch<import('../types').BackupEntry[]>('/backups')
 }
 
-export async function createBackup(includeConfigs = false, includeAntizapretBackup = false) {
+export async function createBackup(
+  includeConfigs = false,
+  includeAntizapretBackup = false,
+  sendToTelegram = false,
+) {
   return apiFetch<import('../types').BackupEntry>('/backups/create', {
     method: 'POST',
     body: JSON.stringify({
       include_configs: includeConfigs,
       include_antizapret_backup: includeAntizapretBackup,
+      send_to_telegram: sendToTelegram,
     }),
   })
 }
@@ -1159,9 +1164,13 @@ export async function getLatestChangelog() {
   return apiFetch<import('../types').LatestChangelog>('/system/latest-changelog')
 }
 
-export async function testBackupTelegram() {
+export async function testBackupTelegram(includeConfigs = false, includeAntizapretBackup = false) {
   return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/backups/test-telegram', {
     method: 'POST',
+    body: JSON.stringify({
+      include_configs: includeConfigs,
+      include_antizapret_backup: includeAntizapretBackup,
+    }),
   })
 }
 

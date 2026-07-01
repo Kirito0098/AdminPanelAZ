@@ -288,8 +288,14 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
 
         if rest == "test":
             from app.routers.backups import test_backup_telegram
+            from app.schemas import BackupTestTelegramRequest
 
-            result = test_backup_telegram(ctx.db, ctx.user)
+            backup_settings = _get_backup_settings(ctx)
+            result = test_backup_telegram(
+                BackupTestTelegramRequest(include_antizapret_backup=backup_settings.backup_az_enabled),
+                db=ctx.db,
+                admin=ctx.user,
+            )
             _log_bot_action(ctx, "settings_backup_test_telegram", "action=test")
             message = result.get("message") if isinstance(result, dict) else "Задача поставлена в очередь"
             await send_message(ctx.bot_token, ctx.chat_id, f"✅ {message}")

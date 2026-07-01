@@ -18,6 +18,7 @@ from app.schemas import (
     BackupRestoreRequest,
     BackupSettingsResponse,
     BackupSettingsUpdate,
+    BackupTestTelegramRequest,
     MessageResponse,
 )
 from app.services.admin_notify import admin_notify_service
@@ -100,27 +101,76 @@ def update_backup_settings(
     )
 
 
-def _maybe_send_az_backup_telegram(
-    db: Session,
-    *,
-    az_result: dict[str, str] | None,
-    caption_prefix: str,
-) -> None:
-    if not az_result or not az_result.get("archive_path"):
-        return
-    if _get_setting(db, "backup_telegram_enabled", "false") != "true":
-        return
+def _telegram_credentials(db: Session) -> tuple[str, str] | None:
     bot_token = _get_setting(db, "telegram_bot_token")
     chat_id = _get_setting(db, "telegram_chat_id")
-    if not bot_token or not chat_id:
-        return
-    archive_name = az_result.get("archive_name") or Path(az_result["archive_path"]).name
-    send_tg_document(
-        bot_token,
-        chat_id,
-        az_result["archive_path"],
-        caption=f"{caption_prefix}: {archive_name}",
+    if bot_token and chat_id:
+        return bot_token, chat_id
+    return None
+
+
+def _create_backup_with_optional_telegram(
+    db: Session,
+    *,
+    include_configs: bool,
+    include_antizapret_backup: bool,
+    send_to_telegram: bool,
+    panel_caption_prefix: str,
+    az_caption_prefix: str,
+) -> dict:
+    manager = _get_backup_manager()
+    config_contents: dict[str, str] | None = None
+    if include_configs:
+        adapter = get_active_adapter(db)
+        config_contents = {
+            fname: adapter.read_config_file(fname)
+            for fname in BackupManager.CONFIG_FILES
+        }
+
+    result = manager.create_backup(
+        include_configs=include_configs,
+        config_contents=config_contents,
     )
+
+    send_tg = send_to_telegram or _get_setting(db, "backup_telegram_enabled", "false") == "true"
+
+    tg: tuple[str, str] | None = None
+    if send_tg:
+        tg = _telegram_credentials(db)
+        if send_to_telegram and not tg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Укажите токен бота и chat_id в настройках Telegram",
+            )
+
+    if tg:
+        bot_token, chat_id = tg
+        archive_path = manager.get_backup_path(result["file_name"])
+        send_tg_document(
+            bot_token,
+            chat_id,
+            str(archive_path),
+            caption=f"{panel_caption_prefix}: {result['file_name']}",
+        )
+
+    if include_antizapret_backup:
+        try:
+            adapter = get_active_adapter(db)
+            az_result = adapter.create_antizapret_backup()
+            if tg and az_result.get("archive_path"):
+                archive_name = az_result.get("archive_name") or Path(az_result["archive_path"]).name
+                send_tg_document(
+                    tg[0],
+                    tg[1],
+                    az_result["archive_path"],
+                    caption=f"{az_caption_prefix}: {archive_name}",
+                )
+        except Exception as exc:
+            if send_to_telegram:
+                raise
+            logger.warning("AntiZapret backup (client.sh 8) failed: %s", exc)
+
+    return result
 
 
 @router.post("/create", response_model=BackupEntry)
@@ -130,39 +180,14 @@ def create_backup(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    manager = _get_backup_manager()
-    config_contents: dict[str, str] | None = None
-    if payload.include_configs:
-        adapter = get_active_adapter(db)
-        config_contents = {
-            fname: adapter.read_config_file(fname)
-            for fname in BackupManager.CONFIG_FILES
-        }
-
-    result = manager.create_backup(
+    result = _create_backup_with_optional_telegram(
+        db,
         include_configs=payload.include_configs,
-        config_contents=config_contents,
+        include_antizapret_backup=payload.include_antizapret_backup,
+        send_to_telegram=payload.send_to_telegram,
+        panel_caption_prefix="Бэкап AdminPanelAZ",
+        az_caption_prefix="Бэкап AntiZapret",
     )
-
-    if _get_setting(db, "backup_telegram_enabled", "false") == "true":
-        bot_token = _get_setting(db, "telegram_bot_token")
-        chat_id = _get_setting(db, "telegram_chat_id")
-        if bot_token and chat_id:
-            archive_path = manager.get_backup_path(result["file_name"])
-            send_tg_document(
-                bot_token,
-                chat_id,
-                str(archive_path),
-                caption=f"Бэкап AdminPanelAZ: {result['file_name']}",
-            )
-
-    if payload.include_antizapret_backup:
-        try:
-            adapter = get_active_adapter(db)
-            az_result = adapter.create_antizapret_backup()
-            _maybe_send_az_backup_telegram(db, az_result=az_result, caption_prefix="Бэкап AntiZapret")
-        except Exception as exc:
-            logger.warning("AntiZapret backup (client.sh 8) failed: %s", exc)
 
     admin_notify_service.send_settings_change(
         db,
@@ -218,6 +243,7 @@ def download_backup(file_name: str, _: User = Depends(require_admin)):
 
 @router.post("/test-telegram", status_code=status.HTTP_202_ACCEPTED)
 def test_backup_telegram(
+    payload: BackupTestTelegramRequest = BackupTestTelegramRequest(),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
@@ -236,48 +262,35 @@ def test_backup_telegram(
             content={"detail": "Тестовая отправка бэкапа уже выполняется", "active_task_id": active.id},
         )
 
-    include_az = _get_setting(db, "backup_az_enabled", "true") == "true"
+    include_az = bool(payload.include_antizapret_backup)
+    include_configs = bool(payload.include_configs)
 
     def _task(progress_updater=None):
         from app.database import SessionLocal
 
-        if progress_updater:
-            progress_updater(10, "Создание архива панели…")
-        manager = _get_backup_manager()
-        result = manager.create_backup(include_configs=False, config_contents=None)
-        if progress_updater:
-            progress_updater(50, "Отправка бэкапа панели в Telegram…")
-        archive_path = manager.get_backup_path(result["file_name"])
-        send_tg_document(
-            bot_token,
-            chat_id,
-            str(archive_path),
-            caption=f"Тест бэкапа AdminPanelAZ: {result['file_name']}",
-        )
-        az_summary = ""
-        if include_az:
+        task_db = SessionLocal()
+        try:
             if progress_updater:
-                progress_updater(75, "Создание бэкапа AntiZapret…")
-            task_db = SessionLocal()
-            try:
-                adapter = get_active_adapter(task_db)
-                az_result = adapter.create_antizapret_backup()
-                if az_result.get("archive_path"):
-                    send_tg_document(
-                        bot_token,
-                        chat_id,
-                        az_result["archive_path"],
-                        caption=f"Тест бэкапа AntiZapret: {az_result.get('archive_name', 'archive')}",
-                    )
-                    az_summary = f"; AZ: {az_result.get('archive_name', 'ok')}"
-            except Exception as exc:
-                az_summary = f"; AZ error: {exc}"
-            finally:
-                task_db.close()
-        return {
-            "message": f"Бэкап отправлен в Telegram: {result['file_name']}{az_summary}",
-            "file_name": result["file_name"],
-        }
+                progress_updater(10, "Создание архива панели…")
+            result = _create_backup_with_optional_telegram(
+                task_db,
+                include_configs=include_configs,
+                include_antizapret_backup=include_az,
+                send_to_telegram=True,
+                panel_caption_prefix="Тест бэкапа AdminPanelAZ",
+                az_caption_prefix="Тест бэкапа AntiZapret",
+            )
+            if progress_updater:
+                progress_updater(100, "Готово")
+            az_summary = ""
+            if include_az:
+                az_summary = "; AZ: включён"
+            return {
+                "message": f"Бэкап отправлен в Telegram: {result['file_name']}{az_summary}",
+                "file_name": result["file_name"],
+            }
+        finally:
+            task_db.close()
 
     task = background_task_service.enqueue_background_task(
         "app_backup_test_tg",

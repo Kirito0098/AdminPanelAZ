@@ -7,7 +7,6 @@ import secrets
 
 import pyotp
 import qrcode
-import qrcode.image.svg
 from fastapi import HTTPException, status
 from io import BytesIO
 import base64
@@ -40,12 +39,14 @@ def get_totp_uri(user: User, secret: str) -> str:
 
 
 def generate_qr_data_url(uri: str) -> str:
-    img = qrcode.make(uri, image_factory=qrcode.image.svg.SvgPathImage)
+    qr = qrcode.QRCode(version=1, box_size=8, border=2)
+    qr.add_data(uri)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
     buf = BytesIO()
-    img.save(buf)
-    svg = buf.getvalue().decode("utf-8")
-    b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
-    return f"data:image/svg+xml;base64,{b64}"
+    img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{b64}"
 
 
 def verify_totp_code(user: User, code: str) -> bool:

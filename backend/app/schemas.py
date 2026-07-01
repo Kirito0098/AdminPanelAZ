@@ -578,6 +578,12 @@ class BackupEntry(BaseModel):
 class BackupCreateRequest(BaseModel):
     include_configs: bool = False
     include_antizapret_backup: bool = False
+    send_to_telegram: bool = False
+
+
+class BackupTestTelegramRequest(BaseModel):
+    include_configs: bool = False
+    include_antizapret_backup: bool = False
 
 
 class BackupRestoreRequest(BaseModel):
