@@ -70,8 +70,33 @@ const statusIcons = {
 interface MetaRow {
   key: string
   icon: LucideIcon
-  text: string
+  label: string
+  value: string
   tone?: 'default' | 'warning' | 'danger'
+  wide?: boolean
+}
+
+function splitMetaText(text: string): { label: string; value: string } {
+  if (text.includes(' · ')) {
+    const [label, ...rest] = text.split(' · ')
+    return { label, value: rest.join(' · ') }
+  }
+  if (text.includes(':')) {
+    const [label, ...rest] = text.split(':')
+    return { label: label.trim(), value: rest.join(':').trim() }
+  }
+  return { label: text, value: '' }
+}
+
+function metaRow(
+  key: string,
+  icon: LucideIcon,
+  label: string,
+  value: string,
+  tone: MetaRow['tone'] = 'default',
+  wide = false,
+): MetaRow {
+  return { key, icon, label, value, tone, wide }
 }
 
 function isNoiseMetaLine(text: string, tone: 'active' | 'expiring' | 'expired'): boolean {
@@ -85,26 +110,33 @@ function isNoiseMetaLine(text: string, tone: 'active' | 'expiring' | 'expired'):
   return false
 }
 
-function formatTrafficLine(policy: ClientAccessPolicy | undefined): string {
-  if (!policy) return 'Трафик · —'
+function formatTrafficMeta(policy: ClientAccessPolicy | undefined): MetaRow {
+  if (!policy) {
+    return metaRow('traffic', Gauge, 'Трафик', '—')
+  }
 
   if (policy.traffic_limit_human) {
-    let text = `Трафик · ${policy.traffic_consumed_human || '0 B'} / ${policy.traffic_limit_human}`
+    let value = `${policy.traffic_consumed_human || '0 B'} / ${policy.traffic_limit_human}`
     if (policy.traffic_limit_period_label) {
-      text += ` (${policy.traffic_limit_period_label})`
+      value += ` · ${policy.traffic_limit_period_label}`
     }
     if (policy.traffic_bytes_left_human) {
-      text += ` · осталось ${policy.traffic_bytes_left_human}`
+      value += ` · осталось ${policy.traffic_bytes_left_human}`
     }
-    return text
+    return metaRow(
+      'traffic',
+      Gauge,
+      'Трафик',
+      value,
+      policy.traffic_limit_exceeded ? 'danger' : 'default',
+    )
   }
 
   const consumed =
-    policy.traffic_consumed_human &&
-    (policy.traffic_consumed_bytes ?? 0) > 0
+    policy.traffic_consumed_human && (policy.traffic_consumed_bytes ?? 0) > 0
       ? policy.traffic_consumed_human
       : '0 B'
-  return `Трафик · ${consumed} · лимит не задан`
+  return metaRow('traffic', Gauge, 'Трафик', `${consumed} · без лимита`, 'default')
 }
 
 function buildCompactMeta(
@@ -115,37 +147,27 @@ function buildCompactMeta(
   tone: 'active' | 'expiring' | 'expired',
 ): MetaRow[] {
   const rows: MetaRow[] = [
-    {
-      key: 'created',
-      icon: Calendar,
-      text: formatCreatedAt(config.created_at),
-    },
+    metaRow('created', Calendar, 'Создан', formatCreatedAt(config.created_at)),
   ]
 
   if (config.vpn_type === 'openvpn' && config.cert_expire_days != null) {
-    rows.push({
-      key: 'cert',
-      icon: KeyRound,
-      text: `Сертификат · ${config.cert_expire_days} дн.`,
-      tone: tone === 'expired' ? 'danger' : tone === 'expiring' ? 'warning' : 'default',
-    })
+    rows.push(
+      metaRow(
+        'cert',
+        KeyRound,
+        'Сертификат',
+        `${config.cert_expire_days} дн.`,
+        tone === 'expired' ? 'danger' : tone === 'expiring' ? 'warning' : 'default',
+      ),
+    )
   }
 
   if (isAdmin && config.owner_username) {
-    rows.push({
-      key: 'owner',
-      icon: UserRound,
-      text: config.owner_username,
-    })
+    rows.push(metaRow('owner', UserRound, 'Владелец', config.owner_username))
   }
 
   if (isAdmin) {
-    rows.push({
-      key: 'traffic',
-      icon: Gauge,
-      text: formatTrafficLine(policy),
-      tone: policy?.traffic_limit_exceeded ? 'danger' : 'default',
-    })
+    rows.push(formatTrafficMeta(policy))
   }
 
   const { lines } = buildAccessMeta(config, tab, policy)
@@ -153,17 +175,38 @@ function buildCompactMeta(
 
   for (const line of keyMeta) {
     if (isNoiseMetaLine(line.text, tone)) continue
-    const value = line.text.includes(':') ? line.text.split(':').slice(1).join(':').trim() : line.text
-    if (!value) continue
-    rows.push({
-      key: line.text,
-      icon: line.text.startsWith('Трафик') || line.text.startsWith('Лимит') ? Gauge : Shield,
-      text: line.text.includes(':') ? line.text : value,
-      tone: tone === 'expired' ? 'danger' : tone === 'expiring' ? 'warning' : 'default',
-    })
+    const parsed = splitMetaText(line.text)
+    if (!parsed.value && !parsed.label) continue
+    rows.push(
+      metaRow(
+        line.text,
+        line.text.startsWith('Трафик') || line.text.startsWith('Лимит') ? Gauge : Shield,
+        parsed.label,
+        parsed.value || parsed.label,
+        tone === 'expired' ? 'danger' : tone === 'expiring' ? 'warning' : 'default',
+      ),
+    )
   }
 
   return rows
+}
+
+function MetaLine({ row }: { row: MetaRow }) {
+  const Icon = row.icon
+  return (
+    <div
+      className={cn(
+        'flex min-w-0 items-baseline gap-1.5 text-xs leading-snug',
+        row.wide && 'col-span-2',
+        row.tone === 'danger' && 'text-destructive',
+        row.tone === 'warning' && 'text-amber-700 dark:text-amber-300',
+      )}
+    >
+      <Icon size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
+      <span className="shrink-0 text-muted-foreground">{row.label}</span>
+      <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{row.value}</span>
+    </div>
+  )
 }
 
 function IconActionButton({
@@ -292,12 +335,21 @@ export default function ConfigCard({
   return (
     <Card
       className={cn(
-        'flex h-full flex-col transition-all hover:border-primary/40 hover:shadow-md',
+        'relative overflow-hidden rounded-xl border shadow-sm transition-colors hover:border-primary/30 hover:shadow-md',
         tone === 'expired' && 'border-destructive/30',
         tone === 'expiring' && 'border-amber-500/30',
       )}
     >
-      <CardHeader className="space-y-2 pb-2">
+      <div
+        className={cn(
+          'h-0.5 w-full',
+          tone === 'expired' && 'bg-destructive/70',
+          tone === 'expiring' && 'bg-amber-500/70',
+          tone === 'active' && 'bg-emerald-500/50',
+        )}
+        aria-hidden
+      />
+      <CardHeader className="space-y-2 p-4 pb-2">
         <div className="flex items-start gap-2">
           {showSelect && (
             <input
@@ -309,94 +361,78 @@ export default function ConfigCard({
             />
           )}
           <div className="min-w-0 flex-1">
-            <CardTitle className="flex items-center gap-1.5 text-sm font-semibold leading-tight">
-              <span className="truncate">{config.client_name}</span>
-              <button
-                type="button"
-                title="Копировать имя"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onCopyName()
-                }}
-                className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-primary"
-              >
-                <Copy size={13} />
-              </button>
-            </CardTitle>
-            {config.description && (
-              <CardDescription className="mt-1 line-clamp-1 text-[11px]">{config.description}</CardDescription>
-            )}
-            {config.ha ? (
-              <Badge variant="outline" className="mt-1 gap-1 px-1.5 text-[10px]">
-                HA: {config.ha.shared_domain} ({config.ha.node_count} узл.)
+            <div className="flex items-start justify-between gap-2">
+              <CardTitle className="flex min-w-0 items-center gap-1.5 text-sm font-semibold leading-tight">
+                <span className="truncate">{config.client_name}</span>
+                <button
+                  type="button"
+                  title="Копировать имя"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onCopyName()
+                  }}
+                  className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-primary"
+                >
+                  <Copy size={13} />
+                </button>
+              </CardTitle>
+              <Badge variant={statusBadgeVariant} className="shrink-0 gap-1 px-2 py-0.5 text-[11px]">
+                <StatusIcon size={11} />
+                {status.label}
               </Badge>
-            ) : null}
+            </div>
+            {config.description && (
+              <CardDescription className="mt-1 line-clamp-2 text-xs leading-relaxed">
+                {config.description}
+              </CardDescription>
+            )}
           </div>
-          <Badge variant={statusBadgeVariant} className="shrink-0 gap-1 px-2 py-0 text-[10px]">
-            <StatusIcon size={11} />
-            {status.label}
-          </Badge>
         </div>
 
-        {(config.tags?.length ?? 0) > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {config.tags!.map((tag) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(config.tags?.length ?? 0) > 0 &&
+            config.tags!.map((tag) => (
               <Badge key={tag.id} variant="outline" className="h-5 px-1.5 text-[10px]">
                 {tag.name}
               </Badge>
             ))}
-          </div>
-        )}
-
-        {(hasVpnProfiles(config, tab) || hasAzProfiles(config, tab)) && (
-          <div className="flex flex-wrap gap-1">
-            {hasVpnProfiles(config, tab) && (
-              <span className="inline-flex items-center rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                VPN
-              </span>
-            )}
-            {hasAzProfiles(config, tab) && (
-              <span className="inline-flex items-center rounded-md border border-amber-500/35 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                AntiZapret
-              </span>
-            )}
-          </div>
-        )}
+          {config.ha ? (
+            <Badge variant="outline" className="gap-1 px-1.5 text-[10px]">
+              HA: {config.ha.shared_domain} ({config.ha.node_count})
+            </Badge>
+          ) : null}
+          {hasVpnProfiles(config, tab) && (
+            <span className="inline-flex items-center rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+              VPN
+            </span>
+          )}
+          {hasAzProfiles(config, tab) && (
+            <span className="inline-flex items-center rounded-md border border-amber-500/35 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+              AntiZapret
+            </span>
+          )}
+        </div>
       </CardHeader>
 
-      <CardContent className="flex flex-1 flex-col gap-3 pt-0">
-        <ul className="space-y-1.5">
-          {metaRows.map((row) => {
-            const Icon = row.icon
-            return (
-              <li key={row.key} className="flex items-start gap-2 text-[11px] leading-snug">
-                <Icon size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
-                <span
-                  className={cn(
-                    'min-w-0 break-words',
-                    row.tone === 'danger' && 'text-destructive',
-                    row.tone === 'warning' && 'text-amber-600 dark:text-amber-400',
-                  )}
-                >
-                  {row.text}
-                </span>
-              </li>
-            )
-          })}
-        </ul>
+      <CardContent className="space-y-2.5 p-4 pt-0">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          {metaRows.map((row) => (
+            <MetaLine key={row.key} row={row} />
+          ))}
+        </div>
 
-        <div className="mt-auto space-y-2 border-t pt-3">
+        <div className="space-y-2 border-t border-border/60 pt-2.5">
           {filesLoading && !primaryFile && (
-            <div className="grid grid-cols-2 gap-1.5">
-              <div className="h-8 animate-pulse rounded-md bg-muted" />
-              <div className="h-8 animate-pulse rounded-md bg-muted" />
+            <div className="grid grid-cols-2 gap-2">
+              <div className="h-9 animate-pulse rounded-lg bg-muted" />
+              <div className="h-9 animate-pulse rounded-lg bg-muted" />
             </div>
           )}
 
           {primaryFile && showQrDownloads && (
-            <div className="rounded-lg border border-border/60 bg-muted/20 p-1.5">
+            <div className="grid grid-cols-2 gap-2">
               {hasBothProfiles ? (
-                <div className="flex gap-1.5">
+                <>
                   <DownloadButton
                     label="VPN"
                     filename={getDownloadFilename(config, vpnFile!)}
@@ -405,28 +441,28 @@ export default function ConfigCard({
                     onClick={() => runFileAction(vpnFile, onDownload)}
                   />
                   <DownloadButton
-                    label="AZ"
+                    label="AntiZapret"
                     filename={getDownloadFilename(config, azFile!)}
                     disabled={actionBusy}
                     loading={loadingAction === 'download'}
                     accent="amber"
                     onClick={() => runFileAction(azFile, onDownload)}
                   />
-                </div>
+                </>
               ) : (
                 <DownloadButton
-                  label="Скачать"
+                  label="Скачать профиль"
                   filename={getDownloadFilename(config, primaryFile)}
                   disabled={actionBusy}
                   loading={loadingAction === 'download'}
-                  className="w-full"
+                  className="col-span-2 w-full"
                   onClick={() => runFileAction(primaryFile, onDownload)}
                 />
               )}
             </div>
           )}
 
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1.5">
             {primaryFile && showQrDownloads && (
               <>
                 {hasBothProfiles ? (

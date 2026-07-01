@@ -37,7 +37,6 @@ import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -391,88 +390,91 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Shield size={22} />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-2xl font-bold tracking-tight">Конфигурации</h2>
-              <NodeBadge name={activeNode?.name} status={activeNode?.status} />
+    <div className="space-y-4">
+      <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-primary/5 via-card to-card p-5 shadow-sm">
+        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
+        <div className="relative flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary shadow-sm">
+              <Shield size={26} strokeWidth={2} />
             </div>
-            <p className="text-sm text-muted-foreground">
-              Управление клиентами OpenVPN и WireGuard/AmneziaWG на активном узле
-            </p>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Конфигурации</h2>
+                <NodeBadge name={activeNode?.name} status={activeNode?.status} />
+              </div>
+              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                VPN-клиенты на узле{' '}
+                <strong className="font-medium text-foreground">{activeNode?.name ?? summary?.node_name ?? 'не выбран'}</strong>
+                {activeNode?.is_local ? ' (локальный controller)' : activeNode ? ' (удалённый node agent)' : ''}.
+                OpenVPN и WireGuard / AmneziaWG.
+              </p>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {user?.role === 'admin' && (
-            <>
-              <Button variant="outline" onClick={handleSync} disabled={syncing || haReplicaReadonly}>
-                {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                {syncing ? 'Синхронизация...' : 'Синхронизировать'}
-              </Button>
-              <Button variant="outline" onClick={() => void handleExportCsv()} disabled={csvExporting}>
-                {csvExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                Экспорт CSV
-              </Button>
+
+          <div className="flex flex-wrap gap-2 xl:max-w-xl xl:justify-end">
+            {user?.role === 'admin' && (
+              <>
+                <Button variant="outline" className="gap-2 bg-card/80" onClick={handleSync} disabled={syncing || haReplicaReadonly}>
+                  {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                  {syncing ? 'Синхронизация...' : 'Синхронизировать'}
+                </Button>
+                <Button variant="outline" className="gap-2 bg-card/80" onClick={() => void handleExportCsv()} disabled={csvExporting}>
+                  {csvExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                  Экспорт CSV
+                </Button>
+                <Button
+                  variant="outline"
+                  className="gap-2 bg-card/80"
+                  onClick={() => csvInputRef.current?.click()}
+                  disabled={csvImporting || importPolling || haReplicaReadonly}
+                >
+                  {csvImporting || importPolling ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Upload size={16} />
+                  )}
+                  Импорт CSV
+                </Button>
+                <input
+                  ref={csvInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    e.target.value = ''
+                    if (file) void handleImportCsv(file)
+                  }}
+                />
+              </>
+            )}
+            {user?.role !== 'viewer' && canCreateClient && (
               <Button
-                variant="outline"
-                onClick={() => csvInputRef.current?.click()}
-                disabled={csvImporting || importPolling || haReplicaReadonly}
-              >
-                {csvImporting || importPolling ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  <Upload size={16} />
-                )}
-                Импорт CSV
-              </Button>
-              <input
-                ref={csvInputRef}
-                type="file"
-                accept=".csv,text/csv"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  e.target.value = ''
-                  if (file) void handleImportCsv(file)
+                size="lg"
+                className="gap-2"
+                onClick={() => {
+                  setOwnerId(user?.id ?? null)
+                  setShowForm(true)
                 }}
-              />
-            </>
-          )}
-          {user?.role !== 'viewer' && canCreateClient && (
-            <Button
-              onClick={() => {
-                setOwnerId(user?.id ?? null)
-                setShowForm(true)
-              }}
-              disabled={quotaReached || haReplicaReadonly}
-            >
-              <Plus size={16} />
-              Новый клиент
-            </Button>
-          )}
+                disabled={quotaReached || haReplicaReadonly}
+              >
+                <Plus size={18} />
+                Новый клиент
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
-      <SettingsAlert variant="info" title="Импорт CSV">
-        Обязательные колонки: client_name, vpn_type. Опционально: traffic_limit_bytes, traffic_limit_days
-        (1 / 7 / 30), block_mode (permanent, temp, temp:N). В HA auto политики реплицируются на replica.
-        {importTask?.progress_stage || importTask?.message
-          ? ` ${importTask.progress_stage || importTask.message}${importTask.progress_percent != null ? ` (${importTask.progress_percent}%)` : ''}`
-          : ''}
-      </SettingsAlert>
-
       <HaReplicaBanner />
 
-      <SettingsAlert variant="info" title="Конфигурации активного узла">
-        Список клиентов привязан к узлу <strong>{activeNode?.name ?? summary?.node_name ?? 'не выбран'}</strong>
-        {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'} — при переключении узла
-        отображаются только его конфигурации. Управление — в шапке или на странице «Узлы».
-      </SettingsAlert>
+      {(importPolling || importTask || csvImporting) && user?.role === 'admin' && (
+        <SettingsAlert variant="info" title="Импорт CSV">
+          {importTask?.progress_stage || importTask?.message || 'Импорт выполняется…'}
+          {importTask?.progress_percent != null ? ` (${importTask.progress_percent}%)` : ''}
+        </SettingsAlert>
+      )}
 
       {quota && !quota.unlimited && (
         <SettingsAlert variant={quotaReached ? 'warning' : 'info'} title="Лимит конфигураций">
@@ -495,15 +497,13 @@ export default function DashboardPage() {
       )}
 
       {summaryLoading && !summary && (
-        <Card>
-          <CardContent>
-            <Spinner label="Загрузка сводки узла..." className="py-8" />
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border bg-card p-6">
+          <Spinner label="Загрузка сводки узла..." className="py-8" />
+        </div>
       )}
 
       {summary && (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             label="Всего клиентов"
             value={String(summary.total_configs)}
@@ -688,14 +688,13 @@ export default function DashboardPage() {
       </Dialog>
 
       {loading ? (
-        <Card>
-          <CardContent>
-            <Spinner label="Загрузка конфигураций..." className="py-16" />
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border bg-card p-6">
+          <Spinner label="Загрузка конфигураций..." className="py-16" />
+        </div>
       ) : configs.length === 0 ? (
-        <Card>
-          <CardContent>
+        <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+          <div className="h-1 bg-gradient-to-r from-primary/70 to-primary/10" />
+          <div className="p-6">
             <EmptyState
               icon={Shield}
               title="Нет конфигураций"
@@ -724,8 +723,8 @@ export default function DashboardPage() {
               }
               className="py-8"
             />
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ) : user ? (
         <ConfigCardsSection
           configs={configs}

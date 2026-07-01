@@ -361,24 +361,48 @@ export default function ConfigCardsSection({
 
   return (
     <>
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Shield size={18} />
-            Список клиентов
-          </CardTitle>
-          <CardDescription>
-            {activeCount > 0
-              ? `${configs.length} конфигураци${configs.length === 1 ? 'я' : configs.length < 5 ? 'и' : 'й'} · ${activeCount} в текущей вкладке`
-              : 'Клиенты не найдены'}
-          </CardDescription>
+      <div className="overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm">
+        <div className="h-1 bg-gradient-to-r from-primary/80 via-primary/40 to-transparent" />
+        <CardHeader className="border-b border-border/60 bg-muted/15 pb-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Shield size={18} />
+                Список клиентов
+              </CardTitle>
+              <CardDescription className="mt-1">
+                {activeCount > 0
+                  ? `${configs.length} конфигураци${configs.length === 1 ? 'я' : configs.length < 5 ? 'и' : 'й'} · ${activeCount} в текущей вкладке`
+                  : 'Клиенты не найдены'}
+              </CardDescription>
+            </div>
+            <div className="relative w-full lg:max-w-xs">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Поиск по имени..."
+                className="h-10 bg-background pl-9 pr-9"
+              />
+              {search && (
+                <button
+                  type="button"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  onClick={() => setSearch('')}
+                  title="Очистить поиск"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 p-4 sm:p-5">
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ProtocolTab)}>
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <TabsList className="h-auto flex-wrap justify-start">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <TabsList className="h-auto w-full flex-wrap justify-start bg-muted/40 p-1 sm:w-auto">
                 {visibleTabs.includes('openvpn') && (
-                  <TabsTrigger value="openvpn" className="gap-1.5">
+                  <TabsTrigger value="openvpn" className="gap-1.5 data-[state=active]:shadow-sm">
                     OpenVPN
                     <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                       {tabCounts.openvpn}
@@ -386,7 +410,7 @@ export default function ConfigCardsSection({
                   </TabsTrigger>
                 )}
                 {visibleTabs.includes('amneziawg') && (
-                  <TabsTrigger value="amneziawg" className="gap-1.5">
+                  <TabsTrigger value="amneziawg" className="gap-1.5 data-[state=active]:shadow-sm">
                     AmneziaWG
                     <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                       {tabCounts.amneziawg}
@@ -394,7 +418,7 @@ export default function ConfigCardsSection({
                   </TabsTrigger>
                 )}
                 {visibleTabs.includes('wireguard') && (
-                  <TabsTrigger value="wireguard" className="gap-1.5">
+                  <TabsTrigger value="wireguard" className="gap-1.5 data-[state=active]:shadow-sm">
                     WireGuard
                     <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                       {tabCounts.wireguard}
@@ -403,52 +427,31 @@ export default function ConfigCardsSection({
                 )}
               </TabsList>
 
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                {activeTab === 'openvpn' && openvpnTabEnabled && openvpnGroupOptions.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1 rounded-md border bg-muted/30 p-1">
-                    {openvpnGroupOptions.map((option) => (
-                      <Button
-                        key={option.key}
-                        type="button"
-                        size="sm"
-                        variant={openvpnGroup === option.key ? 'default' : 'ghost'}
-                        className="h-7 px-2 text-xs"
-                        disabled={groupBusy}
-                        onClick={() => void handleOpenVpnGroupChange(option.key)}
-                      >
-                        {option.label}
-                      </Button>
-                    ))}
-                  </div>
-                )}
-                <div className="relative min-w-[220px] flex-1 sm:max-w-xs">
-                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Поиск по имени..."
-                    className="pl-8 pr-8"
-                  />
-                  {search && (
-                    <button
+              {activeTab === 'openvpn' && openvpnTabEnabled && openvpnGroupOptions.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1 rounded-xl border bg-muted/30 p-1">
+                  {openvpnGroupOptions.map((option) => (
+                    <Button
+                      key={option.key}
                       type="button"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      onClick={() => setSearch('')}
-                      title="Очистить поиск"
+                      size="sm"
+                      variant={openvpnGroup === option.key ? 'default' : 'ghost'}
+                      className="h-8 px-2.5 text-xs"
+                      disabled={groupBusy}
+                      onClick={() => void handleOpenVpnGroupChange(option.key)}
                     >
-                      <X size={14} />
-                    </button>
-                  )}
+                      {option.label}
+                    </Button>
+                  ))}
                 </div>
-              </div>
+              )}
             </div>
 
             {isAdmin && (
-              <div className="mt-3 space-y-2">
+              <div className="space-y-3 rounded-xl border border-dashed bg-muted/15 p-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Filter size={12} />
-                    Фильтр:
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Filter size={13} />
+                    Статус
                   </span>
                   {(
                     [
@@ -471,9 +474,9 @@ export default function ConfigCardsSection({
                   ))}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Tag size={12} />
-                    Теги:
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Tag size={13} />
+                    Теги
                   </span>
                   {allTags.map((tag) => (
                     <Button
@@ -500,7 +503,7 @@ export default function ConfigCardsSection({
                   </div>
                 </div>
                 {(selectedCount > 0 || tagFilterIds.length > 0) && (
-                  <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-background/80 p-2.5">
                     <span className="text-xs text-muted-foreground">
                       Выбрано: {selectedCount}
                       {tagFilterIds.length > 0 ? ` · теги: ${tagFilterIds.length}` : ''}
@@ -529,7 +532,7 @@ export default function ConfigCardsSection({
             )}
 
             {visibleTabs.map((tab) => (
-              <TabsContent key={tab} value={tab} className="mt-4">
+              <TabsContent key={tab} value={tab} className="mt-2">
                 {filteredByTab[tab].length === 0 ? (
                   <EmptyState
                     icon={FileKey}
@@ -539,10 +542,10 @@ export default function ConfigCardsSection({
                         ? `Нет результатов для «${protocolLabel(tab)}» с текущими фильтрами`
                         : `В категории ${protocolLabel(tab)} пока нет конфигураций`
                     }
-                    className="py-8"
+                    className="py-10"
                   />
                 ) : (
-                  <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid items-start gap-3 md:grid-cols-2 2xl:grid-cols-3">
                     {filteredByTab[tab].map((config) => (
                       <ConfigCard
                         key={`${tab}-${config.id}`}
@@ -579,7 +582,7 @@ export default function ConfigCardsSection({
             ))}
           </Tabs>
         </CardContent>
-      </Card>
+      </div>
 
       <ClientActionsDialog
         config={selectedConfig}

@@ -1,6 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
 interface MetricCardProps {
@@ -11,27 +10,25 @@ interface MetricCardProps {
   sub?: string
 }
 
-const accentClasses = {
-  cyan: 'text-primary',
-  green: 'text-emerald-500',
-  amber: 'text-amber-500',
-  red: 'text-destructive',
-  default: 'text-muted-foreground',
-}
+const accentStyles = {
+  cyan: 'bg-primary/15 text-primary',
+  green: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+  amber: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+  red: 'bg-destructive/15 text-destructive',
+  default: 'bg-muted text-muted-foreground',
+} as const
 
 export default function MetricCard({ label, value, icon: Icon, accent = 'default', sub }: MetricCardProps) {
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between">
-          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
-          <div className={cn('rounded-md bg-muted p-2', accentClasses[accent])}>
-            <Icon size={16} />
-          </div>
-        </div>
-        <div className="mono mt-2 text-2xl font-bold tracking-tight">{value}</div>
-        {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}
-      </CardContent>
-    </Card>
+    <div className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 shadow-sm">
+      <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', accentStyles[accent])}>
+        <Icon size={18} strokeWidth={2} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className="mono truncate text-lg font-semibold leading-tight">{value}</p>
+        {sub && <p className="mt-0.5 truncate text-xs text-muted-foreground">{sub}</p>}
+      </div>
+    </div>
   )
 }
