@@ -249,15 +249,21 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <aside className="hidden w-full shrink-0 lg:block lg:sticky lg:top-4 lg:w-64">
-          <div className="rounded-lg border bg-card p-2">
-            <SettingsNav
-              active={activeSection}
-              onChange={setActiveSection}
-              isAdmin={isAdmin}
-              isTabEnabled={isSettingsTabEnabled}
-              isModuleEnabled={isEnabled}
-            />
+        <aside className="hidden w-full shrink-0 lg:block lg:sticky lg:top-4 lg:w-72">
+          <div className="rounded-2xl border border-border/80 bg-card p-2 shadow-sm">
+            <div className="border-b border-border/60 px-3 py-3">
+              <p className="text-sm font-medium leading-snug">Разделы</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Навигация по настройкам панели</p>
+            </div>
+            <div className="p-1.5">
+              <SettingsNav
+                active={activeSection}
+                onChange={setActiveSection}
+                isAdmin={isAdmin}
+                isTabEnabled={isSettingsTabEnabled}
+                isModuleEnabled={isEnabled}
+              />
+            </div>
           </div>
         </aside>
 
