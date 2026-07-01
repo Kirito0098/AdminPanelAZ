@@ -4,6 +4,9 @@ export default {
   content: ['./index.html', './tg-mini.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
+      screens: {
+        '2k': '2400px',
+      },
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',

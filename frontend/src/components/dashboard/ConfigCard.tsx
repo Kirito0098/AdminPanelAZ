@@ -404,7 +404,7 @@ export default function ConfigCard({
   return (
     <Card
       className={cn(
-        'relative overflow-hidden rounded-xl border shadow-sm transition-colors hover:border-primary/30 hover:shadow-md',
+        'relative flex h-full flex-col overflow-hidden rounded-xl border shadow-sm transition-colors hover:border-primary/30 hover:shadow-md',
         selected && showSelect && 'border-primary/40 bg-primary/5',
         tone === 'expired' && 'border-destructive/30',
         tone === 'expiring' && 'border-amber-500/30',
@@ -483,14 +483,14 @@ export default function ConfigCard({
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-2.5 p-4 pt-0">
+      <CardContent className="flex flex-1 flex-col space-y-2.5 p-4 pt-0">
         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
           {metaRows.map((row) => (
             <MetaLine key={row.key} row={row} />
           ))}
         </div>
 
-        <div className="space-y-2 border-t border-border/60 pt-2.5">
+        <div className="mt-auto space-y-2 border-t border-border/60 pt-2.5">
           {filesLoading && !primaryFile && (
             <div className="grid grid-cols-2 gap-2">
               <div className="h-9 animate-pulse rounded-lg bg-muted" />
@@ -613,7 +613,6 @@ export default function ConfigCard({
                 {canDelete && onDelete && (
                   <IconActionButton
                     title="Удалить"
-                    label="Удалить"
                     destructive
                     disabled={actionBusy}
                     loading={loadingAction === 'delete'}

@@ -659,7 +659,7 @@ export default function ConfigCardsSection({
                     className="py-10"
                   />
                 ) : (
-                  <div className="grid items-start gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  <div className="grid items-stretch gap-3 md:grid-cols-2 lg:grid-cols-3 2k:grid-cols-4">
                     {filteredByTab[tab].map((config) => (
                       <ConfigCard
                         key={`${tab}-${config.id}`}
