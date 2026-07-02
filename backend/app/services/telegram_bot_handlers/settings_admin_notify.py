@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from app.schemas import AdminNotifySettingsUpdate
+from app.services import telegram_bot_i18n as i18n
 from app.services.admin_notify import TG_NOTIFY_EVENT_LABELS
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext, inline_button, inline_keyboard

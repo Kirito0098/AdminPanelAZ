@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any, Callable
 
+from sqlalchemy.orm import Session
+
 from app.database import SessionLocal
 from app.models import Node, NodeStatus
 from app.services.background_tasks import background_task_service

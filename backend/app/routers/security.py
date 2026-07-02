@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.auth import require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import User
+from app.models import AppSetting, User
 from app.services.action_log import log_action
 from app.services.ip_restriction import ip_restriction_service
 from app.services.public_download_settings import is_public_download_enabled, set_public_download_enabled

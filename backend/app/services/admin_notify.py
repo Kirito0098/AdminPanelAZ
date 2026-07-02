@@ -20,6 +20,7 @@ from app.services.feature_guards import get_feature_service
 from app.services.notify_time import format_notify_when
 from app.services.notify_backends import dispatch_admin_notify, register_notify_backend
 from app.services.telegram import send_tg_message
+from app.services.resource_alert_sustained import SustainedMetricSource
 from app.services.traffic_limit import (
     format_traffic_limit_period_label,
     format_traffic_limit_unblock_at,
@@ -737,14 +738,10 @@ class AdminNotifyService:
         ram_percent: float | None = None,
         node_id: int | None = None,
         node_name: str | None = None,
-        cpu_source: "SustainedMetricSource | None" = None,
-        ram_source: "SustainedMetricSource | None" = None,
+        cpu_source: SustainedMetricSource | None = None,
+        ram_source: SustainedMetricSource | None = None,
     ) -> None:
-        from app.services.resource_alert_sustained import (
-            SustainedMetricSource,
-            format_alert_details,
-            is_sustained_high,
-        )
+        from app.services.resource_alert_sustained import format_alert_details, is_sustained_high
 
         if not get_feature_service().is_enabled("resource_monitor"):
             return
@@ -816,9 +813,7 @@ class AdminNotifyService:
                         )
 
     @staticmethod
-    def _sustained_sample_interval(source: "SustainedMetricSource") -> int:
-        from app.services.resource_alert_sustained import SustainedMetricSource
-
+    def _sustained_sample_interval(source: SustainedMetricSource) -> int:
         cfg = get_settings()
         if source in (SustainedMetricSource.node_cpu, SustainedMetricSource.node_ram):
             return cfg.resource_metrics_interval_seconds
