@@ -1,0 +1,25 @@
+{
+  "config": {
+    "default": true,
+    "MD013": {
+      "line_length": 120,
+      "code_blocks": false,
+      "tables": false,
+      "headings": false
+    },
+    "MD024": {
+      "siblings_only": true
+    },
+    "MD033": {
+      "allowed_elements": ["a", "details", "summary", "strong"]
+    }
+  },
+  "overrides": [
+    {
+      "files": ["CHANGELOG.md"],
+      "config": {
+        "MD013": false
+      }
+    }
+  ]
+}
