@@ -16,6 +16,7 @@ import {
 } from '@/api/client'
 import ClientActionsDialog from '@/components/dashboard/ClientActionsDialog'
 import ConfigCard from '@/components/dashboard/ConfigCard'
+import ConfigCardViewSettings from '@/components/dashboard/ConfigCardViewSettings'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import EmptyState from '@/components/ui/EmptyState'
@@ -41,6 +42,13 @@ import {
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { configOwnerCandidates } from '@/lib/configOwners'
+import {
+  DEFAULT_CONFIG_CARD_VIEW_PREFS,
+  gridColsClass,
+  loadConfigCardViewPrefs,
+  saveConfigCardViewPrefs,
+  type ConfigCardViewPrefs,
+} from '@/lib/configCardViewPrefs'
 import { cn } from '@/lib/utils'
 import type { ClientAccessPolicy, ConfigTag, OpenVpnGroupOption, User, UserRole, VpnConfig } from '@/types'
 import { FileKey, Filter, Search, Shield, Tag, Wifi, X } from 'lucide-react'
@@ -122,6 +130,16 @@ export default function ConfigCardsSection({
   const [bulkBusy, setBulkBusy] = useState(false)
   const [newTagName, setNewTagName] = useState('')
   const [tagToDelete, setTagToDelete] = useState<ConfigTag | null>(null)
+  const [viewPrefs, setViewPrefs] = useState<ConfigCardViewPrefs>(DEFAULT_CONFIG_CARD_VIEW_PREFS)
+
+  useEffect(() => {
+    setViewPrefs(loadConfigCardViewPrefs())
+  }, [])
+
+  const handleViewPrefsChange = (next: ConfigCardViewPrefs) => {
+    setViewPrefs(next)
+    saveConfigCardViewPrefs(next)
+  }
   const [tagDeleteBusy, setTagDeleteBusy] = useState(false)
 
   const isAdmin = userRole === 'admin'
@@ -424,24 +442,27 @@ export default function ConfigCardsSection({
                   : 'Клиенты не найдены'}
               </CardDescription>
             </div>
-            <div className="relative w-full lg:max-w-xs">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Поиск по имени..."
-                className="h-10 bg-background pl-9 pr-9"
-              />
-              {search && (
-                <button
-                  type="button"
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  onClick={() => setSearch('')}
-                  title="Очистить поиск"
-                >
-                  <X size={14} />
-                </button>
-              )}
+            <div className="flex w-full items-center gap-2 lg:max-w-md">
+              <div className="relative min-w-0 flex-1">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Поиск по имени..."
+                  className="h-10 bg-background pl-9 pr-9"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    onClick={() => setSearch('')}
+                    title="Очистить поиск"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              <ConfigCardViewSettings prefs={viewPrefs} onChange={handleViewPrefsChange} />
             </div>
           </div>
         </CardHeader>
@@ -659,7 +680,7 @@ export default function ConfigCardsSection({
                     className="py-10"
                   />
                 ) : (
-                  <div className="grid items-stretch gap-3 md:grid-cols-2 lg:grid-cols-3 2k:grid-cols-4">
+                  <div className={cn('grid items-stretch gap-3', gridColsClass(viewPrefs.gridCols))}>
                     {filteredByTab[tab].map((config) => (
                       <ConfigCard
                         key={`${tab}-${config.id}`}
@@ -689,6 +710,7 @@ export default function ConfigCardsSection({
                         showQrDownloads={qrDownloadsEnabled}
                         showTrafficLink={trafficLinkEnabled}
                         isOnline={isConfigConnected(config.client_name, tab, connectionMap)}
+                        viewPrefs={viewPrefs}
                       />
                     ))}
                   </div>

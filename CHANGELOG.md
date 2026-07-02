@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.8.0](#280---2026-07-02) — 2026-07-02
 - [2.7.0](#270---2026-07-02) — 2026-07-02
 - [2.6.0](#260---2026-07-02) — 2026-07-02
 - [2.5.0](#250---2026-06-30) — 2026-06-30
@@ -31,6 +32,24 @@
 ---
 
 ## [Unreleased]
+
+---
+
+## [2.8.0] - 2026-07-02
+
+> **Кратко:** настройки отображения карточек клиентов (сетка, видимость полей, цвет кнопок), усиление CI.
+
+### ✨ Added
+
+#### Конфигурации — настройки отображения карточек
+
+- **Кнопка настроек** — в шапке «Список клиентов» рядом с поиском; выпадающее меню (`ConfigCardViewSettings.tsx`, `ConfigCardsSection.tsx`).
+- **Столбцы сетки** — выбор «Авто» / 1 / 2 / 3 / 4; «Авто» сохраняет адаптивную сетку 2→3→4 колонки (`gridColsClass`, `configCardViewPrefs.ts`).
+- **Видимость полей** — чекбоксы для описания, тегов, бейджей VPN/AZ, мета-полей (создан, сертификат, владелец, трафик, блокировка, онлайн), кнопок скачивания, QR, ссылки «Трафик», блока «Блок / удалить» (`ConfigCard.tsx`).
+- **Цвет кнопок** — пресеты cyan / amber / emerald / red и режим «по умолчанию» (VPN — primary, AntiZapret — amber); остальные пресеты задают единый акцент на все outline-кнопки карточки.
+- **Свой цвет** — color picker и ввод hex (`#rrggbb`); применяется через CSS-переменные к кнопкам и бейджам VPN/AntiZapret.
+- **Сохранение настроек** — `localStorage` с префиксом `dashboard-config-cards` (по образцу NOC Мониторинг).
+- **UI** — компонент `dropdown-menu.tsx` (Radix) для выпадающих меню в панели.
 
 ### 🧪 Tests
 
@@ -1179,7 +1198,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.7.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.4.0...v2.5.0

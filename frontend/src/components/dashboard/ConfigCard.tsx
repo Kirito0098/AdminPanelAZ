@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -39,6 +39,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  DEFAULT_CONFIG_CARD_VIEW_PREFS,
+  isMetaKeyVisible,
+  resolveBadgeAccent,
+  resolveButtonAccent,
+  type AccentPresentation,
+  type ConfigCardViewPrefs,
+} from '@/lib/configCardViewPrefs'
 import { cn } from '@/lib/utils'
 
 type ActionKey = 'download' | 'qr' | 'block' | 'unblock' | 'delete'
@@ -63,6 +71,7 @@ interface ConfigCardProps {
   showQrDownloads?: boolean
   showTrafficLink?: boolean
   isOnline?: boolean | null
+  viewPrefs?: ConfigCardViewPrefs
 }
 
 const statusIcons = {
@@ -245,6 +254,19 @@ function MetaLine({ row }: { row: MetaRow }) {
   )
 }
 
+function applyAccent(
+  presentation: AccentPresentation | null,
+  fallbackClassName: string,
+): { className: string; style?: CSSProperties } {
+  if (!presentation) {
+    return { className: fallbackClassName }
+  }
+  return {
+    className: cn(presentation.className, presentation.hoverClass),
+    style: presentation.style,
+  }
+}
+
 function IconActionButton({
   title,
   label,
@@ -253,6 +275,7 @@ function IconActionButton({
   onClick,
   destructive,
   className,
+  style,
   children,
 }: {
   title: string
@@ -262,6 +285,7 @@ function IconActionButton({
   onClick: () => void
   destructive?: boolean
   className?: string
+  style?: CSSProperties
   children: ReactNode
 }) {
   return (
@@ -271,9 +295,10 @@ function IconActionButton({
       size={label ? 'sm' : 'icon'}
       className={cn(
         label ? 'h-8 gap-1.5 px-2 text-xs' : 'h-8 w-8 shrink-0',
-        destructive && 'text-destructive hover:bg-destructive/10 hover:text-destructive',
+        destructive && !style && 'text-destructive hover:bg-destructive/10 hover:text-destructive',
         className,
       )}
+      style={style}
       title={title}
       disabled={disabled}
       onClick={onClick}
@@ -289,12 +314,14 @@ function IconActionLink({
   label,
   to,
   className,
+  style,
   children,
 }: {
   title: string
   label: string
   to: string
   className?: string
+  style?: CSSProperties
   children: ReactNode
 }) {
   return (
@@ -303,6 +330,7 @@ function IconActionLink({
       variant="outline"
       size="sm"
       className={cn('h-8 gap-1.5 px-2 text-xs', className)}
+      style={style}
       title={title}
     >
       <Link to={to}>
@@ -319,7 +347,8 @@ function DownloadButton({
   disabled,
   loading,
   onClick,
-  accent = 'default',
+  accentClassName,
+  accentStyle,
   className,
 }: {
   label: string
@@ -327,7 +356,8 @@ function DownloadButton({
   disabled?: boolean
   loading?: boolean
   onClick: () => void
-  accent?: 'default' | 'amber'
+  accentClassName?: string
+  accentStyle?: CSSProperties
   className?: string
 }) {
   return (
@@ -337,9 +367,10 @@ function DownloadButton({
       size="sm"
       className={cn(
         'h-8 min-w-0 flex-1 gap-1.5 px-2 text-xs',
-        accent === 'amber' && 'border-amber-500/40 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400',
+        accentClassName,
         className,
       )}
+      style={accentStyle}
       title={`Скачать ${label}: ${filename}`}
       disabled={disabled}
       onClick={onClick}
@@ -370,6 +401,7 @@ export default function ConfigCard({
   showQrDownloads = true,
   showTrafficLink = false,
   isOnline = null,
+  viewPrefs = DEFAULT_CONFIG_CARD_VIEW_PREFS,
 }: ConfigCardProps) {
   const status = getConfigStatus(config, tab, policy)
   const StatusIcon = statusIcons[status.variant]
@@ -381,8 +413,41 @@ export default function ConfigCard({
   const isAdmin = userRole === 'admin'
   const canDelete = isAdmin || userRole === 'user'
   const isBlocked = policy?.is_blocked ?? false
-  const metaRows = buildCompactMeta(config, tab, policy, isAdmin, tone, isOnline)
+  const { fields } = viewPrefs
+  const unifiedButtonAccent = resolveButtonAccent(viewPrefs)
+  const unifiedBadgeAccent = resolveBadgeAccent(viewPrefs)
+  const metaRows = buildCompactMeta(config, tab, policy, isAdmin, tone, isOnline).filter((row) => {
+    if (!isMetaKeyVisible(row.key, fields)) return false
+    if (!fields.metaTraffic && (row.key === 'traffic' || row.label.startsWith('Трафик') || row.label.startsWith('Лимит'))) {
+      return false
+    }
+    if (!fields.metaBlock && (row.key === 'block' || row.label.startsWith('Блокировка'))) {
+      return false
+    }
+    return true
+  })
   const actionBusy = loadingAction != null
+  const showDownloads = fields.downloadButtons && showQrDownloads
+  const showQr = fields.qrButtons && showQrDownloads
+  const showTraffic = fields.trafficLink && showTrafficLink
+  const showDanger = fields.dangerActions
+
+  const vpnDownloadAccent = applyAccent(
+    unifiedButtonAccent,
+    'border-primary/40 text-primary hover:bg-primary/10',
+  )
+  const azDownloadAccent = applyAccent(
+    unifiedButtonAccent,
+    'border-amber-500/40 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400',
+  )
+  const actionAccent = unifiedButtonAccent
+    ? applyAccent(unifiedButtonAccent, '')
+    : null
+  const vpnBadgeAccent = applyAccent(unifiedBadgeAccent, 'border-primary/25 bg-primary/10 text-primary')
+  const azBadgeAccent = applyAccent(
+    unifiedBadgeAccent,
+    'border-amber-500/35 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  )
 
   const runFileAction = (
     file: VpnConfig['profile_files'][number] | undefined,
@@ -450,7 +515,7 @@ export default function ConfigCard({
                 {status.label}
               </Badge>
             </div>
-            {config.description && (
+            {fields.description && config.description && (
               <CardDescription className="mt-1 line-clamp-2 text-xs leading-relaxed">
                 {config.description}
               </CardDescription>
@@ -458,47 +523,63 @@ export default function ConfigCard({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          {(config.tags?.length ?? 0) > 0 &&
-            config.tags!.map((tag) => (
-              <Badge key={tag.id} variant="outline" className="h-5 px-1.5 text-[10px]">
-                {tag.name}
+        {(fields.tags || fields.profileBadges) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {fields.tags && (config.tags?.length ?? 0) > 0 &&
+              config.tags!.map((tag) => (
+                <Badge key={tag.id} variant="outline" className="h-5 px-1.5 text-[10px]">
+                  {tag.name}
+                </Badge>
+              ))}
+            {fields.tags && config.ha ? (
+              <Badge variant="outline" className="gap-1 px-1.5 text-[10px]">
+                HA: {config.ha.shared_domain} ({config.ha.node_count})
               </Badge>
-            ))}
-          {config.ha ? (
-            <Badge variant="outline" className="gap-1 px-1.5 text-[10px]">
-              HA: {config.ha.shared_domain} ({config.ha.node_count})
-            </Badge>
-          ) : null}
-          {hasVpnProfiles(config, tab) && (
-            <span className="inline-flex items-center rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-              VPN
-            </span>
-          )}
-          {hasAzProfiles(config, tab) && (
-            <span className="inline-flex items-center rounded-md border border-amber-500/35 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-              AntiZapret
-            </span>
-          )}
-        </div>
+            ) : null}
+            {fields.profileBadges && hasVpnProfiles(config, tab) && (
+              <span
+                className={cn(
+                  'inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium',
+                  vpnBadgeAccent.className,
+                )}
+                style={vpnBadgeAccent.style}
+              >
+                VPN
+              </span>
+            )}
+            {fields.profileBadges && hasAzProfiles(config, tab) && (
+              <span
+                className={cn(
+                  'inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium',
+                  azBadgeAccent.className,
+                )}
+                style={azBadgeAccent.style}
+              >
+                AntiZapret
+              </span>
+            )}
+          </div>
+        )}
       </CardHeader>
 
       <CardContent className="flex flex-1 flex-col space-y-2.5 p-4 pt-0">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-          {metaRows.map((row) => (
-            <MetaLine key={row.key} row={row} />
-          ))}
-        </div>
+        {metaRows.length > 0 && (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            {metaRows.map((row) => (
+              <MetaLine key={row.key} row={row} />
+            ))}
+          </div>
+        )}
 
         <div className="mt-auto space-y-2 border-t border-border/60 pt-2.5">
-          {filesLoading && !primaryFile && (
+          {filesLoading && !primaryFile && showDownloads && (
             <div className="grid grid-cols-2 gap-2">
               <div className="h-9 animate-pulse rounded-lg bg-muted" />
               <div className="h-9 animate-pulse rounded-lg bg-muted" />
             </div>
           )}
 
-          {primaryFile && showQrDownloads && (
+          {primaryFile && showDownloads && (
             <div className="grid grid-cols-2 gap-2">
               {hasBothProfiles ? (
                 <>
@@ -507,6 +588,8 @@ export default function ConfigCard({
                     filename={getDownloadFilename(config, vpnFile!)}
                     disabled={actionBusy}
                     loading={loadingAction === 'download'}
+                    accentClassName={vpnDownloadAccent.className}
+                    accentStyle={vpnDownloadAccent.style}
                     onClick={() => runFileAction(vpnFile, onDownload)}
                   />
                   <DownloadButton
@@ -514,7 +597,8 @@ export default function ConfigCard({
                     filename={getDownloadFilename(config, azFile!)}
                     disabled={actionBusy}
                     loading={loadingAction === 'download'}
-                    accent="amber"
+                    accentClassName={azDownloadAccent.className}
+                    accentStyle={azDownloadAccent.style}
                     onClick={() => runFileAction(azFile, onDownload)}
                   />
                 </>
@@ -524,6 +608,8 @@ export default function ConfigCard({
                   filename={getDownloadFilename(config, primaryFile)}
                   disabled={actionBusy}
                   loading={loadingAction === 'download'}
+                  accentClassName={(actionAccent ?? vpnDownloadAccent).className}
+                  accentStyle={(actionAccent ?? vpnDownloadAccent).style}
                   className="col-span-2 w-full"
                   onClick={() => runFileAction(primaryFile, onDownload)}
                 />
@@ -533,7 +619,7 @@ export default function ConfigCard({
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1.5">
-              {primaryFile && showQrDownloads && (
+              {primaryFile && showQr && (
                 <>
                   {hasBothProfiles ? (
                     <>
@@ -542,6 +628,8 @@ export default function ConfigCard({
                         label="QR VPN"
                         disabled={actionBusy}
                         loading={loadingAction === 'qr'}
+                        className={(actionAccent ?? vpnDownloadAccent).className}
+                        style={(actionAccent ?? vpnDownloadAccent).style}
                         onClick={() => runFileAction(vpnFile, onQr)}
                       >
                         <QrCode size={14} className="shrink-0" />
@@ -551,7 +639,8 @@ export default function ConfigCard({
                         label="QR AZ"
                         disabled={actionBusy}
                         loading={loadingAction === 'qr'}
-                        className="border-amber-500/40 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400"
+                        className={(actionAccent ?? azDownloadAccent).className}
+                        style={(actionAccent ?? azDownloadAccent).style}
                         onClick={() => runFileAction(azFile, onQr)}
                       >
                         <QrCode size={14} className="shrink-0" />
@@ -563,6 +652,8 @@ export default function ConfigCard({
                       label="QR-код"
                       disabled={actionBusy}
                       loading={loadingAction === 'qr'}
+                      className={(actionAccent ?? vpnDownloadAccent).className}
+                      style={(actionAccent ?? vpnDownloadAccent).style}
                       onClick={() => runFileAction(primaryFile, onQr)}
                     >
                       <QrCode size={14} className="shrink-0" />
@@ -571,22 +662,30 @@ export default function ConfigCard({
                 </>
               )}
 
-              {showTrafficLink && (
+              {showTraffic && (
                 <IconActionLink
                   title="Статистика трафика"
                   label="Трафик"
                   to={`/traffic?client=${encodeURIComponent(config.client_name)}`}
+                  className={actionAccent?.className}
+                  style={actionAccent?.style}
                 >
                   <BarChart3 size={14} className="shrink-0" />
                 </IconActionLink>
               )}
 
-              <IconActionButton title="Все действия" label="Ещё" onClick={onOpenDetails}>
+              <IconActionButton
+                title="Все действия"
+                label="Ещё"
+                className={actionAccent?.className}
+                style={actionAccent?.style}
+                onClick={onOpenDetails}
+              >
                 <MoreHorizontal size={14} className="shrink-0" />
               </IconActionButton>
             </div>
 
-            {(onBlock || onUnblock || onDelete) && (
+            {showDanger && (onBlock || onUnblock || onDelete) && (
               <div className="flex flex-wrap items-center gap-1.5">
                 {isAdmin && !isBlocked && onBlock && (
                   <IconActionButton
@@ -594,6 +693,8 @@ export default function ConfigCard({
                     label="Блок"
                     disabled={actionBusy}
                     loading={loadingAction === 'block'}
+                    className={actionAccent?.className}
+                    style={actionAccent?.style}
                     onClick={onBlock}
                   >
                     <Ban size={14} className="shrink-0" />
@@ -605,6 +706,8 @@ export default function ConfigCard({
                     label="Разблок"
                     disabled={actionBusy}
                     loading={loadingAction === 'unblock'}
+                    className={actionAccent?.className}
+                    style={actionAccent?.style}
                     onClick={onUnblock}
                   >
                     <Unlock size={14} className="shrink-0" />
@@ -613,7 +716,9 @@ export default function ConfigCard({
                 {canDelete && onDelete && (
                   <IconActionButton
                     title="Удалить"
-                    destructive
+                    destructive={!actionAccent}
+                    className={actionAccent?.className}
+                    style={actionAccent?.style}
                     disabled={actionBusy}
                     loading={loadingAction === 'delete'}
                     onClick={onDelete}
