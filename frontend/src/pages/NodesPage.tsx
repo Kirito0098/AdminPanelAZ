@@ -26,6 +26,7 @@ import {
   getNodes,
   rollingNodeUpdate,
   rotateNodeApiKey,
+  restartNodeAgent,
   updateNode,
 } from '@/api/client'
 import NodeUpdateDialog from '@/components/NodeUpdateDialog'
@@ -66,7 +67,7 @@ import { cn } from '@/lib/utils'
 import type { Node, NodeMtlsStatus } from '@/types'
 import { Navigate } from 'react-router-dom'
 
-type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | 'disable-mtls' | null
+type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | 'disable-mtls' | 'restart-agent' | null
 type BulkConfirmAction = 'delete' | 'enable-mtls' | null
 
 function getSelectedNodes(nodes: Node[], selectedNodeIds: number[]) {
@@ -168,6 +169,7 @@ type NodeActionsProps = {
   onActivate: () => void
   onHealth: () => void
   onUpdate: () => void
+  onRestart: () => void
   onRotateKey: () => void
   onEnableMtls: () => void
   onDisableMtls: () => void
@@ -184,6 +186,7 @@ function NodeActions({
   onActivate,
   onHealth,
   onUpdate,
+  onRestart,
   onRotateKey,
   onEnableMtls,
   onDisableMtls,
@@ -234,6 +237,15 @@ function NodeActions({
       >
         <Download size={iconSize} />
         {!compact && 'Обновить'}
+      </Button>
+      <Button
+        variant={compact ? 'ghost' : 'outline'}
+        size={btnSize}
+        title="Перезапуск node agent"
+        onClick={onRestart}
+      >
+        <RefreshCw size={iconSize} />
+        {!compact && 'Перезапуск'}
       </Button>
       {!node.is_local && (
         <>
@@ -303,6 +315,7 @@ type NodeCardProps = {
   onActivate: () => void
   onHealth: () => void
   onUpdate: () => void
+  onRestart: () => void
   onRotateKey: () => void
   onEnableMtls: () => void
   onDisableMtls: () => void
@@ -320,6 +333,7 @@ function NodeCard({
   onActivate,
   onHealth,
   onUpdate,
+  onRestart,
   onRotateKey,
   onEnableMtls,
   onDisableMtls,
@@ -397,8 +411,10 @@ function NodeCard({
           onActivate={onActivate}
           onHealth={onHealth}
           onUpdate={onUpdate}
+          onRestart={onRestart}
           onRotateKey={onRotateKey}
           onEnableMtls={onEnableMtls}
+          onDisableMtls={onDisableMtls}
           onEdit={onEdit}
           onDelete={onDelete}
         />
@@ -688,6 +704,10 @@ export default function NodesPage() {
     openConfirm('disable-mtls', node)
   }
 
+  const handleRestartAgent = (node: Node) => {
+    openConfirm('restart-agent', node)
+  }
+
   const handleConfirm = async () => {
     const action = confirmAction
     const target = confirmTarget
@@ -740,6 +760,15 @@ export default function NodesPage() {
         success(result.message || `mTLS отключён для узла «${target.name}»`)
         if (result.warning) {
           warning(result.warning)
+        }
+        await load()
+        await refresh()
+      } else if (action === 'restart-agent') {
+        const result = await restartNodeAgent(target.id)
+        closeConfirm()
+        success(result.message || `Перезапуск node agent «${target.name}» запланирован`)
+        if (result.restarting) {
+          warning('Node agent перезапускается — подождите и выполните проверку здоровья')
         }
         await load()
         await refresh()
@@ -1116,6 +1145,7 @@ export default function NodesPage() {
                     onActivate={() => handleActivate(node)}
                     onHealth={() => handleHealth(node)}
                     onUpdate={() => setUpdateNodeTarget(node)}
+                    onRestart={() => handleRestartAgent(node)}
                     onRotateKey={() => handleRotateKey(node)}
                     onEnableMtls={() => handleEnableMtls(node)}
                     onDisableMtls={() => handleDisableMtls(node)}
@@ -1226,6 +1256,7 @@ export default function NodesPage() {
                               onActivate={() => handleActivate(node)}
                               onHealth={() => handleHealth(node)}
                               onUpdate={() => setUpdateNodeTarget(node)}
+                              onRestart={() => handleRestartAgent(node)}
                               onRotateKey={() => handleRotateKey(node)}
                               onEnableMtls={() => handleEnableMtls(node)}
                     onDisableMtls={() => handleDisableMtls(node)}
@@ -1369,7 +1400,9 @@ export default function NodesPage() {
                 ? 'Включить mTLS?'
                 : confirmAction === 'disable-mtls'
                   ? 'Сбросить mTLS в панели?'
-                  : ''
+                  : confirmAction === 'restart-agent'
+                    ? 'Перезапустить node agent?'
+                    : ''
         }
         description={
           confirmTarget ? (
@@ -1406,7 +1439,14 @@ export default function NodesPage() {
                       children:
                         'Сбрасывается флаг mTLS в базе панели. Node agent может продолжать работать с mTLS — для полного отключения настройте узел вручную.',
                     }
-                  : undefined
+                  : confirmAction === 'restart-agent'
+                    ? {
+                        variant: 'warning',
+                        title: 'Кратковременный разрыв связи',
+                        children:
+                          'Node agent перезапустится через несколько секунд (~5–30 сек). VPN-службы на узле не затрагиваются.',
+                      }
+                    : undefined
         }
         confirmLabel={
           confirmAction === 'delete'
@@ -1417,7 +1457,9 @@ export default function NodesPage() {
                 ? 'Включить mTLS'
                 : confirmAction === 'disable-mtls'
                   ? 'Сбросить mTLS'
-                  : 'Подтвердить'
+                  : confirmAction === 'restart-agent'
+                    ? 'Перезапустить'
+                    : 'Подтвердить'
         }
         destructive={confirmAction === 'delete'}
         loading={confirmLoading}

@@ -561,6 +561,17 @@ export async function applyNodeUpdate(id: number) {
   })
 }
 
+export async function restartNodeAgent(id: number) {
+  return apiFetch<{
+    node_id: number
+    success: boolean
+    message: string
+    restarting: boolean
+  }>(`/nodes/${id}/restart-agent`, {
+    method: 'POST',
+  })
+}
+
 export async function rollingNodeUpdate(nodeIds: number[]) {
   return apiFetch<import('../types').BackgroundTaskAccepted>('/nodes/update-roll', {
     method: 'POST',
@@ -1778,6 +1789,14 @@ export async function runSiteDiagnostics() {
 
 export async function applySystemUpdate() {
   return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/system/update', { method: 'POST' })
+}
+
+export async function restartPanel() {
+  return apiFetch<{ message: string }>('/system/restart', { method: 'POST' })
+}
+
+export async function rebuildPanel() {
+  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/system/rebuild', { method: 'POST' })
 }
 
 export async function getScannerBans() {

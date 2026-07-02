@@ -346,6 +346,7 @@ export function actionLogDetailsLabel(action: string, details?: string | null): 
     case 'settings_cidr_custom_provider':
       return formatCidrProvider(raw)
     case 'system_update_queued':
+    case 'system_rebuild_queued':
       return formatSystemUpdate(raw)
     case 'settings_vpn_network_publish':
       return formatVpnPublish(raw)
@@ -355,6 +356,7 @@ export function actionLogDetailsLabel(action: string, details?: string | null): 
     case 'node_activate':
       return formatNodeRef(raw) ?? formatGeneric(raw)
     case 'node_update_apply':
+    case 'node_restart_agent':
       return raw.startsWith('node=') ? `Узел: ${raw.slice('node='.length)}` : formatGeneric(raw)
     case 'node_update_roll_queued':
       return raw.startsWith('nodes=') ? `Узлы: ${raw.slice('nodes='.length)}` : formatGeneric(raw)

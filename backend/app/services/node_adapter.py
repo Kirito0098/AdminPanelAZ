@@ -164,6 +164,9 @@ class NodeAdapter(ABC):
     def apply_update(self) -> dict[str, Any]: ...
 
     @abstractmethod
+    def restart_agent(self) -> dict[str, Any]: ...
+
+    @abstractmethod
     def ensure_openvpn_ban_check(self) -> dict: ...
 
     @abstractmethod
@@ -460,6 +463,23 @@ class LocalNodeAdapter(NodeAdapter):
 
     def apply_update(self) -> dict[str, Any]:
         return apply_node_update(agent_version=NODE_AGENT_VERSION, repo_root=resolve_repo_root())
+
+    def restart_agent(self) -> dict[str, Any]:
+        from app.services.node_update import resolve_repo_root, schedule_agent_restart
+
+        repo_root = resolve_repo_root()
+        if repo_root is None:
+            return {
+                "success": False,
+                "message": "Репозиторий node agent не найден для перезапуска",
+                "restarting": False,
+            }
+        schedule_agent_restart(repo_root)
+        return {
+            "success": True,
+            "message": "Перезапуск node agent запланирован",
+            "restarting": True,
+        }
 
     def ensure_openvpn_ban_check(self) -> dict:
         return ensure_openvpn_ban_check(self._service.base_path)
@@ -1015,6 +1035,9 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def apply_update(self) -> dict[str, Any]:
         return self._request("POST", "/system/update", json={}, timeout=300.0)
+
+    def restart_agent(self) -> dict[str, Any]:
+        return self.restart_agent_after_mtls()
 
     def ensure_openvpn_ban_check(self) -> dict:
         return self._request("POST", "/system/ensure-openvpn-ban-check", timeout=30.0)

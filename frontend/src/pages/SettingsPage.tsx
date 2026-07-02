@@ -16,6 +16,7 @@ import SettingsNav, {
   type SettingsSection,
 } from '@/components/settings/SettingsNav'
 import { getSectionMeta } from '@/components/settings/settingsLabels'
+import PanelOpsTab from '@/components/settings/PanelOpsTab'
 import RunbookTab from '@/components/settings/RunbookTab'
 import UpdatesTab from '@/components/settings/UpdatesTab'
 import UsersTab from '@/components/settings/UsersTab'
@@ -198,6 +199,8 @@ export default function SettingsPage() {
         return <FeatureTogglesTab />
       case 'updates':
         return <UpdatesTab />
+      case 'panel_ops':
+        return <PanelOpsTab />
       case 'tests':
         return <RunbookTab />
       case 'vpn_network':

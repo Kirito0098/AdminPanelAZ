@@ -22,6 +22,7 @@ const ACTION_LOG_LABELS: Record<string, string> = {
   node_delete: 'Удаление узла',
   node_activate: 'Активация узла',
   node_update_apply: 'Применение обновления узла',
+  node_restart_agent: 'Перезапуск node agent',
   node_update_roll_queued: 'Откат обновления узла в очереди',
   node_api_key_rotate: 'Ротация API-ключа узла',
   node_mtls_enable: 'Включение mTLS узла',
@@ -107,6 +108,8 @@ const ACTION_LOG_LABELS: Record<string, string> = {
 
   // Система
   system_update_queued: 'Обновление системы в очереди',
+  system_rebuild_queued: 'Пересборка frontend в очереди',
+  system_restart: 'Перезапуск панели',
   backup_restore: 'Восстановление из бэкапа',
   edit_files_transfer: 'Передача файлов конфигурации',
   ha_replicate_partial_failure: 'Частичный сбой репликации HA',

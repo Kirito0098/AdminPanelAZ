@@ -14,6 +14,7 @@ from app.schemas import LatestChangelogResponse, MessageResponse
 from app.services.action_log import log_action
 from app.services.background_tasks import background_task_service
 from app.services.changelog_remote import build_changelog_response, fetch_remote_changelog_content
+from app.services.system_update import schedule_controller_restart
 
 router = APIRouter(prefix="/system", tags=["system"])
 APP_ROOT = Path(__file__).resolve().parents[2]
@@ -94,6 +95,15 @@ def apply_update(db: Session = Depends(get_db), user: User = Depends(require_adm
                 "active_task_id": active.id,
             },
         )
+    active_rebuild = background_task_service.find_active_task("rebuild_frontend")
+    if active_rebuild:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": "Пересборка frontend уже выполняется",
+                "active_task_id": active_rebuild.id,
+            },
+        )
 
     def _callable(progress_updater=None):
         return background_task_service.task_update_system(progress_updater)
@@ -114,6 +124,53 @@ def apply_update(db: Session = Depends(get_db), user: User = Depends(require_adm
     )
 
     return background_task_service.build_accepted_payload(task, "Обновление системы запущено в фоне.")
+
+
+@router.post("/rebuild", status_code=status.HTTP_202_ACCEPTED)
+def rebuild_panel(db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    for task_type in ("update_system", "rebuild_frontend"):
+        active = background_task_service.find_active_task(task_type)
+        if active:
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content={
+                    "detail": "Пересборка или обновление уже выполняется",
+                    "active_task_id": active.id,
+                },
+            )
+
+    def _callable(progress_updater=None):
+        return background_task_service.task_rebuild_frontend(progress_updater)
+
+    task = background_task_service.enqueue_background_task(
+        "rebuild_frontend",
+        _callable,
+        created_by_username=user.username,
+        queued_message="Пересборка frontend поставлена в очередь",
+    )
+
+    log_action(
+        db,
+        action="system_rebuild_queued",
+        user_id=user.id,
+        username=user.username,
+        details=f"task_id={task.id}",
+    )
+
+    return background_task_service.build_accepted_payload(task, "Пересборка frontend запущена в фоне.")
+
+
+@router.post("/restart", response_model=MessageResponse)
+def restart_panel(db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    schedule_controller_restart(_repo_root())
+    log_action(
+        db,
+        action="system_restart",
+        user_id=user.id,
+        username=user.username,
+        details="scheduled",
+    )
+    return MessageResponse(message="Перезапуск панели запланирован через несколько секунд")
 
 
 @router.get("/viewer-access/{user_id}")

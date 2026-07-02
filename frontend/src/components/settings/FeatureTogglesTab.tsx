@@ -22,6 +22,7 @@ import {
   updateFeatureToggles,
 } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import PanelRestartCard from '@/components/settings/PanelRestartCard'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -534,7 +535,8 @@ export default function FeatureTogglesTab() {
             Изменения записаны в <code className="text-xs">backend/.env</code>. Фоновые задачи (трафик, CIDR, метрики)
             подхватятся только после перезапуска сервиса панели.
           </SettingsAlert>
-          <div className="flex justify-end">
+          <div className="flex flex-wrap justify-end gap-2">
+            <PanelRestartCard compact onRestartScheduled={clearRestartPending} />
             <Button type="button" size="sm" variant="secondary" onClick={clearRestartPending}>
               Перезапуск выполнен
             </Button>

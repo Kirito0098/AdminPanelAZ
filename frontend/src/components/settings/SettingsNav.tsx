@@ -8,6 +8,7 @@ import {
   KeyRound,
   Puzzle,
   QrCode,
+  RefreshCw,
   Shield,
   User,
   Users,
@@ -27,6 +28,7 @@ export type SettingsSection =
   | 'vpn_network'
   | 'modules'
   | 'updates'
+  | 'panel_ops'
   | 'tests'
 
 type SettingsTabKey =
@@ -112,6 +114,7 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
     items: [
       navItem('modules', Puzzle),
       navItem('updates', Download, { settingsTab: 'updates' }),
+      navItem('panel_ops', RefreshCw),
       navItem('tests', FlaskConical, { settingsTab: 'tests' }),
     ],
   },

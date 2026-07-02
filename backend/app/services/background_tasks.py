@@ -51,6 +51,7 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "routing_apply_replica": ("Применение маршрутизации на replica…", "Синхронизация провайдеров…", 5),
     "restart_service": ("Перезапуск службы…", "Перезапуск службы…", 10),
     "update_system": ("Обновление кода и зависимостей…", "Обновление: проверка репозитория…", 5),
+    "rebuild_frontend": ("Пересборка интерфейса…", "npm run build:all…", 10),
     "cidr_db_refresh": ("Обновление CIDR БД…", "Подготовка обновления провайдеров…", 3),
     "cidr_db_refresh_dry_run": ("Пробный прогон CIDR БД…", "Подготовка обновления провайдеров…", 3),
     "cidr_estimate_from_db": ("Оценка CIDR из БД…", "Подготовка оценки…", 3),
@@ -71,6 +72,7 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "routing_apply_replica": "Маршрутизация на replica применена",
     "restart_service": "Служба перезапущена",
     "update_system": "Обновление завершено",
+    "rebuild_frontend": "Пересборка завершена",
     "cidr_db_refresh": "CIDR БД обновлена",
     "cidr_db_refresh_dry_run": "Пробный прогон завершён",
     "cidr_estimate_from_db": "Оценка завершена",
@@ -474,6 +476,22 @@ class BackgroundTaskService:
             raise RuntimeError(error_text)
         return {
             "message": str(result.get("message") or "Обновление применено"),
+            "output": str(result.get("output") or ""),
+        }
+
+    def task_rebuild_frontend(self, progress_updater: Callable[[int, str, str | None], None] | None = None) -> dict[str, str]:
+        from app.services.system_update import apply_controller_rebuild
+
+        def _progress(percent: int, stage: str) -> None:
+            if progress_updater:
+                progress_updater(percent, stage)
+
+        result = apply_controller_rebuild(repo_root=PROJECT_ROOT, progress=_progress)
+        if not result.get("success"):
+            error_text = "; ".join(result.get("errors") or []) or "Пересборка не выполнена"
+            raise RuntimeError(error_text)
+        return {
+            "message": str(result.get("message") or "Frontend пересобран"),
             "output": str(result.get("output") or ""),
         }
 

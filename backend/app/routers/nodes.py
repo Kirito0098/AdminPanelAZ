@@ -524,3 +524,43 @@ def apply_node_update_endpoint(
         detail=result.get("detail", {}),
         errors=result.get("errors", []),
     )
+
+
+@router.post("/{node_id}/restart-agent", response_model=NodeUpdateResult)
+def restart_node_agent_endpoint(
+    node_id: int,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = _get_node_or_404(node_id, db)
+    if node.status == NodeStatus.offline:
+        health = check_node_health(node)
+        update_node_from_health(node, health, db)
+        if node.status == NodeStatus.offline:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Узел недоступен")
+
+    adapter = get_adapter_for_node(node)
+    result = adapter.restart_agent()
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.get("message", "Ошибка перезапуска node agent"),
+        )
+
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_restart_agent",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"node={node.name}",
+        )
+    return NodeUpdateResult(
+        node_id=node.id,
+        success=True,
+        message=result.get("message", "Перезапуск node agent запланирован"),
+        restarting=bool(result.get("restarting", True)),
+    )

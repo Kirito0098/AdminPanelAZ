@@ -321,3 +321,55 @@ def apply_controller_update(
         "restarting": restarting,
         "detail": detail,
     }
+
+
+def apply_controller_rebuild(
+    *,
+    repo_root: Path | None = None,
+    progress: ProgressCallback = None,
+) -> dict[str, Any]:
+    """Rebuild frontend (npm run build:all) and schedule panel restart."""
+    repo_root = repo_root or resolve_repo_root()
+    report = progress or _noop_progress
+    output_parts: list[str] = []
+    errors: list[str] = []
+    detail: dict[str, Any] = {}
+    restarting = False
+
+    if not repo_root:
+        return {
+            "success": False,
+            "message": "Пересборка не выполнена",
+            "errors": ["Репозиторий AdminPanelAZ не найден"],
+            "output": "",
+            "restarting": False,
+            "detail": detail,
+        }
+
+    report(15, "Пересборка: сборка frontend…")
+    npm_build = build_frontend(repo_root)
+    detail["npm_build"] = npm_build
+    if not _require_step(label="npm run build:all", result=npm_build, output_parts=output_parts, errors=errors):
+        return {
+            "success": False,
+            "message": "Пересборка не выполнена",
+            "errors": errors,
+            "output": "\n\n".join(output_parts).strip(),
+            "restarting": False,
+            "detail": detail,
+        }
+
+    report(90, "Пересборка: перезапуск панели…")
+    schedule_controller_restart(repo_root)
+    restarting = True
+    output_parts.append("[restart] Перезапуск adminpanelaz запланирован через несколько секунд")
+
+    report(100, "Пересборка завершена")
+    return {
+        "success": True,
+        "message": "Frontend пересобран, панель перезапускается",
+        "errors": [],
+        "output": "\n\n".join(output_parts).strip(),
+        "restarting": restarting,
+        "detail": detail,
+    }
