@@ -13,14 +13,11 @@ concurrency:
 permissions:
   contents: read
 
-defaults:
-  run:
-    timeout-minutes: 15
-
 jobs:
   backend:
     name: backend (py3.12)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -67,6 +64,7 @@ jobs:
   frontend:
     name: frontend (node 20)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -100,6 +98,7 @@ jobs:
   shell:
     name: shell scripts
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
