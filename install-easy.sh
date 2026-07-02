@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # Простая установка AdminPanelAZ — для тех, кто не знаком с Linux и кодом.
-# Запуск: sudo bash install-easy.sh
-# Или:   wget -qO /tmp/install-easy.sh URL && sudo bash /tmp/install-easy.sh
+#
+# Запуск:
+#   sudo bash install-easy.sh              # меню
+#   sudo bash install-easy.sh --easy       # простой мастер установки
+#   sudo bash install-easy.sh --uninstall  # удаление (с вопросами, как install.sh)
+#   sudo bash install-easy.sh --uninstall -y   # удаление без вопросов (CI/скрипты)
+#   sudo bash install-easy.sh --purge-all      # удалить всё без следов
+#   sudo bash install-easy.sh --purge-all -y   # полное удаление без вопросов
+#
+# Или: wget -qO /tmp/install-easy.sh URL && sudo bash /tmp/install-easy.sh
 set -euo pipefail
 
 DEFAULT_INSTALL_GIT="https://github.com/Kirito0098/AdminPanelAZ.git"
@@ -78,6 +86,17 @@ BOOTSTRAP
   exec bash "$target/install-easy.sh" "$@"
 }
 
+easy_delegates_to_install_sh() {
+  for arg in "$@"; do
+    case "$arg" in
+      --uninstall|--purge-all|--purge|--reinstall)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 show_easy_menu() {
   local choice=""
   # shellcheck source=scripts/install-ui.sh
@@ -88,21 +107,32 @@ show_easy_menu() {
     ui_show_banner
     ui_box_top "Простая установка — выберите действие"
     ui_box_line "  1) Установить панель (простой мастер)"
-    ui_box_line "  2) Удалить панель"
-    ui_box_line "  3) Полный установщик (для опытных пользователей)"
-    ui_box_line "  4) Справка"
+    ui_box_line "  2) Удалить панель (с подтверждениями)"
+    ui_box_line "  3) Удалить панель без вопросов (для скриптов)"
+    ui_box_line "  4) Удалить всё без следов"
+    ui_box_line "  5) Полный установщик (для опытных пользователей)"
+    ui_box_line "  6) Справка"
     ui_box_bottom
     read -r -p "Выберите пункт [1]: " choice
     choice="${choice:-1}"
     case "$choice" in
       1) return 0 ;;
       2)
+        # install.sh → пункт «Удаление»
         exec bash "$ROOT_DIR/install.sh" --uninstall
         ;;
       3)
-        exec bash "$ROOT_DIR/install.sh" "$@"
+        # install.sh --uninstall -y (дефолты: state, nginx, firewall)
+        exec bash "$ROOT_DIR/install.sh" --uninstall -y
         ;;
       4)
+        # install.sh → пункт «Удалить всё без следов»
+        exec bash "$ROOT_DIR/install.sh" --purge-all
+        ;;
+      5)
+        exec bash "$ROOT_DIR/install.sh" "$@"
+        ;;
+      6)
         cat <<'EOF'
 
 Простая установка AdminPanelAZ
@@ -117,6 +147,13 @@ show_easy_menu() {
   sudo bash /tmp/install-easy.sh
 
 Мастер задаст несколько простых вопросов с пояснениями.
+
+Удаление (те же сценарии, что в sudo ./install.sh):
+  sudo bash install-easy.sh --uninstall       # с вопросами
+  sudo bash install-easy.sh --uninstall -y    # без вопросов (CI/скрипты)
+  sudo bash install-easy.sh --purge-all       # всё без следов
+  sudo bash install-easy.sh --purge-all -y    # полное удаление без вопросов
+
 Для расширенных настроек используйте: sudo ./install.sh
 
 EOF
@@ -137,6 +174,11 @@ main() {
   if [[ "$(id -u)" -ne 0 ]]; then
     echo "[install-easy] ОШИБКА: запустите от root: sudo $0" >&2
     exit 1
+  fi
+
+  # Удаление / переустановка — делегируем в install.sh (в т.ч. без TTY для -y / CI)
+  if easy_delegates_to_install_sh "$@"; then
+    exec bash "$ROOT_DIR/install.sh" "$@"
   fi
 
   if [[ ! -t 0 ]]; then

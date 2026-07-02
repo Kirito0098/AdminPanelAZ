@@ -16,6 +16,7 @@
 ### Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.7.0](#270---2026-07-02) — 2026-07-02
 - [2.6.0](#260---2026-07-02) — 2026-07-02
 - [2.5.0](#250---2026-06-30) — 2026-06-30
 - [2.4.0](#240---2026-06-18) — 2026-06-18
@@ -28,6 +29,50 @@
 ---
 
 ## [Unreleased]
+
+---
+
+## [2.7.0] - 2026-07-02
+
+> **Кратко:** перезапуск и пересборка панели из UI, перезапуск node agent на странице узлов, надёжное удаление сервисов (systemd + state в `/var/lib`).
+
+### ✨ Added
+
+#### Настройки — перезапуск и пересборка
+
+- **Раздел «Перезапуск и пересборка»** — новая вкладка в группе «Панель» (`panel_ops`, `PanelOpsTab.tsx`, `SettingsNav.tsx`, `settingsLabels.ts`).
+- **`POST /api/system/restart`** — отложенный перезапуск `adminpanelaz` через systemd или `start.sh restart` (`schedule_controller_restart`, `PanelRestartCard.tsx`); запись `system_restart` в журнал действий.
+- **`POST /api/system/rebuild`** — фоновая задача `rebuild_frontend`: `npm run build:all` + перезапуск без `git pull` (`apply_controller_rebuild`, `PanelRebuildCard.tsx`); прогресс в UI через `ProgressContext`; запись `system_rebuild_queued`.
+- **Защита от параллельных операций** — `409 Conflict`, если уже выполняется `update_system` или `rebuild_frontend`.
+
+#### Узлы — перезапуск node agent
+
+- **`POST /api/nodes/{node_id}/restart-agent`** — перезапуск агента на удалённой ноде (`nodes.py`, `node_adapter.restart_agent`).
+- **`POST /system/restart-agent`** на node agent — отложенный restart через `schedule_agent_restart` (`node_agent/main.py`).
+- **Кнопка «Перезапуск»** на странице **Узлы** с подтверждением (`NodesPage.tsx`); запись `node_restart_agent` в журнале.
+
+#### Журналы — русские подписи
+
+- **Новые действия** — «Перезапуск панели», «Пересборка frontend в очереди», «Перезапуск node agent» (`actionLogLabels.ts`, `actionLogDetails.ts`).
+
+### 🔄 Changed
+
+#### Настройки — разделы панели
+
+- **Баннер «Перезапустите панель»** — после смены профиля или модулей добавлена компактная кнопка перезапуска прямо в `FeatureTogglesTab.tsx` (рядом с «Перезапуск выполнен»).
+
+#### Установка — простой установщик
+
+- **`install-easy.sh`** — флаги `--uninstall`, `--purge-all`, `--purge`, `--reinstall` делегируются в `install.sh` (в т.ч. без TTY для `-y` / CI).
+- **Меню** — отдельные пункты: удаление с подтверждениями, удаление без вопросов, «удалить всё без следов»; обновлена справка в шапке скрипта.
+
+### 🐛 Fixed
+
+#### Установка — удаление сервисов
+
+- **`scripts/uninstall.sh`** — `stop_local_daemons` останавливает процессы во **всех** каталогах state: из `.env`, `/var/lib/adminpanelaz*`, `.runtime` (раньше смотрел только в `.runtime`, и сервисы после лёгкой установки оставались работать).
+- **`stop_all_services`** — явная остановка `adminpanelaz`, `adminpanelaz-node`, `adminpanelaz-ddns.timer` / `.service` даже если unit-файл уже удалён (`systemd_unit_exists`, `stop_systemd_unit_if_loaded`).
+- **DDNS timer** — удаление через `ddns-update.sh remove-timer` с fallback на ручную очистку systemd.
 
 ---
 
@@ -1077,7 +1122,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.3.0...v2.4.0

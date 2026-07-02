@@ -138,28 +138,93 @@ die_confirm() {
   exit 1
 }
 
+env_file_value() {
+  local file="$1"
+  local key="$2"
+  if [[ ! -f "$file" ]]; then
+    return 0
+  fi
+  grep -E "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ' || true
+}
+
+collect_controller_state_dirs() {
+  local -n _out_dirs=$1
+  local custom=""
+  custom="$(env_file_value "$ROOT_DIR/backend/.env" "ADMINPANELAZ_STATE_DIR")"
+  _out_dirs=()
+  if [[ -n "$custom" ]]; then
+    _out_dirs+=("$custom")
+  fi
+  _out_dirs+=("/var/lib/adminpanelaz" "$ROOT_DIR/.runtime")
+}
+
+collect_node_state_dirs() {
+  local -n _out_dirs=$1
+  local custom=""
+  custom="$(env_file_value "$ROOT_DIR/backend/node_agent.env" "NODE_AGENT_STATE_DIR")"
+  if [[ -z "$custom" && -f /etc/adminpanelaz/node_agent.env ]]; then
+    custom="$(env_file_value /etc/adminpanelaz/node_agent.env "NODE_AGENT_STATE_DIR")"
+  fi
+  _out_dirs=()
+  if [[ -n "$custom" ]]; then
+    _out_dirs+=("$custom")
+  fi
+  _out_dirs+=("/var/lib/adminpanelaz-node" "$ROOT_DIR/.runtime/node")
+}
+
 stop_local_daemons() {
+  local -a controller_dirs=()
+  local -a node_dirs=()
+  local state_dir=""
+
+  collect_controller_state_dirs controller_dirs
+  collect_node_state_dirs node_dirs
+
   if [[ -x "$ROOT_DIR/start.sh" ]]; then
-    log "Остановка controller (start.sh stop)..."
-    "$ROOT_DIR/start.sh" stop 2>/dev/null || true
+    for state_dir in "${controller_dirs[@]}"; do
+      log "Остановка controller (start.sh stop, state=$state_dir)..."
+      ADMINPANELAZ_STATE_DIR="$state_dir" "$ROOT_DIR/start.sh" stop 2>/dev/null || true
+    done
   fi
+
   if [[ -x "$ROOT_DIR/start_node_agent.sh" ]]; then
-    log "Остановка node agent (start_node_agent.sh stop)..."
-    "$ROOT_DIR/start_node_agent.sh" stop 2>/dev/null || true
+    for state_dir in "${node_dirs[@]}"; do
+      log "Остановка node agent (start_node_agent.sh stop, state=$state_dir)..."
+      NODE_AGENT_STATE_DIR="$state_dir" "$ROOT_DIR/start_node_agent.sh" stop 2>/dev/null || true
+    done
   fi
+}
+
+systemd_unit_exists() {
+  local name="$1"
+  systemctl cat "$name" >/dev/null 2>&1 \
+    || [[ -f "/etc/systemd/system/${name}" ]] \
+    || [[ -f "/etc/systemd/system/${name}.service" ]]
+}
+
+stop_systemd_unit_if_loaded() {
+  local name="$1"
+
+  if ! systemd_unit_exists "$name"; then
+    return 0
+  fi
+
+  log "Остановка systemd unit $name..."
+  systemctl stop "$name" 2>/dev/null || true
+  systemctl disable "$name" 2>/dev/null || true
+  systemctl reset-failed "$name" 2>/dev/null || true
 }
 
 remove_systemd_unit() {
   local name="$1"
   local unit="/etc/systemd/system/${name}.service"
 
+  stop_systemd_unit_if_loaded "$name"
+
   if [[ ! -f "$unit" ]]; then
     return 0
   fi
 
-  log "Остановка и отключение $name..."
-  systemctl stop "$name" 2>/dev/null || true
-  systemctl disable "$name" 2>/dev/null || true
   rm -f "$unit"
   log "Удалён $unit"
 }
@@ -168,16 +233,32 @@ remove_ddns_timer() {
   local timer="adminpanelaz-ddns.timer"
   local service="adminpanelaz-ddns.service"
 
-  if [[ ! -f "/etc/systemd/system/$timer" && ! -f "/etc/systemd/system/$service" ]]; then
+  if [[ ! -f "/etc/systemd/system/$timer" \
+    && ! -f "/etc/systemd/system/$service" ]] \
+    && ! systemctl is-enabled "$timer" >/dev/null 2>&1 \
+    && ! systemctl is-enabled "$service" >/dev/null 2>&1; then
     return 0
   fi
 
   log "Удаление DDNS timer..."
-  systemctl stop "$timer" 2>/dev/null || true
-  systemctl disable "$timer" 2>/dev/null || true
-  rm -f "/etc/systemd/system/$timer" "/etc/systemd/system/$service"
-  systemctl daemon-reload
+  if [[ -x "$ROOT_DIR/scripts/ddns-update.sh" ]]; then
+    "$ROOT_DIR/scripts/ddns-update.sh" remove-timer 2>/dev/null || true
+  else
+    stop_systemd_unit_if_loaded "$timer"
+    stop_systemd_unit_if_loaded "$service"
+    rm -f "/etc/systemd/system/$timer" "/etc/systemd/system/$service"
+    systemctl daemon-reload 2>/dev/null || true
+  fi
   log "DDNS timer удалён"
+}
+
+stop_all_services() {
+  log "Остановка всех сервисов AdminPanelAZ..."
+  stop_local_daemons
+  stop_systemd_unit_if_loaded "adminpanelaz-ddns.timer"
+  stop_systemd_unit_if_loaded "adminpanelaz-ddns.service"
+  stop_systemd_unit_if_loaded "adminpanelaz"
+  stop_systemd_unit_if_loaded "adminpanelaz-node"
 }
 
 remove_nginx_site_if_present() {
@@ -356,7 +437,7 @@ main() {
 
   confirm_destructive
 
-  stop_local_daemons
+  stop_all_services
   remove_nginx_site_if_present
   remove_ddns_timer
   remove_systemd_unit "adminpanelaz"
