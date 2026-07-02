@@ -49,17 +49,11 @@ jobs:
           PYTHONPATH=. python -c "from app.main import app; print('panel app import ok')"
           PYTHONPATH=. python -c "from node_agent.main import app as agent_app; print('node agent import ok')"
 
-      # Advisory: known CVEs in pinned deps are tracked here until bumps are reviewed.
-      - name: pip-audit (dependency vulnerabilities, advisory)
-        continue-on-error: true
+      - name: pip-audit (dependency vulnerabilities)
         run: pip-audit -r backend/requirements.txt
 
-      # Advisory security scan; findings are surfaced for review but do not block CI.
-      - name: Bandit (security scan, advisory)
-        continue-on-error: true
-        run: |
-          bandit -r backend/app backend/node_agent -ll \
-            --exclude backend/.venv,backend/app/data
+      - name: Bandit (security scan)
+        run: bandit -c backend/bandit.yaml -r backend/app backend/node_agent -ll
 
   frontend:
     name: frontend (node 20)
@@ -89,9 +83,7 @@ jobs:
         working-directory: frontend
         run: npm run build:all
 
-      # Advisory: surface high/critical npm advisories without blocking CI yet.
-      - name: npm audit (advisory)
-        continue-on-error: true
+      - name: npm audit
         working-directory: frontend
         run: npm audit --audit-level=high
 

@@ -58,7 +58,8 @@ class AntizapretBackupService:
 
         extract_root = Path("/root")
         with tarfile.open(archive, "r:gz") as tar:
-            tar.extractall(path=str(extract_root))
+            # Trusted AntiZapret backup archives from client.sh 8; reject path traversal (Bandit B202).
+            tar.extractall(path=str(extract_root), filter="data")
 
         self._copy_tree(extract_root / "easyrsa3", Path("/etc/openvpn/easyrsa3"))
         self._copy_files(extract_root / "wireguard", Path("/etc/wireguard"))

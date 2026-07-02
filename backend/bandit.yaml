@@ -1,0 +1,13 @@
+# Bandit config for CI/pre-commit. Skips are intentional server/panel patterns, not secrets.
+exclude_dirs:
+  - .venv
+  - data
+  - __pycache__
+
+skips:
+  # Controlled HTTPS downloads (GitHub raw, CIDR lists, Telegram API).
+  - B310
+  # VPN/node services bind on all interfaces by design.
+  - B104
+  # Internal migration DDL; table names are code constants, not user input.
+  - B608

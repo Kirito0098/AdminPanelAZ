@@ -34,6 +34,7 @@
 
 - **CI** — три параллельных job (backend / frontend / shell): compileall и import smoke для panel + node agent, сборка `build:all` (tg-mini), npm audit advisory, GitHub-аннотации ruff, таймаут 15 мин.
 - **CI fixes** — shellcheck только на `-S error`, ESLint: unused imports и rules-of-hooks в RoutingPage / tg-mini Nodes.
+- **CI hardening** — обновлены уязвимые Python-зависимости (pip-audit clean), безопасный `tarfile.extractall`, bandit.yaml, advisory-шаги стали блокирующими, ESLint `--quiet`.
 
 ---
 

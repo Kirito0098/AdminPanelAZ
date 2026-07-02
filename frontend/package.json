@@ -10,7 +10,7 @@
     "build:tg-mini": "vite build --mode tg-mini && mv ../backend/app/static/tg_mini/tg-mini.html ../backend/app/static/tg_mini/index.html && sed -i 's/ crossorigin//g' ../backend/app/static/tg_mini/index.html && sed -i 's/type=\"module\" //g' ../backend/app/static/tg_mini/index.html",
     "build:all": "npm run build && npm run build:tg-mini",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "lint": "eslint . --quiet"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.12",
