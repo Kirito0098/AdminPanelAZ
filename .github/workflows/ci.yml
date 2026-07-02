@@ -111,4 +111,4 @@ jobs:
 
       - name: ShellCheck
         run: |
-          shellcheck install.sh install-easy.sh start.sh start_node_agent.sh scripts/*.sh
+          shellcheck -S error -x install.sh install-easy.sh start.sh start_node_agent.sh scripts/*.sh

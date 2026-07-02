@@ -33,6 +33,7 @@
 ### 🧪 Tests
 
 - **CI** — три параллельных job (backend / frontend / shell): compileall и import smoke для panel + node agent, сборка `build:all` (tg-mini), npm audit advisory, GitHub-аннотации ruff, таймаут 15 мин.
+- **CI fixes** — shellcheck только на `-S error`, ESLint: unused imports и rules-of-hooks в RoutingPage / tg-mini Nodes.
 
 ---
 

@@ -6,12 +6,10 @@ import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import NodesCompareSection from '@/components/dashboard/NodesCompareSection'
 import MetricCard from '@/components/noc/MetricCard'
 import { NodeStatusBadge } from '@/components/NodeSelector'
-import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Progress } from '@/components/ui/progress'
 import {
   Table,

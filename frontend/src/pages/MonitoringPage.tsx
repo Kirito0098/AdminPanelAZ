@@ -22,7 +22,7 @@ import MonitoringConnectionsList, {
   buildMonitoringConnectionRows,
 } from '@/components/monitoring/MonitoringConnectionsList'
 import MonitoringGeoSummary from '@/components/monitoring/MonitoringGeoSummary'
-import { NodeScopeBadge, getConnectionDisplayAddress, getConnectionGeoLabel } from '@/components/monitoring/ConnectionAddress'
+import { getConnectionDisplayAddress, getConnectionGeoLabel } from '@/components/monitoring/ConnectionAddress'
 import PanelResourceHistoryCharts from '@/components/monitoring/PanelResourceHistoryCharts'
 import ResourceHistoryCharts from '@/components/monitoring/ResourceHistoryCharts'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'

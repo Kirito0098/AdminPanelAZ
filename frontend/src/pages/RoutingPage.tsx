@@ -93,14 +93,6 @@ export default function RoutingPage() {
     return () => window.clearTimeout(timer)
   }, [tab])
 
-  if (searchParams.get('tab') === 'antizapret-config') {
-    return <Navigate to="/antizapret" replace />
-  }
-
-  if (searchParams.get('tab') === 'files') {
-    return <Navigate to="/routing?tab=overview" replace />
-  }
-
   const {
     data,
     cidrDb,
@@ -150,6 +142,14 @@ export default function RoutingPage() {
     () => (data ? getRoutingWorkflowState(data.providers, cidrDb, isAdmin) : null),
     [data, cidrDb, isAdmin],
   )
+
+  if (searchParams.get('tab') === 'antizapret-config') {
+    return <Navigate to="/antizapret" replace />
+  }
+
+  if (searchParams.get('tab') === 'files') {
+    return <Navigate to="/routing?tab=overview" replace />
+  }
 
   const visibleTabs = ROUTING_TABS.filter((item) => !item.adminOnly || isAdmin)
   const activeTabMeta = visibleTabs.find((item) => item.id === tab)

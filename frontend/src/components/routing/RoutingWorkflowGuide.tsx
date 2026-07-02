@@ -2,7 +2,7 @@ import { ArrowRight, Check, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { RoutingTab, RoutingWorkflowState } from './routingWorkflow'
-import { ROUTING_TAB_UPDATE, STAGE_DEPLOY, WORKFLOW_CHAIN } from './routingLabels'
+import { STAGE_DEPLOY } from './routingLabels'
 import { pluralProviders } from './utils'
 
 interface RoutingWorkflowGuideProps {

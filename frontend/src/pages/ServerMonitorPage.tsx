@@ -180,7 +180,7 @@ export default function ServerMonitorPage() {
   const { user } = useAuth()
   const { activeNode } = useNode()
   const { error: notifyError, success } = useNotifications()
-  const { startGlobal, doneGlobal, inline, withInline } = useProgress()
+  const { startGlobal, doneGlobal, withInline } = useProgress()
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [liveCpu, setLiveCpu] = useState<number | null>(null)

@@ -239,7 +239,7 @@ export default function TrafficPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const { success, error: notifyError } = useNotifications()
-  const { startGlobal, doneGlobal, inline, withInline } = useProgress()
+  const { startGlobal, doneGlobal, withInline } = useProgress()
   const [searchParams, setSearchParams] = useSearchParams()
   const [data, setData] = useState<TrafficOverview | null>(null)
   const [chartData, setChartData] = useState<TrafficChartData | null>(null)

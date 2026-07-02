@@ -270,10 +270,6 @@ export default function Nodes() {
     void load()
   }, [isAdmin, load])
 
-  if (!isAdmin) {
-    return <Navigate to="/" replace />
-  }
-
   const activeNode = useMemo(
     () => nodes.find((node) => node.id === activeNodeId || node.is_active) ?? null,
     [nodes, activeNodeId],
@@ -315,6 +311,10 @@ export default function Nodes() {
       )
     })
   }, [sortedNodes, statusFilter, search])
+
+  if (!isAdmin) {
+    return <Navigate to="/" replace />
+  }
 
   const hasActiveFilters = search.trim().length > 0 || statusFilter !== 'all'
 

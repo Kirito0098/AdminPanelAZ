@@ -25,7 +25,6 @@ import {
   runDoall,
   updateRetentionSettings,
 } from '@/api/client'
-import SettingsAlert from '@/components/settings/SettingsAlert'
 import { getVpnServiceLabel } from '@/components/settings/settingsLabels'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
