@@ -13,9 +13,13 @@ concurrency:
 permissions:
   contents: read
 
+defaults:
+  run:
+    timeout-minutes: 15
+
 jobs:
-  lint:
-    name: lint & build (py3.12)
+  backend:
+    name: backend (py3.12)
     runs-on: ubuntu-latest
 
     steps:
@@ -29,23 +33,44 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements-dev.txt
 
-      - name: Install system dependencies (shellcheck)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
-
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements-dev.txt
+
+      - name: Ruff (lint)
+        run: ruff check backend/ --output-format=github
+
+      - name: Python compile check
+        run: python -m compileall -q backend/app backend/node_agent
+
+      - name: Import smoke test (panel + node agent)
+        working-directory: backend
+        env:
+          NODE_AGENT_MODE: dev
+        run: |
+          PYTHONPATH=. python -c "from app.main import app; print('panel app import ok')"
+          PYTHONPATH=. python -c "from node_agent.main import app as agent_app; print('node agent import ok')"
 
       # Advisory: known CVEs in pinned deps are tracked here until bumps are reviewed.
       - name: pip-audit (dependency vulnerabilities, advisory)
         continue-on-error: true
         run: pip-audit -r backend/requirements.txt
 
-      - name: Ruff (lint)
-        run: ruff check backend/
+      # Advisory security scan; findings are surfaced for review but do not block CI.
+      - name: Bandit (security scan, advisory)
+        continue-on-error: true
+        run: |
+          bandit -r backend/app backend/node_agent -ll \
+            --exclude backend/.venv,backend/app/data
+
+  frontend:
+    name: frontend (node 20)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -54,27 +79,37 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: ESLint (frontend)
+      - name: Install dependencies
         working-directory: frontend
-        run: |
-          npm ci
-          npm run lint
+        run: npm ci
 
-      - name: Build frontend
+      - name: ESLint
         working-directory: frontend
-        run: npm run build
+        run: npm run lint
 
-      - name: Shell scripts (shellcheck)
-        run: |
-          if command -v shellcheck >/dev/null 2>&1; then
-            shellcheck install.sh install-easy.sh start.sh start_node_agent.sh scripts/*.sh
-          else
-            echo "shellcheck not available, skipping"
-          fi
+      - name: Build frontend (panel + tg-mini)
+        working-directory: frontend
+        run: npm run build:all
 
-      # Advisory security scan; findings are surfaced for review but do not block CI.
-      - name: Bandit (security scan, advisory)
+      # Advisory: surface high/critical npm advisories without blocking CI yet.
+      - name: npm audit (advisory)
         continue-on-error: true
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
+  shell:
+    name: shell scripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
         run: |
-          bandit -r backend/app backend/node_agent -ll \
-            --exclude backend/.venv,backend/app/data
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: ShellCheck
+        run: |
+          shellcheck install.sh install-easy.sh start.sh start_node_agent.sh scripts/*.sh

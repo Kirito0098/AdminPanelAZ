@@ -1,4 +1,4 @@
-# Local checks aligned with .github/workflows/ci.yml (without pip-audit).
+# Local checks aligned with .github/workflows/ci.yml (parallel backend / frontend / shell jobs).
 # Setup: pip install -r backend/requirements-dev.txt && pre-commit install
 
 default_language_version:

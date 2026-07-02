@@ -30,6 +30,10 @@
 
 ## [Unreleased]
 
+### 🧪 Tests
+
+- **CI** — три параллельных job (backend / frontend / shell): compileall и import smoke для panel + node agent, сборка `build:all` (tg-mini), npm audit advisory, GitHub-аннотации ruff, таймаут 15 мин.
+
 ---
 
 ## [2.7.0] - 2026-07-02
