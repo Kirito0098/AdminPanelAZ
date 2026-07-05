@@ -37,6 +37,9 @@ type ResourceHistoryChartsProps = {
   loading: boolean
   period: Period
   onPeriodChange: (period: Period) => void
+  showLatestSummary?: boolean
+  title?: string
+  description?: string
 }
 
 function formatLabel(ts: string, period: Period) {
@@ -71,9 +74,17 @@ export default function ResourceHistoryCharts({
   loading,
   period,
   onPeriodChange,
+  showLatestSummary = true,
+  title = 'Ресурсы VPN-сервера',
+  description,
 }: ResourceHistoryChartsProps) {
   const chartData = useMemo(() => buildChartRows(data?.points ?? [], period), [data?.points, period])
   const latest = latestPoint(data?.points ?? [])
+  const cardDescription =
+    description ??
+    `CPU, RAM и диск узла AntiZapret (OpenVPN, WireGuard, маршрутизация) · ${RANGE_LABELS[period]}${
+      data && data.sample_count > 0 ? ` · ${data.sample_count} снимков` : ''
+    }`
 
   return (
     <div className="space-y-4">
@@ -82,14 +93,9 @@ export default function ResourceHistoryCharts({
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
               <Activity size={18} />
-              Ресурсы VPN-сервера
+              {title}
             </CardTitle>
-            <CardDescription>
-              CPU, RAM и диск узла AntiZapret (OpenVPN, WireGuard, маршрутизация) · {RANGE_LABELS[period]}
-              {data && data.sample_count > 0 && (
-                <> · {data.sample_count} снимков</>
-              )}
-            </CardDescription>
+            <CardDescription>{cardDescription}</CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {(['1d', '7d', '30d'] as const).map((r) => (
@@ -116,7 +122,7 @@ export default function ResourceHistoryCharts({
             />
           ) : (
             <div className="space-y-6">
-              {latest && (
+              {showLatestSummary && latest && (
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-lg border p-3">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -183,6 +189,7 @@ export default function ResourceHistoryCharts({
                       width={44}
                     />
                     <Tooltip
+                      cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }}
                       formatter={(value: number, name: string) => {
                         const labels: Record<string, string> = {
                           cpu: 'CPU',
@@ -198,7 +205,15 @@ export default function ResourceHistoryCharts({
                         value === 'cpu' ? 'CPU' : value === 'memory' ? 'RAM' : 'Диск'
                       }
                     />
-                    <Area type="monotone" dataKey="cpu" name="cpu" stroke={CHART_CPU} fill="url(#resCpu)" strokeWidth={2} />
+                    <Area
+                      type="monotone"
+                      dataKey="cpu"
+                      name="cpu"
+                      stroke={CHART_CPU}
+                      fill="url(#resCpu)"
+                      strokeWidth={2}
+                      activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
+                    />
                     <Area
                       type="monotone"
                       dataKey="memory"
@@ -206,6 +221,7 @@ export default function ResourceHistoryCharts({
                       stroke={CHART_RAM}
                       fill="url(#resRam)"
                       strokeWidth={2}
+                      activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
                     />
                     <Area
                       type="monotone"
@@ -214,6 +230,7 @@ export default function ResourceHistoryCharts({
                       stroke={CHART_DISK}
                       fill="url(#resDisk)"
                       strokeWidth={2}
+                      activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
                     />
                   </AreaChart>
                   )}
@@ -236,6 +253,7 @@ export default function ResourceHistoryCharts({
                       />
                       <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={44} />
                       <Tooltip
+                        cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }}
                         formatter={(value: number) => [Number(value).toFixed(2), 'Load 1m']}
                         labelFormatter={(label) => `Время: ${label}`}
                       />
@@ -246,6 +264,7 @@ export default function ResourceHistoryCharts({
                         stroke={CHART_LOAD}
                         strokeWidth={2}
                         dot={false}
+                        activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
                       />
                     </LineChart>
                     )}

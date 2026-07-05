@@ -25,8 +25,9 @@ import {
   YAxis,
 } from 'recharts'
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
+import ResourceHistoryCharts from '@/components/monitoring/ResourceHistoryCharts'
 import { Navigate } from 'react-router-dom'
-import { ApiError, getBandwidthChart, getServerInterfaces, getServerMetrics } from '@/api/client'
+import { ApiError, getBandwidthChart, getResourceHistory, getServerInterfaces, getServerMetrics } from '@/api/client'
 import { NodeBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
@@ -42,14 +43,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
@@ -57,7 +50,7 @@ import { useProgress } from '@/context/ProgressContext'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
-import type { BandwidthChart, ServerMetrics } from '@/types'
+import type { BandwidthChart, ResourceHistory, ServerMetrics } from '@/types'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
@@ -71,16 +64,74 @@ const RANGE_LABELS: Record<'1d' | '7d' | '30d', string> = {
 }
 
 const GROUP_LABELS: Record<string, string> = {
-  main: 'Основной',
+  main: 'Основной интернет',
   vpn: 'VPN',
   antizapret: 'AntiZapret',
   openvpn: 'OpenVPN',
-  wireguard: 'WireGuard',
+  wireguard: 'WireGuard / AWG',
 }
 
-function formatInterfaceLabel(name: string, primaryInterface?: string | null) {
+function interfaceTransport(name: string): 'UDP' | 'TCP' | null {
+  const lowered = name.toLowerCase()
+  if (lowered.endsWith('-udp')) return 'UDP'
+  if (lowered.endsWith('-tcp')) return 'TCP'
+  return null
+}
+
+function interfaceScope(name: string): 'VPN' | 'AntiZapret' | null {
+  const lowered = name.toLowerCase()
+  if (lowered.includes('antizapret')) return 'AntiZapret'
+  if (/(^|[-_])vpn([-_]|$)|wg|wireguard|awg|amnezia/.test(lowered)) return 'VPN'
+  return null
+}
+
+function inferInterfaceProtocol(
+  name: string,
+  groups: Record<string, string[]> | undefined,
+): 'openvpn' | 'wireguard' | null {
+  const inOpenVpn = groups?.openvpn?.includes(name) ?? false
+  const inWireguard = groups?.wireguard?.includes(name) ?? false
+  if (inOpenVpn && !inWireguard) return 'openvpn'
+  if (inWireguard && !inOpenVpn) return 'wireguard'
+  if (inOpenVpn && inWireguard) {
+    return interfaceTransport(name) ? 'openvpn' : 'wireguard'
+  }
+
+  const transport = interfaceTransport(name)
+  if (transport) return 'openvpn'
+
+  const lowered = name.toLowerCase()
+  if (lowered === 'vpn' || lowered === 'antizapret') return 'wireguard'
+  if (lowered.includes('antizapret') || lowered.includes('vpn')) return 'wireguard'
+  return null
+}
+
+function formatInterfaceLabel(
+  name: string,
+  primaryInterface?: string | null,
+  groups?: Record<string, string[]>,
+) {
   if (primaryInterface && name === primaryInterface) {
-    return `${name} (основной)`
+    return `${name} · основной интернет`
+  }
+
+  const scope = interfaceScope(name)
+  const protocol = inferInterfaceProtocol(name, groups)
+  const transport = interfaceTransport(name)
+
+  if (scope && protocol === 'openvpn') {
+    const proto = transport ? `OpenVPN (${transport})` : 'OpenVPN'
+    return `${scope} · ${proto} (${name})`
+  }
+  if (scope && protocol === 'wireguard') {
+    return `${scope} · WireGuard / AWG (${name})`
+  }
+  if (protocol === 'openvpn') {
+    const proto = transport ? `OpenVPN (${transport})` : 'OpenVPN'
+    return `${proto} (${name})`
+  }
+  if (protocol === 'wireguard') {
+    return `WireGuard / AWG (${name})`
   }
   return name
 }
@@ -195,6 +246,9 @@ export default function ServerMonitorPage() {
   const [primaryInterface, setPrimaryInterface] = useState<string | null>(null)
   const [interfaceGroups, setInterfaceGroups] = useState<Record<string, string[]>>({})
   const [range, setRange] = useState<'1d' | '7d' | '30d'>('1d')
+  const [resourceHistory, setResourceHistory] = useState<ResourceHistory | null>(null)
+  const [resourceLoading, setResourceLoading] = useState(false)
+  const [resourcePeriod, setResourcePeriod] = useState<'1d' | '7d' | '30d'>('1d')
   const [bwChart, setBwChart] = useState<BandwidthChart | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
 
@@ -237,6 +291,20 @@ export default function ServerMonitorPage() {
     [notifyError],
   )
 
+  const loadResourceHistory = useCallback(
+    async (period: '1d' | '7d' | '30d') => {
+      setResourceLoading(true)
+      try {
+        setResourceHistory(await getResourceHistory(period))
+      } catch (err) {
+        notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки истории ресурсов')
+      } finally {
+        setResourceLoading(false)
+      }
+    },
+    [notifyError],
+  )
+
   useEffect(() => {
     if (user?.role !== 'admin') return
     startGlobal()
@@ -251,6 +319,11 @@ export default function ServerMonitorPage() {
     if (user?.role !== 'admin' || !iface) return
     loadBandwidth(iface, range)
   }, [user?.role, iface, range, loadBandwidth, activeNode?.id])
+
+  useEffect(() => {
+    if (user?.role !== 'admin') return
+    loadResourceHistory(resourcePeriod)
+  }, [user?.role, loadResourceHistory, resourcePeriod, activeNode?.id])
 
   useEffect(() => {
     if (user?.role !== 'admin' || !iface) return
@@ -290,6 +363,7 @@ export default function ServerMonitorPage() {
       await withInline(async () => {
         await loadMetrics()
         await loadBandwidth(iface, range)
+        await loadResourceHistory(resourcePeriod)
       }, 'Обновление метрик сервера...')
       success('Метрики сервера обновлены')
     } finally {
@@ -381,9 +455,15 @@ export default function ServerMonitorPage() {
       )}
 
       <InlineProgressBar
-        active={refreshing || bwLoading}
+        active={refreshing || bwLoading || resourceLoading}
         label={
-          refreshing ? 'Обновление метрик...' : bwLoading ? 'Загрузка графика vnStat...' : undefined
+          refreshing
+            ? 'Обновление метрик...'
+            : bwLoading
+              ? 'Загрузка графика vnStat...'
+              : resourceLoading
+                ? 'Загрузка истории ресурсов...'
+                : undefined
         }
       />
 
@@ -414,6 +494,20 @@ export default function ServerMonitorPage() {
             <ResourceGauge label="RAM" value={ram} icon={MemoryStick} sub={ramSub} />
             <ResourceGauge label="Диск" value={disk} icon={HardDrive} sub="Использование корневого раздела" />
           </div>
+
+          <ResourceHistoryCharts
+            data={resourceHistory}
+            loading={resourceLoading}
+            period={resourcePeriod}
+            onPeriodChange={setResourcePeriod}
+            showLatestSummary={false}
+            title="История CPU / RAM / Диск"
+            description={`Снимки каждые ~60 с · ${RANGE_LABELS[resourcePeriod]}${
+              resourceHistory && resourceHistory.sample_count > 0
+                ? ` · ${resourceHistory.sample_count} точек`
+                : ''
+            }`}
+          />
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <LiveMetricCard
@@ -460,13 +554,13 @@ export default function ServerMonitorPage() {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={iface} onValueChange={setIface}>
-                  <SelectTrigger className="h-9 w-[160px] text-xs">
+                  <SelectTrigger className="h-9 w-full min-w-[220px] max-w-[320px] text-xs sm:w-[280px]">
                     <SelectValue placeholder="Интерфейс" />
                   </SelectTrigger>
                   <SelectContent>
                     {interfaceList.map((i) => (
                       <SelectItem key={i} value={i}>
-                        {formatInterfaceLabel(i, primaryInterface)}
+                        {formatInterfaceLabel(i, primaryInterface, interfaceGroups)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -522,6 +616,7 @@ export default function ServerMonitorPage() {
                       width={56}
                     />
                     <Tooltip
+                      cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }}
                       formatter={(value: number, name: string) => [
                         `${Number(value).toFixed(2)} Mbps`,
                         name === 'rx' ? 'Приём (RX)' : 'Передача (TX)',
@@ -536,6 +631,7 @@ export default function ServerMonitorPage() {
                       stroke={CHART_RX}
                       fill="url(#bwRx)"
                       strokeWidth={2}
+                      activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
                     />
                     <Area
                       type="monotone"
@@ -544,6 +640,7 @@ export default function ServerMonitorPage() {
                       stroke={CHART_TX}
                       fill="url(#bwTx)"
                       strokeWidth={2}
+                      activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
                     />
                   </AreaChart>
                   )}
@@ -559,147 +656,34 @@ export default function ServerMonitorPage() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Gauge size={18} />
-                  Load average
-                </CardTitle>
-                <CardDescription>Средняя загрузка системы за 1, 5 и 15 минут</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {[
-                    { key: 'load_1m', label: '1 мин' },
-                    { key: 'load_5m', label: '5 мин' },
-                    { key: 'load_15m', label: '15 мин' },
-                  ].map(({ key, label }) => {
-                    const value = metrics?.load_average?.[key]
-                    return (
-                      <div key={key} className="rounded-lg border bg-muted/30 px-4 py-3 text-center">
-                        <p className="text-xs text-muted-foreground">{label}</p>
-                        <p className="mono mt-1 text-xl font-semibold tabular-nums">
-                          {value !== undefined ? value.toFixed(2) : '—'}
-                        </p>
-                      </div>
-                    )
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Network size={18} />
-                  Сетевые интерфейсы
-                </CardTitle>
-                <CardDescription>
-                  {interfaceList.length > 0
-                    ? `${interfaceList.length} интерфейс${interfaceList.length === 1 ? '' : interfaceList.length < 5 ? 'а' : 'ов'} · vnStat`
-                    : 'Интерфейсы не обнаружены'}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {interfaceList.length === 0 ? (
-                  <EmptyState
-                    icon={Network}
-                    title="Нет интерфейсов"
-                    description="Список сетевых интерфейсов пуст. Проверьте vnStat и доступ node agent к системе."
-                    className="py-6"
-                  />
-                ) : (
-                  <>
-                    <div className="space-y-3 lg:hidden">
-                      {interfaceList.map((name) => {
-                        const groups = getInterfaceGroups(name, interfaceGroups)
-                        const isSelected = name === iface
-                        return (
-                          <div
-                            key={name}
-                            className={cn(
-                              'rounded-lg border p-3',
-                              isSelected && 'border-primary/40 bg-primary/5',
-                            )}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-mono text-sm font-medium">
-                                {formatInterfaceLabel(name, primaryInterface)}
-                              </span>
-                              {isSelected && (
-                                <Badge variant="default" className="text-[10px]">
-                                  выбран
-                                </Badge>
-                              )}
-                            </div>
-                            {groups.length > 0 && (
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                {groups.map((g) => (
-                                  <Badge key={g} variant="secondary" className="text-[10px]">
-                                    {g}
-                                  </Badge>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Gauge size={18} />
+                Load average
+              </CardTitle>
+              <CardDescription>Средняя загрузка системы за 1, 5 и 15 минут</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {[
+                  { key: 'load_1m', label: '1 мин' },
+                  { key: 'load_5m', label: '5 мин' },
+                  { key: 'load_15m', label: '15 мин' },
+                ].map(({ key, label }) => {
+                  const value = metrics?.load_average?.[key]
+                  return (
+                    <div key={key} className="rounded-lg border bg-muted/30 px-4 py-3 text-center">
+                      <p className="text-xs text-muted-foreground">{label}</p>
+                      <p className="mono mt-1 text-xl font-semibold tabular-nums">
+                        {value !== undefined ? value.toFixed(2) : '—'}
+                      </p>
                     </div>
-
-                    <div className="hidden overflow-x-auto rounded-md border lg:block">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Интерфейс</TableHead>
-                            <TableHead>Группы</TableHead>
-                            <TableHead className="text-right">График</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {interfaceList.map((name) => {
-                            const groups = getInterfaceGroups(name, interfaceGroups)
-                            const isSelected = name === iface
-                            return (
-                              <TableRow key={name} className={cn(isSelected && 'bg-primary/5')}>
-                                <TableCell className="font-mono text-sm font-medium">
-                                  {formatInterfaceLabel(name, primaryInterface)}
-                                </TableCell>
-                                <TableCell>
-                                  {groups.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1">
-                                      {groups.map((g) => (
-                                        <Badge key={g} variant="secondary" className="text-[10px]">
-                                          {g}
-                                        </Badge>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <span className="text-muted-foreground">—</span>
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {isSelected ? (
-                                    <Badge variant="default" className="text-[10px]">
-                                      активный
-                                    </Badge>
-                                  ) : (
-                                    <Button variant="ghost" size="sm" onClick={() => setIface(name)}>
-                                      Показать
-                                    </Button>
-                                  )}
-                                </TableCell>
-                              </TableRow>
-                            )
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+                  )
+                })}
+              </div>
+            </CardContent>
+          </Card>
         </>
       )}
     </div>

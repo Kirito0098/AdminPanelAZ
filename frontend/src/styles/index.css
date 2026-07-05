@@ -96,13 +96,16 @@
   }
 }
 
-/* Recharts: без подсветки колонки/линии и белой обводки при hover */
+/* Recharts hover: полоса/линия по времени и точки на сериях */
 .recharts-tooltip-cursor {
-  display: none !important;
+  fill: hsl(var(--primary) / 0.08) !important;
+  stroke: hsl(var(--muted-foreground) / 0.4) !important;
+  stroke-width: 1 !important;
 }
 
 .recharts-active-dot {
-  display: none !important;
+  stroke: hsl(var(--background)) !important;
+  stroke-width: 2 !important;
 }
 
 .recharts-default-tooltip {

@@ -20,7 +20,7 @@ from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
-from app.services.server_monitor import ServerMonitorService
+from app.services.server_monitor import get_server_monitor
 from app.services.node_remote_cache import get_cached_monitoring_overview, monitoring_overview_cache_key
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 from app.services.warper import WarperService, build_ip_ranges_text_from_items, build_user_domains_text_from_items
@@ -304,7 +304,7 @@ class LocalNodeAdapter(NodeAdapter):
         self._service = service or AntiZapretService()
         self._warper = warper or WarperService()
         self._cidr = CidrRoutingService(self._service.base_path, get_cidr_list_dir())
-        self._monitor = ServerMonitorService()
+        self._monitor = get_server_monitor()
 
     def health_check(self) -> dict[str, Any]:
         return build_health_payload(self._service, agent_version=NODE_AGENT_VERSION)

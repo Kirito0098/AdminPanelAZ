@@ -33,6 +33,29 @@
 
 ## [Unreleased]
 
+> **Кратко:** мониторинг сервера — исправлен live CPU, графики ресурсов, понятные названия интерфейсов, улучшен hover на графиках.
+
+### ✨ Added
+
+#### Мониторинг сервера — история ресурсов
+
+- **Графики CPU / RAM / Диск** — на странице «Сервер» под live-карточками: история за 1 / 7 / 30 дней (`ResourceHistoryCharts`, `GET /api/monitoring/resource-history`); снимки ~раз в минуту фоновым worker.
+- **Load average** — второй график в том же блоке, если в истории есть `load_1`.
+
+### 🔄 Changed
+
+#### Мониторинг сервера — интерфейсы и UI
+
+- **Селект vnStat** — понятные подписи: `-udp`/`-tcp` → OpenVPN, `vpn`/`antizapret` без суффикса → WireGuard / AWG; техническое имя в скобках (`ServerMonitorPage.tsx`, `server_monitor.collect_interface_groups`).
+- **Hover на графиках Recharts** — снова показываются вертикальная линия и точки на сериях (`index.css`, графики трафика и ресурсов).
+- **Страница «Сервер»** — убрана дублирующая таблица «Сетевые интерфейсы»; переключение интерфейса только через селект над графиком vnStat.
+
+### 🐛 Fixed
+
+#### Мониторинг сервера — live CPU
+
+- **WebSocket CPU всегда 0%** — `LocalNodeAdapter` создавал новый `ServerMonitorService` на каждый опрос; psutil не успевал накопить интервал между замерами. Добавлен process-wide singleton `get_server_monitor()` (`server_monitor.py`, `node_adapter.py`).
+
 ---
 
 ## [2.8.0] - 2026-07-02

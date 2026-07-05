@@ -120,7 +120,12 @@ def collect_interface_groups() -> dict[str, list[str]]:
         lowered = iface.lower()
         if not any(k in lowered for k in ("vpn", "wg", "wireguard", "awg", "amnezia", "antizapret")):
             continue
-        is_wg = iface in wg_interfaces or any(k in lowered for k in ("wg", "wireguard", "awg", "amnezia"))
+        is_openvpn = lowered.endswith("-udp") or lowered.endswith("-tcp")
+        is_wg = not is_openvpn and (
+            iface in wg_interfaces
+            or lowered in ("vpn", "antizapret")
+            or any(k in lowered for k in ("wg", "wireguard", "awg", "amnezia"))
+        )
         if "antizapret" in lowered:
             _add_unique(antizapret_group, iface)
         else:
@@ -313,3 +318,15 @@ class ServerMonitorService:
             "primary_interface": primary,
             "vnstat_available": is_vnstat_available(),
         }
+
+
+_server_monitor: ServerMonitorService | None = None
+
+
+def get_server_monitor() -> ServerMonitorService:
+    """Return a process-wide monitor so psutil CPU deltas persist between polls."""
+    global _server_monitor
+    if _server_monitor is None:
+        _server_monitor = ServerMonitorService()
+        _server_monitor._ensure_cpu()
+    return _server_monitor
