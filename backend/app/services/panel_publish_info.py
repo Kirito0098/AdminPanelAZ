@@ -54,8 +54,35 @@ def is_whitelist_port_firewall_applicable(*, get_env_value: GetEnvValue | None =
     return mode in WHITELIST_PORT_FIREWALL_MODES
 
 
-def resolve_request_url_root(request: Request, *, behind_nginx: bool) -> str:
+def _host_has_explicit_port(host: str) -> bool:
+    if host.startswith("["):
+        return "]:" in host
+    if ":" not in host:
+        return False
+    return host.rsplit(":", 1)[-1].isdigit()
+
+
+def _append_public_https_port(host: str, *, proto: str, https_public_port: int) -> str:
+    if _host_has_explicit_port(host):
+        return host
+    default_port = 443 if proto == "https" else 80
+    if https_public_port == default_port:
+        return host
+    return f"{host}:{https_public_port}"
+
+
+def resolve_request_url_root(
+    request: Request,
+    *,
+    behind_nginx: bool,
+    https_public_port: int | None = None,
+) -> str:
     """Current browser URL root, honoring reverse-proxy forwarded headers."""
+    if https_public_port is None:
+        from app.config import get_settings
+
+        https_public_port = get_settings().https_public_port
+
     if behind_nginx:
         proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "http").split(",")[0].strip()
         host = (
@@ -65,8 +92,22 @@ def resolve_request_url_root(request: Request, *, behind_nginx: bool) -> str:
             or ""
         ).split(",")[0].strip()
         if proto and host:
+            if proto == "https":
+                host = _append_public_https_port(host, proto=proto, https_public_port=https_public_port)
             return f"{proto}://{host}/"
     return str(request.base_url)
+
+
+def resolve_public_base_url(request: Request) -> str:
+    """Public panel origin without trailing slash (for one-time download links, webhooks, etc.)."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    return resolve_request_url_root(
+        request,
+        behind_nginx=settings.behind_nginx,
+        https_public_port=settings.https_public_port,
+    ).rstrip("/")
 
 
 def build_panel_publish_context(

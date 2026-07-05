@@ -52,6 +52,7 @@ from app.services.node_manager import (
 )
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.panel_publish_info import resolve_public_base_url
 from app.services.qr_download import QrDownloadService
 from app.services.security import SecurityService
 from app.services.telegram import send_tg_message
@@ -107,7 +108,7 @@ def _static_index() -> Path:
 def _qr_download_service(db: Session, request: Request) -> QrDownloadService:
     sec = SecurityService().get_settings(db)
     pin_row = db.query(AppSetting).filter(AppSetting.key == "qr_download_pin").first()
-    base_url = str(request.base_url).rstrip("/")
+    base_url = resolve_public_base_url(request)
     return QrDownloadService(
         db,
         base_url=base_url,

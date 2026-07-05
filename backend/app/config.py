@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     serve_frontend: bool = False
     frontend_dist_path: Path = Path("../frontend/dist")
     domain: str = ""
+    https_public_port: int = 443
     behind_nginx: bool = False
     trusted_proxy_ips: str = "127.0.0.1,::1"
     forwarded_allow_ips: str = "127.0.0.1,::1"
