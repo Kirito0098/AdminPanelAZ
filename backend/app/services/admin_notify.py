@@ -193,53 +193,70 @@ def _fmt_action_config(verb: str, target_type: str | None, target_name: str | No
     return f"{verb_text} конфигурацию {_fmt_config_object(target_type, target_name)}"
 
 
-def _format_notify(
+def _format_notify_card(
     title: str,
-    actor_line: str | None,
-    action_line: str,
     when: str,
     *,
-    extra_lines: list[str] | None = None,
+    actor_line: str | None = None,
+    detail_lines: list[str] | None = None,
 ) -> str:
     lines = [title]
     if actor_line:
         lines.append(actor_line)
-    if action_line:
-        lines.append(action_line)
-    if extra_lines:
-        lines.extend(extra_lines)
+    if detail_lines:
+        lines.extend(line for line in detail_lines if line)
     lines.append(when)
     return "\n".join(lines)
 
 
-def _format_notify_system(
-    title: str,
-    action_line: str,
-    when: str,
+def _line_code(icon: str, label: str, value: str | None) -> str:
+    return f"{icon} {label} : {_fmt_code(value)}"
+
+
+def _line_text(icon: str, label: str, text: str) -> str:
+    return f"{icon} {label} : {text}"
+
+
+def _client_detail_lines(target_type: str | None, target_name: str | None) -> list[str]:
+    lines: list[str] = []
+    protocol = _fmt_protocol(target_type)
+    if protocol and protocol != "неизвестно":
+        lines.append(_line_text(_protocol_emoji(target_type), "Протокол", protocol))
+    lines.append(_line_code("📁", "Клиент", target_name))
+    return lines
+
+
+def _node_detail_line(node_id: int | None, node_name: str | None) -> str | None:
+    if not node_id and not node_name:
+        return None
+    label = (node_name or "-").strip()
+    suffix = f" (#{node_id})" if node_id is not None else ""
+    return f"📡 Узел : {_fmt_code(label)}{suffix}"
+
+
+def _append_node_detail(
+    lines: list[str],
     *,
-    extra_lines: list[str] | None = None,
-) -> str:
-    lines = [title]
-    if action_line:
-        lines.append(action_line)
-    if extra_lines:
-        lines.extend(extra_lines)
-    lines.append(when)
-    return "\n".join(lines)
+    node_id: int | None = None,
+    node_name: str | None = None,
+) -> None:
+    node_line = _node_detail_line(node_id, node_name)
+    if node_line:
+        lines.append(node_line)
+
+
+def _fmt_login_ip(remote_addr: str | None) -> str:
+    return _line_code("🌐", "IP входа", remote_addr)
+
+
+def _fmt_ip_line(remote_addr: str | None) -> str:
+    return _line_code("🌐", "IP", remote_addr)
 
 
 def _fmt_actor(actor_username: str | None, *, as_admin: bool = False) -> str:
     icon = "👨‍💼" if as_admin else "👤"
     role = "Администратор" if as_admin else "Пользователь"
     return f"{icon} {role} {_fmt_code(actor_username)}"
-
-
-def _fmt_ip(remote_addr: str | None) -> str:
-    return f"🌐 IP {_fmt_code(remote_addr)}"
-
-
-def _fmt_login_ip(remote_addr: str | None) -> str:
-    return f"🌐 IP входа : {_fmt_code(remote_addr)}"
 
 
 def _fmt_device(user_agent: str | None, *, login_via: str | None = None) -> str | None:
@@ -275,11 +292,8 @@ def _prepend_node_context(
     node_id: int | None = None,
     node_name: str | None = None,
 ) -> str:
-    if not node_id and not node_name:
-        return text
-    label = (node_name or "—").strip()
-    id_part = f" (#{node_id})" if node_id is not None else ""
-    return f"📡 Узел: <code>{label}</code>{id_part}\n{text}"
+    """Legacy wrapper — node is now embedded in notify cards."""
+    return text
 
 
 def _resolve_client_block_action(details: str | None) -> str:
@@ -322,12 +336,12 @@ def _build_traffic_limit_message(
     target_name: str | None,
     details: str | None,
     when: str,
-    action_line: str,
     show_unblock_hint: bool = True,
+    node_id: int | None = None,
+    node_name: str | None = None,
 ) -> str:
     detail_map = parse_mini_details_kv(details)
-    client = _fmt_config_object(target_type, target_name)
-    lines = [title, action_line.replace("{client}", client)]
+    detail_lines = _client_detail_lines(target_type, target_name)
 
     limit_bytes = detail_map.get("limit_bytes")
     consumed_bytes = detail_map.get("consumed_bytes")
@@ -342,10 +356,10 @@ def _build_traffic_limit_message(
             except (TypeError, ValueError):
                 period_label = None
         if period_label:
-            lines.append(f"📏 Лимит: <code>{limit_human}</code> ({period_label})")
+            detail_lines.append(_line_text("📏", "Лимит", f"{limit_human} ({period_label})"))
         else:
-            lines.append(f"📏 Лимит: <code>{limit_human}</code>")
-        lines.append(f"📈 Использовано: <code>{consumed_human}</code>")
+            detail_lines.append(_line_text("📏", "Лимит", limit_human))
+        detail_lines.append(_line_text("📈", "Использовано", consumed_human))
 
     if show_unblock_hint:
         period_days_raw = detail_map.get("period_days")
@@ -356,10 +370,10 @@ def _build_traffic_limit_message(
             except (TypeError, ValueError):
                 unblock_label = None
         if unblock_label:
-            lines.append(f"🕓 {unblock_label}")
+            detail_lines.append(_line_text("🕓", "Разблокировка", unblock_label))
 
-    lines.append(when)
-    return "\n".join(lines)
+    _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+    return _format_notify_card(title, when, detail_lines=detail_lines)
 
 
 def _build_client_ban_message(
@@ -368,38 +382,32 @@ def _build_client_ban_message(
     target_name: str | None,
     details: str | None,
     when: str,
+    *,
+    node_id: int | None = None,
+    node_name: str | None = None,
 ) -> str | None:
-    client = _fmt_config_object(target_type, target_name)
     action = _resolve_client_block_action(details)
     detail_map = parse_mini_details_kv(details)
     days = detail_map.get("days")
     block_until = detail_map.get("block_until")
+    detail_lines = _client_detail_lines(target_type, target_name)
 
     if action == "unblock":
-        return _format_notify(
-            "🟢 <b>Разблокировка клиента</b>",
-            actor_admin,
-            f"Разблокировал клиента {client}",
-            when,
-        )
-    if action == "permanent_block":
-        return _format_notify(
-            "🔴 <b>Постоянная блокировка</b>",
-            actor_admin,
-            f"Заблокировал клиента {client} бессрочно (до ручной разблокировки)",
-            when,
-        )
-    if action == "temp_block":
-        duration = f"на {days} дн." if days else "временно"
+        title = "🟢 <b>Разблокировка клиента</b>"
+    elif action == "permanent_block":
+        title = "🔴 <b>Постоянная блокировка</b>"
+        detail_lines.append(_line_text("⛔", "Срок", "бессрочно (до ручной разблокировки)"))
+    elif action == "temp_block":
+        title = "⏱️ <b>Временная блокировка</b>"
+        duration = f"{days} дн." if days else "временно"
         if block_until:
-            duration = f"{duration}, до {_fmt_code(block_until)}"
-        return _format_notify(
-            "⏱️ <b>Временная блокировка</b>",
-            actor_admin,
-            f"Временно заблокировал клиента {client} {duration}",
-            when,
-        )
-    return None
+            duration = f"{duration}, до {block_until}"
+        detail_lines.append(_line_text("⏳", "Срок", duration))
+    else:
+        return None
+
+    _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+    return _format_notify_card(title, when, actor_line=actor_admin, detail_lines=detail_lines)
 
 
 class AdminNotifyService:
@@ -454,11 +462,11 @@ class AdminNotifyService:
                 client_timezone=client_timezone,
                 user_agent=user_agent,
                 login_via=login_via,
+                node_id=node_id,
+                node_name=node_name,
             )
             if text is None:
                 return
-
-            text = _prepend_node_context(text, node_id=node_id, node_name=node_name)
 
             dispatch_admin_notify(
                 db,
@@ -908,88 +916,123 @@ class AdminNotifyService:
         client_timezone: str | None = None,
         user_agent: str | None = None,
         login_via: str | None = None,
+        node_id: int | None = None,
+        node_name: str | None = None,
     ) -> str | None:
         when = _fmt_when(format_notify_when(client_timezone))
         actor_admin = _fmt_actor(actor_username, as_admin=True)
         actor_user = _fmt_actor(actor_username, as_admin=False)
-        ip = _fmt_ip(remote_addr)
-        login_context = _login_context_lines(
-            remote_addr=remote_addr,
-            user_agent=user_agent,
-            login_via=login_via,
-        )
 
         if event_type == "login_success":
-            return _format_notify(
+            detail_lines = _login_context_lines(
+                remote_addr=remote_addr,
+                user_agent=user_agent,
+                login_via=login_via,
+            )
+            return _format_notify_card(
                 "✅ <b>Вход в панель</b>",
-                actor_user,
-                "",
                 when,
-                extra_lines=login_context,
+                actor_line=actor_user,
+                detail_lines=detail_lines,
             )
+
         if event_type == "login_failed":
-            return _format_notify(
+            detail_lines = _login_context_lines(
+                remote_addr=remote_addr,
+                user_agent=user_agent,
+                login_via=login_via,
+            )
+            return _format_notify_card(
                 "⚠️ <b>Неудачный вход</b>",
-                f"🔑 Логин {_fmt_code(actor_username)}",
-                "",
                 when,
-                extra_lines=login_context,
+                detail_lines=[_line_code("🔑", "Логин", actor_username), *detail_lines],
             )
+
         if event_type in ("tg_login_unlinked", "tg_mini_login_unlinked"):
-            via = "📱 мини-приложение" if "mini" in event_type else "✈️ Телеграм"
-            return _format_notify_system(
+            via = "мини-приложение Telegram" if "mini" in event_type else "Telegram"
+            detail_lines = [
+                _line_text("📱", "Способ", via),
+                _line_code("🆔", "Telegram ID", target_name),
+            ]
+            if remote_addr:
+                detail_lines.append(_fmt_ip_line(remote_addr))
+            return _format_notify_card(
                 "🚫 <b>TG ID не привязан</b>",
-                f"Попытка входа через {via} · 🆔 {_fmt_code(target_name)} · {ip}",
                 when,
+                detail_lines=detail_lines,
             )
+
         if event_type == "config_create":
-            return _format_notify(
+            detail_lines = _client_detail_lines(target_type, target_name)
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
                 "✨ <b>Создание конфига</b>",
-                actor_admin,
-                _fmt_action_config("создал", target_type, target_name),
                 when,
+                actor_line=actor_admin,
+                detail_lines=detail_lines,
             )
+
         if event_type == "config_recreate":
-            return _format_notify(
+            detail_lines = _client_detail_lines(target_type, target_name)
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
                 "🔄 <b>Пересоздание конфига</b>",
-                actor_admin,
-                _fmt_action_config("пересоздал", target_type, target_name),
                 when,
+                actor_line=actor_admin,
+                detail_lines=detail_lines,
             )
+
         if event_type == "config_delete":
-            return _format_notify(
+            detail_lines = _client_detail_lines(target_type, target_name)
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
                 "🗑️ <b>Удаление конфига</b>",
-                actor_admin,
-                _fmt_action_config("удалил", target_type, target_name),
                 when,
+                actor_line=actor_admin,
+                detail_lines=detail_lines,
             )
+
         if event_type == "user_create":
-            extra = f" · 📝 {_fmt_code(details)}" if details else ""
-            return _format_notify(
+            detail_lines = [_line_code("🆔", "Пользователь", target_name)]
+            if details:
+                detail_lines.append(_line_text("📝", "Детали", details))
+            return _format_notify_card(
                 "➕ <b>Новый пользователь</b>",
-                actor_admin,
-                f"Добавил пользователя 🆔 {_fmt_code(target_name)}{extra}",
                 when,
+                actor_line=actor_admin,
+                detail_lines=detail_lines,
             )
+
         if event_type == "user_delete":
-            return _format_notify(
+            detail_lines = [_line_code("🆔", "Пользователь", target_name)]
+            return _format_notify_card(
                 "➖ <b>Удаление пользователя</b>",
-                actor_admin,
-                f"Удалил пользователя 🆔 {_fmt_code(target_name)}",
                 when,
+                actor_line=actor_admin,
+                detail_lines=detail_lines,
             )
+
         if event_type == "client_ban":
             block_text = _build_client_ban_message(
-                actor_admin, target_type, target_name, details, when,
+                actor_admin,
+                target_type,
+                target_name,
+                details,
+                when,
+                node_id=node_id,
+                node_name=node_name,
             )
             if block_text:
                 return block_text
-            return _format_notify(
+            detail_lines = _client_detail_lines(target_type, target_name)
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
                 "🔒 <b>Статус клиента</b>",
-                actor_admin,
-                f"Изменил статус блокировки для {_fmt_config_object(target_type, target_name)}",
                 when,
+                actor_line=actor_admin,
+                detail_lines=detail_lines,
             )
+
         if event_type == "settings_change":
             settings_key = str(target_name or "").strip()
             tg_title = SETTINGS_TG_TITLES.get(settings_key, "Изменение настроек")
@@ -1000,12 +1043,16 @@ class AdminNotifyService:
                 target_type=target_type,
             )
             icon = "🔧" if settings_key in SETTINGS_ACTION_EVENTS else "⚙️"
-            return _format_notify(
+            detail_lines = [_line_text("📋", "Изменение", action_line)]
+            if subject_name:
+                detail_lines.insert(0, _line_code("🎯", "Объект", subject_name))
+            return _format_notify_card(
                 f"{icon} <b>{tg_title}</b>",
-                actor_admin,
-                action_line,
                 when,
+                actor_line=actor_admin,
+                detail_lines=detail_lines,
             )
+
         if event_type == "traffic_limit_block":
             return _build_traffic_limit_message(
                 title="🚫 <b>Блокировка по лимиту трафика</b>",
@@ -1013,8 +1060,10 @@ class AdminNotifyService:
                 target_name=target_name,
                 details=details,
                 when=when,
-                action_line="Клиент {client} отключён — превышен лимит трафика",
+                node_id=node_id,
+                node_name=node_name,
             )
+
         if event_type == "traffic_limit_unblock":
             return _build_traffic_limit_message(
                 title="🟢 <b>Авторазблокировка по лимиту трафика</b>",
@@ -1022,59 +1071,59 @@ class AdminNotifyService:
                 target_name=target_name,
                 details=details,
                 when=when,
-                action_line="Клиент {client} разблокирован — начался новый период учёта",
                 show_unblock_hint=False,
+                node_id=node_id,
+                node_name=node_name,
             )
+
         if event_type == "high_cpu":
-            metric = _fmt_code(details) if details else "—"
-            return _format_notify_system(
+            detail_lines = [_line_code("📊", "Показатель", details or "-")]
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
                 "🔥 <b>Высокая нагрузка процессора</b>",
-                f"📊 {metric}",
                 when,
+                detail_lines=detail_lines,
             )
+
         if event_type == "high_ram":
-            metric = _fmt_code(details) if details else "—"
-            return _format_notify_system(
+            detail_lines = [_line_code("📊", "Показатель", details or "-")]
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
                 "💾 <b>Высокая нагрузка памяти</b>",
-                f"📊 {metric}",
                 when,
+                detail_lines=detail_lines,
             )
+
         if event_type == "alert_rule":
-            rule_name = _fmt_code(target_name)
-            condition = details or "—"
-            return _format_notify_system(
+            detail_lines = [
+                _line_code("📋", "Правило", target_name),
+                _line_text("📊", "Условие", details or "-"),
+            ]
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
                 "🚨 <b>Alert rule</b>",
-                f"📋 {rule_name}\n📊 {condition}",
                 when,
+                detail_lines=detail_lines,
             )
+
         if event_type == "cidr_deploy_failed":
-            action = details or "Развёртывание CIDR завершилось с ошибкой"
-            if actor_username:
-                return _format_notify(
-                    "❌ <b>Ошибка развёртывания CIDR</b>",
-                    _fmt_actor(actor_username, as_admin=True),
-                    action,
-                    when,
-                )
-            return _format_notify_system(
+            detail_lines = [_line_text("📋", "Детали", details or "Развёртывание CIDR завершилось с ошибкой")]
+            return _format_notify_card(
                 "❌ <b>Ошибка развёртывания CIDR</b>",
-                action,
                 when,
+                actor_line=_fmt_actor(actor_username, as_admin=True) if actor_username else None,
+                detail_lines=detail_lines,
             )
+
         if event_type == "cidr_ingest_partial":
-            action = details or "Обновление CIDR БД завершилось частично"
-            if actor_username:
-                return _format_notify(
-                    "⚠️ <b>Частичное обновление CIDR БД</b>",
-                    _fmt_actor(actor_username, as_admin=True),
-                    action,
-                    when,
-                )
-            return _format_notify_system(
+            detail_lines = [_line_text("📋", "Детали", details or "Обновление CIDR БД завершилось частично")]
+            return _format_notify_card(
                 "⚠️ <b>Частичное обновление CIDR БД</b>",
-                action,
                 when,
+                actor_line=_fmt_actor(actor_username, as_admin=True) if actor_username else None,
+                detail_lines=detail_lines,
             )
+
         if event_type in (
             "user_cert_expiry_reminder",
             "user_traffic_limit_reminder",
@@ -1085,14 +1134,18 @@ class AdminNotifyService:
                 "user_traffic_limit_reminder": "📊 <b>Лимит трафика пользователя</b>",
                 "user_temp_block_reminder": "⛔ <b>Временная блокировка</b>",
             }
-            user_label = _fmt_code(subject_name or actor_username)
-            client_label = _fmt_code(target_name)
-            detail_line = details or "—"
-            return _format_notify_system(
+            detail_lines = [
+                _line_code("👤", "Пользователь", subject_name or actor_username),
+                *_client_detail_lines(target_type, target_name),
+                _line_text("📋", "Детали", details or "-"),
+            ]
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
                 titles[event_type],
-                f"👤 {user_label} · клиент {client_label} · {detail_line}",
                 when,
+                detail_lines=detail_lines,
             )
+
         return None
 
     def _monitor_loop(self) -> None:
@@ -1140,21 +1193,31 @@ class AdminNotifyService:
 
 def _preview_owner_reminder_text(event_key: str) -> str | None:
     """Sample text for self-service owner reminders (not routed through _build_text)."""
+    when = _fmt_when(format_notify_when(None))
     samples = {
-        "cert_expiry_reminder": (
-            "⚠️ <b>Сертификат скоро истечёт</b>\n"
-            "Клиент: <code>demo-ovpn</code>\n"
-            "Истекает через 5 дн. (2026-07-10)"
+        "cert_expiry_reminder": _format_notify_card(
+            "⚠️ <b>Сертификат скоро истечёт</b>",
+            when,
+            detail_lines=[
+                _line_code("📁", "Клиент", "demo-ovpn"),
+                _line_text("📋", "Детали", "Истекает через 5 дн. (2026-07-10)"),
+            ],
         ),
-        "traffic_limit_reminder": (
-            "📊 <b>Лимит трафика</b>\n"
-            "Клиент: <code>demo-wg</code>\n"
-            "Использовано 8.5 GB из 10 GB (85%)"
+        "traffic_limit_reminder": _format_notify_card(
+            "📊 <b>Лимит трафика</b>",
+            when,
+            detail_lines=[
+                _line_code("📁", "Клиент", "demo-wg"),
+                _line_text("📋", "Детали", "Использовано 8.5 GB из 10 GB (85%)"),
+            ],
         ),
-        "temp_block_reminder": (
-            "⛔ <b>Временная блокировка</b>\n"
-            "Клиент: <code>demo-ovpn</code>\n"
-            "Блокировка до 2026-07-12 18:00 UTC"
+        "temp_block_reminder": _format_notify_card(
+            "⛔ <b>Временная блокировка</b>",
+            when,
+            detail_lines=[
+                _line_code("📁", "Клиент", "demo-ovpn"),
+                _line_text("📋", "Детали", "Блокировка до 2026-07-12 18:00 UTC"),
+            ],
         ),
     }
     return samples.get(event_key)
@@ -1325,10 +1388,12 @@ def build_notify_event_preview_text(event_key: str, *, actor_username: str = "ad
         kwargs.get("subject_name"),
         user_agent=kwargs.get("user_agent"),
         login_via=kwargs.get("login_via"),
+        node_id=node_id,
+        node_name=node_name,
     )
     if text is None:
         return None
-    return _prepend_node_context(text, node_id=node_id, node_name=node_name)
+    return text
 
 
 def send_notify_event_preview(

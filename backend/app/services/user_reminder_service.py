@@ -55,22 +55,27 @@ def _traffic_warning(limit_bytes: int | None, consumed_bytes: int | None) -> boo
 
 
 def _build_owner_message(reminder_type: str, config: VpnConfig, details: str) -> str:
-    if reminder_type == REMINDER_CERT:
-        return (
-            f"⚠️ <b>Сертификат скоро истечёт</b>\n"
-            f"Клиент: <code>{config.client_name}</code>\n"
-            f"{details}"
-        )
-    if reminder_type == REMINDER_TRAFFIC:
-        return (
-            f"📊 <b>Лимит трафика</b>\n"
-            f"Клиент: <code>{config.client_name}</code>\n"
-            f"{details}"
-        )
-    return (
-        f"⛔ <b>Временная блокировка</b>\n"
-        f"Клиент: <code>{config.client_name}</code>\n"
-        f"{details}"
+    from app.services.admin_notify import (
+        _format_notify_card,
+        _fmt_when,
+        _line_code,
+        _line_text,
+    )
+    from app.services.notify_time import format_notify_when
+
+    when = _fmt_when(format_notify_when(None))
+    titles = {
+        REMINDER_CERT: "⚠️ <b>Сертификат скоро истечёт</b>",
+        REMINDER_TRAFFIC: "📊 <b>Лимит трафика</b>",
+        REMINDER_TEMP_BLOCK: "⛔ <b>Временная блокировка</b>",
+    }
+    return _format_notify_card(
+        titles[reminder_type],
+        when,
+        detail_lines=[
+            _line_code("📁", "Клиент", config.client_name),
+            _line_text("📋", "Детали", details),
+        ],
     )
 
 
