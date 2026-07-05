@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.9.0](#290---2026-07-05) — 2026-07-05
 - [2.8.0](#280---2026-07-02) — 2026-07-02
 - [2.7.0](#270---2026-07-02) — 2026-07-02
 - [2.6.0](#260---2026-07-02) — 2026-07-02
@@ -32,6 +33,10 @@
 ---
 
 ## [Unreleased]
+
+---
+
+## [2.9.0] - 2026-07-05
 
 > **Кратко:** Telegram — OIDC-вход, несколько получателей уведомлений и бэкапов, объединённая вкладка «Бот и авторизация», сворачиваемые инструкции; NOC — расширенные сводки и PNG-дашборд; единый карточный формат TG-алертов; мониторинг — TB, доля трафика, live CPU, графики ресурсов; короткие ссылки на конфиги учитывают `HTTPS_PUBLIC_PORT`.
 
@@ -1328,7 +1333,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.8.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.9.0...HEAD
+[2.9.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.5.0...v2.6.0
