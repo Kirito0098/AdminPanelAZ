@@ -79,6 +79,60 @@ def get_latest_samples_by_node(db: Session) -> dict[int, NodeResourceSample]:
     return {sample.node_id: sample for sample in samples}
 
 
+def get_resource_stats_by_node(
+    db: Session,
+    *,
+    since: datetime,
+    until: datetime,
+) -> dict[int, dict[str, float | None]]:
+    """Average and peak CPU/RAM/disk per node over [since, until)."""
+    since_dt = since.replace(tzinfo=None) if since.tzinfo else since
+    until_dt = until.replace(tzinfo=None) if until.tzinfo else until
+    rows = (
+        db.query(
+            NodeResourceSample.node_id,
+            func.avg(NodeResourceSample.cpu_percent),
+            func.max(NodeResourceSample.cpu_percent),
+            func.avg(NodeResourceSample.memory_percent),
+            func.max(NodeResourceSample.memory_percent),
+            func.avg(NodeResourceSample.disk_percent),
+            func.max(NodeResourceSample.disk_percent),
+        )
+        .filter(
+            NodeResourceSample.created_at >= since_dt,
+            NodeResourceSample.created_at < until_dt,
+        )
+        .group_by(NodeResourceSample.node_id)
+        .all()
+    )
+    return {
+        int(node_id): {
+            "cpu_percent": round(float(cpu_avg), 1) if cpu_avg is not None else None,
+            "cpu_peak": round(float(cpu_peak), 1) if cpu_peak is not None else None,
+            "memory_percent": round(float(mem_avg), 1) if mem_avg is not None else None,
+            "memory_peak": round(float(mem_peak), 1) if mem_peak is not None else None,
+            "disk_percent": round(float(disk_avg), 1) if disk_avg is not None else None,
+            "disk_peak": round(float(disk_peak), 1) if disk_peak is not None else None,
+        }
+        for node_id, cpu_avg, cpu_peak, mem_avg, mem_peak, disk_avg, disk_peak in rows
+    }
+
+
+def get_avg_metrics_by_node(
+    db: Session,
+    *,
+    since: datetime,
+    until: datetime,
+) -> dict[int, dict[str, float | None]]:
+    return {
+        node_id: {
+            "cpu_percent": stats.get("cpu_percent"),
+            "memory_percent": stats.get("memory_percent"),
+        }
+        for node_id, stats in get_resource_stats_by_node(db, since=since, until=until).items()
+    }
+
+
 def purge_old_samples(db: Session) -> int:
     cutoff = _utcnow() - timedelta(days=settings.resource_metrics_retention_days)
     deleted = (

@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell } from 'lucide-react'
+import { CheckCircle2, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell, BarChart3, FileText } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { formatDateTime } from '@/lib/datetime'
@@ -522,8 +522,25 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
             )}
 
             <InlineProgressBar
-              active={tg.savingNotify || tg.testingNotify}
-              label={tg.testingNotify ? 'Отправка...' : tg.savingNotify ? 'Сохранение...' : undefined}
+              active={
+                tg.savingNotify ||
+                tg.testingNotify ||
+                tg.testingNotifyEvent !== null ||
+                tg.testingNocReport !== null
+              }
+              label={
+                tg.testingNotifyEvent
+                  ? 'Отправка примера...'
+                  : tg.testingNocReport === 'pdf'
+                  ? 'Отправка PDF...'
+                  : tg.testingNocReport
+                    ? 'Отправка NOC...'
+                    : tg.testingNotify
+                      ? 'Отправка...'
+                      : tg.savingNotify
+                        ? 'Сохранение...'
+                        : undefined
+              }
             />
             <form onSubmit={(e) => void tg.handleSaveAdminNotify(e)} className="space-y-5">
               <div className="space-y-2 max-w-md">
@@ -541,27 +558,116 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
 
               <div className="space-y-3">
                 <Label>О чём сообщать</Label>
+                <p className="text-xs text-muted-foreground">
+                  Нажмите на строку, чтобы включить или выключить событие. Кнопка{' '}
+                  <Send size={12} className="inline align-text-bottom" aria-hidden /> — отправить
+                  пример в Telegram.
+                </p>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {tg.adminNotify?.events.map((event) => {
                     const enabled = tg.eventToggles[event.key] ?? false
+                    const sending = tg.testingNotifyEvent === event.key
+                    const testDisabled =
+                      tg.testingNotifyEvent !== null ||
+                      tg.testingNocReport !== null ||
+                      tg.testingNotify ||
+                      !tg.adminNotify?.bot_token_set ||
+                      !tg.telegramId
                     return (
-                      <button
+                      <div
                         key={event.key}
-                        type="button"
-                        onClick={() =>
-                          tg.setEventToggles((prev) => ({ ...prev, [event.key]: !enabled }))
-                        }
                         className={cn(
-                          'flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-left text-sm transition-colors hover:bg-muted/50',
+                          'flex items-start gap-2 rounded-lg border p-3 text-sm transition-colors',
                           enabled && 'border-primary/40 bg-primary/5',
                         )}
                       >
-                        <Switch checked={enabled} tabIndex={-1} aria-hidden className="pointer-events-none mt-0.5" />
-                        <span>{event.label}</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            tg.setEventToggles((prev) => ({ ...prev, [event.key]: !enabled }))
+                          }
+                          className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-left hover:opacity-90"
+                        >
+                          <Switch
+                            checked={enabled}
+                            tabIndex={-1}
+                            aria-hidden
+                            className="pointer-events-none mt-0.5"
+                          />
+                          <span>{event.label}</span>
+                        </button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                          title={`Отправить пример: ${event.label}`}
+                          disabled={testDisabled}
+                          onClick={() => void tg.handleTestNotifyEvent(event.key)}
+                        >
+                          <Send size={14} aria-hidden />
+                          <span className="sr-only">{sending ? 'Отправка...' : 'Тест'}</span>
+                        </Button>
+                      </div>
                     )
                   })}
                 </div>
+              </div>
+
+              <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
+                <div className="flex items-start gap-2">
+                  <BarChart3 size={18} className="mt-0.5 shrink-0 text-muted-foreground" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">NOC сводка — предпросмотр</p>
+                    <p className="text-xs text-muted-foreground">
+                      Текстовая сводка — ежедневно или еженедельно. PDF формируется только для
+                      еженедельного отчёта (по расписанию — понедельник 09:00 UTC, плюс файл в TG).
+                      Предпросмотр приходит только вам.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void tg.handleTestNocReport('daily')}
+                    disabled={
+                      tg.testingNocReport !== null ||
+                      !tg.adminNotify?.bot_token_set ||
+                      !tg.telegramId
+                    }
+                  >
+                    {tg.testingNocReport === 'daily' ? 'Отправка...' : 'Ежедневная сводка'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void tg.handleTestNocReport('weekly')}
+                    disabled={
+                      tg.testingNocReport !== null ||
+                      !tg.adminNotify?.bot_token_set ||
+                      !tg.telegramId
+                    }
+                  >
+                    {tg.testingNocReport === 'weekly' ? 'Отправка...' : 'Еженедельная сводка'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void tg.handleTestNocWeeklyPdf()}
+                    disabled={
+                      tg.testingNocReport !== null ||
+                      !tg.adminNotify?.bot_token_set ||
+                      !tg.telegramId
+                    }
+                  >
+                    {tg.testingNocReport === 'pdf' ? 'Отправка...' : 'Еженедельный PDF'}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <FileText size={14} />
+                  PDF: топ клиентов, инциденты алертов, ошибки CIDR, таблица узлов
+                </p>
               </div>
 
               <div className="flex flex-wrap gap-2 border-t pt-4">

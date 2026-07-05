@@ -13,11 +13,13 @@ import json
 from app.models import DEFAULT_TG_NOTIFY_EVENTS, AppSetting, User
 from app.schemas import (
     AdminNotifyEventItem,
+    AdminNotifyEventTestRequest,
     AdminNotifySettingsResponse,
     AdminNotifySettingsUpdate,
     BackgroundTaskResponse,
     GeoIpStatusResponse,
     MessageResponse,
+    NocReportPreviewRequest,
     ServiceRestartRequest,
     TelegramLinkCodeResponse,
     TelegramSettingsResponse,
@@ -27,7 +29,11 @@ from app.schemas import (
     VpnNetworkPublishRequest,
     VpnNetworkSettingsResponse,
 )
-from app.services.admin_notify import TG_NOTIFY_EVENT_LABELS, admin_notify_service
+from app.services.admin_notify import (
+    TG_NOTIFY_EVENT_LABELS,
+    admin_notify_service,
+    send_notify_event_preview,
+)
 from app.services.background_tasks import background_task_service
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.notify_time import get_client_timezone_from_request
@@ -35,6 +41,7 @@ from app.config import get_settings
 from app.services.active_web_session import active_web_session_service
 from app.services.env_file import EnvFileService
 from app.services.feature_guards import get_feature_service, module_disabled_message
+from app.services.noc_report import send_noc_report_preview, send_weekly_pdf_preview
 from app.services.action_log import log_action
 from app.services.panel_publish_info import (
     build_panel_publish_context,
@@ -284,6 +291,97 @@ def test_admin_notify(db: Session = Depends(get_db), admin: User = Depends(requi
     if not ok:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
     return MessageResponse(message="Тестовое сообщение отправлено")
+
+
+@router.post("/settings/admin-notify/test-event", response_model=MessageResponse)
+def test_admin_notify_event(
+    payload: AdminNotifyEventTestRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    event_key = payload.event.strip()
+    if event_key not in DEFAULT_TG_NOTIFY_EVENTS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неизвестный тип события")
+    if not admin.telegram_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Укажите Telegram ID в настройках уведомлений",
+        )
+    bot_token = _get_setting(db, "telegram_bot_token")
+    if not bot_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
+
+    if event_key == "noc_report":
+        ok = send_noc_report_preview(
+            db,
+            period="daily",
+            telegram_id=admin.telegram_id,
+            bot_token=bot_token,
+        )
+    else:
+        ok = send_notify_event_preview(
+            db,
+            event_key=event_key,
+            telegram_id=admin.telegram_id,
+            bot_token=bot_token,
+            actor_username=admin.username,
+        )
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
+
+    label = dict(TG_NOTIFY_EVENT_LABELS).get(event_key, event_key)
+    return MessageResponse(message=f"Пример «{label}» отправлен на ваш Telegram ID")
+
+
+@router.post("/settings/admin-notify/test-noc-report", response_model=MessageResponse)
+def test_noc_report_preview(
+    payload: NocReportPreviewRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    if not get_feature_service().is_enabled("telegram"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=module_disabled_message("telegram"))
+    if not admin.telegram_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Укажите Telegram ID в настройках уведомлений",
+        )
+    bot_token = _get_setting(db, "telegram_bot_token")
+    if not bot_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
+
+    period = payload.period if payload.period in {"daily", "weekly"} else "daily"
+    ok = send_noc_report_preview(
+        db,
+        period=period,
+        telegram_id=admin.telegram_id,
+        bot_token=bot_token,
+    )
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
+
+    label = "еженедельная" if period == "weekly" else "ежедневная"
+    return MessageResponse(message=f"NOC сводка ({label}) отправлена на ваш Telegram ID")
+
+
+@router.post("/settings/admin-notify/test-noc-pdf", response_model=MessageResponse)
+def test_noc_weekly_pdf_preview(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    if not get_feature_service().is_enabled("telegram"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=module_disabled_message("telegram"))
+    if not admin.telegram_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Укажите Telegram ID в настройках уведомлений",
+        )
+    bot_token = _get_setting(db, "telegram_bot_token")
+    if not bot_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
+
+    ok = send_weekly_pdf_preview(db, telegram_id=admin.telegram_id, bot_token=bot_token)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить PDF в Telegram")
+
+    return MessageResponse(message="NOC weekly PDF отправлен на ваш Telegram ID")
 
 
 @router.post("/settings/telegram/test", response_model=MessageResponse)

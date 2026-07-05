@@ -868,6 +868,14 @@ class AdminNotifySettingsUpdate(BaseModel):
     events: dict[str, bool] | None = None
 
 
+class NocReportPreviewRequest(BaseModel):
+    period: Literal["daily", "weekly"] = "daily"
+
+
+class AdminNotifyEventTestRequest(BaseModel):
+    event: str
+
+
 class VpnNetworkEnvRow(BaseModel):
     label: str
     value: str

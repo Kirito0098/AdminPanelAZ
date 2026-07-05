@@ -12,6 +12,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from app.services.noc_report import _format_resource_avg_peak
 from app.services.traffic_limit import human_bytes
 
 
@@ -71,30 +72,46 @@ def generate_weekly_pdf(report_data: dict[str, Any]) -> bytes:
     story.append(Spacer(1, 6))
 
     summary = report_data.get("summary") or {}
+    resource_fleet = summary.get("resource_fleet") or {}
+    traffic_limit = report_data.get("traffic_limit") or {}
     story.append(_section_title("Overview", styles))
     overview_rows = [
         ["Metric", "Value"],
         ["Nodes online", f"{summary.get('nodes_online', 0)}/{summary.get('nodes_total', 0)}"],
-        ["OpenVPN sessions", str(summary.get("total_openvpn", 0))],
-        ["WireGuard sessions", str(summary.get("total_wireguard", 0))],
-        ["Total traffic", human_bytes(summary.get("total_traffic_bytes")) or "0 B"],
+        ["OpenVPN sessions (avg)", str(summary.get("total_openvpn", 0))],
+        ["WireGuard sessions (avg)", str(summary.get("total_wireguard", 0))],
+        ["OpenVPN peak concurrent", str(summary.get("total_openvpn_peak", 0))],
+        ["WireGuard peak concurrent", str(summary.get("total_wireguard_peak", 0))],
+        ["Traffic (7d)", human_bytes(summary.get("period_traffic_bytes")) or "0 B"],
     ]
+    if summary.get("traffic_delta_pct"):
+        overview_rows.append(["Traffic delta", f"{summary['traffic_delta_pct']} {report_data.get('compare_label', '')}"])
+    overview_rows.extend([
+        ["Traffic (cumulative)", human_bytes(summary.get("total_traffic_bytes")) or "0 B"],
+        ["CPU avg / peak", _format_resource_avg_peak(resource_fleet.get("cpu_avg"), resource_fleet.get("cpu_peak")) or "—"],
+        ["RAM avg / peak", _format_resource_avg_peak(resource_fleet.get("memory_avg"), resource_fleet.get("memory_peak")) or "—"],
+        ["Disk avg / peak", _format_resource_avg_peak(resource_fleet.get("disk_avg"), resource_fleet.get("disk_peak")) or "—"],
+        ["Traffic limit blocked now", str(traffic_limit.get("blocked_now", 0))],
+        ["Traffic limit blocks (7d)", str(traffic_limit.get("blocks_in_period", 0))],
+    ])
     story.append(_table(overview_rows, col_widths=[70 * mm, 90 * mm]))
     story.append(Spacer(1, 10))
 
     nodes = summary.get("nodes") or []
     if nodes:
         story.append(_section_title("Nodes", styles))
-        node_rows = [["Node", "Status", "OVPN", "WG", "CPU %", "RAM %", "Traffic"]]
+        node_rows = [["Node", "Status", "OVPN", "WG", "CPU", "RAM", "Disk", "Traffic (7d)", "Traffic (total)"]]
         for node in nodes:
             node_rows.append(
                 [
                     str(node.get("name") or ""),
                     str(node.get("status") or ""),
-                    str(node.get("openvpn", 0)),
-                    str(node.get("wireguard", 0)),
-                    "—" if node.get("cpu_percent") is None else str(node.get("cpu_percent")),
-                    "—" if node.get("memory_percent") is None else str(node.get("memory_percent")),
+                    f"{node.get('openvpn', 0)} / {node.get('openvpn_peak', 0)}",
+                    f"{node.get('wireguard', 0)} / {node.get('wireguard_peak', 0)}",
+                    _format_resource_avg_peak(node.get("cpu_percent"), node.get("cpu_peak")) or "—",
+                    _format_resource_avg_peak(node.get("memory_percent"), node.get("memory_peak")) or "—",
+                    _format_resource_avg_peak(node.get("disk_percent"), node.get("disk_peak")) or "—",
+                    human_bytes(node.get("period_traffic_bytes")) or "0 B",
                     human_bytes(node.get("traffic_bytes")) or "0 B",
                 ]
             )

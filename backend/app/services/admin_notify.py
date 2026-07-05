@@ -991,6 +991,20 @@ class AdminNotifyService:
                 action,
                 when,
             )
+        if event_type == "cidr_ingest_partial":
+            action = details or "Обновление CIDR БД завершилось частично"
+            if actor_username:
+                return _format_notify(
+                    "⚠️ <b>Частичное обновление CIDR БД</b>",
+                    _fmt_actor(actor_username, as_admin=True),
+                    action,
+                    when,
+                )
+            return _format_notify_system(
+                "⚠️ <b>Частичное обновление CIDR БД</b>",
+                action,
+                when,
+            )
         if event_type in (
             "user_cert_expiry_reminder",
             "user_traffic_limit_reminder",
@@ -1054,6 +1068,150 @@ class AdminNotifyService:
                 time.sleep(60)
 
 
+def _preview_owner_reminder_text(event_key: str) -> str | None:
+    """Sample text for self-service owner reminders (not routed through _build_text)."""
+    samples = {
+        "cert_expiry_reminder": (
+            "⚠️ <b>Сертификат скоро истечёт</b>\n"
+            "Клиент: <code>demo-ovpn</code>\n"
+            "Истекает через 5 дн. (2026-07-10)"
+        ),
+        "traffic_limit_reminder": (
+            "📊 <b>Лимит трафика</b>\n"
+            "Клиент: <code>demo-wg</code>\n"
+            "Использовано 8.5 GB из 10 GB (85%)"
+        ),
+        "temp_block_reminder": (
+            "⛔ <b>Временная блокировка</b>\n"
+            "Клиент: <code>demo-ovpn</code>\n"
+            "Блокировка до 2026-07-12 18:00 UTC"
+        ),
+    }
+    return samples.get(event_key)
+
+
+def _preview_event_build_kwargs(event_key: str, *, actor_username: str) -> dict | None:
+    """Map notify preference key to _build_text kwargs with realistic sample data."""
+    node_ctx = {"node_id": 1, "node_name": "RU-1"}
+    samples: dict[str, dict] = {
+        "login_success": {
+            "event_type": "login_success",
+            "actor_username": actor_username,
+            "remote_addr": "203.0.113.42",
+        },
+        "login_failed": {
+            "event_type": "login_failed",
+            "actor_username": "unknown",
+            "remote_addr": "198.51.100.7",
+        },
+        "tg_unlinked": {
+            "event_type": "tg_login_unlinked",
+            "target_name": "987654321",
+            "remote_addr": "203.0.113.42",
+        },
+        "config_create": {
+            "event_type": "config_create",
+            "actor_username": actor_username,
+            "target_name": "demo-ovpn",
+            "target_type": "openvpn",
+            **node_ctx,
+        },
+        "config_delete": {
+            "event_type": "config_delete",
+            "actor_username": actor_username,
+            "target_name": "demo-wg",
+            "target_type": "wireguard",
+            **node_ctx,
+        },
+        "user_create": {
+            "event_type": "user_create",
+            "actor_username": actor_username,
+            "target_name": "newuser",
+            "details": "роль: user",
+        },
+        "user_delete": {
+            "event_type": "user_delete",
+            "actor_username": actor_username,
+            "target_name": "olduser",
+        },
+        "client_ban": {
+            "event_type": "client_ban",
+            "actor_username": actor_username,
+            "target_name": "demo-wg",
+            "target_type": "wireguard",
+            "details": "action=temp_block\ndays=7\nblock_until=2026-07-12",
+            **node_ctx,
+        },
+        "traffic_limit": {
+            "event_type": "traffic_limit_block",
+            "target_name": "demo-wg",
+            "target_type": "wireguard",
+            "details": "limit_bytes=10737418240\nconsumed_bytes=12884901888\nperiod_days=30",
+            **node_ctx,
+        },
+        "user_cert_expiry_reminder": {
+            "event_type": "user_cert_expiry_reminder",
+            "actor_username": "vpnuser",
+            "target_name": "demo-ovpn",
+            "target_type": "openvpn",
+            "details": "Истекает через 5 дн.",
+            "subject_name": "vpnuser",
+            **node_ctx,
+        },
+        "user_traffic_limit_reminder": {
+            "event_type": "user_traffic_limit_reminder",
+            "actor_username": "vpnuser",
+            "target_name": "demo-wg",
+            "target_type": "wireguard",
+            "details": "Использовано 8.5 GB из 10 GB (85%)",
+            "subject_name": "vpnuser",
+            **node_ctx,
+        },
+        "user_temp_block_reminder": {
+            "event_type": "user_temp_block_reminder",
+            "actor_username": "vpnuser",
+            "target_name": "demo-ovpn",
+            "target_type": "openvpn",
+            "details": "Блокировка до 2026-07-12",
+            "subject_name": "vpnuser",
+            **node_ctx,
+        },
+        "settings_change": {
+            "event_type": "settings_change",
+            "actor_username": actor_username,
+            "target_name": "settings_port_update",
+            "details": "8080 → 8443",
+        },
+        "high_cpu": {
+            "event_type": "high_cpu",
+            "details": "92.4% (порог 85%, sustained 180s)",
+            **node_ctx,
+        },
+        "high_ram": {
+            "event_type": "high_ram",
+            "details": "88.1% (порог 85%, sustained 180s)",
+            **node_ctx,
+        },
+        "cidr_deploy_failed": {
+            "event_type": "cidr_deploy_failed",
+            "actor_username": actor_username,
+            "details": "Ошибки на 1 узел(ов): RU-1: timeout",
+        },
+        "cidr_ingest_partial": {
+            "event_type": "cidr_ingest_partial",
+            "actor_username": actor_username,
+            "details": "Обновлено: 3, ошибок: 1 · Проблемные: antifilter",
+        },
+        "alert_rule": {
+            "event_type": "alert_rule",
+            "target_name": "CPU > 90% on RU-1",
+            "details": "текущее: 94.2%, порог: 90%",
+            **node_ctx,
+        },
+    }
+    return samples.get(event_key)
+
+
 def _telegram_notify_backend(
     *,
     db: Session,
@@ -1070,3 +1228,46 @@ def _telegram_notify_backend(
 register_notify_backend("telegram", _telegram_notify_backend)
 
 admin_notify_service = AdminNotifyService()
+
+
+def build_notify_event_preview_text(event_key: str, *, actor_username: str = "admin") -> str | None:
+    """Build a sample Telegram message for manual preview of one notify event."""
+    owner_text = _preview_owner_reminder_text(event_key)
+    if owner_text:
+        return owner_text
+
+    kwargs = _preview_event_build_kwargs(event_key, actor_username=actor_username)
+    if not kwargs:
+        return None
+
+    event_type = kwargs.pop("event_type")
+    node_id = kwargs.pop("node_id", None)
+    node_name = kwargs.pop("node_name", None)
+    text = admin_notify_service._build_text(
+        event_type,
+        kwargs.get("actor_username"),
+        kwargs.get("target_name"),
+        kwargs.get("target_type"),
+        kwargs.get("remote_addr"),
+        kwargs.get("details"),
+        kwargs.get("subject_name"),
+    )
+    if text is None:
+        return None
+    return _prepend_node_context(text, node_id=node_id, node_name=node_name)
+
+
+def send_notify_event_preview(
+    db: Session,
+    *,
+    event_key: str,
+    telegram_id: str,
+    bot_token: str,
+    actor_username: str,
+) -> bool:
+    """Send one sample notify message to a single Telegram ID."""
+    text = build_notify_event_preview_text(event_key, actor_username=actor_username)
+    if not text:
+        return False
+    preview_note = "🧪 <i>Пример уведомления (тест)</i>\n\n"
+    return send_tg_message(bot_token, telegram_id, preview_note + text, run_async=False)

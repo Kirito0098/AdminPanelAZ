@@ -150,6 +150,11 @@ class TrafficCollectorService:
 
                 session_state = sessions.get(session_key)
                 is_new = session_state is None
+                was_inactive = bool(session_state and not session_state.is_active)
+
+                connected_ts = int(client.get("connected_since_ts") or 0)
+                if is_wireguard and connected_ts <= 0:
+                    connected_ts = int(client_seen.timestamp())
 
                 if is_new:
                     session_state = TrafficSessionState(
@@ -159,7 +164,7 @@ class TrafficCollectorService:
                         common_name=common_name,
                         real_address=(client.get("real_address") or "").strip() or None,
                         virtual_address=(client.get("virtual_address") or "").strip() or None,
-                        connected_since_ts=int(client.get("connected_since_ts") or 0),
+                        connected_since_ts=connected_ts,
                         last_bytes_received=current_rx,
                         last_bytes_sent=current_tx,
                         is_active=True,
@@ -181,6 +186,8 @@ class TrafficCollectorService:
                     session_state.last_bytes_received = current_rx
                     session_state.last_bytes_sent = current_tx
                     session_state.last_seen_at = client_seen
+                    if is_wireguard and (was_inactive or int(session_state.connected_since_ts or 0) <= 0):
+                        session_state.connected_since_ts = connected_ts
                     session_state.is_active = True
                     session_state.ended_at = None
 

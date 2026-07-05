@@ -7,6 +7,9 @@ import {
   getTelegramSettings,
   registerTelegramWebhook,
   testAdminNotify,
+  testAdminNotifyEvent,
+  testNocReportPreview,
+  testNocWeeklyPdfPreview,
   testTelegram,
   updateAdminNotifySettings,
   updateTelegramSettings,
@@ -35,6 +38,8 @@ export function useTelegramSettings() {
   const [loading, setLoading] = useState(true)
   const [testing, setTesting] = useState(false)
   const [testingNotify, setTestingNotify] = useState(false)
+  const [testingNotifyEvent, setTestingNotifyEvent] = useState<string | null>(null)
+  const [testingNocReport, setTestingNocReport] = useState<'daily' | 'weekly' | 'pdf' | null>(null)
   const [registeringWebhook, setRegisteringWebhook] = useState(false)
   const [deletingWebhook, setDeletingWebhook] = useState(false)
   const [linkCode, setLinkCode] = useState<string | null>(null)
@@ -214,6 +219,42 @@ export function useTelegramSettings() {
     }
   }
 
+  const handleTestNotifyEvent = async (eventKey: string) => {
+    setTestingNotifyEvent(eventKey)
+    try {
+      const result = await testAdminNotifyEvent(eventKey)
+      success(result.message || 'Пример уведомления отправлен')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка отправки')
+    } finally {
+      setTestingNotifyEvent(null)
+    }
+  }
+
+  const handleTestNocReport = async (period: 'daily' | 'weekly') => {
+    setTestingNocReport(period)
+    try {
+      const result = await testNocReportPreview(period)
+      success(result.message || 'NOC сводка отправлена на ваш Telegram ID')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка отправки')
+    } finally {
+      setTestingNocReport(null)
+    }
+  }
+
+  const handleTestNocWeeklyPdf = async () => {
+    setTestingNocReport('pdf')
+    try {
+      const result = await testNocWeeklyPdfPreview()
+      success(result.message || 'NOC weekly PDF отправлен на ваш Telegram ID')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка отправки PDF')
+    } finally {
+      setTestingNocReport(null)
+    }
+  }
+
   return {
     settings,
     adminNotify,
@@ -240,6 +281,8 @@ export function useTelegramSettings() {
     loading,
     testing,
     testingNotify,
+    testingNotifyEvent,
+    testingNocReport,
     registeringWebhook,
     deletingWebhook,
     linkCode,
@@ -258,6 +301,9 @@ export function useTelegramSettings() {
     handleCopyLinkCode,
     handleTest,
     handleTestAdminNotify,
+    handleTestNotifyEvent,
+    handleTestNocReport,
+    handleTestNocWeeklyPdf,
   }
 }
 

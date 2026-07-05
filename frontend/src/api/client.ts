@@ -843,6 +843,26 @@ export async function testAdminNotify() {
   return apiFetch('/settings/admin-notify/test', { method: 'POST' })
 }
 
+export async function testAdminNotifyEvent(event: string) {
+  return apiFetch<{ message: string }>('/settings/admin-notify/test-event', {
+    method: 'POST',
+    body: JSON.stringify({ event }),
+  })
+}
+
+export async function testNocReportPreview(period: 'daily' | 'weekly' = 'daily') {
+  return apiFetch<{ message: string }>('/settings/admin-notify/test-noc-report', {
+    method: 'POST',
+    body: JSON.stringify({ period }),
+  })
+}
+
+export async function testNocWeeklyPdfPreview() {
+  return apiFetch<{ message: string }>('/settings/admin-notify/test-noc-pdf', {
+    method: 'POST',
+  })
+}
+
 export function getQrUrl(configId: number, path: string) {
   const token = getToken()
   const params = new URLSearchParams({ path })
