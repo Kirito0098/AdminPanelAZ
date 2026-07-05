@@ -6,8 +6,12 @@
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](backend/)
 [![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)](frontend/)
 
-[🚀 Установка](#-установка) · [✨ Возможности](#-возможности) · [📖 Руководства](docs/README.md) ·
-[🔐 Безопасность](SECURITY.md) · [📝 Changelog](CHANGELOG.md)
+[🚀 Установка](#-установка) · [✨ Возможности](#-возможности) · [🖼️ Обзор](#-обзор-панели) ·
+[📖 Руководства](docs/README.md) · [🔐 Безопасность](SECURITY.md) · [📝 Changelog](CHANGELOG.md)
+
+<p align="center">
+  <img src="docs/assets/telegram-promo/01-hero-banner.png" alt="AdminPanel AntiZapret" width="900">
+</p>
 
 > [!NOTE]
 > **Статус проекта**
@@ -22,6 +26,7 @@
 
 ## 📑 Содержание
 
+- [🖼️ Обзор панели](#-обзор-панели)
 - [✨ Возможности](#-возможности)
 - [🚀 Установка](#-установка)
 - [📖 Руководства пользователя](#-руководства-пользователя)
@@ -32,21 +37,52 @@
 - [📝 История изменений](#-история-изменений)
 - [💖 Поддержка проекта](#-поддержка-проекта)
 
+## 🖼️ Обзор панели
+
+<p align="center">
+  <img src="docs/assets/telegram-promo/02-features-overview.png" alt="Все модули AdminPanel AntiZapret" width="900">
+</p>
+
+| | | |
+| --- | --- | --- |
+| [<img src="docs/assets/telegram-promo/10-configurations.png" alt="Конфигурации" width="400">](docs/konfiguracii.md) | [<img src="docs/assets/telegram-promo/09-nodes.png" alt="Узлы VPN" width="400">](docs/uzly.md) | [<img src="docs/assets/telegram-promo/07-routing-cidr.png" alt="Маршрутизация CIDR" width="400">](docs/routing-cidr.md) |
+| [<img src="docs/assets/telegram-promo/08-routing-az-warp.png" alt="AZ-WARP" width="400">](docs/warper.md) | [<img src="docs/assets/telegram-promo/04-monitoring-noc.png" alt="Мониторинг и NOC" width="400">](docs/noc-monitoring.md) | [<img src="docs/assets/telegram-promo/03-telegram-integration.png" alt="Telegram" width="400">](docs/Telegram.md) |
+
 ## ✨ Возможности
 
 ### 🔌 VPN и клиенты
+
+<p align="center">
+  <img src="docs/assets/telegram-promo/10-configurations.png" alt="Конфигурации — VPN-клиенты" width="900">
+</p>
 
 - OpenVPN, WireGuard, AmneziaWG — создание, скачивание, QR-коды ([инструкция](docs/konfiguracii.md))
 - Блокировка, срок действия, лимиты трафика
 - Несколько VPN-серверов (узлов) из одной панели ([инструкция](docs/uzly.md))
 
+<p align="center">
+  <img src="docs/assets/telegram-promo/09-nodes.png" alt="Узлы VPN — несколько серверов из одной панели" width="900">
+</p>
+
 ### 🧭 Маршрутизация
+
+<p align="center">
+  <img src="docs/assets/telegram-promo/07-routing-cidr.png" alt="Маршрутизация и CIDR" width="900">
+</p>
 
 - Списки провайдеров (CIDR), пресеты, конфиг AntiZapret ([маршрутизация](docs/routing-cidr.md), [конфиг](docs/antizapret-config.md))
 - Редактор файлов AntiZapret с применением на сервер ([инструкция](docs/edit-files.md))
 - AZ-WARP — точечная маршрутизация через Cloudflare WARP ([инструкция](docs/warper.md))
 
+<p align="center">
+  <img src="docs/assets/telegram-promo/08-routing-az-warp.png" alt="AZ-WARP — интеграция с github.com/Liafanx/AZ-WARP" width="900">
+</p>
+
 ### 📊 Мониторинг
+
+<p align="center">
+  <img src="docs/assets/telegram-promo/04-monitoring-noc.png" alt="Мониторинг и NOC" width="900">
+</p>
 
 - **NOC** — кто подключён, откуда (город и провайдер), графики, состояние служб;
   **Telegram-сводки** — ежедневный/еженедельный текст и еженедельный PNG-дашборд
@@ -64,6 +100,10 @@
 
 ### 💬 Telegram
 
+<p align="center">
+  <img src="docs/assets/telegram-promo/03-telegram-integration.png" alt="Telegram — вход, Mini App, бот, уведомления" width="900">
+</p>
+
 - **Вход в панель** — Legacy Login Widget или OpenID Connect (настройка на вкладке «Бот и авторизация»)
 - **Mini App** — адаптированная панель и отправка VPN-конфигов из Telegram
 - **Бот** — webhook, команды (`/start`, `/link`, `/status`, …), привязка и отвязка аккаунтов администратором
@@ -74,6 +114,10 @@
 Пошаговая настройка и вкладки раздела: [docs/Telegram.md](docs/Telegram.md)
 
 ## 🚀 Установка
+
+<p align="center">
+  <img src="docs/assets/telegram-promo/06-quick-install.png" alt="Быстрая установка AdminPanel AntiZapret" width="900">
+</p>
 
 - **ОС** — Ubuntu 24.04+ или Debian 13+
 - **Права** — root / sudo, доступ в интернет
@@ -215,6 +259,10 @@ sudo ./scripts/nginx-setup.sh       # сменить HTTPS после устан
 ```
 
 ## 📝 История изменений
+
+<p align="center">
+  <img src="docs/assets/telegram-promo/05-whats-new.png" alt="Последние обновления AdminPanel AntiZapret" width="900">
+</p>
 
 Список новых функций и исправлений: **[CHANGELOG.md](CHANGELOG.md)**
 
