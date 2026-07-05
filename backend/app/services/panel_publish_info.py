@@ -352,8 +352,8 @@ def build_vpn_network_publish_modes() -> list[dict[str, str | bool | None]]:
         {
             "key": "uvicorn_custom",
             "title": "HTTPS на uvicorn + свои сертификаты",
-            "description": "TLS на приложении без Nginx — укажите пути к cert/key (3x-ui и т.п.).",
-            "requires_domain": True,
+            "description": "TLS на приложении без Nginx — укажите пути к cert/key (certbot, 3x-ui и т.п.).",
+            "requires_domain": False,
             "requires_email": False,
             "requires_ssl_cert": True,
             "uses_nginx_ports": False,

@@ -103,6 +103,34 @@ function publishModeIcon(key: string): LucideIcon {
   return MODE_ICONS[key] ?? Globe
 }
 
+const PUBLISH_MODE_GROUPS: Array<{ id: string; title: string; keys: string[] }> = [
+  {
+    id: 'nginx',
+    title: 'Через Nginx',
+    keys: ['nginx_le', 'nginx_selfsigned', 'nginx_custom'],
+  },
+  {
+    id: 'uvicorn',
+    title: 'Напрямую на uvicorn (без Nginx)',
+    keys: ['uvicorn_custom', 'uvicorn_le', 'uvicorn_selfsigned', 'http_direct'],
+  },
+]
+
+function orderPublishModes(modes: VpnNetworkPublishMode[]): VpnNetworkPublishMode[] {
+  const byKey = new Map(modes.map((mode) => [mode.key, mode]))
+  const ordered: VpnNetworkPublishMode[] = []
+  for (const group of PUBLISH_MODE_GROUPS) {
+    for (const key of group.keys) {
+      const mode = byKey.get(key)
+      if (mode) ordered.push(mode)
+    }
+  }
+  for (const mode of modes) {
+    if (!ordered.some((entry) => entry.key === mode.key)) ordered.push(mode)
+  }
+  return ordered
+}
+
 export default function VpnNetworkTab() {
   const { success, error: notifyError } = useNotifications()
   const { trackBackgroundTask, backgroundTaskPolling } = useProgress()
@@ -263,6 +291,10 @@ export default function VpnNetworkTab() {
   const showUvicornHttpsPort = selectedModeInfo?.uses_uvicorn_https_port === true
   const showLetsEncryptEmail = selectedMode === 'nginx_le' || selectedMode === 'uvicorn_le'
   const showSslPaths = selectedModeInfo?.requires_ssl_cert === true
+  const showOptionalDomain =
+    !selectedModeInfo?.requires_domain &&
+    (selectedMode === 'uvicorn_custom' || selectedMode === 'nginx_custom')
+  const orderedPublishModes = orderPublishModes(settings.publish_modes || [])
   const domainRow = settings.env_rows.find((r) => r.label.includes('DOMAIN'))
   const domainDisplay =
     domainRow && domainRow.value !== '—' ? domainRow.value : domain.trim() || 'не задан'
@@ -420,41 +452,54 @@ export default function VpnNetworkTab() {
               <Rocket size={18} />
               Настроить доступ к панели
             </CardTitle>
-            <CardDescription>Выберите режим и укажите домен при необходимости</CardDescription>
+            <CardDescription>Выберите режим и укажите домен или пути к сертификатам</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {(settings.publish_modes || []).map((mode) => {
-                const Icon = publishModeIcon(mode.key)
-                const selected = selectedMode === mode.key
-                return (
-                  <button
-                    key={mode.key}
-                    type="button"
-                    onClick={() => setSelectedMode(mode.key)}
-                    className={cn(
-                      'flex flex-col gap-3 rounded-xl border p-4 text-left transition-all',
-                      selected
-                        ? 'border-primary bg-primary/5 ring-1 ring-primary'
-                        : 'bg-card/50 hover:border-muted-foreground/30 hover:bg-muted/30',
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        'flex h-9 w-9 items-center justify-center rounded-lg',
-                        selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
-                      )}
-                    >
-                      <Icon size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">{mode.title}</p>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{mode.description}</p>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
+            {PUBLISH_MODE_GROUPS.map((group) => {
+              const groupModes = group.keys
+                .map((key) => orderedPublishModes.find((mode) => mode.key === key))
+                .filter((mode): mode is VpnNetworkPublishMode => Boolean(mode))
+              if (groupModes.length === 0) return null
+              return (
+                <div key={group.id} className="space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {group.title}
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {groupModes.map((mode) => {
+                      const Icon = publishModeIcon(mode.key)
+                      const selected = selectedMode === mode.key
+                      return (
+                        <button
+                          key={mode.key}
+                          type="button"
+                          onClick={() => setSelectedMode(mode.key)}
+                          className={cn(
+                            'flex flex-col gap-3 rounded-xl border p-4 text-left transition-all',
+                            selected
+                              ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                              : 'bg-card/50 hover:border-muted-foreground/30 hover:bg-muted/30',
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              'flex h-9 w-9 items-center justify-center rounded-lg',
+                              selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
+                            )}
+                          >
+                            <Icon size={18} />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">{mode.title}</p>
+                            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{mode.description}</p>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
 
             {selectedModeInfo?.warning && (
               <SettingsAlert variant="warning" title="Внимание">
@@ -494,6 +539,21 @@ export default function VpnNetworkTab() {
                     />
                   </div>
                 )}
+                {showOptionalDomain && (
+                  <div className="space-y-2">
+                    <Label htmlFor="vpn-domain-optional">Домен (необязательно)</Label>
+                    <Input
+                      id="vpn-domain-optional"
+                      value={domain}
+                      onChange={(e) => setDomain(e.target.value)}
+                      placeholder="panel.example.com"
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Для подсказок URL и CORS; если уже задан в .env — можно оставить пустым
+                    </p>
+                  </div>
+                )}
                 {showLetsEncryptEmail && (
                   <div className="space-y-2">
                     <Label htmlFor="vpn-email">Email для сертификата</Label>
@@ -510,28 +570,42 @@ export default function VpnNetworkTab() {
                   </div>
                 )}
                 {showSslPaths && (
-                  <>
-                    <div className="space-y-2 sm:col-span-2">
+                  <div className="space-y-4 rounded-xl border border-primary/25 bg-primary/5 p-4 sm:col-span-2">
+                    <div>
+                      <p className="text-sm font-medium">Пути к сертификатам на сервере</p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        Укажите абсолютные пути к файлам certbot или 3x-ui, например{' '}
+                        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+                          /etc/letsencrypt/live/example.com/fullchain.pem
+                        </code>{' '}
+                        и{' '}
+                        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+                          /etc/letsencrypt/live/example.com/privkey.pem
+                        </code>
+                        . Панель должна иметь право читать эти файлы.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
                       <Label htmlFor="vpn-ssl-cert">Путь к сертификату (.pem / .crt)</Label>
                       <Input
                         id="vpn-ssl-cert"
                         value={sslCert}
                         onChange={(e) => setSslCert(e.target.value)}
-                        placeholder="/path/to/fullchain.pem"
+                        placeholder="/etc/letsencrypt/live/your-domain/fullchain.pem"
                         className="font-mono text-xs"
                       />
                     </div>
-                    <div className="space-y-2 sm:col-span-2">
+                    <div className="space-y-2">
                       <Label htmlFor="vpn-ssl-key">Путь к приватному ключу (.key)</Label>
                       <Input
                         id="vpn-ssl-key"
                         value={sslKey}
                         onChange={(e) => setSslKey(e.target.value)}
-                        placeholder="/path/to/privkey.pem"
+                        placeholder="/etc/letsencrypt/live/your-domain/privkey.pem"
                         className="font-mono text-xs"
                       />
                     </div>
-                  </>
+                  </div>
                 )}
                 {showNginxPorts && (
                   <>
