@@ -29,6 +29,39 @@ BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
 FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-127.0.0.1,::1}"
+USE_HTTPS="${USE_HTTPS:-false}"
+SSL_CERT="${SSL_CERT:-}"
+SSL_KEY="${SSL_KEY:-}"
+
+load_backend_publish_env() {
+  local env_file="$BACKEND_DIR/.env"
+  [[ -f "$env_file" ]] || return 0
+  local line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" =~ ^(BACKEND_HOST|BACKEND_PORT|USE_HTTPS|SSL_CERT|SSL_KEY|FORWARDED_ALLOW_IPS|UVICORN_WORKERS)= ]] || continue
+    key="${line%%=*}"
+    val="${line#*=}"
+    val="${val%$'\r'}"
+    export "${key}=${val}"
+  done <"$env_file"
+}
+
+load_backend_publish_env
+
+uvicorn_ssl_flags() {
+  local flags=""
+  case "${USE_HTTPS,,}" in
+    true|1|yes|on)
+      if [[ -n "$SSL_CERT" && -n "$SSL_KEY" && -f "$SSL_CERT" && -f "$SSL_KEY" ]]; then
+        flags="--ssl-certfile $SSL_CERT --ssl-keyfile $SSL_KEY"
+      else
+        echo "[start.sh] USE_HTTPS=true, но SSL_CERT/SSL_KEY не найдены — запуск без TLS" >&2
+      fi
+      ;;
+  esac
+  printf '%s' "$flags"
+}
 FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 ADMINPANELAZ_MODE="${ADMINPANELAZ_MODE:-dev}"
@@ -78,13 +111,38 @@ clear_stale_backend_listener() {
   done < <(port_listener_pids "$BACKEND_PORT")
 }
 
+backend_health_url() {
+  case "${USE_HTTPS,,}" in
+    true|1|yes|on)
+      if [[ -n "$SSL_CERT" && -f "$SSL_CERT" ]]; then
+        echo "https://127.0.0.1:${BACKEND_PORT}/api/health"
+        return 0
+      fi
+      ;;
+  esac
+  echo "http://127.0.0.1:${BACKEND_PORT}/api/health"
+}
+
+curl_backend_health() {
+  local url="$1"
+  if [[ "$url" == https://* ]]; then
+    curl -kfsS "$url" >/dev/null 2>&1
+  else
+    curl -fsS "$url" >/dev/null 2>&1
+  fi
+}
+
 wait_for_url() {
   local url="$1"
   local label="$2"
   local attempts="${3:-60}"
 
   for ((i = 1; i <= attempts; i++)); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
+    if [[ "$url" == */api/health ]]; then
+      curl_backend_health "$url" && return 0
+    elif [[ "$url" == https://* ]]; then
+      curl -kfsS "$url" >/dev/null 2>&1 && return 0
+    elif curl -fsS "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -232,9 +290,11 @@ launch_backend() {
         export SERVE_FRONTEND=true
         export FRONTEND_DIST_PATH="$FRONTEND_DIR/dist"
       fi
+      local ssl_flags
+      ssl_flags="$(uvicorn_ssl_flags)"
       # shellcheck disable=SC2086
       exec uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" \
-        --proxy-headers --forwarded-allow-ips="$FORWARDED_ALLOW_IPS" $reload_flag $workers_flag
+        --proxy-headers --forwarded-allow-ips="$FORWARDED_ALLOW_IPS" $ssl_flags $reload_flag $workers_flag
     ) >>"$LOG_DIR/backend.log" 2>&1 &
     echo "$!" >"$BACKEND_PID_FILE"
     return 0
@@ -244,9 +304,11 @@ launch_backend() {
     cd "$BACKEND_DIR"
     # shellcheck source=/dev/null
     source "$VENV_DIR/bin/activate"
+    local ssl_flags
+    ssl_flags="$(uvicorn_ssl_flags)"
     # shellcheck disable=SC2086
     exec uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" \
-      --proxy-headers --forwarded-allow-ips="$FORWARDED_ALLOW_IPS" $reload_flag $workers_flag
+      --proxy-headers --forwarded-allow-ips="$FORWARDED_ALLOW_IPS" $ssl_flags $reload_flag $workers_flag
   ) &
   echo "$! backend" >>"$LEGACY_PID_FILE"
 }
@@ -346,12 +408,19 @@ start_daemon() {
   echo "$watchdog_pid" >"$WATCHDOG_PID_FILE"
   disown "$watchdog_pid" 2>/dev/null || true
 
-  wait_for_url "http://127.0.0.1:${BACKEND_PORT}/api/health" "backend"
+  wait_for_url "$(backend_health_url)" "backend"
 
   if [[ "$ADMINPANELAZ_MODE" == "dev" ]]; then
     wait_for_url "http://${FRONTEND_HOST}:${FRONTEND_PORT}/" "frontend"
   else
-    wait_for_url "http://127.0.0.1:${BACKEND_PORT}/" "frontend (static)"
+    case "${USE_HTTPS,,}" in
+      true|1|yes|on)
+        wait_for_url "https://127.0.0.1:${BACKEND_PORT}/" "frontend (static)"
+        ;;
+      *)
+        wait_for_url "http://127.0.0.1:${BACKEND_PORT}/" "frontend (static)"
+        ;;
+    esac
   fi
 
   echo ""

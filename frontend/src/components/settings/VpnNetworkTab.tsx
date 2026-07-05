@@ -24,25 +24,36 @@ import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { cn } from '@/lib/utils'
-import type { VpnNetworkPublishMode, VpnNetworkSettings } from '@/types'
+import type { VpnNetworkPublishMode, VpnNetworkPublishModeKey, VpnNetworkSettings } from '@/types'
 
 const MODE_LABELS: Record<string, string> = {
   reverse_proxy: 'Через Nginx с HTTPS',
+  direct_https: 'HTTPS на uvicorn (без Nginx)',
   direct_http: 'Напрямую по HTTP',
   local_http: 'Только с этого компьютера',
 }
 
 const MODE_ICONS: Record<string, LucideIcon> = {
   reverse_proxy: Lock,
+  direct_https: Shield,
   direct_http: Wifi,
   local_http: Server,
   http_direct: Wifi,
   nginx_le: Shield,
   nginx_selfsigned: Lock,
+  nginx_custom: Lock,
+  uvicorn_le: Shield,
+  uvicorn_custom: Shield,
+  uvicorn_selfsigned: Lock,
+}
+
+function envRowValue(rows: VpnNetworkSettings['env_rows'], labelPrefix: string): string {
+  const row = rows.find((r) => r.label.startsWith(labelPrefix))
+  return row && row.value !== '—' ? row.value : ''
 }
 
 function modeBadgeVariant(modeKey: string): 'default' | 'secondary' | 'outline' | 'success' {
-  if (modeKey === 'reverse_proxy' || modeKey === 'nginx_le') return 'success'
+  if (modeKey === 'reverse_proxy' || modeKey === 'nginx_le' || modeKey === 'direct_https') return 'success'
   if (modeKey === 'direct_http' || modeKey === 'http_direct') return 'secondary'
   return 'outline'
 }
@@ -105,6 +116,8 @@ export default function VpnNetworkTab() {
   const [email, setEmail] = useState('')
   const [httpsPublicPort, setHttpsPublicPort] = useState('443')
   const [httpAcmePort, setHttpAcmePort] = useState('80')
+  const [sslCert, setSslCert] = useState('')
+  const [sslKey, setSslKey] = useState('')
   const [publishing, setPublishing] = useState(false)
 
   const loadSettings = useCallback(async () => {
@@ -114,11 +127,18 @@ export default function VpnNetworkTab() {
       const data = await getVpnNetworkSettings()
       setSettings(data)
       setBackendPort(data.backend_port || '8000')
-      const domainRow = data.env_rows.find((r) => r.label.includes('DOMAIN'))
-      if (domainRow && domainRow.value !== '—') {
-        setDomain(domainRow.value)
-      }
-      if (data.publish_modes?.length) {
+      const domainVal = envRowValue(data.env_rows, 'DOMAIN')
+      if (domainVal) setDomain(domainVal)
+      const httpsPortVal = envRowValue(data.env_rows, 'HTTPS_PUBLIC_PORT')
+      if (httpsPortVal) setHttpsPublicPort(httpsPortVal)
+      const certVal = envRowValue(data.env_rows, 'SSL_CERT')
+      if (certVal) setSslCert(certVal)
+      const keyVal = envRowValue(data.env_rows, 'SSL_KEY')
+      if (keyVal) setSslKey(keyVal)
+      const active = data.active_publish_mode
+      if (active && data.publish_modes?.some((m) => m.key === active)) {
+        setSelectedMode(active)
+      } else if (data.publish_modes?.length) {
         setSelectedMode(data.publish_modes[0].key)
       }
     } catch (err) {
@@ -141,42 +161,68 @@ export default function VpnNetworkTab() {
   const handlePublish = () => {
     if (!selectedModeInfo) return
 
+    const isUvicornHttps = selectedModeInfo.uses_uvicorn_https_port === true
     const port = Number(backendPort)
-    const httpsPort = Number(httpsPublicPort)
+    const httpsPort = Number(isUvicornHttps ? backendPort : httpsPublicPort)
     const httpPort = Number(httpAcmePort)
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      notifyError('Укажите корректный порт приложения (от 1 до 65535)')
+      notifyError(
+        isUvicornHttps
+          ? 'Укажите корректный HTTPS-порт (от 1 до 65535)'
+          : 'Укажите корректный порт приложения (от 1 до 65535)',
+      )
       return
+    }
+    if (selectedModeInfo.uses_nginx_ports) {
+      if (!Number.isInteger(httpsPort) || httpsPort < 1 || httpsPort > 65535) {
+        notifyError('Укажите корректный порт HTTPS')
+        return
+      }
+      if (port === httpsPort || port === httpPort) {
+        notifyError('Порт приложения не должен совпадать с публичными портами Nginx')
+        return
+      }
     }
     if (selectedModeInfo.requires_domain && !domain.trim()) {
       notifyError('Укажите адрес сайта (домен)')
       return
     }
+    if (selectedModeInfo.requires_ssl_cert) {
+      if (!sslCert.trim() || !sslKey.trim()) {
+        notifyError('Укажите пути к сертификату и приватному ключу')
+        return
+      }
+    }
 
-    const isDirect = selectedMode === 'http_direct'
+    const isDirectHttp = selectedMode === 'http_direct'
+    const isUvicorn = selectedMode.startsWith('uvicorn_')
     confirm({
       title: 'Применить настройки доступа?',
       description: `Выбран режим: ${selectedModeInfo.title}. Сайт может быть недоступен несколько минут.`,
       alert: {
-        variant: isDirect ? 'danger' : 'warning',
-        title: isDirect ? 'Небезопасный режим' : 'Изменение способа доступа',
-        children: isDirect
+        variant: isDirectHttp ? 'danger' : 'warning',
+        title: isDirectHttp ? 'Небезопасный режим' : 'Изменение способа доступа',
+        children: isDirectHttp
           ? (selectedModeInfo.warning ||
             'Открывать панель напрямую по HTTP из интернета небезопасно. Включите ограничение по IP в разделе «Защита входа».')
-          : 'Будет настроен веб-сервер и защищённое соединение. Убедитесь, что домен указывает на этот сервер и порты открыты.',
+          : isUvicorn
+            ? 'Будет настроен HTTPS на uvicorn (без Nginx). После обновления cert перезапустите панель.'
+            : 'Будет настроен Nginx и защищённое соединение. Убедитесь, что домен указывает на этот сервер и порты открыты.',
       },
       confirmLabel: 'Применить',
-      destructive: isDirect,
+      destructive: isDirectHttp,
       onConfirm: async () => {
         setPublishing(true)
         try {
           const resp = await publishVpnNetwork({
-            mode: selectedMode as 'http_direct' | 'nginx_le' | 'nginx_selfsigned',
+            mode: selectedMode as VpnNetworkPublishModeKey,
             backend_port: port,
             domain: domain.trim() || null,
             email: email.trim() || null,
             https_public_port: httpsPort,
             http_acme_port: httpPort,
+            ssl_cert: sslCert.trim() || null,
+            ssl_key: sslKey.trim() || null,
           })
           trackBackgroundTask(resp.task_id, {
             onComplete: () => {
@@ -213,7 +259,10 @@ export default function VpnNetworkTab() {
   }
 
   const modeLabel = MODE_LABELS[settings.mode_key] ?? settings.mode_title
-  const showNginxPorts = selectedMode !== 'http_direct'
+  const showNginxPorts = selectedModeInfo?.uses_nginx_ports === true
+  const showUvicornHttpsPort = selectedModeInfo?.uses_uvicorn_https_port === true
+  const showLetsEncryptEmail = selectedMode === 'nginx_le' || selectedMode === 'uvicorn_le'
+  const showSslPaths = selectedModeInfo?.requires_ssl_cert === true
   const domainRow = settings.env_rows.find((r) => r.label.includes('DOMAIN'))
   const domainDisplay =
     domainRow && domainRow.value !== '—' ? domainRow.value : domain.trim() || 'не задан'
@@ -231,7 +280,13 @@ export default function VpnNetworkTab() {
               icon={publishModeIcon(settings.mode_key)}
               label="Режим"
               value={modeLabel}
-              tone={settings.mode_key === 'reverse_proxy' || settings.mode_key === 'nginx_le' ? 'success' : 'default'}
+              tone={
+                settings.mode_key === 'reverse_proxy' ||
+                settings.mode_key === 'nginx_le' ||
+                settings.mode_key === 'direct_https'
+                  ? 'success'
+                  : 'default'
+              }
             />
             <MetricPill icon={Globe} label="Домен" value={domainDisplay} />
             <MetricPill icon={Server} label="Порт приложения" value={settings.backend_port || backendPort} />
@@ -253,7 +308,9 @@ export default function VpnNetworkTab() {
           <div
             className={cn(
               'h-1 bg-gradient-to-r',
-              settings.mode_key === 'reverse_proxy' || settings.mode_key === 'nginx_le'
+              settings.mode_key === 'reverse_proxy' ||
+              settings.mode_key === 'nginx_le' ||
+              settings.mode_key === 'direct_https'
                 ? 'from-emerald-500/70 to-emerald-500/15'
                 : 'from-sky-500/70 to-sky-500/15',
             )}
@@ -366,7 +423,7 @@ export default function VpnNetworkTab() {
             <CardDescription>Выберите режим и укажите домен при необходимости</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {(settings.publish_modes || []).map((mode) => {
                 const Icon = publishModeIcon(mode.key)
                 const selected = selectedMode === mode.key
@@ -408,7 +465,9 @@ export default function VpnNetworkTab() {
             <div className="rounded-xl border bg-muted/20 p-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="vpn-backend-port">Порт приложения</Label>
+                  <Label htmlFor="vpn-backend-port">
+                    {showUvicornHttpsPort ? 'Порт HTTPS (uvicorn)' : 'Порт приложения'}
+                  </Label>
                   <Input
                     id="vpn-backend-port"
                     type="number"
@@ -418,7 +477,9 @@ export default function VpnNetworkTab() {
                     onChange={(e) => setBackendPort(e.target.value)}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Обычно 8000 — внутренний порт, на котором работает панель
+                    {showUvicornHttpsPort
+                      ? 'Uvicorn слушает этот порт с TLS (например 8443 или 443)'
+                      : 'Обычно 8000 — внутренний порт, на котором работает панель'}
                   </p>
                 </div>
                 {selectedModeInfo?.requires_domain && (
@@ -433,7 +494,7 @@ export default function VpnNetworkTab() {
                     />
                   </div>
                 )}
-                {selectedMode === 'nginx_le' && (
+                {showLetsEncryptEmail && (
                   <div className="space-y-2">
                     <Label htmlFor="vpn-email">Email для сертификата</Label>
                     <Input
@@ -448,10 +509,34 @@ export default function VpnNetworkTab() {
                     </p>
                   </div>
                 )}
+                {showSslPaths && (
+                  <>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="vpn-ssl-cert">Путь к сертификату (.pem / .crt)</Label>
+                      <Input
+                        id="vpn-ssl-cert"
+                        value={sslCert}
+                        onChange={(e) => setSslCert(e.target.value)}
+                        placeholder="/path/to/fullchain.pem"
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="vpn-ssl-key">Путь к приватному ключу (.key)</Label>
+                      <Input
+                        id="vpn-ssl-key"
+                        value={sslKey}
+                        onChange={(e) => setSslKey(e.target.value)}
+                        placeholder="/path/to/privkey.pem"
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                  </>
+                )}
                 {showNginxPorts && (
                   <>
                     <div className="space-y-2">
-                      <Label htmlFor="vpn-https-port">Порт HTTPS</Label>
+                      <Label htmlFor="vpn-https-port">Публичный порт HTTPS (Nginx)</Label>
                       <Input
                         id="vpn-https-port"
                         type="number"
@@ -465,7 +550,7 @@ export default function VpnNetworkTab() {
                       </p>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="vpn-http-port">Порт HTTP</Label>
+                      <Label htmlFor="vpn-http-port">Порт HTTP (ACME / редирект)</Label>
                       <Input
                         id="vpn-http-port"
                         type="number"

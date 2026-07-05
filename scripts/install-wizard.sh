@@ -489,17 +489,17 @@ wizard_ask_https() {
     return 0
   fi
 
-  wiz_step "Публикация через Nginx"
+  wiz_step "Публикация и HTTPS"
   ui_info_box "Рекомендуется" \
-    "Панель слушает только 127.0.0.1:${WIZ_BACKEND_PORT}." \
-    "Наружу — только Nginx на HTTPS (и HTTP для ACME)." \
+    "Nginx: панель на 127.0.0.1, снаружи только HTTPS через прокси." \
+    "Uvicorn + HTTPS: TLS на самом приложении (как в AdminAntizapret), без nginx." \
     "Позже можно изменить: ./scripts/nginx-setup.sh"
   echo
   if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
     WIZ_NGINX_MODE="none"
     WIZ_BACKEND_HOST="127.0.0.1"
     WIZ_BEHIND_NGINX="false"
-    echo "Способ публикации [3]: Пропустить Nginx (только localhost, dev/тесты)"
+    echo "Способ публикации [7]: Пропустить (только localhost, dev/тесты)"
     print_info "Backend будет доступен только на http://127.0.0.1:${WIZ_BACKEND_PORT}/"
     echo
     return 0
@@ -507,28 +507,37 @@ wizard_ask_https() {
   wiz_prompt_choice "Способ публикации" \
     "Nginx + Let's Encrypt (домен, рекомендуется для интернета)" \
     "Nginx + самоподписанный сертификат (LAN / внутренняя сеть)" \
-    "Пропустить Nginx (только localhost, dev/тесты)" \
-    "HTTP напрямую без Nginx (не рекомендуется для интернета)"
+    "Nginx + собственные сертификаты" \
+    "HTTPS на uvicorn + Let's Encrypt (без nginx, standalone certbot)" \
+    "HTTPS на uvicorn + собственные сертификаты (без nginx, cert от 3x-ui и т.п.)" \
+    "HTTPS на uvicorn + самоподписанный (без nginx)" \
+    "Пропустить (только localhost, dev/тесты)" \
+    "HTTP напрямую без TLS (LAN / тесты, не для интернета)"
 
   case "$REPLY" in
     1) WIZ_NGINX_MODE="le" ;;
     2) WIZ_NGINX_MODE="selfsigned" ;;
-    3) WIZ_NGINX_MODE="none" ;;
-    4) WIZ_NGINX_MODE="http_direct" ;;
+    3) WIZ_NGINX_MODE="nginx_custom" ;;
+    4) WIZ_NGINX_MODE="uvicorn_le" ;;
+    5) WIZ_NGINX_MODE="uvicorn_custom" ;;
+    6) WIZ_NGINX_MODE="uvicorn_selfsigned" ;;
+    7) WIZ_NGINX_MODE="none" ;;
+    8) WIZ_NGINX_MODE="http_direct" ;;
   esac
 
-  if [[ "$WIZ_NGINX_MODE" == "le" || "$WIZ_NGINX_MODE" == "selfsigned" ]]; then
+  local default_domain
+  default_domain="$(wizard_ddns_fqdn)"
+  if [[ -z "$default_domain" ]]; then
+    default_domain="${WIZ_SERVER_ADDRESS:-}"
+    default_domain="${default_domain#http://}"
+    default_domain="${default_domain#https://}"
+    default_domain="${default_domain%%/*}"
+    default_domain="${default_domain%%:*}"
+  fi
+
+  if [[ "$WIZ_NGINX_MODE" == "le" || "$WIZ_NGINX_MODE" == "selfsigned" || "$WIZ_NGINX_MODE" == "nginx_custom" ]]; then
     WIZ_BACKEND_HOST="127.0.0.1"
     WIZ_BEHIND_NGINX="true"
-    local default_domain
-    default_domain="$(wizard_ddns_fqdn)"
-    if [[ -z "$default_domain" ]]; then
-      default_domain="${WIZ_SERVER_ADDRESS:-}"
-      default_domain="${default_domain#http://}"
-      default_domain="${default_domain#https://}"
-      default_domain="${default_domain%%/*}"
-      default_domain="${default_domain%%:*}"
-    fi
     wiz_prompt "Домен для сертификата и server_name" "${default_domain:-panel.example.com}"
     WIZ_NGINX_DOMAIN="$REPLY"
     if [[ "$WIZ_NGINX_MODE" == "le" ]]; then
@@ -543,6 +552,25 @@ wizard_ask_https() {
       if [[ "$WIZ_HTTP_ACME_PORT" != "80" ]]; then
         print_warn "Let's Encrypt проверяет домен на порту 80. Нестандартный порт может потребовать DNS-challenge."
       fi
+    elif [[ "$WIZ_NGINX_MODE" == "nginx_custom" ]]; then
+      wiz_prompt_port_no_conflict "Публичный HTTPS-порт панели (nginx)" "$WIZ_HTTPS_PUBLIC_PORT" \
+        "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT"
+      WIZ_HTTPS_PUBLIC_PORT="$REPLY"
+      wiz_prompt_port_no_conflict "Публичный HTTP-порт (редирект на HTTPS)" "$WIZ_HTTP_ACME_PORT" \
+        "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT" "$WIZ_HTTPS_PUBLIC_PORT"
+      WIZ_HTTP_ACME_PORT="$REPLY"
+      while true; do
+        wiz_prompt "Путь к сертификату (.crt/.pem)" "${WIZ_SSL_CERT:-}"
+        WIZ_SSL_CERT="$REPLY"
+        [[ -f "$WIZ_SSL_CERT" ]] && break
+        print_warn "Файл не найден: $WIZ_SSL_CERT"
+      done
+      while true; do
+        wiz_prompt "Путь к приватному ключу (.key)" "${WIZ_SSL_KEY:-}"
+        WIZ_SSL_KEY="$REPLY"
+        [[ -f "$WIZ_SSL_KEY" ]] && break
+        print_warn "Файл не найден: $WIZ_SSL_KEY"
+      done
     else
       wiz_prompt_port_no_conflict "Публичный HTTPS-порт панели (nginx)" "$WIZ_HTTPS_PUBLIC_PORT" \
         "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT"
@@ -554,6 +582,41 @@ wizard_ask_https() {
     if [[ "$WIZ_APP_ENV" == "production" ]]; then
       wizard_build_nginx_cors_origins "$WIZ_NGINX_DOMAIN" "$WIZ_HTTPS_PUBLIC_PORT" "$WIZ_BACKEND_PORT"
     fi
+  elif [[ "$WIZ_NGINX_MODE" == uvicorn_* ]]; then
+    WIZ_BACKEND_HOST="0.0.0.0"
+    WIZ_BEHIND_NGINX="false"
+    wiz_prompt "Домен для HTTPS" "${default_domain:-panel.example.com}"
+    WIZ_NGINX_DOMAIN="$REPLY"
+    wiz_prompt_port_no_conflict "Порт HTTPS панели (uvicorn слушает этот порт)" "${WIZ_BACKEND_PORT:-8000}" \
+      "$WIZ_NODE_AGENT_PORT"
+    WIZ_BACKEND_PORT="$REPLY"
+    WIZ_HTTPS_PUBLIC_PORT="$REPLY"
+    if [[ "$WIZ_NGINX_MODE" == "uvicorn_le" ]]; then
+      wiz_prompt "Email для Let's Encrypt (пусто — без email)" "$WIZ_NGINX_EMAIL"
+      WIZ_NGINX_EMAIL="$REPLY"
+    elif [[ "$WIZ_NGINX_MODE" == "uvicorn_custom" ]]; then
+      while true; do
+        wiz_prompt "Путь к сертификату (.crt/.pem)" "${WIZ_SSL_CERT:-}"
+        WIZ_SSL_CERT="$REPLY"
+        [[ -f "$WIZ_SSL_CERT" ]] && break
+        print_warn "Файл не найден: $WIZ_SSL_CERT"
+      done
+      while true; do
+        wiz_prompt "Путь к приватному ключу (.key)" "${WIZ_SSL_KEY:-}"
+        WIZ_SSL_KEY="$REPLY"
+        [[ -f "$WIZ_SSL_KEY" ]] && break
+        print_warn "Файл не найден: $WIZ_SSL_KEY"
+      done
+    fi
+    if [[ "$WIZ_APP_ENV" == "production" ]]; then
+      local pub_host="$WIZ_NGINX_DOMAIN"
+      if [[ "$WIZ_BACKEND_PORT" != "443" ]]; then
+        pub_host="${pub_host}:${WIZ_BACKEND_PORT}"
+      fi
+      WIZ_CORS_ORIGINS="https://${pub_host},http://127.0.0.1:${WIZ_BACKEND_PORT},http://localhost:${WIZ_BACKEND_PORT}"
+      WIZ_CORS_ORIGINS+=",http://127.0.0.1:5173,http://localhost:5173"
+    fi
+    print_info "Uvicorn будет слушать https://0.0.0.0:${WIZ_BACKEND_PORT}/ (TLS на приложении, без nginx)"
   elif [[ "$WIZ_NGINX_MODE" == "none" ]]; then
     WIZ_BACKEND_HOST="127.0.0.1"
     WIZ_BEHIND_NGINX="false"

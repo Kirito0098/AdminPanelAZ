@@ -24,6 +24,10 @@ usage() {
   --http             Только HTTP, uvicorn на 0.0.0.0 (без nginx)
   --nginx-le         Nginx + Let's Encrypt (нужен DOMAIN, опционально EMAIL)
   --nginx-selfsigned Nginx + самоподписанный сертификат
+  --nginx-custom     Nginx + собственные сертификаты (SSL_CERT, SSL_KEY)
+  --uvicorn-le       HTTPS на uvicorn + Let's Encrypt (без nginx)
+  --uvicorn-selfsigned HTTPS на uvicorn + самоподписанный сертификат
+  --uvicorn-custom   HTTPS на uvicorn + собственные сертификаты (SSL_CERT, SSL_KEY)
   --change           Сменить режим публикации (интерактивно)
   --non-interactive  Не запрашивать ввод (для вызова из панели / background task)
   --help             Справка
@@ -34,6 +38,8 @@ usage() {
   BACKEND_PORT       Порт uvicorn (по умолчанию 8000)
   HTTPS_PUBLIC_PORT  Публичный HTTPS-порт панели (nginx, по умолчанию 443)
   HTTP_ACME_PORT     Публичный HTTP-порт (ACME/редирект, по умолчанию 80)
+  SSL_CERT           Путь к сертификату (для --nginx-custom / --uvicorn-custom)
+  SSL_KEY            Путь к приватному ключу (для --nginx-custom / --uvicorn-custom)
   NON_INTERACTIVE    true — пропускать prompts при заданных env
 EOF
 }
@@ -276,19 +282,116 @@ setup_nginx_custom_certs() {
   restart_panel_if_needed
 }
 
-choose_installation_type() {
+setup_uvicorn_letsencrypt() {
+  resolve_domain true
+  local domain="$DOMAIN"
+  local email="${EMAIL:-}"
+  if [[ -z "${email:-}" ]] && ! is_non_interactive; then
+    read -r -p "Email для Let's Encrypt (ENTER — пропустить): " email
+  fi
+  resolve_backend_port
+
+  nginx_obtain_letsencrypt_cert "$domain" "$email"
+  local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
+  local key="/etc/letsencrypt/live/${domain}/privkey.pem"
+  nginx_remove_site "$(nginx_env_get DOMAIN)"
+  nginx_apply_direct_https_env "$domain" "$BACKEND_PORT" "$cert" "$key"
+  systemctl enable --now snap.certbot.renew.timer 2>/dev/null || \
+    systemctl enable --now certbot.timer 2>/dev/null || true
+  if [[ "$BACKEND_PORT" == "443" ]]; then
+    nginx_log "HTTPS на uvicorn + Let's Encrypt: https://${domain}/"
+  else
+    nginx_log "HTTPS на uvicorn + Let's Encrypt: https://${domain}:${BACKEND_PORT}/"
+  fi
+  restart_panel_if_needed
+}
+
+setup_uvicorn_selfsigned() {
+  resolve_domain false
+  local domain="$DOMAIN"
+  [[ -n "$domain" ]] || domain="$(hostname -f 2>/dev/null || hostname)"
+  resolve_backend_port
+
+  mkdir -p /etc/ssl/private
+  if [[ ! -f "$NGINX_SELF_SIGNED_CERT" ]]; then
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+      -keyout "$NGINX_SELF_SIGNED_KEY" \
+      -out "$NGINX_SELF_SIGNED_CERT" \
+      -subj "/CN=${domain}" >/dev/null 2>&1
+  fi
+  nginx_remove_site "$(nginx_env_get DOMAIN)"
+  nginx_apply_direct_https_env "$domain" "$BACKEND_PORT" "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY"
+  if [[ "$BACKEND_PORT" == "443" ]]; then
+    nginx_log "HTTPS на uvicorn + самоподписанный SSL: https://${domain}/"
+  else
+    nginx_log "HTTPS на uvicorn + самоподписанный SSL: https://${domain}:${BACKEND_PORT}/"
+  fi
+  restart_panel_if_needed
+}
+
+setup_uvicorn_custom_certs() {
+  local domain="${DOMAIN:-}"
+  local cert_path="${SSL_CERT:-}"
+  local key_path="${SSL_KEY:-}"
+
+  if [[ -z "$domain" ]]; then
+    resolve_domain true
+    domain="$DOMAIN"
+  fi
+  if [[ -z "$cert_path" ]]; then
+    if is_non_interactive; then
+      nginx_die "SSL_CERT обязателен в неинтерактивном режиме"
+    fi
+    read -r -p "Путь к сертификату (.crt/.pem): " cert_path
+  fi
+  if [[ -z "$key_path" ]]; then
+    if is_non_interactive; then
+      nginx_die "SSL_KEY обязателен в неинтерактивном режиме"
+    fi
+    read -r -p "Путь к приватному ключу (.key): " key_path
+  fi
+  [[ -f "$cert_path" && -f "$key_path" ]] || nginx_die "Файлы сертификата не найдены"
+  resolve_backend_port
+  nginx_remove_site "$(nginx_env_get DOMAIN)"
+  nginx_apply_direct_https_env "$domain" "$BACKEND_PORT" "$cert_path" "$key_path"
+  if [[ "$BACKEND_PORT" == "443" ]]; then
+    nginx_log "HTTPS на uvicorn + пользовательские сертификаты: https://${domain}/"
+  else
+    nginx_log "HTTPS на uvicorn + пользовательские сертификаты: https://${domain}:${BACKEND_PORT}/"
+  fi
+  restart_panel_if_needed
+}
+
+choose_https_type() {
   echo
-  echo "Выберите способ публикации AdminPanelAZ:"
-  echo "  1) HTTPS — Nginx reverse proxy + Let's Encrypt (рекомендуется)"
-  echo "  2) HTTPS — Nginx + самоподписанный сертификат"
-  echo "  3) HTTPS — Nginx + собственные сертификаты"
-  echo "  4) HTTP — uvicorn напрямую без nginx (только LAN / тесты, не для интернета)"
-  read -r -p "Ваш выбор [1-4]: " choice
+  echo "Выберите тип HTTPS:"
+  echo "  1) Nginx reverse proxy + Let's Encrypt (рекомендуется)"
+  echo "  2) Nginx + самоподписанный сертификат"
+  echo "  3) Nginx + собственные сертификаты"
+  echo "  4) HTTPS на uvicorn + Let's Encrypt (без nginx)"
+  echo "  5) HTTPS на uvicorn + собственные сертификаты (без nginx)"
+  echo "  6) HTTPS на uvicorn + самоподписанный (без nginx)"
+  read -r -p "Ваш выбор [1-6]: " choice
   case "$choice" in
     1) setup_nginx_letsencrypt ;;
     2) setup_nginx_selfsigned ;;
     3) setup_nginx_custom_certs ;;
-    4) setup_http_direct ;;
+    4) setup_uvicorn_letsencrypt ;;
+    5) setup_uvicorn_custom_certs ;;
+    6) setup_uvicorn_selfsigned ;;
+    *) nginx_die "Неверный выбор" ;;
+  esac
+}
+
+choose_installation_type() {
+  echo
+  echo "Выберите способ публикации AdminPanelAZ:"
+  echo "  1) HTTPS (Nginx или uvicorn — см. следующий шаг)"
+  echo "  2) HTTP — uvicorn напрямую без TLS (только LAN / тесты, не для интернета)"
+  read -r -p "Ваш выбор [1-2]: " choice
+  case "$choice" in
+    1) choose_https_type ;;
+    2) setup_http_direct ;;
     *) nginx_die "Неверный выбор" ;;
   esac
 }
@@ -317,8 +420,20 @@ main() {
     --nginx-selfsigned)
       setup_nginx_selfsigned
       ;;
+    --nginx-custom)
+      setup_nginx_custom_certs
+      ;;
+    --uvicorn-le)
+      setup_uvicorn_letsencrypt
+      ;;
+    --uvicorn-selfsigned)
+      setup_uvicorn_selfsigned
+      ;;
+    --uvicorn-custom)
+      setup_uvicorn_custom_certs
+      ;;
     --change|"")
-      is_non_interactive && nginx_die "Интерактивный режим недоступен без TTY; укажите --http, --nginx-le или --nginx-selfsigned"
+      is_non_interactive && nginx_die "Интерактивный режим недоступен без TTY; укажите --http, --nginx-le, --uvicorn-custom и т.д."
       choose_installation_type
       ;;
     --help|-h)

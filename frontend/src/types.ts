@@ -706,6 +706,9 @@ export interface VpnNetworkPublishMode {
   description: string
   requires_domain: boolean
   requires_email: boolean
+  requires_ssl_cert?: boolean
+  uses_nginx_ports?: boolean
+  uses_uvicorn_https_port?: boolean
   warning: string | null
 }
 
@@ -719,15 +722,27 @@ export interface VpnNetworkSettings {
   backend_port: string
   nginx_setup_hint: string
   publish_modes: VpnNetworkPublishMode[]
+  active_publish_mode?: string | null
 }
 
+export type VpnNetworkPublishModeKey =
+  | 'http_direct'
+  | 'nginx_le'
+  | 'nginx_selfsigned'
+  | 'nginx_custom'
+  | 'uvicorn_le'
+  | 'uvicorn_selfsigned'
+  | 'uvicorn_custom'
+
 export interface VpnNetworkPublishPayload {
-  mode: 'http_direct' | 'nginx_le' | 'nginx_selfsigned'
+  mode: VpnNetworkPublishModeKey
   backend_port: number
   domain?: string | null
   email?: string | null
   https_public_port: number
   http_acme_port: number
+  ssl_cert?: string | null
+  ssl_key?: string | null
 }
 
 export interface CidrProviderInfo {

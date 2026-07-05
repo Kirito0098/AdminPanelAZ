@@ -504,19 +504,28 @@ class BackgroundTaskService:
             "http_direct": "--http",
             "nginx_le": "--nginx-le",
             "nginx_selfsigned": "--nginx-selfsigned",
+            "nginx_custom": "--nginx-custom",
+            "uvicorn_le": "--uvicorn-le",
+            "uvicorn_selfsigned": "--uvicorn-selfsigned",
+            "uvicorn_custom": "--uvicorn-custom",
         }
         mode = str(payload.get("mode") or "")
         flag = mode_flags.get(mode)
         if not flag:
             raise RuntimeError(f"Неизвестный режим публикации: {mode}")
 
+        uvicorn_modes = {"uvicorn_le", "uvicorn_selfsigned", "uvicorn_custom"}
+        backend_port = int(payload.get("backend_port") or 8000)
+
         if progress_updater:
             progress_updater(10, "Подготовка nginx-setup.sh…")
 
         cmd_env: dict[str, str] = {
             "NON_INTERACTIVE": "true",
-            "BACKEND_PORT": str(payload.get("backend_port") or 8000),
-            "HTTPS_PUBLIC_PORT": str(payload.get("https_public_port") or 443),
+            "BACKEND_PORT": str(backend_port),
+            "HTTPS_PUBLIC_PORT": str(
+                backend_port if mode in uvicorn_modes else (payload.get("https_public_port") or 443)
+            ),
             "HTTP_ACME_PORT": str(payload.get("http_acme_port") or 80),
         }
         domain = payload.get("domain")
@@ -525,6 +534,12 @@ class BackgroundTaskService:
         email = payload.get("email")
         if email:
             cmd_env["EMAIL"] = str(email)
+        ssl_cert = payload.get("ssl_cert")
+        if ssl_cert:
+            cmd_env["SSL_CERT"] = str(ssl_cert)
+        ssl_key = payload.get("ssl_key")
+        if ssl_key:
+            cmd_env["SSL_KEY"] = str(ssl_key)
 
         script = PROJECT_ROOT / "scripts" / "nginx-setup.sh"
         if not script.is_file():
@@ -548,6 +563,10 @@ class BackgroundTaskService:
             "http_direct": "Прямой HTTP",
             "nginx_le": "Nginx + Let's Encrypt",
             "nginx_selfsigned": "Nginx + самоподписанный SSL",
+            "nginx_custom": "Nginx + собственные сертификаты",
+            "uvicorn_le": "HTTPS на uvicorn + Let's Encrypt",
+            "uvicorn_selfsigned": "HTTPS на uvicorn + самоподписанный SSL",
+            "uvicorn_custom": "HTTPS на uvicorn + собственные сертификаты",
         }
         return {
             "message": f"Публикация применена: {mode_labels.get(mode, mode)}",

@@ -35,8 +35,12 @@ firewall_validate_ports() {
     names+=("backend")
   fi
   if [[ "$has_nginx" == true ]]; then
-    ports+=("$https_port" "$http_port")
-    names+=("HTTPS" "HTTP (ACME)")
+    ports+=("$https_port")
+    names+=("HTTPS")
+    if [[ "$http_port" != "0" ]]; then
+      ports+=("$http_port")
+      names+=("HTTP (ACME)")
+    fi
   fi
   if [[ "$has_node" == true ]]; then
     ports+=("$node_port")
@@ -76,8 +80,10 @@ firewall_show_rules_summary() {
     fi
   fi
   if [[ "$has_nginx" == true ]]; then
-    echo "    • Открыть ${https_port}/tcp (HTTPS, Nginx)"
-    echo "    • Открыть ${http_port}/tcp (HTTP, ACME / редирект)"
+    echo "    • Открыть ${https_port}/tcp (HTTPS)"
+    if [[ "$http_port" != "0" ]]; then
+      echo "    • Открыть ${http_port}/tcp (HTTP, ACME / редирект)"
+    fi
   fi
 }
 
@@ -161,8 +167,10 @@ firewall_apply_ufw_rules() {
   if [[ "$has_nginx" == true ]]; then
     ufw allow "${https_port}/tcp" comment "AdminPanelAZ HTTPS" >/dev/null 2>&1 || \
       ufw allow "${https_port}/tcp" >/dev/null 2>&1 || true
-    ufw allow "${http_port}/tcp" comment "AdminPanelAZ HTTP (ACME)" >/dev/null 2>&1 || \
-      ufw allow "${http_port}/tcp" >/dev/null 2>&1 || true
+    if [[ "$http_port" != "0" ]]; then
+      ufw allow "${http_port}/tcp" comment "AdminPanelAZ HTTP (ACME)" >/dev/null 2>&1 || \
+        ufw allow "${http_port}/tcp" >/dev/null 2>&1 || true
+    fi
   fi
 
   ufw reload >/dev/null 2>&1 || true
@@ -197,7 +205,7 @@ firewall_apply_iptables_rules() {
     if ! iptables -C INPUT -p tcp --dport "$https_port" -j ACCEPT 2>/dev/null; then
       iptables -A INPUT -p tcp --dport "$https_port" -j ACCEPT
     fi
-    if ! iptables -C INPUT -p tcp --dport "$http_port" -j ACCEPT 2>/dev/null; then
+    if [[ "$http_port" != "0" ]] && ! iptables -C INPUT -p tcp --dport "$http_port" -j ACCEPT 2>/dev/null; then
       iptables -A INPUT -p tcp --dport "$http_port" -j ACCEPT
     fi
   fi

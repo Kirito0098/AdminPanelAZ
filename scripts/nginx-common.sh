@@ -138,6 +138,23 @@ nginx_update_cors_for_domain() {
   nginx_env_set CORS_ORIGINS "$origins"
 }
 
+nginx_clear_app_ssl_env() {
+  nginx_env_unset USE_HTTPS
+  nginx_env_unset SSL_CERT
+  nginx_env_unset SSL_KEY
+}
+
+nginx_update_cors_for_direct_https() {
+  local domain="$1"
+  local https_port="${2:-443}"
+  local public_host
+  public_host="$(nginx_public_origin_host "$domain" "$https_port")"
+  local origins="https://${public_host}"
+  origins+=",http://127.0.0.1:${https_port},http://localhost:${https_port}"
+  origins+=",http://127.0.0.1:5173,http://localhost:5173"
+  nginx_env_set CORS_ORIGINS "$origins"
+}
+
 nginx_apply_behind_proxy_env() {
   local domain="$1"
   local backend_port="$2"
@@ -145,6 +162,7 @@ nginx_apply_behind_proxy_env() {
   local https_public_port="${4:-${HTTPS_PUBLIC_PORT:-443}}"
   local http_acme_port="${5:-${HTTP_ACME_PORT:-80}}"
 
+  nginx_clear_app_ssl_env
   nginx_env_set BACKEND_HOST "127.0.0.1"
   nginx_env_set BACKEND_PORT "$backend_port"
   nginx_env_set DOMAIN "$domain"
@@ -156,14 +174,44 @@ nginx_apply_behind_proxy_env() {
   nginx_update_cors_for_domain "$domain" "$scheme" "$https_public_port"
 }
 
+nginx_apply_direct_https_env() {
+  local domain="$1"
+  local backend_port="$2"
+  local ssl_cert="$3"
+  local ssl_key="$4"
+  local enforce_https="${5:-true}"
+
+  nginx_env_set BACKEND_HOST "0.0.0.0"
+  nginx_env_set BACKEND_PORT "$backend_port"
+  nginx_env_set DOMAIN "$domain"
+  nginx_env_set BEHIND_NGINX "false"
+  nginx_env_set USE_HTTPS "true"
+  nginx_env_set SSL_CERT "$ssl_cert"
+  nginx_env_set SSL_KEY "$ssl_key"
+  nginx_env_set HTTPS_PUBLIC_PORT "$backend_port"
+  nginx_env_unset HTTP_ACME_PORT
+  nginx_env_unset TRUSTED_PROXY_IPS
+  nginx_env_unset FORWARDED_ALLOW_IPS
+  nginx_env_set REFRESH_TOKEN_COOKIE_SECURE "true"
+  if [[ "$enforce_https" == "true" ]]; then
+    nginx_env_set ENFORCE_HTTPS "true"
+  fi
+  nginx_update_cors_for_direct_https "$domain" "$backend_port"
+}
+
 nginx_apply_direct_http_env() {
   local backend_port="$1"
+  nginx_clear_app_ssl_env
   nginx_env_set BACKEND_HOST "0.0.0.0"
   nginx_env_set BACKEND_PORT "$backend_port"
   nginx_env_unset DOMAIN
   nginx_env_set BEHIND_NGINX "false"
+  nginx_env_unset HTTPS_PUBLIC_PORT
+  nginx_env_unset HTTP_ACME_PORT
   nginx_env_unset TRUSTED_PROXY_IPS
   nginx_env_unset FORWARDED_ALLOW_IPS
+  nginx_env_unset ENFORCE_HTTPS
+  nginx_env_unset REFRESH_TOKEN_COOKIE_SECURE
 }
 
 nginx_install_site() {

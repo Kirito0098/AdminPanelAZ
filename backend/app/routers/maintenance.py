@@ -604,6 +604,7 @@ def get_vpn_network_settings(
         env_rows=[VpnNetworkEnvRow(**row) for row in ctx["env_rows"]],
         backend_port=ctx["backend_port"],
         publish_modes=publish_modes,
+        active_publish_mode=ctx.get("active_publish_mode"),
     )
 
 
@@ -620,13 +621,22 @@ def publish_vpn_network(
             detail=module_disabled_message("vpn_network"),
         )
 
-    if payload.mode == "nginx_le" and not (payload.domain or "").strip():
+    if payload.mode in {"nginx_le", "uvicorn_le"} and not (payload.domain or "").strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="DOMAIN обязателен для Let's Encrypt")
 
-    if payload.backend_port == payload.https_public_port or payload.backend_port == payload.http_acme_port:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="BACKEND_PORT конфликтует с публичными портами")
-    if payload.http_acme_port == payload.https_public_port:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="HTTP_ACME_PORT совпадает с HTTPS_PUBLIC_PORT")
+    if payload.mode in {"nginx_custom", "uvicorn_custom"}:
+        if not (payload.ssl_cert or "").strip() or not (payload.ssl_key or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="SSL_CERT и SSL_KEY обязательны для режима с собственными сертификатами",
+            )
+
+    uvicorn_modes = {"uvicorn_le", "uvicorn_selfsigned", "uvicorn_custom"}
+    if payload.mode not in uvicorn_modes:
+        if payload.backend_port == payload.https_public_port or payload.backend_port == payload.http_acme_port:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="BACKEND_PORT конфликтует с публичными портами")
+        if payload.http_acme_port == payload.https_public_port:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="HTTP_ACME_PORT совпадает с HTTPS_PUBLIC_PORT")
 
     active = background_task_service.find_active_task("vpn_network_publish")
     if active:

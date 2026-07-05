@@ -1274,7 +1274,7 @@ setup_ddns_if_selected() {
     log "DDNS: начальное обновление IP выполнено"
   else
     warn "DDNS: не удалось обновить IP — проверьте token/учётные данные и доступ в интернет"
-    if [[ "${WIZ_NGINX_MODE:-none}" == "le" ]]; then
+    if [[ "${WIZ_NGINX_MODE:-none}" == "le" || "${WIZ_NGINX_MODE:-none}" == "uvicorn_le" ]]; then
       warn "Let's Encrypt может не выдать сертификат, пока DNS не указывает на этот сервер"
     fi
   fi
@@ -1298,7 +1298,7 @@ setup_nginx_if_selected() {
     return 0
   fi
 
-  log "Настройка публикации (Nginx/HTTPS): $mode"
+  log "Настройка публикации (HTTPS): $mode"
 
   # shellcheck source=scripts/nginx-common.sh
   source "$ROOT_DIR/scripts/nginx-common.sh"
@@ -1308,12 +1308,55 @@ setup_nginx_if_selected() {
   local domain="${WIZ_NGINX_DOMAIN:-}"
   local https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
   local http_port="${WIZ_HTTP_ACME_PORT:-80}"
+  local enforce_https="true"
+  if [[ "$WIZ_APP_ENV" != "production" ]]; then
+    enforce_https="false"
+  fi
 
   case "$mode" in
     http_direct)
       nginx_apply_direct_http_env "$backend_port"
       nginx_remove_site "$(nginx_env_get DOMAIN)"
       log "HTTP без nginx: http://<сервер>:${backend_port}/ (не рекомендуется для интернета)"
+      ;;
+    uvicorn_le)
+      [[ -n "$domain" ]] || die "Для Let's Encrypt нужен домен"
+      NGINX_FAIL_SOFT=true
+      if ! nginx_obtain_letsencrypt_cert "$domain" "${WIZ_NGINX_EMAIL:-}"; then
+        unset NGINX_FAIL_SOFT
+        warn "Let's Encrypt не выдан (DNS/порт 80). Позже: sudo ./scripts/nginx-setup.sh --uvicorn-le"
+        return 0
+      fi
+      unset NGINX_FAIL_SOFT
+      nginx_remove_site "$(nginx_env_get DOMAIN)"
+      nginx_apply_direct_https_env "$domain" "$backend_port" \
+        "/etc/letsencrypt/live/${domain}/fullchain.pem" \
+        "/etc/letsencrypt/live/${domain}/privkey.pem" "$enforce_https"
+      systemctl enable --now snap.certbot.renew.timer 2>/dev/null || \
+        systemctl enable --now certbot.timer 2>/dev/null || true
+      log "HTTPS на uvicorn + Let's Encrypt: https://${domain}:${backend_port}/"
+      ;;
+    uvicorn_custom)
+      [[ -n "$domain" ]] || die "Для HTTPS нужен домен"
+      [[ -n "${WIZ_SSL_CERT:-}" && -n "${WIZ_SSL_KEY:-}" ]] || die "Укажите WIZ_SSL_CERT и WIZ_SSL_KEY"
+      [[ -f "${WIZ_SSL_CERT}" && -f "${WIZ_SSL_KEY}" ]] || die "Файлы сертификата не найдены"
+      nginx_remove_site "$(nginx_env_get DOMAIN)"
+      nginx_apply_direct_https_env "$domain" "$backend_port" "${WIZ_SSL_CERT}" "${WIZ_SSL_KEY}" "$enforce_https"
+      log "HTTPS на uvicorn + собственные сертификаты: https://${domain}:${backend_port}/"
+      ;;
+    uvicorn_selfsigned)
+      [[ -n "$domain" ]] || domain="$(hostname -f 2>/dev/null || hostname)"
+      mkdir -p /etc/ssl/private
+      if [[ ! -f "$NGINX_SELF_SIGNED_CERT" ]]; then
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          -keyout "$NGINX_SELF_SIGNED_KEY" \
+          -out "$NGINX_SELF_SIGNED_CERT" \
+          -subj "/CN=${domain}" >/dev/null 2>&1
+      fi
+      nginx_remove_site "$(nginx_env_get DOMAIN)"
+      nginx_apply_direct_https_env "$domain" "$backend_port" \
+        "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" "$enforce_https"
+      log "HTTPS на uvicorn + самоподписанный SSL: https://${domain}:${backend_port}/"
       ;;
     le)
       [[ -n "$domain" ]] || die "Для Let's Encrypt нужен домен (запустите install.sh заново или ./scripts/nginx-setup.sh)"
@@ -1362,10 +1405,41 @@ setup_nginx_if_selected() {
       fi
       log "Nginx + самоподписанный SSL: https://${domain}:${https_port}/"
       ;;
+    nginx_custom)
+      [[ -n "$domain" ]] || die "Для HTTPS нужен домен"
+      [[ -n "${WIZ_SSL_CERT:-}" && -n "${WIZ_SSL_KEY:-}" ]] || die "Укажите пути к сертификату и ключу"
+      [[ -f "${WIZ_SSL_CERT}" && -f "${WIZ_SSL_KEY}" ]] || die "Файлы сертификата не найдены"
+      nginx_ensure_nginx || die "Не удалось установить nginx"
+      local conf
+      conf="$(nginx_render_template \
+        "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
+        "$domain" "$backend_port" "${WIZ_SSL_CERT}" "${WIZ_SSL_KEY}" \
+        "$https_port" "$http_port")"
+      nginx_install_site "$conf" "$domain"
+      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https" "$https_port" "$http_port"
+      if [[ "$WIZ_APP_ENV" == "production" ]]; then
+        nginx_env_set ENFORCE_HTTPS "true"
+      fi
+      log "Nginx + пользовательские сертификаты: https://${domain}:${https_port}/"
+      ;;
     *)
-      warn "Неизвестный режим Nginx: $mode — пропуск"
+      warn "Неизвестный режим публикации: $mode — пропуск"
       return 0
       ;;
+  esac
+}
+
+is_uvicorn_https_mode() {
+  case "${WIZ_NGINX_MODE:-none}" in
+    uvicorn_le | uvicorn_custom | uvicorn_selfsigned) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_nginx_https_mode() {
+  case "${WIZ_NGINX_MODE:-none}" in
+    le | selfsigned | nginx_custom) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
@@ -1377,6 +1451,7 @@ restart_services_after_nginx() {
     return 0
   fi
   if [[ "$WITH_SYSTEMD" == true ]]; then
+    setup_systemd
     systemctl restart adminpanelaz 2>/dev/null || true
   elif [[ "$WITH_DAEMON" == true ]]; then
     "$ROOT_DIR/start.sh" restart 2>/dev/null || true
@@ -1395,6 +1470,9 @@ setup_firewall_if_selected() {
   local has_nginx=false
   local has_node=false
   local has_controller=false
+  local fw_backend_port="${WIZ_BACKEND_PORT:-8000}"
+  local fw_https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
+  local fw_http_port="${WIZ_HTTP_ACME_PORT:-80}"
 
   if install_controller_selected; then
     has_controller=true
@@ -1402,8 +1480,13 @@ setup_firewall_if_selected() {
   if install_node_selected; then
     has_node=true
   fi
-  if [[ "${WIZ_NGINX_MODE:-none}" == "le" || "${WIZ_NGINX_MODE:-none}" == "selfsigned" ]]; then
+  if is_nginx_https_mode; then
     has_nginx=true
+  elif is_uvicorn_https_mode; then
+    has_nginx=true
+    fw_https_port="${WIZ_BACKEND_PORT:-8000}"
+    fw_http_port="0"
+    fw_backend_port="0"
   fi
 
   local panel_ip="${WIZ_NODE_AGENT_ALLOWED_IPS:-}"
@@ -1423,20 +1506,24 @@ setup_firewall_if_selected() {
   local backend_port="${WIZ_BACKEND_PORT:-8000}"
   if [[ "$has_controller" != true ]]; then
     backend_port="0"
+  elif is_uvicorn_https_mode; then
+    backend_port="0"
   fi
 
-  firewall_show_rules_summary "$backend_port" "${WIZ_NODE_AGENT_PORT:-9100}" \
-    "${WIZ_HTTPS_PUBLIC_PORT:-443}" "${WIZ_HTTP_ACME_PORT:-80}" \
-    "$has_node" "$has_nginx" "$panel_ip" || true
+  if [[ "$has_controller" == true ]]; then
+    firewall_show_rules_summary "$backend_port" "${WIZ_NODE_AGENT_PORT:-9100}" \
+      "$fw_https_port" "$fw_http_port" \
+      "$has_node" "$has_nginx" "$panel_ip" || true
+  fi
 
   if [[ "$has_controller" == true ]]; then
     firewall_apply_rules "$backend_port" "${WIZ_NODE_AGENT_PORT:-9100}" \
-      "${WIZ_HTTPS_PUBLIC_PORT:-443}" "${WIZ_HTTP_ACME_PORT:-80}" \
+      "$fw_https_port" "$fw_http_port" \
       "$has_node" "$has_nginx" "$panel_ip" || \
       warn "Не удалось применить правила firewall — см. SECURITY.md"
   elif [[ "$has_node" == true ]]; then
     firewall_apply_rules "0" "${WIZ_NODE_AGENT_PORT:-9100}" \
-      "${WIZ_HTTPS_PUBLIC_PORT:-443}" "${WIZ_HTTP_ACME_PORT:-80}" \
+      "$fw_https_port" "$fw_http_port" \
       true false "$panel_ip" || \
       warn "Не удалось применить правила firewall — см. SECURITY.md"
   fi
@@ -1522,11 +1609,20 @@ print_post_install() {
     echo
     if [[ "${WIZ_NGINX_MODE:-none}" != "none" && -n "${WIZ_NGINX_DOMAIN:-}" ]]; then
       local pub_https="${WIZ_HTTPS_PUBLIC_PORT:-443}"
+      if is_uvicorn_https_mode; then
+        pub_https="${WIZ_BACKEND_PORT:-8000}"
+      fi
       local url_suffix=""
       if [[ "$pub_https" != "443" ]]; then
         url_suffix=":${pub_https}"
       fi
-      ui_summary_row "HTTPS" "https://${WIZ_NGINX_DOMAIN}${url_suffix}/"
+      if is_uvicorn_https_mode; then
+        ui_summary_row "HTTPS (uvicorn)" "https://${WIZ_NGINX_DOMAIN}${url_suffix}/"
+      else
+        ui_summary_row "HTTPS" "https://${WIZ_NGINX_DOMAIN}${url_suffix}/"
+      fi
+    elif [[ "${WIZ_NGINX_MODE:-none}" == "http_direct" ]]; then
+      ui_summary_row "HTTP" "http://<сервер>:${WIZ_BACKEND_PORT:-8000}/"
     else
       print_info "Для интернета: sudo ./scripts/nginx-setup.sh или повторно sudo ./install.sh"
     fi

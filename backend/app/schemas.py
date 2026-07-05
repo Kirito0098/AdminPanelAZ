@@ -909,16 +909,23 @@ class VpnNetworkPublishModeInfo(BaseModel):
     description: str
     requires_domain: bool = False
     requires_email: bool = False
+    requires_ssl_cert: bool = False
+    uses_nginx_ports: bool = False
+    uses_uvicorn_https_port: bool = False
     warning: str | None = None
 
 
 class VpnNetworkPublishRequest(BaseModel):
-    mode: str = Field(pattern=r"^(http_direct|nginx_le|nginx_selfsigned)$")
+    mode: str = Field(
+        pattern=r"^(http_direct|nginx_le|nginx_selfsigned|nginx_custom|uvicorn_le|uvicorn_selfsigned|uvicorn_custom)$"
+    )
     backend_port: int = Field(default=8000, ge=1, le=65535)
     domain: str | None = Field(default=None, max_length=255)
     email: str | None = Field(default=None, max_length=255)
     https_public_port: int = Field(default=443, ge=1, le=65535)
     http_acme_port: int = Field(default=80, ge=1, le=65535)
+    ssl_cert: str | None = Field(default=None, max_length=1024)
+    ssl_key: str | None = Field(default=None, max_length=1024)
 
 
 class VpnNetworkSettingsResponse(BaseModel):
@@ -931,6 +938,7 @@ class VpnNetworkSettingsResponse(BaseModel):
     backend_port: str
     nginx_setup_hint: str = "scripts/nginx-setup.sh"
     publish_modes: list[VpnNetworkPublishModeInfo] = []
+    active_publish_mode: str | None = None
 
 
 class ServiceRestartRequest(BaseModel):
