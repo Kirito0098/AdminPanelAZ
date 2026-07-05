@@ -133,6 +133,7 @@ def update_user(
         if not is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять Telegram ID")
         tg_id = payload.telegram_id.strip()
+        had_tg = bool((user.telegram_id or "").strip())
         if tg_id:
             existing = db.query(User).filter(User.telegram_id == tg_id, User.id != user.id).first()
             if existing:
@@ -143,6 +144,15 @@ def update_user(
             user.telegram_id = tg_id
         else:
             user.telegram_id = None
+        if settings.audit_log_enabled and had_tg and not user.telegram_id:
+            log_action(
+                db,
+                action="telegram_unlink",
+                user_id=current_user.id,
+                username=current_user.username,
+                remote_addr=ip_restriction_service.get_client_ip(request),
+                details=f"target={user.username}",
+            )
     if payload.config_quota is not None:
         if not is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять квоту")

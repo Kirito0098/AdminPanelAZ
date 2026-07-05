@@ -234,9 +234,16 @@ export async function getCaptchaRequired() {
 }
 
 export async function getTelegramLoginConfig() {
-  return apiFetch<{ enabled: boolean; bot_username: string; max_age_seconds?: number }>(
-    '/auth/telegram/config',
-  )
+  return apiFetch<{
+    enabled: boolean
+    auth_method?: 'oidc' | 'legacy' | 'none'
+    bot_username: string
+    max_age_seconds?: number
+    oidc_enabled?: boolean
+    oidc_client_id?: string
+    legacy_enabled?: boolean
+    oidc_start_url?: string
+  }>('/auth/telegram/config')
 }
 
 export async function getMe() {
@@ -795,9 +802,15 @@ export async function updateTelegramSettings(data: {
   bot_username?: string
   auth_max_age_seconds?: number
   chat_id?: string
+  chat_ids?: string[]
   notify_enabled?: boolean
   notify_on_backup?: boolean
   interactive_enabled?: boolean
+  auth_method?: 'oidc' | 'legacy'
+  oidc_enabled?: boolean
+  oidc_client_id?: string
+  oidc_client_secret?: string
+  legacy_login_enabled?: boolean
 }) {
   return apiFetch<import('../types').TelegramSettings>('/settings/telegram', {
     method: 'PATCH',
@@ -831,6 +844,7 @@ export async function getAdminNotifySettings() {
 
 export async function updateAdminNotifySettings(data: {
   telegram_id?: string
+  recipient_user_ids?: number[]
   events?: Record<string, boolean>
 }) {
   return apiFetch<import('../types').AdminNotifySettings>('/settings/admin-notify', {

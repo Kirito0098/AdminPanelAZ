@@ -540,12 +540,21 @@ export interface TelegramSettings {
   auth_max_age_seconds: number
   mini_app_url: string
   chat_id: string
+  chat_ids: string[]
   notify_enabled: boolean
   notify_on_backup: boolean
   interactive_enabled: boolean
   webhook_registered: boolean
   webhook_secret_set: boolean
   webhook_set_at: string
+  oidc_enabled: boolean
+  oidc_client_id: string
+  oidc_client_secret_set: boolean
+  oidc_callback_url: string
+  oidc_trusted_origin: string
+  legacy_login_enabled: boolean
+  auth_method: 'oidc' | 'legacy' | 'none'
+  login_ready: boolean
 }
 
 export interface TelegramLinkCode {
@@ -561,6 +570,7 @@ export interface AdminNotifyEventItem {
 
 export interface AdminNotifySettings {
   telegram_id: string
+  recipient_user_ids: number[]
   notify_enabled: boolean
   bot_token_set: boolean
   events: AdminNotifyEventItem[]

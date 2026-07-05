@@ -2,8 +2,10 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import time
 from datetime import timedelta
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
@@ -36,6 +38,7 @@ from app.schemas import (
     PasskeyRegisterVerifyRequest,
     PasskeyRenameRequest,
     PasswordChangeRequest,
+    TelegramOidcTokenRequest,
     Token,
     TwoFABackupCodesResponse,
     TwoFADisableRequest,
@@ -63,6 +66,15 @@ from app.services.active_web_session import active_web_session_service
 from app.services.admin_notify import admin_notify_service
 from app.services.user_agent_format import user_agent_from_request
 from app.services.notify_time import get_client_timezone_from_request
+from app.services.panel_publish_info import resolve_request_url_root
+from app.services.telegram_oidc import (
+    build_authorization_url,
+    exchange_authorization_code,
+    pkce_verifier,
+    pop_oidc_state,
+    telegram_id_from_claims,
+    verify_id_token,
+)
 from app.services.totp_service import (
     encrypt_backup_codes,
     encrypt_totp_secret,
@@ -87,6 +99,87 @@ def _get_telegram_auth_settings(db: Session) -> tuple[str, str, int]:
     username = username_row.value if username_row else os.getenv("TELEGRAM_AUTH_BOT_USERNAME", "")
     max_age = int(max_age_row.value) if max_age_row and max_age_row.value.isdigit() else 300
     return token.strip(), username.strip(), max(30, min(max_age, 86400))
+
+
+def _get_telegram_oidc_settings(db: Session) -> tuple[bool, str, str]:
+    enabled_row = db.query(AppSetting).filter(AppSetting.key == "telegram_oidc_enabled").first()
+    client_id_row = db.query(AppSetting).filter(AppSetting.key == "telegram_oidc_client_id").first()
+    secret_row = db.query(AppSetting).filter(AppSetting.key == "telegram_oidc_client_secret").first()
+    enabled = (enabled_row.value if enabled_row else os.getenv("TELEGRAM_OIDC_ENABLED", "")).lower() == "true"
+    client_id = (client_id_row.value if client_id_row else os.getenv("TELEGRAM_OIDC_CLIENT_ID", "")).strip()
+    client_secret = (secret_row.value if secret_row else os.getenv("TELEGRAM_OIDC_CLIENT_SECRET", "")).strip()
+    return enabled, client_id, client_secret
+
+
+def _telegram_oidc_callback_url(request: Request) -> str:
+    root = resolve_request_url_root(request, behind_nginx=settings.behind_nginx).rstrip("/")
+    return f"{root}/api/auth/telegram/oidc/callback"
+
+
+def _legacy_login_enabled(db: Session) -> bool:
+    oidc_row = db.query(AppSetting).filter(AppSetting.key == "telegram_oidc_enabled").first()
+    if oidc_row and oidc_row.value == "true":
+        return False
+    row = db.query(AppSetting).filter(AppSetting.key == "telegram_legacy_login_enabled").first()
+    if row is None:
+        return True
+    return row.value != "false"
+
+
+def _resolve_user_by_telegram_id(db: Session, tg_id: str) -> User | None:
+    user = db.query(User).filter(User.telegram_id == tg_id).first()
+    if user:
+        return user
+    user = db.query(User).filter(User.username == f"tg_{tg_id}").first()
+    if user and not user.telegram_id:
+        user.telegram_id = tg_id
+        db.commit()
+    return user
+
+
+def _telegram_login_redirect(user: User) -> RedirectResponse:
+    access_token = create_access_token(
+        data={"sub": user.username, "role": user.role.value},
+        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
+    )
+    return RedirectResponse(url=f"/login#token={access_token}", status_code=302)
+
+
+def _complete_telegram_login(
+    db: Session,
+    request: Request,
+    tg_id: str,
+    *,
+    mini: bool = False,
+) -> User:
+    user = _resolve_user_by_telegram_id(db, tg_id)
+    client_ip = ip_restriction_service.get_client_ip(request)
+    if not user:
+        admin_notify_service.send_tg_login_unlinked(
+            db,
+            telegram_id=tg_id,
+            remote_addr=client_ip,
+            mini=mini,
+            client_timezone=get_client_timezone_from_request(request),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Этот Telegram аккаунт не привязан ни к одному пользователю панели",
+        )
+    if user.role != UserRole.viewer:
+        admin_notify_service.send_login_success(
+            db,
+            actor_username=user.username,
+            remote_addr=client_ip,
+            client_timezone=get_client_timezone_from_request(request),
+            user_agent=user_agent_from_request(request),
+            login_via="Telegram",
+        )
+    return user
+
+
+def _oidc_login_error_redirect(message: str) -> RedirectResponse:
+    return RedirectResponse(url=f"/login?tg_error={quote(message)}", status_code=302)
 
 
 def _verify_telegram_login(payload: dict[str, str], bot_token: str, max_age: int) -> tuple[bool, str]:
@@ -280,18 +373,138 @@ def captcha_required(request: Request):
 
 
 @router.get("/telegram/config")
-def telegram_login_config(db: Session = Depends(get_db)):
+def telegram_login_config(request: Request, db: Session = Depends(get_db)):
     from app.services.feature_guards import get_feature_service
 
     if not get_feature_service().is_enabled("telegram"):
-        return {"enabled": False, "bot_username": "", "max_age_seconds": 300}
+        return {
+            "enabled": False,
+            "bot_username": "",
+            "max_age_seconds": 300,
+            "oidc_enabled": False,
+            "oidc_client_id": "",
+            "legacy_enabled": False,
+            "oidc_start_url": "",
+            "auth_method": "none",
+        }
     token, username, max_age = _get_telegram_auth_settings(db)
-    enabled = bool(token and username)
+    oidc_enabled, oidc_client_id, oidc_secret = _get_telegram_oidc_settings(db)
+    legacy_enabled = _legacy_login_enabled(db)
+    oidc_ready = oidc_enabled and bool(oidc_client_id and oidc_secret)
+    legacy_ready = legacy_enabled and bool(token and username)
+    auth_method = "oidc" if oidc_enabled else ("legacy" if legacy_enabled else "none")
+    root = resolve_request_url_root(request, behind_nginx=settings.behind_nginx).rstrip("/")
     return {
-        "enabled": enabled,
-        "bot_username": username,
+        "enabled": oidc_ready or legacy_ready,
+        "auth_method": auth_method,
+        "bot_username": username if legacy_ready else "",
         "max_age_seconds": max_age,
+        "oidc_enabled": oidc_ready,
+        "oidc_client_id": oidc_client_id if oidc_enabled else "",
+        "legacy_enabled": legacy_ready,
+        "oidc_start_url": f"{root}/api/auth/telegram/oidc/start" if oidc_ready else "",
     }
+
+
+@router.get("/telegram/oidc/start")
+def telegram_oidc_start(request: Request, db: Session = Depends(get_db)):
+    from app.services.feature_guards import get_feature_service
+
+    if not get_feature_service().is_enabled("telegram"):
+        raise HTTPException(status_code=503, detail="Модуль Telegram отключён")
+    oidc_enabled, client_id, client_secret = _get_telegram_oidc_settings(db)
+    if not oidc_enabled or not client_id or not client_secret:
+        raise HTTPException(status_code=503, detail="Telegram OpenID Connect не настроен")
+    redirect_uri = _telegram_oidc_callback_url(request)
+    state = secrets.token_urlsafe(24)
+    code_verifier = pkce_verifier()
+    auth_url = build_authorization_url(
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        state=state,
+        code_verifier=code_verifier,
+    )
+    return RedirectResponse(url=auth_url, status_code=302)
+
+
+@router.get("/telegram/oidc/callback")
+def telegram_oidc_callback(request: Request, db: Session = Depends(get_db)):
+    from app.services.feature_guards import get_feature_service
+
+    if not get_feature_service().is_enabled("telegram"):
+        return _oidc_login_error_redirect("Модуль Telegram отключён")
+    oidc_enabled, client_id, client_secret = _get_telegram_oidc_settings(db)
+    if not oidc_enabled or not client_id or not client_secret:
+        return _oidc_login_error_redirect("Telegram OpenID Connect не настроен")
+
+    params = dict(request.query_params)
+    error = (params.get("error") or "").strip()
+    if error:
+        description = (params.get("error_description") or error).strip()
+        return _oidc_login_error_redirect(description or "Telegram OIDC отклонил вход")
+
+    code = (params.get("code") or "").strip()
+    state = (params.get("state") or "").strip()
+    if not code or not state:
+        return _oidc_login_error_redirect("Некорректный ответ Telegram OIDC")
+
+    stored = pop_oidc_state(state)
+    if not stored:
+        return _oidc_login_error_redirect("Сессия Telegram OIDC истекла — попробуйте снова")
+
+    redirect_uri = stored.get("redirect_uri") or _telegram_oidc_callback_url(request)
+    code_verifier = stored.get("code_verifier") or ""
+    try:
+        token_payload = exchange_authorization_code(
+            code=code,
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            code_verifier=code_verifier,
+        )
+        id_token = str(token_payload.get("id_token") or "").strip()
+        if not id_token:
+            return _oidc_login_error_redirect("Telegram OIDC не вернул id_token")
+        claims = verify_id_token(id_token, client_id=client_id)
+        tg_id = telegram_id_from_claims(claims)
+    except ValueError as exc:
+        return _oidc_login_error_redirect(str(exc))
+    except HTTPException:
+        raise
+    except Exception:
+        return _oidc_login_error_redirect("Не удалось завершить вход через Telegram OIDC")
+
+    try:
+        user = _complete_telegram_login(db, request, tg_id, mini=False)
+        return _telegram_login_redirect(user)
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else "Ошибка входа через Telegram"
+        return _oidc_login_error_redirect(detail)
+
+
+@router.post("/telegram/oidc/token")
+def telegram_oidc_token(payload: TelegramOidcTokenRequest, request: Request, db: Session = Depends(get_db)):
+    from app.services.feature_guards import get_feature_service
+
+    if not get_feature_service().is_enabled("telegram"):
+        raise HTTPException(status_code=503, detail="Модуль Telegram отключён")
+    oidc_enabled, client_id, client_secret = _get_telegram_oidc_settings(db)
+    if not oidc_enabled or not client_id or not client_secret:
+        raise HTTPException(status_code=503, detail="Telegram OpenID Connect не настроен")
+    try:
+        claims = verify_id_token(payload.id_token.strip(), client_id=client_id)
+        tg_id = telegram_id_from_claims(claims)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    try:
+        user = _complete_telegram_login(db, request, tg_id, mini=False)
+    except HTTPException:
+        raise
+    access_token = create_access_token(
+        data={"sub": user.username, "role": user.role.value},
+        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 @router.get("/telegram")
@@ -299,45 +512,18 @@ def telegram_login_callback(request: Request, db: Session = Depends(get_db)):
     token, _, max_age = _get_telegram_auth_settings(db)
     if not token:
         raise HTTPException(status_code=503, detail="Telegram авторизация не настроена")
+    if not _legacy_login_enabled(db):
+        raise HTTPException(status_code=503, detail="Legacy Telegram Login отключён")
     payload = dict(request.query_params)
     ok, err = _verify_telegram_login(payload, token, max_age)
     if not ok:
         raise HTTPException(status_code=401, detail=err)
     tg_id = str(payload.get("id", ""))
-    user = db.query(User).filter(User.telegram_id == tg_id).first()
-    if not user:
-        user = db.query(User).filter(User.username == f"tg_{tg_id}").first()
-        if user and not user.telegram_id:
-            user.telegram_id = tg_id
-            db.commit()
-    client_ip = ip_restriction_service.get_client_ip(request)
-    if not user:
-        admin_notify_service.send_tg_login_unlinked(
-            db,
-            telegram_id=tg_id,
-            remote_addr=client_ip,
-            mini=False,
-            client_timezone=get_client_timezone_from_request(request),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Этот Telegram аккаунт не привязан ни к одному пользователю панели",
-        )
-    if user.role != UserRole.viewer:
-        admin_notify_service.send_login_success(
-            db,
-            actor_username=user.username,
-            remote_addr=client_ip,
-            client_timezone=get_client_timezone_from_request(request),
-            user_agent=user_agent_from_request(request),
-            login_via="Telegram",
-        )
-    access_token = create_access_token(
-        data={"sub": user.username, "role": user.role.value},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-    )
-    redirect_url = f"/login#token={access_token}"
-    return RedirectResponse(url=redirect_url, status_code=302)
+    try:
+        user = _complete_telegram_login(db, request, tg_id, mini=False)
+        return _telegram_login_redirect(user)
+    except HTTPException as exc:
+        raise exc
 
 
 @router.post("/login", response_model=Token)

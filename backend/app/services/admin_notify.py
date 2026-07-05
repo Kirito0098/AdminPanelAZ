@@ -20,6 +20,7 @@ from app.services.feature_guards import get_feature_service
 from app.services.notify_time import format_notify_when
 from app.services.notify_backends import dispatch_admin_notify, register_notify_backend
 from app.services.telegram import send_tg_message
+from app.services.telegram_recipients import filter_notify_recipients
 from app.services.resource_alert_sustained import SustainedMetricSource
 from app.services.user_agent_format import format_user_agent_label, is_mobile_user_agent
 from app.services.traffic_limit import (
@@ -448,6 +449,11 @@ class AdminNotifyService:
                 u for u in db.query(User).filter(User.telegram_id.isnot(None)).all()
                 if u.has_tg_notify_event(pref_key)
             ]
+            notify_users = filter_notify_recipients(
+                db,
+                notify_users,
+                lambda key, default="": _get_setting(db, key, default),
+            )
             if not notify_users:
                 return
 

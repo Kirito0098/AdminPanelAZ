@@ -118,9 +118,10 @@ def send_config_for_user(
 ) -> tuple[int, str | None]:
     """Resolve destination chat and send config files."""
     from app.routers.maintenance import _get_setting
+    from app.services.telegram_recipients import get_setting_chat_ids
 
     if chat_id_override is not None:
-        chat_id = chat_id_override
+        chat_ids = [str(chat_id_override).strip()]
     elif destination == "owner":
         if user.role.value != "admin":
             return 0, "Недостаточно прав"
@@ -130,26 +131,36 @@ def send_config_for_user(
         chat_id = (owner.telegram_id or "").strip()
         if not chat_id:
             return 0, "У пользователя не привязан Telegram"
+        chat_ids = [chat_id]
     elif destination == "chat":
         if user.role.value != "admin":
             return 0, "Только admin может отправлять в общий chat"
-        chat_id = _get_setting(db, "telegram_chat_id").strip()
-        if not chat_id:
-            return 0, "Глобальный chat_id не настроен"
+        chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
+        if not chat_ids:
+            return 0, "Получатели бэкапов не настроены"
     else:
         chat_id = (user.telegram_id or "").strip()
         if not chat_id and user.role.value == "admin":
-            chat_id = _get_setting(db, "telegram_chat_id").strip()
+            fallback = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
+            chat_id = fallback[0] if fallback else ""
         if not chat_id:
             return 0, "Telegram ID не привязан к вашему аккаунту"
+        chat_ids = [chat_id]
 
-    return send_config_files_to_chat(
-        db,
-        config,
-        bot_token=bot_token,
-        chat_id=chat_id,
-        path=path,
-        send_all=send_all,
-        run_async=run_async,
-        install_platform=install_platform,
-    )
+    total_sent = 0
+    last_error: str | None = None
+    for chat_id in chat_ids:
+        sent, err = send_config_files_to_chat(
+            db,
+            config,
+            bot_token=bot_token,
+            chat_id=chat_id,
+            path=path,
+            send_all=send_all,
+            run_async=run_async,
+            install_platform=install_platform,
+        )
+        total_sent += sent
+        if err:
+            last_error = err
+    return total_sent, last_error

@@ -24,6 +24,7 @@ from app.models import DEFAULT_TG_NOTIFY_EVENTS, AppSetting, User, VpnConfig, Vp
 from app.routers.maintenance import (
     _admin_notify_settings_response,
     _get_setting,
+    _send_test_message_to_recipients,
     _set_setting,
     _telegram_settings_response,
     update_telegram_settings,
@@ -501,6 +502,10 @@ def mini_update_admin_notify(
             if key in payload.events:
                 merged[key] = bool(payload.events[key])
         current_user.tg_notify_events = json.dumps(merged)
+    if payload.recipient_user_ids is not None:
+        from app.services.telegram_recipients import join_user_ids
+
+        _set_setting(db, "telegram_notify_recipient_user_ids", join_user_ids(payload.recipient_user_ids))
     db.commit()
     db.refresh(current_user)
     return _admin_notify_settings_response(db, current_user)
@@ -511,8 +516,6 @@ def mini_test_admin_notify(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not current_user.telegram_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите Telegram ID в настройках уведомлений")
     bot_token = _get_bot_token(db)
     if not bot_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
@@ -524,10 +527,8 @@ def mini_test_admin_notify(
         f"Аккаунт: <code>{current_user.username}</code>\n\n"
         f"Включённые события:\n{events_text}"
     )
-    ok = send_tg_message(bot_token, current_user.telegram_id, text, run_async=False)
-    if not ok:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
-    return MessageResponse(message="Тестовое сообщение отправлено")
+    sent, total = _send_test_message_to_recipients(db, current_user, text)
+    return MessageResponse(message=f"Тестовое сообщение отправлено ({sent} из {total})")
 
 
 @router.get("/telegram-settings", response_model=TelegramSettingsResponse)
@@ -551,19 +552,24 @@ def mini_update_telegram_settings(
 
 @router.post("/telegram-settings/test", response_model=MessageResponse)
 def mini_test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    from app.services.telegram_recipients import get_setting_chat_ids
+
     bot_token = _get_bot_token(db)
-    chat_id = _get_setting(db, "telegram_chat_id")
-    if not bot_token or not chat_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите токен бота и chat_id")
-    ok = send_tg_message(
-        bot_token,
-        chat_id,
-        "✅ <b>AdminPanelAZ</b>: тестовое уведомление Telegram",
-        run_async=False,
-    )
-    if not ok:
+    chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
+    if not bot_token or not chat_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите токен бота и получателей бэкапов")
+    sent = 0
+    for chat_id in chat_ids:
+        if send_tg_message(
+            bot_token,
+            chat_id,
+            "✅ <b>AdminPanelAZ</b>: тестовое уведомление Telegram",
+            run_async=False,
+        ):
+            sent += 1
+    if sent == 0:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
-    return MessageResponse(message="Тестовое сообщение отправлено")
+    return MessageResponse(message=f"Тестовое сообщение отправлено ({sent} из {len(chat_ids)})")
 
 
 @router.post("/send-config", response_model=MessageResponse, deprecated=True)

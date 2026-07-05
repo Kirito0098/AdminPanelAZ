@@ -911,11 +911,18 @@ send_weekly_pdf_report = send_weekly_image_report
 
 
 def _notify_recipients(db: Session) -> list[User]:
-    return [
+    from app.services.telegram_recipients import filter_notify_recipients
+
+    users = [
         user
         for user in db.query(User).filter(User.telegram_id.isnot(None)).all()
         if user.has_tg_notify_event(NOC_REPORT_EVENT)
     ]
+    return filter_notify_recipients(
+        db,
+        users,
+        lambda key, default="": _get_setting(db, key, default),
+    )
 
 
 def send_noc_report(db: Session, *, period: str) -> dict:

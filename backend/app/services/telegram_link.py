@@ -72,7 +72,7 @@ def redeem_link_code(db: Session, code: str, telegram_id: str) -> tuple[bool, st
 
     if not meta:
         db.commit()
-        return False, "Код не найден или истёк. Получите новый в панели: раздел Telegram → «Интерактив».", None
+        return False, "Код не найден или истёк. Получите новый в панели: Telegram → «Команды бота».", None
 
     user_id = int(meta["user_id"])
     user = db.query(User).filter(User.id == user_id).first()

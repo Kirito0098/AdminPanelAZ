@@ -7,26 +7,26 @@ export const TELEGRAM_TAB_META: Record<
   setup: {
     label: 'С чего начать',
     shortLabel: 'Старт',
-    description: 'Пошаговая инструкция: создайте бота, привяжите аккаунт и проверьте вход в панель',
+    description: 'Пошаговая инструкция: создайте бота, настройте вход и проверьте авторизацию',
   },
   bot: {
-    label: 'Данные бота',
+    label: 'Бот и авторизация',
     shortLabel: 'Бот',
-    description: 'Токен и имя бота из BotFather — основа для входа, приложения и сообщений',
+    description: 'Токен BotFather, Legacy или OIDC для входа — пошаговая инструкция и форма настройки',
   },
   miniapp: {
     label: 'Приложение',
     shortLabel: 'Прилож.',
-    description: 'Откройте панель прямо в Telegram — кнопка меню у вашего бота',
+    description: 'Mini App в Telegram: настройка кнопки, привязка аккаунта и возможности для user/admin',
   },
   interactive: {
     label: 'Команды бота',
     shortLabel: 'Команды',
-    description: 'Бот отвечает на /start, /status и другие команды в чате',
+    description: 'Webhook, команды /start и /status, привязка аккаунта через /link',
   },
   notify: {
     label: 'Уведомления',
     shortLabel: 'Увед.',
-    description: 'Сообщения о важных событиях приходят вам в личку от бота',
+    description: 'Получатели, переключатели, типы событий и NOC-сводки',
   },
 }

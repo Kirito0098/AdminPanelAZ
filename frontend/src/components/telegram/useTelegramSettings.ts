@@ -5,6 +5,7 @@ import {
   getAdminNotifySettings,
   getTelegramLinkCode,
   getTelegramSettings,
+  getUsers,
   registerTelegramWebhook,
   testAdminNotify,
   testAdminNotifyEvent,
@@ -13,9 +14,12 @@ import {
   testTelegram,
   updateAdminNotifySettings,
   updateTelegramSettings,
+  updateUser,
 } from '@/api/client'
 import { useNotifications } from '@/context/NotificationContext'
-import type { AdminNotifySettings, TelegramSettings } from '@/types'
+import type { AdminNotifySettings, TelegramSettings, User } from '@/types'
+
+export type TelegramAuthMethod = 'oidc' | 'legacy'
 
 export type TelegramSection = 'setup' | 'bot' | 'miniapp' | 'interactive' | 'notify'
 
@@ -26,8 +30,12 @@ export function useTelegramSettings() {
   const [botToken, setBotToken] = useState('')
   const [botUsername, setBotUsername] = useState('')
   const [authMaxAge, setAuthMaxAge] = useState('300')
-  const [chatId, setChatId] = useState('')
+  const [authMethod, setAuthMethod] = useState<TelegramAuthMethod>('legacy')
+  const [oidcClientId, setOidcClientId] = useState('')
+  const [oidcClientSecret, setOidcClientSecret] = useState('')
+  const [chatIds, setChatIds] = useState<string[]>([])
   const [telegramId, setTelegramId] = useState('')
+  const [notifyRecipientIds, setNotifyRecipientIds] = useState<number[]>([])
   const [notifyEnabled, setNotifyEnabled] = useState(false)
   const [notifyOnBackup, setNotifyOnBackup] = useState(false)
   const [interactiveEnabled, setInteractiveEnabled] = useState(false)
@@ -43,41 +51,69 @@ export function useTelegramSettings() {
   const [registeringWebhook, setRegisteringWebhook] = useState(false)
   const [deletingWebhook, setDeletingWebhook] = useState(false)
   const [linkCode, setLinkCode] = useState<string | null>(null)
+  const [linkedAdmins, setLinkedAdmins] = useState<User[]>([])
+  const [linkedAccounts, setLinkedAccounts] = useState<User[]>([])
+  const [unlinkingUserId, setUnlinkingUserId] = useState<number | null>(null)
+
+  const applyUsers = useCallback((users: User[]) => {
+    const linked = users.filter((user) => Boolean(user.telegram_id?.trim()))
+    setLinkedAccounts(linked)
+    setLinkedAdmins(linked.filter((user) => user.role === 'admin'))
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [tg, notify] = await Promise.all([getTelegramSettings(), getAdminNotifySettings()])
+      const [tg, notify, users] = await Promise.all([
+        getTelegramSettings(),
+        getAdminNotifySettings(),
+        getUsers().catch(() => [] as User[]),
+      ])
+      applyUsers(users)
       setSettings(tg)
       setBotUsername(tg.bot_username)
       setAuthMaxAge(String(tg.auth_max_age_seconds || 300))
-      setChatId(tg.chat_id)
+      setAuthMethod(tg.auth_method === 'oidc' ? 'oidc' : 'legacy')
+      setOidcClientId(tg.oidc_client_id || '')
+      setChatIds(tg.chat_ids?.length ? tg.chat_ids : tg.chat_id ? [tg.chat_id] : [])
       setNotifyEnabled(tg.notify_enabled)
       setNotifyOnBackup(tg.notify_on_backup)
       setInteractiveEnabled(tg.interactive_enabled)
       setAdminNotify(notify)
       setTelegramId(notify.telegram_id)
+      setNotifyRecipientIds(notify.recipient_user_ids ?? [])
       setEventToggles(Object.fromEntries(notify.events.map((e) => [e.key, e.enabled])))
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки')
     } finally {
       setLoading(false)
     }
-  }, [notifyError])
+  }, [notifyError, applyUsers])
 
   useEffect(() => {
     void load()
   }, [load])
 
-  const loginConfigured = Boolean(settings?.bot_token_set && settings?.bot_username)
+  const loginConfigured = Boolean(settings?.login_ready)
+  const oidcLoginReady = Boolean(
+    settings?.auth_method === 'oidc' && settings?.oidc_client_id && settings?.oidc_client_secret_set,
+  )
+  const legacyLoginReady = Boolean(
+    settings?.auth_method === 'legacy' &&
+      settings?.legacy_login_enabled &&
+      settings?.bot_token_set &&
+      settings?.bot_username,
+  )
   const miniAppReady = Boolean(settings?.mini_app_url)
   const webhookReady = Boolean(settings?.webhook_registered)
   const notifyEventsEnabled = useMemo(
     () => Object.values(eventToggles).filter(Boolean).length,
     [eventToggles],
   )
+  const hasNotifyRecipients = notifyRecipientIds.length > 0 || Boolean(telegramId.trim())
+  const hasBackupRecipients = chatIds.length > 0
 
-  const handleSave = async (e: FormEvent) => {
+  const handleSaveBot = async (e: FormEvent) => {
     e.preventDefault()
     setSaving(true)
     try {
@@ -85,18 +121,19 @@ export function useTelegramSettings() {
       const updated = await updateTelegramSettings({
         bot_token: botToken || undefined,
         bot_username: botUsername.trim() || undefined,
-        auth_max_age_seconds: Number.isFinite(maxAge) ? maxAge : undefined,
-        chat_id: chatId,
-        notify_enabled: notifyEnabled,
-        notify_on_backup: notifyOnBackup,
+        auth_method: authMethod,
+        auth_max_age_seconds: authMethod === 'legacy' && Number.isFinite(maxAge) ? maxAge : undefined,
+        oidc_client_id: authMethod === 'oidc' ? oidcClientId.trim() || undefined : undefined,
+        oidc_client_secret: authMethod === 'oidc' && oidcClientSecret ? oidcClientSecret : undefined,
       })
       setSettings(updated)
       setBotUsername(updated.bot_username)
       setAuthMaxAge(String(updated.auth_max_age_seconds))
-      setNotifyEnabled(updated.notify_enabled)
-      setNotifyOnBackup(updated.notify_on_backup)
+      setAuthMethod(updated.auth_method === 'oidc' ? 'oidc' : 'legacy')
+      setOidcClientId(updated.oidc_client_id || '')
+      setOidcClientSecret('')
       setBotToken('')
-      success('Настройки Telegram сохранены')
+      success('Настройки бота сохранены')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
     } finally {
@@ -119,12 +156,24 @@ export function useTelegramSettings() {
     e.preventDefault()
     setSavingNotify(true)
     try {
-      const updated = await updateAdminNotifySettings({
-        telegram_id: telegramId,
-        events: eventToggles,
-      })
+      const [updated, updatedTg] = await Promise.all([
+        updateAdminNotifySettings({
+          recipient_user_ids: notifyRecipientIds,
+          events: eventToggles,
+        }),
+        updateTelegramSettings({
+          chat_ids: chatIds,
+          notify_enabled: notifyEnabled,
+          notify_on_backup: notifyOnBackup,
+        }),
+      ])
       setAdminNotify(updated)
+      setSettings(updatedTg)
       setTelegramId(updated.telegram_id)
+      setNotifyRecipientIds(updated.recipient_user_ids ?? [])
+      setChatIds(updatedTg.chat_ids?.length ? updatedTg.chat_ids : updatedTg.chat_id ? [updatedTg.chat_id] : [])
+      setNotifyEnabled(updatedTg.notify_enabled)
+      setNotifyOnBackup(updatedTg.notify_on_backup)
       setEventToggles(Object.fromEntries(updated.events.map((item) => [item.key, item.enabled])))
       success('Настройки уведомлений сохранены')
     } catch (err) {
@@ -195,11 +244,33 @@ export function useTelegramSettings() {
     }
   }
 
+  const handleUnlinkTelegram = async (user: User) => {
+    setUnlinkingUserId(user.id)
+    try {
+      await updateUser(user.id, { telegram_id: '' })
+      const tgId = user.telegram_id?.trim()
+      setLinkedAccounts((prev) => prev.filter((item) => item.id !== user.id))
+      setLinkedAdmins((prev) => prev.filter((item) => item.id !== user.id))
+      setNotifyRecipientIds((prev) => prev.filter((id) => id !== user.id))
+      if (tgId) {
+        setChatIds((prev) => prev.filter((id) => id !== tgId))
+      }
+      if (telegramId === tgId) {
+        setTelegramId('')
+      }
+      success(`Telegram отвязан от ${user.username}`)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось отвязать Telegram')
+    } finally {
+      setUnlinkingUserId(null)
+    }
+  }
+
   const handleTest = async () => {
     setTesting(true)
     try {
       await testTelegram()
-      success('Тестовое сообщение отправлено в chat_id')
+      success('Тестовое сообщение отправлено получателям бэкапов')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка отправки')
     } finally {
@@ -211,7 +282,7 @@ export function useTelegramSettings() {
     setTestingNotify(true)
     try {
       await testAdminNotify()
-      success('Тестовое уведомление отправлено на ваш Telegram ID')
+      success('Тестовое уведомление отправлено выбранным получателям')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка отправки')
     } finally {
@@ -235,7 +306,7 @@ export function useTelegramSettings() {
     setTestingNocReport(period)
     try {
       const result = await testNocReportPreview(period)
-      success(result.message || 'NOC сводка отправлена на ваш Telegram ID')
+      success(result.message || 'NOC сводка отправлена выбранным получателям')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка отправки')
     } finally {
@@ -247,7 +318,7 @@ export function useTelegramSettings() {
     setTestingNocReport('image')
     try {
       const result = await testNocWeeklyImagePreview()
-      success(result.message || 'NOC weekly изображение отправлено на ваш Telegram ID')
+      success(result.message || 'NOC weekly изображение отправлено выбранным получателям')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка отправки изображения')
     } finally {
@@ -264,10 +335,20 @@ export function useTelegramSettings() {
     setBotUsername,
     authMaxAge,
     setAuthMaxAge,
-    chatId,
-    setChatId,
+    authMethod,
+    setAuthMethod,
+    oidcClientId,
+    setOidcClientId,
+    oidcClientSecret,
+    setOidcClientSecret,
+    chatIds,
+    setChatIds,
     telegramId,
     setTelegramId,
+    notifyRecipientIds,
+    setNotifyRecipientIds,
+    hasNotifyRecipients,
+    hasBackupRecipients,
     notifyEnabled,
     setNotifyEnabled,
     notifyOnBackup,
@@ -286,12 +367,17 @@ export function useTelegramSettings() {
     registeringWebhook,
     deletingWebhook,
     linkCode,
+    linkedAdmins,
+    linkedAccounts,
+    unlinkingUserId,
     load,
     loginConfigured,
+    oidcLoginReady,
+    legacyLoginReady,
     miniAppReady,
     webhookReady,
     notifyEventsEnabled,
-    handleSave,
+    handleSaveBot,
     handleCopyMiniAppUrl,
     handleSaveAdminNotify,
     handleSaveInteractive,
@@ -299,6 +385,7 @@ export function useTelegramSettings() {
     handleDeleteWebhook,
     handleGetLinkCode,
     handleCopyLinkCode,
+    handleUnlinkTelegram,
     handleTest,
     handleTestAdminNotify,
     handleTestNotifyEvent,

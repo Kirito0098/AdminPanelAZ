@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     hsts_max_age: int = 31536000
     content_security_policy: str = (
         "default-src 'self'; "
-        "script-src 'self' https://telegram.org; "
+        "script-src 'self' https://telegram.org https://oauth.telegram.org; "
         "style-src 'self'; "
         "style-src-attr 'unsafe-inline'; "
         "img-src 'self' data: blob:; "

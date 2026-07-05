@@ -30,6 +30,10 @@ class Login2FARequest(BaseModel):
     code: str = Field(min_length=6, max_length=16)
 
 
+class TelegramOidcTokenRequest(BaseModel):
+    id_token: str = Field(min_length=20)
+
+
 class TwoFASetupResponse(BaseModel):
     secret: str
     otpauth_uri: str
@@ -827,12 +831,21 @@ class TelegramSettingsResponse(BaseModel):
     auth_max_age_seconds: int = 300
     mini_app_url: str = ""
     chat_id: str = ""
+    chat_ids: list[str] = Field(default_factory=list)
     notify_enabled: bool = False
     notify_on_backup: bool = False
     interactive_enabled: bool = False
     webhook_registered: bool = False
     webhook_secret_set: bool = False
     webhook_set_at: str = ""
+    oidc_enabled: bool = False
+    oidc_client_id: str = ""
+    oidc_client_secret_set: bool = False
+    oidc_callback_url: str = ""
+    oidc_trusted_origin: str = ""
+    legacy_login_enabled: bool = True
+    auth_method: Literal["oidc", "legacy", "none"] = "legacy"
+    login_ready: bool = False
 
 
 class TelegramSettingsUpdate(BaseModel):
@@ -840,9 +853,15 @@ class TelegramSettingsUpdate(BaseModel):
     bot_username: str | None = None
     auth_max_age_seconds: int | None = Field(default=None, ge=30, le=86400)
     chat_id: str | None = None
+    chat_ids: list[str] | None = None
     notify_enabled: bool | None = None
     notify_on_backup: bool | None = None
     interactive_enabled: bool | None = None
+    auth_method: Literal["oidc", "legacy"] | None = None
+    oidc_enabled: bool | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
+    legacy_login_enabled: bool | None = None
 
 
 class TelegramLinkCodeResponse(BaseModel):
@@ -858,6 +877,7 @@ class AdminNotifyEventItem(BaseModel):
 
 class AdminNotifySettingsResponse(BaseModel):
     telegram_id: str = ""
+    recipient_user_ids: list[int] = Field(default_factory=list)
     notify_enabled: bool = False
     bot_token_set: bool = False
     events: list[AdminNotifyEventItem]
@@ -865,6 +885,7 @@ class AdminNotifySettingsResponse(BaseModel):
 
 class AdminNotifySettingsUpdate(BaseModel):
     telegram_id: str | None = None
+    recipient_user_ids: list[int] | None = None
     events: dict[str, bool] | None = None
 
 

@@ -107,7 +107,7 @@ START_UNLINKED = (
     "{title}\n\n"
     "Чтобы начать, привяжите аккаунт панели:\n"
     "<code>/link &lt;код&gt;</code>\n\n"
-    "Код — в панели: Telegram → «Интерактив»."
+    "Код — в панели: Telegram → «Команды бота»."
 )
 START_LINKED = (
     "{title}\n\n"

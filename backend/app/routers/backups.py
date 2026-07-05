@@ -27,6 +27,7 @@ from app.services.backup_manager import BackupManager
 from app.services.node_manager import get_active_adapter
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.telegram import send_tg_document, send_tg_message
+from app.services.telegram_recipients import get_setting_chat_ids
 
 router = APIRouter(prefix="/backups", tags=["backups"])
 settings = get_settings()
@@ -101,11 +102,11 @@ def update_backup_settings(
     )
 
 
-def _telegram_credentials(db: Session) -> tuple[str, str] | None:
+def _telegram_credentials(db: Session) -> tuple[str, list[str]] | None:
     bot_token = _get_setting(db, "telegram_bot_token")
-    chat_id = _get_setting(db, "telegram_chat_id")
-    if bot_token and chat_id:
-        return bot_token, chat_id
+    chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
+    if bot_token and chat_ids:
+        return bot_token, chat_ids
     return None
 
 
@@ -144,14 +145,15 @@ def _create_backup_with_optional_telegram(
             )
 
     if tg:
-        bot_token, chat_id = tg
+        bot_token, chat_ids = tg
         archive_path = manager.get_backup_path(result["file_name"])
-        send_tg_document(
-            bot_token,
-            chat_id,
-            str(archive_path),
-            caption=f"{panel_caption_prefix}: {result['file_name']}",
-        )
+        for chat_id in chat_ids:
+            send_tg_document(
+                bot_token,
+                chat_id,
+                str(archive_path),
+                caption=f"{panel_caption_prefix}: {result['file_name']}",
+            )
 
     if include_antizapret_backup:
         try:
@@ -159,12 +161,13 @@ def _create_backup_with_optional_telegram(
             az_result = adapter.create_antizapret_backup()
             if tg and az_result.get("archive_path"):
                 archive_name = az_result.get("archive_name") or Path(az_result["archive_path"]).name
-                send_tg_document(
-                    tg[0],
-                    tg[1],
-                    az_result["archive_path"],
-                    caption=f"{az_caption_prefix}: {archive_name}",
-                )
+                for chat_id in tg[1]:
+                    send_tg_document(
+                        tg[0],
+                        chat_id,
+                        az_result["archive_path"],
+                        caption=f"{az_caption_prefix}: {archive_name}",
+                    )
         except Exception as exc:
             if send_to_telegram:
                 raise
@@ -248,11 +251,11 @@ def test_backup_telegram(
     admin: User = Depends(require_admin),
 ):
     bot_token = _get_setting(db, "telegram_bot_token")
-    chat_id = _get_setting(db, "telegram_chat_id")
-    if not bot_token or not chat_id:
+    chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
+    if not bot_token or not chat_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Укажите токен бота и chat_id в настройках Telegram",
+            detail="Укажите токен бота и получателей бэкапов в настройках Telegram",
         )
 
     active = background_task_service.find_active_task("app_backup_test_tg")

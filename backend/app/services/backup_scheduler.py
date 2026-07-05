@@ -12,6 +12,7 @@ from app.services.cidr.pipeline.file_pipeline import _prune_runtime_backups
 from app.services.feature_toggles import FeatureToggleService
 from app.services.node_manager import get_active_adapter
 from app.services.telegram import send_tg_document
+from app.services.telegram_recipients import get_setting_chat_ids
 
 logger = logging.getLogger(__name__)
 
@@ -70,14 +71,16 @@ async def run_backup_scheduler_loop(app_root: Path, backup_root: Path, db_path: 
 
                     if get_feature_service().is_enabled("telegram"):
                         token = _get_setting(db, "telegram_bot_token")
-                        chat = _get_setting(db, "telegram_chat_id")
-                        if token and chat:
-                            send_tg_document(
-                                token,
-                                chat,
-                                str(manager.get_backup_path(result["file_name"])),
-                                caption=f"Авто-бэкап: {result['file_name']}",
-                            )
+                        chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
+                        if token and chat_ids:
+                            backup_path = str(manager.get_backup_path(result["file_name"]))
+                            for chat_id in chat_ids:
+                                send_tg_document(
+                                    token,
+                                    chat_id,
+                                    backup_path,
+                                    caption=f"Авто-бэкап: {result['file_name']}",
+                                )
                 if _get_setting(db, "backup_az_enabled", "true") == "true":
                     try:
                         adapter = get_active_adapter(db)
@@ -87,14 +90,17 @@ async def run_backup_scheduler_loop(app_root: Path, backup_root: Path, db_path: 
 
                             if get_feature_service().is_enabled("telegram"):
                                 token = _get_setting(db, "telegram_bot_token")
-                                chat = _get_setting(db, "telegram_chat_id")
-                                if token and chat and az_result.get("archive_path"):
-                                    send_tg_document(
-                                        token,
-                                        chat,
-                                        az_result["archive_path"],
-                                        caption=f"Авто-бэкап AntiZapret: {az_result.get('archive_name', '')}",
-                                    )
+                                chat_ids = get_setting_chat_ids(
+                                    lambda key, default="": _get_setting(db, key, default)
+                                )
+                                if token and chat_ids and az_result.get("archive_path"):
+                                    for chat_id in chat_ids:
+                                        send_tg_document(
+                                            token,
+                                            chat_id,
+                                            az_result["archive_path"],
+                                            caption=f"Авто-бэкап AntiZapret: {az_result.get('archive_name', '')}",
+                                        )
                     except Exception as exc:
                         logger.warning("Auto AntiZapret backup (client.sh 8) failed: %s", exc)
                 db.commit()

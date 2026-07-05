@@ -25,8 +25,9 @@ export default function TelegramPage() {
   const tg = useTelegramSettings()
 
   const tab = useMemo(() => {
-    const value = searchParams.get('tab') as TelegramSection | null
-    return value && VALID_TABS.has(value) ? value : 'setup'
+    const value = searchParams.get('tab')
+    if (value === 'auth') return 'bot'
+    return value && VALID_TABS.has(value as TelegramSection) ? (value as TelegramSection) : 'setup'
   }, [searchParams])
 
   const navigateTab = (next: TelegramSection) => {

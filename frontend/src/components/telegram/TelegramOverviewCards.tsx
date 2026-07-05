@@ -11,6 +11,15 @@ interface TelegramOverviewCardsProps {
 }
 
 export default function TelegramOverviewCards({ tg, loading = false, onNavigate }: TelegramOverviewCardsProps) {
+  const authLabel =
+    tg.settings?.auth_method === 'oidc'
+      ? tg.oidcLoginReady
+        ? 'OIDC'
+        : 'OIDC · настройка'
+      : tg.legacyLoginReady
+        ? 'Legacy'
+        : 'Legacy · настройка'
+
   const cards: Array<{
     key: TelegramSection
     title: string
@@ -22,21 +31,23 @@ export default function TelegramOverviewCards({ tg, loading = false, onNavigate 
   }> = [
     {
       key: 'setup',
-      title: 'Вход в панель',
+      title: 'С чего начать',
       icon: LogIn,
       value: tg.loginConfigured && tg.telegramId ? 'Готов' : tg.loginConfigured ? 'Почти готов' : 'Настроить',
-      sub: tg.telegramId ? `Ваш ID: ${tg.telegramId}` : 'Привяжите свой Telegram',
+      sub: tg.telegramId ? `Ваш ID: ${tg.telegramId}` : 'Пошаговая инструкция',
       accent: tg.loginConfigured && tg.telegramId ? 'border-l-emerald-500' : 'border-l-muted-foreground/30',
       tone: tg.loginConfigured && tg.telegramId ? 'text-emerald-600 dark:text-emerald-400' : undefined,
     },
     {
       key: 'bot',
-      title: 'Данные бота',
+      title: 'Бот и авторизация',
       icon: Send,
-      value: tg.loginConfigured ? 'Подключён' : tg.settings?.bot_token_set ? 'Не завершено' : 'Не настроен',
-      sub: tg.botUsername ? `@${tg.botUsername.replace(/^@/, '')}` : 'Токен и имя из BotFather',
-      accent: tg.loginConfigured ? 'border-l-emerald-500' : 'border-l-amber-500',
-      tone: tg.loginConfigured ? 'text-emerald-600 dark:text-emerald-400' : undefined,
+      value: tg.settings?.bot_token_set && tg.loginConfigured ? 'Готов' : tg.settings?.bot_token_set ? 'Почти готов' : 'Настроить',
+      sub: tg.botUsername
+        ? `@${tg.botUsername.replace(/^@/, '')} · ${authLabel}`
+        : 'Токен, username и способ входа',
+      accent: tg.settings?.bot_token_set && tg.loginConfigured ? 'border-l-emerald-500' : 'border-l-amber-500',
+      tone: tg.settings?.bot_token_set && tg.loginConfigured ? 'text-emerald-600 dark:text-emerald-400' : undefined,
     },
     {
       key: 'miniapp',
@@ -78,7 +89,7 @@ export default function TelegramOverviewCards({ tg, loading = false, onNavigate 
   ]
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       {cards.map((card) => (
         <button
           key={card.key}

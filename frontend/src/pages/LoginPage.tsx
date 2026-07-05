@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
-import { LogIn, Shield } from 'lucide-react'
+import { LogIn, Send, Shield } from 'lucide-react'
 import {
   ApiError,
   getCaptchaRequired,
@@ -43,6 +43,8 @@ export default function LoginPage() {
   const [captchaImageUrl, setCaptchaImageUrl] = useState('')
   const [captchaRequired, setCaptchaRequired] = useState(false)
   const [tgBot, setTgBot] = useState('')
+  const [tgOidcStartUrl, setTgOidcStartUrl] = useState('')
+  const [tgLegacyEnabled, setTgLegacyEnabled] = useState(false)
   const [tgLoginReason, setTgLoginReason] = useState<string | null>(null)
   const [telegramModuleEnabled, setTelegramModuleEnabled] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -66,7 +68,15 @@ export default function LoginPage() {
         window.history.replaceState(null, '', window.location.pathname + window.location.search)
       }
     }
-  }, [searchParams, setToken])
+    const tgError = searchParams.get('tg_error')
+    if (tgError) {
+      notifyError(decodeURIComponent(tgError))
+      const next = new URLSearchParams(searchParams)
+      next.delete('tg_error')
+      const qs = next.toString()
+      window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`)
+    }
+  }, [searchParams, setToken, notifyError])
 
   const refreshCaptcha = async () => {
     const resp = await fetch(`${API_BASE}/auth/captcha`)
@@ -100,22 +110,45 @@ export default function LoginPage() {
           setTgLoginReason('Не удалось загрузить настройки Telegram')
           return
         }
-        if (tgConfig.enabled && tgConfig.bot_username) {
-          setTgBot(tgConfig.bot_username)
+        setTgOidcStartUrl('')
+        setTgLegacyEnabled(false)
+        setTgBot('')
+
+        const method = tgConfig.auth_method === 'oidc' ? 'oidc' : tgConfig.auth_method === 'legacy' ? 'legacy' : null
+
+        if (method === 'oidc') {
+          setTgOidcStartUrl(tgConfig.oidc_start_url || '')
+        } else if (method === 'legacy') {
+          const legacyReady = Boolean(tgConfig.legacy_enabled && tgConfig.bot_username)
+          setTgLegacyEnabled(legacyReady)
+          if (legacyReady) {
+            setTgBot(tgConfig.bot_username)
+          }
+        }
+
+        if (tgConfig.enabled) {
           setTgLoginReason(null)
           return
         }
-        if (!tgConfig.bot_username) {
-          setTgLoginReason('Не указан username бота — заполните в разделе «Telegram»')
+        if (method === 'oidc' && tgConfig.auth_method === 'oidc' && !tgConfig.oidc_start_url) {
+          setTgLoginReason('OpenID Connect выбран, но Client ID/Secret не заполнены')
           return
         }
-        setTgLoginReason('Не указан токен бота — заполните в разделе «Telegram»')
+        if (method === 'legacy' && !tgConfig.bot_username) {
+          setTgLoginReason('Укажите токен и username бота на вкладке «Бот и авторизация»')
+          return
+        }
+        if (!method) {
+          setTgLoginReason('Настройте вход в разделе «Telegram → Бот и авторизация»')
+          return
+        }
+        setTgLoginReason('Завершите настройку выбранного способа входа')
       })
   }, [])
 
   useEffect(() => {
     const container = telegramLoginRef.current
-    if (!container || !tgBot || !telegramAuthCallback) {
+    if (!container || !tgBot || !tgLegacyEnabled || !telegramAuthCallback) {
       if (container) container.innerHTML = ''
       return
     }
@@ -128,7 +161,7 @@ export default function LoginPage() {
     script.setAttribute('data-auth-url', telegramAuthCallback)
     script.setAttribute('data-request-access', 'write')
     container.appendChild(script)
-  }, [tgBot, telegramAuthCallback])
+  }, [tgBot, tgLegacyEnabled, telegramAuthCallback])
 
   useEffect(() => {
     return () => {
@@ -295,13 +328,30 @@ export default function LoginPage() {
                 </>
               )}
             </Button>
-            {telegramModuleEnabled && !tgBot && tgLoginReason && (
+            {telegramModuleEnabled && !tgOidcStartUrl && !tgBot && tgLoginReason && (
               <p className="rounded-md border border-dashed px-3 py-2 text-center text-xs text-muted-foreground">
                 {tgLoginReason}
               </p>
             )}
           </form>
-          <div ref={telegramLoginRef} className="flex min-h-[44px] justify-center pt-4" />
+          {(tgOidcStartUrl || tgLegacyEnabled) && (
+            <div className="space-y-3 border-t pt-4">
+              {tgOidcStartUrl && (
+                <Button type="button" variant="secondary" className="w-full" asChild>
+                  <a href={tgOidcStartUrl}>
+                    <Send size={16} />
+                    Войти через Telegram
+                  </a>
+                </Button>
+              )}
+              {tgLegacyEnabled && (
+                <div ref={telegramLoginRef} className="flex min-h-[44px] justify-center" />
+              )}
+              {telegramModuleEnabled && tgLoginReason && (tgOidcStartUrl || tgBot) && (
+                <p className="text-center text-xs text-muted-foreground">{tgLoginReason}</p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

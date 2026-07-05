@@ -13,7 +13,7 @@ export default function TelegramAlerts({ tg }: TelegramAlertsProps) {
     <div className="space-y-3">
       {!tg.settings.bot_token_set && (
         <SettingsAlert variant="warning" title="Сначала настройте бота">
-          Укажите токен и имя бота на вкладке <strong>Данные бота</strong> — без этого не заработают вход,
+          Укажите токен и имя бота на вкладке <strong>Бот и авторизация</strong> — без этого не заработают вход,
           приложение и команды.
         </SettingsAlert>
       )}
@@ -25,9 +25,16 @@ export default function TelegramAlerts({ tg }: TelegramAlertsProps) {
         </SettingsAlert>
       )}
 
-      {tg.notifyEnabled && !tg.telegramId && (
-        <SettingsAlert variant="info" title="Укажите свой Telegram ID">
-          Уведомления включены, но некуда отправлять — заполните ID на вкладке <strong>Уведомления</strong> или в{' '}
+      {tg.notifyOnBackup && !tg.hasBackupRecipients && (
+        <SettingsAlert variant="info" title="Укажите получателей бэкапов">
+          Отправка архивов включена — выберите администраторов на вкладке <strong>Уведомления</strong>.
+        </SettingsAlert>
+      )}
+
+      {tg.notifyEnabled && !tg.hasNotifyRecipients && (
+        <SettingsAlert variant="info" title="Укажите получателей уведомлений">
+          Уведомления включены, но некуда отправлять — выберите администраторов на вкладке{' '}
+          <strong>Уведомления</strong> или привяжите Telegram в{' '}
           <Link to="/settings" className="font-medium text-primary underline-offset-4 hover:underline">
             Настройки → Пользователи
           </Link>
@@ -38,7 +45,7 @@ export default function TelegramAlerts({ tg }: TelegramAlertsProps) {
       {!tg.notifyEnabled && tg.notifyEventsEnabled > 0 && (
         <SettingsAlert variant="info" title="Уведомления сохранены, но выключены">
           Вы выбрали типы событий, но общий переключатель выключен. Включите его на вкладке{' '}
-          <strong>Данные бота</strong>.
+          <strong>Уведомления</strong>.
         </SettingsAlert>
       )}
     </div>
