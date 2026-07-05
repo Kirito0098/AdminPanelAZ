@@ -44,3 +44,9 @@ export function splitProfileFilesByRoute(files: TgMiniConfigFile[]) {
 export function profileRouteLabel(route: ProfileRoute): string {
   return route === 'antizapret' ? 'AntiZapret' : 'VPN'
 }
+
+export function profileRouteHint(route: ProfileRoute): string {
+  return route === 'antizapret'
+    ? 'Только заблокированные сайты и сервисы'
+    : 'Весь трафик через VPN-сервер'
+}

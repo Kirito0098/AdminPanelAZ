@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.10.0](#2100---2026-07-05) — 2026-07-05
 - [2.9.0](#290---2026-07-05) — 2026-07-05
 - [2.8.0](#280---2026-07-02) — 2026-07-02
 - [2.7.0](#270---2026-07-02) — 2026-07-02
@@ -33,6 +34,53 @@
 ---
 
 ## [Unreleased]
+
+---
+
+## [2.10.0] - 2026-07-05
+
+> **Кратко:** Telegram Mini App — создание и полное управление конфигами (шаблоны, блокировка, смена владельца), переработанный UX карточки клиента, исправления авторизации и прокрутки формы создания.
+
+### ✨ Added
+
+#### Telegram Mini App — конфиги
+
+- **Создание конфигов** — кнопка «Новый конфиг» на вкладке «Конфиги»: имя, протокол (OpenVPN / WireGuard), срок сертификата, описание; для admin — выбор владельца; учёт квоты self-service (`CreateConfigDialog`, `GET/POST /api/configs`, `GET /api/configs/quota`).
+- **Шаблоны** — one-click создание по шаблонам узла: укажите имя клиента и нажмите шаблон (`GET /api/client-templates`, `POST /api/client-templates/{id}/apply`).
+- **Управление конфигом** — в карточке конфига: редактирование описания, обновление сертификата OpenVPN, удаление с подтверждением (свои конфиги; все — для admin).
+- **Admin: смена владельца** — передача конфига другому пользователю панели (`PATCH /api/configs/{id}`, `ConfigOwnerSelect`).
+- **Admin: блокировка** — временная и постоянная блокировка OpenVPN / WireGuard, разблокировка; отображение текущего статуса (`/api/client-access/*`, `ConfigManagePanel`).
+
+#### Telegram Mini App — API
+
+- **Обёртки panel API** — Mini App вызывает основные эндпоинты панели с JWT из Telegram (`panelApiFetch` в `tg-mini/api.ts`): CRUD конфигов, квота, шаблоны, политики доступа, список пользователей.
+- **`user_id` в `/tg-mini/settings`** — для предвыбора владельца при создании конфига admin'ом (`tg_mini.py`).
+
+### 🔄 Changed
+
+#### Telegram Mini App — карточка конфига
+
+- **Новый UX bottom sheet** — вкладки «Получить» / «Управление», sticky-кнопки внизу, пошаговые карточки (профиль → устройство → действие) (`ConfigActionDialog`).
+- **Выбор профиля** — tappable-карточки файлов с бейджем расширения вместо dropdown; подсказки AntiZapret / VPN (`MiniProfileFilePicker`, `profileRouteHint`).
+- **Выбор устройства** — сетка 3+2, динамическая подпись «инструкция для …» (`MiniPlatformPicker`).
+- **Управление** — сворачиваемые секции: основное, владелец, сертификат, доступ, удаление.
+- **Успешная отправка** — отдельный экран подтверждения с haptic feedback.
+
+#### Telegram Mini App — форма «Новый конфиг»
+
+- **Bottom sheet layout** — прокручиваемое тело формы и sticky footer с кнопками «Создать» / «Отмена» (классы `tg-mini-config-sheet`, `tg-mini-config-sheet-body`, `tg-mini-config-sheet-footer`).
+
+#### Telegram Mini App — авторизация
+
+- **Обновление сессии** — при 401 автоматический re-auth через Telegram `initData` (`refreshTgSession`, `refreshTgSessionFromInitData`); `/auth` больше не отправляет устаревший Bearer.
+- **Ожидание initData** — расширен polling до ~2.5 с для медленных клиентов Telegram (`waitForTelegramInitData`).
+
+### 🐛 Fixed
+
+#### Telegram Mini App
+
+- **Первый вход / «Неверный токен авторизации»** — протухший JWT в `localStorage` больше не блокирует вход: приложение прозрачно перевыпускает сессию без экрана «Повторить» (`TgAuthContext`).
+- **Форма «Новый конфиг» на маленьком экране** — поля и шаблоны не обрезаются; кнопки создания всегда доступны (touch-scroll на Android).
 
 ---
 
@@ -1333,7 +1381,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.9.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.10.0...HEAD
+[2.10.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.6.0...v2.7.0

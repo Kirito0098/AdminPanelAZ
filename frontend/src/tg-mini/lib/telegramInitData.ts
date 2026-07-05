@@ -28,7 +28,7 @@ export async function waitForTelegramInitData(tg: TgWebApp | null): Promise<stri
   tg?.ready()
   tg?.expand()
 
-  const delays = [0, 50, 150]
+  const delays = [0, 50, 100, 200, 400, 700, 1200]
   for (const delay of delays) {
     if (delay > 0) {
       await new Promise((resolve) => setTimeout(resolve, delay))

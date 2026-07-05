@@ -1,7 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ApiError } from '@/api/client'
 import { applyThemeClass, normalizeTheme } from '@/lib/theme'
-import { clearTgToken, getTgSettings, getTgToken, setTgToken, tgAuth } from '@/tg-mini/api'
+import {
+  clearTgToken,
+  getTgSettings,
+  getTgToken,
+  refreshTgSessionFromInitData,
+} from '@/tg-mini/api'
 import { getTelegramWebApp, TG_MINI_NO_INIT_DATA, waitForTelegramInitData } from '@/tg-mini/lib/telegramInitData'
 import type { TgMiniSettings } from '@/types'
 
@@ -38,14 +43,25 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
       setError(TG_MINI_NO_INIT_DATA)
       return
     }
+
     setStatus('loading')
     setError(null)
+
     try {
-      const cached = getTgToken()
-      if (!cached) {
-        const auth = await tgAuth(initData)
-        setTgToken(auth.access_token)
+      if (getTgToken()) {
+        try {
+          await loadSettings()
+          setStatus('authenticated')
+          return
+        } catch (err) {
+          if (!(err instanceof ApiError && err.status === 401)) {
+            throw err
+          }
+          clearTgToken()
+        }
       }
+
+      await refreshTgSessionFromInitData(initData)
       await loadSettings()
       setStatus('authenticated')
     } catch (err) {

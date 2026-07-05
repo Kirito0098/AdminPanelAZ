@@ -621,6 +621,7 @@ export interface TgMiniConfigFile {
 export interface TgMiniSettings {
   server_ip: string | null
   bot_configured: boolean
+  user_id: number
   username: string
   role: string
   theme: 'light' | 'dark'

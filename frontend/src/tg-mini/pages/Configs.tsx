@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronRight, FileKey, Search } from 'lucide-react'
+import { ChevronRight, FileKey, Plus, Search } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import ConfigActionDialog, { type ConfigFeedback } from '@/tg-mini/components/ConfigActionDialog'
+import CreateConfigDialog from '@/tg-mini/components/CreateConfigDialog'
 import { splitProfileFilesByRoute } from '@/tg-mini/lib/profileFiles'
 import MiniListToolbar, {
   matchesProtocolFilter,
@@ -14,9 +15,16 @@ import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
 import { guessInstallPlatform } from '@/tg-mini/lib/platformMeta'
 import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
-import { getTgConfigFiles, getTgConfigs, getTgQrLink, sendTgConfig } from '@/tg-mini/api'
+import {
+  getTgConfigFiles,
+  getTgConfigQuota,
+  getTgConfigs,
+  getTgFeatureModules,
+  getTgQrLink,
+  sendTgConfig,
+} from '@/tg-mini/api'
 import { copyText, openExternalLink, shareViaTelegram } from '@/tg-mini/lib/shareDownloadLink'
-import type { InstallPlatform, TgMiniConfig, TgMiniConfigFile, TgMiniQrLink } from '@/types'
+import type { InstallPlatform, SelfServiceQuota, TgMiniConfig, TgMiniConfigFile, TgMiniQrLink } from '@/types'
 
 const canShareInTelegram = typeof window.Telegram?.WebApp?.shareUrl === 'function'
 
@@ -38,8 +46,12 @@ function ownerLabel(config: TgMiniConfig): string | null {
 }
 
 export default function Configs() {
-  const { isAdmin } = useTgAuth()
+  const { isAdmin, settings } = useTgAuth()
   const [configs, setConfigs] = useState<TgMiniConfig[]>([])
+  const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
+  const [openvpnEnabled, setOpenvpnEnabled] = useState(true)
+  const [wireguardEnabled, setWireguardEnabled] = useState(true)
+  const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -63,14 +75,27 @@ export default function Configs() {
     }
     setError(null)
     try {
-      const data = await getTgConfigs()
+      const [data, quotaData] = await Promise.all([getTgConfigs(), getTgConfigQuota()])
       setConfigs(data.configs)
+      setQuota(quotaData)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка загрузки')
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
+  }, [])
+
+  useEffect(() => {
+    void getTgFeatureModules()
+      .then((data) => {
+        setOpenvpnEnabled(Boolean(data.features.openvpn))
+        setWireguardEnabled(Boolean(data.features.wireguard))
+      })
+      .catch(() => {
+        setOpenvpnEnabled(true)
+        setWireguardEnabled(true)
+      })
   }, [])
 
   useEffect(() => {
@@ -104,6 +129,11 @@ export default function Configs() {
 
   const hasActiveFilters = search.trim().length > 0 || protocol !== 'all'
   const isForeignConfig = Boolean(activeConfig && activeConfig.is_mine === false)
+  const canCreate =
+    settings?.role !== 'viewer' &&
+    (openvpnEnabled || wireguardEnabled) &&
+    (quota?.can_create ?? true)
+  const canManageConfig = (config: TgMiniConfig) => isAdmin || config.is_mine !== false
 
   const openActions = async (config: TgMiniConfig) => {
     setActiveConfig(config)
@@ -222,6 +252,15 @@ export default function Configs() {
     })
   }
 
+  const handleConfigDeleted = () => {
+    closeSheet()
+    void load({ silent: true })
+  }
+
+  const handleConfigUpdated = () => {
+    void load({ silent: true })
+  }
+
   if (loading && configs.length === 0) {
     return <ConfigsSkeleton />
   }
@@ -233,11 +272,25 @@ export default function Configs() {
         subtitle={
           configs.length > 0
             ? `${configs.length} ${configs.length === 1 ? 'конфиг' : configs.length < 5 ? 'конфига' : 'конфигов'}`
-            : 'Скачайте или отправьте свой VPN-профиль'
+            : 'Создайте или получите VPN-профиль'
         }
         onRefresh={() => void load({ silent: true })}
         refreshing={refreshing}
       />
+
+      {canCreate && (
+        <Button type="button" className="w-full gap-2" onClick={() => setShowCreate(true)}>
+          <Plus size={18} aria-hidden />
+          Новый конфиг
+        </Button>
+      )}
+
+      {quota && !quota.unlimited && (
+        <p className="text-xs text-muted-foreground">
+          Лимит: {quota.used} из {quota.limit}
+          {!quota.can_create ? ' — достигнут' : ''}
+        </p>
+      )}
 
       {error && <p className="text-destructive text-sm">{error}</p>}
 
@@ -265,7 +318,9 @@ export default function Configs() {
         <div className="tg-mini-filter-empty">
           <FileKey size={22} className="text-muted-foreground" aria-hidden />
           <p className="text-sm font-medium">Нет конфигов</p>
-          <p className="text-xs text-muted-foreground">Профили появятся после создания в панели</p>
+          <p className="text-xs text-muted-foreground">
+            {canCreate ? 'Создайте первый профиль кнопкой выше' : 'Профили появятся после создания в панели'}
+          </p>
         </div>
       ) : filteredConfigs.length === 0 ? (
         <div className="tg-mini-filter-empty">
@@ -320,12 +375,27 @@ export default function Configs() {
         canShareLink={canShareInTelegram}
         isForeignConfig={isForeignConfig}
         ownerLabel={activeConfig ? ownerLabel(activeConfig) : null}
+        canManage={activeConfig ? canManageConfig(activeConfig) : false}
+        isAdmin={isAdmin}
         onClose={closeSheet}
         onSend={(destination) => void handleSend(destination)}
         onCreateDownloadLink={() => void handleCreateDownloadLink()}
         onCopyDownloadLink={() => void handleCopyDownloadLink()}
         onShareDownloadLink={handleShareDownloadLink}
         onOpenDownloadLink={handleOpenDownloadLink}
+        onConfigDeleted={handleConfigDeleted}
+        onConfigUpdated={handleConfigUpdated}
+      />
+
+      <CreateConfigDialog
+        open={showCreate}
+        onOpenChange={setShowCreate}
+        isAdmin={isAdmin}
+        currentUserId={settings?.user_id}
+        openvpnEnabled={openvpnEnabled}
+        wireguardEnabled={wireguardEnabled}
+        quota={quota}
+        onCreated={() => void load({ silent: true })}
       />
     </div>
   )

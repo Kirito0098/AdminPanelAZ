@@ -8,11 +8,15 @@ interface MiniPlatformPickerProps {
   label?: string
 }
 
-export default function MiniPlatformPicker({ value, onChange, label = 'Инструкция для' }: MiniPlatformPickerProps) {
+export default function MiniPlatformPicker({ value, onChange, label = 'Устройство' }: MiniPlatformPickerProps) {
+  const activeLabel = INSTALL_PLATFORMS.find((item) => item.value === value)?.label ?? value
+
   return (
-    <div className="space-y-2">
-      <p className="tg-mini-sheet-label">{label}</p>
-      <div className="tg-mini-platform-grid" role="radiogroup" aria-label={label}>
+    <div className="tg-mini-platform-picker">
+      <p className="tg-mini-platform-hint">
+        Пошаговая инструкция для <strong>{activeLabel}</strong>
+      </p>
+      <div className="tg-mini-platform-grid tg-mini-platform-grid--balanced" role="radiogroup" aria-label={label}>
         {INSTALL_PLATFORMS.map((option) => {
           const active = value === option.value
           const Icon = PLATFORM_ICONS[option.value]
@@ -22,10 +26,13 @@ export default function MiniPlatformPicker({ value, onChange, label = 'Инст�
               type="button"
               role="radio"
               aria-checked={active}
+              aria-label={option.label}
               className={cn('tg-mini-platform-option', active && 'is-active')}
               onClick={() => onChange(option.value)}
             >
-              <Icon size={16} className="shrink-0 opacity-80" aria-hidden />
+              <span className="tg-mini-platform-icon-wrap">
+                <Icon size={18} className="shrink-0" aria-hidden />
+              </span>
               <span>{option.label}</span>
             </button>
           )

@@ -472,6 +472,7 @@ def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(ge
     return {
         "server_ip": adapter.get_server_ip(),
         "bot_configured": bool(token),
+        "user_id": current_user.id,
         "username": current_user.username,
         "role": current_user.role.value,
         "theme": current_user.theme,

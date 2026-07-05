@@ -1,14 +1,8 @@
-import { FileKey } from 'lucide-react'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Check, FileKey } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   profileRouteForFile,
+  profileRouteHint,
   profileRouteLabel,
   splitProfileFilesByRoute,
   type ProfileRoute,
@@ -18,6 +12,12 @@ import { useEffect, useMemo, useState } from 'react'
 
 function fileLabel(file: TgMiniConfigFile): string {
   return file.download_filename || file.filename || file.path
+}
+
+function fileExtension(file: TgMiniConfigFile): string {
+  const name = fileLabel(file)
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 ? name.slice(dot + 1).toUpperCase() : 'CFG'
 }
 
 function defaultRoute(files: TgMiniConfigFile[], selectedPath: string): ProfileRoute {
@@ -46,7 +46,7 @@ export default function MiniProfileFilePicker({
 
   useEffect(() => {
     setRoute(defaultRoute(files, selectedPath))
-  }, [files])
+  }, [files, selectedPath])
 
   const routeFiles = route === 'antizapret' ? antizapret : vpn
 
@@ -59,11 +59,16 @@ export default function MiniProfileFilePicker({
   }
 
   if (files.length === 0) {
-    return <p className="text-sm text-muted-foreground">Файлы профиля не найдены</p>
+    return (
+      <div className="tg-mini-empty-inline">
+        <FileKey size={20} className="text-muted-foreground" aria-hidden />
+        <p>Файлы профиля не найдены на узле</p>
+      </div>
+    )
   }
 
   return (
-    <div className="space-y-2">
+    <div className="tg-mini-profile-picker">
       {showRouteTabs ? (
         <div
           className="tg-mini-segmented tg-mini-segmented--cols-2"
@@ -79,43 +84,46 @@ export default function MiniProfileFilePicker({
                 type="button"
                 role="tab"
                 aria-selected={active}
-                className={cn('tg-mini-segment', active && 'is-active')}
+                className={cn('tg-mini-segment tg-mini-segment--stacked', active && 'is-active')}
                 onClick={() => handleRouteChange(option)}
               >
-                <span>{profileRouteLabel(option)}</span>
+                <span className="tg-mini-segment-title">{profileRouteLabel(option)}</span>
+                <span className="tg-mini-segment-sub">{profileRouteHint(option)}</span>
                 <span className="tg-mini-segment-count">{count}</span>
               </button>
             )
           })}
         </div>
       ) : (
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          {profileRouteLabel(route)}
-        </p>
+        <p className="tg-mini-route-hint">{profileRouteHint(route)}</p>
       )}
 
-      {routeFiles.length > 1 ? (
-        <Select value={selectedPath} onValueChange={onSelectedPathChange}>
-          <SelectTrigger className="h-11 w-full">
-            <div className="flex min-w-0 items-center gap-2">
-              <FileKey size={16} className="shrink-0 text-muted-foreground" aria-hidden />
-              <SelectValue placeholder="Выберите файл профиля" />
-            </div>
-          </SelectTrigger>
-          <SelectContent className="z-[100] max-h-56">
-            {routeFiles.map((file) => (
-              <SelectItem key={file.path} value={file.path}>
-                {fileLabel(file)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : (
-        <div className="tg-mini-file-chip">
-          <FileKey size={16} className="shrink-0 text-primary" aria-hidden />
-          <span className="truncate text-sm">{fileLabel(routeFiles[0])}</span>
-        </div>
-      )}
+      <div className="tg-mini-file-list" role="listbox" aria-label="Файлы профиля">
+        {routeFiles.map((file) => {
+          const active = file.path === selectedPath
+          return (
+            <button
+              key={file.path}
+              type="button"
+              role="option"
+              aria-selected={active}
+              className={cn('tg-mini-file-option', active && 'is-active')}
+              onClick={() => onSelectedPathChange(file.path)}
+            >
+              <span className="tg-mini-file-option-ext" aria-hidden>
+                {fileExtension(file)}
+              </span>
+              <span className="tg-mini-file-option-body">
+                <span className="tg-mini-file-option-name">{fileLabel(file)}</span>
+                {!showRouteTabs && (
+                  <span className="tg-mini-file-option-meta">{profileRouteLabel(route)}</span>
+                )}
+              </span>
+              {active && <Check size={18} className="tg-mini-file-option-check" aria-hidden />}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
