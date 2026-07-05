@@ -2,7 +2,7 @@ import enum
 import json
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -422,6 +422,9 @@ class PanelResourceSample(Base):
 
 class UserTrafficSample(Base):
     __tablename__ = "user_traffic_sample"
+    __table_args__ = (
+        Index("ix_user_traffic_sample_node_created", "node_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)

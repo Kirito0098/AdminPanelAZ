@@ -235,7 +235,7 @@ function TrafficClientCard({ row, maxBytes, expanded, onToggle, children }: Traf
 }
 
 export default function TrafficPage() {
-  const { activeNode } = useNode()
+  const { activeNode, loading: nodeLoading } = useNode()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const { success, error: notifyError } = useNotifications()
@@ -386,8 +386,9 @@ export default function TrafficPage() {
   }, [selectedClient, chartRange, notifyError])
 
   useEffect(() => {
+    if (nodeLoading) return
     load(true)
-  }, [load, activeNode?.id])
+  }, [load, nodeLoading, activeNode?.id])
 
   const loadDeletedClients = useCallback(async () => {
     if (!isAdmin) return
@@ -425,10 +426,11 @@ export default function TrafficPage() {
   }, [isAdmin])
 
   useEffect(() => {
+    if (nodeLoading) return
     void loadDeletedClients()
     void loadCleanupSchedule()
     void loadNeverConnectedClients()
-  }, [loadDeletedClients, loadCleanupSchedule, loadNeverConnectedClients, activeNode?.id])
+  }, [loadDeletedClients, loadCleanupSchedule, loadNeverConnectedClients, nodeLoading, activeNode?.id])
 
   useEffect(() => {
     loadChart()

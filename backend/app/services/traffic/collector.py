@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.models import Node, TrafficSessionState, UserTrafficSample, UserTrafficStatProtocol
@@ -429,23 +429,44 @@ class TrafficCollectorService:
     def _recent_usage(self, node_ids: list[int] | None = None) -> dict:
         now = datetime.utcnow()
         scope_ids = node_ids or [self.node_id]
-        windows = {
-            "days_1": now - timedelta(days=1),
-            "days_7": now - timedelta(days=7),
-            "days_30": now - timedelta(days=30),
-        }
-        result: dict[tuple[int, str, str], dict[str, int]] = {}
+        since_1d = now - timedelta(days=1)
+        since_7d = now - timedelta(days=7)
+        since_30d = now - timedelta(days=30)
 
-        for label, since in windows.items():
-            samples = self.db.query(UserTrafficSample).filter(
+        delta = func.coalesce(UserTrafficSample.delta_received, 0) + func.coalesce(
+            UserTrafficSample.delta_sent, 0
+        )
+        common_name_lower = func.lower(UserTrafficSample.common_name)
+
+        rows = (
+            self.db.query(
+                UserTrafficSample.node_id,
+                common_name_lower.label("cn"),
+                UserTrafficSample.protocol_type,
+                func.sum(case((UserTrafficSample.created_at >= since_1d, delta), else_=0)).label("days_1"),
+                func.sum(case((UserTrafficSample.created_at >= since_7d, delta), else_=0)).label("days_7"),
+                func.sum(case((UserTrafficSample.created_at >= since_30d, delta), else_=0)).label("days_30"),
+            )
+            .filter(
                 UserTrafficSample.node_id.in_(scope_ids),
-                UserTrafficSample.created_at >= since,
-            ).all()
-            for s in samples:
-                key = (s.node_id, (s.common_name or "").lower(), s.protocol_type)
-                result.setdefault(key, {"days_1": 0, "days_7": 0, "days_30": 0})
-                result[key][label] += int(s.delta_received or 0) + int(s.delta_sent or 0)
+                UserTrafficSample.created_at >= since_30d,
+            )
+            .group_by(
+                UserTrafficSample.node_id,
+                common_name_lower,
+                UserTrafficSample.protocol_type,
+            )
+            .all()
+        )
 
+        result: dict[tuple[int, str, str], dict[str, int]] = {}
+        for row in rows:
+            key = (row.node_id, row.cn or "", row.protocol_type)
+            result[key] = {
+                "days_1": int(row.days_1 or 0),
+                "days_7": int(row.days_7 or 0),
+                "days_30": int(row.days_30 or 0),
+            }
         return result
 
     def reset_traffic(self, scope: str = "all") -> int:

@@ -709,6 +709,23 @@ def _migrate_alert_rules_table() -> None:
     logger.info("DB migration: created alert_rules table")
 
 
+def _migrate_user_traffic_sample_node_created_index() -> None:
+    inspector = inspect(engine)
+    if "user_traffic_sample" not in inspector.get_table_names():
+        return
+    existing = {idx["name"] for idx in inspector.get_indexes("user_traffic_sample")}
+    if "ix_user_traffic_sample_node_created" in existing:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_user_traffic_sample_node_created "
+                "ON user_traffic_sample (node_id, created_at)"
+            )
+        )
+    logger.info("DB migration: created ix_user_traffic_sample_node_created index")
+
+
 def run_db_migrations() -> None:
     """Lightweight SQLite migrations for columns added after initial deploy."""
     _migrate_alert_rules_table()
@@ -724,6 +741,7 @@ def run_db_migrations() -> None:
     _migrate_webhook_delivery_table()
     _migrate_webauthn_credentials_table()
     _migrate_webhook_delivery_destination_type()
+    _migrate_user_traffic_sample_node_created_index()
     inspector = inspect(engine)
     migrations = {
         "wg_access_policy": [
