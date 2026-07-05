@@ -857,10 +857,15 @@ export async function testNocReportPreview(period: 'daily' | 'weekly' = 'daily')
   })
 }
 
-export async function testNocWeeklyPdfPreview() {
-  return apiFetch<{ message: string }>('/settings/admin-notify/test-noc-pdf', {
+export async function testNocWeeklyImagePreview() {
+  return apiFetch<{ message: string }>('/settings/admin-notify/test-noc-image', {
     method: 'POST',
   })
+}
+
+/** @deprecated use testNocWeeklyImagePreview */
+export async function testNocWeeklyPdfPreview() {
+  return testNocWeeklyImagePreview()
 }
 
 export function getQrUrl(configId: number, path: string) {

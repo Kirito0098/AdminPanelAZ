@@ -41,7 +41,7 @@ from app.config import get_settings
 from app.services.active_web_session import active_web_session_service
 from app.services.env_file import EnvFileService
 from app.services.feature_guards import get_feature_service, module_disabled_message
-from app.services.noc_report import send_noc_report_preview, send_weekly_pdf_preview
+from app.services.noc_report import send_noc_report_preview, send_weekly_image_preview
 from app.services.action_log import log_action
 from app.services.panel_publish_info import (
     build_panel_publish_context,
@@ -364,8 +364,8 @@ def test_noc_report_preview(
     return MessageResponse(message=f"NOC сводка ({label}) отправлена на ваш Telegram ID")
 
 
-@router.post("/settings/admin-notify/test-noc-pdf", response_model=MessageResponse)
-def test_noc_weekly_pdf_preview(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+@router.post("/settings/admin-notify/test-noc-image", response_model=MessageResponse)
+def test_noc_weekly_image_preview(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     if not get_feature_service().is_enabled("telegram"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=module_disabled_message("telegram"))
     if not admin.telegram_id:
@@ -377,11 +377,17 @@ def test_noc_weekly_pdf_preview(db: Session = Depends(get_db), admin: User = Dep
     if not bot_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
 
-    ok = send_weekly_pdf_preview(db, telegram_id=admin.telegram_id, bot_token=bot_token)
+    ok = send_weekly_image_preview(db, telegram_id=admin.telegram_id, bot_token=bot_token)
     if not ok:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить PDF в Telegram")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить изображение в Telegram")
 
-    return MessageResponse(message="NOC weekly PDF отправлен на ваш Telegram ID")
+    return MessageResponse(message="NOC weekly изображение отправлено на ваш Telegram ID")
+
+
+@router.post("/settings/admin-notify/test-noc-pdf", response_model=MessageResponse)
+def test_noc_weekly_pdf_preview_legacy(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    """Legacy alias — weekly report is now sent as PNG."""
+    return test_noc_weekly_image_preview(db=db, admin=admin)
 
 
 @router.post("/settings/telegram/test", response_model=MessageResponse)

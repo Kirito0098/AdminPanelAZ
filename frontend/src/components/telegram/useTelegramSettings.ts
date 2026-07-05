@@ -9,7 +9,7 @@ import {
   testAdminNotify,
   testAdminNotifyEvent,
   testNocReportPreview,
-  testNocWeeklyPdfPreview,
+  testNocWeeklyImagePreview,
   testTelegram,
   updateAdminNotifySettings,
   updateTelegramSettings,
@@ -39,7 +39,7 @@ export function useTelegramSettings() {
   const [testing, setTesting] = useState(false)
   const [testingNotify, setTestingNotify] = useState(false)
   const [testingNotifyEvent, setTestingNotifyEvent] = useState<string | null>(null)
-  const [testingNocReport, setTestingNocReport] = useState<'daily' | 'weekly' | 'pdf' | null>(null)
+  const [testingNocReport, setTestingNocReport] = useState<'daily' | 'weekly' | 'image' | null>(null)
   const [registeringWebhook, setRegisteringWebhook] = useState(false)
   const [deletingWebhook, setDeletingWebhook] = useState(false)
   const [linkCode, setLinkCode] = useState<string | null>(null)
@@ -243,13 +243,13 @@ export function useTelegramSettings() {
     }
   }
 
-  const handleTestNocWeeklyPdf = async () => {
-    setTestingNocReport('pdf')
+  const handleTestNocWeeklyImage = async () => {
+    setTestingNocReport('image')
     try {
-      const result = await testNocWeeklyPdfPreview()
-      success(result.message || 'NOC weekly PDF отправлен на ваш Telegram ID')
+      const result = await testNocWeeklyImagePreview()
+      success(result.message || 'NOC weekly изображение отправлено на ваш Telegram ID')
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка отправки PDF')
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка отправки изображения')
     } finally {
       setTestingNocReport(null)
     }
@@ -303,7 +303,7 @@ export function useTelegramSettings() {
     handleTestAdminNotify,
     handleTestNotifyEvent,
     handleTestNocReport,
-    handleTestNocWeeklyPdf,
+    handleTestNocWeeklyImage,
   }
 }
 

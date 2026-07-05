@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell, BarChart3, FileText } from 'lucide-react'
+import { CheckCircle2, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell, BarChart3, ImageIcon } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { formatDateTime } from '@/lib/datetime'
@@ -531,15 +531,15 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               label={
                 tg.testingNotifyEvent
                   ? 'Отправка примера...'
-                  : tg.testingNocReport === 'pdf'
-                  ? 'Отправка PDF...'
-                  : tg.testingNocReport
-                    ? 'Отправка NOC...'
-                    : tg.testingNotify
-                      ? 'Отправка...'
-                      : tg.savingNotify
-                        ? 'Сохранение...'
-                        : undefined
+                  : tg.testingNocReport === 'image'
+                    ? 'Отправка изображения...'
+                    : tg.testingNocReport
+                      ? 'Отправка NOC...'
+                      : tg.testingNotify
+                        ? 'Отправка...'
+                        : tg.savingNotify
+                          ? 'Сохранение...'
+                          : undefined
               }
             />
             <form onSubmit={(e) => void tg.handleSaveAdminNotify(e)} className="space-y-5">
@@ -620,9 +620,9 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   <div className="space-y-1">
                     <p className="text-sm font-medium">NOC сводка — предпросмотр</p>
                     <p className="text-xs text-muted-foreground">
-                      Текстовая сводка — ежедневно или еженедельно. PDF формируется только для
-                      еженедельного отчёта (по расписанию — понедельник 09:00 UTC, плюс файл в TG).
-                      Предпросмотр приходит только вам.
+                      Текстовая сводка — ежедневно или еженедельно. Еженедельный отчёт также
+                      приходит одной картинкой-дашбордом (понедельник 09:00 UTC). Предпросмотр
+                      приходит только вам.
                     </p>
                   </div>
                 </div>
@@ -654,19 +654,19 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => void tg.handleTestNocWeeklyPdf()}
+                    onClick={() => void tg.handleTestNocWeeklyImage()}
                     disabled={
                       tg.testingNocReport !== null ||
                       !tg.adminNotify?.bot_token_set ||
                       !tg.telegramId
                     }
                   >
-                    {tg.testingNocReport === 'pdf' ? 'Отправка...' : 'Еженедельный PDF'}
+                    {tg.testingNocReport === 'image' ? 'Отправка...' : 'Еженедельная картинка'}
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  <FileText size={14} />
-                  PDF: топ клиентов, инциденты алертов, ошибки CIDR, таблица узлов
+                  <ImageIcon size={14} />
+                  Дашборд: KPI, узлы, топ клиентов, инциденты и CIDR
                 </p>
               </div>
 

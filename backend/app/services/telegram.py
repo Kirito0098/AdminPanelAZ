@@ -107,3 +107,67 @@ def send_tg_document(
         threading.Thread(target=_send, daemon=True).start()
         return True
     return _send()
+
+
+def send_tg_photo(
+    bot_token: str,
+    chat_id: str,
+    file_path: str,
+    caption: str = "",
+    *,
+    filename: str | None = None,
+    run_async: bool = True,
+    timeout_seconds: int = 120,
+) -> bool:
+    if not _outbound_enabled():
+        return False
+    upload_timeout = max(15, int(timeout_seconds or 120))
+
+    def _send() -> bool:
+        try:
+            with open(file_path, "rb") as fh:
+                file_bytes = fh.read()
+
+            boundary = f"----adminpanelaz-{uuid.uuid4().hex}"
+            body = bytearray()
+
+            def _add_field(name: str, value: str) -> None:
+                body.extend(f"--{boundary}\r\n".encode("utf-8"))
+                body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+                body.extend((value or "").encode("utf-8"))
+                body.extend(b"\r\n")
+
+            _add_field("chat_id", str(chat_id))
+            if caption:
+                _add_field("caption", caption)
+                _add_field("parse_mode", "HTML")
+
+            upload_name = (filename or "").strip() or (file_path or "").strip().split("/")[-1] or "report.png"
+            body.extend(f"--{boundary}\r\n".encode("utf-8"))
+            body.extend(
+                (
+                    f'Content-Disposition: form-data; name="photo"; filename="{upload_name}"\r\n'
+                    f"Content-Type: image/png\r\n\r\n"
+                ).encode("utf-8")
+            )
+            body.extend(file_bytes)
+            body.extend(b"\r\n")
+            body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+
+            url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+            req = urllib.request.Request(
+                url,
+                data=bytes(body),
+                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            )
+            with urllib.request.urlopen(req, timeout=upload_timeout):
+                pass
+            return True
+        except Exception as exc:
+            logger.warning("TG photo send failed chat_id=%s file=%s: %s", chat_id, file_path, exc)
+            return False
+
+    if run_async:
+        threading.Thread(target=_send, daemon=True).start()
+        return True
+    return _send()

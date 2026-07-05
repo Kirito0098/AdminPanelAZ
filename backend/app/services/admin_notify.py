@@ -21,6 +21,7 @@ from app.services.notify_time import format_notify_when
 from app.services.notify_backends import dispatch_admin_notify, register_notify_backend
 from app.services.telegram import send_tg_message
 from app.services.resource_alert_sustained import SustainedMetricSource
+from app.services.user_agent_format import format_user_agent_label, is_mobile_user_agent
 from app.services.traffic_limit import (
     format_traffic_limit_period_label,
     format_traffic_limit_unblock_at,
@@ -192,17 +193,39 @@ def _fmt_action_config(verb: str, target_type: str | None, target_name: str | No
     return f"{verb_text} конфигурацию {_fmt_config_object(target_type, target_name)}"
 
 
-def _format_notify(title: str, actor_line: str | None, action_line: str, when: str) -> str:
+def _format_notify(
+    title: str,
+    actor_line: str | None,
+    action_line: str,
+    when: str,
+    *,
+    extra_lines: list[str] | None = None,
+) -> str:
     lines = [title]
     if actor_line:
         lines.append(actor_line)
-    lines.append(action_line)
+    if action_line:
+        lines.append(action_line)
+    if extra_lines:
+        lines.extend(extra_lines)
     lines.append(when)
     return "\n".join(lines)
 
 
-def _format_notify_system(title: str, action_line: str, when: str) -> str:
-    return f"{title}\n{action_line}\n{when}"
+def _format_notify_system(
+    title: str,
+    action_line: str,
+    when: str,
+    *,
+    extra_lines: list[str] | None = None,
+) -> str:
+    lines = [title]
+    if action_line:
+        lines.append(action_line)
+    if extra_lines:
+        lines.extend(extra_lines)
+    lines.append(when)
+    return "\n".join(lines)
 
 
 def _fmt_actor(actor_username: str | None, *, as_admin: bool = False) -> str:
@@ -213,6 +236,33 @@ def _fmt_actor(actor_username: str | None, *, as_admin: bool = False) -> str:
 
 def _fmt_ip(remote_addr: str | None) -> str:
     return f"🌐 IP {_fmt_code(remote_addr)}"
+
+
+def _fmt_login_ip(remote_addr: str | None) -> str:
+    return f"🌐 IP входа : {_fmt_code(remote_addr)}"
+
+
+def _fmt_device(user_agent: str | None, *, login_via: str | None = None) -> str | None:
+    label = format_user_agent_label(user_agent, login_via=login_via)
+    if not label:
+        return None
+    icon = "📱" if is_mobile_user_agent(user_agent) and not login_via else "💻"
+    return f"{icon} Устройство {label}"
+
+
+def _login_context_lines(
+    *,
+    remote_addr: str | None,
+    user_agent: str | None,
+    login_via: str | None = None,
+) -> list[str]:
+    lines: list[str] = []
+    if remote_addr:
+        lines.append(_fmt_login_ip(remote_addr))
+    device = _fmt_device(user_agent, login_via=login_via)
+    if device:
+        lines.append(device)
+    return lines
 
 
 def _fmt_when(now: str) -> str:
@@ -373,6 +423,8 @@ class AdminNotifyService:
         client_timezone: str | None = None,
         node_id: int | None = None,
         node_name: str | None = None,
+        user_agent: str | None = None,
+        login_via: str | None = None,
     ) -> None:
         try:
             if not get_feature_service().is_enabled("telegram"):
@@ -400,6 +452,8 @@ class AdminNotifyService:
                 details,
                 subject_name,
                 client_timezone=client_timezone,
+                user_agent=user_agent,
+                login_via=login_via,
             )
             if text is None:
                 return
@@ -423,6 +477,8 @@ class AdminNotifyService:
         actor_username: str,
         remote_addr: str | None = None,
         client_timezone: str | None = None,
+        user_agent: str | None = None,
+        login_via: str | None = None,
     ) -> None:
         self.send(
             db,
@@ -430,6 +486,8 @@ class AdminNotifyService:
             actor_username=actor_username,
             remote_addr=remote_addr,
             client_timezone=client_timezone,
+            user_agent=user_agent,
+            login_via=login_via,
         )
 
     def send_login_failed(
@@ -439,6 +497,7 @@ class AdminNotifyService:
         actor_username: str | None = None,
         remote_addr: str | None = None,
         client_timezone: str | None = None,
+        user_agent: str | None = None,
     ) -> None:
         self.send(
             db,
@@ -446,6 +505,7 @@ class AdminNotifyService:
             actor_username=actor_username,
             remote_addr=remote_addr,
             client_timezone=client_timezone,
+            user_agent=user_agent,
         )
 
     def send_tg_login_unlinked(
@@ -846,24 +906,34 @@ class AdminNotifyService:
         subject_name: str | None = None,
         *,
         client_timezone: str | None = None,
+        user_agent: str | None = None,
+        login_via: str | None = None,
     ) -> str | None:
         when = _fmt_when(format_notify_when(client_timezone))
         actor_admin = _fmt_actor(actor_username, as_admin=True)
         actor_user = _fmt_actor(actor_username, as_admin=False)
         ip = _fmt_ip(remote_addr)
+        login_context = _login_context_lines(
+            remote_addr=remote_addr,
+            user_agent=user_agent,
+            login_via=login_via,
+        )
 
         if event_type == "login_success":
             return _format_notify(
                 "✅ <b>Вход в панель</b>",
                 actor_user,
-                f"Вошёл в панель · {ip}",
+                "",
                 when,
+                extra_lines=login_context,
             )
         if event_type == "login_failed":
-            return _format_notify_system(
+            return _format_notify(
                 "⚠️ <b>Неудачный вход</b>",
-                f"🔑 Логин {_fmt_code(actor_username)} · {ip}",
+                f"🔑 Логин {_fmt_code(actor_username)}",
+                "",
                 when,
+                extra_lines=login_context,
             )
         if event_type in ("tg_login_unlinked", "tg_mini_login_unlinked"):
             via = "📱 мини-приложение" if "mini" in event_type else "✈️ Телеграм"
@@ -1098,11 +1168,13 @@ def _preview_event_build_kwargs(event_key: str, *, actor_username: str) -> dict 
             "event_type": "login_success",
             "actor_username": actor_username,
             "remote_addr": "203.0.113.42",
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
         },
         "login_failed": {
             "event_type": "login_failed",
             "actor_username": "unknown",
             "remote_addr": "198.51.100.7",
+            "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1",
         },
         "tg_unlinked": {
             "event_type": "tg_login_unlinked",
@@ -1251,6 +1323,8 @@ def build_notify_event_preview_text(event_key: str, *, actor_username: str = "ad
         kwargs.get("remote_addr"),
         kwargs.get("details"),
         kwargs.get("subject_name"),
+        user_agent=kwargs.get("user_agent"),
+        login_via=kwargs.get("login_via"),
     )
     if text is None:
         return None

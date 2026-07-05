@@ -12,6 +12,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
+from app.services.image_fonts import load_image_font
+
 CAPTCHA_STORE: dict[str, dict] = {}
 CAPTCHA_LOCK = threading.Lock()
 CAPTCHA_TTL = 300
@@ -27,8 +29,7 @@ def _cleanup_captchas() -> None:
 
 class CaptchaService:
     def __init__(self, font_path: str | None = None):
-        default_font = Path(__file__).resolve().parents[2] / "static" / "fonts" / "DejaVuSans-Bold.ttf"
-        self.font_path = font_path or str(default_font)
+        self.font_path = font_path
 
     def generate_text(self) -> str:
         return "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
@@ -54,8 +55,11 @@ class CaptchaService:
         image = Image.new("RGB", (width, height), color=(255, 255, 255))
         draw = ImageDraw.Draw(image)
         try:
-            font = ImageFont.truetype(self.font_path, 36)
-        except OSError:
+            if self.font_path:
+                font = ImageFont.truetype(self.font_path, 36)
+            else:
+                font = load_image_font(36, bold=True)
+        except (OSError, RuntimeError):
             font = ImageFont.load_default()
         x_offset = 20
         for char in text:

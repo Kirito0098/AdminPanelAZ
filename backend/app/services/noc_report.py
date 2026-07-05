@@ -28,7 +28,7 @@ from app.services.feature_guards import get_feature_service
 from app.services.node_compare_metrics import get_traffic_totals_by_node
 from app.services.notify_time import format_notify_when
 from app.services.resource_metrics import get_latest_samples_by_node, get_resource_stats_by_node
-from app.services.telegram import send_tg_document, send_tg_message
+from app.services.telegram import send_tg_message, send_tg_photo
 from app.services.traffic_limit import human_bytes
 
 logger = logging.getLogger(__name__)
@@ -779,11 +779,11 @@ def build_weekly_report_data(
     until: datetime | None = None,
     top_clients_limit: int | None = None,
 ) -> dict:
-    """Aggregate weekly PDF report payload (extends NOC summary)."""
+    """Aggregate weekly image report payload (extends NOC summary)."""
     settings = get_settings()
     until = _as_utc(until) or datetime.now(timezone.utc)
     since = _as_utc(since) or (until - timedelta(days=WEEKLY_REPORT_DAYS))
-    limit = top_clients_limit if top_clients_limit is not None else settings.noc_report_weekly_pdf_top_clients
+    limit = top_clients_limit if top_clients_limit is not None else settings.noc_report_weekly_image_top_clients
 
     report = build_noc_report_data(
         db,
@@ -804,49 +804,49 @@ def build_weekly_report_data(
     }
 
 
-def generate_weekly_pdf_bytes(db: Session, *, since: datetime | None = None, until: datetime | None = None) -> bytes:
-    from app.services.noc_report_pdf import generate_weekly_pdf
+def generate_weekly_image_bytes(db: Session, *, since: datetime | None = None, until: datetime | None = None) -> bytes:
+    from app.services.noc_report_image import generate_weekly_image
 
     report_data = build_weekly_report_data(db, since=since, until=until)
-    return generate_weekly_pdf(report_data)
+    return generate_weekly_image(report_data)
 
 
-def generate_weekly_pdf_file(
+def generate_weekly_image_file(
     db: Session,
     output_dir: Path | None = None,
     *,
     since: datetime | None = None,
     until: datetime | None = None,
 ) -> Path:
-    """Write weekly PDF to disk and return its path."""
+    """Write weekly NOC PNG to disk and return its path."""
     target_dir = output_dir or Path("data/reports")
     target_dir.mkdir(parents=True, exist_ok=True)
     stamp = (_as_utc(until) or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
-    path = target_dir / f"noc-weekly-{stamp}.pdf"
-    path.write_bytes(generate_weekly_pdf_bytes(db, since=since, until=until))
+    path = target_dir / f"noc-weekly-{stamp}.png"
+    path.write_bytes(generate_weekly_image_bytes(db, since=since, until=until))
     return path
 
 
-def send_weekly_pdf_report(db: Session, *, since: datetime | None = None, until: datetime | None = None) -> dict:
-    """Generate weekly PDF and optionally deliver it to TG admins."""
+def send_weekly_image_report(db: Session, *, since: datetime | None = None, until: datetime | None = None) -> dict:
+    """Generate weekly NOC PNG and optionally deliver it to TG admins."""
     settings = get_settings()
-    if not settings.noc_report_weekly_pdf_enabled:
-        return {"status": "skipped", "reason": "pdf_disabled"}
+    if not settings.noc_report_weekly_image_enabled:
+        return {"status": "skipped", "reason": "image_disabled"}
 
-    pdf_path: Path | None = None
+    image_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(generate_weekly_pdf_bytes(db, since=since, until=until))
-            pdf_path = Path(tmp.name)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(generate_weekly_image_bytes(db, since=since, until=until))
+            image_path = Path(tmp.name)
 
         result: dict = {
             "status": "generated",
-            "path": str(pdf_path),
+            "path": str(image_path),
             "sent": 0,
             "recipients": 0,
         }
 
-        if not settings.noc_report_weekly_pdf_tg_enabled:
+        if not settings.noc_report_weekly_image_tg_enabled:
             result["status"] = "generated_no_tg"
             result["reason"] = "tg_delivery_disabled"
             return result
@@ -874,23 +874,22 @@ def send_weekly_pdf_report(db: Session, *, since: datetime | None = None, until:
             return result
 
         when = format_notify_when(None)
-        caption = f"📄 <b>NOC weekly PDF</b>\n🕐 {when}"
-        filename = f"noc-weekly-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.pdf"
+        caption = f"📊 <b>NOC weekly</b>\n🕐 {when}"
+        filename = f"noc-weekly-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.png"
         sent = 0
         for user in recipients:
             try:
-                if send_tg_document(
+                if send_tg_photo(
                     bot_token,
                     user.telegram_id,
-                    str(pdf_path),
+                    str(image_path),
                     caption=caption,
                     filename=filename,
-                    content_type="application/pdf",
                     run_async=False,
                 ):
                     sent += 1
             except Exception as exc:
-                logger.warning("NOC weekly PDF TG send failed for user %s: %s", user.id, exc)
+                logger.warning("NOC weekly image TG send failed for user %s: %s", user.id, exc)
 
         result["status"] = "sent" if sent else "generated_no_tg"
         result["sent"] = sent
@@ -898,11 +897,17 @@ def send_weekly_pdf_report(db: Session, *, since: datetime | None = None, until:
             result["reason"] = "send_failed"
         return result
     finally:
-        if pdf_path is not None:
+        if image_path is not None:
             try:
-                pdf_path.unlink(missing_ok=True)
+                image_path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+# Backward-compatible aliases (legacy PDF naming)
+generate_weekly_pdf_bytes = generate_weekly_image_bytes
+generate_weekly_pdf_file = generate_weekly_image_file
+send_weekly_pdf_report = send_weekly_image_report
 
 
 def _notify_recipients(db: Session) -> list[User]:
@@ -954,33 +959,35 @@ def send_noc_report_preview(
     return send_tg_message(bot_token, telegram_id, text, run_async=False)
 
 
-def send_weekly_pdf_preview(
+def send_weekly_image_preview(
     db: Session,
     *,
     telegram_id: str,
     bot_token: str,
 ) -> bool:
-    """Generate and send weekly NOC PDF to one Telegram ID (manual preview)."""
-    pdf_path: Path | None = None
+    """Generate and send weekly NOC PNG to one Telegram ID (manual preview)."""
+    image_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(generate_weekly_pdf_bytes(db))
-            pdf_path = Path(tmp.name)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(generate_weekly_image_bytes(db))
+            image_path = Path(tmp.name)
         when = format_notify_when(None)
-        caption = f"📄 <b>NOC weekly PDF (предпросмотр)</b>\n🕐 {when}"
-        filename = f"noc-weekly-preview-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.pdf"
-        return send_tg_document(
+        caption = f"📊 <b>NOC weekly (предпросмотр)</b>\n🕐 {when}"
+        filename = f"noc-weekly-preview-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.png"
+        return send_tg_photo(
             bot_token,
             telegram_id,
-            str(pdf_path),
+            str(image_path),
             caption=caption,
             filename=filename,
-            content_type="application/pdf",
             run_async=False,
         )
     finally:
-        if pdf_path is not None:
+        if image_path is not None:
             try:
-                pdf_path.unlink(missing_ok=True)
+                image_path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+send_weekly_pdf_preview = send_weekly_image_preview

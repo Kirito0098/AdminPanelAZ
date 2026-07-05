@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_SECRET_KEY = "change-me-in-production-use-long-random-string"
@@ -151,9 +151,27 @@ class Settings(BaseSettings):
     noc_report_check_interval_seconds: int = 60
     noc_report_daily_cron: str = "0 8 * * *"
     noc_report_weekly_cron: str = "0 9 * * 1"
-    noc_report_weekly_pdf_enabled: bool = True
-    noc_report_weekly_pdf_tg_enabled: bool = True
-    noc_report_weekly_pdf_top_clients: int = 10
+    noc_report_weekly_image_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "noc_report_weekly_image_enabled",
+            "noc_report_weekly_pdf_enabled",
+        ),
+    )
+    noc_report_weekly_image_tg_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "noc_report_weekly_image_tg_enabled",
+            "noc_report_weekly_pdf_tg_enabled",
+        ),
+    )
+    noc_report_weekly_image_top_clients: int = Field(
+        default=10,
+        validation_alias=AliasChoices(
+            "noc_report_weekly_image_top_clients",
+            "noc_report_weekly_pdf_top_clients",
+        ),
+    )
     alert_rules_enabled: bool = True
     alert_rules_check_interval_seconds: int = 60
     openapi_docs_enabled: bool = True

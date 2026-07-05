@@ -61,6 +61,7 @@ from app.services.refresh_token import (
 )
 from app.services.active_web_session import active_web_session_service
 from app.services.admin_notify import admin_notify_service
+from app.services.user_agent_format import user_agent_from_request
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.totp_service import (
     encrypt_backup_codes,
@@ -158,6 +159,7 @@ def _complete_2fa_login(user: User, db: Session, request: Request, response: Res
             actor_username=user.username,
             remote_addr=client_ip,
             client_timezone=get_client_timezone_from_request(request),
+            user_agent=user_agent_from_request(request),
         )
     db.commit()
     return _issue_token_pair(user, db, response, request)
@@ -227,6 +229,7 @@ def _login_with_checks(
             actor_username=username,
             remote_addr=client_ip,
             client_timezone=get_client_timezone_from_request(request),
+            user_agent=user_agent_from_request(request),
         )
         detail = "Неверный логин или пароль"
         if attempts > 2:
@@ -255,6 +258,7 @@ def _login_with_checks(
             actor_username=user.username,
             remote_addr=client_ip,
             client_timezone=get_client_timezone_from_request(request),
+            user_agent=user_agent_from_request(request),
         )
     return _issue_token_pair(user, db, response, request)
 
@@ -325,6 +329,8 @@ def telegram_login_callback(request: Request, db: Session = Depends(get_db)):
             actor_username=user.username,
             remote_addr=client_ip,
             client_timezone=get_client_timezone_from_request(request),
+            user_agent=user_agent_from_request(request),
+            login_via="Telegram",
         )
     access_token = create_access_token(
         data={"sub": user.username, "role": user.role.value},
