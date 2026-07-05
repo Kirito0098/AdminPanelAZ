@@ -25,7 +25,7 @@ export function formatBytes(value: number): string {
     size /= 1024
     unit += 1
   }
-  return `${size < 10 && unit > 0 ? size.toFixed(1) : Math.round(size)} ${units[unit]}`
+  return `${size < 10 && unit > 0 ? size.toFixed(1) : Math.round(size)}\u00A0${units[unit]}`
 }
 
 export function parseBulkLines(text: string): string[] {

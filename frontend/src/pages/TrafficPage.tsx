@@ -154,13 +154,13 @@ function TrafficShareBar({ value, max }: TrafficShareBarProps) {
 
 type TrafficClientCardProps = {
   row: TrafficClientRow
-  maxBytes: number
+  totalBytes: number
   expanded: boolean
   onToggle: () => void
   children?: React.ReactNode
 }
 
-function TrafficClientCard({ row, maxBytes, expanded, onToggle, children }: TrafficClientCardProps) {
+function TrafficClientCard({ row, totalBytes, expanded, onToggle, children }: TrafficClientCardProps) {
   return (
     <div
       className={cn(
@@ -224,7 +224,7 @@ function TrafficClientCard({ row, maxBytes, expanded, onToggle, children }: Traf
         </div>
       </div>
       <div className="mt-3">
-        <TrafficShareBar value={row.total_bytes} max={maxBytes} />
+        <TrafficShareBar value={row.total_bytes} max={totalBytes} />
       </div>
       </button>
       {expanded && children && (
@@ -497,8 +497,8 @@ export default function TrafficPage() {
     toggleClient(filteredRows[0].common_name, filteredRows[0].protocol_type)
   }
 
-  const maxBytes = useMemo(
-    () => Math.max(...(filteredRows.map((r) => r.total_bytes) ?? [0]), 1),
+  const totalBytes = useMemo(
+    () => filteredRows.reduce((sum, row) => sum + row.total_bytes, 0) || 1,
     [filteredRows],
   )
 
@@ -781,7 +781,7 @@ export default function TrafficPage() {
                         <TrafficClientCard
                           key={`${r.common_name}-${r.protocol_type}`}
                           row={r}
-                          maxBytes={maxBytes}
+                          totalBytes={totalBytes}
                           expanded={expanded}
                           onToggle={() => toggleClient(r.common_name, r.protocol_type)}
                         >
@@ -847,25 +847,25 @@ export default function TrafficPage() {
                                 {getProtocolLabel(r.protocol_type)}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-right font-mono text-xs">
+                            <TableCell className="whitespace-nowrap text-right font-mono text-xs">
                               {formatBytes(r.total_received)}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-xs">
+                            <TableCell className="whitespace-nowrap text-right font-mono text-xs">
                               {formatBytes(r.total_sent)}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-xs font-medium">
+                            <TableCell className="whitespace-nowrap text-right font-mono text-xs font-medium">
                               {formatBytes(r.total_bytes)}
                             </TableCell>
                             <TableCell>
-                              <TrafficShareBar value={r.total_bytes} max={maxBytes} />
+                              <TrafficShareBar value={r.total_bytes} max={totalBytes} />
                             </TableCell>
-                            <TableCell className="text-right font-mono text-xs">
+                            <TableCell className="whitespace-nowrap text-right font-mono text-xs">
                               {formatBytes(r.traffic_1d)}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-xs">
+                            <TableCell className="whitespace-nowrap text-right font-mono text-xs">
                               {formatBytes(r.traffic_7d)}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-xs">
+                            <TableCell className="whitespace-nowrap text-right font-mono text-xs">
                               {formatBytes(r.traffic_30d)}
                             </TableCell>
                             <TableCell className="text-xs text-muted-foreground">

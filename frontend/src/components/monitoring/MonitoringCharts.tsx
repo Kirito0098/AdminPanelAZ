@@ -38,10 +38,12 @@ interface MonitoringChartsProps {
 }
 
 function formatBytes(n: number) {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`
-  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`
-  return `${(n / 1024 ** 3).toFixed(2)} GB`
+  const unit = '\u00A0'
+  if (n < 1024) return `${n}${unit}B`
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)}${unit}KB`
+  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)}${unit}MB`
+  if (n < 1024 ** 4) return `${(n / 1024 ** 3).toFixed(2)}${unit}GB`
+  return `${(n / 1024 ** 4).toFixed(2)}${unit}TB`
 }
 
 function totalTraffic(data: MonitoringOverview) {
