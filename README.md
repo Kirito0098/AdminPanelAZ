@@ -6,7 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](backend/)
 [![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)](frontend/)
 
-[🚀 Установка](#-установка) · [✨ Возможности](#-возможности) · [🖼️ Обзор](#-обзор-панели) ·
+[🚀 Быстрый старт](#-быстрый-старт) · [✨ Возможности](#-возможности) · [🖼️ Обзор](#-обзор-панели) ·
 [📖 Руководства](docs/README.md) · [🔐 Безопасность](SECURITY.md) · [📝 Changelog](CHANGELOG.md)
 
 <p align="center">
@@ -24,11 +24,66 @@
 - **Пользователи и администраторы** — **[docs/README.md](docs/README.md)** — простые инструкции по каждому разделу
 - **Разработчики** — [SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md) · [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md)
 
+## 🚀 Быстрый старт
+
+**Требования:** Ubuntu 24.04+ или Debian 13+, root / sudo, доступ в интернет.
+AntiZapret ставится **отдельно** на VPN-сервер — см. [AntiZapret-VPN](https://github.com/GubernievS/AntiZapret-VPN).
+
+### Порты
+
+| Порт | Назначение | Куда открывать |
+| --- | --- | --- |
+| **443** | HTTPS панели (Nginx) | в интернет — если заходите по домену |
+| **80** | HTTP / проверка Let's Encrypt | в интернет — для выпуска HTTPS-сертификата |
+| **8000** | Backend панели (uvicorn) | **только localhost** — снаружи не публикуется |
+| **9100** | Node agent | localhost или между панелью и VPN-узлом |
+| **6379** | Redis | localhost — если `UVICORN_WORKERS > 1` |
+
+Порты **OpenVPN / WireGuard / AmneziaWG** задаёт **AntiZapret** на VPN-сервере, не панель.
+При установке с доменом и HTTPS мастер может предложить настроить firewall (UFW) — открыть **80** и **443**.
+Нестандартный HTTPS-порт задаётся в мастере или в `HTTPS_PUBLIC_PORT` в `backend/.env`.
+
+#### 🟢 Простая установка — рекомендуется новичкам
+
+```bash
+sudo apt update && sudo apt install -y git wget curl
+wget -qO /tmp/install-easy.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install-easy.sh
+sudo bash /tmp/install-easy.sh
+```
+
+Мастер спросит:
+
+1. **Что ставим** — только панель, панель + VPN на этом сервере, или связь VPN-сервера с панелью
+2. **Как заходить в браузере** — свой домен, бесплатный DuckDNS, или только на этом сервере
+3. **Логин и пароль** администратора
+4. **Профиль ресурсов** — Minimal (1 GB, только панель без VPN на хосте) или Standard / Full
+   (рекомендуется **1 GB+**; стек Full ≈ **411 MB** — см. [Production](#️-production-vds-redis-и-профили))
+5. **Автозапуск** — включается автоматически (рекомендуется)
+
+#### 🔵 Полный установщик — больше настроек
+
+```bash
+sudo apt update && sudo apt install -y git wget curl
+wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh
+sudo bash /tmp/install.sh
+```
+
+Мастер спросит:
+
+1. **Тип** — только панель, панель + VPN на этом сервере, или только агент на VPN-сервере
+2. **Домен или DDNS** — DuckDNS / No-IP / свой домен
+3. **HTTPS** — Let's Encrypt (рекомендуется) или самоподписанный сертификат
+4. **Логин и пароль** администратора
+5. **Автозапуск** — для постоянной работы выберите systemd
+
+Подробнее: [после установки](#-после-установки) · [DDNS](#-бесплатный-адрес-для-панели-ddns) · [Production](#️-production-vds-redis-и-профили)
+
 ## 📑 Содержание
 
+- [🚀 Быстрый старт](#-быстрый-старт)
 - [🖼️ Обзор панели](#-обзор-панели)
 - [✨ Возможности](#-возможности)
-- [🚀 Установка](#-установка)
+- [✅ После установки](#-после-установки)
 - [📖 Руководства пользователя](#-руководства-пользователя)
 - [🌐 Бесплатный адрес (DDNS)](#-бесплатный-адрес-для-панели-ddns)
 - [⚙️ Production: VDS, Redis и профили](#️-production-vds-redis-и-профили)
@@ -113,63 +168,11 @@
 
 Пошаговая настройка и вкладки раздела: [docs/Telegram.md](docs/Telegram.md)
 
-## 🚀 Установка
+## ✅ После установки
 
 <p align="center">
   <img src="docs/assets/telegram-promo/06-quick-install.png" alt="Быстрая установка AdminPanel AntiZapret" width="900">
 </p>
-
-- **ОС** — Ubuntu 24.04+ или Debian 13+
-- **Права** — root / sudo, доступ в интернет
-- **AntiZapret** — ставится **отдельно** на VPN-сервер — см. [AntiZapret-VPN](https://github.com/GubernievS/AntiZapret-VPN)
-
-### ⚡ Быстрый старт
-
-#### 🟢 Простая установка — рекомендуется новичкам
-
-```bash
-sudo apt update && sudo apt install -y git wget curl
-wget -qO /tmp/install-easy.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install-easy.sh
-sudo bash /tmp/install-easy.sh
-```
-
-Мастер спросит:
-
-1. **Что ставим** — только панель, панель + VPN на этом сервере, или связь VPN-сервера с панелью
-2. **Как заходить в браузере** — свой домен, бесплатный DuckDNS, или только на этом сервере
-3. **Логин и пароль** администратора
-4. **Профиль ресурсов** — Minimal (1 GB, только панель без VPN на хосте) или Standard / Full
-   (рекомендуется **1 GB+**; стек Full ≈ **411 MB** — см. [Production](#️-production-vds-redis-и-профили))
-5. **Автозапуск** — включается автоматически (рекомендуется)
-
-#### 🔵 Полный установщик — больше настроек
-
-```bash
-sudo apt update && sudo apt install -y git wget curl
-wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install.sh
-sudo bash /tmp/install.sh
-```
-
-Мастер спросит:
-
-1. **Тип** — только панель, панель + VPN на этом сервере, или только агент на VPN-сервере
-2. **Домен или DDNS** — DuckDNS / No-IP / свой домен
-3. **HTTPS** — Let's Encrypt (рекомендуется) или самоподписанный сертификат
-4. **Логин и пароль** администратора
-5. **Автозапуск** — для постоянной работы выберите systemd
-
-> [!IMPORTANT]
-> Запускайте установщик **из SSH-терминала**, не через `curl | bash` — иначе не откроется интерактивный мастер.
-
-**Уже скачали репозиторий:**
-
-```bash
-cd /opt/AdminPanelAZ
-sudo ./install-easy.sh    # простой мастер
-sudo ./install.sh         # полный мастер
-```
-
-### ✅ После установки
 
 1. Откройте URL из вывода установщика
 2. Войдите под созданным администратором
