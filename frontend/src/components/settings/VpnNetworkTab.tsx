@@ -574,7 +574,7 @@ export default function VpnNetworkTab() {
                     <div>
                       <p className="text-sm font-medium">Пути к сертификатам на сервере</p>
                       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                        Укажите абсолютные пути к файлам certbot или 3x-ui, например{' '}
+                        Укажите абсолютные пути к файлам сертификата, например{' '}
                         <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
                           /etc/letsencrypt/live/example.com/fullchain.pem
                         </code>{' '}

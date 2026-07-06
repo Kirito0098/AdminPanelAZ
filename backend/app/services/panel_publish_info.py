@@ -214,7 +214,7 @@ def build_panel_publish_context(
         if ssl_cert:
             bullet_points.append(f"SSL_CERT: {ssl_cert}")
         bullet_points.append(
-            "После обновления cert (certbot/3x-ui) перезапустите панель: systemctl restart adminpanelaz"
+            "После обновления cert (certbot и т.п.) перезапустите панель: systemctl restart adminpanelaz"
         )
         bullet_points.append(
             "Смена режима: sudo ./scripts/nginx-setup.sh (uvicorn-custom / uvicorn-le)."
@@ -330,7 +330,7 @@ def build_vpn_network_publish_modes() -> list[dict[str, str | bool | None]]:
         {
             "key": "nginx_custom",
             "title": "Nginx + собственные сертификаты",
-            "description": "TLS на Nginx с вашими cert/key (например, от 3x-ui / certbot).",
+            "description": "TLS на Nginx с вашими cert/key (certbot или свои файлы).",
             "requires_domain": True,
             "requires_email": False,
             "requires_ssl_cert": True,
@@ -352,7 +352,7 @@ def build_vpn_network_publish_modes() -> list[dict[str, str | bool | None]]:
         {
             "key": "uvicorn_custom",
             "title": "HTTPS на uvicorn + свои сертификаты",
-            "description": "TLS на приложении без Nginx — укажите пути к cert/key (certbot, 3x-ui и т.п.).",
+            "description": "TLS на приложении без Nginx — укажите пути к cert/key (certbot или свои файлы).",
             "requires_domain": False,
             "requires_email": False,
             "requires_ssl_cert": True,
