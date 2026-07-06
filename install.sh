@@ -708,6 +708,9 @@ verify_controller_running() {
     if bhc_wait_systemd_active adminpanelaz 60; then
       ui_progress_done "Сервис adminpanelaz активен"
     else
+      if systemctl is-failed --quiet adminpanelaz 2>/dev/null; then
+        die "Сервис adminpanelaz в состоянии failed. Проверьте: journalctl -u adminpanelaz -n 50; ${state_dir}/logs/backend.log"
+      fi
       warn "systemctl: adminpanelaz не active за 60 с — продолжаем проверку /api/health"
       ui_progress_done "Проверка health без ожидания systemd"
     fi
@@ -790,6 +793,7 @@ resolve_project_dir() {
 ensure_executable_scripts() {
   chmod +x "$ROOT_DIR/start.sh" "$ROOT_DIR/start_node_agent.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
+  chmod +x "$ROOT_DIR/scripts/test-backend-health-check.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/backend-health-check.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/nginx-setup.sh" "$ROOT_DIR/scripts/nginx-common.sh" "$ROOT_DIR/scripts/firewall-setup.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/seed-admin-user.py" "$ROOT_DIR/scripts/seed-wizard-db.py" 2>/dev/null || true

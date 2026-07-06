@@ -557,8 +557,13 @@ def _check_port(
         )
 
 
-def _http_probe_url(port: str) -> str:
-    return f"http://127.0.0.1:{port}/api/health"
+def _health_probe_url(env: dict[str, str]) -> tuple[str, list[str]]:
+    app_port = env.get("BACKEND_PORT", env.get("APP_PORT", "8000"))
+    use_https = _env_bool(env.get("USE_HTTPS"))
+    ssl_cert = (env.get("SSL_CERT") or "").strip()
+    if use_https and ssl_cert:
+        return f"https://127.0.0.1:{app_port}/api/health", ["curl", "-ksf", "--max-time", "5"]
+    return f"http://127.0.0.1:{app_port}/api/health", ["curl", "-sf", "--max-time", "5"]
 
 
 def _check_http_probe(
@@ -566,8 +571,7 @@ def _check_http_probe(
     report: DiagnosticsReport,
     run_cmd: RunCmd,
 ) -> None:
-    app_port = env.get("BACKEND_PORT", env.get("APP_PORT", "8000"))
-    url = _http_probe_url(app_port)
+    url, curl_prefix = _health_probe_url(env)
 
     if _env_bool(env.get("BEHIND_NGINX")):
         domain = (env.get("DOMAIN") or "").strip()
@@ -644,16 +648,23 @@ def _check_http_probe(
     last_err = ""
     probes: list[list[str]] = []
     if shutil.which("curl"):
-        probes.append(["curl", "-sf", "--max-time", "3", url])
+        probes.append([*curl_prefix, url])
+        if url.startswith("https://"):
+            probes.append(["curl", "-sf", "--max-time", "5", url])
+        else:
+            probes.append(["curl", "-ksf", "--max-time", "5", url.replace("http://", "https://", 1)])
     if shutil.which("wget"):
-        probes.append(["wget", "-q", "-O", "/dev/null", "--timeout=3", url])
+        wget_url = url
+        if url.startswith("https://"):
+            wget_url = url.replace("https://", "http://", 1)
+        probes.append(["wget", "-q", "-O", "/dev/null", "--timeout=5", wget_url])
 
     for cmd in probes:
-        proc = run_cmd(cmd, 5.0)
+        proc = run_cmd(cmd, 8.0)
         if proc.returncode == 0:
             _append_result(
                 report,
-                CheckResult("ok", f"HTTP ответ с {url}", detail="curl/wget успешно"),
+                CheckResult("ok", f"Health probe OK ({url})", detail="curl/wget успешно"),
             )
             return
         last_err = (proc.stderr or proc.stdout or "").strip()
@@ -673,9 +684,9 @@ def _check_http_probe(
         report,
         CheckResult(
             "fail",
-            f"Нет HTTP-ответа от {url}",
+            f"Нет ответа от {url}",
             detail=last_err,
-            hint_ru="Проверьте journalctl и что uvicorn слушает BACKEND_PORT.",
+            hint_ru="Проверьте journalctl и что uvicorn слушает BACKEND_PORT (HTTP или HTTPS).",
         ),
     )
 
