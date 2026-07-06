@@ -794,6 +794,7 @@ ensure_executable_scripts() {
   chmod +x "$ROOT_DIR/start.sh" "$ROOT_DIR/start_node_agent.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/test-backend-health-check.sh" 2>/dev/null || true
+  chmod +x "$ROOT_DIR/scripts/test-install-publish-modes.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/backend-health-check.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/nginx-setup.sh" "$ROOT_DIR/scripts/nginx-common.sh" "$ROOT_DIR/scripts/firewall-setup.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/seed-admin-user.py" "$ROOT_DIR/scripts/seed-wizard-db.py" 2>/dev/null || true
@@ -1467,6 +1468,13 @@ setup_nginx_if_selected() {
   esac
 }
 
+is_direct_public_http_mode() {
+  case "${WIZ_NGINX_MODE:-none}" in
+    http_direct) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 is_uvicorn_https_mode() {
   case "${WIZ_NGINX_MODE:-none}" in
     uvicorn_le | uvicorn_custom | uvicorn_selfsigned) return 0 ;;
@@ -1525,6 +1533,11 @@ setup_firewall_if_selected() {
     fw_https_port="${WIZ_BACKEND_PORT:-8000}"
     fw_http_port="0"
     fw_backend_port="0"
+  elif is_direct_public_http_mode; then
+    has_nginx=true
+    fw_https_port="${WIZ_BACKEND_PORT:-8000}"
+    fw_http_port="0"
+    fw_backend_port="0"
   fi
 
   local panel_ip="${WIZ_NODE_AGENT_ALLOWED_IPS:-}"
@@ -1544,7 +1557,7 @@ setup_firewall_if_selected() {
   local backend_port="${WIZ_BACKEND_PORT:-8000}"
   if [[ "$has_controller" != true ]]; then
     backend_port="0"
-  elif is_uvicorn_https_mode; then
+  elif is_uvicorn_https_mode || is_direct_public_http_mode; then
     backend_port="0"
   fi
 

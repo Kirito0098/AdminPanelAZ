@@ -106,4 +106,6 @@ jobs:
           shellcheck -S error -x install.sh install-easy.sh start.sh start_node_agent.sh scripts/*.sh
 
       - name: Backend health-check logic
-        run: ./scripts/test-backend-health-check.sh
+        run: |
+          ./scripts/test-backend-health-check.sh
+          ./scripts/test-install-publish-modes.sh

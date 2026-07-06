@@ -509,7 +509,7 @@ wizard_ask_https() {
     "Nginx + самоподписанный сертификат (LAN / внутренняя сеть)" \
     "Nginx + собственные сертификаты" \
     "HTTPS на uvicorn + Let's Encrypt (без nginx, standalone certbot)" \
-    "HTTPS на uvicorn + собственные сертификаты (без nginx, cert от 3x-ui и т.п.)" \
+    "HTTPS на uvicorn + собственные сертификаты (без nginx)" \
     "HTTPS на uvicorn + самоподписанный (без nginx)" \
     "Пропустить (только localhost, dev/тесты)" \
     "HTTP напрямую без TLS (LAN / тесты, не для интернета)"

@@ -21,15 +21,21 @@ bhc_env_get() {
 bhc_scheme_from_env() {
   local use_https ssl_cert
   use_https="$(bhc_env_get USE_HTTPS 2>/dev/null || true)"
-  case "${use_https,,}" in
-    true|1|yes|on)
-      ssl_cert="$(bhc_env_get SSL_CERT 2>/dev/null || true)"
-      if [[ -n "$ssl_cert" ]]; then
-        echo "https"
+  if [[ -n "$use_https" ]]; then
+    case "${use_https,,}" in
+      false|0|no|off)
+        echo "http"
         return 0
-      fi
-      ;;
-  esac
+        ;;
+      true|1|yes|on)
+        ssl_cert="$(bhc_env_get SSL_CERT 2>/dev/null || true)"
+        if [[ -n "$ssl_cert" ]]; then
+          echo "https"
+          return 0
+        fi
+        ;;
+    esac
+  fi
   return 1
 }
 
