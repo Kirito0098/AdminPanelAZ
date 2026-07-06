@@ -643,14 +643,38 @@ ensure_backend_data_dirs() {
     "${WIZ_BACKUP_ROOT:-/var/backups/adminpanelaz}"
 }
 
+backend_health_check_scheme() {
+  local use_https ssl_cert
+  use_https="$(env_get USE_HTTPS 2>/dev/null || true)"
+  case "${use_https,,}" in
+    true|1|yes|on)
+      ssl_cert="$(env_get SSL_CERT 2>/dev/null || true)"
+      if [[ -n "$ssl_cert" && -f "$ssl_cert" ]]; then
+        echo "https"
+        return 0
+      fi
+      ;;
+  esac
+  echo "http"
+}
+
+curl_backend_health_url() {
+  local url="$1"
+  if [[ "$url" == https://* ]]; then
+    curl -kfsS "$url"
+  else
+    curl -fsS "$url"
+  fi
+}
+
 wait_for_backend_health() {
   local port="${1:-${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}}"
-  local url="http://127.0.0.1:${port}/api/health"
-  local attempts="${2:-90}"
-  local i
+  local scheme url attempts="${2:-90}" i
+  scheme="$(backend_health_check_scheme)"
+  url="${scheme}://127.0.0.1:${port}/api/health"
 
   for ((i = 1; i <= attempts; i++)); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
+    if curl_backend_health_url "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -660,12 +684,12 @@ wait_for_backend_health() {
 
 wait_for_backend_health_deep() {
   local port="${1:-${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}}"
-  local url="http://127.0.0.1:${port}/api/health/deep"
-  local attempts="${2:-30}"
-  local i
+  local scheme url attempts="${2:-30}" i
+  scheme="$(backend_health_check_scheme)"
+  url="${scheme}://127.0.0.1:${port}/api/health/deep"
 
   for ((i = 1; i <= attempts; i++)); do
-    if curl -fsS "$url" | grep -q '"status"' 2>/dev/null; then
+    if curl_backend_health_url "$url" 2>/dev/null | grep -q '"status"' 2>/dev/null; then
       return 0
     fi
     sleep 1
@@ -680,19 +704,21 @@ verify_controller_running() {
 
   local port="${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}"
   local state_dir="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-/var/lib/adminpanelaz}}"
+  local health_scheme
+  health_scheme="$(backend_health_check_scheme)"
 
   ui_progress_start "Проверка backend (/api/health)"
   if wait_for_backend_health "$port" 90; then
-    ui_progress_done "Backend отвечает на порту ${port}"
+    ui_progress_done "Backend отвечает на порту ${port} (${health_scheme})"
   else
-    die "Backend не ответил на /api/health за 90 с (порт ${port}). Проверьте: systemctl status adminpanelaz; journalctl -u adminpanelaz -n 50; ${state_dir}/logs/backend.log"
+    die "Backend не ответил на /api/health за 90 с (порт ${port}, ${health_scheme}). Проверьте: systemctl status adminpanelaz; journalctl -u adminpanelaz -n 50; ${state_dir}/logs/backend.log"
   fi
 
   ui_progress_start "Проверка backend (/api/health/deep)"
   if wait_for_backend_health_deep "$port" 30; then
     ui_progress_done "Deep health OK"
   else
-    warn "Deep health не ответил за 30 с — проверьте: curl -s http://127.0.0.1:${port}/api/health/deep"
+    warn "Deep health не ответил за 30 с — проверьте: curl -ks ${health_scheme}://127.0.0.1:${port}/api/health/deep"
     ui_progress_done "Light health OK, deep health пропущен"
   fi
 }
