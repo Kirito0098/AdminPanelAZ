@@ -1007,13 +1007,36 @@ wizard_show_summary() {
 
   if [[ "$WIZ_INSTALL_TYPE" != "node" ]]; then
     wiz_summary_section "Сеть и доступ"
-    ui_summary_row "Доступ" "${WIZ_SERVER_ADDRESS:-localhost (127.0.0.1)}"
+    local access_summary backend_summary
+    case "${WIZ_NGINX_MODE}" in
+      uvicorn_*)
+        access_summary="https://${WIZ_NGINX_DOMAIN:-<домен>}:${WIZ_BACKEND_PORT}"
+        backend_summary="0.0.0.0:${WIZ_BACKEND_PORT} (HTTPS на uvicorn, без Nginx)"
+        ;;
+      http_direct)
+        access_summary="http://<сервер>:${WIZ_BACKEND_PORT}"
+        backend_summary="0.0.0.0:${WIZ_BACKEND_PORT} (HTTP без TLS)"
+        ;;
+      none)
+        access_summary="http://127.0.0.1:${WIZ_BACKEND_PORT}"
+        backend_summary="127.0.0.1:${WIZ_BACKEND_PORT} (только localhost)"
+        ;;
+      le | selfsigned | nginx_custom)
+        access_summary="${WIZ_SERVER_ADDRESS:-https://${WIZ_NGINX_DOMAIN}}"
+        backend_summary="127.0.0.1:${WIZ_BACKEND_PORT} (за Nginx)"
+        ;;
+      *)
+        access_summary="${WIZ_SERVER_ADDRESS:-localhost (127.0.0.1)}"
+        backend_summary="${WIZ_BACKEND_HOST}:${WIZ_BACKEND_PORT}"
+        ;;
+    esac
+    ui_summary_row "Доступ" "$access_summary"
     if [[ "$WIZ_DDNS_PROVIDER" != "none" ]]; then
       ui_summary_row "DDNS" "$WIZ_DDNS_PROVIDER ($(wizard_ddns_fqdn))"
       ui_summary_row "DDNS auto-update" "$WIZ_DDNS_CONFIGURE_UPDATE"
     fi
-    ui_summary_row "Backend (внутр.)" "${WIZ_BACKEND_HOST}:${WIZ_BACKEND_PORT} (только localhost)"
-    ui_summary_row "Публикация (Nginx)" "$WIZ_NGINX_MODE"
+    ui_summary_row "Backend" "$backend_summary"
+    ui_summary_row "Публикация" "$WIZ_NGINX_MODE"
     if [[ "$WIZ_NGINX_MODE" != "none" && -n "$WIZ_NGINX_DOMAIN" ]]; then
       ui_summary_row "Домен" "$WIZ_NGINX_DOMAIN"
       if [[ "$WIZ_NGINX_MODE" == "le" || "$WIZ_NGINX_MODE" == "selfsigned" ]]; then

@@ -644,7 +644,7 @@ ensure_backend_data_dirs() {
 }
 
 backend_health_check_scheme() {
-  local use_https ssl_cert
+  local use_https ssl_cert mode
   use_https="$(env_get USE_HTTPS 2>/dev/null || true)"
   case "${use_https,,}" in
     true|1|yes|on)
@@ -655,7 +655,20 @@ backend_health_check_scheme() {
       fi
       ;;
   esac
+  mode="${WIZ_NGINX_MODE:-}"
+  case "$mode" in
+    uvicorn_le | uvicorn_custom | uvicorn_selfsigned)
+      echo "https"
+      return 0
+      ;;
+  esac
   echo "http"
+}
+
+backend_health_check_port() {
+  local port
+  port="$(env_get BACKEND_PORT 2>/dev/null || true)"
+  printf '%s' "${port:-${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}}"
 }
 
 curl_backend_health_url() {
@@ -668,8 +681,9 @@ curl_backend_health_url() {
 }
 
 wait_for_backend_health() {
-  local port="${1:-${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}}"
-  local scheme url attempts="${2:-90}" i
+  local port scheme url attempts="${2:-90}" i
+  port="$(backend_health_check_port)"
+  [[ -n "${1:-}" ]] && port="$1"
   scheme="$(backend_health_check_scheme)"
   url="${scheme}://127.0.0.1:${port}/api/health"
 
@@ -683,8 +697,9 @@ wait_for_backend_health() {
 }
 
 wait_for_backend_health_deep() {
-  local port="${1:-${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}}"
-  local scheme url attempts="${2:-30}" i
+  local port scheme url attempts="${2:-30}" i
+  port="$(backend_health_check_port)"
+  [[ -n "${1:-}" ]] && port="$1"
   scheme="$(backend_health_check_scheme)"
   url="${scheme}://127.0.0.1:${port}/api/health/deep"
 
@@ -702,9 +717,9 @@ verify_controller_running() {
     return 0
   fi
 
-  local port="${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}"
-  local state_dir="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-/var/lib/adminpanelaz}}"
-  local health_scheme
+  local port state_dir health_scheme
+  port="$(backend_health_check_port)"
+  state_dir="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-/var/lib/adminpanelaz}}"
   health_scheme="$(backend_health_check_scheme)"
 
   ui_progress_start "Проверка backend (/api/health)"
