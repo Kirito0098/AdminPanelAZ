@@ -915,6 +915,13 @@ class VpnNetworkPublishModeInfo(BaseModel):
     warning: str | None = None
 
 
+class VpnNetworkSslCertSuggestion(BaseModel):
+    cert: str
+    key: str
+    label: str
+    source: str
+
+
 class VpnNetworkPublishRequest(BaseModel):
     mode: str = Field(
         pattern=r"^(http_direct|nginx_le|nginx_selfsigned|nginx_custom|uvicorn_le|uvicorn_selfsigned|uvicorn_custom)$"
@@ -939,6 +946,12 @@ class VpnNetworkSettingsResponse(BaseModel):
     nginx_setup_hint: str = "scripts/nginx-setup.sh"
     publish_modes: list[VpnNetworkPublishModeInfo] = []
     active_publish_mode: str | None = None
+    known_ssl_cert: str | None = None
+    known_ssl_key: str | None = None
+    ssl_cert_suggestions: list[VpnNetworkSslCertSuggestion] = []
+    nginx_installed: bool = False
+    panel_restart_command: str = "sudo systemctl restart adminpanelaz"
+    uvicorn_publish_warnings: list[str] = []
 
 
 class ServiceRestartRequest(BaseModel):

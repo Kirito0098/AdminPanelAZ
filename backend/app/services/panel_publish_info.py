@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
+from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -14,6 +17,10 @@ PublishModeKey = str
 GetEnvValue = Callable[[str, str], str]
 
 WHITELIST_PORT_FIREWALL_MODES = frozenset({"direct_http"})
+
+SELF_SIGNED_CERT_PATH = Path("/etc/ssl/certs/adminpanelaz.crt")
+SELF_SIGNED_KEY_PATH = Path("/etc/ssl/private/adminpanelaz.key")
+PANEL_SYSTEMD_UNIT = "adminpanelaz"
 
 
 def _parse_bool(raw: str | None, *, default: bool = False) -> bool:
@@ -276,12 +283,21 @@ def build_panel_publish_context(
         "active_publish_mode": resolve_active_publish_mode_key(
             mode_key=mode_key,
             ssl_cert=ssl_cert,
+            publish_mode=gv("PUBLISH_MODE", ""),
         ),
     }
 
 
-def resolve_active_publish_mode_key(*, mode_key: str, ssl_cert: str) -> str | None:
+def resolve_active_publish_mode_key(
+    *,
+    mode_key: str,
+    ssl_cert: str,
+    publish_mode: str = "",
+) -> str | None:
     """Best-effort mapping of runtime mode to publish wizard key."""
+    explicit = (publish_mode or "").strip()
+    if explicit:
+        return explicit
     if mode_key == "direct_http":
         return "http_direct"
     if mode_key == "local_http":
@@ -300,6 +316,212 @@ def resolve_active_publish_mode_key(*, mode_key: str, ssl_cert: str) -> str | No
             return "nginx_custom"
         return "nginx_le"
     return None
+
+
+def is_nginx_installed() -> bool:
+    return shutil.which("nginx") is not None
+
+
+def nginx_listens_on_443() -> bool:
+    if not is_nginx_installed():
+        return False
+    try:
+        result = subprocess.run(
+            ["ss", "-tln"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return ":443 " in (result.stdout or "")
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def nginx_has_vhost_for_domain(domain: str) -> bool:
+    domain = (domain or "").strip().split(":")[0]
+    if not domain or not is_nginx_installed():
+        return False
+    sites_dir = Path("/etc/nginx/sites-enabled")
+    if not sites_dir.is_dir():
+        return False
+    basename = domain.replace(".", "_")
+    if (sites_dir / basename).exists():
+        return True
+    try:
+        for path in sites_dir.iterdir():
+            if not path.is_file() and not path.is_symlink():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if f"server_name {domain}" in text or f"server_name {domain};" in text:
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def build_uvicorn_publish_warnings(
+    *,
+    domain: str,
+    backend_port: str | int,
+    ssl_cert_suggestions: list[dict[str, str]] | None = None,
+) -> list[str]:
+    """Warnings when publishing via uvicorn HTTPS on a server that already uses nginx:443."""
+    warnings: list[str] = []
+    domain_host = (domain or "").strip().split(":")[0]
+    try:
+        port = int(backend_port)
+    except (TypeError, ValueError):
+        port = 8000
+
+    has_le = any(item.get("source") == "letsencrypt" for item in (ssl_cert_suggestions or []))
+    if has_le and domain_host:
+        warnings.append(
+            f"На сервере уже есть Let's Encrypt для {domain_host}. "
+            "Для uvicorn без nginx выберите «HTTPS на uvicorn + свои сертификаты» "
+            "или оставьте «Nginx + Let's Encrypt»."
+        )
+        warnings.append(
+            f"HSTS: браузер запомнил защищённый HTTPS для {domain_host}. "
+            "Самоподписанный сертификат не откроется (даже с :8000) — только «Nginx + HTTPS» "
+            "или очистка HSTS в браузере (edge://net-internals/#hsts)."
+        )
+
+    if nginx_listens_on_443() and port != 443:
+        if domain_host and not nginx_has_vhost_for_domain(domain_host):
+            warnings.append(
+                f"Nginx слушает 443, но сайта для {domain_host} нет. "
+                f"Адрес https://{domain_host}/ откроет другой сайт с чужим сертификатом (HSTS). "
+                f"Используйте https://{domain_host}:{port}/ или режим «Nginx + HTTPS»."
+            )
+        elif domain_host:
+            warnings.append(
+                f"Uvicorn на порту {port}: стандартный https://{domain_host}/ идёт через nginx на 443. "
+                f"Без nginx-сайта для домена браузер получит ошибку сертификата."
+            )
+
+    return warnings
+
+
+def build_publish_access_url(
+    *,
+    publish_mode: str,
+    domain: str,
+    backend_port: str | int,
+    https_public_port: str | int | None = None,
+    behind_nginx: bool = False,
+) -> str | None:
+    """Primary browser URL after applying a publish mode."""
+    mode = (publish_mode or "").strip()
+    domain_host = (domain or "").strip().split(":")[0]
+    if not domain_host and mode != "http_direct":
+        return None
+    try:
+        port = int(backend_port)
+    except (TypeError, ValueError):
+        port = 8000
+    pub = int(https_public_port or (443 if behind_nginx else port))
+
+    if mode.startswith("nginx_") or (behind_nginx and not mode.startswith("uvicorn_")):
+        return f"https://{domain_host}/" if pub == 443 else f"https://{domain_host}:{pub}/"
+    if mode == "http_direct":
+        return f"http://{domain_host}:{port}/" if domain_host else f"http://<сервер>:{port}/"
+    if mode.startswith("uvicorn_"):
+        le_cert = Path(f"/etc/letsencrypt/live/{domain_host}/fullchain.pem")
+        if port != 443 and le_cert.is_file():
+            return f"https://{domain_host}/"
+        return f"https://{domain_host}/" if port == 443 else f"https://{domain_host}:{port}/"
+    return None
+
+
+def panel_restart_command() -> str:
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-enabled", PANEL_SYSTEMD_UNIT],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode == 0:
+            return f"sudo systemctl restart {PANEL_SYSTEMD_UNIT}"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return "sudo ./start.sh restart"
+
+
+def discover_ssl_certificate_candidates(
+    *,
+    domain: str = "",
+    ssl_cert: str = "",
+    ssl_key: str = "",
+) -> list[dict[str, str]]:
+    """Known cert/key pairs on the server (for mode switching without re-entering paths)."""
+    candidates: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(cert: str, key: str, label: str, source: str) -> None:
+        cert = (cert or "").strip()
+        key = (key or "").strip()
+        if not cert or not key:
+            return
+        pair = (cert, key)
+        if pair in seen:
+            return
+        if Path(cert).is_file() and Path(key).is_file():
+            seen.add(pair)
+            candidates.append({"cert": cert, "key": key, "label": label, "source": source})
+
+    _add(ssl_cert, ssl_key, "Текущие пути из .env", "env")
+    domain_host = (domain or "").strip().split(":")[0]
+    if domain_host:
+        _add(
+            f"/etc/letsencrypt/live/{domain_host}/fullchain.pem",
+            f"/etc/letsencrypt/live/{domain_host}/privkey.pem",
+            f"Let's Encrypt ({domain_host})",
+            "letsencrypt",
+        )
+    _add(
+        str(SELF_SIGNED_CERT_PATH),
+        str(SELF_SIGNED_KEY_PATH),
+        "Самоподписанный adminpanelaz",
+        "selfsigned",
+    )
+    return candidates
+
+
+def resolve_publish_ssl_paths(
+    *,
+    ssl_cert: str | None,
+    ssl_key: str | None,
+    domain: str | None,
+    get_env_value: GetEnvValue | None = None,
+) -> tuple[str, str]:
+    """Pick cert/key for custom SSL modes: payload → .env → discovered candidates."""
+    cert = (ssl_cert or "").strip()
+    key = (ssl_key or "").strip()
+    if cert and key:
+        return cert, key
+
+    env_cert = ""
+    env_key = ""
+    env_domain = (domain or "").strip()
+    if get_env_value is not None:
+        env_cert = get_env_value("SSL_CERT", "")
+        env_key = get_env_value("SSL_KEY", "")
+        if not env_domain:
+            env_domain = get_env_value("DOMAIN", "")
+
+    for candidate in discover_ssl_certificate_candidates(
+        domain=env_domain,
+        ssl_cert=env_cert,
+        ssl_key=env_key,
+    ):
+        return candidate["cert"], candidate["key"]
+    return cert, key
 
 
 def build_vpn_network_publish_modes() -> list[dict[str, str | bool | None]]:
@@ -363,13 +585,17 @@ def build_vpn_network_publish_modes() -> list[dict[str, str | bool | None]]:
         {
             "key": "uvicorn_selfsigned",
             "title": "HTTPS на uvicorn + самоподписанный",
-            "description": "TLS на приложении с локальным сертификатом (тесты / LAN).",
+            "description": "TLS на приложении с локальным сертификатом (тесты / LAN). Укажите домен для CN в cert.",
             "requires_domain": False,
             "requires_email": False,
             "requires_ssl_cert": False,
             "uses_nginx_ports": False,
             "uses_uvicorn_https_port": True,
-            "warning": "Telegram Mini App не работает с самоподписанным сертификатом.",
+            "warning": (
+                "Telegram Mini App не работает с самоподписанным сертификатом. "
+                "Если домен раньше открывался через Let's Encrypt / Nginx — браузер заблокирует "
+                "самоподписанный cert из‑за HSTS (обход невозможен). Для этого домена используйте «Nginx + HTTPS»."
+            ),
         },
         {
             "key": "http_direct",

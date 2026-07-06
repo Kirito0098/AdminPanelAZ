@@ -217,6 +217,51 @@ firewall_apply_iptables_rules() {
   fi
 }
 
+firewall_apply_direct_port() {
+  local port="$1"
+  local tool
+  tool="$(firewall_detect_tool)"
+
+  case "$tool" in
+    ufw)
+      ufw allow "${port}/tcp" comment "AdminPanelAZ direct publish" >/dev/null 2>&1 || \
+        ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+      ufw reload >/dev/null 2>&1 || true
+      ;;
+    iptables)
+      if ! iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
+        iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
+      fi
+      firewall_persist_iptables_rules
+      ;;
+    none)
+      firewall_warn "Откройте порт ${port}/tcp вручную для прямого доступа к панели"
+      ;;
+  esac
+}
+
+firewall_apply_publish_mode() {
+  local mode="$1"
+  local backend_port="$2"
+  local https_public_port="$3"
+  local http_acme_port="$4"
+
+  case "$mode" in
+    nginx_le|nginx_selfsigned|nginx_custom)
+      firewall_apply_rules "$backend_port" "0" "$https_public_port" "$http_acme_port" false true "" || return 1
+      ;;
+    uvicorn_le|uvicorn_selfsigned|uvicorn_custom)
+      firewall_apply_direct_port "$backend_port" || return 1
+      ;;
+    http_direct)
+      firewall_apply_direct_port "$backend_port" || return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 firewall_apply_rules() {
   local backend_port="$1"
   local node_port="$2"

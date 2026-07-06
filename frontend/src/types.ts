@@ -712,6 +712,13 @@ export interface VpnNetworkPublishMode {
   warning: string | null
 }
 
+export interface VpnNetworkSslCertSuggestion {
+  cert: string
+  key: string
+  label: string
+  source: string
+}
+
 export interface VpnNetworkSettings {
   mode_key: string
   mode_title: string
@@ -723,6 +730,12 @@ export interface VpnNetworkSettings {
   nginx_setup_hint: string
   publish_modes: VpnNetworkPublishMode[]
   active_publish_mode?: string | null
+  known_ssl_cert?: string | null
+  known_ssl_key?: string | null
+  ssl_cert_suggestions?: VpnNetworkSslCertSuggestion[]
+  nginx_installed?: boolean
+  panel_restart_command?: string
+  uvicorn_publish_warnings?: string[]
 }
 
 export type VpnNetworkPublishModeKey =

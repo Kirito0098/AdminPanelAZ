@@ -35,6 +35,57 @@
 
 ## [Unreleased]
 
+> **Кратко:** мастер публикации панели (Nginx ↔ uvicorn, 7 режимов HTTPS/HTTP), переключение из UI с firewall и редиректом на multi-site, улучшенный UX подтверждения.
+
+### ✨ Added
+
+#### VPN / Сеть — мастер публикации
+
+- **7 режимов доступа** — в «Настройки → VPN / Сеть»: Nginx + LE / самоподписанный / свои cert; HTTPS на uvicorn + LE / свои cert / самоподписанный; прямой HTTP (`VpnNetworkTab`, `scripts/nginx-setup.sh`, `POST /api/settings/vpn-network/publish`).
+- **HTTPS на uvicorn без Nginx** — TLS на приложении по образцу AdminAntizapret: `USE_HTTPS`, `SSL_CERT`, `SSL_KEY` в `.env`, флаги uvicorn в `start.sh`, режимы `--uvicorn-le|custom|selfsigned` в `nginx-setup.sh`.
+- **Фоновая задача публикации** — `task_vpn_network_publish`: `nginx-setup.sh`, отложенный перезапуск панели, `ACCESS_URL` и `PUBLISH_MODE` в результате (`background_tasks.py`).
+- **Подсказки по сертификатам** — `known_ssl_cert`, `known_ssl_key`, `ssl_cert_suggestions[]` (`.env`, Let's Encrypt, самоподписанный adminpanelaz); автоподстановка путей при custom-режимах (`panel_publish_info.py`, `nginx_resolve_existing_ssl_paths`).
+- **Multi-site: редирект 443 → uvicorn** — если nginx уже слушает 443, для uvicorn на другом порту создаётся vhost с LE и редиректом `https://domain/` → `https://domain:port/` (`deploy/nginx/adminpanelaz-redirect.conf.template`, `nginx_install_uvicorn_redirect`).
+- **Firewall при смене режима** — `firewall_apply_publish_mode` (nginx: 80/443; uvicorn/HTTP: открытие порта приложения) вызывается из `nginx-setup.sh` (`scripts/firewall-setup.sh`).
+- **Certbot webroot** — при работающем nginx сначала выпуск LE через webroot без остановки всех сайтов; standalone — fallback (`nginx_obtain_letsencrypt_cert`).
+- **Предупреждения uvicorn** — `uvicorn_publish_warnings[]` при nginx на 443 и HSTS; контекстные подсказки в UI (`publishWizardUi.ts`).
+- **Поле домена** — для самоподписанного uvicorn/nginx (CN в cert).
+
+#### Установка
+
+- **Мастер install-wizard** — defaults по Enter: panel+AntiZapret, production, systemd, full profile, mTLS, auto-backup, firewall off.
+- **Тесты режимов публикации** — `scripts/test-install-publish-modes.sh`, `scripts/test-backend-health-check.sh` (health-check при HTTPS uvicorn).
+
+### 🔄 Changed
+
+#### VPN / Сеть
+
+- **Группировка режимов в UI** — «Через Nginx» и «Напрямую на uvicorn»; preview URL «После применения откройте…».
+- **Диалог подтверждения** — контекстные info/warning/danger по режиму, карточка домена/порта/URL; красная кнопка только для рискованных режимов (`publishWizardUi.ts`).
+- **`PUBLISH_MODE` в `.env`** — активный режим мастера сохраняется и не сбрасывается при перезагрузке настроек без явного выбора пользователя.
+- **`nginx_install_site`** — не удаляет `sites-enabled/default`, если на сервере уже есть другие сайты; reload вместо restart где возможно.
+- **`nginx_apply_behind_proxy_env`** — `ENFORCE_HTTPS=true` при публикации через nginx из UI.
+
+#### Прочее
+
+- **Удалены упоминания 3x-ui** — из UI, `.env.example`, `panel_publish_info.py`.
+
+### 🐛 Fixed
+
+#### VPN / Сеть
+
+- **Кнопка «Применить настройки»** — `ConfirmDialogHost` получал props неверно (`{...dialogProps}` вместо `dialogProps={…}`), диалог не открывался.
+- **Сброс выбранного режима** — `loadSettings` перезаписывал режим на `active_publish_mode` после клика; добавлен `userPickedModeRef`.
+- **Самоподписанный → Let's Encrypt в UI** — скрипт больше не подменяет self-signed на LE; режим в мастере соответствует выбору.
+- **502 Bad Gateway** — восстановлена функция `panel_restart_command()` в `panel_publish_info.py` (ImportError ломал старт uvicorn).
+- **Ложный fail установки** — `backend-health-check.sh` и installer пробуют HTTPS, когда uvicorn слушает TLS (`install.sh`, `site_diagnostics.py`).
+- **`http_direct` + firewall** — whitelist порта панели при прямом HTTP.
+
+### 🧪 Tests
+
+- **`scripts/test-backend-health-check.sh`** — схема health-check для режимов uvicorn HTTPS.
+- **`scripts/test-install-publish-modes.sh`** — матрица 8 режимов публикации в CI.
+
 ---
 
 ## [2.10.0] - 2026-07-05

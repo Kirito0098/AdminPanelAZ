@@ -111,6 +111,12 @@ class BackgroundTaskService:
         return text[:MAX_OUTPUT_CHARS] + "\n...[truncated]"
 
     def _parse_result_from_output(self, task_type: str, output: str | None) -> dict[str, Any] | None:
+        if task_type == "vpn_network_publish" and output:
+            try:
+                parsed = json.loads(output)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return None
+            return parsed if isinstance(parsed, dict) else None
         if task_type not in _PIPELINE_TASK_TYPES or not output:
             return None
         try:
@@ -312,6 +318,20 @@ class BackgroundTaskService:
             output_value = result.get("output", "")
             if task_type in _PIPELINE_TASK_TYPES and isinstance(result, dict) and "success" in result:
                 output_value = json.dumps(result, ensure_ascii=False)
+            elif task_type == "vpn_network_publish" and isinstance(result, dict):
+                output_value = json.dumps(
+                    {
+                        "log": result.get("log", result.get("output", "")),
+                        "panel_restarted": bool(result.get("panel_restarted")),
+                        "requires_manual_restart": bool(result.get("requires_manual_restart")),
+                        "restart_command": str(result.get("restart_command") or ""),
+                        "resolved_ssl_cert": str(result.get("resolved_ssl_cert") or ""),
+                        "resolved_ssl_key": str(result.get("resolved_ssl_key") or ""),
+                        "access_url": str(result.get("access_url") or ""),
+                        "publish_mode": str(result.get("publish_mode") or ""),
+                    },
+                    ensure_ascii=False,
+                )
             self.update_background_task(
                 task_id,
                 status="completed",
@@ -499,7 +519,11 @@ class BackgroundTaskService:
         self,
         payload: dict[str, object],
         progress_updater: Callable[[int, str, str | None], None] | None = None,
-    ) -> dict[str, str]:
+    ) -> dict[str, str | bool]:
+        from app.services.env_file import EnvFileService
+        from app.services.panel_publish_info import panel_restart_command, resolve_publish_ssl_paths
+        from app.services.system_update import _systemd_unit_installed, schedule_controller_restart
+
         mode_flags = {
             "http_direct": "--http",
             "nginx_le": "--nginx-le",
@@ -516,30 +540,43 @@ class BackgroundTaskService:
 
         uvicorn_modes = {"uvicorn_le", "uvicorn_selfsigned", "uvicorn_custom"}
         backend_port = int(payload.get("backend_port") or 8000)
+        domain = str(payload.get("domain") or "").strip()
+        ssl_cert = str(payload.get("ssl_cert") or "").strip()
+        ssl_key = str(payload.get("ssl_key") or "").strip()
+        resolved_cert = ssl_cert
+        resolved_key = ssl_key
+
+        env_path = APP_ROOT / ".env"
+        env = EnvFileService(env_path)
+        if mode in {"nginx_custom", "uvicorn_custom"}:
+            resolved_cert, resolved_key = resolve_publish_ssl_paths(
+                ssl_cert=ssl_cert or None,
+                ssl_key=ssl_key or None,
+                domain=domain or None,
+                get_env_value=env.get_env_value,
+            )
 
         if progress_updater:
             progress_updater(10, "Подготовка nginx-setup.sh…")
 
         cmd_env: dict[str, str] = {
             "NON_INTERACTIVE": "true",
+            "SKIP_PANEL_RESTART": "true",
             "BACKEND_PORT": str(backend_port),
             "HTTPS_PUBLIC_PORT": str(
                 backend_port if mode in uvicorn_modes else (payload.get("https_public_port") or 443)
             ),
             "HTTP_ACME_PORT": str(payload.get("http_acme_port") or 80),
         }
-        domain = payload.get("domain")
         if domain:
-            cmd_env["DOMAIN"] = str(domain)
+            cmd_env["DOMAIN"] = domain
         email = payload.get("email")
         if email:
             cmd_env["EMAIL"] = str(email)
-        ssl_cert = payload.get("ssl_cert")
-        if ssl_cert:
-            cmd_env["SSL_CERT"] = str(ssl_cert)
-        ssl_key = payload.get("ssl_key")
-        if ssl_key:
-            cmd_env["SSL_KEY"] = str(ssl_key)
+        if resolved_cert:
+            cmd_env["SSL_CERT"] = resolved_cert
+        if resolved_key:
+            cmd_env["SSL_KEY"] = resolved_key
 
         script = PROJECT_ROOT / "scripts" / "nginx-setup.sh"
         if not script.is_file():
@@ -555,10 +592,25 @@ class BackgroundTaskService:
             env=cmd_env,
         )
 
-        if progress_updater:
-            progress_updater(95, "Перезапуск панели…")
+        restart_cmd = panel_restart_command()
+        panel_restarted = False
+        requires_manual_restart = True
 
-        output = "\n".join(part for part in [stdout, stderr] if part).strip()
+        if progress_updater:
+            progress_updater(90, "Перезапуск панели…")
+
+        if _systemd_unit_installed() or (PROJECT_ROOT / "start.sh").is_file():
+            schedule_controller_restart(PROJECT_ROOT)
+            panel_restarted = True
+            requires_manual_restart = False
+
+        log_output = "\n".join(part for part in [stdout, stderr] if part).strip()
+        access_url = ""
+        for line in log_output.splitlines():
+            if "ACCESS_URL=" in line:
+                access_url = line.split("ACCESS_URL=", 1)[-1].strip()
+                break
+
         mode_labels = {
             "http_direct": "Прямой HTTP",
             "nginx_le": "Nginx + Let's Encrypt",
@@ -568,9 +620,24 @@ class BackgroundTaskService:
             "uvicorn_selfsigned": "HTTPS на uvicorn + самоподписанный SSL",
             "uvicorn_custom": "HTTPS на uvicorn + собственные сертификаты",
         }
+        message = f"Публикация применена: {mode_labels.get(mode, mode)}"
+        if access_url:
+            message += f". Откройте: {access_url}"
+        if panel_restarted:
+            message += ". Панель перезапускается через несколько секунд"
+        elif requires_manual_restart:
+            message += f". Перезапустите панель: {restart_cmd}"
+
         return {
-            "message": f"Публикация применена: {mode_labels.get(mode, mode)}",
-            "output": output,
+            "message": message,
+            "log": log_output,
+            "panel_restarted": panel_restarted,
+            "requires_manual_restart": requires_manual_restart,
+            "restart_command": restart_cmd,
+            "resolved_ssl_cert": resolved_cert,
+            "resolved_ssl_key": resolved_key,
+            "access_url": access_url,
+            "publish_mode": mode,
         }
 
     def start_cidr_runner(self, task_id: str, runner: Callable) -> None:

@@ -27,6 +27,43 @@ nginx_env_get() {
   grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true
 }
 
+# Подставить SSL_CERT/SSL_KEY из .env, Let's Encrypt или самоподписанного cert (без повторного ввода).
+nginx_resolve_existing_ssl_paths() {
+  local domain="${1:-${DOMAIN:-}}"
+  domain="${domain%%:*}"
+
+  if [[ -n "${SSL_CERT:-}" && -n "${SSL_KEY:-}" ]]; then
+    return 0
+  fi
+
+  local cert key
+  cert="$(nginx_env_get SSL_CERT)"
+  key="$(nginx_env_get SSL_KEY)"
+  if [[ -f "$cert" && -f "$key" ]]; then
+    SSL_CERT="$cert"
+    SSL_KEY="$key"
+    return 0
+  fi
+
+  if [[ -n "$domain" ]]; then
+    cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
+    key="/etc/letsencrypt/live/${domain}/privkey.pem"
+    if [[ -f "$cert" && -f "$key" ]]; then
+      SSL_CERT="$cert"
+      SSL_KEY="$key"
+      return 0
+    fi
+  fi
+
+  if [[ -f "$NGINX_SELF_SIGNED_CERT" && -f "$NGINX_SELF_SIGNED_KEY" ]]; then
+    SSL_CERT="$NGINX_SELF_SIGNED_CERT"
+    SSL_KEY="$NGINX_SELF_SIGNED_KEY"
+    return 0
+  fi
+
+  return 1
+}
+
 nginx_env_set() {
   local key="$1"
   local value="$2"
@@ -116,7 +153,89 @@ nginx_render_template() {
     -e "s|__HTTP_PORT__|${http_port}|g" \
     -e "s|__SSL_CERT__|${ssl_cert}|g" \
     -e "s|__SSL_KEY__|${ssl_key}|g" \
+    -e "s|__UVICORN_PORT__|${backend_port}|g" \
     "$template"
+}
+
+nginx_render_redirect_template() {
+  local domain="$1"
+  local uvicorn_port="$2"
+  local ssl_cert="$3"
+  local ssl_key="$4"
+  sed \
+    -e "s|__DOMAIN__|${domain}|g" \
+    -e "s|__UVICORN_PORT__|${uvicorn_port}|g" \
+    -e "s|__SSL_CERT__|${ssl_cert}|g" \
+    -e "s|__SSL_KEY__|${ssl_key}|g" \
+    "$NGINX_TEMPLATE_DIR/adminpanelaz-redirect.conf.template"
+}
+
+nginx_count_other_enabled_sites() {
+  local domain="$1"
+  local count=0
+  local base
+  base="$(nginx_conf_basename "$domain")"
+  local path name
+  for path in /etc/nginx/sites-enabled/*; do
+    [[ -e "$path" ]] || continue
+    name="$(basename "$path")"
+    [[ "$name" == "$base" ]] && continue
+    [[ "$name" == "default" ]] && continue
+    count=$((count + 1))
+  done
+  printf '%s' "$count"
+}
+
+nginx_pick_redirect_cert_paths() {
+  local domain="$1"
+  local fallback_cert="${2:-}"
+  local fallback_key="${3:-}"
+  local le_cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
+  local le_key="/etc/letsencrypt/live/${domain}/privkey.pem"
+  if [[ -f "$le_cert" && -f "$le_key" ]]; then
+    NGINX_REDIRECT_CERT="$le_cert"
+    NGINX_REDIRECT_KEY="$le_key"
+    return 0
+  fi
+  if [[ -f "$fallback_cert" && -f "$fallback_key" ]]; then
+    NGINX_REDIRECT_CERT="$fallback_cert"
+    NGINX_REDIRECT_KEY="$fallback_key"
+    return 0
+  fi
+  if [[ -f "$NGINX_SELF_SIGNED_CERT" && -f "$NGINX_SELF_SIGNED_KEY" ]]; then
+    NGINX_REDIRECT_CERT="$NGINX_SELF_SIGNED_CERT"
+    NGINX_REDIRECT_KEY="$NGINX_SELF_SIGNED_KEY"
+    return 0
+  fi
+  return 1
+}
+
+# Редирект 443 → uvicorn HTTPS (для multi-site: другие сайты на 443 не трогаем)
+nginx_install_uvicorn_redirect() {
+  local domain="$1"
+  local uvicorn_port="$2"
+  local ssl_cert="${3:-}"
+  local ssl_key="${4:-}"
+
+  [[ -n "$domain" ]] || return 0
+  [[ "$uvicorn_port" != "443" ]] || return 0
+  command -v nginx >/dev/null 2>&1 || return 0
+
+  nginx_pick_redirect_cert_paths "$domain" "$ssl_cert" "$ssl_key" || {
+    nginx_warn "Не найден cert для редиректа 443 → :${uvicorn_port}; открывайте https://${domain}:${uvicorn_port}/"
+    return 0
+  }
+
+  local conf
+  conf="$(nginx_render_redirect_template "$domain" "$uvicorn_port" "$NGINX_REDIRECT_CERT" "$NGINX_REDIRECT_KEY")"
+  nginx_install_site "$conf" "$domain" "true"
+  nginx_log "Nginx редирект: https://${domain}/ → https://${domain}:${uvicorn_port}/"
+}
+
+nginx_set_publish_mode() {
+  local mode="$1"
+  [[ -n "$mode" ]] || return 0
+  nginx_env_set PUBLISH_MODE "$mode"
 }
 
 nginx_update_cors_for_domain() {
@@ -171,6 +290,8 @@ nginx_apply_behind_proxy_env() {
   nginx_env_set HTTP_ACME_PORT "$http_acme_port"
   nginx_env_set TRUSTED_PROXY_IPS "127.0.0.1,::1"
   nginx_env_set FORWARDED_ALLOW_IPS "127.0.0.1,::1"
+  nginx_env_set REFRESH_TOKEN_COOKIE_SECURE "true"
+  nginx_env_set ENFORCE_HTTPS "true"
   nginx_update_cors_for_domain "$domain" "$scheme" "$https_public_port"
 }
 
@@ -195,6 +316,8 @@ nginx_apply_direct_https_env() {
   nginx_env_set REFRESH_TOKEN_COOKIE_SECURE "true"
   if [[ "$enforce_https" == "true" ]]; then
     nginx_env_set ENFORCE_HTTPS "true"
+  else
+    nginx_env_unset ENFORCE_HTTPS
   fi
   nginx_update_cors_for_direct_https "$domain" "$backend_port"
 }
@@ -217,14 +340,21 @@ nginx_apply_direct_http_env() {
 nginx_install_site() {
   local conf_content="$1"
   local domain="$2"
+  local reload_only="${3:-false}"
 
   nginx_conf_paths "$domain"
   printf '%s\n' "$conf_content" >"$NGINX_CONF_FILE"
   ln -sf "$NGINX_CONF_FILE" "$NGINX_ENABLED_LINK"
-  rm -f /etc/nginx/sites-enabled/default
+  if [[ "$(nginx_count_other_enabled_sites "$domain")" -eq 0 ]]; then
+    rm -f /etc/nginx/sites-enabled/default
+  fi
   nginx -t || nginx_die "nginx -t не прошёл (конфиг: $NGINX_CONF_FILE)"
   systemctl enable nginx >/dev/null 2>&1 || true
-  systemctl restart nginx || nginx_die "Не удалось запустить nginx"
+  if [[ "$reload_only" == "true" ]]; then
+    systemctl reload nginx || nginx_die "Не удалось перезагрузить nginx"
+  else
+    systemctl restart nginx || nginx_die "Не удалось запустить nginx"
+  fi
 }
 
 nginx_update_proxy_port() {
@@ -281,6 +411,24 @@ nginx_obtain_letsencrypt_cert() {
   fi
 
   nginx_ensure_certbot || nginx_die "Не удалось установить certbot"
+  mkdir -p /var/www/html/.well-known/acme-challenge
+
+  local certbot_ok=false
+  if systemctl is-active nginx >/dev/null 2>&1; then
+    nginx_log "Пробуем certbot webroot (nginx остаётся запущенным)…"
+    if [[ -n "$email" ]]; then
+      certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos -m "$email" -d "$domain" && certbot_ok=true || true
+    else
+      certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos --register-unsafely-without-email -d "$domain" && certbot_ok=true || true
+    fi
+  fi
+
+  if [[ "$certbot_ok" == "true" && -f "$cert_path" ]]; then
+    nginx_log "Сертификат Let's Encrypt получен через webroot"
+    return 0
+  fi
+
+  nginx_log "Webroot не сработал — certbot standalone (nginx будет остановлен)…"
   systemctl stop nginx 2>/dev/null || true
   nginx_temp_clear_port80_nat
 
@@ -307,6 +455,7 @@ nginx_obtain_letsencrypt_cert() {
   fi
 
   nginx_restore_port80_nat
+  systemctl start nginx 2>/dev/null || true
   [ -f "$cert_path" ] || nginx_die "Сертификат не найден после certbot: $cert_path"
 }
 

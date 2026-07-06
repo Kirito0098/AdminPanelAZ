@@ -46,6 +46,11 @@ from app.services.action_log import log_action
 from app.services.panel_publish_info import (
     build_panel_publish_context,
     build_vpn_network_publish_modes,
+    discover_ssl_certificate_candidates,
+    build_uvicorn_publish_warnings,
+    is_nginx_installed,
+    panel_restart_command,
+    resolve_publish_ssl_paths,
     resolve_request_url_root,
 )
 from app.services.telegram import send_tg_message
@@ -595,6 +600,24 @@ def get_vpn_network_settings(
         settings=settings,
     )
     publish_modes = [VpnNetworkPublishModeInfo(**row) for row in build_vpn_network_publish_modes()]
+    domain = env.get_env_value("DOMAIN", "")
+    ssl_cert = env.get_env_value("SSL_CERT", "")
+    ssl_key = env.get_env_value("SSL_KEY", "")
+    suggestions = discover_ssl_certificate_candidates(
+        domain=domain,
+        ssl_cert=ssl_cert,
+        ssl_key=ssl_key,
+    )
+    known_cert = ssl_cert if ssl_cert and Path(ssl_cert).is_file() else None
+    known_key = ssl_key if ssl_key and Path(ssl_key).is_file() else None
+    if not known_cert and suggestions:
+        known_cert = suggestions[0]["cert"]
+        known_key = suggestions[0]["key"]
+    uvicorn_warnings = build_uvicorn_publish_warnings(
+        domain=domain,
+        backend_port=ctx["backend_port"],
+        ssl_cert_suggestions=suggestions,
+    )
     return VpnNetworkSettingsResponse(
         mode_key=ctx["mode_key"],
         mode_title=ctx["mode_title"],
@@ -605,6 +628,12 @@ def get_vpn_network_settings(
         backend_port=ctx["backend_port"],
         publish_modes=publish_modes,
         active_publish_mode=ctx.get("active_publish_mode"),
+        known_ssl_cert=known_cert,
+        known_ssl_key=known_key,
+        ssl_cert_suggestions=suggestions,
+        nginx_installed=is_nginx_installed(),
+        panel_restart_command=panel_restart_command(),
+        uvicorn_publish_warnings=uvicorn_warnings,
     )
 
 
@@ -624,12 +653,28 @@ def publish_vpn_network(
     if payload.mode in {"nginx_le", "uvicorn_le"} and not (payload.domain or "").strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="DOMAIN обязателен для Let's Encrypt")
 
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    env = EnvFileService(env_path)
+
     if payload.mode in {"nginx_custom", "uvicorn_custom"}:
-        if not (payload.ssl_cert or "").strip() or not (payload.ssl_key or "").strip():
+        cert, key = resolve_publish_ssl_paths(
+            ssl_cert=payload.ssl_cert,
+            ssl_key=payload.ssl_key,
+            domain=payload.domain,
+            get_env_value=env.get_env_value,
+        )
+        if not cert or not key:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="SSL_CERT и SSL_KEY обязательны для режима с собственными сертификатами",
+                detail="Укажите пути к сертификату и ключу или задайте DOMAIN для Let's Encrypt",
             )
+        if not Path(cert).is_file() or not Path(key).is_file():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Файлы сертификата не найдены: {cert}, {key}",
+            )
+        payload.ssl_cert = cert
+        payload.ssl_key = key
 
     uvicorn_modes = {"uvicorn_le", "uvicorn_selfsigned", "uvicorn_custom"}
     if payload.mode not in uvicorn_modes:

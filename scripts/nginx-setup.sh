@@ -163,6 +163,10 @@ prompt_domain() {
 }
 
 restart_panel_if_needed() {
+  if [[ "${SKIP_PANEL_RESTART:-false}" == "true" ]]; then
+    nginx_log "Перезапуск панели отложен (выполнится после завершения задачи в UI)"
+    return 0
+  fi
   if systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1; then
     systemctl restart "$SERVICE_NAME" 2>/dev/null || nginx_warn "Не удалось перезапустить $SERVICE_NAME"
   elif [[ -x "$ROOT_DIR/start.sh" ]]; then
@@ -170,10 +174,75 @@ restart_panel_if_needed() {
   fi
 }
 
+nginx_apply_publish_firewall_for_mode() {
+  local mode="$1"
+  local backend_port="$2"
+  local https_port="${3:-443}"
+  local http_port="${4:-80}"
+  # shellcheck source=scripts/firewall-setup.sh
+  source "$ROOT_DIR/scripts/firewall-setup.sh"
+  firewall_apply_publish_mode "$mode" "$backend_port" "$https_port" "$http_port" || \
+    nginx_warn "Не удалось обновить firewall — откройте порты вручную"
+}
+
+nginx_log_access_url() {
+  local mode="$1"
+  local domain="$2"
+  local port="$3"
+  case "$mode" in
+    nginx_*)
+      if [[ "$port" == "443" ]]; then
+        nginx_log "ACCESS_URL=https://${domain}/"
+      else
+        nginx_log "ACCESS_URL=https://${domain}:${port}/"
+      fi
+      ;;
+    uvicorn_*|http_direct)
+      if [[ "$mode" == http_direct ]]; then
+        if [[ -n "$domain" ]]; then
+          nginx_log "ACCESS_URL=http://${domain}:${port}/"
+        else
+          nginx_log "ACCESS_URL=http://<сервер>:${port}/"
+        fi
+      elif [[ "$port" == "443" ]]; then
+        nginx_log "ACCESS_URL=https://${domain}/"
+      elif nginx_pick_redirect_cert_paths "$domain" "" "" 2>/dev/null; then
+        nginx_log "ACCESS_URL=https://${domain}/"
+      else
+        nginx_log "ACCESS_URL=https://${domain}:${port}/"
+      fi
+      ;;
+  esac
+}
+
+nginx_finalize_nginx_mode() {
+  local mode="$1"
+  local domain="$2"
+  nginx_set_publish_mode "$mode"
+  nginx_apply_publish_firewall_for_mode "$mode" "$BACKEND_PORT" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
+  nginx_log_access_url "$mode" "$domain" "$HTTPS_PUBLIC_PORT"
+}
+
+nginx_finalize_uvicorn_mode() {
+  local mode="$1"
+  local domain="$2"
+  local port="$3"
+  local cert="$4"
+  local key="$5"
+  nginx_set_publish_mode "$mode"
+  nginx_install_uvicorn_redirect "$domain" "$port" "$cert" "$key"
+  nginx_apply_publish_firewall_for_mode "$mode" "$port" "$port" "0"
+  nginx_log_access_url "$mode" "$domain" "$port"
+}
+
 setup_http_direct() {
   resolve_backend_port
+  local domain="${DOMAIN:-$(nginx_env_get DOMAIN)}"
   nginx_apply_direct_http_env "$BACKEND_PORT"
   nginx_remove_site "$(nginx_env_get DOMAIN)"
+  nginx_set_publish_mode "http_direct"
+  nginx_apply_publish_firewall_for_mode "http_direct" "$BACKEND_PORT" "0" "0"
+  nginx_log_access_url "http_direct" "$domain" "$BACKEND_PORT"
   nginx_log "HTTP без nginx: http://<сервер>:${BACKEND_PORT}/"
   restart_panel_if_needed
 }
@@ -208,6 +277,7 @@ setup_nginx_letsencrypt() {
   else
     nginx_log "Nginx + Let's Encrypt настроен: https://${domain}:${HTTPS_PUBLIC_PORT}/"
   fi
+  nginx_finalize_nginx_mode "nginx_le" "$domain"
   restart_panel_if_needed
 }
 
@@ -238,6 +308,7 @@ setup_nginx_selfsigned() {
   else
     nginx_log "Nginx + самоподписанный SSL: https://${domain}:${HTTPS_PUBLIC_PORT}/"
   fi
+  nginx_finalize_nginx_mode "nginx_selfsigned" "$domain"
   restart_panel_if_needed
 }
 
@@ -251,16 +322,24 @@ setup_nginx_custom_certs() {
     domain="$DOMAIN"
   fi
   if [[ -z "$cert_path" ]]; then
-    if is_non_interactive; then
-      nginx_die "SSL_CERT обязателен в неинтерактивном режиме"
+    if nginx_resolve_existing_ssl_paths "$domain"; then
+      cert_path="$SSL_CERT"
+      key_path="$SSL_KEY"
+      nginx_log "Используются найденные сертификаты: $cert_path"
+    elif is_non_interactive; then
+      nginx_die "SSL_CERT обязателен в неинтерактивном режиме (укажите пути или DOMAIN с Let's Encrypt)"
+    else
+      read -r -p "Путь к сертификату (.crt/.pem): " cert_path
     fi
-    read -r -p "Путь к сертификату (.crt/.pem): " cert_path
   fi
   if [[ -z "$key_path" ]]; then
-    if is_non_interactive; then
+    if [[ -n "${SSL_KEY:-}" ]]; then
+      key_path="$SSL_KEY"
+    elif is_non_interactive; then
       nginx_die "SSL_KEY обязателен в неинтерактивном режиме"
+    else
+      read -r -p "Путь к приватному ключу (.key): " key_path
     fi
-    read -r -p "Путь к приватному ключу (.key): " key_path
   fi
   [[ -f "$cert_path" && -f "$key_path" ]] || nginx_die "Файлы сертификата не найдены"
   resolve_backend_port
@@ -279,6 +358,7 @@ setup_nginx_custom_certs() {
   else
     nginx_log "Nginx + пользовательские сертификаты: https://${domain}:${HTTPS_PUBLIC_PORT}/"
   fi
+  nginx_finalize_nginx_mode "nginx_custom" "$domain"
   restart_panel_if_needed
 }
 
@@ -303,6 +383,7 @@ setup_uvicorn_letsencrypt() {
   else
     nginx_log "HTTPS на uvicorn + Let's Encrypt: https://${domain}:${BACKEND_PORT}/"
   fi
+  nginx_finalize_uvicorn_mode "uvicorn_le" "$domain" "$BACKEND_PORT" "$cert" "$key"
   restart_panel_if_needed
 }
 
@@ -313,7 +394,15 @@ setup_uvicorn_selfsigned() {
   resolve_backend_port
 
   mkdir -p /etc/ssl/private
-  if [[ ! -f "$NGINX_SELF_SIGNED_CERT" ]]; then
+  local need_cert=true
+  if [[ -f "$NGINX_SELF_SIGNED_CERT" ]]; then
+    if openssl x509 -in "$NGINX_SELF_SIGNED_CERT" -noout -subject 2>/dev/null | grep -q "CN=${domain}"; then
+      need_cert=false
+    else
+      nginx_log "Перевыпуск самоподписанного сертификата для CN=${domain}"
+    fi
+  fi
+  if [[ "$need_cert" == "true" ]]; then
     openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
       -keyout "$NGINX_SELF_SIGNED_KEY" \
       -out "$NGINX_SELF_SIGNED_CERT" \
@@ -326,6 +415,8 @@ setup_uvicorn_selfsigned() {
   else
     nginx_log "HTTPS на uvicorn + самоподписанный SSL: https://${domain}:${BACKEND_PORT}/"
   fi
+  nginx_finalize_uvicorn_mode "uvicorn_selfsigned" "$domain" "$BACKEND_PORT" \
+    "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY"
   restart_panel_if_needed
 }
 
@@ -339,16 +430,24 @@ setup_uvicorn_custom_certs() {
     domain="$DOMAIN"
   fi
   if [[ -z "$cert_path" ]]; then
-    if is_non_interactive; then
-      nginx_die "SSL_CERT обязателен в неинтерактивном режиме"
+    if nginx_resolve_existing_ssl_paths "$domain"; then
+      cert_path="$SSL_CERT"
+      key_path="$SSL_KEY"
+      nginx_log "Используются найденные сертификаты: $cert_path"
+    elif is_non_interactive; then
+      nginx_die "SSL_CERT обязателен в неинтерактивном режиме (укажите пути или DOMAIN с Let's Encrypt)"
+    else
+      read -r -p "Путь к сертификату (.crt/.pem): " cert_path
     fi
-    read -r -p "Путь к сертификату (.crt/.pem): " cert_path
   fi
   if [[ -z "$key_path" ]]; then
-    if is_non_interactive; then
+    if [[ -n "${SSL_KEY:-}" ]]; then
+      key_path="$SSL_KEY"
+    elif is_non_interactive; then
       nginx_die "SSL_KEY обязателен в неинтерактивном режиме"
+    else
+      read -r -p "Путь к приватному ключу (.key): " key_path
     fi
-    read -r -p "Путь к приватному ключу (.key): " key_path
   fi
   [[ -f "$cert_path" && -f "$key_path" ]] || nginx_die "Файлы сертификата не найдены"
   resolve_backend_port
@@ -359,6 +458,7 @@ setup_uvicorn_custom_certs() {
   else
     nginx_log "HTTPS на uvicorn + пользовательские сертификаты: https://${domain}:${BACKEND_PORT}/"
   fi
+  nginx_finalize_uvicorn_mode "uvicorn_custom" "$domain" "$BACKEND_PORT" "$cert_path" "$key_path"
   restart_panel_if_needed
 }
 
