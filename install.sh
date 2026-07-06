@@ -644,72 +644,52 @@ ensure_backend_data_dirs() {
 }
 
 backend_health_check_scheme() {
-  local use_https ssl_cert mode
-  use_https="$(env_get USE_HTTPS 2>/dev/null || true)"
-  case "${use_https,,}" in
-    true|1|yes|on)
-      ssl_cert="$(env_get SSL_CERT 2>/dev/null || true)"
-      if [[ -n "$ssl_cert" && -f "$ssl_cert" ]]; then
-        echo "https"
-        return 0
-      fi
-      ;;
-  esac
-  mode="${WIZ_NGINX_MODE:-}"
-  case "$mode" in
-    uvicorn_le | uvicorn_custom | uvicorn_selfsigned)
-      echo "https"
-      return 0
-      ;;
-  esac
-  echo "http"
+  BHC_ENV_FILE="$ENV_FILE"
+  BHC_WIZ_NGINX_MODE="${WIZ_NGINX_MODE:-}"
+  BHC_BACKEND_LOG="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-/var/lib/adminpanelaz}}/logs/backend.log"
+  # shellcheck source=scripts/backend-health-check.sh
+  source "$ROOT_DIR/scripts/backend-health-check.sh"
+  bhc_primary_scheme
 }
 
 backend_health_check_port() {
-  local port
-  port="$(env_get BACKEND_PORT 2>/dev/null || true)"
-  printf '%s' "${port:-${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}}"
+  BHC_ENV_FILE="$ENV_FILE"
+  BHC_BACKEND_PORT="${BACKEND_PORT:-}"
+  BHC_WIZ_BACKEND_PORT="${WIZ_BACKEND_PORT:-}"
+  # shellcheck source=scripts/backend-health-check.sh
+  source "$ROOT_DIR/scripts/backend-health-check.sh"
+  bhc_resolve_port
+}
+
+init_backend_health_check() {
+  BHC_ENV_FILE="$ENV_FILE"
+  BHC_WIZ_NGINX_MODE="${WIZ_NGINX_MODE:-}"
+  BHC_BACKEND_PORT="${BACKEND_PORT:-}"
+  BHC_WIZ_BACKEND_PORT="${WIZ_BACKEND_PORT:-}"
+  BHC_BACKEND_LOG="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-/var/lib/adminpanelaz}}/logs/backend.log"
+  # shellcheck source=scripts/backend-health-check.sh
+  source "$ROOT_DIR/scripts/backend-health-check.sh"
 }
 
 curl_backend_health_url() {
-  local url="$1"
-  if [[ "$url" == https://* ]]; then
-    curl -kfsS "$url"
-  else
-    curl -fsS "$url"
-  fi
+  init_backend_health_check
+  bhc_curl_url "$1"
 }
 
 wait_for_backend_health() {
-  local port scheme url attempts="${2:-90}" i
-  port="$(backend_health_check_port)"
+  init_backend_health_check
+  local port attempts="${2:-90}"
+  port="$(bhc_resolve_port)"
   [[ -n "${1:-}" ]] && port="$1"
-  scheme="$(backend_health_check_scheme)"
-  url="${scheme}://127.0.0.1:${port}/api/health"
-
-  for ((i = 1; i <= attempts; i++)); do
-    if curl_backend_health_url "$url" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 1
-  done
-  return 1
+  bhc_wait_health "$port" "/api/health" "$attempts"
 }
 
 wait_for_backend_health_deep() {
-  local port scheme url attempts="${2:-30}" i
-  port="$(backend_health_check_port)"
+  init_backend_health_check
+  local port attempts="${2:-30}"
+  port="$(bhc_resolve_port)"
   [[ -n "${1:-}" ]] && port="$1"
-  scheme="$(backend_health_check_scheme)"
-  url="${scheme}://127.0.0.1:${port}/api/health/deep"
-
-  for ((i = 1; i <= attempts; i++)); do
-    if curl_backend_health_url "$url" 2>/dev/null | grep -q '"status"' 2>/dev/null; then
-      return 0
-    fi
-    sleep 1
-  done
-  return 1
+  bhc_wait_health_deep "$port" "$attempts"
 }
 
 verify_controller_running() {
@@ -718,19 +698,31 @@ verify_controller_running() {
   fi
 
   local port state_dir health_scheme
-  port="$(backend_health_check_port)"
+  init_backend_health_check
+  port="$(bhc_resolve_port)"
   state_dir="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-/var/lib/adminpanelaz}}"
-  health_scheme="$(backend_health_check_scheme)"
+  health_scheme="$(bhc_primary_scheme)"
+
+  if [[ "$WITH_SYSTEMD" == true ]]; then
+    ui_progress_start "Ожидание запуска adminpanelaz (systemd)"
+    if bhc_wait_systemd_active adminpanelaz 60; then
+      ui_progress_done "Сервис adminpanelaz активен"
+    else
+      warn "systemctl: adminpanelaz не active за 60 с — продолжаем проверку /api/health"
+      ui_progress_done "Проверка health без ожидания systemd"
+    fi
+  fi
 
   ui_progress_start "Проверка backend (/api/health)"
-  if wait_for_backend_health "$port" 90; then
-    ui_progress_done "Backend отвечает на порту ${port} (${health_scheme})"
+  if bhc_wait_health "$port" "/api/health" 90; then
+    health_scheme="${BHC_LAST_HEALTH_URL%%://*}"
+    ui_progress_done "Backend отвечает на ${BHC_LAST_HEALTH_URL}"
   else
-    die "Backend не ответил на /api/health за 90 с (порт ${port}, ${health_scheme}). Проверьте: systemctl status adminpanelaz; journalctl -u adminpanelaz -n 50; ${state_dir}/logs/backend.log"
+    die "Backend не ответил на /api/health за 90 с (порт ${port}, ожидали ${health_scheme}). Проверьте: systemctl status adminpanelaz; journalctl -u adminpanelaz -n 50; ${state_dir}/logs/backend.log"
   fi
 
   ui_progress_start "Проверка backend (/api/health/deep)"
-  if wait_for_backend_health_deep "$port" 30; then
+  if bhc_wait_health_deep "$port" 30; then
     ui_progress_done "Deep health OK"
   else
     warn "Deep health не ответил за 30 с — проверьте: curl -ks ${health_scheme}://127.0.0.1:${port}/api/health/deep"
@@ -798,6 +790,7 @@ resolve_project_dir() {
 ensure_executable_scripts() {
   chmod +x "$ROOT_DIR/start.sh" "$ROOT_DIR/start_node_agent.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
+  chmod +x "$ROOT_DIR/scripts/backend-health-check.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/nginx-setup.sh" "$ROOT_DIR/scripts/nginx-common.sh" "$ROOT_DIR/scripts/firewall-setup.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/seed-admin-user.py" "$ROOT_DIR/scripts/seed-wizard-db.py" 2>/dev/null || true
 }

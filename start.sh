@@ -136,10 +136,19 @@ wait_for_url() {
   local url="$1"
   local label="$2"
   local attempts="${3:-60}"
+  local try_url
 
   for ((i = 1; i <= attempts; i++)); do
     if [[ "$url" == */api/health ]]; then
-      curl_backend_health "$url" && return 0
+      BHC_ENV_FILE="$BACKEND_DIR/.env"
+      BHC_BACKEND_PORT="$BACKEND_PORT"
+      BHC_BACKEND_LOG="$LOG_DIR/backend.log"
+      # shellcheck source=scripts/backend-health-check.sh
+      source "$ROOT_DIR/scripts/backend-health-check.sh"
+      while read -r try_url; do
+        [[ -z "$try_url" ]] && continue
+        curl_backend_health "$try_url" && return 0
+      done < <(bhc_probe_urls "$BACKEND_PORT" "/api/health")
     elif [[ "$url" == https://* ]]; then
       curl -kfsS "$url" >/dev/null 2>&1 && return 0
     elif curl -fsS "$url" >/dev/null 2>&1; then
@@ -509,7 +518,7 @@ start_foreground() {
   log "Starting frontend (Vite dev server)..."
   launch_frontend false
 
-  wait_for_url "http://127.0.0.1:${BACKEND_PORT}/api/health" "backend"
+  wait_for_url "$(backend_health_url)" "backend"
   wait_for_url "http://${FRONTEND_HOST}:${FRONTEND_PORT}/" "frontend"
 
   echo ""
