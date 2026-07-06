@@ -5,7 +5,7 @@ set -euo pipefail
 
 # shellcheck disable=SC2034
 WIZ_INSTALL_TYPE="${WIZ_INSTALL_TYPE:-controller}"
-WIZ_REQUIRE_ANTIZAPRET="${WIZ_REQUIRE_ANTIZAPRET:-false}"
+WIZ_REQUIRE_ANTIZAPRET="${WIZ_REQUIRE_ANTIZAPRET:-true}"
 WIZ_ANTIZAPRET_PATH="${WIZ_ANTIZAPRET_PATH:-/root/antizapret}"
 WIZ_BACKEND_HOST="${WIZ_BACKEND_HOST:-127.0.0.1}"
 WIZ_BACKEND_PORT="${WIZ_BACKEND_PORT:-8000}"
@@ -25,8 +25,8 @@ WIZ_DDNS_PASSWORD="${WIZ_DDNS_PASSWORD:-}"
 WIZ_DDNS_CONFIGURE_UPDATE="${WIZ_DDNS_CONFIGURE_UPDATE:-false}"
 WIZ_CORS_ORIGINS="${WIZ_CORS_ORIGINS:-}"
 WIZ_ALLOW_INTERNAL_NODES="${WIZ_ALLOW_INTERNAL_NODES:-false}"
-WIZ_APP_ENV="${WIZ_APP_ENV:-development}"
-WIZ_ENFORCE_PASSWORD_POLICY="${WIZ_ENFORCE_PASSWORD_POLICY:-false}"
+WIZ_APP_ENV="${WIZ_APP_ENV:-production}"
+WIZ_ENFORCE_PASSWORD_POLICY="${WIZ_ENFORCE_PASSWORD_POLICY:-true}"
 WIZ_NGINX_MODE="${WIZ_NGINX_MODE:-none}"
 WIZ_NGINX_DOMAIN="${WIZ_NGINX_DOMAIN:-}"
 WIZ_NGINX_EMAIL="${WIZ_NGINX_EMAIL:-}"
@@ -39,10 +39,10 @@ WIZ_NODE_AGENT_ALLOWED_IPS="${WIZ_NODE_AGENT_ALLOWED_IPS:-}"
 WIZ_AUTH_RATE_LIMIT_BACKEND="${WIZ_AUTH_RATE_LIMIT_BACKEND:-memory}"
 WIZ_API_RATE_LIMIT_BACKEND="${WIZ_API_RATE_LIMIT_BACKEND:-memory}"
 WIZ_REDIS_URL="${WIZ_REDIS_URL:-}"
-WIZ_RESOURCE_PROFILE="${WIZ_RESOURCE_PROFILE:-standard}"
+WIZ_RESOURCE_PROFILE="${WIZ_RESOURCE_PROFILE:-full}"
 WIZ_NODE_AGENT_MTLS_ENABLED="${WIZ_NODE_AGENT_MTLS_ENABLED:-false}"
 WIZ_NODE_API_KEY_ROTATION_DAYS="${WIZ_NODE_API_KEY_ROTATION_DAYS:-0}"
-WIZ_RUN_MODE="${WIZ_RUN_MODE:-manual}"
+WIZ_RUN_MODE="${WIZ_RUN_MODE:-systemd}"
 WIZ_CIDR_DB_REFRESH_ENABLED="${WIZ_CIDR_DB_REFRESH_ENABLED:-true}"
 WIZ_CIDR_DB_REFRESH_HOUR="${WIZ_CIDR_DB_REFRESH_HOUR:-2}"
 WIZ_CIDR_DB_REFRESH_MINUTE="${WIZ_CIDR_DB_REFRESH_MINUTE:-30}"
@@ -50,7 +50,7 @@ WIZ_TRAFFIC_SYNC_ENABLED="${WIZ_TRAFFIC_SYNC_ENABLED:-true}"
 WIZ_TELEGRAM_ENABLED="${WIZ_TELEGRAM_ENABLED:-false}"
 WIZ_TELEGRAM_BOT_TOKEN="${WIZ_TELEGRAM_BOT_TOKEN:-}"
 WIZ_TELEGRAM_CHAT_ID="${WIZ_TELEGRAM_CHAT_ID:-}"
-WIZ_AUTO_BACKUP_ENABLED="${WIZ_AUTO_BACKUP_ENABLED:-false}"
+WIZ_AUTO_BACKUP_ENABLED="${WIZ_AUTO_BACKUP_ENABLED:-true}"
 WIZ_AUTO_BACKUP_DAYS="${WIZ_AUTO_BACKUP_DAYS:-7}"
 WIZ_STATE_DIR="${WIZ_STATE_DIR:-}"
 WIZ_NODE_STATE_DIR="${WIZ_NODE_STATE_DIR:-}"
@@ -229,28 +229,37 @@ wizard_show_redis_rate_limit_hint() {
 wiz_prompt_choice() {
   local prompt="$1"
   shift
+  local default_choice=1
+  if [[ "${1:-}" =~ ^[0-9]+$ ]] && [[ -n "${2:-}" ]]; then
+    default_choice="$1"
+    shift
+  fi
   local options=("$@")
   local i choice
 
   echo "$prompt"
   for i in "${!options[@]}"; do
-    echo "  $((i + 1))) ${options[$i]}"
+    if (( i + 1 == default_choice )); then
+      echo "  $((i + 1))) ${options[$i]} (по умолчанию)"
+    else
+      echo "  $((i + 1))) ${options[$i]}"
+    fi
   done
 
   if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
-    REPLY="1"
-    echo "Выбор [1]: ${options[0]}"
+    REPLY="$default_choice"
+    echo "Выбор [${default_choice}]: ${options[$((default_choice - 1))]}"
     return 0
   fi
 
   while true; do
-    read -r -p "Ваш выбор [1-${#options[@]}] (Enter = 1): " choice
-    choice="${choice:-1}"
+    read -r -p "Ваш выбор [1-${#options[@]}] (Enter = ${default_choice}): " choice
+    choice="${choice:-$default_choice}"
     if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
       REPLY="$choice"
       return 0
     fi
-    echo "  Введите номер от 1 до ${#options[@]} (или Enter для варианта 1)."
+    echo "  Введите номер от 1 до ${#options[@]} (или Enter для варианта ${default_choice})."
   done
 }
 
@@ -312,25 +321,31 @@ wizard_ask_install_type() {
     "   другого хоста." \
     "Не уверены? Один сервер с уже установленным AntiZapret — выберите 2."
   echo
-  wiz_prompt_choice "Какой компонент устанавливаем?" \
-    "Только панель (управление удалёнными узлами, без локального AntiZapret)" \
-    "Панель + локальный AntiZapret (AntiZapret уже установлен в /root/antizapret)" \
-    "Только Node agent (удалённый VPN-сервер)"
+  if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
+    WIZ_INSTALL_TYPE="controller"
+    WIZ_REQUIRE_ANTIZAPRET=true
+    echo "Какой компонент устанавливаем? [2]: Панель + локальный AntiZapret"
+  else
+    wiz_prompt_choice "Какой компонент устанавливаем?" 2 \
+      "Только панель (управление удалёнными узлами, без локального AntiZapret)" \
+      "Панель + локальный AntiZapret (AntiZapret уже установлен в /root/antizapret)" \
+      "Только Node agent (удалённый VPN-сервер)"
 
-  case "$REPLY" in
-    1)
-      WIZ_INSTALL_TYPE="controller"
-      WIZ_REQUIRE_ANTIZAPRET=false
-      ;;
-    2)
-      WIZ_INSTALL_TYPE="controller"
-      WIZ_REQUIRE_ANTIZAPRET=true
-      ;;
-    3)
-      WIZ_INSTALL_TYPE="node"
-      WIZ_REQUIRE_ANTIZAPRET=true
-      ;;
-  esac
+    case "$REPLY" in
+      1)
+        WIZ_INSTALL_TYPE="controller"
+        WIZ_REQUIRE_ANTIZAPRET=false
+        ;;
+      2)
+        WIZ_INSTALL_TYPE="controller"
+        WIZ_REQUIRE_ANTIZAPRET=true
+        ;;
+      3)
+        WIZ_INSTALL_TYPE="node"
+        WIZ_REQUIRE_ANTIZAPRET=true
+        ;;
+    esac
+  fi
   wiz_set_total_steps
   echo
 }
@@ -461,14 +476,20 @@ wizard_ask_app_env() {
     "APP_ENV=production — проверка секретов, политика паролей, усиленные заголовки." \
     "Для доступа из интернета/LAN рекомендуется production + HTTPS (см. SECURITY.md)."
   echo
-  wiz_prompt_choice "Режим APP_ENV" \
-    "development (локальная разработка / тесты)" \
-    "production (рекомендуется для сетевого доступа)"
+  if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
+    WIZ_APP_ENV="production"
+    WIZ_ENFORCE_PASSWORD_POLICY="true"
+    echo "Режим APP_ENV [2]: production"
+  else
+    wiz_prompt_choice "Режим APP_ENV" 2 \
+      "development (локальная разработка / тесты)" \
+      "production (рекомендуется для сетевого доступа)"
 
-  case "$REPLY" in
-    1) WIZ_APP_ENV="development" ;;
-    2) WIZ_APP_ENV="production" ;;
-  esac
+    case "$REPLY" in
+      1) WIZ_APP_ENV="development" ;;
+      2) WIZ_APP_ENV="production" ;;
+    esac
+  fi
 
   if [[ "$WIZ_APP_ENV" == "production" ]]; then
     WIZ_ENFORCE_PASSWORD_POLICY="true"
@@ -738,7 +759,7 @@ wizard_ask_security_hardening() {
       WIZ_REDIS_URL="$REPLY"
     fi
   fi
-  wiz_prompt_yesno "Включить mTLS между панелью и node agent?" "n"
+  wiz_prompt_yesno "Включить mTLS между панелью и node agent?" "y"
   if [[ "$REPLY" == "y" ]]; then
     WIZ_NODE_AGENT_MTLS_ENABLED="true"
     echo "  После установки: sudo ./scripts/generate-mtls-certs.sh"
@@ -777,9 +798,6 @@ wizard_ask_firewall() {
 
   echo
   local fw_default="n"
-  if [[ "$WIZ_APP_ENV" == "production" ]]; then
-    fw_default="y"
-  fi
   wiz_prompt_yesno "Настроить firewall автоматически (ufw/iptables)?" "$fw_default"
   if [[ "$REPLY" == "y" ]]; then
     WIZ_CONFIGURE_FIREWALL="true"
@@ -811,7 +829,7 @@ wizard_ask_services() {
     WIZ_RUN_MODE="systemd"
     echo "Как запускать после установки? [3]: Systemd (рекомендуется для production)"
   else
-    wiz_prompt_choice "Как запускать после установки?" \
+    wiz_prompt_choice "Как запускать после установки?" 3 \
       "Вручную (./start.sh / ./start_node_agent.sh)" \
       "Daemon через start.sh (watchdog)" \
       "Systemd (рекомендуется для production)"
@@ -852,17 +870,22 @@ wizard_ask_resource_profile() {
   wiz_step "Профиль ресурсов (VDS)"
   echo "Замер стека Full (панель + локальная нода): ≈411 MB (358+53); среднее за 7 дн. ~148 MB."
   echo "Minimal — для VDS 1 GB только под панель (без AntiZapret на том же хосте)."
-  wiz_prompt_choice "Resource profile:" \
-    "Minimal — 1 GB, panel-only (без traffic/CIDR collectors)" \
-    "Standard — баланс (1 GB+, без CIDR scheduler)" \
-    "Full — все фоновые задачи (≈411 MB стек; 1 GB+ / лучше 2 GB с VPN на хосте)"
+  if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
+    WIZ_RESOURCE_PROFILE="full"
+    echo "Resource profile [3]: Full"
+  else
+    wiz_prompt_choice "Resource profile:" 3 \
+      "Minimal — 1 GB, panel-only (без traffic/CIDR collectors)" \
+      "Standard — баланс (1 GB+, без CIDR scheduler)" \
+      "Full — все фоновые задачи (≈411 MB стек; 1 GB+ / лучше 2 GB с VPN на хосте)"
 
-  case "$REPLY" in
-    1) WIZ_RESOURCE_PROFILE="minimal" ;;
-    2) WIZ_RESOURCE_PROFILE="standard" ;;
-    3) WIZ_RESOURCE_PROFILE="full" ;;
-    *) WIZ_RESOURCE_PROFILE="standard" ;;
-  esac
+    case "$REPLY" in
+      1) WIZ_RESOURCE_PROFILE="minimal" ;;
+      2) WIZ_RESOURCE_PROFILE="standard" ;;
+      3) WIZ_RESOURCE_PROFILE="full" ;;
+      *) WIZ_RESOURCE_PROFILE="full" ;;
+    esac
+  fi
   echo "Выбран профиль: $WIZ_RESOURCE_PROFILE"
   echo
 }
@@ -917,7 +940,7 @@ wizard_ask_optional() {
       WIZ_TELEGRAM_CHAT_ID="$REPLY"
     fi
 
-    wiz_prompt_yesno "Включить автоматические бэкапы?" "n"
+    wiz_prompt_yesno "Включить автоматические бэкапы?" "y"
     if [[ "$REPLY" == "y" ]]; then
       WIZ_AUTO_BACKUP_ENABLED="true"
       wiz_prompt "Интервал автобэкапа (дней)" "$WIZ_AUTO_BACKUP_DAYS"
@@ -1095,7 +1118,7 @@ wizard_confirm_apply() {
   print_info "Дальше: установим зависимости, соберём интерфейс и настроим сервис."
   print_info "Это займёт несколько минут — прогресс будет показан по шагам."
   echo
-  if ui_confirm "Применить конфигурацию и начать установку?" "n"; then
+  if ui_confirm "Применить конфигурацию и начать установку?" "y"; then
     WIZ_APPLY_CONFIRMED=true
     print_success "Конфигурация принята, начинаем установку..."
   else
