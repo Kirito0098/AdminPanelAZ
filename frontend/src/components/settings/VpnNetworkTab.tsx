@@ -10,7 +10,7 @@ import {
   Terminal,
   Wifi,
 } from 'lucide-react'
-import { ApiError, getVpnNetworkSettings, publishVpnNetwork } from '@/api/client'
+import { ApiError, getVpnNetworkDomainSsl, getVpnNetworkPortStatus, getVpnNetworkSettings, publishVpnNetwork } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
@@ -24,9 +24,23 @@ import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { cn } from '@/lib/utils'
-import type { VpnNetworkPublishMode, VpnNetworkPublishModeKey, VpnNetworkSettings } from '@/types'
+import type {
+  VpnNetworkPortStatus,
+  VpnNetworkPublishMode,
+  VpnNetworkPublishModeKey,
+  VpnNetworkDomainSslStatus,
+  VpnNetworkSettings,
+} from '@/types'
 import {
   buildPublishConfirmPlan,
+  domainFromSslSuggestion,
+  parsePublishModeWarning,
+  publishAddressHint,
+  shouldShowAddressHint,
+  publishModeWarningTitle,
+  publishModeWarningVariant,
+  publishUvicornWarningsTitle,
+  getLetsEncryptPathsForDomain,
   guessPublishAccessUrl,
   hasLetsEncryptHint,
   inlinePublishWarnings,
@@ -109,16 +123,41 @@ function publishModeIcon(key: string): LucideIcon {
   return MODE_ICONS[key] ?? Globe
 }
 
+function publishModeMethodLabel(mode: VpnNetworkPublishMode): string | null {
+  if (mode.method) return mode.method
+  if (mode.key.startsWith('nginx_')) return 'Nginx'
+  if (mode.key.startsWith('uvicorn_') || mode.key === 'http_direct') return 'Uvicorn'
+  return null
+}
+
+function PortStatusHint({ status }: { status: VpnNetworkPortStatus | null | undefined }) {
+  if (!status) return null
+  return (
+    <p
+      className={cn(
+        'text-xs leading-relaxed',
+        status.status === 'free' && 'text-muted-foreground',
+        status.status === 'panel' && 'text-emerald-600 dark:text-emerald-400',
+        status.status === 'nginx' && 'text-primary',
+        status.status === 'other' && 'text-amber-600 dark:text-amber-400',
+        status.status === 'unknown' && 'text-muted-foreground',
+      )}
+    >
+      {status.message}
+    </p>
+  )
+}
+
 const PUBLISH_MODE_GROUPS: Array<{ id: string; title: string; keys: string[] }> = [
   {
     id: 'nginx',
     title: 'Через Nginx',
-    keys: ['nginx_le', 'nginx_selfsigned', 'nginx_custom'],
+    keys: ['nginx_le', 'nginx_custom', 'nginx_selfsigned'],
   },
   {
     id: 'uvicorn',
     title: 'Напрямую на uvicorn (без Nginx)',
-    keys: ['uvicorn_custom', 'uvicorn_le', 'uvicorn_selfsigned', 'http_direct'],
+    keys: ['uvicorn_le', 'uvicorn_custom', 'uvicorn_selfsigned', 'http_direct'],
   },
 ]
 
@@ -153,6 +192,8 @@ export default function VpnNetworkTab() {
   const [sslCert, setSslCert] = useState('')
   const [sslKey, setSslKey] = useState('')
   const [publishing, setPublishing] = useState(false)
+  const [domainSslStatus, setDomainSslStatus] = useState<VpnNetworkDomainSslStatus | null>(null)
+  const [portStatuses, setPortStatuses] = useState<Record<string, VpnNetworkPortStatus | null>>({})
   const userPickedModeRef = useRef(false)
   const hasSettingsRef = useRef(false)
   const notifyErrorRef = useRef(notifyError)
@@ -198,9 +239,64 @@ export default function VpnNetworkTab() {
     void loadSettings({ syncSelectedMode: true })
   }, [loadSettings])
 
+  useEffect(() => {
+    const host = domain.trim().split(':')[0]
+    if (!host) {
+      setDomainSslStatus(null)
+      return
+    }
+    const timer = window.setTimeout(() => {
+      void getVpnNetworkDomainSsl(host)
+        .then((data) => setDomainSslStatus(data))
+        .catch(() => setDomainSslStatus(null))
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [domain])
+
   const selectedModeInfo: VpnNetworkPublishMode | undefined = settings?.publish_modes?.find(
     (m) => m.key === selectedMode,
   )
+
+  useEffect(() => {
+    const usesNginxPorts = selectedModeInfo?.uses_nginx_ports === true
+    const checks: Array<{ key: string; port: number; role: 'backend' | 'nginx_https' | 'nginx_http' }> = []
+    const backend = Number(backendPort)
+    if (Number.isInteger(backend) && backend >= 1 && backend <= 65535) {
+      checks.push({ key: 'backend', port: backend, role: 'backend' })
+    }
+    if (usesNginxPorts) {
+      const https = Number(httpsPublicPort)
+      const http = Number(httpAcmePort)
+      if (Number.isInteger(https) && https >= 1 && https <= 65535) {
+        checks.push({ key: 'nginx_https', port: https, role: 'nginx_https' })
+      }
+      if (Number.isInteger(http) && http >= 1 && http <= 65535) {
+        checks.push({ key: 'nginx_http', port: http, role: 'nginx_http' })
+      }
+    }
+
+    if (checks.length === 0) {
+      setPortStatuses({})
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      void Promise.all(
+        checks.map(async (check) => {
+          try {
+            const data = await getVpnNetworkPortStatus(check.port, check.role)
+            return [check.key, data] as const
+          } catch {
+            return [check.key, null] as const
+          }
+        }),
+      ).then((entries) => {
+        setPortStatuses(Object.fromEntries(entries))
+      })
+    }, 350)
+
+    return () => window.clearTimeout(timer)
+  }, [backendPort, httpsPublicPort, httpAcmePort, selectedModeInfo?.uses_nginx_ports])
 
   useEffect(() => {
     if (!selectedModeInfo?.requires_ssl_cert || !settings) return
@@ -268,6 +364,7 @@ export default function VpnNetworkTab() {
       domain,
       backendPort,
       httpsPublicPort,
+      domainLetsEncrypt,
     )
     confirm({
       title: 'Применить настройки доступа?',
@@ -386,13 +483,17 @@ export default function VpnNetworkTab() {
   const showUvicornHttpsPort = selectedModeInfo?.uses_uvicorn_https_port === true
   const showLetsEncryptEmail = selectedMode === 'nginx_le' || selectedMode === 'uvicorn_le'
   const showSslPaths = selectedModeInfo?.requires_ssl_cert === true
-  const uvicornWarnings = inlinePublishWarnings(selectedMode, settings)
+  const uvicornWarnings = inlinePublishWarnings(selectedMode, settings, domain)
+  const modeWarningLines = parsePublishModeWarning(selectedModeInfo?.warning)
+  const domainLetsEncrypt = domainSslStatus?.has_letsencrypt ?? null
+  const foundLetsEncryptPaths = getLetsEncryptPathsForDomain(settings, domain, domainSslStatus)
   const previewAccessUrl = guessPublishAccessUrl(
     selectedMode,
     domain,
     backendPort,
     httpsPublicPort,
     settings,
+    domainLetsEncrypt,
   )
   const showOptionalDomain =
     !selectedModeInfo?.requires_domain &&
@@ -403,6 +504,11 @@ export default function VpnNetworkTab() {
   const selfsignedDomainHint =
     selectedMode === 'uvicorn_selfsigned' || selectedMode === 'nginx_selfsigned'
   const orderedPublishModes = orderPublishModes(settings.publish_modes || [])
+  const addressHint = publishAddressHint(selectedMode)
+  const showAddressHint = shouldShowAddressHint(selectedMode) && addressHint.lines.length > 0
+  const showServerUvicornHints =
+    uvicornWarnings.length > 0 &&
+    (selectedMode === 'uvicorn_le' || selectedMode === 'uvicorn_custom')
   const domainRow = settings.env_rows.find((r) => r.label.includes('DOMAIN'))
   const domainDisplay =
     domainRow && domainRow.value !== '—' ? domainRow.value : domain.trim() || 'не задан'
@@ -576,6 +682,7 @@ export default function VpnNetworkTab() {
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {groupModes.map((mode) => {
                       const Icon = publishModeIcon(mode.key)
+                      const methodLabel = publishModeMethodLabel(mode)
                       const selected = selectedMode === mode.key
                       return (
                         <button
@@ -602,6 +709,11 @@ export default function VpnNetworkTab() {
                           </div>
                           <div>
                             <p className="text-sm font-medium">{mode.title}</p>
+                            {methodLabel && (
+                              <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary/80">
+                                {methodLabel}
+                              </p>
+                            )}
                             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{mode.description}</p>
                           </div>
                         </button>
@@ -612,24 +724,40 @@ export default function VpnNetworkTab() {
               )
             })}
 
-            {selectedModeInfo?.warning && selectedMode !== 'http_direct' && (
-              <SettingsAlert variant="warning" title="Внимание">
-                {selectedModeInfo.warning}
+            {showAddressHint && (
+              <SettingsAlert variant="info" title={addressHint.title}>
+                <p className="text-sm leading-relaxed">{addressHint.lines[0]}</p>
               </SettingsAlert>
             )}
 
-            {selectedMode.startsWith('nginx_') && hasLetsEncryptHint(settings) && (
-              <SettingsAlert variant="info" title="Сертификат найден">
-                Let&apos;s Encrypt для этого домена уже есть на сервере — при применении Nginx использует его
-                повторно, повторный выпуск не нужен.
-              </SettingsAlert>
-            )}
-
-            {uvicornWarnings.length > 0 && (
+            {modeWarningLines.length > 0 && (
               <SettingsAlert
-                variant={selectedMode === 'uvicorn_selfsigned' ? 'danger' : 'warning'}
-                title="Учтите перед применением"
+                variant={publishModeWarningVariant(selectedMode)}
+                title={publishModeWarningTitle(selectedMode)}
               >
+                <ul className="list-disc space-y-1 pl-4 text-sm leading-relaxed">
+                  {modeWarningLines.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </SettingsAlert>
+            )}
+
+            {selectedMode === 'nginx_le' && hasLetsEncryptHint(settings, domain, domainLetsEncrypt) && (
+              <SettingsAlert variant="info" title="Сертификат найден">
+                <p className="text-sm leading-relaxed">
+                  Let&apos;s Encrypt для этого домена уже есть — будет переиспользован.
+                </p>
+                {foundLetsEncryptPaths && (
+                  <p className="mt-1.5 break-all font-mono text-xs text-muted-foreground">
+                    {foundLetsEncryptPaths.cert}
+                  </p>
+                )}
+              </SettingsAlert>
+            )}
+
+            {showServerUvicornHints && (
+              <SettingsAlert variant="info" title={publishUvicornWarningsTitle(selectedMode, uvicornWarnings)}>
                 <ul className="list-disc space-y-1 pl-4">
                   {uvicornWarnings.map((line) => (
                     <li key={line}>{line}</li>
@@ -642,6 +770,11 @@ export default function VpnNetworkTab() {
               <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
                 <span className="text-muted-foreground">После применения откройте: </span>
                 <code className="break-all font-mono text-xs text-primary">{previewAccessUrl}</code>
+                {selectedMode === 'http_direct' && (
+                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                    В режиме HTTP домен из настроек не используется — только IP-адрес сервера.
+                  </p>
+                )}
               </div>
             )}
 
@@ -670,6 +803,7 @@ export default function VpnNetworkTab() {
                       ? 'Uvicorn слушает этот порт с TLS (например 8443 или 443)'
                       : 'Обычно 8000 — внутренний порт, на котором работает панель'}
                   </p>
+                  <PortStatusHint status={portStatuses.backend} />
                 </div>
                 {selectedModeInfo?.requires_domain && (
                   <div className="space-y-2">
@@ -692,12 +826,12 @@ export default function VpnNetworkTab() {
                       id="vpn-domain-optional"
                       value={domain}
                       onChange={(e) => setDomain(e.target.value)}
-                      placeholder={selfsignedDomainHint ? 'aqws123.duckdns.org' : 'panel.example.com'}
+                      placeholder={selfsignedDomainHint ? '192.168.1.10' : 'panel.example.com'}
                       className="font-mono"
                     />
                     <p className="text-xs text-muted-foreground">
                       {selfsignedDomainHint
-                        ? 'Попадёт в CN самоподписанного сертификата. Без домена будет использован hostname сервера.'
+                        ? 'Попадёт в CN самоподписанного сертификата. Без домена будет использован IP-адрес сервера.'
                         : 'Для подсказок URL и CORS; если уже задан в .env — можно оставить пустым'}
                     </p>
                   </div>
@@ -740,6 +874,8 @@ export default function VpnNetworkTab() {
                               onClick={() => {
                                 setSslCert(item.cert)
                                 setSslKey(item.key)
+                                const suggestedDomain = domainFromSslSuggestion(item)
+                                if (suggestedDomain) setDomain(suggestedDomain)
                               }}
                             >
                               {item.label}
@@ -785,6 +921,7 @@ export default function VpnNetworkTab() {
                       <p className="text-xs text-muted-foreground">
                         Обычно 443 — защищённое соединение в браузере
                       </p>
+                      <PortStatusHint status={portStatuses.nginx_https} />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="vpn-http-port">Порт HTTP (ACME / редирект)</Label>
@@ -799,6 +936,7 @@ export default function VpnNetworkTab() {
                       <p className="text-xs text-muted-foreground">
                         Обычно 80 — для проверки домена при выпуске сертификата
                       </p>
+                      <PortStatusHint status={portStatuses.nginx_http} />
                     </div>
                   </>
                 )}

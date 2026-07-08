@@ -282,8 +282,9 @@ setup_nginx_letsencrypt() {
 }
 
 setup_nginx_selfsigned() {
-  resolve_domain false
-  local domain="$DOMAIN"
+  local domain
+  domain="$(nginx_resolve_selfsigned_cn)"
+  [[ -n "$domain" ]] || nginx_die "Не удалось определить CN для самоподписанного сертификата"
   resolve_backend_port
   resolve_public_ports
   nginx_ensure_nginx || nginx_die "Не удалось установить nginx"
@@ -388,9 +389,9 @@ setup_uvicorn_letsencrypt() {
 }
 
 setup_uvicorn_selfsigned() {
-  resolve_domain false
-  local domain="$DOMAIN"
-  [[ -n "$domain" ]] || domain="$(hostname -f 2>/dev/null || hostname)"
+  local domain
+  domain="$(nginx_resolve_selfsigned_cn)"
+  [[ -n "$domain" ]] || nginx_die "Не удалось определить CN для самоподписанного сертификата"
   resolve_backend_port
 
   mkdir -p /etc/ssl/private

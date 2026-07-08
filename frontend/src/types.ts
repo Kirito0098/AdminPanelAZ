@@ -703,6 +703,7 @@ export interface VpnNetworkEnvRow {
 export interface VpnNetworkPublishMode {
   key: string
   title: string
+  method?: string | null
   description: string
   requires_domain: boolean
   requires_email: boolean
@@ -717,6 +718,23 @@ export interface VpnNetworkSslCertSuggestion {
   key: string
   label: string
   source: string
+}
+
+export interface VpnNetworkDomainSslStatus {
+  domain: string
+  has_letsencrypt: boolean
+  cert?: string | null
+  key?: string | null
+}
+
+export type VpnNetworkPortRole = 'backend' | 'nginx_https' | 'nginx_http'
+
+export interface VpnNetworkPortStatus {
+  port: number
+  status: 'free' | 'panel' | 'nginx' | 'other' | 'unknown'
+  in_use: boolean
+  message: string
+  listener?: string | null
 }
 
 export interface VpnNetworkSettings {
@@ -736,6 +754,7 @@ export interface VpnNetworkSettings {
   nginx_installed?: boolean
   panel_restart_command?: string
   uvicorn_publish_warnings?: string[]
+  server_primary_ip?: string | null
 }
 
 export type VpnNetworkPublishModeKey =

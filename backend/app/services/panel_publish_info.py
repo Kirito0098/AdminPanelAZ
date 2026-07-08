@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,7 +21,13 @@ WHITELIST_PORT_FIREWALL_MODES = frozenset({"direct_http"})
 
 SELF_SIGNED_CERT_PATH = Path("/etc/ssl/certs/adminpanelaz.crt")
 SELF_SIGNED_KEY_PATH = Path("/etc/ssl/private/adminpanelaz.key")
+LETSENCRYPT_LIVE_DIR = Path("/etc/letsencrypt/live")
 PANEL_SYSTEMD_UNIT = "adminpanelaz"
+PANEL_PROCESS_RE = re.compile(r"uvicorn|adminpanelaz|python.*app\.main", re.I)
+NGINX_PROCESS_RE = re.compile(r"nginx", re.I)
+PORT_ROLE_BACKEND = "backend"
+PORT_ROLE_NGINX_HTTPS = "nginx_https"
+PORT_ROLE_NGINX_HTTP = "nginx_http"
 
 
 def _parse_bool(raw: str | None, *, default: bool = False) -> bool:
@@ -377,30 +384,20 @@ def build_uvicorn_publish_warnings(
     except (TypeError, ValueError):
         port = 8000
 
-    has_le = any(item.get("source") == "letsencrypt" for item in (ssl_cert_suggestions or []))
+    has_le = letsencrypt_exists_for_domain(domain_host)
     if has_le and domain_host:
         warnings.append(
-            f"На сервере уже есть Let's Encrypt для {domain_host}. "
-            "Для uvicorn без nginx выберите «HTTPS на uvicorn + свои сертификаты» "
-            "или оставьте «Nginx + Let's Encrypt»."
-        )
-        warnings.append(
-            f"HSTS: браузер запомнил защищённый HTTPS для {domain_host}. "
-            "Самоподписанный сертификат не откроется (даже с :8000) — только «Nginx + HTTPS» "
-            "или очистка HSTS в браузере (edge://net-internals/#hsts)."
+            f"Сертификат Let's Encrypt для {domain_host} уже есть — повторный выпуск не нужен."
         )
 
-    if nginx_listens_on_443() and port != 443:
-        if domain_host and not nginx_has_vhost_for_domain(domain_host):
+    if nginx_listens_on_443() and port != 443 and domain_host:
+        if not nginx_has_vhost_for_domain(domain_host):
             warnings.append(
-                f"Nginx слушает 443, но сайта для {domain_host} нет. "
-                f"Адрес https://{domain_host}/ откроет другой сайт с чужим сертификатом (HSTS). "
-                f"Используйте https://{domain_host}:{port}/ или режим «Nginx + HTTPS»."
+                f"Nginx на 443 без сайта для {domain_host} — открывайте https://{domain_host}:{port}/"
             )
-        elif domain_host:
+        else:
             warnings.append(
-                f"Uvicorn на порту {port}: стандартный https://{domain_host}/ идёт через nginx на 443. "
-                f"Без nginx-сайта для домена браузер получит ошибку сертификата."
+                f"https://{domain_host}/ идёт в Nginx, панель — https://{domain_host}:{port}/"
             )
 
     return warnings
@@ -453,6 +450,181 @@ def panel_restart_command() -> str:
     return "sudo ./start.sh restart"
 
 
+def _parse_ss_listeners(ss_output: str, port: int) -> list[str]:
+    port_marker = f":{port}"
+    listeners: list[str] = []
+    for line in ss_output.splitlines():
+        if port_marker in line:
+            listeners.append(line.strip())
+    return listeners
+
+
+def _listener_process_hint(listener: str) -> str:
+    match = re.search(r'users:\(\("([^"]+)"', listener)
+    if match:
+        return match.group(1)
+    if NGINX_PROCESS_RE.search(listener):
+        return "nginx"
+    if PANEL_PROCESS_RE.search(listener):
+        return "панель"
+    return "другой процесс"
+
+
+def inspect_tcp_port(port: int, *, role: str = PORT_ROLE_BACKEND) -> dict[str, str | bool | int | None]:
+    """Check whether a TCP port is listening and who owns it."""
+    if port < 1 or port > 65535:
+        return {
+            "port": port,
+            "status": "unknown",
+            "in_use": False,
+            "message": "Некорректный номер порта",
+            "listener": None,
+        }
+
+    try:
+        ss = subprocess.run(
+            ["ss", "-tlnp"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "port": port,
+            "status": "unknown",
+            "in_use": False,
+            "message": f"Не удалось проверить порт: {exc}",
+            "listener": None,
+        }
+
+    if ss.returncode != 0:
+        return {
+            "port": port,
+            "status": "unknown",
+            "in_use": False,
+            "message": "Не удалось выполнить ss -tlnp (установите iproute2)",
+            "listener": None,
+        }
+
+    listeners = _parse_ss_listeners(ss.stdout or "", port)
+    if not listeners:
+        return {
+            "port": port,
+            "status": "free",
+            "in_use": False,
+            "message": "Порт свободен",
+            "listener": None,
+        }
+
+    listener = listeners[0][:300]
+    panel_lines = [line for line in listeners if PANEL_PROCESS_RE.search(line)]
+    nginx_lines = [line for line in listeners if NGINX_PROCESS_RE.search(line)]
+
+    if panel_lines and not nginx_lines and role == PORT_ROLE_BACKEND:
+        return {
+            "port": port,
+            "status": "panel",
+            "in_use": True,
+            "message": "Порт уже используется панелью (uvicorn)",
+            "listener": listener,
+        }
+
+    if nginx_lines and role in {PORT_ROLE_NGINX_HTTPS, PORT_ROLE_NGINX_HTTP}:
+        label = "HTTPS" if role == PORT_ROLE_NGINX_HTTPS else "HTTP (ACME / редирект)"
+        return {
+            "port": port,
+            "status": "nginx",
+            "in_use": True,
+            "message": f"Порт слушает nginx — подходит для {label}",
+            "listener": listener,
+        }
+
+    if nginx_lines:
+        return {
+            "port": port,
+            "status": "nginx",
+            "in_use": True,
+            "message": "Порт занят nginx — выберите другой или остановите чужой сайт",
+            "listener": listener,
+        }
+
+    process_hint = _listener_process_hint(listener)
+    return {
+        "port": port,
+        "status": "other",
+        "in_use": True,
+        "message": f"Порт занят: {process_hint}",
+        "listener": listener,
+    }
+
+
+def server_primary_ip() -> str | None:
+    """First IPv4 of the server (for HTTP direct access hints)."""
+    try:
+        result = subprocess.run(
+            ["hostname", "-I"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if result.returncode == 0:
+            parts = (result.stdout or "").strip().split()
+            if parts:
+                first = parts[0]
+                if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", first):
+                    return first
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        result = subprocess.run(
+            ["ip", "-4", "route", "get", "1.1.1.1"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if result.returncode == 0:
+            match = re.search(r"\bsrc\s+(\d+\.\d+\.\d+\.\d+)", result.stdout or "")
+            if match:
+                return match.group(1)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+def letsencrypt_cert_paths(domain: str) -> tuple[str, str]:
+    domain_host = (domain or "").strip().split(":")[0]
+    return (
+        f"/etc/letsencrypt/live/{domain_host}/fullchain.pem",
+        f"/etc/letsencrypt/live/{domain_host}/privkey.pem",
+    )
+
+
+def letsencrypt_exists_for_domain(domain: str) -> bool:
+    cert, key = letsencrypt_cert_paths(domain)
+    return Path(cert).is_file() and Path(key).is_file()
+
+
+def _iter_letsencrypt_live_domains() -> list[str]:
+    if not LETSENCRYPT_LIVE_DIR.is_dir():
+        return []
+    names: list[str] = []
+    try:
+        for entry in sorted(LETSENCRYPT_LIVE_DIR.iterdir()):
+            if not entry.is_dir():
+                continue
+            name = entry.name
+            if name.startswith("."):
+                continue
+            if letsencrypt_exists_for_domain(name):
+                names.append(name)
+    except OSError:
+        pass
+    return names
+
+
 def discover_ssl_certificate_candidates(
     *,
     domain: str = "",
@@ -477,13 +649,15 @@ def discover_ssl_certificate_candidates(
 
     _add(ssl_cert, ssl_key, "Текущие пути из .env", "env")
     domain_host = (domain or "").strip().split(":")[0]
+    le_domains: list[str] = []
     if domain_host:
-        _add(
-            f"/etc/letsencrypt/live/{domain_host}/fullchain.pem",
-            f"/etc/letsencrypt/live/{domain_host}/privkey.pem",
-            f"Let's Encrypt ({domain_host})",
-            "letsencrypt",
-        )
+        le_domains.append(domain_host)
+    for le_domain in _iter_letsencrypt_live_domains():
+        if le_domain not in le_domains:
+            le_domains.append(le_domain)
+    for le_domain in le_domains:
+        cert, key = letsencrypt_cert_paths(le_domain)
+        _add(cert, key, f"Let's Encrypt ({le_domain})", "letsencrypt")
     _add(
         str(SELF_SIGNED_CERT_PATH),
         str(SELF_SIGNED_KEY_PATH),
@@ -529,7 +703,8 @@ def build_vpn_network_publish_modes() -> list[dict[str, str | bool | None]]:
     return [
         {
             "key": "nginx_le",
-            "title": "Nginx + Let's Encrypt",
+            "title": "Let's Encrypt",
+            "method": "Nginx",
             "description": "Рекомендуемый режим: TLS на Nginx, uvicorn на loopback.",
             "requires_domain": True,
             "requires_email": False,
@@ -539,19 +714,9 @@ def build_vpn_network_publish_modes() -> list[dict[str, str | bool | None]]:
             "warning": None,
         },
         {
-            "key": "nginx_selfsigned",
-            "title": "Nginx + самоподписанный SSL",
-            "description": "HTTPS через Nginx с локальным сертификатом (для тестов или LAN).",
-            "requires_domain": False,
-            "requires_email": False,
-            "requires_ssl_cert": False,
-            "uses_nginx_ports": True,
-            "uses_uvicorn_https_port": False,
-            "warning": None,
-        },
-        {
             "key": "nginx_custom",
-            "title": "Nginx + собственные сертификаты",
+            "title": "Собственные сертификаты",
+            "method": "Nginx",
             "description": "TLS на Nginx с вашими cert/key (certbot или свои файлы).",
             "requires_domain": True,
             "requires_email": False,
@@ -561,8 +726,24 @@ def build_vpn_network_publish_modes() -> list[dict[str, str | bool | None]]:
             "warning": None,
         },
         {
+            "key": "nginx_selfsigned",
+            "title": "Самоподписанный SSL",
+            "method": "Nginx",
+            "description": "Локальный HTTPS через Nginx. Только для тестов.",
+            "requires_domain": False,
+            "requires_email": False,
+            "requires_ssl_cert": False,
+            "uses_nginx_ports": True,
+            "uses_uvicorn_https_port": False,
+            "warning": (
+                "Только для тестов — браузер не доверяет сертификату.\n"
+                "Nginx примет HTTPS снаружи (порты 80/443); для интернета — Let's Encrypt · Nginx."
+            ),
+        },
+        {
             "key": "uvicorn_le",
-            "title": "HTTPS на uvicorn + Let's Encrypt",
+            "title": "Let's Encrypt",
+            "method": "Uvicorn",
             "description": "TLS на приложении, standalone certbot, без Nginx.",
             "requires_domain": True,
             "requires_email": False,
@@ -573,7 +754,8 @@ def build_vpn_network_publish_modes() -> list[dict[str, str | bool | None]]:
         },
         {
             "key": "uvicorn_custom",
-            "title": "HTTPS на uvicorn + свои сертификаты",
+            "title": "Собственные сертификаты",
+            "method": "Uvicorn",
             "description": "TLS на приложении без Nginx — укажите пути к cert/key (certbot или свои файлы).",
             "requires_domain": False,
             "requires_email": False,
@@ -584,28 +766,32 @@ def build_vpn_network_publish_modes() -> list[dict[str, str | bool | None]]:
         },
         {
             "key": "uvicorn_selfsigned",
-            "title": "HTTPS на uvicorn + самоподписанный",
-            "description": "TLS на приложении с локальным сертификатом (тесты / LAN). Укажите домен для CN в cert.",
+            "title": "Самоподписанный SSL",
+            "method": "Uvicorn",
+            "description": "TLS на uvicorn без Nginx. Только для тестов.",
             "requires_domain": False,
             "requires_email": False,
             "requires_ssl_cert": False,
             "uses_nginx_ports": False,
             "uses_uvicorn_https_port": True,
             "warning": (
-                "Telegram Mini App не работает с самоподписанным сертификатом. "
-                "Если домен раньше открывался через Let's Encrypt / Nginx — браузер заблокирует "
-                "самоподписанный cert из‑за HSTS (обход невозможен). Для этого домена используйте «Nginx + HTTPS»."
+                "Только для тестов — браузер не доверяет сертификату, Telegram не работает.\n"
+                "Домен или IP в поле ниже; без домена — IP сервера. Вход: https://адрес:порт/"
             ),
         },
         {
             "key": "http_direct",
-            "title": "Прямой HTTP (без Nginx)",
-            "description": "Uvicorn слушает 0.0.0.0 — только для LAN/тестов.",
+            "title": "Прямой HTTP",
+            "method": "Uvicorn",
+            "description": "Uvicorn на 0.0.0.0 без шифрования. Только для тестов.",
             "requires_domain": False,
             "requires_email": False,
             "requires_ssl_cert": False,
             "uses_nginx_ports": False,
             "uses_uvicorn_https_port": False,
-            "warning": "Не используйте в интернете без firewall. Включите блок на порту панели в разделе «Безопасность».",
+            "warning": (
+                "Без шифрования — только для тестов.\n"
+                "Вход по http://IP:порт/; в интернет включите ограничение по IP."
+            ),
         },
     ]

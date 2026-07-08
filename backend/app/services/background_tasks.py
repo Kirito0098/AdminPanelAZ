@@ -612,13 +612,13 @@ class BackgroundTaskService:
                 break
 
         mode_labels = {
-            "http_direct": "Прямой HTTP",
-            "nginx_le": "Nginx + Let's Encrypt",
-            "nginx_selfsigned": "Nginx + самоподписанный SSL",
-            "nginx_custom": "Nginx + собственные сертификаты",
-            "uvicorn_le": "HTTPS на uvicorn + Let's Encrypt",
-            "uvicorn_selfsigned": "HTTPS на uvicorn + самоподписанный SSL",
-            "uvicorn_custom": "HTTPS на uvicorn + собственные сертификаты",
+            "http_direct": "Прямой HTTP · Uvicorn",
+            "nginx_le": "Let's Encrypt · Nginx",
+            "nginx_selfsigned": "Самоподписанный SSL · Nginx",
+            "nginx_custom": "Собственные сертификаты · Nginx",
+            "uvicorn_le": "Let's Encrypt · Uvicorn",
+            "uvicorn_selfsigned": "Самоподписанный SSL · Uvicorn",
+            "uvicorn_custom": "Собственные сертификаты · Uvicorn",
         }
         message = f"Публикация применена: {mode_labels.get(mode, mode)}"
         if access_url:

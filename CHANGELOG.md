@@ -35,7 +35,7 @@
 
 ## [Unreleased]
 
-> **Кратко:** мастер публикации панели (Nginx ↔ uvicorn, 7 режимов HTTPS/HTTP), переключение из UI с firewall и редиректом на multi-site, улучшенный UX подтверждения.
+> **Кратко:** мастер публикации панели — единые названия режимов (Nginx/uvicorn), проверка домена и порта, раздельные подсказки и риски «только для тестов».
 
 ### ✨ Added
 
@@ -45,11 +45,15 @@
 - **HTTPS на uvicorn без Nginx** — TLS на приложении по образцу AdminAntizapret: `USE_HTTPS`, `SSL_CERT`, `SSL_KEY` в `.env`, флаги uvicorn в `start.sh`, режимы `--uvicorn-le|custom|selfsigned` в `nginx-setup.sh`.
 - **Фоновая задача публикации** — `task_vpn_network_publish`: `nginx-setup.sh`, отложенный перезапуск панели, `ACCESS_URL` и `PUBLISH_MODE` в результате (`background_tasks.py`).
 - **Подсказки по сертификатам** — `known_ssl_cert`, `known_ssl_key`, `ssl_cert_suggestions[]` (`.env`, Let's Encrypt, самоподписанный adminpanelaz); автоподстановка путей при custom-режимах (`panel_publish_info.py`, `nginx_resolve_existing_ssl_paths`).
+- **Сканирование всех LE-сертификатов** — `discover_ssl_certificate_candidates` перечисляет `/etc/letsencrypt/live/*`, не только домен из `.env`.
+- **API проверки домена и порта** — `GET /settings/vpn-network/domain-ssl`, `GET /settings/vpn-network/port-status`; `server_primary_ip` в ответе настроек (`maintenance.py`, `panel_publish_info.py`).
+- **Проверка порта в UI** — под полями порта: свободен / занят панелью / nginx / другой процесс (`VpnNetworkTab`, debounce).
+- **Пути найденного LE в UI** — блок «Сертификат найден» показывает `cert` и `key` на диске.
 - **Multi-site: редирект 443 → uvicorn** — если nginx уже слушает 443, для uvicorn на другом порту создаётся vhost с LE и редиректом `https://domain/` → `https://domain:port/` (`deploy/nginx/adminpanelaz-redirect.conf.template`, `nginx_install_uvicorn_redirect`).
 - **Firewall при смене режима** — `firewall_apply_publish_mode` (nginx: 80/443; uvicorn/HTTP: открытие порта приложения) вызывается из `nginx-setup.sh` (`scripts/firewall-setup.sh`).
 - **Certbot webroot** — при работающем nginx сначала выпуск LE через webroot без остановки всех сайтов; standalone — fallback (`nginx_obtain_letsencrypt_cert`).
-- **Предупреждения uvicorn** — `uvicorn_publish_warnings[]` при nginx на 443 и HSTS; контекстные подсказки в UI (`publishWizardUi.ts`).
-- **Поле домена** — для самоподписанного uvicorn/nginx (CN в cert).
+- **Предупреждения uvicorn** — `uvicorn_publish_warnings[]` при nginx на 443; контекстные подсказки в UI (`publishWizardUi.ts`).
+- **Поле домена** — для самоподписанного uvicorn/nginx (CN в cert); без домена — IP сервера (`nginx_resolve_selfsigned_cn`).
 
 #### Установка
 
@@ -60,11 +64,15 @@
 
 #### VPN / Сеть
 
-- **Группировка режимов в UI** — «Через Nginx» и «Напрямую на uvicorn»; preview URL «После применения откройте…».
+- **Единые названия режимов** — «Let's Encrypt», «Собственные сертификаты», «Самоподписанный SSL», «Прямой HTTP»; метод отдельной строкой: Nginx / Uvicorn (`method` в API, `VpnNetworkTab`).
+- **Порядок карточек** — Let's Encrypt → свои cert → самоподписанный → HTTP; группы «Через Nginx» и «Напрямую на uvicorn».
+- **Подсказки по стеку** — отдельные тексты для Nginx и uvicorn (адрес входа, риски); сокращённые формулировки «только для тестов».
+- **Preview URL** — прямой HTTP: `http://IP:порт/` (не домен из `.env`); выбор найденного cert подставляет домен в поле.
 - **Диалог подтверждения** — контекстные info/warning/danger по режиму, карточка домена/порта/URL; красная кнопка только для рискованных режимов (`publishWizardUi.ts`).
 - **`PUBLISH_MODE` в `.env`** — активный режим мастера сохраняется и не сбрасывается при перезагрузке настроек без явного выбора пользователя.
 - **`nginx_install_site`** — не удаляет `sites-enabled/default`, если на сервере уже есть другие сайты; reload вместо restart где возможно.
 - **`nginx_apply_behind_proxy_env`** — `ENFORCE_HTTPS=true` при публикации через nginx из UI.
+- **CN самоподписанного cert** — при пустом домене IP сервера вместо hostname (`nginx-common.sh`, `install.sh`, `nginx-setup.sh`).
 
 #### Прочее
 
@@ -80,6 +88,9 @@
 - **502 Bad Gateway** — восстановлена функция `panel_restart_command()` в `panel_publish_info.py` (ImportError ломал старт uvicorn).
 - **Ложный fail установки** — `backend-health-check.sh` и installer пробуют HTTPS, когда uvicorn слушает TLS (`install.sh`, `site_diagnostics.py`).
 - **`http_direct` + firewall** — whitelist порта панели при прямом HTTP.
+- **Ложный «Сертификат найден»** — подсказка LE привязана к домену в форме, а не к любому cert на сервере (`domain-ssl`, `getLetsEncryptPathsForDomain`).
+- **500 при загрузке VPN / Сеть** — `has_le` не была определена в `build_uvicorn_publish_warnings`; `server_primary_ip()` падала на пустом `hostname -I`.
+- **Лишние подсказки при HTTP** — блок uvicorn-предупреждений (Nginx/LE) не показывается в режиме `http_direct`.
 
 ### 🧪 Tests
 

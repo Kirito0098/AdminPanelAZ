@@ -906,6 +906,7 @@ class VpnNetworkEnvRow(BaseModel):
 class VpnNetworkPublishModeInfo(BaseModel):
     key: str
     title: str
+    method: str | None = None
     description: str
     requires_domain: bool = False
     requires_email: bool = False
@@ -952,6 +953,22 @@ class VpnNetworkSettingsResponse(BaseModel):
     nginx_installed: bool = False
     panel_restart_command: str = "sudo systemctl restart adminpanelaz"
     uvicorn_publish_warnings: list[str] = []
+    server_primary_ip: str | None = None
+
+
+class VpnNetworkDomainSslStatusResponse(BaseModel):
+    domain: str
+    has_letsencrypt: bool
+    cert: str | None = None
+    key: str | None = None
+
+
+class VpnNetworkPortStatusResponse(BaseModel):
+    port: int
+    status: str
+    in_use: bool
+    message: str
+    listener: str | None = None
 
 
 class ServiceRestartRequest(BaseModel):

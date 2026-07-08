@@ -24,7 +24,9 @@ from app.schemas import (
     TelegramLinkCodeResponse,
     TelegramSettingsResponse,
     TelegramSettingsUpdate,
+    VpnNetworkDomainSslStatusResponse,
     VpnNetworkEnvRow,
+    VpnNetworkPortStatusResponse,
     VpnNetworkPublishModeInfo,
     VpnNetworkPublishRequest,
     VpnNetworkSettingsResponse,
@@ -48,8 +50,12 @@ from app.services.panel_publish_info import (
     build_vpn_network_publish_modes,
     discover_ssl_certificate_candidates,
     build_uvicorn_publish_warnings,
+    inspect_tcp_port,
     is_nginx_installed,
+    letsencrypt_cert_paths,
+    letsencrypt_exists_for_domain,
     panel_restart_command,
+    server_primary_ip,
     resolve_publish_ssl_paths,
     resolve_request_url_root,
 )
@@ -634,7 +640,49 @@ def get_vpn_network_settings(
         nginx_installed=is_nginx_installed(),
         panel_restart_command=panel_restart_command(),
         uvicorn_publish_warnings=uvicorn_warnings,
+        server_primary_ip=server_primary_ip(),
     )
+
+
+@router.get("/settings/vpn-network/domain-ssl", response_model=VpnNetworkDomainSslStatusResponse)
+def get_vpn_network_domain_ssl(
+    domain: str,
+    _: User = Depends(require_admin),
+):
+    if not get_feature_service().is_enabled("vpn_network"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("vpn_network"),
+        )
+    domain_host = (domain or "").strip().split(":")[0]
+    if not domain_host:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите домен")
+    cert, key = letsencrypt_cert_paths(domain_host)
+    has_le = letsencrypt_exists_for_domain(domain_host)
+    return VpnNetworkDomainSslStatusResponse(
+        domain=domain_host,
+        has_letsencrypt=has_le,
+        cert=cert if has_le else None,
+        key=key if has_le else None,
+    )
+
+
+@router.get("/settings/vpn-network/port-status", response_model=VpnNetworkPortStatusResponse)
+def get_vpn_network_port_status(
+    port: int,
+    role: str = "backend",
+    _: User = Depends(require_admin),
+):
+    if not get_feature_service().is_enabled("vpn_network"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("vpn_network"),
+        )
+    allowed_roles = {"backend", "nginx_https", "nginx_http"}
+    if role not in allowed_roles:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректная роль порта")
+    result = inspect_tcp_port(port, role=role)
+    return VpnNetworkPortStatusResponse(**result)
 
 
 @router.post("/settings/vpn-network/publish", status_code=status.HTTP_202_ACCEPTED, response_model=BackgroundTaskResponse)

@@ -1384,7 +1384,7 @@ setup_nginx_if_selected() {
       log "HTTPS на uvicorn + собственные сертификаты: https://${domain}:${backend_port}/"
       ;;
     uvicorn_selfsigned)
-      [[ -n "$domain" ]] || domain="$(hostname -f 2>/dev/null || hostname)"
+      domain="$(nginx_resolve_selfsigned_cn "$domain")"
       mkdir -p /etc/ssl/private
       if [[ ! -f "$NGINX_SELF_SIGNED_CERT" ]]; then
         openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
@@ -1423,7 +1423,7 @@ setup_nginx_if_selected() {
       log "Nginx + Let's Encrypt: https://${domain}:${https_port}/"
       ;;
     selfsigned)
-      [[ -n "$domain" ]] || domain="$(hostname -f 2>/dev/null || hostname)"
+      domain="$(nginx_resolve_selfsigned_cn "$domain")"
       nginx_ensure_nginx || die "Не удалось установить nginx"
       mkdir -p /etc/ssl/private
       if [[ ! -f "$NGINX_SELF_SIGNED_CERT" ]]; then

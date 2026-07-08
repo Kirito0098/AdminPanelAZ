@@ -786,6 +786,20 @@ export async function getVpnNetworkSettings() {
   return apiFetch<import('../types').VpnNetworkSettings>('/settings/vpn-network')
 }
 
+export async function getVpnNetworkDomainSsl(domain: string) {
+  const params = new URLSearchParams({ domain })
+  return apiFetch<import('../types').VpnNetworkDomainSslStatus>(
+    `/settings/vpn-network/domain-ssl?${params.toString()}`,
+  )
+}
+
+export async function getVpnNetworkPortStatus(port: number, role: import('../types').VpnNetworkPortRole = 'backend') {
+  const params = new URLSearchParams({ port: String(port), role })
+  return apiFetch<import('../types').VpnNetworkPortStatus>(
+    `/settings/vpn-network/port-status?${params.toString()}`,
+  )
+}
+
 export async function publishVpnNetwork(data: import('../types').VpnNetworkPublishPayload) {
   return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/settings/vpn-network/publish', {
     method: 'POST',
