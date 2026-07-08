@@ -572,6 +572,7 @@ def _check_http_probe(
     run_cmd: RunCmd,
 ) -> None:
     url, curl_prefix = _health_probe_url(env)
+    app_port = env.get("BACKEND_PORT", env.get("APP_PORT", "8000"))
 
     if _env_bool(env.get("BEHIND_NGINX")):
         domain = (env.get("DOMAIN") or "").strip()
