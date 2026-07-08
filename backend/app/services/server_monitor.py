@@ -319,6 +319,73 @@ class ServerMonitorService:
             "vnstat_available": is_vnstat_available(),
         }
 
+    def sample_interface_throughput(
+        self,
+        interface_names: list[str] | None = None,
+        *,
+        interval: float = 0.8,
+        max_interfaces: int = 6,
+    ) -> list[dict]:
+        """Instant RX/TX Mbps per interface (short psutil sample)."""
+        interval = max(0.3, min(float(interval), 2.0))
+        names = [str(name).strip() for name in (interface_names or []) if str(name).strip()]
+        if not names:
+            listed = self.list_interfaces()
+            names = list(listed.get("interfaces") or [])
+        if not names:
+            primary = detect_primary_interface()
+            if primary:
+                names = [primary]
+
+        pernic = psutil.net_io_counters(pernic=True)
+        stats = _net_if_stats()
+        valid = [name for name in names if name in pernic][:max_interfaces]
+        if not valid:
+            return []
+
+        snap1 = {name: pernic[name] for name in valid}
+        time.sleep(interval)
+        pernic2 = psutil.net_io_counters(pernic=True)
+
+        rows: list[dict] = []
+        for name in valid:
+            current = pernic2.get(name)
+            previous = snap1.get(name)
+            if current is None or previous is None:
+                continue
+            delta_rx = max(int(current.bytes_recv) - int(previous.bytes_recv), 0)
+            delta_tx = max(int(current.bytes_sent) - int(previous.bytes_sent), 0)
+            rx_mbps = round((delta_rx * 8) / (interval * 1_000_000), 2)
+            tx_mbps = round((delta_tx * 8) / (interval * 1_000_000), 2)
+            iface_stats = stats.get(name)
+            rows.append(
+                {
+                    "name": name,
+                    "rx_mbps": rx_mbps,
+                    "tx_mbps": tx_mbps,
+                    "is_up": bool(iface_stats.isup) if iface_stats is not None else True,
+                }
+            )
+        return rows
+
+    def get_live_throughput(
+        self,
+        *,
+        interval: float = 0.8,
+        max_interfaces: int = 6,
+    ) -> dict:
+        listed = self.list_interfaces()
+        names = list(listed.get("interfaces") or [])
+        return {
+            "primary_interface": listed.get("primary_interface"),
+            "interfaces": self.sample_interface_throughput(
+                names,
+                interval=interval,
+                max_interfaces=max_interfaces,
+            ),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
 
 _server_monitor: ServerMonitorService | None = None
 

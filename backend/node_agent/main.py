@@ -177,6 +177,15 @@ def server_interfaces(_: None = Depends(verify_api_key)):
     return monitor.list_interfaces()
 
 
+@app.get("/server-monitor/live-throughput")
+def server_live_throughput(
+    interval: float = 0.8,
+    max_interfaces: int = 6,
+    _: None = Depends(verify_api_key),
+):
+    return monitor.get_live_throughput(interval=interval, max_interfaces=max_interfaces)
+
+
 @app.get("/monitoring/overview")
 def monitoring_overview(_: None = Depends(verify_api_key)):
     ovpn_clients, openvpn_data_source = service.parse_openvpn_status()

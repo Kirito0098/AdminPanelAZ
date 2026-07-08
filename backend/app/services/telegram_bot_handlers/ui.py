@@ -59,12 +59,12 @@ def nav_footer_keyboard(
 ) -> dict:
     """Standard inline footer: optional refresh + help + home."""
     footer: list[dict] = []
+    if include_home:
+        footer.append(inline_button(i18n.BTN_MENU_HOME, callback_data="nav:home"))
     if refresh:
         footer.append(inline_button(i18n.BTN_REFRESH, callback_data=refresh))
     if include_help:
         footer.append(inline_button(i18n.BTN_HELP, callback_data="nav:help"))
-    if include_home:
-        footer.append(inline_button(i18n.BTN_MENU_HOME, callback_data="nav:home"))
 
     rows = [list(row) for row in (extra_rows or [])]
     if footer:

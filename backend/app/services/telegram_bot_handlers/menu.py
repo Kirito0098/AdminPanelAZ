@@ -12,6 +12,7 @@ from app.services.telegram_bot_handlers.base import (
     reply_button,
     reply_keyboard,
 )
+from app.services.telegram_bot_handlers.ui import send_or_edit
 from app.services import telegram_bot_i18n as i18n
 from app.services.telegram_bot_handlers import settings_fsm
 
@@ -34,71 +35,73 @@ def _linked_user_menu_visible(ctx: BotContext) -> bool:
     return ctx.user is not None
 
 
-def _menu_button_specs(ctx: BotContext) -> list[list[tuple[str, str | None]]]:
-    """Rows of (label, action). action None = Mini App URL button."""
-    rows: list[list[tuple[str, str | None]]] = []
-    if ctx.mini_app_url:
-        rows.append([(i18n.BTN_OPEN_MINI_APP, None)])
+def _menu_button_label(action: str) -> str:
+    return {
+        "status": i18n.BTN_MENU_STATUS,
+        "configs": i18n.BTN_MENU_CONFIGS,
+        "more": i18n.BTN_MENU_MORE,
+        "traffic": i18n.BTN_MENU_TRAFFIC,
+        "help": i18n.BTN_MENU_HELP,
+        "settings": i18n.BTN_MENU_SETTINGS,
+        "nodes": i18n.BTN_MENU_NODES,
+        "cidr": i18n.BTN_MENU_CIDR,
+        "warper": i18n.BTN_MENU_WARPER,
+    }[action]
 
-    rows.append(
-        [
-            (i18n.BTN_MENU_STATUS, "status"),
-            (i18n.BTN_MENU_CONFIGS, "configs"),
-        ]
-    )
-    rows.append(
-        [
-            (i18n.BTN_MENU_TRAFFIC, "traffic"),
-            (i18n.BTN_MENU_HELP, "help"),
-        ]
-    )
+
+def _more_menu_row_actions(ctx: BotContext) -> list[list[str]]:
+    rows: list[list[str]] = [["traffic", "help"]]
 
     if _admin_menu_visible(ctx):
-        rows.append(
-            [
-                (i18n.BTN_MENU_SETTINGS, "settings"),
-                (i18n.BTN_MENU_NODES, "nodes"),
-            ]
-        )
-        module_row: list[tuple[str, str | None]] = []
+        rows.append(["settings", "nodes"])
+        module_row: list[str] = []
         if _cidr_visible(ctx):
-            module_row.append((i18n.BTN_MENU_CIDR, "cidr"))
+            module_row.append("cidr")
         if _warper_visible(ctx):
-            module_row.append((i18n.BTN_MENU_WARPER, "warper"))
+            module_row.append("warper")
         if module_row:
             rows.append(module_row)
+
     return rows
 
 
 def build_reply_keyboard(ctx: BotContext) -> dict:
     if not _linked_user_menu_visible(ctx):
-        return reply_keyboard([[reply_button(i18n.BTN_MENU_HELP)]])
+        return reply_keyboard(
+            [[reply_button(i18n.BTN_MENU_HELP)]],
+            placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER,
+        )
 
-    rows: list[list[dict]] = []
-    for spec_row in _menu_button_specs(ctx):
-        row: list[dict] = []
-        for label, action in spec_row:
-            if action is None:
-                row.append(reply_button(label, web_app_url=ctx.mini_app_url))
-            else:
-                row.append(reply_button(label))
-        rows.append(row)
-    return reply_keyboard(rows)
+    rows = [
+        [
+            reply_button(i18n.BTN_MENU_CONFIGS),
+            reply_button(i18n.BTN_MENU_STATUS),
+        ],
+        [reply_button(i18n.BTN_MENU_MORE)],
+    ]
+    return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
+
+
+def build_more_inline_menu(ctx: BotContext) -> dict:
+    rows = [
+        [inline_button(_menu_button_label(action), callback_data=f"nav:{action}") for action in spec_row]
+        for spec_row in _more_menu_row_actions(ctx)
+    ]
+    return inline_keyboard(rows)
 
 
 def build_main_inline_menu(ctx: BotContext) -> dict:
+    """Full inline menu (same sections as «Ещё» + primary actions)."""
     if not _linked_user_menu_visible(ctx):
         return inline_keyboard([[inline_button(i18n.BTN_MENU_HELP, callback_data="nav:help")]])
 
-    rows: list[list[dict]] = []
-    for spec_row in _menu_button_specs(ctx):
-        row: list[dict] = []
-        for label, action in spec_row:
-            if action is None:
-                row.append(inline_button(label, web_app_url=ctx.mini_app_url))
-            else:
-                row.append(inline_button(label, callback_data=f"nav:{action}"))
-        rows.append(row)
+    rows = [
+        [
+            inline_button(i18n.BTN_MENU_CONFIGS, callback_data="nav:configs"),
+            inline_button(i18n.BTN_MENU_STATUS, callback_data="nav:status"),
+        ],
+    ]
+    rows.extend(build_more_inline_menu(ctx)["inline_keyboard"])
     return inline_keyboard(rows)
 
 
@@ -106,12 +109,23 @@ def build_bot_commands() -> list[dict[str, str]]:
     return [{"command": cmd, "description": desc} for cmd, desc in i18n.BOT_COMMANDS]
 
 
+async def handle_more_menu(ctx: BotContext, *, message_id: int | None = None) -> None:
+    await send_or_edit(
+        ctx,
+        i18n.MENU_MORE_TITLE,
+        markup=build_more_inline_menu(ctx),
+        message_id=message_id,
+    )
+
+
 async def _dispatch_action(ctx: BotContext, action: str, *, message_id: int | None = None) -> None:
     if action in _ADMIN_ACTIONS and not is_admin(ctx.user):
         await send_message(ctx.bot_token, ctx.chat_id, i18n.ADMIN_ONLY)
         return
 
-    if action == "status":
+    if action == "more":
+        await handle_more_menu(ctx, message_id=message_id)
+    elif action == "status":
         from app.services.telegram_bot_handlers.status import handle_status
 
         await handle_status(ctx, message_id=message_id)

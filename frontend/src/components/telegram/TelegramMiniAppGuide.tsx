@@ -84,13 +84,11 @@ function FeatureTable() {
 export interface TelegramMiniAppGuideProps {
   miniAppUrl?: string
   loginConfigured?: boolean
-  webhookReady?: boolean
 }
 
 export default function TelegramMiniAppGuide({
   miniAppUrl = '',
   loginConfigured = false,
-  webhookReady = false,
 }: TelegramMiniAppGuideProps) {
   return (
     <TelegramInstructionPanel
@@ -113,25 +111,8 @@ export default function TelegramMiniAppGuide({
           В разделе <Link to="/telegram?tab=interactive">Telegram → Команды бота</Link> получите код и отправьте боту{' '}
           <code>/link &lt;код&gt;</code>. Без привязки Mini App не авторизует пользователя.
         </GuideStep>
-        <GuideStep step={3} title="Добавьте кнопку в бота">
-          {webhookReady ? (
-            <>
-              Webhook уже подключён на вкладке <strong>Команды бота</strong> — панель автоматически выставила кнопку
-              меню «Открыть» с URL Mini App. Дополнительно в BotFather ничего делать не нужно.
-            </>
-          ) : (
-            <>
-              <strong>Автоматически:</strong> на вкладке <strong>Команды бота</strong> включите команды и нажмите{' '}
-              <strong>«Подключить бота к панели»</strong> — кнопка меню установится сама.
-              <br />
-              <strong>Вручную:</strong> @BotFather → <code>/setmenubutton</code> → ваш бот → Web App → вставьте URL
-              выше.
-            </>
-          )}
-        </GuideStep>
-        <GuideStep step={4} title="Откройте приложение">
-          В Telegram откройте бота → кнопка меню (☰) внизу слева или кнопка <strong>«📱 Открыть Mini App»</strong> в
-          клавиатуре после <code>/start</code>.
+        <GuideStep step={3} title="Откройте приложение">
+          В Telegram: inline <code>@ваш_бот</code> → «AdminPanelAZ Mini App», либо кнопка на карточке конфига в боте.
         </GuideStep>
       </div>
 
@@ -175,13 +156,6 @@ export default function TelegramMiniAppGuide({
           <p className="text-sm font-medium">Как ещё открыть Mini App</p>
         </div>
         <ul className="space-y-1.5 text-sm text-muted-foreground">
-          <li className="flex gap-2">
-            <span className="text-muted-foreground/60">•</span>
-            <span>
-              Кнопка <strong className="text-foreground">«📱 Открыть Mini App»</strong> в меню бота после{' '}
-              <code>/start</code> (если webhook подключён).
-            </span>
-          </li>
           <li className="flex gap-2">
             <span className="text-muted-foreground/60">•</span>
             <span>

@@ -69,10 +69,13 @@ def reply_keyboard(
     *,
     resize: bool = True,
     persistent: bool = True,
+    placeholder: str | None = None,
 ) -> dict:
     markup: dict = {
         "keyboard": rows,
         "resize_keyboard": resize,
         "is_persistent": persistent,
     }
+    if placeholder:
+        markup["input_field_placeholder"] = placeholder
     return markup

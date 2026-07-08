@@ -131,8 +131,8 @@ Multi-node: бэкап AntiZapret выполняется на **активном
 ## 6. Telegram Mini App
 
 1. В разделе **Telegram** (вкладка «Mini App») скопируйте ссылку Mini App.
-2. В BotFather: `/setmenubutton` → Web App → вставьте ссылку.
-3. Откройте приложение из Telegram.
+2. Подключите webhook на вкладке **Команды бота** (если ещё не подключён).
+3. Откройте приложение из Telegram: inline `@бот`, карточка конфига или ссылка Mini App из раздела Telegram.
 
 Mini App для admin включает вкладку **Узлы**: список VPN-узлов, проверка health и активация узла.
 

@@ -35,7 +35,7 @@ UNLINKED = (
 )
 
 UNKNOWN_COMMAND = "Неизвестная команда. Откройте меню или /help"
-UNKNOWN_TEXT = "Не понял сообщение.\n\nИспользуйте кнопки меню внизу или откройте главное меню."
+UNKNOWN_TEXT = "Не понял сообщение.\n\nВыберите раздел в меню внизу или отправьте /start."
 ADMIN_ONLY = "Команда доступна только администратору."
 INSUFFICIENT_PERMISSIONS = "Недостаточно прав."
 VALUE_EMPTY = "Значение не может быть пустым."
@@ -65,17 +65,22 @@ BTN_SETTINGS_MAINTENANCE = "Обслуживание"
 
 BTN_MENU_STATUS = "📊 Статус"
 BTN_MENU_CONFIGS = "📁 Конфиги"
+BTN_MENU_MORE = "⋯ Ещё"
 BTN_MENU_TRAFFIC = "📈 Трафик"
 BTN_MENU_HELP = BTN_HELP
 BTN_MENU_HOME = "🏠 Главная"
 BTN_MENU_SETTINGS = "⚙️ Настройки"
 BTN_MENU_NODES = "🖥 Узлы"
 BTN_MENU_CIDR = "🗂 CIDR"
-BTN_MENU_WARPER = "🌐 AZ-WARP"
+BTN_MENU_WARPER = "🌐 WARP"
+
+MENU_KEYBOARD_PLACEHOLDER = "Конфиги, статус или Ещё…"
+MENU_MORE_TITLE = "📋 <b>Дополнительно</b>\n\n<i>Остальные разделы — кнопками ниже.</i>"
 
 MENU_ACTIONS: dict[str, str] = {
     BTN_MENU_STATUS: "status",
     BTN_MENU_CONFIGS: "configs",
+    BTN_MENU_MORE: "more",
     BTN_MENU_TRAFFIC: "traffic",
     BTN_MENU_HELP: "help",
     BTN_MENU_HOME: "home",
@@ -83,6 +88,8 @@ MENU_ACTIONS: dict[str, str] = {
     BTN_MENU_NODES: "nodes",
     BTN_MENU_CIDR: "cidr",
     BTN_MENU_WARPER: "warper",
+    # Старые подписи кнопок (до обновления меню)
+    "🌐 AZ-WARP": "warper",
 }
 
 BOT_COMMANDS: tuple[tuple[str, str], ...] = (
@@ -91,7 +98,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("link", "Привязка аккаунта"),
     ("status", "Статус панели"),
     ("myconfigs", "Мои VPN-конфиги"),
-    ("traffic", "Мой трафик"),
+    ("traffic", "Трафик: сводка и топ-5"),
     ("configs", "Список VPN-конфигов"),
     ("config", "Карточка конфига"),
     ("settings", "Настройки панели (admin)"),
@@ -105,14 +112,14 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
 START_TITLE = "👋 <b>AdminPanelAZ Bot</b>"
 START_UNLINKED = (
     "{title}\n\n"
-    "Чтобы начать, привяжите аккаунт панели:\n"
+    "Привяжите аккаунт панели, чтобы открыть меню:\n"
     "<code>/link &lt;код&gt;</code>\n\n"
-    "Код — в панели: Telegram → «Команды бота»."
+    "Код — в панели: <b>Telegram → Команды бота</b>."
 )
 START_LINKED = (
     "{title}\n\n"
-    "Добро пожаловать, <b>{username}</b>.\n"
-    "{role_display}"
+    "Привет, <b>{username}</b> · {role_display}\n\n"
+    "<i>Внизу — Конфиги и Статус; остальное в «⋯ Ещё».</i>"
 )
 START_ROLE_DISPLAY = {
     "admin": "🔑 Администратор",
@@ -126,25 +133,25 @@ HELP_TITLE = "❓ <b>Справка</b>"
 HELP_SECTION_MAIN = "<b>📌 Основное</b>"
 HELP_LINES_MAIN = (
     "• /start — главное меню",
-    "• /status — статус панели",
+    "• Кнопки <b>Конфиги</b> и <b>Статус</b> — внизу чата",
+    "• <b>⋯ Ещё</b> — трафик, помощь и разделы admin",
     "• /help — эта справка",
     "• /link &lt;код&gt; — привязка Telegram",
 )
 HELP_SECTION_CONFIGS = "<b>📁 Конфиги</b>"
 HELP_LINES_CONFIGS = (
+    "• Кнопка <b>Конфиги</b> — список и отправка файлов",
     "• /myconfigs — ваши конфиги",
-    "• /configs — список конфигов",
-    "• /config &lt;имя&gt; — выбор протокола и отправка файла",
-    "• @bot &lt;имя&gt; — inline: ссылка или файл конфига",
-    "• /traffic — трафик ваших клиентов",
-    "• OpenVPN / WireGuard / AmneziaWG — отдельные группы",
+    "• /config &lt;имя&gt; — карточка конфига",
+    "• @bot &lt;имя&gt; — inline-поиск конфига",
+    "• /traffic — сводка и топ-5 за 24 ч (admin: все конфиги)",
 )
 HELP_SECTION_ADMIN = "<b>⚙️ Администратор</b>"
 HELP_LINES_ADMIN = (
     "• /settings — настройки панели",
     "• /nodes — VPN-узлы",
 )
-HELP_FOOTER = "<i>💡 Подсказка: кнопки внизу чата дублируют команды.</i>"
+HELP_FOOTER = "<i>💡 Кнопки внизу чата — основной способ навигации.</i>"
 HELP_ADMIN_CIDR = "• /cidr — статус CIDR pipeline"
 HELP_ADMIN_NODES = "• /nodes — VPN-узлы (health, активация)"
 HELP_ADMIN_WARPER = "• /warper — статус AZ-WARP"
@@ -157,12 +164,23 @@ HELP_LINES = HELP_LINES_MAIN
 STATUS_TITLE = "📊 <b>Статус панели</b>"
 STATUS_BODY = (
     "{title}\n\n"
+    "🖥 Узел: <b>{node_name}</b>\n"
     "📁 Конфигов: <b>{total_configs}</b>\n"
     "🔐 OpenVPN online: <b>{connected_openvpn}</b>\n"
     "🛡️ WireGuard online: <b>{connected_wireguard}</b>\n"
-    "🌐 IP сервера: <code>{server_ip}</code>\n\n"
-    "🕐 <i>Обновлено: {timestamp}</i>"
+    "🌐 IP сервера: <code>{server_ip}</code>"
 )
+STATUS_SERVER_HEADER = "\n🖥 <b>Ресурсы сервера</b>"
+STATUS_SERVER_METRICS = (
+    "CPU <b>{cpu}%</b> · RAM <b>{ram}%</b> ({mem_used} / {mem_total})\n"
+    "Диск <b>{disk}%</b> · аптайм {uptime}"
+)
+STATUS_SERVER_LOAD = "Load avg: <code>{load_1m}</code> / <code>{load_5m}</code> / <code>{load_15m}</code>"
+STATUS_SERVER_NETWORK = "\n🌐 <b>Сеть</b> (сейчас)\n{iface_lines}"
+STATUS_SERVER_NETWORK_LINE = "{state} <code>{name}</code> ↑ {tx_mbps} · ↓ {rx_mbps} Mbps"
+STATUS_SERVER_NETWORK_EMPTY = "\n🌐 <b>Сеть</b>: интерфейсы не найдены"
+STATUS_SERVER_UNAVAILABLE = "\n🖥 <i>Мониторинг сервера ({node_name}) временно недоступен</i>"
+STATUS_FOOTER = "\n\n🕐 <i>Обновлено: {timestamp}</i>"
 
 # --- /configs ---
 
@@ -176,18 +194,36 @@ CONFIGS_FILTER_ALL = "все типы"
 CONFIGS_FILTER_OVPN = "🔐 OpenVPN"
 CONFIGS_FILTER_WG = "🛡️ WireGuard"
 CONFIGS_FILTER_AWG = "🌀 AmneziaWG"
-CONFIGS_FILTER_HINT = "\n💡 Сузьте список кнопками типа VPN выше"
+CONFIGS_FILTER_HINT = "\n💡 🔐OVPN · 🛡️WG · 🌀AWG — метка на каждой кнопке"
+CONFIGS_FILTER_HINT_WG_AWG = (
+    "\n💡 <b>WG</b> — WireGuard · <b>AWG</b> — AmneziaWG"
+    "\nПри выборе фильтра сразу откроются файлы нужного типа"
+)
 CONFIGS_NONE = "📭 Конфигурации не найдены.\n\nСоздайте клиента в веб-панели или Mini App."
+CONFIGS_NONE_ON_NODE = (
+    "📭 На активном узле нет файлов конфигурации.\n\n"
+    "Клиенты есть в панели, но профили на сервере не найдены."
+)
+CONFIGS_FILTER_EMPTY = "<i>Нет клиентов с файлами этого типа на узле.</i>"
 
 # --- /traffic ---
 
-TRAFFIC_LIST = (
-    "📊 <b>Мой трафик</b>\n\n"
-    "Стр. {page}/{total_pages} · клиентов <b>{count}</b> · суммарно <b>{total}</b>\n\n"
-    "{lines}"
+TRAFFIC_FLEET_TITLE = "📊 <b>Трафик · сводка</b>"
+TRAFFIC_USER_TITLE = "📊 <b>Мой трафик</b>"
+TRAFFIC_USER_SCOPE = "<i>Только ваши конфиги</i>\n"
+TRAFFIC_SUMMARY = (
+    "{title}\n\n"
+    "🖥 Узел: <b>{node_name}</b>\n"
+    "{scope_hint}"
+    "Клиентов: <b>{count}</b> · online <b>{active}</b>\n"
+    "За 24 ч: <b>{traffic_1d}</b> · всего: <b>{total_all}</b>\n\n"
+    "🏆 <b>Топ-5 за сутки</b>\n"
+    "{top_lines}"
 )
+TRAFFIC_TOP_LINE = "{medal} {status} <code>{name}</code> — {traffic}"
+TRAFFIC_TOP_EMPTY = "<i>За последние 24 ч трафика нет</i>"
 TRAFFIC_NONE = "📭 У вас нет конфигураций для отображения трафика."
-TRAFFIC_NO_STATS = "📊 Статистика трафика для ваших клиентов ещё не собрана."
+TRAFFIC_NO_STATS = "📊 Статистика трафика ещё не собрана."
 
 CONFIG_NOT_FOUND = "Конфиг <code>{name}</code> не найден."
 CONFIG_NOT_FOUND_ID = "Конфигурация не найдена."

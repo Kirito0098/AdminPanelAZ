@@ -524,7 +524,6 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
             <TelegramMiniAppGuide
               miniAppUrl={tg.settings?.mini_app_url}
               loginConfigured={tg.loginConfigured}
-              webhookReady={tg.webhookReady}
             />
           </CardContent>
         </Card>

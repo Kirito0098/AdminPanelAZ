@@ -156,8 +156,10 @@ async def _dispatch_callback(ctx: BotContext, data: str, *, message_id: int | No
         await handle_config_group_callback(ctx, config_id, group_key, message_id=message_id)
         return
     if data.startswith("cfg:"):
-        config_id = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
-        await handle_config_callback(ctx, config_id, message_id=message_id)
+        from app.services.telegram_bot_handlers.configs import handle_config_callback, parse_config_callback
+
+        config_id, filter_key = parse_config_callback(data)
+        await handle_config_callback(ctx, config_id, filter_key=filter_key, message_id=message_id)
         return
     if data.startswith("st:"):
         await handle_settings_callback(ctx, data, message_id=message_id)

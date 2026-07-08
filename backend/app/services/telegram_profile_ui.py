@@ -12,6 +12,56 @@ GROUP_META: dict[str, tuple[str, str]] = {
     "wg": ("🛡️", "WireGuard"),
     "awg": ("🌀", "AmneziaWG"),
 }
+PROTOCOL_BUTTON_TAG: dict[str, str] = {
+    "ovpn": "OVPN",
+    "wg": "WG",
+    "awg": "AWG",
+}
+
+
+def classify_config_profile_groups(files: list[dict[str, str]], vpn_type) -> frozenset[str]:
+    """Classify config for bot labels/filters: ovpn, wg, awg (from profile files)."""
+    from app.models import VpnType
+
+    if not files:
+        return frozenset()
+
+    vt = vpn_type if isinstance(vpn_type, VpnType) else VpnType(str(vpn_type))
+    if vt == VpnType.openvpn:
+        return frozenset({"ovpn"})
+
+    protocols = {(item.get("protocol") or "").strip().lower() for item in files}
+    groups: set[str] = set()
+    if "wireguard" in protocols:
+        groups.add("wg")
+    if "amneziawg" in protocols:
+        groups.add("awg")
+    if not groups:
+        groups.add("wg")
+    return frozenset(groups)
+
+
+def format_config_protocol_badge(groups: frozenset[str]) -> tuple[str, str]:
+    if "ovpn" in groups:
+        return GROUP_META["ovpn"][0], PROTOCOL_BUTTON_TAG["ovpn"]
+
+    emojis: list[str] = []
+    tags: list[str] = []
+    if "wg" in groups:
+        emojis.append(GROUP_META["wg"][0])
+        tags.append(PROTOCOL_BUTTON_TAG["wg"])
+    if "awg" in groups:
+        emojis.append(GROUP_META["awg"][0])
+        tags.append(PROTOCOL_BUTTON_TAG["awg"])
+    if not tags:
+        return GROUP_META["wg"][0], PROTOCOL_BUTTON_TAG["wg"]
+    return "".join(emojis), "·".join(tags)
+
+
+def format_config_protocol_badge_for_filter(groups: frozenset[str], filter_key: str) -> tuple[str, str]:
+    if filter_key in PROTOCOL_BUTTON_TAG and filter_key in groups:
+        return GROUP_META[filter_key][0], PROTOCOL_BUTTON_TAG[filter_key]
+    return format_config_protocol_badge(groups)
 
 
 @dataclass(frozen=True)

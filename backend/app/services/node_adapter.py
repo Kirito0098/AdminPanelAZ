@@ -149,6 +149,14 @@ class NodeAdapter(ABC):
     def list_server_interfaces(self) -> dict: ...
 
     @abstractmethod
+    def get_server_live_throughput(
+        self,
+        *,
+        interval: float = 0.8,
+        max_interfaces: int = 6,
+    ) -> dict: ...
+
+    @abstractmethod
     def block_wireguard_client_runtime(self, client_name: str) -> dict: ...
 
     @abstractmethod
@@ -448,6 +456,14 @@ class LocalNodeAdapter(NodeAdapter):
 
     def list_server_interfaces(self) -> dict:
         return self._monitor.list_interfaces()
+
+    def get_server_live_throughput(
+        self,
+        *,
+        interval: float = 0.8,
+        max_interfaces: int = 6,
+    ) -> dict:
+        return self._monitor.get_live_throughput(interval=interval, max_interfaces=max_interfaces)
 
     def block_wireguard_client_runtime(self, client_name: str) -> dict:
         return block_client_runtime(client_name)
@@ -1015,6 +1031,22 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def list_server_interfaces(self) -> dict:
         return self._request("GET", "/server-monitor/interfaces", timeout=15.0)
+
+    def get_server_live_throughput(
+        self,
+        *,
+        interval: float = 0.8,
+        max_interfaces: int = 6,
+    ) -> dict:
+        return self._request(
+            "GET",
+            "/server-monitor/live-throughput",
+            params={
+                "interval": str(interval),
+                "max_interfaces": str(max_interfaces),
+            },
+            timeout=30.0,
+        )
 
     def block_wireguard_client_runtime(self, client_name: str) -> dict:
         return self._request("POST", f"/clients/wireguard/{client_name}/block", timeout=30.0)

@@ -36,6 +36,43 @@
 
 ## [Unreleased]
 
+> **Кратко:** переработка Telegram-бота — компактное меню, сводка трафика с топ-5, метки OVPN/WG/AWG на конфигах, live-скорость сети в /status для admin; сброс Web App-кнопки меню при webhook.
+
+### ✨ Added
+
+#### Telegram-бот — /status (admin)
+
+- **Блок ресурсов сервера** — CPU, RAM, диск, аптайм, load average и live RX/TX по интерфейсам в `/status` (`build_server_status_block`, `telegram_bot_handlers/status.py`).
+- **Live throughput API** — `sample_interface_throughput`, `get_live_throughput` в `server_monitor.py`; прокси через `NodeAdapter.get_server_live_throughput` и `GET /server-monitor/live-throughput` на node agent.
+
+#### Telegram-бот — /traffic
+
+- **Сводка и топ-5 за сутки** — вместо постраничного списка: клиентов, online, трафик за 24 ч и всего, медали 🥇🥈🥉 для лидеров (`telegram_bot_handlers/traffic.py`).
+- **Два режима** — admin видит флот целиком; пользователь — только свои конфиги.
+
+#### Telegram-бот — /configs
+
+- **Метки протокола на кнопках** — OVPN / WG / AWG по реальным файлам профиля на узле (`classify_config_profile_groups`, `format_config_protocol_badge` в `telegram_profile_ui.py`).
+- **Подменю «Ещё»** — компактная reply-клавиатура (Конфиги · Статус · Ещё); трафик, помощь и admin-разделы — inline-меню «Дополнительно» (`menu.py`, `handle_more_menu`).
+
+### 🔄 Changed
+
+#### Telegram-бот
+
+- **Имя узла** в `/status` и `/traffic`.
+- **Фильтр конфигов** — список строится только по клиентам с файлами на активном узле; WG/AWG-фильтр сразу открывает нужный тип; контекст фильтра сохраняется при возврате из карточки (`configs.py`, `parse_config_callback`).
+- **Команда /traffic в BotFather** — описание «Трафик: сводка и топ-5»; подпись WARP-кнопки «🌐 WARP» (старая «AZ-WARP» по-прежнему распознаётся).
+- **Placeholder reply-клавиатуры** — «Конфиги, статус или Ещё…» (`reply_keyboard` + `input_field_placeholder`).
+
+#### Telegram — webhook и Mini App
+
+- **Кнопка меню бота** — при подключении/отключении webhook панель сбрасывает `menu_button` в default вместо Web App «Открыть» (`reset_chat_menu_button_sync`, `maintenance.py`).
+- **Инструкции Mini App** — убран шаг BotFather `/setmenubutton`; открытие через inline `@бот` или карточку конфига (`TelegramMiniAppGuide`, `docs/Telegram.md`).
+
+### 🐛 Fixed
+
+- **Диагностика сайта** — 500 при `BEHIND_NGINX`: в тексте health-probe не была определена `app_port` (`site_diagnostics.py`).
+
 ---
 
 ## [2.11.0] - 2026-07-08
