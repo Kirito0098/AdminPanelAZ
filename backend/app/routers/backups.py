@@ -1,7 +1,9 @@
 import logging
+import os
+import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
@@ -32,6 +34,7 @@ from app.services.telegram_recipients import get_setting_chat_ids
 router = APIRouter(prefix="/backups", tags=["backups"])
 settings = get_settings()
 logger = logging.getLogger(__name__)
+MAX_BACKUP_UPLOAD_BYTES = 200 * 1024 * 1024
 
 
 def _get_backup_manager() -> BackupManager:
@@ -199,6 +202,74 @@ def create_backup(
         subject_name=result["file_name"],
         client_timezone=get_client_timezone_from_request(request),
     )
+    return BackupEntry(**result)
+
+
+@router.post("/upload", response_model=BackupEntry)
+async def upload_backup(
+    request: Request,
+    file: UploadFile = File(...),
+    restore: bool = Form(False),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    original_name = os.path.basename(file.filename or "")
+    if not original_name.lower().endswith((".tar.gz", ".tgz")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ожидается архив .tar.gz",
+        )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пуст")
+    if len(content) > MAX_BACKUP_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Размер архива превышает {MAX_BACKUP_UPLOAD_BYTES // (1024 * 1024)} МБ",
+        )
+
+    manager = _get_backup_manager()
+    suffix = ".tar.gz" if original_name.lower().endswith(".tar.gz") else ".tgz"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+
+    try:
+        result = manager.import_uploaded_backup(tmp_path, original_name=original_name)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    if restore:
+        manager.restore_backup(result["file_name"])
+        if settings.audit_log_enabled:
+            log_action(
+                db,
+                action="backup_restore",
+                user_id=admin.id,
+                username=admin.username,
+                remote_addr=ip_restriction_service.get_client_ip(request),
+                details=f"upload:{result['file_name']}",
+            )
+        admin_notify_service.send_settings_change(
+            db,
+            actor_username=admin.username,
+            settings_key="settings_backup_restore",
+            subject_name=result["file_name"],
+            client_timezone=get_client_timezone_from_request(request),
+        )
+    else:
+        admin_notify_service.send_settings_change(
+            db,
+            actor_username=admin.username,
+            settings_key="settings_backup_upload",
+            subject_name=result["file_name"],
+            client_timezone=get_client_timezone_from_request(request),
+        )
+
     return BackupEntry(**result)
 
 

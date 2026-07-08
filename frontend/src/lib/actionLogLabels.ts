@@ -78,6 +78,7 @@ const ACTION_LOG_LABELS: Record<string, string> = {
   settings_backup_update: 'Изменение настроек бэкапов',
   settings_backup_create: 'Создание бэкапа',
   settings_backup_restore: 'Восстановление из бэкапа',
+  settings_backup_upload: 'Загрузка бэкапа',
   settings_backup_delete: 'Удаление бэкапа',
   settings_backup_test_telegram: 'Тест бэкапа в Telegram',
   settings_restart_service: 'Перезапуск службы',

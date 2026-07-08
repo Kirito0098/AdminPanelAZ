@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   Archive,
@@ -15,6 +15,7 @@ import {
   Send,
   Server,
   Trash2,
+  Upload,
 } from 'lucide-react'
 import {
   ApiError,
@@ -25,6 +26,7 @@ import {
   getBackups,
   restoreBackup,
   updateBackupSettings,
+  uploadBackup,
 } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -247,6 +249,8 @@ export default function BackupTab() {
   const [includeAntizapretBackup, setIncludeAntizapretBackup] = useState(false)
   const [loading, setLoading] = useState(true)
   const [savingSettings, setSavingSettings] = useState(false)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
+  const pendingRestoreRef = useRef(false)
 
   const load = async () => {
     const [list, cfg] = await Promise.all([getBackups(), getBackupSettings()])
@@ -368,6 +372,58 @@ export default function BackupTab() {
         }
       },
     })
+  }
+
+  const handleUpload = (restoreAfterUpload: boolean) => {
+    pendingRestoreRef.current = restoreAfterUpload
+    uploadInputRef.current?.click()
+  }
+
+  const handleUploadFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    const restoreAfterUpload = pendingRestoreRef.current
+    pendingRestoreRef.current = false
+    const runUpload = async () => {
+      try {
+        await withInline(async () => {
+          await uploadBackup(file, restoreAfterUpload)
+          await load()
+        }, restoreAfterUpload ? 'Загрузка и восстановление...' : 'Загрузка архива...')
+        success(
+          restoreAfterUpload
+            ? 'Архив загружен и восстановлен — перезапустите панель'
+            : 'Архив загружен и добавлен в список',
+        )
+      } catch (err) {
+        notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки архива')
+      }
+    }
+
+    if (restoreAfterUpload) {
+      confirm({
+        title: 'Загрузить и восстановить?',
+        description: (
+          <>
+            Файл «{file.name}» заменит текущие данные панели на сервере после загрузки.
+          </>
+        ),
+        alert: {
+          variant: 'danger',
+          title: 'Внимание',
+          children:
+            'Используйте после переустановки или когда на сервере нет сохранённых копий. После восстановления перезапустите панель.',
+        },
+        confirmLabel: 'Загрузить и восстановить',
+        destructive: true,
+        onConfirm: runUpload,
+      })
+      return
+    }
+
+    await runUpload()
   }
 
   const handleDelete = (fileName: string) => {
@@ -656,13 +712,37 @@ export default function BackupTab() {
           <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
             <div>
               <CardTitle className="text-base">Сохранённые копии</CardTitle>
-              <CardDescription className="mt-1.5">Скачивание, восстановление и удаление архивов</CardDescription>
+              <CardDescription className="mt-1.5">
+                Скачивание, загрузка с компьютера, восстановление и удаление архивов
+              </CardDescription>
             </div>
-            {backups.length > 0 && (
-              <Badge variant="secondary" className="shrink-0">
-                {backups.length}
-              </Badge>
-            )}
+            <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept=".tar.gz,.tgz,application/gzip,application/x-gzip"
+                className="hidden"
+                onChange={(event) => void handleUploadFileSelected(event)}
+              />
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => handleUpload(false)}>
+                <Upload size={14} />
+                Загрузить
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
+                onClick={() => handleUpload(true)}
+              >
+                <RotateCcw size={14} />
+                Загрузить и восстановить
+              </Button>
+              {backups.length > 0 && (
+                <Badge variant="secondary" className="shrink-0">
+                  {backups.length}
+                </Badge>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             {backups.length === 0 ? (
@@ -670,12 +750,18 @@ export default function BackupTab() {
                 <ArchiveX className="mb-2 h-8 w-8 text-muted-foreground/70" />
                 <p className="text-sm font-medium">Копий пока нет</p>
                 <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-                  Создайте первую резервную копию, чтобы не потерять настройки при сбое
+                  Создайте первую резервную копию или загрузите ранее скачанный архив adminpanelaz_*.tar.gz
                 </p>
-                <Button onClick={() => void handleCreate()} variant="outline" className="mt-4 gap-1.5">
-                  <Archive size={16} />
-                  Создать копию
-                </Button>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  <Button onClick={() => void handleCreate()} variant="outline" className="gap-1.5">
+                    <Archive size={16} />
+                    Создать копию
+                  </Button>
+                  <Button onClick={() => handleUpload(false)} variant="outline" className="gap-1.5">
+                    <Upload size={16} />
+                    Загрузить архив
+                  </Button>
+                </div>
               </div>
             ) : (
               <ul className="space-y-2">
@@ -748,9 +834,9 @@ export default function BackupTab() {
         </Card>
 
         <SettingsAlert variant="info" title="Что восстанавливается откуда" className="md:col-span-2">
-          <strong>AdminPanel</strong> — кнопка «Восстановить» в списке ниже: база, CIDR, .env и при наличии списки
-          маршрутизации из того же архива. <strong>AntiZapret</strong> — полный архив VPN восстанавливается на
-          VPN-сервере (не через этот список).
+          <strong>AdminPanel</strong> — «Восстановить» в списке или «Загрузить и восстановить» для архива с
+          компьютера (после переустановки): база, CIDR, .env и при наличии списки маршрутизации.{' '}
+          <strong>AntiZapret</strong> — полный архив VPN восстанавливается на VPN-сервере (не через этот список).
         </SettingsAlert>
 
         <SettingsAlert variant="danger" title="Перед восстановлением AdminPanel" className="md:col-span-2">

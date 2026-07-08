@@ -11,6 +11,7 @@ SETTINGS_CHANGE_LABELS: dict[str, str] = {
     "settings_backup_update": "Изменены настройки бэкапов",
     "settings_backup_create": "Создан бэкап",
     "settings_backup_restore": "Запущено восстановление из бэкапа",
+    "settings_backup_upload": "Загружен архив резервной копии",
     "settings_backup_delete": "Удалён бэкап",
     "settings_restart_service": "Перезапуск сервиса",
     "settings_user_password_update": "Изменён пароль пользователя",
@@ -138,6 +139,11 @@ def user_action_tg_action_line(
         if archive:
             return f"Восстановление из архива «{archive}» поставлено в очередь"
         return "Восстановление из бэкапа поставлено в очередь"
+
+    if key == "settings_backup_upload":
+        if target_value:
+            return f"Загружен архив резервной копии «{target_value}»"
+        return "Загружен архив резервной копии"
 
     if key == "settings_backup_delete":
         if target_value:

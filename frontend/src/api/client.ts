@@ -767,6 +767,16 @@ export async function restoreBackup(fileName: string) {
   })
 }
 
+export async function uploadBackup(file: File, restore = false) {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('restore', restore ? 'true' : 'false')
+  return apiFetch<import('../types').BackupEntry>('/backups/upload', {
+    method: 'POST',
+    body: form,
+  })
+}
+
 export async function deleteBackup(fileName: string) {
   return apiFetch(`/backups/${encodeURIComponent(fileName)}`, { method: 'DELETE' })
 }

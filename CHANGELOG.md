@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.11.0](#2110---2026-07-08) — 2026-07-08
 - [2.10.0](#2100---2026-07-05) — 2026-07-05
 - [2.9.0](#290---2026-07-05) — 2026-07-05
 - [2.8.0](#280---2026-07-02) — 2026-07-02
@@ -35,7 +36,11 @@
 
 ## [Unreleased]
 
-> **Кратко:** мастер публикации панели — единые названия режимов (Nginx/uvicorn), проверка домена и порта, раздельные подсказки и риски «только для тестов».
+---
+
+## [2.11.0] - 2026-07-08
+
+> **Кратко:** мастер публикации панели (Nginx ↔ uvicorn, 7 режимов), проверка домена и порта, загрузка резервной копии с компьютера; единые названия режимов и контекстные подсказки в UI.
 
 ### ✨ Added
 
@@ -43,7 +48,7 @@
 
 - **7 режимов доступа** — в «Настройки → VPN / Сеть»: Nginx + LE / самоподписанный / свои cert; HTTPS на uvicorn + LE / свои cert / самоподписанный; прямой HTTP (`VpnNetworkTab`, `scripts/nginx-setup.sh`, `POST /api/settings/vpn-network/publish`).
 - **HTTPS на uvicorn без Nginx** — TLS на приложении по образцу AdminAntizapret: `USE_HTTPS`, `SSL_CERT`, `SSL_KEY` в `.env`, флаги uvicorn в `start.sh`, режимы `--uvicorn-le|custom|selfsigned` в `nginx-setup.sh`.
-- **Фоновая задача публикации** — `task_vpn_network_publish`: `nginx-setup.sh`, отложенный перезапуск панели, `ACCESS_URL` и `PUBLISH_MODE` в результате (`background_tasks.py`).
+- **Фоновая задача публикации** — `task_vpn_network_publish`: `nginx-setup.sh`, отложенный перезапуск панели (`SKIP_PANEL_RESTART`, `panel_restart_command` в результате), `ACCESS_URL` и `PUBLISH_MODE` (`background_tasks.py`, `VpnNetworkTab`).
 - **Подсказки по сертификатам** — `known_ssl_cert`, `known_ssl_key`, `ssl_cert_suggestions[]` (`.env`, Let's Encrypt, самоподписанный adminpanelaz); автоподстановка путей при custom-режимах (`panel_publish_info.py`, `nginx_resolve_existing_ssl_paths`).
 - **Сканирование всех LE-сертификатов** — `discover_ssl_certificate_candidates` перечисляет `/etc/letsencrypt/live/*`, не только домен из `.env`.
 - **API проверки домена и порта** — `GET /settings/vpn-network/domain-ssl`, `GET /settings/vpn-network/port-status`; `server_primary_ip` в ответе настроек (`maintenance.py`, `panel_publish_info.py`).
@@ -54,10 +59,17 @@
 - **Certbot webroot** — при работающем nginx сначала выпуск LE через webroot без остановки всех сайтов; standalone — fallback (`nginx_obtain_letsencrypt_cert`).
 - **Предупреждения uvicorn** — `uvicorn_publish_warnings[]` при nginx на 443; контекстные подсказки в UI (`publishWizardUi.ts`).
 - **Поле домена** — для самоподписанного uvicorn/nginx (CN в cert); без домена — IP сервера (`nginx_resolve_selfsigned_cn`).
+- **Модуль `publishWizardUi.ts`** — план подтверждения, preview URL, фильтрация предупреждений и рисков по режиму.
+
+#### Резервные копии
+
+- **Загрузка архива с компьютера** — `POST /api/backups/upload` (до 200 МБ): ранее скачанный `adminpanelaz_*.tar.gz` можно загрузить в список или сразу восстановить после переустановки (`BackupTab`, `BackupManager.import_uploaded_backup`, `inspect_backup_archive`).
+- **Кнопки в UI** — «Загрузить» и «Загрузить и восстановить» в блоке «Сохранённые копии»; пустое состояние с подсказкой про архив после переустановки.
 
 #### Установка
 
-- **Мастер install-wizard** — defaults по Enter: panel+AntiZapret, production, systemd, full profile, mTLS, auto-backup, firewall off.
+- **Мастер install-wizard** — defaults по Enter: panel+AntiZapret, production, systemd, full profile, mTLS, auto-backup, firewall off; режимы публикации Nginx/uvicorn; ввод путей cert/key при `nginx_custom` и `uvicorn_custom` с проверкой файлов на диске.
+- **`scripts/backend-health-check.sh`** — единая проверка HTTP/HTTPS backend для `install.sh` и диагностики.
 - **Тесты режимов публикации** — `scripts/test-install-publish-modes.sh`, `scripts/test-backend-health-check.sh` (health-check при HTTPS uvicorn).
 
 ### 🔄 Changed
@@ -68,15 +80,21 @@
 - **Порядок карточек** — Let's Encrypt → свои cert → самоподписанный → HTTP; группы «Через Nginx» и «Напрямую на uvicorn».
 - **Подсказки по стеку** — отдельные тексты для Nginx и uvicorn (адрес входа, риски); сокращённые формулировки «только для тестов».
 - **Preview URL** — прямой HTTP: `http://IP:порт/` (не домен из `.env`); выбор найденного cert подставляет домен в поле.
-- **Диалог подтверждения** — контекстные info/warning/danger по режиму, карточка домена/порта/URL; красная кнопка только для рискованных режимов (`publishWizardUi.ts`).
+- **Диалог подтверждения** — контекстные info/warning/danger по режиму, карточка домена/порта/URL; красная кнопка только для рискованных режимов; uvicorn-предупреждения не показываются для nginx-режимов (`filterPublishWarningsForMode`).
 - **`PUBLISH_MODE` в `.env`** — активный режим мастера сохраняется и не сбрасывается при перезагрузке настроек без явного выбора пользователя.
 - **`nginx_install_site`** — не удаляет `sites-enabled/default`, если на сервере уже есть другие сайты; reload вместо restart где возможно.
 - **`nginx_apply_behind_proxy_env`** — `ENFORCE_HTTPS=true` при публикации через nginx из UI.
 - **CN самоподписанного cert** — при пустом домене IP сервера вместо hostname (`nginx-common.sh`, `install.sh`, `nginx-setup.sh`).
+- **Поля SSL в мастере установки и UI** — выбор своих сертификатов запрашивает пути к `.crt/.pem` и `.key` с повтором при отсутствии файла (`install-wizard.sh`, `VpnNetworkTab`).
 
 #### Прочее
 
 - **Удалены упоминания 3x-ui** — из UI, `.env.example`, `panel_publish_info.py`.
+- **README** — таблица сценариев установки: только панель / панель + узел / узел; когда какой вариант выбирать.
+
+#### Резервные копии
+
+- **Уведомления admin** — событие `settings_backup_upload` в Telegram и журнале действий.
 
 ### 🐛 Fixed
 
@@ -91,11 +109,17 @@
 - **Ложный «Сертификат найден»** — подсказка LE привязана к домену в форме, а не к любому cert на сервере (`domain-ssl`, `getLetsEncryptPathsForDomain`).
 - **500 при загрузке VPN / Сеть** — `has_le` не была определена в `build_uvicorn_publish_warnings`; `server_primary_ip()` падала на пустом `hostname -I`.
 - **Лишние подсказки при HTTP** — блок uvicorn-предупреждений (Nginx/LE) не показывается в режиме `http_direct`.
+- **Лишние uvicorn-предупреждения в nginx-режимах** — в диалоге подтверждения Nginx+LE не показывается «стена» предупреждений про uvicorn (`filterPublishWarningsForMode`).
+
+#### Резервные копии
+
+- **`backup-cli.py restore`** — абсолютный путь к архиву на диске принимается в `_resolve_archive` (раньше работало только имя из каталога бэкапов).
 
 ### 🧪 Tests
 
 - **`scripts/test-backend-health-check.sh`** — схема health-check для режимов uvicorn HTTPS.
-- **`scripts/test-install-publish-modes.sh`** — матрица 8 режимов публикации в CI.
+- **`scripts/test-install-publish-modes.sh`** — матрица 8 режимов публикации.
+- **CI** — оба скрипта в job `backend` (`.github/workflows/ci.yml`).
 
 ---
 
@@ -1443,7 +1467,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.10.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.7.0...v2.8.0

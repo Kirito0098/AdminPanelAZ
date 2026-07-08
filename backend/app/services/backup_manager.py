@@ -113,6 +113,79 @@ class BackupManager:
             **metadata,
         }
 
+    def inspect_backup_archive(self, archive_path: Path) -> dict:
+        path = archive_path.resolve()
+        if not path.is_file():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл архива не найден")
+        try:
+            with tarfile.open(path, "r:gz") as tar:
+                self._validate_tar_members(tar)
+                member_names = {m.name for m in tar.getmembers()}
+        except tarfile.TarError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Некорректный архив .tar.gz",
+            ) from exc
+
+        components: list[str] = []
+        if "data/adminpanel.db" in member_names:
+            components.append("db")
+        if "data/cidr/cidr.db" in member_names:
+            components.append("cidr_db")
+        if "env/.env" in member_names:
+            components.append("env")
+        if any(name.startswith("antizapret/config/") for name in member_names):
+            components.append("configs")
+
+        if not components:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Архив не похож на резервную копию AdminPanel (нет БД, CIDR или .env)",
+            )
+
+        created_at = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return {
+            "components": components,
+            "summary": ",".join(components),
+            "created_at": created_at,
+        }
+
+    def import_uploaded_backup(self, source_path: Path, *, original_name: str | None = None) -> dict:
+        source = source_path.resolve()
+        metadata = self.inspect_backup_archive(source)
+        self.backup_root.mkdir(parents=True, exist_ok=True)
+
+        target_name = self._upload_target_name(original_name)
+        target_path = self.backup_root / target_name
+        if target_path.exists():
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            target_name = f"adminpanelaz_{stamp}_upload.tar.gz"
+            target_path = self.backup_root / target_name
+
+        shutil.move(str(source), str(target_path))
+        meta_path = target_path.with_suffix(".json")
+        meta_path.write_text(
+            json.dumps(
+                {
+                    "created_at": metadata["created_at"],
+                    "components": metadata["components"],
+                    "summary": metadata["summary"],
+                    "source": "upload",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "file_name": target_name,
+            "file_path": str(target_path),
+            "size_bytes": target_path.stat().st_size,
+            "created_at": metadata["created_at"],
+            "components": metadata["components"],
+            "summary": metadata["summary"],
+        }
+
     def restore_backup(self, file_name: str) -> dict:
         archive_path = self._resolve_archive(file_name)
         restored: list[str] = []
@@ -156,12 +229,34 @@ class BackupManager:
         safe_name = os.path.basename(file_name)
         if not safe_name.endswith(".tar.gz"):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимое имя архива")
+
+        if os.path.isabs(file_name):
+            candidate = Path(file_name).resolve()
+            if candidate.is_file():
+                return candidate
+
         path = (self.backup_root / safe_name).resolve()
         if not str(path).startswith(str(self.backup_root)):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимый путь")
         if not path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив не найден")
         return path
+
+    def _upload_target_name(self, original_name: str | None) -> str:
+        safe_name = os.path.basename(original_name or "").strip()
+        if safe_name.endswith(".tar.gz") and safe_name.startswith("adminpanelaz_"):
+            return safe_name
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        return f"adminpanelaz_{stamp}_upload.tar.gz"
+
+    def _validate_tar_members(self, tar: tarfile.TarFile) -> None:
+        for member in tar.getmembers():
+            name = member.name.replace("\\", "/")
+            if name.startswith("/") or name.startswith("../") or "/../" in f"/{name}/":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Архив содержит недопустимые пути",
+                )
 
     def _read_metadata(self, archive_path: Path) -> dict:
         meta_path = archive_path.with_suffix(".json")
