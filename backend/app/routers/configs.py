@@ -25,7 +25,7 @@ from app.services.config_csv_ops import (
 from app.services.config_tags import get_tags_for_configs, resolve_config_ids_by_tags
 from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_adapter import NodeAdapter
-from app.services.config_import import import_clients_from_disk
+from app.services.config_import import format_config_disk_sync_message, import_clients_from_disk
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.client_sync import (
     maybe_replicate_cert_renew,
@@ -632,11 +632,11 @@ def create_one_time_link(
 
 @router.post("/sync", response_model=MessageResponse)
 def sync_from_antizapret(db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    """Импорт существующих клиентов AntiZapret в базу данных."""
+    """Синхронизация клиентов AntiZapret с базой данных (импорт с диска и удаление устаревших записей)."""
     require_ha_primary_for_client_ops(db)
     admin = db.query(User).filter(User.role == UserRole.admin).first()
     if not admin:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Администратор не найден")
 
-    imported = import_clients_from_disk(db, get_active_node(db), admin.id)
-    return MessageResponse(message=f"Синхронизировано клиентов: {imported}")
+    result = import_clients_from_disk(db, get_active_node(db), admin.id)
+    return MessageResponse(message=format_config_disk_sync_message(result))

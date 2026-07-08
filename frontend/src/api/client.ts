@@ -304,7 +304,7 @@ export async function updateConfig(
 }
 
 export async function syncConfigs() {
-  return apiFetch('/configs/sync', { method: 'POST' })
+  return apiFetch<{ message: string }>('/configs/sync', { method: 'POST' })
 }
 
 export async function getConfigTags() {

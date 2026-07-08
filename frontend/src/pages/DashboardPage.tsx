@@ -335,11 +335,12 @@ export default function DashboardPage() {
   const handleSync = async () => {
     setSyncing(true)
     try {
-      await withInline(async () => {
-        await syncConfigs()
+      const result = await withInline(async () => {
+        const syncResult = await syncConfigs()
         await load({ silent: true })
+        return syncResult
       }, 'Синхронизация с AntiZapret...')
-      success('Конфигурации синхронизированы')
+      success(result?.message || 'Конфигурации синхронизированы')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка синхронизации')
     } finally {
