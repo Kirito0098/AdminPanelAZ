@@ -1,6 +1,7 @@
 import logging
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -9,8 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_admin
 from app.config import get_settings
-from app.cidr_database import resolve_cidr_db_path
-from app.database import get_db, resolve_main_db_path
+from app.cidr_database import cidr_engine, resolve_cidr_db_path
+from app.database import engine, get_db, resolve_main_db_path
 from app.models import AppSetting, User
 from app.services.action_log import log_action
 from app.services.ip_restriction import ip_restriction_service
@@ -27,7 +28,9 @@ from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
 from app.services.backup_manager import BackupManager
 from app.services.node_manager import get_active_adapter
+from app.services.node_update import resolve_repo_root
 from app.services.notify_time import get_client_timezone_from_request
+from app.services.system_update import RESTART_DELAY_SECONDS, restart_controller
 from app.services.telegram import send_tg_document, send_tg_message
 from app.services.telegram_recipients import get_setting_chat_ids
 
@@ -35,6 +38,37 @@ router = APIRouter(prefix="/backups", tags=["backups"])
 settings = get_settings()
 logger = logging.getLogger(__name__)
 MAX_BACKUP_UPLOAD_BYTES = 200 * 1024 * 1024
+RESTORE_RESTART_MESSAGE = "Восстановление выполнено. Панель будет перезапущена через несколько секунд."
+
+
+def _project_root() -> Path:
+    backend = Path(__file__).resolve().parents[2]
+    return resolve_repo_root(backend.parent) or backend.parent
+
+
+def _dispose_db_engines() -> None:
+    engine.dispose()
+    cidr_engine.dispose()
+
+
+def _schedule_panel_restart_after_restore() -> None:
+    project_root = _project_root()
+
+    def _restart() -> None:
+        _dispose_db_engines()
+        restart_controller(project_root)
+
+    timer = threading.Timer(RESTART_DELAY_SECONDS, _restart)
+    timer.daemon = True
+    timer.start()
+
+
+def _restore_response(restore_result: dict) -> MessageResponse:
+    _schedule_panel_restart_after_restore()
+    return MessageResponse(
+        message=RESTORE_RESTART_MESSAGE,
+        detail={**restore_result, "restart_scheduled": True},
+    )
 
 
 def _get_backup_manager() -> BackupManager:
@@ -261,14 +295,16 @@ async def upload_backup(
             subject_name=result["file_name"],
             client_timezone=get_client_timezone_from_request(request),
         )
-    else:
-        admin_notify_service.send_settings_change(
-            db,
-            actor_username=admin.username,
-            settings_key="settings_backup_upload",
-            subject_name=result["file_name"],
-            client_timezone=get_client_timezone_from_request(request),
-        )
+        _schedule_panel_restart_after_restore()
+        return BackupEntry(**result)
+
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_backup_upload",
+        subject_name=result["file_name"],
+        client_timezone=get_client_timezone_from_request(request),
+    )
 
     return BackupEntry(**result)
 
@@ -297,10 +333,7 @@ def restore_backup(
         subject_name=payload.file_name,
         client_timezone=get_client_timezone_from_request(request),
     )
-    return MessageResponse(
-        message="Восстановление выполнено. Перезапустите панель для применения БД.",
-        detail=result,
-    )
+    return _restore_response(result)
 
 
 @router.delete("/{file_name}", response_model=MessageResponse)

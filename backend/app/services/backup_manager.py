@@ -9,6 +9,15 @@ from pathlib import Path
 from fastapi import HTTPException, status
 
 
+def remove_sqlite_sidecars(db_path: Path) -> None:
+    """Remove SQLite WAL/SHM files so a restored .db is opened cleanly."""
+    for suffix in ("-wal", "-shm"):
+        try:
+            Path(f"{db_path}{suffix}").unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 class BackupManager:
     CONFIG_FILES = (
         "include-hosts.txt",
@@ -197,6 +206,7 @@ class BackupManager:
                 extracted = tar.extractfile(members["data/adminpanel.db"])
                 if extracted:
                     self.db_path.write_bytes(extracted.read())
+                    remove_sqlite_sidecars(self.db_path)
                     restored.append("db")
 
             if "data/cidr/cidr.db" in members and self.cidr_db_path is not None:
@@ -204,6 +214,7 @@ class BackupManager:
                 extracted = tar.extractfile(members["data/cidr/cidr.db"])
                 if extracted:
                     self.cidr_db_path.write_bytes(extracted.read())
+                    remove_sqlite_sidecars(self.cidr_db_path)
                     restored.append("cidr_db")
 
             if "env/.env" in members:

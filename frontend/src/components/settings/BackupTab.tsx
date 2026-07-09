@@ -61,6 +61,12 @@ const COMPONENT_LABELS: Record<string, string> = {
   antizapret_backup: 'Архив AntiZapret',
 }
 
+const RESTORE_WARNING =
+  'Текущие настройки и данные панели будут перезаписаны. После восстановления панель будет автоматически перезапущена — страница станет недоступна на несколько секунд.'
+
+const RESTORE_SUCCESS_MESSAGE =
+  'Восстановление выполнено. Панель будет перезапущена через несколько секунд.'
+
 const ADMIN_PANEL_ALWAYS_INCLUDED = [
   'База данных — пользователи, роли, настройки, узлы и журналы',
   'База CIDR — подсети для карты маршрутизации в панели',
@@ -356,17 +362,18 @@ export default function BackupTab() {
       alert: {
         variant: 'danger',
         title: 'Внимание',
-        children: 'Текущие настройки и данные панели будут перезаписаны. После восстановления нужно перезапустить панель.',
+        children: RESTORE_WARNING,
       },
-      confirmLabel: 'Восстановить',
+      confirmLabel: 'Восстановить и перезапустить',
       destructive: true,
       onConfirm: async () => {
         try {
-          await withInline(async () => {
-            await restoreBackup(fileName)
+          const resp = await withInline(async () => {
+            const result = await restoreBackup(fileName)
             await load()
-          }, 'Восстановление...')
-          success('Восстановление выполнено — перезапустите панель')
+            return result
+          }, 'Восстановление и перезапуск...')
+          success(resp.message || RESTORE_SUCCESS_MESSAGE)
         } catch (err) {
           notifyError(err instanceof ApiError ? err.message : 'Ошибка восстановления')
         }
@@ -391,12 +398,8 @@ export default function BackupTab() {
         await withInline(async () => {
           await uploadBackup(file, restoreAfterUpload)
           await load()
-        }, restoreAfterUpload ? 'Загрузка и восстановление...' : 'Загрузка архива...')
-        success(
-          restoreAfterUpload
-            ? 'Архив загружен и восстановлен — перезапустите панель'
-            : 'Архив загружен и добавлен в список',
-        )
+        }, restoreAfterUpload ? 'Загрузка, восстановление и перезапуск...' : 'Загрузка архива...')
+        success(restoreAfterUpload ? RESTORE_SUCCESS_MESSAGE : 'Архив загружен и добавлен в список')
       } catch (err) {
         notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки архива')
       }
@@ -414,9 +417,10 @@ export default function BackupTab() {
           variant: 'danger',
           title: 'Внимание',
           children:
-            'Используйте после переустановки или когда на сервере нет сохранённых копий. После восстановления перезапустите панель.',
+            'Используйте после переустановки или когда на сервере нет сохранённых копий. ' +
+            RESTORE_WARNING,
         },
-        confirmLabel: 'Загрузить и восстановить',
+        confirmLabel: 'Загрузить, восстановить и перезапустить',
         destructive: true,
         onConfirm: runUpload,
       })

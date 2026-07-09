@@ -8,6 +8,7 @@ from app.schemas import BackupCreateRequest, BackupRestoreRequest, BackupSetting
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext, inline_button, inline_keyboard
 from app.services.telegram_bot_handlers import settings_fsm
+from app.services.telegram_bot_i18n import BK_RESTORE_WARN
 from app.services.telegram_bot_handlers.settings import (
     _log_bot_action,
     _make_bot_request,
@@ -355,7 +356,7 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
                 ctx,
                 "⚠️ <b>Восстановить из бэкапа?</b>\n"
                 f"<code>{entry.file_name}</code>\n\n"
-                "Текущие данные будут перезаписаны. Перезапустите панель после восстановления.",
+                f"{BK_RESTORE_WARN}",
                 markup=markup,
                 message_id=message_id,
             )
@@ -367,7 +368,7 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
             if entry is None:
                 await send_message(ctx.bot_token, ctx.chat_id, "❌ Архив не найден.")
                 return
-            from app.routers.backups import restore_backup
+            from app.routers.backups import RESTORE_RESTART_MESSAGE, restore_backup
 
             restore_backup(
                 BackupRestoreRequest(file_name=entry.file_name),
@@ -379,7 +380,7 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
             await send_message(
                 ctx.bot_token,
                 ctx.chat_id,
-                f"✅ Восстановлено: {entry.file_name}\nПерезапустите панель.",
+                f"✅ Восстановлено: {entry.file_name}\n{RESTORE_RESTART_MESSAGE}",
             )
             return
 

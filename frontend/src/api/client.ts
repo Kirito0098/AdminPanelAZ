@@ -761,7 +761,7 @@ export async function createBackup(
 }
 
 export async function restoreBackup(fileName: string) {
-  return apiFetch('/backups/restore', {
+  return apiFetch<{ message: string; detail?: Record<string, unknown> }>('/backups/restore', {
     method: 'POST',
     body: JSON.stringify({ file_name: fileName }),
   })
