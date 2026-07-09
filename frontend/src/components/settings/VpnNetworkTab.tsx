@@ -13,6 +13,7 @@ import {
 import { ApiError, getBackgroundTask, getBackgroundTaskForApiBase, getVpnNetworkDomainSsl, getVpnNetworkPortStatus, getVpnNetworkSettings, publishVpnNetwork } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import PublishAwaitDialog, { type PublishAwaitDialogState } from '@/components/settings/PublishAwaitDialog'
+import SharedDomainPublishSection from '@/components/settings/SharedDomainPublishSection'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
@@ -219,6 +220,9 @@ export default function VpnNetworkTab() {
       const data = await getVpnNetworkSettings()
       setSettings(data)
       hasSettingsRef.current = true
+      if (data.shared_domain_status_openvpn || data.shared_domain_foreign_vhost) {
+        setNginxSubpathIntegrate(true)
+      }
       setBackendPort(data.backend_port || '8000')
       const domainVal = envRowValue(data.env_rows, 'DOMAIN')
       if (domainVal) setDomain(domainVal)
@@ -382,6 +386,7 @@ export default function VpnNetworkTab() {
       httpsPublicPort,
       domainLetsEncrypt,
       accessPath,
+      nginxSubpathIntegrate,
     )
     confirm({
       title: 'Применить настройки доступа?',
@@ -585,7 +590,12 @@ export default function VpnNetworkTab() {
   )
   const showAccessPathField = selectedMode.startsWith('nginx_')
   const showSubpathIntegrate =
-    showAccessPathField && Boolean(accessPath.trim()) && settings.shared_domain_foreign_vhost
+    showAccessPathField &&
+    Boolean(accessPath.trim()) &&
+    settings.shared_domain_foreign_vhost &&
+    !settings.shared_domain_status_openvpn
+  const showStatusOpenVpnIntegrate =
+    showAccessPathField && Boolean(accessPath.trim()) && settings.shared_domain_status_openvpn
   const showOptionalDomain =
     !selectedModeInfo?.requires_domain &&
     (selectedMode === 'uvicorn_custom' ||
@@ -857,7 +867,7 @@ export default function VpnNetworkTab() {
               </SettingsAlert>
             )}
 
-            {previewAccessUrl && (
+            {previewAccessUrl && !(showAccessPathField && accessPath.trim()) && (
               <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
                 <span className="text-muted-foreground">После применения откройте: </span>
                 <code className="break-all font-mono text-xs text-primary">{previewAccessUrl}</code>
@@ -928,35 +938,18 @@ export default function VpnNetworkTab() {
                   </div>
                 )}
                 {showAccessPathField && (
-                  <div className="space-y-2 sm:col-span-2">
-                    <Label htmlFor="vpn-access-path">Путь доступа на домене (необязательно)</Label>
-                    <Input
-                      id="vpn-access-path"
-                      value={accessPath}
-                      onChange={(e) => setAccessPath(e.target.value)}
-                      onBlur={() => setAccessPath((value) => normalizeAccessPathInput(value))}
-                      placeholder="/panel"
-                      className="font-mono"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Для общего домена с другими проектами, например <code className="text-xs">/panel</code> рядом с{' '}
-                      <code className="text-xs">/monitor</code>. Пусто — корень домена. Это дополнительная мера, не замена 2FA.
-                    </p>
-                    {showSubpathIntegrate && (
-                      <label className="flex items-start gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          className="mt-1"
-                          checked={nginxSubpathIntegrate}
-                          onChange={(e) => setNginxSubpathIntegrate(e.target.checked)}
-                        />
-                        <span>
-                          Автоматически добавить <code className="text-xs">include</code> в существующий nginx vhost домена
-                          (с бэкапом конфига)
-                        </span>
-                      </label>
-                    )}
-                  </div>
+                  <SharedDomainPublishSection
+                    domain={domain}
+                    accessPath={accessPath}
+                    previewAccessUrl={previewAccessUrl}
+                    settings={settings}
+                    nginxSubpathIntegrate={nginxSubpathIntegrate}
+                    onAccessPathChange={setAccessPath}
+                    onAccessPathBlur={() => setAccessPath((value) => normalizeAccessPathInput(value))}
+                    onIntegrateChange={setNginxSubpathIntegrate}
+                    showStatusOpenVpnIntegrate={showStatusOpenVpnIntegrate}
+                    showGenericSubpathIntegrate={showSubpathIntegrate}
+                  />
                 )}
                 {showLetsEncryptEmail && (
                   <div className="space-y-2">

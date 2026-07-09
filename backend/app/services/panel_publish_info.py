@@ -313,6 +313,7 @@ def build_panel_publish_context(
             publish_mode=gv("PUBLISH_MODE", ""),
         ),
         "shared_domain_foreign_vhost": nginx_is_foreign_vhost_for_domain(domain) if domain else False,
+        "shared_domain_status_openvpn": nginx_is_status_openvpn_on_domain(domain) if domain else False,
     }
 
 
@@ -391,12 +392,85 @@ def nginx_has_vhost_for_domain(domain: str) -> bool:
     return False
 
 
-def nginx_is_foreign_vhost_for_domain(domain: str) -> bool:
-    domain = (domain or "").strip().split(":")[0]
-    if not domain or not nginx_has_vhost_for_domain(domain):
+def _nginx_is_our_panel_vhost_file(path: Path) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
         return False
-    our_site = Path(f"/etc/nginx/sites-available/{domain.replace('.', '_')}")
-    return not our_site.is_file()
+    return "AdminPanelAZ —" in text
+
+
+def _nginx_iter_vhost_files_for_domain(domain: str) -> list[Path]:
+    domain = (domain or "").strip().split(":")[0]
+    if not domain:
+        return []
+    ordered: list[Path] = []
+    seen: set[str] = set()
+    for root in (Path("/etc/nginx/sites-enabled"), Path("/etc/nginx/sites-available")):
+        if not root.is_dir():
+            continue
+        for path in sorted(root.iterdir(), key=lambda p: p.name):
+            if not path.is_file() and not path.is_symlink():
+                continue
+            key = str(path)
+            if key in seen:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if f"server_name {domain}" in text or f"server_name {domain};" in text:
+                seen.add(key)
+                ordered.append(path)
+    return ordered
+
+
+def _nginx_is_status_openvpn_vhost_file(path: Path) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    if "# Created by StatusOpenVPN" in text:
+        return True
+    return "location /status/" in text and "X-Script-Name /status" in text
+
+
+def nginx_is_status_openvpn_on_domain(domain: str) -> bool:
+    domain = (domain or "").strip().split(":")[0]
+    if not domain:
+        return False
+    enabled = Path("/etc/nginx/sites-enabled")
+    if not enabled.is_dir():
+        return False
+    for path in enabled.iterdir():
+        if not path.is_file() and not path.is_symlink():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if f"server_name {domain}" not in text and f"server_name {domain};" not in text:
+            continue
+        if _nginx_is_status_openvpn_vhost_file(path):
+            return True
+    return False
+
+
+def nginx_list_foreign_vhosts_for_domain(domain: str) -> list[Path]:
+    return [
+        path
+        for path in _nginx_iter_vhost_files_for_domain(domain)
+        if not _nginx_is_our_panel_vhost_file(path)
+    ]
+
+
+def nginx_find_foreign_vhost_for_domain(domain: str) -> Path | None:
+    foreign = nginx_list_foreign_vhosts_for_domain(domain)
+    return foreign[0] if foreign else None
+
+
+def nginx_is_foreign_vhost_for_domain(domain: str) -> bool:
+    return nginx_find_foreign_vhost_for_domain(domain) is not None
 
 
 def build_subpath_publish_warnings(
@@ -420,10 +494,24 @@ def build_subpath_publish_warnings(
             "ACCESS_PATH поддерживается только с nginx reverse proxy. "
             "Выберите режим nginx_* или настройте внешний nginx вручную."
         )
-    if domain_host and nginx_is_foreign_vhost_for_domain(domain_host):
+    if domain_host and nginx_is_status_openvpn_on_domain(domain_host):
         warnings.append(
-            f"Домен {domain_host} уже обслуживается другим nginx vhost — "
-            f"будет создан snippet для пути {path}."
+            f"На домене {domain_host} обнаружен StatusOpenVPN (/status/) — "
+            f"панель можно встроить по пути {path} рядом, не затрагивая /status/."
+        )
+        warnings.append(
+            "Включите интеграцию со StatusOpenVPN в мастере публикации: "
+            "будет изменён только активный vhost в sites-enabled (с бэкапом)."
+        )
+    elif domain_host and nginx_is_foreign_vhost_for_domain(domain_host):
+        foreign = nginx_find_foreign_vhost_for_domain(domain_host)
+        foreign_name = foreign.name if foreign else domain_host
+        warnings.append(
+            f"Домен {domain_host} уже обслуживается сайтом «{foreign_name}» — "
+            f"панель будет встроена по пути {path} (рядом с другими проектами)."
+        )
+        warnings.append(
+            "Выделенный vhost панели на этом домене будет удалён, если он есть."
         )
     warnings.append(
         "Публикация по подпути — дополнительная мера, не замена 2FA и сильного пароля."

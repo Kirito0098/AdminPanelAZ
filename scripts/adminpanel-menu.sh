@@ -265,14 +265,20 @@ menu_diagnostics() {
     _m_title "Диагностика"
     _m_sep
     _m_item "1. Диагностика запуска сайта"
+    _m_item "2. Восстановить nginx для панели"
     _m_sep
     _m_item "0. Назад"
     _m_bot
     printf "\n"
 
-    read -r -p "  Выберите действие [0-1]: " choice
+    read -r -p "  Выберите действие [0-2]: " choice
     case "$choice" in
       1) panel_diagnose; press_any_key ;;
+      2)
+        require_root
+        bash "$ROOT_DIR/scripts/nginx-repair.sh"
+        press_any_key
+        ;;
       0) break ;;
       *)
         ui_warn "Неверный выбор"

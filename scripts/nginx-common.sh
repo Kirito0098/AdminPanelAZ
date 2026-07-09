@@ -237,6 +237,20 @@ nginx_root_panel_location_blocks() {
 EOF
 }
 
+nginx_subpath_root_guard_blocks() {
+  local access_path="$1"
+  [[ -n "$access_path" ]] || return 0
+  cat <<'EOF'
+
+    # Корень и прочие пути вне подпути панели — plain 404 (без HTML nginx и без редиректа)
+    location / {
+        default_type text/plain;
+        add_header Cache-Control "no-store" always;
+        return 404 "Not Found";
+    }
+EOF
+}
+
 nginx_panel_location_blocks() {
   local access_path="$1"
   local backend_port="$2"
@@ -244,6 +258,7 @@ nginx_panel_location_blocks() {
     nginx_root_panel_location_blocks "$backend_port"
   else
     nginx_render_subpath_template "$access_path" "$backend_port"
+    nginx_subpath_root_guard_blocks "$access_path"
   fi
 }
 
@@ -259,16 +274,99 @@ nginx_has_vhost_for_domain() {
   return 1
 }
 
+nginx_is_our_panel_vhost_file() {
+  local path="$1"
+  [[ -f "$path" ]] || return 1
+  grep -qE 'AdminPanelAZ —' "$path" 2>/dev/null
+}
+
+nginx_grep_vhosts_for_domain() {
+  local domain="$1"
+  local root="$2"
+  [[ -n "$domain" && -n "$root" && -d "$root" ]] || return 0
+  grep -Rsl "server_name[^;]*\\b${domain}\\b" "$root" 2>/dev/null || true
+}
+
+# sites-enabled первым: StatusOpenVPN и др. часто кладут копию в enabled, а не symlink.
+nginx_list_vhosts_for_domain() {
+  local domain="$1"
+  [[ -n "$domain" ]] || return 0
+  {
+    nginx_grep_vhosts_for_domain "$domain" /etc/nginx/sites-enabled
+    nginx_grep_vhosts_for_domain "$domain" /etc/nginx/sites-available
+  } | awk '!seen[$0]++'
+}
+
+nginx_is_status_openvpn_vhost_file() {
+  local path="$1"
+  [[ -f "$path" ]] || return 1
+  if grep -qF '# Created by StatusOpenVPN' "$path" 2>/dev/null; then
+    return 0
+  fi
+  grep -qE 'location /status/' "$path" 2>/dev/null && grep -qF 'X-Script-Name /status' "$path" 2>/dev/null
+}
+
+nginx_list_status_openvpn_vhosts_for_domain() {
+  local domain="$1"
+  local path
+  while IFS= read -r path; do
+    [[ -n "$path" && -f "$path" ]] || continue
+    nginx_is_status_openvpn_vhost_file "$path" || continue
+    printf '%s\n' "$path"
+  done < <(nginx_grep_vhosts_for_domain "$domain" /etc/nginx/sites-enabled)
+}
+
+nginx_has_status_openvpn_vhost_for_domain() {
+  local domain="$1"
+  nginx_list_status_openvpn_vhosts_for_domain "$domain" | grep -q .
+}
+
+nginx_list_foreign_vhosts_for_domain() {
+  local domain="$1"
+  local path
+  while IFS= read -r path; do
+    [[ -n "$path" && -f "$path" ]] || continue
+    if nginx_is_our_panel_vhost_file "$path"; then
+      continue
+    fi
+    printf '%s\n' "$path"
+  done < <(nginx_list_vhosts_for_domain "$domain")
+}
+
+nginx_find_foreign_vhost_for_domain() {
+  local domain="$1"
+  local path
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    printf '%s\n' "$path"
+    return 0
+  done < <(nginx_list_foreign_vhosts_for_domain "$domain")
+  return 1
+}
+
+nginx_has_foreign_vhost_for_domain() {
+  local domain="$1"
+  nginx_find_foreign_vhost_for_domain "$domain" >/dev/null
+}
+
 nginx_is_foreign_vhost_for_domain() {
   local domain="$1"
-  local base our_site
-  base="$(nginx_conf_basename "$domain")"
-  our_site="/etc/nginx/sites-available/${base}"
-  if ! nginx_has_vhost_for_domain "$domain"; then
-    return 1
-  fi
-  [[ -f "$our_site" ]] && return 1
-  return 0
+  nginx_has_foreign_vhost_for_domain "$domain"
+}
+
+nginx_remove_our_dedicated_sites_for_domain() {
+  local domain="$1"
+  local path base
+  while IFS= read -r path; do
+    [[ -n "$path" && -f "$path" ]] || continue
+    if ! nginx_is_our_panel_vhost_file "$path"; then
+      continue
+    fi
+    base="$(basename "$path")"
+    rm -f "/etc/nginx/sites-enabled/${base}"
+    rm -f "$path"
+    nginx_log "Удалён выделенный vhost панели: ${path}"
+  done < <(nginx_list_vhosts_for_domain "$domain")
 }
 
 nginx_subpath_snippet_basename() {
@@ -297,16 +395,11 @@ nginx_install_subpath_snippet() {
   NGINX_SUBPATH_SNIPPET_INCLUDE="snippets/${snippet_name}.conf"
 }
 
-nginx_integrate_subpath_snippet() {
-  local domain="$1"
+_nginx_integrate_subpath_into_vhost_file() {
+  local target="$1"
   local include_line="$2"
-  local target backup stamp
-  [[ -n "$domain" && -n "$include_line" ]] || return 1
-  target="$(grep -Rsl "server_name[^;]*\b${domain}\b" /etc/nginx/sites-enabled /etc/nginx/sites-available 2>/dev/null | head -1)"
-  [[ -n "$target" && -f "$target" ]] || {
-    nginx_warn "Не найден vhost для ${domain} — добавьте include вручную: include ${include_line};"
-    return 1
-  }
+  local backup stamp
+  [[ -n "$target" && -f "$target" && -n "$include_line" ]] || return 1
   if grep -qF "include ${include_line}" "$target"; then
     nginx_log "Include уже присутствует в ${target}"
     return 0
@@ -314,8 +407,64 @@ nginx_integrate_subpath_snippet() {
   stamp="$(date +%Y%m%d%H%M%S)"
   backup="/etc/nginx/backups/$(basename "$target").${stamp}.bak"
   cp "$target" "$backup"
-  sed -i "/server_name[^;]*\b${domain}\b/a\\    include ${include_line};" "$target"
+  INCLUDE_LINE="$include_line" TARGET_FILE="$target" python3 - <<'PY'
+import os
+import re
+
+path = os.environ["TARGET_FILE"]
+include = os.environ["INCLUDE_LINE"]
+text = open(path, encoding="utf-8").read()
+if f"include {include}" in text:
+    raise SystemExit(0)
+match = re.search(r"listen\s+443[^\n]*", text)
+if not match:
+    raise SystemExit(1)
+insert_at = match.end()
+text = text[:insert_at] + f"\n\n    include {include};" + text[insert_at:]
+open(path, "w", encoding="utf-8").write(text)
+PY
   nginx_log "Include добавлен в ${target} (бэкап: ${backup})"
+}
+
+_nginx_assert_status_openvpn_vhost_intact() {
+  local target="$1"
+  [[ -f "$target" ]] || return 1
+  grep -qE 'location /status/' "$target" && grep -qF 'X-Script-Name /status' "$target"
+}
+
+nginx_integrate_subpath_snippet_status_openvpn() {
+  local domain="$1"
+  local include_line="$2"
+  local target integrated=0
+  [[ -n "$domain" && -n "$include_line" ]] || return 1
+  while IFS= read -r target; do
+    [[ -n "$target" && -f "$target" ]] || continue
+    _nginx_integrate_subpath_into_vhost_file "$target" "$include_line" || continue
+    if ! _nginx_assert_status_openvpn_vhost_intact "$target"; then
+      nginx_die "Интеграция нарушила конфиг StatusOpenVPN (${target}) — восстановите из /etc/nginx/backups/"
+    fi
+    nginx_log "StatusOpenVPN: блок /status/ сохранён в ${target}"
+    integrated=1
+  done < <(nginx_list_status_openvpn_vhosts_for_domain "$domain")
+  if [[ "$integrated" -eq 0 ]]; then
+    nginx_warn "Не найден активный StatusOpenVPN vhost в sites-enabled для ${domain}"
+    return 1
+  fi
+}
+
+nginx_integrate_subpath_snippet() {
+  local domain="$1"
+  local include_line="$2"
+  local target integrated=0
+  [[ -n "$domain" && -n "$include_line" ]] || return 1
+  while IFS= read -r target; do
+    [[ -n "$target" && -f "$target" ]] || continue
+    _nginx_integrate_subpath_into_vhost_file "$target" "$include_line" && integrated=1
+  done < <(nginx_list_foreign_vhosts_for_domain "$domain")
+  if [[ "$integrated" -eq 0 ]]; then
+    nginx_warn "Не найден сторонний vhost для ${domain} — добавьте include вручную: include ${include_line};"
+    return 1
+  fi
 }
 
 # Удалить subpath-snippet'ы панели с домена (при возврате на корень или смене пути).
@@ -563,6 +712,71 @@ nginx_apply_direct_http_env() {
   nginx_env_unset FORWARDED_ALLOW_IPS
   nginx_env_unset ENFORCE_HTTPS
   nginx_env_unset REFRESH_TOKEN_COOKIE_SECURE
+}
+
+nginx_remove_all_vhosts_for_domain() {
+  local domain="$1"
+  [[ -n "$domain" ]] || return 0
+
+  mkdir -p /etc/nginx/backups
+  local path stamp backup base
+  declare -A seen=()
+  while IFS= read -r path; do
+    [[ -n "$path" && -f "$path" ]] || continue
+    [[ -n "${seen[$path]:-}" ]] && continue
+    seen[$path]=1
+    stamp="$(date +%Y%m%d%H%M%S)"
+    backup="/etc/nginx/backups/$(basename "$path").repair.${stamp}.bak"
+    cp "$path" "$backup"
+    nginx_log "Бэкап vhost: ${backup}"
+    base="$(basename "$path")"
+    rm -f "$path" "/etc/nginx/sites-enabled/${base}" "/etc/nginx/sites-available/${base}"
+    nginx_log "Удалён vhost: ${path}"
+  done < <(nginx_list_vhosts_for_domain "$domain")
+}
+
+nginx_resolve_panel_ssl_cert_paths() {
+  local domain="$1"
+  local le_cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
+  local le_key="/etc/letsencrypt/live/${domain}/privkey.pem"
+  local cert key
+
+  if [[ -f "$le_cert" && -f "$le_key" ]]; then
+    NGINX_SSL_CERT="$le_cert"
+    NGINX_SSL_KEY="$le_key"
+    return 0
+  fi
+
+  cert="$(nginx_env_get SSL_CERT)"
+  key="$(nginx_env_get SSL_KEY)"
+  if [[ -n "$cert" && -n "$key" && -f "$cert" && -f "$key" ]]; then
+    NGINX_SSL_CERT="$cert"
+    NGINX_SSL_KEY="$key"
+    return 0
+  fi
+
+  if [[ -f "$NGINX_SELF_SIGNED_CERT" && -f "$NGINX_SELF_SIGNED_KEY" ]]; then
+    NGINX_SSL_CERT="$NGINX_SELF_SIGNED_CERT"
+    NGINX_SSL_KEY="$NGINX_SELF_SIGNED_KEY"
+    return 0
+  fi
+
+  return 1
+}
+
+nginx_install_dedicated_panel_vhost() {
+  local domain="$1"
+  local backend_port="$2"
+  local ssl_cert="$3"
+  local ssl_key="$4"
+  local https_port="${5:-443}"
+  local http_port="${6:-80}"
+  local conf
+
+  conf="$(nginx_render_template \
+    "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
+    "$domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")"
+  nginx_install_site "$conf" "$domain"
 }
 
 nginx_install_site() {

@@ -36,13 +36,17 @@
 
 ## [Unreleased]
 
-> **Кратко:** переработка Telegram-бота — компактное меню, сводка трафика с топ-5, метки OVPN/WG/AWG на конфигах, live-скорость сети в /status для admin; сброс Web App-кнопки меню при webhook; двусторонняя синхронизация VPN-клиентов с диском узла; CLI `reset-password.py` для сброса паролей и второго фактора; автоперезапуск панели после восстановления из бэкапа; подсказки в UI обновления о длительной сборке и ложной «Ошибке опроса»; HA — перезапуск OpenVPN после синхронизации, модальные отчёты «Синхронизировать» и «Проверить» с понятными описаниями, live health-check перед verify; публикация панели по подпути на общем домене (`ACCESS_PATH`, nginx snippet).
+> **Кратко:** переработка Telegram-бота — компактное меню, сводка трафика с топ-5, метки OVPN/WG/AWG на конфигах, live-скорость сети в /status для admin; сброс Web App-кнопки меню при webhook; двусторонняя синхронизация VPN-клиентов с диском узла; CLI `reset-password.py` для сброса паролей и второго фактора; автоперезапуск панели после восстановления из бэкапа; подсказки в UI обновления о длительной сборке и ложной «Ошибке опроса»; HA — перезапуск OpenVPN после синхронизации, модальные отчёты «Синхронизировать» и «Проверить» с понятными описаниями, live health-check перед verify; публикация панели по подпути на общем домене (`ACCESS_PATH`, nginx snippet); интеграция со [StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) на общем домене; скрипт восстановления nginx после сбоя сторонних uninstall-скриптов.
 
 ### ✨ Added
 
 #### Сеть и публикация
 
 - **`ACCESS_PATH`** — публикация панели по подпути на общем домене (например `https://example.com/panel/` рядом с `/monitor`): нативные маршруты backend/frontend, nginx snippet + опциональный auto-include, поле в мастере «Сеть и публикация», переменная `.env`, runtime `window.__PANEL_ACCESS_PATH__` для SPA без пересборки.
+- **Интеграция со StatusOpenVPN** — переключатель в мастере «Сеть и публикация» при обнаружении `/status/` на домене: безопасное добавление `include` только в активный vhost `sites-enabled`, бэкап конфига, проверка сохранности блока `/status/`; API `shared_domain_status_openvpn` (`panel_publish_info.py`, `nginx-common.sh`, `SharedDomainPublishSection.tsx`).
+- **`scripts/nginx-repair.sh`** — восстановление nginx для панели после поломки сторонними скриптами (например `uninstall.sh` StatusOpenVPN): чтение `backend/.env`, удаление сломанных vhost'ов домена, установка выделенного vhost AdminPanelAZ, перезапуск панели; пункт в `adminpanel-menu.sh` → «Диагностика».
+- **Секция «Общий домен» в мастере публикации** — карточка с префиксом URL (`https://домен/` + подпуть), превью полного адреса, схема сосуществования путей при StatusOpenVPN (`SharedDomainPublishSection.tsx`).
+- **Блокирующий диалог публикации** — `PublishAwaitDialog`: модальное окно на время применения настроек (running / completed / failed), без сырого HTML nginx в toast; ручное открытие URL вместо авто-редиректа (`VpnNetworkTab.tsx`, `publishWizardUi.ts`).
 
 #### Операции и CLI
 
@@ -105,15 +109,30 @@
 - **Сводки verify на русском** — итог проверки: «Готово к DNS-переключению» / «Расхождения между основным узлом и репликой» вместо англоязычных строк в API и UI.
 - **Отчёт проверки в UI** — убран общий жёлтый баннер под таблицей HA-групп; результат привязан к группе, статус в строке обновляется сразу после «Проверить».
 
+#### Сеть и публикация
+
+- **Мастер публикации по подпути** — переключатель интеграции (Switch) вместо чекбокса; отдельный UX для StatusOpenVPN и для прочих сторонних vhost; предупреждения и план подтверждения учитывают выключенную интеграцию (`publishWizardUi.ts`, `VpnNetworkTab.tsx`).
+- **Сброс `ACCESS_PATH`** — пустое поле в мастере явно очищает переменную в `.env` (не восстанавливает старое значение) (`background_tasks.py`).
+- **Nginx subpath snippet** — `include` встраивается во все vhost'ы домена; для StatusOpenVPN — только `sites-enabled`; приоритет `sites-enabled` над `sites-available` (`nginx-common.sh`, `nginx-setup.sh`).
+
 ### 🧪 Tests
 
 - **OpenVPN restart после HA** — `test_node_sync_openvpn_restart.py`: перезапуск установленных `openvpn-server@*`, пропуск отсутствующих unit без ошибки.
+- **`ACCESS_PATH`** — `test_panel_paths.py`: нормализация подпути, `with_access_path`, `strip_access_path`, валидатор в `Settings`.
 
 ### 🐛 Fixed
 
 - **HA verify: ложный `node_status`** — проверка опиралась только на кэшированный статус узла в БД; после Push full реплика могла быть доступна, но помечалась «Есть расхождения» до ручного health-poll (`verify.py`).
 - **Восстановление из бэкапа (SQLite WAL)** — после записи `adminpanel.db` и `cidr.db` удаляются файлы `-wal`/`-shm`; без этого при работающей панели восстановленная база могла оставаться пустой или битой, хотя архив содержал полные данные (`backup_manager.py`, `remove_sqlite_sidecars`).
 - **Диагностика сайта** — 500 при `BEHIND_NGINX`: в тексте health-probe не была определена `app_port` (`site_diagnostics.py`).
+- **`ACCESS_PATH` на выделенном домене** — корень и прочие пути вне подпути отдают 404 без редиректа; убирает дефолтную страницу «Welcome to nginx» (`nginx-common.sh`).
+- **Публикация на общем домене: 404 после смены подпути** — `include` попадал в `sites-available`, а nginx читал отдельную копию в `sites-enabled` (типично для StatusOpenVPN); интеграция исправлена с приоритетом активного vhost (`nginx-common.sh`).
+- **Повторная публикация после интеграции** — vhost с `include snippets/adminpanelaz-*` ошибочно считался «своим» и не находился как сторонний; детекция только по заголовку `# AdminPanelAZ —` (`nginx-common.sh`, `panel_publish_info.py`).
+- **Subpath snippet в чужом vhost** — `$connection_upgrade` не определён вне выделенного vhost панели; в snippet используется `Connection "upgrade"` (`adminpanelaz-subpath.conf.template`).
+- **Принудительная интеграция** — `NGINX_SUBPATH_INTEGRATE` из UI теперь реально управляет встраиванием snippet (раньше foreign vhost интегрировался всегда) (`nginx-setup.sh`).
+- **500 на странице «VPN / Сеть»** — `access_path_value` использовался до определения в `panel_publish_info.py`.
+- **Опрос фоновой публикации** — `ReferenceError: opts is not defined` в `useBackgroundTaskPoll.startPoll`.
+- **HTML nginx в уведомлениях** — нормализация ошибок proxy/502 при опросе задачи публикации (`httpErrorMessage.ts`, `publishWizardUi.ts`).
 
 ---
 

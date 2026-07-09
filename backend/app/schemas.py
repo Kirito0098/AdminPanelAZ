@@ -956,6 +956,7 @@ class VpnNetworkSettingsResponse(BaseModel):
     panel_restart_command: str = "sudo systemctl restart adminpanelaz"
     uvicorn_publish_warnings: list[str] = []
     shared_domain_foreign_vhost: bool = False
+    shared_domain_status_openvpn: bool = False
     server_primary_ip: str | None = None
 
 

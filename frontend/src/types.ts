@@ -755,6 +755,7 @@ export interface VpnNetworkSettings {
   panel_restart_command?: string
   uvicorn_publish_warnings?: string[]
   shared_domain_foreign_vhost?: boolean
+  shared_domain_status_openvpn?: boolean
   server_primary_ip?: string | null
 }
 

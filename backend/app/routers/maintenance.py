@@ -648,6 +648,7 @@ def get_vpn_network_settings(
         panel_restart_command=panel_restart_command(),
         uvicorn_publish_warnings=uvicorn_warnings,
         shared_domain_foreign_vhost=bool(ctx.get("shared_domain_foreign_vhost")),
+        shared_domain_status_openvpn=bool(ctx.get("shared_domain_status_openvpn")),
         server_primary_ip=server_primary_ip(),
     )
 
@@ -773,6 +774,7 @@ def publish_vpn_network(
         task_payload["access_path"] = normalized_access_path
     else:
         task_payload["access_path"] = None
+    domain_host = (payload.domain or env.get_env_value("DOMAIN", "") or "").strip().split(":")[0]
 
     def _callable(progress_updater=None):
         return background_task_service.task_vpn_network_publish(task_payload, progress_updater)

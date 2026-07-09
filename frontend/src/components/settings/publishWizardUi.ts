@@ -133,6 +133,7 @@ export function buildPublishConfirmPlan(
   httpsPublicPort: string,
   domainLetsEncrypt?: boolean | null,
   accessPath = '',
+  nginxSubpathIntegrate = true,
 ): PublishConfirmPlan {
   const host = domainHost(domain)
   const accessUrl = guessPublishAccessUrl(
@@ -184,8 +185,18 @@ export function buildPublishConfirmPlan(
     }
     if (accessPath.trim()) {
       bullets.push(`Панель будет доступна по подпути ${publishPathSuffix(accessPath)} на домене.`)
-      if (settings?.shared_domain_foreign_vhost) {
-        bullets.push('На домене уже есть другой сайт — будет создан nginx snippet для встраивания.')
+      if (settings?.shared_domain_status_openvpn) {
+        bullets.push(
+          'На домене обнаружен StatusOpenVPN — панель встроится рядом с /status/ (только sites-enabled, с бэкапом).',
+        )
+        if (!nginxSubpathIntegrate) {
+          bullets.push('Интеграция со StatusOpenVPN выключена — snippet будет создан, include нужно добавить вручную.')
+        }
+      } else if (!settings?.shared_domain_foreign_vhost) {
+        bullets.push('Корень домена и другие пути вне подпути будут отдавать 404 — без редиректа, чтобы не раскрывать адрес панели.')
+      } else {
+        bullets.push('На домене уже есть другой сайт — панель встроится в его nginx vhost (snippet).')
+        bullets.push('Корень домена остаётся за другим проектом — настройте редирект вручную, если нужно.')
       }
     }
     bullets.push(
