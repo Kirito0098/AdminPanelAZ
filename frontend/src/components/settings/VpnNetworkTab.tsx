@@ -4,7 +4,6 @@ import {
   ExternalLink,
   Globe,
   Lock,
-  Rocket,
   Server,
   Shield,
   Terminal,
@@ -12,15 +11,12 @@ import {
 } from 'lucide-react'
 import { ApiError, getBackgroundTask, getBackgroundTaskForApiBase, getVpnNetworkDomainSsl, getVpnNetworkPortStatus, getVpnNetworkSettings, publishVpnNetwork } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
+import PublishAccessWizard from '@/components/settings/PublishAccessWizard'
 import PublishAwaitDialog, { type PublishAwaitDialogState } from '@/components/settings/PublishAwaitDialog'
-import SharedDomainPublishSection from '@/components/settings/SharedDomainPublishSection'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
@@ -35,15 +31,7 @@ import type {
 import {
   buildPublishConfirmPlan,
   domainFromSslSuggestion,
-  parsePublishModeWarning,
-  publishAddressHint,
-  shouldShowAddressHint,
-  publishModeWarningTitle,
-  publishModeWarningVariant,
-  publishUvicornWarningsTitle,
-  getLetsEncryptPathsForDomain,
   guessPublishAccessUrl,
-  hasLetsEncryptHint,
   inlinePublishWarnings,
   isPublishPathMovedPollMessage,
   isPublishStartTransientError,
@@ -130,31 +118,6 @@ function MetricPill({
 
 function publishModeIcon(key: string): LucideIcon {
   return MODE_ICONS[key] ?? Globe
-}
-
-function publishModeMethodLabel(mode: VpnNetworkPublishMode): string | null {
-  if (mode.method) return mode.method
-  if (mode.key.startsWith('nginx_')) return 'Nginx'
-  if (mode.key.startsWith('uvicorn_') || mode.key === 'http_direct') return 'Uvicorn'
-  return null
-}
-
-function PortStatusHint({ status }: { status: VpnNetworkPortStatus | null | undefined }) {
-  if (!status) return null
-  return (
-    <p
-      className={cn(
-        'text-xs leading-relaxed',
-        status.status === 'free' && 'text-muted-foreground',
-        status.status === 'panel' && 'text-emerald-600 dark:text-emerald-400',
-        status.status === 'nginx' && 'text-primary',
-        status.status === 'other' && 'text-amber-600 dark:text-amber-400',
-        status.status === 'unknown' && 'text-muted-foreground',
-      )}
-    >
-      {status.message}
-    </p>
-  )
 }
 
 const PUBLISH_MODE_GROUPS: Array<{ id: string; title: string; keys: string[] }> = [
@@ -576,9 +539,8 @@ export default function VpnNetworkTab() {
   const showLetsEncryptEmail = selectedMode === 'nginx_le' || selectedMode === 'uvicorn_le'
   const showSslPaths = selectedModeInfo?.requires_ssl_cert === true
   const uvicornWarnings = inlinePublishWarnings(selectedMode, settings, domain)
-  const modeWarningLines = parsePublishModeWarning(selectedModeInfo?.warning)
   const domainLetsEncrypt = domainSslStatus?.has_letsencrypt ?? null
-  const foundLetsEncryptPaths = getLetsEncryptPathsForDomain(settings, domain, domainSslStatus)
+  const orderedPublishModes = orderPublishModes(settings.publish_modes || [])
   const previewAccessUrl = guessPublishAccessUrl(
     selectedMode,
     domain,
@@ -589,7 +551,7 @@ export default function VpnNetworkTab() {
     accessPath,
   )
   const showAccessPathField = selectedMode.startsWith('nginx_')
-  const showSubpathIntegrate =
+  const showGenericSubpathIntegrate =
     showAccessPathField &&
     Boolean(accessPath.trim()) &&
     settings.shared_domain_foreign_vhost &&
@@ -604,12 +566,6 @@ export default function VpnNetworkTab() {
       selectedMode === 'nginx_selfsigned')
   const selfsignedDomainHint =
     selectedMode === 'uvicorn_selfsigned' || selectedMode === 'nginx_selfsigned'
-  const orderedPublishModes = orderPublishModes(settings.publish_modes || [])
-  const addressHint = publishAddressHint(selectedMode)
-  const showAddressHint = shouldShowAddressHint(selectedMode) && addressHint.lines.length > 0
-  const showServerUvicornHints =
-    uvicornWarnings.length > 0 &&
-    (selectedMode === 'uvicorn_le' || selectedMode === 'uvicorn_custom')
   const domainRow = settings.env_rows.find((r) => r.label.includes('DOMAIN'))
   const domainDisplay =
     domainRow && domainRow.value !== '—' ? domainRow.value : domain.trim() || 'не задан'
@@ -760,317 +716,59 @@ export default function VpnNetworkTab() {
           description="Выберите способ открытия панели в браузере и примените изменения"
         />
 
-        <Card className="overflow-hidden shadow-sm md:col-span-2">
-          <div className="h-1 bg-gradient-to-r from-primary/80 to-primary/15" />
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Rocket size={18} />
-              Настроить доступ к панели
-            </CardTitle>
-            <CardDescription>Выберите режим и укажите домен или пути к сертификатам</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {PUBLISH_MODE_GROUPS.map((group) => {
-              const groupModes = group.keys
-                .map((key) => orderedPublishModes.find((mode) => mode.key === key))
-                .filter((mode): mode is VpnNetworkPublishMode => Boolean(mode))
-              if (groupModes.length === 0) return null
-              return (
-                <div key={group.id} className="space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {group.title}
-                  </p>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {groupModes.map((mode) => {
-                      const Icon = publishModeIcon(mode.key)
-                      const methodLabel = publishModeMethodLabel(mode)
-                      const selected = selectedMode === mode.key
-                      return (
-                        <button
-                          key={mode.key}
-                          type="button"
-                          onClick={() => {
-                            userPickedModeRef.current = true
-                            setSelectedMode(mode.key)
-                          }}
-                          className={cn(
-                            'flex flex-col gap-3 rounded-xl border p-4 text-left transition-all',
-                            selected
-                              ? 'border-primary bg-primary/5 ring-1 ring-primary'
-                              : 'bg-card/50 hover:border-muted-foreground/30 hover:bg-muted/30',
-                          )}
-                        >
-                          <div
-                            className={cn(
-                              'flex h-9 w-9 items-center justify-center rounded-lg',
-                              selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
-                            )}
-                          >
-                            <Icon size={18} />
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium">{mode.title}</p>
-                            {methodLabel && (
-                              <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary/80">
-                                {methodLabel}
-                              </p>
-                            )}
-                            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{mode.description}</p>
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
-
-            {showAddressHint && (
-              <SettingsAlert variant="info" title={addressHint.title}>
-                <p className="text-sm leading-relaxed">{addressHint.lines[0]}</p>
-              </SettingsAlert>
-            )}
-
-            {modeWarningLines.length > 0 && (
-              <SettingsAlert
-                variant={publishModeWarningVariant(selectedMode)}
-                title={publishModeWarningTitle(selectedMode)}
-              >
-                <ul className="list-disc space-y-1 pl-4 text-sm leading-relaxed">
-                  {modeWarningLines.map((line) => (
-                    <li key={line}>{line}</li>
-                  ))}
-                </ul>
-              </SettingsAlert>
-            )}
-
-            {selectedMode === 'nginx_le' && hasLetsEncryptHint(settings, domain, domainLetsEncrypt) && (
-              <SettingsAlert variant="info" title="Сертификат найден">
-                <p className="text-sm leading-relaxed">
-                  Let&apos;s Encrypt для этого домена уже есть — будет переиспользован.
-                </p>
-                {foundLetsEncryptPaths && (
-                  <p className="mt-1.5 break-all font-mono text-xs text-muted-foreground">
-                    {foundLetsEncryptPaths.cert}
-                  </p>
-                )}
-              </SettingsAlert>
-            )}
-
-            {showServerUvicornHints && (
-              <SettingsAlert variant="info" title={publishUvicornWarningsTitle(selectedMode, uvicornWarnings)}>
-                <ul className="list-disc space-y-1 pl-4">
-                  {uvicornWarnings.map((line) => (
-                    <li key={line}>{line}</li>
-                  ))}
-                </ul>
-              </SettingsAlert>
-            )}
-
-            {previewAccessUrl && !(showAccessPathField && accessPath.trim()) && (
-              <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
-                <span className="text-muted-foreground">После применения откройте: </span>
-                <code className="break-all font-mono text-xs text-primary">{previewAccessUrl}</code>
-                {selectedMode === 'http_direct' && (
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-                    В режиме HTTP домен из настроек не используется — только IP-адрес сервера.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {selectedModeInfo?.uses_nginx_ports && settings.nginx_installed === false && (
-              <SettingsAlert variant="info" title="Nginx не установлен">
-                Nginx будет установлен автоматически при применении настроек. Убедитесь, что порты 80/443 открыты.
-              </SettingsAlert>
-            )}
-
-            <div className="rounded-xl border bg-muted/20 p-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="vpn-backend-port">
-                    {showUvicornHttpsPort ? 'Порт HTTPS (uvicorn)' : 'Порт приложения'}
-                  </Label>
-                  <Input
-                    id="vpn-backend-port"
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={backendPort}
-                    onChange={(e) => setBackendPort(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {showUvicornHttpsPort
-                      ? 'Uvicorn слушает этот порт с TLS (например 8443 или 443)'
-                      : 'Обычно 8000 — внутренний порт, на котором работает панель'}
-                  </p>
-                  <PortStatusHint status={portStatuses.backend} />
-                </div>
-                {selectedModeInfo?.requires_domain && (
-                  <div className="space-y-2">
-                    <Label htmlFor="vpn-domain">Адрес сайта (домен)</Label>
-                    <Input
-                      id="vpn-domain"
-                      value={domain}
-                      onChange={(e) => setDomain(e.target.value)}
-                      placeholder="panel.example.com"
-                      className="font-mono"
-                    />
-                  </div>
-                )}
-                {showOptionalDomain && (
-                  <div className="space-y-2">
-                    <Label htmlFor="vpn-domain-optional">
-                      {selfsignedDomainHint ? 'Адрес сайта (домен или IP)' : 'Домен (необязательно)'}
-                    </Label>
-                    <Input
-                      id="vpn-domain-optional"
-                      value={domain}
-                      onChange={(e) => setDomain(e.target.value)}
-                      placeholder={selfsignedDomainHint ? '192.168.1.10' : 'panel.example.com'}
-                      className="font-mono"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      {selfsignedDomainHint
-                        ? 'Попадёт в CN самоподписанного сертификата. Без домена будет использован IP-адрес сервера.'
-                        : 'Для подсказок URL и CORS; если уже задан в .env — можно оставить пустым'}
-                    </p>
-                  </div>
-                )}
-                {showAccessPathField && (
-                  <SharedDomainPublishSection
-                    domain={domain}
-                    accessPath={accessPath}
-                    previewAccessUrl={previewAccessUrl}
-                    settings={settings}
-                    nginxSubpathIntegrate={nginxSubpathIntegrate}
-                    onAccessPathChange={setAccessPath}
-                    onAccessPathBlur={() => setAccessPath((value) => normalizeAccessPathInput(value))}
-                    onIntegrateChange={setNginxSubpathIntegrate}
-                    showStatusOpenVpnIntegrate={showStatusOpenVpnIntegrate}
-                    showGenericSubpathIntegrate={showSubpathIntegrate}
-                  />
-                )}
-                {showLetsEncryptEmail && (
-                  <div className="space-y-2">
-                    <Label htmlFor="vpn-email">Email для сертификата</Label>
-                    <Input
-                      id="vpn-email"
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="admin@example.com"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Нужен для бесплатного HTTPS-сертификата Let&apos;s Encrypt
-                    </p>
-                  </div>
-                )}
-                {showSslPaths && (
-                  <div className="space-y-4 rounded-xl border border-primary/25 bg-primary/5 p-4 sm:col-span-2">
-                    <div>
-                      <p className="text-sm font-medium">Пути к сертификатам на сервере</p>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                        Укажите абсолютные пути к файлам сертификата или выберите найденный на сервере вариант.
-                        Панель должна иметь право читать эти файлы.
-                      </p>
-                    </div>
-                    {(settings.ssl_cert_suggestions?.length ?? 0) > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground">Найденные сертификаты</p>
-                        <div className="flex flex-wrap gap-2">
-                          {settings.ssl_cert_suggestions!.map((item) => (
-                            <Button
-                              key={`${item.source}-${item.cert}`}
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-auto max-w-full whitespace-normal text-left text-xs"
-                              onClick={() => {
-                                setSslCert(item.cert)
-                                setSslKey(item.key)
-                                const suggestedDomain = domainFromSslSuggestion(item)
-                                if (suggestedDomain) setDomain(suggestedDomain)
-                              }}
-                            >
-                              {item.label}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <div className="space-y-2">
-                      <Label htmlFor="vpn-ssl-cert">Путь к сертификату (.pem / .crt)</Label>
-                      <Input
-                        id="vpn-ssl-cert"
-                        value={sslCert}
-                        onChange={(e) => setSslCert(e.target.value)}
-                        placeholder="/etc/letsencrypt/live/your-domain/fullchain.pem"
-                        className="font-mono text-xs"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="vpn-ssl-key">Путь к приватному ключу (.key)</Label>
-                      <Input
-                        id="vpn-ssl-key"
-                        value={sslKey}
-                        onChange={(e) => setSslKey(e.target.value)}
-                        placeholder="/etc/letsencrypt/live/your-domain/privkey.pem"
-                        className="font-mono text-xs"
-                      />
-                    </div>
-                  </div>
-                )}
-                {showNginxPorts && (
-                  <>
-                    <div className="space-y-2">
-                      <Label htmlFor="vpn-https-port">Публичный порт HTTPS (Nginx)</Label>
-                      <Input
-                        id="vpn-https-port"
-                        type="number"
-                        min={1}
-                        max={65535}
-                        value={httpsPublicPort}
-                        onChange={(e) => setHttpsPublicPort(e.target.value)}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Обычно 443 — защищённое соединение в браузере
-                      </p>
-                      <PortStatusHint status={portStatuses.nginx_https} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="vpn-http-port">Порт HTTP (ACME / редирект)</Label>
-                      <Input
-                        id="vpn-http-port"
-                        type="number"
-                        min={1}
-                        max={65535}
-                        value={httpAcmePort}
-                        onChange={(e) => setHttpAcmePort(e.target.value)}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Обычно 80 — для проверки домена при выпуске сертификата
-                      </p>
-                      <PortStatusHint status={portStatuses.nginx_http} />
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div className="flex justify-end border-t pt-4">
-              <Button
-                onClick={handlePublish}
-                disabled={backgroundTaskPolling}
-                className="gap-1.5"
-                size="lg"
-              >
-                <Rocket size={18} className={backgroundTaskPolling ? 'animate-pulse' : ''} />
-                {backgroundTaskPolling ? 'Применение...' : 'Применить настройки'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <PublishAccessWizard
+          settings={settings}
+          publishModes={orderedPublishModes}
+          selectedMode={selectedMode}
+          onSelectMode={(modeKey) => {
+            userPickedModeRef.current = true
+            setSelectedMode(modeKey)
+          }}
+          selectedModeInfo={selectedModeInfo}
+          backendPort={backendPort}
+          onBackendPortChange={setBackendPort}
+          domain={domain}
+          onDomainChange={setDomain}
+          email={email}
+          onEmailChange={setEmail}
+          httpsPublicPort={httpsPublicPort}
+          onHttpsPublicPortChange={setHttpsPublicPort}
+          httpAcmePort={httpAcmePort}
+          onHttpAcmePortChange={setHttpAcmePort}
+          sslCert={sslCert}
+          onSslCertChange={setSslCert}
+          sslKey={sslKey}
+          onSslKeyChange={setSslKey}
+          accessPath={accessPath}
+          onAccessPathChange={setAccessPath}
+          onAccessPathBlur={() => setAccessPath((value) => normalizeAccessPathInput(value))}
+          nginxSubpathIntegrate={nginxSubpathIntegrate}
+          onIntegrateChange={setNginxSubpathIntegrate}
+          portStatuses={portStatuses}
+          domainSslStatus={domainSslStatus}
+          previewAccessUrl={previewAccessUrl}
+          uvicornWarnings={uvicornWarnings}
+          publishing={backgroundTaskPolling}
+          onPublish={handlePublish}
+          showUvicornHttpsPort={showUvicornHttpsPort}
+          showLetsEncryptEmail={showLetsEncryptEmail}
+          showSslPaths={showSslPaths}
+          showNginxPorts={showNginxPorts}
+          showAccessPathField={showAccessPathField}
+          showStatusOpenVpnIntegrate={showStatusOpenVpnIntegrate}
+          showGenericSubpathIntegrate={showGenericSubpathIntegrate}
+          showOptionalDomain={showOptionalDomain}
+          selfsignedDomainHint={selfsignedDomainHint}
+          onPickSslSuggestion={(cert, key) => {
+            setSslCert(cert)
+            setSslKey(key)
+            const item = settings.ssl_cert_suggestions?.find((entry) => entry.cert === cert)
+            if (item) {
+              const suggestedDomain = domainFromSslSuggestion(item)
+              if (suggestedDomain) setDomain(suggestedDomain)
+            }
+          }}
+        />
 
         <SectionHeading
           title="Ручная настройка"
