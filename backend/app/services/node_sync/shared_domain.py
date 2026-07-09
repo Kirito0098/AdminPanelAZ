@@ -18,10 +18,30 @@ from sqlalchemy.orm import Session
 from app.models import Node, NodeSyncGroup, SyncStatus
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.groups import parse_replica_node_ids
+from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
 
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[int, str, str | None], None]
+
+
+def _shared_domain_success_message(result: dict[str, Any]) -> str:
+    domain = str(result.get("domain") or "").strip()
+    nodes = [str(item.get("node_name") or item.get("node_id") or "") for item in result.get("updated") or []]
+    nodes = [name for name in nodes if name]
+    restarted = [
+        str(item.get("node_name") or item.get("node_id") or "")
+        for item in result.get("openvpn_restart") or []
+        if item.get("restarted")
+    ]
+    restarted = [name for name in restarted if name]
+    parts = [f"Домен {domain} записан в setup"]
+    if nodes:
+        parts.append(f"узлы: {', '.join(nodes)}")
+    parts.append("выполнены doall.sh и client.sh 7")
+    if restarted:
+        parts.append(f"OpenVPN перезапущен на: {', '.join(restarted)}")
+    return ". ".join(parts) + "."
 
 
 def get_member_nodes(db: Session, group: NodeSyncGroup) -> list[Node]:
@@ -63,6 +83,7 @@ def apply_shared_domain_to_members(
         "domain": domain,
         "updated": [],
         "applied": [],
+        "openvpn_restart": [],
         "errors": [],
     }
 
@@ -98,12 +119,34 @@ def apply_shared_domain_to_members(
             try:
                 doall_output = adapter.apply_config_changes()
                 recreate_output = adapter.recreate_profiles()
+                progress(percent, f"{node.name}: перезапуск OpenVPN…")
+                restart_result = restart_all_openvpn_servers(adapter)
+                result["openvpn_restart"].append(
+                    {
+                        "node_id": node.id,
+                        "node_name": node.name,
+                        **restart_result,
+                    }
+                )
+                if restart_result.get("failed"):
+                    result["errors"].append(
+                        {
+                            "node_id": node.id,
+                            "node_name": node.name,
+                            "stage": "openvpn_restart",
+                            "error": "; ".join(
+                                f"{item.get('unit')}: {item.get('error')}"
+                                for item in restart_result.get("failed", [])
+                            ),
+                        }
+                    )
                 result["applied"].append(
                     {
                         "node_id": node.id,
                         "node_name": node.name,
                         "doall": (doall_output or "")[:500],
                         "recreate": (recreate_output or "")[:500],
+                        "openvpn_restarted": list(restart_result.get("restarted") or []),
                     }
                 )
             except Exception as exc:
@@ -148,7 +191,7 @@ def make_shared_domain_callable(group_id: int) -> Callable[..., dict[str, Any]]:
 
             return {
                 "message": (
-                    f"Домен {result.get('domain')} применён на узлах (doall.sh + client.sh 7)"
+                    _shared_domain_success_message(result)
                     if result.get("success")
                     else "Применение shared domain завершилось с ошибками"
                 ),

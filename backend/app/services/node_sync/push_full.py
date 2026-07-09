@@ -20,6 +20,7 @@ from app.services.node_sync.groups import (
     validate_sync_group_payload,
 )
 from app.services.node_sync.manual_link import link_primary_configs_to_group
+from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
 from app.services.node_sync.verify import verify_sync_group
 from app.services.policy_import import copy_access_policies_from_node
 from app.services.traffic.collector import collect_traffic_snapshot_for_node
@@ -93,6 +94,7 @@ def run_push_full(
     restored: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     host_copy: list[dict[str, Any]] = []
+    openvpn_restart: list[dict[str, Any]] = []
     admin = db.query(User).filter(User.role == UserRole.admin).first()
 
     for index, replica_id in enumerate(replica_ids):
@@ -133,6 +135,23 @@ def run_push_full(
             else:
                 result = replica_adapter.restore_antizapret_backup(archive_bytes, archive_name)
             restored.append({"node_id": replica_id, "node_name": replica_name, "result": result})
+
+            progress(percent, f"Перезапуск OpenVPN на {replica_name}…")
+            restart_result = restart_all_openvpn_servers(replica_adapter)
+            openvpn_restart.append(
+                {
+                    "node_id": replica_id,
+                    "node_name": replica_name,
+                    **restart_result,
+                }
+            )
+            if restart_result.get("failed"):
+                logger.warning(
+                    "Push full: OpenVPN restart partial failure on %s: %s",
+                    replica_name,
+                    restart_result.get("failed"),
+                )
+
             if admin and replica_node and primary_node:
                 import_clients_from_disk(db, replica_node, admin.id)
                 copy_access_policies_from_node(db, primary_node, replica_node)
@@ -158,6 +177,7 @@ def run_push_full(
                 "restored": restored,
                 "failed": failed,
                 "host_copy": host_copy,
+                "openvpn_restart": openvpn_restart,
             }
 
     group.sync_status = SyncStatus.synced
@@ -173,12 +193,17 @@ def run_push_full(
         verify_result = verify_sync_group(db, group)
 
     progress(100, "Push full завершён")
+    restart_names = [item.get("node_name") for item in openvpn_restart if item.get("restarted")]
+    message = "Полная синхронизация завершена"
+    if restart_names:
+        message += f". OpenVPN перезапущен на: {', '.join(str(n) for n in restart_names if n)}"
     return {
         "success": True,
-        "message": "Полная синхронизация завершена",
+        "message": message,
         "backup": backup_info,
         "restored": restored,
         "failed": failed,
         "host_copy": host_copy,
+        "openvpn_restart": openvpn_restart,
         "verify": verify_result,
     }

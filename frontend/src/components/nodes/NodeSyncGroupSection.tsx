@@ -56,8 +56,9 @@ import {
 } from '@/components/ui/table'
 import { useNotifications } from '@/context/NotificationContext'
 import { HA_PRIMARY, HA_PUSH_FULL, HA_REPLICA, nodeStatusRu } from '@/lib/uiLabels'
+import { formatHaSyncTaskSummary } from '@/lib/haSyncSummary'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
-import type { Node, NodeSyncGroup, NodeSyncVerifyResult, SyncStatus } from '@/types'
+import type { BackgroundTask, Node, NodeSyncGroup, NodeSyncVerifyResult, SyncStatus } from '@/types'
 
 type NodeSyncGroupSectionProps = {
   nodes: Node[]
@@ -291,9 +292,9 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
   /** Wrap the callback-based background poll in a promise so steps can be chained. */
   const pollToCompletion = useCallback(
     (taskId: string) =>
-      new Promise<void>((resolve, reject) => {
+      new Promise<BackgroundTask>((resolve, reject) => {
         startPoll(taskId, {
-          onComplete: () => resolve(),
+          onComplete: (task) => resolve(task),
           onError: (_task, message) => reject(new Error(message || 'Задача завершилась с ошибкой')),
         })
       }),
@@ -308,22 +309,24 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
   const runHaSetup = useCallback(
     async (group: NodeSyncGroup) => {
       setActionLoading(group.id)
-      setSetupStage(`Настройка «${group.name}»: домен → полная синхронизация реплики → проверка…`)
+      setSetupStage(`Настройка «${group.name}»: домен → синхронизация реплики → OpenVPN → проверка…`)
       try {
         const accepted = await setupNodeSyncGroup(group.id)
-        await pollToCompletion(accepted.task_id)
+        const task = await pollToCompletion(accepted.task_id)
+        const summary = formatHaSyncTaskSummary(task)
 
         const fresh = await fetchGroups()
         applyGroups(fresh)
         const updated = fresh.find((g) => g.id === group.id)
         if (updated?.last_verify_result) setVerifyResult(updated.last_verify_result)
         if (updated?.ready) {
-          success('HA-группа настроена и готова к DNS-переключению')
+          success(summary || 'HA-группа настроена и готова к DNS-переключению')
         } else {
           notifyWarning(
-            `Настройка завершена. Проверка нашла расхождения: ${
-              updated?.last_verify_result?.summary ?? 'см. «Проверить»'
-            }`,
+            summary ||
+              `Настройка завершена. Проверка нашла расхождения: ${
+                updated?.last_verify_result?.summary ?? 'см. «Проверить»'
+              }`,
           )
         }
       } catch (err) {
@@ -341,11 +344,11 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
   const runDomainApply = useCallback(
     async (group: NodeSyncGroup) => {
       setActionLoading(group.id)
-      setSetupStage(`Применение домена ${group.shared_domain} на узлах (doall.sh + client.sh 7)…`)
+      setSetupStage(`Применение домена ${group.shared_domain} на узлах (doall.sh + client.sh 7 + OpenVPN)…`)
       try {
         const accepted = await applyNodeSyncGroupSharedDomain(group.id)
-        await pollToCompletion(accepted.task_id)
-        success(`Домен ${group.shared_domain} применён на узлах`)
+        const task = await pollToCompletion(accepted.task_id)
+        success(formatHaSyncTaskSummary(task) || `Домен ${group.shared_domain} применён на узлах`)
       } catch (err) {
         notifyError(err instanceof ApiError ? err.message : 'Ошибка применения домена')
       } finally {
@@ -774,6 +777,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                 <ol className="list-decimal space-y-0.5 pl-5">
                   <li>Запись общего домена в OPENVPN_HOST / WIREGUARD_HOST на всех узлах.</li>
                   <li>Полная копия PKI, WireGuard и конфигов с основного узла на реплику.</li>
+                  <li>Перезапуск всех служб OpenVPN (openvpn-server@*) на реплике.</li>
                   <li>Проверка готовности к DNS-переключению.</li>
                 </ol>
                 {replicasWithClients.length > 0 ? (
