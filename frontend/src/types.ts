@@ -754,6 +754,7 @@ export interface VpnNetworkSettings {
   nginx_installed?: boolean
   panel_restart_command?: string
   uvicorn_publish_warnings?: string[]
+  shared_domain_foreign_vhost?: boolean
   server_primary_ip?: string | null
 }
 
@@ -775,6 +776,8 @@ export interface VpnNetworkPublishPayload {
   http_acme_port: number
   ssl_cert?: string | null
   ssl_key?: string | null
+  access_path?: string | null
+  nginx_subpath_integrate?: boolean
 }
 
 export interface CidrProviderInfo {

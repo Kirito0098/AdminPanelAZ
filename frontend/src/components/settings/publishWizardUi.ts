@@ -1,3 +1,4 @@
+import { ApiError } from '@/api/client'
 import type { VpnNetworkPublishMode, VpnNetworkSettings, VpnNetworkSslCertSuggestion } from '@/types'
 
 type AlertVariant = 'info' | 'warning' | 'danger'
@@ -58,6 +59,13 @@ function filterWarningsForDomain(
   })
 }
 
+function publishPathSuffix(accessPath: string): string {
+  const trimmed = accessPath.trim().replace(/\/+$/, '')
+  if (!trimmed) return '/'
+  const normalized = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  return `${normalized}/`
+}
+
 export function guessPublishAccessUrl(
   mode: string,
   domain: string,
@@ -65,28 +73,30 @@ export function guessPublishAccessUrl(
   httpsPublicPort: string,
   settings: VpnNetworkSettings | null,
   domainLetsEncrypt?: boolean | null,
+  accessPath = '',
 ): string | undefined {
   const host = domainHost(domain)
+  const pathSuffix = publishPathSuffix(accessPath)
 
   if (mode.startsWith('nginx_')) {
     if (!host) return undefined
     const port = Number(httpsPublicPort)
-    return port === 443 ? `https://${host}/` : `https://${host}:${port}/`
+    return port === 443 ? `https://${host}${pathSuffix}` : `https://${host}:${port}${pathSuffix}`
   }
 
   if (mode.startsWith('uvicorn_')) {
     if (!host) return undefined
     const port = Number(backendPort)
     if (port !== 443 && resolveDomainLetsEncrypt(settings, domain, domainLetsEncrypt)) {
-      return `https://${host}/`
+      return `https://${host}${pathSuffix}`
     }
-    return port === 443 ? `https://${host}/` : `https://${host}:${port}/`
+    return port === 443 ? `https://${host}${pathSuffix}` : `https://${host}:${port}${pathSuffix}`
   }
 
   if (mode === 'http_direct') {
     const accessHost = settings?.server_primary_ip?.trim()
     if (!accessHost) return undefined
-    return `http://${accessHost}:${backendPort}/`
+    return `http://${accessHost}:${backendPort}${pathSuffix}`
   }
 
   return undefined
@@ -122,6 +132,7 @@ export function buildPublishConfirmPlan(
   backendPort: string,
   httpsPublicPort: string,
   domainLetsEncrypt?: boolean | null,
+  accessPath = '',
 ): PublishConfirmPlan {
   const host = domainHost(domain)
   const accessUrl = guessPublishAccessUrl(
@@ -131,6 +142,7 @@ export function buildPublishConfirmPlan(
     httpsPublicPort,
     settings,
     domainLetsEncrypt,
+    accessPath,
   )
   const filteredWarnings = filterWarningsForDomain(
     filterPublishWarningsForMode(mode, settings?.uvicorn_publish_warnings ?? []),
@@ -170,6 +182,15 @@ export function buildPublishConfirmPlan(
     if (settings?.nginx_installed === false) {
       bullets.push('Nginx будет установлен, если ещё не установлен.')
     }
+    if (accessPath.trim()) {
+      bullets.push(`Панель будет доступна по подпути ${publishPathSuffix(accessPath)} на домене.`)
+      if (settings?.shared_domain_foreign_vhost) {
+        bullets.push('На домене уже есть другой сайт — будет создан nginx snippet для встраивания.')
+      }
+    }
+    bullets.push(
+      'После применения откройте адрес панели из уведомления. Если страница не загрузится сразу — подождите до 5 минут: сервис перезапускается.',
+    )
     return {
       alertVariant: mode === 'nginx_selfsigned' ? 'warning' : 'info',
       alertTitle: mode === 'nginx_selfsigned' ? 'Режим не рекомендуется для интернета' : 'Что будет настроено',
@@ -343,4 +364,115 @@ export function publishAddressHint(mode: string): { title: string; lines: string
     }
   }
   return { title: '', lines: [] }
+}
+
+export const PUBLISH_RESTART_WAIT_NOTICE =
+  'Если страница не откроется сразу, подождите до 5 минут — сервис, скорее всего, перезапускается.'
+
+export function buildPublishCompleteNotice(accessUrl?: string | null): string {
+  const url = accessUrl?.trim()
+  if (url) {
+    return `Перейдите по адресу: ${url}. ${PUBLISH_RESTART_WAIT_NOTICE}`
+  }
+  return PUBLISH_RESTART_WAIT_NOTICE
+}
+
+export const PUBLISH_PATH_MOVED_TOAST = `Панель переезжает на новый адрес. ${PUBLISH_RESTART_WAIT_NOTICE}`
+
+export function isLikelyPublishPathMovedPollError(
+  message: string,
+  expectedAccessUrl?: string | null,
+): boolean {
+  if (!expectedAccessUrl?.trim()) return false
+  const text = message.toLowerCase()
+  const pollError = text.includes('ошибка опроса') || text.includes('ошибка отслеживания')
+  const htmlBody = text.includes('<!doctype') || text.includes('<html') || text.includes('404 not found')
+  const notFound = text.includes('404') || text.includes('не найден')
+  const restarting = text.includes('502') || text.includes('503') || text.includes('временно недоступен')
+  return pollError && (htmlBody || notFound || restarting)
+}
+
+export function resolvePublishTaskErrorMessage(
+  message: string,
+  expectedAccessUrl?: string | null,
+): string {
+  if (isLikelyPublishPathMovedPollError(message, expectedAccessUrl)) {
+    return PUBLISH_PATH_MOVED_TOAST
+  }
+  return message
+}
+
+export function isPublishPathMovedPollMessage(
+  message: string,
+  expectedAccessUrl?: string | null,
+): boolean {
+  if (message === PUBLISH_PATH_MOVED_TOAST) return !!expectedAccessUrl?.trim()
+  if (message.includes(PUBLISH_RESTART_WAIT_NOTICE)) return !!expectedAccessUrl?.trim()
+  return isLikelyPublishPathMovedPollError(message, expectedAccessUrl)
+}
+
+export function buildPublishPollBusyNotice(accessUrl?: string | null): string {
+  const url = accessUrl?.trim()
+  if (url) {
+    return `Панель доступна по адресу: ${url}. ${PUBLISH_RESTART_WAIT_NOTICE}`
+  }
+  return PUBLISH_PATH_MOVED_TOAST
+}
+
+export const PUBLISH_START_LOST_CONNECTION_NOTICE =
+  'Связь с сервером прервалась — это нормально при перезапуске. Публикация, скорее всего, уже запущена. Откройте новый адрес через несколько минут.'
+
+export function isPublishStartTransientError(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    if (err.status === 0 || [502, 503, 504, 404].includes(err.status)) return true
+  }
+  if (err instanceof TypeError) return true
+  if (err instanceof Error) {
+    const text = err.message.toLowerCase()
+    return (
+      text.includes('failed to fetch') ||
+      text.includes('networkerror') ||
+      text.includes('network error') ||
+      text.includes('load failed') ||
+      text.includes('перезапуск')
+    )
+  }
+  return false
+}
+
+export function formatPublishStartError(err: unknown): string {
+  if (err instanceof ApiError) return err.message
+  if (err instanceof Error && err.message.trim()) return err.message
+  return 'Ошибка запуска публикации'
+}
+
+export function publishConflictTaskId(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 409 || !err.payload || typeof err.payload !== 'object') {
+    return null
+  }
+  const taskId = (err.payload as { active_task_id?: unknown }).active_task_id
+  return typeof taskId === 'string' && taskId.trim() ? taskId.trim() : null
+}
+
+export function buildPublishStartedNotice(accessUrl?: string | null): string {
+  const url = accessUrl?.trim()
+  if (url) {
+    return `Публикация запущена. Перейдите по адресу: ${url}. ${PUBLISH_RESTART_WAIT_NOTICE}`
+  }
+  return `Публикация запущена. ${PUBLISH_RESTART_WAIT_NOTICE}`
+}
+
+export function isPublishTransientRestartError(err: unknown, message: string): boolean {
+  const status =
+    err && typeof err === 'object' && 'status' in err ? Number((err as { status: unknown }).status) : NaN
+  if ([404, 502, 503].includes(status)) return true
+  const text = message.toLowerCase()
+  return (
+    text.includes('502') ||
+    text.includes('503') ||
+    text.includes('404') ||
+    text.includes('временно недоступен') ||
+    text.includes('переезжает') ||
+    text.includes('перезапускается')
+  )
 }

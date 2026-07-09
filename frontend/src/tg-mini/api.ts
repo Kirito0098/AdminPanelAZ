@@ -1,4 +1,5 @@
 import { ApiError } from '@/api/client'
+import { parseHttpErrorBody } from '@/lib/httpErrorMessage'
 import {
   getTelegramWebApp,
   resolveTelegramInitData,
@@ -26,9 +27,10 @@ import type {
   ClientTemplate,
   ClientAccessPolicy,
 } from '@/types'
+import { apiBase } from '@/lib/panelBase'
 
-const API_BASE = '/api/tg-mini'
-const PANEL_API_BASE = '/api'
+const API_BASE = `${apiBase}/tg-mini`
+const PANEL_API_BASE = apiBase
 const TOKEN_KEY = 'tg_token'
 
 export function getTgToken(): string | null {
@@ -45,20 +47,8 @@ export function clearTgToken(): void {
 
 async function parseApiResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    let detail = 'Ошибка запроса'
     const body = await response.text()
-    if (body) {
-      try {
-        const data = JSON.parse(body) as { detail?: unknown }
-        if (data.detail != null) {
-          detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
-        } else {
-          detail = body
-        }
-      } catch {
-        detail = body
-      }
-    }
+    const detail = parseHttpErrorBody(body, response.status)
     throw new ApiError(detail, response.status)
   }
   if (response.status === 204) return undefined as T

@@ -9,10 +9,12 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
+from app.services.panel_paths import get_ip_blocked_paths, with_access_path
 from app.services.scanner_firewall_store import scanner_firewall_store
 from app.services.security import SecurityService
 
-IP_BLOCKED_PATHS = {"/ip-blocked", "/api/ip-blocked", "/api/ip-blocked/ping"}
+settings = get_settings()
 LOGIN_ATTEMPTS: dict[str, dict[str, Any]] = {}
 LOGIN_LOCK = threading.Lock()
 
@@ -95,7 +97,9 @@ class IpRestrictionService:
         return self.is_scanner_banned(db, client_ip)
 
     def should_count_denied_access(self, path: str) -> bool:
-        if path in IP_BLOCKED_PATHS or path.startswith("/assets"):
+        blocked_paths = get_ip_blocked_paths(settings)
+        assets_prefix = f"{with_access_path(settings, '/assets')}"
+        if path in blocked_paths or path.startswith(f"{assets_prefix}/") or path == assets_prefix:
             return False
         return True
 

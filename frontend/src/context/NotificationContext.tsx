@@ -27,6 +27,8 @@ const NotificationContext = createContext<NotificationContextValue | null>(null)
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const recentErrorsRef = useRef<Map<string, number>>(new Map())
+  const ERROR_DEDUP_MS = 5000
 
   const dismiss = useCallback((id: string) => {
     const timer = timersRef.current.get(id)
@@ -51,7 +53,23 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   )
 
   const success = useCallback((message: string) => notify('success', message), [notify])
-  const error = useCallback((message: string) => notify('error', message), [notify])
+  const error = useCallback(
+    (message: string) => {
+      const now = Date.now()
+      const lastShown = recentErrorsRef.current.get(message)
+      if (lastShown != null && now - lastShown < ERROR_DEDUP_MS) {
+        return ''
+      }
+      recentErrorsRef.current.set(message, now)
+      if (recentErrorsRef.current.size > 32) {
+        for (const [key, ts] of recentErrorsRef.current) {
+          if (now - ts > ERROR_DEDUP_MS) recentErrorsRef.current.delete(key)
+        }
+      }
+      return notify('error', message)
+    },
+    [notify],
+  )
   const warning = useCallback((message: string) => notify('warning', message), [notify])
   const info = useCallback((message: string) => notify('info', message), [notify])
 

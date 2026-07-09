@@ -6,7 +6,7 @@ import { applyThemeClass, getStoredTheme } from '@/lib/theme'
 import { storeWebSessionId } from '@/lib/webSession'
 import type { User } from '@/types'
 
-const API_BASE = import.meta.env.VITE_API_URL || '/api'
+import { apiBase as API_BASE } from '@/lib/panelBase'
 const REFRESH_INTERVAL_MS = 25 * 60 * 1000
 
 interface AuthContextValue {

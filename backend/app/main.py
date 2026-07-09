@@ -54,8 +54,19 @@ from app.services.ip_restriction import ip_restriction_service
 from app.services.lifespan_workers import cancel_background_tasks, spawn_background_tasks
 from app.services.worker_lifecycle import should_start_resource_monitor
 
+from app.services.panel_paths import (
+    access_path,
+    api_prefix,
+    is_api_path,
+    strip_access_path,
+    with_access_path,
+)
+
 settings = get_settings()
 validate_panel_settings(settings)
+
+_API_PREFIX = api_prefix(settings)
+_ACCESS_PREFIX = access_path(settings)
 
 
 def seed_database():
@@ -185,47 +196,48 @@ app.add_middleware(
 )
 app.add_middleware(ApiRateLimitMiddleware)
 
-app.include_router(auth.router, prefix="/api")
-app.include_router(session.router, prefix="/api")
-app.include_router(users.router, prefix="/api")
-app.include_router(configs.router, prefix="/api")
-app.include_router(configs_bulk.router, prefix="/api")
-app.include_router(config_tags.router, prefix="/api")
-app.include_router(client_templates.router, prefix="/api")
-app.include_router(monitoring.router, prefix="/api")
-app.include_router(alert_rules.router, prefix="/api")
-app.include_router(settings_router.router, prefix="/api")
-app.include_router(maintenance.router, prefix="/api")
-app.include_router(backups.router, prefix="/api")
-app.include_router(node_sync.router, prefix="/api")
-app.include_router(nodes.router, prefix="/api")
-app.include_router(routing.router, prefix="/api")
-app.include_router(warper.router, prefix="/api")
-app.include_router(cidr_db.router, prefix="/api")
-app.include_router(traffic.router, prefix="/api")
-app.include_router(client_access.router, prefix="/api")
-app.include_router(edit_files.router, prefix="/api")
-app.include_router(security.router, prefix="/api")
-app.include_router(public_download.router, prefix="/api")
-app.include_router(server_monitor.router, prefix="/api")
-app.include_router(logs.router, prefix="/api")
-app.include_router(system.router, prefix="/api")
-app.include_router(tg_mini.router, prefix="/api")
-app.include_router(telegram_webhook.router, prefix="/api")
-app.include_router(site_diagnostics.router, prefix="/api")
-app.include_router(tasks.router, prefix="/api")
-app.include_router(feature_toggles.router, prefix="/api")
-app.include_router(feature_toggles.feature_modules_router, prefix="/api")
+app.include_router(auth.router, prefix=_API_PREFIX)
+app.include_router(session.router, prefix=_API_PREFIX)
+app.include_router(users.router, prefix=_API_PREFIX)
+app.include_router(configs.router, prefix=_API_PREFIX)
+app.include_router(configs_bulk.router, prefix=_API_PREFIX)
+app.include_router(config_tags.router, prefix=_API_PREFIX)
+app.include_router(client_templates.router, prefix=_API_PREFIX)
+app.include_router(monitoring.router, prefix=_API_PREFIX)
+app.include_router(alert_rules.router, prefix=_API_PREFIX)
+app.include_router(settings_router.router, prefix=_API_PREFIX)
+app.include_router(maintenance.router, prefix=_API_PREFIX)
+app.include_router(backups.router, prefix=_API_PREFIX)
+app.include_router(node_sync.router, prefix=_API_PREFIX)
+app.include_router(nodes.router, prefix=_API_PREFIX)
+app.include_router(routing.router, prefix=_API_PREFIX)
+app.include_router(warper.router, prefix=_API_PREFIX)
+app.include_router(cidr_db.router, prefix=_API_PREFIX)
+app.include_router(traffic.router, prefix=_API_PREFIX)
+app.include_router(client_access.router, prefix=_API_PREFIX)
+app.include_router(edit_files.router, prefix=_API_PREFIX)
+app.include_router(security.router, prefix=_API_PREFIX)
+app.include_router(public_download.router, prefix=_API_PREFIX)
+app.include_router(server_monitor.router, prefix=_API_PREFIX)
+app.include_router(logs.router, prefix=_API_PREFIX)
+app.include_router(system.router, prefix=_API_PREFIX)
+app.include_router(tg_mini.router, prefix=_API_PREFIX)
+app.include_router(telegram_webhook.router, prefix=_API_PREFIX)
+app.include_router(site_diagnostics.router, prefix=_API_PREFIX)
+app.include_router(tasks.router, prefix=_API_PREFIX)
+app.include_router(feature_toggles.router, prefix=_API_PREFIX)
+app.include_router(feature_toggles.feature_modules_router, prefix=_API_PREFIX)
 app.include_router(ip_blocked.router)
 
 
 @app.middleware("http")
 async def feature_guard_middleware(request, call_next):
     path = request.url.path
-    if path.startswith("/api/"):
+    if is_api_path(path, settings):
         from app.services.feature_guards import blocked_json_response, check_path_access, get_feature_service
 
-        blocked = check_path_access(path, service=get_feature_service())
+        normalized = strip_access_path(path, settings)
+        blocked = check_path_access(normalized, service=get_feature_service())
         if blocked is not None:
             module_key, _ = blocked
             return blocked_json_response(module_key)
@@ -235,16 +247,23 @@ async def feature_guard_middleware(request, call_next):
 @app.middleware("http")
 async def ip_restriction_middleware(request, call_next):
     path = request.url.path
+    api = _API_PREFIX
     exempt = (
-        path.startswith("/api/public/")
-        or path.startswith("/api/tg-mini")
-        or path.startswith("/api/telegram/webhook/")
-        or path.startswith("/api/ip-blocked")
-        or path.startswith("/api/auth/captcha")
-        or path.startswith("/api/auth/telegram")
-        or path.startswith("/api/auth/refresh")
-        or path.startswith("/api/auth/login")
-        or path in ("/api/health", "/api/health/deep", "/metrics", "/ip-blocked")
+        path.startswith(f"{api}/public/")
+        or path.startswith(f"{api}/tg-mini")
+        or path.startswith(f"{api}/telegram/webhook/")
+        or path.startswith(f"{api}/ip-blocked")
+        or path.startswith(f"{api}/auth/captcha")
+        or path.startswith(f"{api}/auth/telegram")
+        or path.startswith(f"{api}/auth/refresh")
+        or path.startswith(f"{api}/auth/login")
+        or path
+        in (
+            f"{api}/health",
+            f"{api}/health/deep",
+            with_access_path(settings, "/metrics"),
+            with_access_path(settings, "/ip-blocked"),
+        )
     )
     if exempt:
         return await call_next(request)
@@ -258,14 +277,14 @@ async def ip_restriction_middleware(request, call_next):
         if ip_restriction_service.should_hard_deny(db, client_ip):
             return JSONResponse(status_code=403, content={"detail": "Доступ заблокирован на уровне сервера"})
 
-        settings = ip_restriction_service.get_settings(db)
-        if settings.get("ip_restriction_enabled") and not ip_restriction_service.is_ip_allowed(db, client_ip):
+        ip_settings = ip_restriction_service.get_settings(db)
+        if ip_settings.get("ip_restriction_enabled") and not ip_restriction_service.is_ip_allowed(db, client_ip):
             if ip_restriction_service.should_count_denied_access(path):
                 ip_restriction_service.record_denied_access(db, client_ip)
             accept = request.headers.get("accept", "")
-            if path.startswith("/api/") or "application/json" in accept:
+            if is_api_path(path, settings) or "application/json" in accept:
                 return JSONResponse(status_code=403, content={"detail": "Доступ запрещён с вашего IP"})
-            return RedirectResponse(url="/ip-blocked", status_code=302)
+            return RedirectResponse(url=with_access_path(settings, "/ip-blocked"), status_code=302)
     finally:
         db.close()
     return await call_next(request)
@@ -278,33 +297,35 @@ def _register_openapi_docs_routes() -> None:
 
     from app.services.openapi_docs_gate import assert_openapi_docs_access
 
-    @app.get("/openapi.json", include_in_schema=False)
+    @app.get(f"{with_access_path(settings, '/openapi.json')}", include_in_schema=False)
     async def protected_openapi_schema(request: Request):
         assert_openapi_docs_access(request)
         return JSONResponse(app.openapi())
 
-    @app.get("/docs", include_in_schema=False)
+    @app.get(f"{with_access_path(settings, '/docs')}", include_in_schema=False)
     async def protected_swagger_ui(request: Request):
         assert_openapi_docs_access(request)
-        return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{settings.app_name} — Swagger UI")
+        openapi_url = with_access_path(settings, "/openapi.json")
+        return get_swagger_ui_html(openapi_url=openapi_url, title=f"{settings.app_name} — Swagger UI")
 
-    @app.get("/redoc", include_in_schema=False)
+    @app.get(f"{with_access_path(settings, '/redoc')}", include_in_schema=False)
     async def protected_redoc(request: Request):
         assert_openapi_docs_access(request)
-        return get_redoc_html(openapi_url="/openapi.json", title=f"{settings.app_name} — ReDoc")
+        openapi_url = with_access_path(settings, "/openapi.json")
+        return get_redoc_html(openapi_url=openapi_url, title=f"{settings.app_name} — ReDoc")
 
 
 _register_openapi_docs_routes()
 
 
-@app.get("/api/health")
+@app.get(f"{_API_PREFIX}/health")
 def health():
     from app.services.health_checks import build_light_health
 
     return build_light_health()
 
 
-@app.get("/api/health/deep")
+@app.get(f"{_API_PREFIX}/health/deep")
 def health_deep():
     from pathlib import Path
 
@@ -319,7 +340,7 @@ def health_deep():
         db.close()
 
 
-@app.get("/metrics", include_in_schema=False)
+@app.get(f"{with_access_path(settings, '/metrics')}", include_in_schema=False)
 def metrics():
     from fastapi.responses import Response
 
@@ -334,14 +355,14 @@ def metrics():
         db.close()
 
 
-@app.get("/robots.txt", include_in_schema=False)
+@app.get(f"{with_access_path(settings, '/robots.txt')}", include_in_schema=False)
 def robots_txt():
     from fastapi.responses import PlainTextResponse
 
     return PlainTextResponse(build_robots_txt(), media_type="text/plain")
 
 
-@app.get("/.well-known/security.txt", include_in_schema=False)
+@app.get(f"{with_access_path(settings, '/.well-known/security.txt')}", include_in_schema=False)
 def security_txt():
     from fastapi.responses import PlainTextResponse
 
@@ -351,7 +372,7 @@ def security_txt():
 def _mount_frontend(app: FastAPI) -> None:
     from pathlib import Path
 
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, RedirectResponse
     from fastapi.staticfiles import StaticFiles
 
     dist = settings.frontend_dist_path
@@ -361,15 +382,20 @@ def _mount_frontend(app: FastAPI) -> None:
         return
 
     assets_dir = dist / "assets"
+    assets_mount = f"{_ACCESS_PREFIX}/assets" if _ACCESS_PREFIX else "/assets"
     if assets_dir.is_dir():
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+        app.mount(assets_mount, StaticFiles(directory=assets_dir), name="frontend-assets")
 
     index_file = dist / "index.html"
+    spa_prefix = _ACCESS_PREFIX or ""
 
-    # Fallback for stale backends: without this, POST to a missing /api/* route matches the
-    # GET-only SPA catch-all below and surfaces misleading "Method Not Allowed" (405).
+    if _ACCESS_PREFIX:
+        @app.get(_ACCESS_PREFIX, include_in_schema=False)
+        async def redirect_access_path_trailing_slash():
+            return RedirectResponse(url=f"{_ACCESS_PREFIX}/", status_code=301)
+
     @app.api_route(
-        "/api/{rest:path}",
+        f"{_API_PREFIX}/{{rest:path}}",
         methods=["POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         include_in_schema=False,
     )
@@ -378,11 +404,14 @@ def _mount_frontend(app: FastAPI) -> None:
 
         raise HTTPException(status_code=404, detail="API endpoint not found — перезапустите панель после обновления")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+    spa_route = f"{spa_prefix}/{{full_path:path}}" if spa_prefix else "/{full_path:path}"
+
+    @app.get(spa_route, include_in_schema=False)
     async def serve_spa(full_path: str, request: Request):
         from app.services.html_csp import serve_html_with_nonce
 
-        if full_path.startswith("api/") or full_path == "api":
+        api_segment = _API_PREFIX.lstrip("/")
+        if full_path.startswith(f"{api_segment}/") or full_path == api_segment:
             from fastapi import HTTPException
 
             raise HTTPException(status_code=404)

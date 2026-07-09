@@ -934,6 +934,8 @@ class VpnNetworkPublishRequest(BaseModel):
     http_acme_port: int = Field(default=80, ge=1, le=65535)
     ssl_cert: str | None = Field(default=None, max_length=1024)
     ssl_key: str | None = Field(default=None, max_length=1024)
+    access_path: str | None = Field(default=None, max_length=255)
+    nginx_subpath_integrate: bool = False
 
 
 class VpnNetworkSettingsResponse(BaseModel):
@@ -953,6 +955,7 @@ class VpnNetworkSettingsResponse(BaseModel):
     nginx_installed: bool = False
     panel_restart_command: str = "sudo systemctl restart adminpanelaz"
     uvicorn_publish_warnings: list[str] = []
+    shared_domain_foreign_vhost: bool = False
     server_primary_ip: str | None = None
 
 

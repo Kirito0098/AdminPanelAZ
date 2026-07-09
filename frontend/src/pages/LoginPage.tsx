@@ -21,7 +21,7 @@ import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/context/AuthContext'
 import { useNotifications } from '@/context/NotificationContext'
 
-const API_BASE = import.meta.env.VITE_API_URL || '/api'
+import { apiBase as API_BASE } from '@/lib/panelBase'
 
 function resolveApiBase(): string {
   const base = API_BASE

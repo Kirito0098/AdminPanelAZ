@@ -3,6 +3,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const CSP_NONCE_PLACEHOLDER = '%CSP_NONCE%'
+const DEV_ACCESS_PATH = (process.env.VITE_ACCESS_PATH || '').replace(/\/+$/, '')
 
 function cspNoncePlaceholder(): Plugin {
   const injectNonce = (html: string) =>
@@ -62,7 +63,7 @@ function tgMiniMoveScriptToBody(): Plugin {
       handler(html, ctx) {
         if (!ctx.filename?.includes('tg-mini')) return html
         const scriptRe =
-          /<script[^>]*src="\/api\/tg-mini\/assets\/[^"]+\.js"[^>]*><\/script>\s*/i
+          /<script[^>]*src="\.\/assets\/[^"]+\.js"[^>]*><\/script>\s*/i
         const match = html.match(scriptRe)
         if (!match) return html
         const script = match[0].trim()
@@ -77,7 +78,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), cspNoncePlaceholder(), cspNoncePlaceholderPost(), ...(isTgMini ? [tgMiniMoveScriptToBody()] : [])],
-    base: isTgMini ? '/api/tg-mini/' : '/',
+    base: './',
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -110,6 +111,14 @@ export default defineConfig(({ mode }) => {
           target: 'http://127.0.0.1:8000',
           changeOrigin: true,
         },
+        ...(DEV_ACCESS_PATH
+          ? {
+              [`${DEV_ACCESS_PATH}/api`]: {
+                target: 'http://127.0.0.1:8000',
+                changeOrigin: true,
+              },
+            }
+          : {}),
       },
     },
   }

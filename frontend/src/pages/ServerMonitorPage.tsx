@@ -52,7 +52,7 @@ import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { BandwidthChart, ResourceHistory, ServerMetrics } from '@/types'
 
-const API_BASE = import.meta.env.VITE_API_URL || '/api'
+import { apiBase as API_BASE } from '@/lib/panelBase'
 
 const CHART_RX = 'hsl(187, 72%, 45%)'
 const CHART_TX = 'hsl(38, 92%, 50%)'

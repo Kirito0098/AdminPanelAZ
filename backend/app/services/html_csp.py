@@ -8,6 +8,9 @@ from pathlib import Path
 from fastapi import Request
 from fastapi.responses import HTMLResponse
 
+from app.config import get_settings
+from app.services.panel_paths import panel_access_path_script
+
 CSP_NONCE_PLACEHOLDER = "%CSP_NONCE%"
 
 _SCRIPT_TAG_RE = re.compile(
@@ -53,4 +56,7 @@ def serve_html_with_nonce(request: Request, index_file: Path) -> HTMLResponse:
 
         nonce = generate_csp_nonce()
     html = index_file.read_text(encoding="utf-8")
+    script = panel_access_path_script(get_settings())
+    if script and "</head>" in html:
+        html = html.replace("</head>", f"    {script}\n  </head>", 1)
     return HTMLResponse(inject_csp_nonce(html, nonce), media_type="text/html")

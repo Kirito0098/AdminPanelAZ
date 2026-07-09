@@ -1,10 +1,13 @@
-const API_BASE = import.meta.env.VITE_API_URL || '/api'
+import { apiBase as API_BASE } from '@/lib/panelBase'
+import { parseHttpErrorBody } from '@/lib/httpErrorMessage'
 
 export class ApiError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  payload?: unknown
+  constructor(message: string, status: number, payload?: unknown) {
     super(message)
     this.status = status
+    this.payload = payload
   }
 }
 
@@ -38,6 +41,15 @@ async function refreshAccessToken(): Promise<string | null> {
 }
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
+  return apiFetchAtBase<T>(API_BASE, path, options, retry)
+}
+
+export async function apiFetchAtBase<T>(
+  base: string,
+  path: string,
+  options: RequestInit = {},
+  retry = true,
+): Promise<T> {
   const headers = new Headers(options.headers)
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
@@ -51,30 +63,35 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, retry
     if (tz) headers.set('X-Client-Timezone', tz)
   }
 
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'include' })
-  if (response.status === 401 && retry && !path.startsWith('/auth/')) {
+  const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base
+  let response: Response
+  try {
+    response = await fetch(`${normalizedBase}${path}`, { ...options, headers, credentials: 'include' })
+  } catch {
+    throw new ApiError(
+      'Не удалось связаться с сервером. Возможен перезапуск панели — подождите и откройте новый адрес.',
+      0,
+    )
+  }
+  if (response.status === 401 && retry && !path.startsWith('/auth/') && normalizedBase === API_BASE) {
     const newToken = await refreshAccessToken()
     if (newToken) {
-      return apiFetch<T>(path, options, false)
+      return apiFetchAtBase<T>(base, path, options, false)
     }
     localStorage.removeItem('token')
   }
   if (!response.ok) {
-    let detail = 'Ошибка запроса'
     const body = await response.text()
+    let payload: unknown
     if (body) {
       try {
-        const data = JSON.parse(body) as { detail?: unknown }
-        if (data.detail != null) {
-          detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
-        } else {
-          detail = body
-        }
+        payload = JSON.parse(body)
       } catch {
-        detail = body
+        payload = undefined
       }
     }
-    throw new ApiError(detail, response.status)
+    const detail = parseHttpErrorBody(body, response.status)
+    throw new ApiError(detail, response.status, payload)
   }
   if (response.status === 204) return undefined as T
   return response.json()
@@ -1124,6 +1141,13 @@ export async function getBackgroundTask(taskId: string) {
   return apiFetch<import('../types').BackgroundTask>(`/tasks/${encodeURIComponent(taskId)}`)
 }
 
+export async function getBackgroundTaskForApiBase(taskId: string, apiBaseOverride: string) {
+  return apiFetchAtBase<import('../types').BackgroundTask>(
+    apiBaseOverride,
+    `/tasks/${encodeURIComponent(taskId)}`,
+  )
+}
+
 export async function getTrafficOverview(live = true) {
   return apiFetch<import('../types').TrafficOverview>(`/traffic/overview?live=${live}`)
 }
@@ -1926,20 +1950,8 @@ export type QrBlobResult = {
 }
 
 async function parseApiError(response: Response, fallback: string): Promise<ApiError> {
-  let detail = fallback
   const body = await response.text()
-  if (body) {
-    try {
-      const data = JSON.parse(body) as { detail?: unknown }
-      if (data.detail != null) {
-        detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
-      } else {
-        detail = body
-      }
-    } catch {
-      detail = body
-    }
-  }
+  const detail = parseHttpErrorBody(body, response.status, fallback)
   return new ApiError(detail, response.status)
 }
 

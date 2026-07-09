@@ -12,6 +12,12 @@ export interface BackgroundTaskPollOptions {
   intervalMs?: number
   timeoutMs?: number
   fetchTask?: BackgroundTaskFetcher
+  formatPollError?: (message: string) => string
+  /** Не показывать нижнюю полосу прогресса (тихий опрос). */
+  showProgress?: boolean
+  /** Временные сбои опроса (502 при перезапуске) — не считать ошибкой. */
+  isTransientPollError?: (err: unknown, message: string) => boolean
+  transientProgressStage?: string
   initialTask?: BackgroundTask
   onProgress?: (task: BackgroundTask) => void
   onComplete?: (task: BackgroundTask) => void
@@ -57,7 +63,9 @@ export function useBackgroundTaskPoll() {
       }
       errorCountRef.current = 0
       taskRef.current = current
-      setTask(current)
+      if (opts.showProgress !== false) {
+        setTask(current)
+      }
       opts.onProgress?.(current)
       if (current.status === 'completed') {
         stopPoll()
@@ -72,18 +80,40 @@ export function useBackgroundTaskPoll() {
       return true
     } catch (err) {
       const isRateLimit = err instanceof ApiError && err.status === 429
-      const message = err instanceof ApiError ? err.message : 'Ошибка отслеживания задачи'
-      setTask((prev) =>
-        prev
-          ? {
-              ...prev,
-              progress_stage: isRateLimit
-                ? 'Слишком много запросов, повтор через несколько секунд…'
-                : `Ошибка опроса: ${message}`,
-              message: isRateLimit ? 'Слишком много запросов' : message,
-            }
-          : prev,
-      )
+      const rawMessage = err instanceof ApiError ? err.message : 'Ошибка отслеживания задачи'
+      const message = opts.formatPollError?.(rawMessage) ?? rawMessage
+      const isTransient = opts.isTransientPollError?.(err, message) ?? false
+
+      if (isTransient) {
+        if (opts.showProgress !== false) {
+          setTask((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  progress_stage:
+                    opts.transientProgressStage ??
+                    'Сервис перезапускается. Подождите и откройте новый адрес панели…',
+                  message: opts.transientProgressStage ?? 'Сервис перезапускается…',
+                }
+              : prev,
+          )
+        }
+        return true
+      }
+
+      if (opts.showProgress !== false) {
+        setTask((prev) =>
+          prev
+            ? {
+                ...prev,
+                progress_stage: isRateLimit
+                  ? 'Слишком много запросов, повтор через несколько секунд…'
+                  : `Ошибка опроса: ${message}`,
+                message: isRateLimit ? 'Слишком много запросов' : message,
+              }
+            : prev,
+        )
+      }
       if (isRateLimit) {
         return true
       }
@@ -133,16 +163,20 @@ export function useBackgroundTaskPoll() {
       errorNotifiedRef.current = false
       pollActiveRef.current = true
       setPolling(true)
-      setTask(
-        options.initialTask ?? {
-          task_id: taskId,
-          task_type: '',
-          status: 'queued',
-          message: 'Запрос статуса задачи…',
-          progress_percent: 0,
-          progress_stage: 'Подключение к серверу…',
-        },
-      )
+      if (options.showProgress !== false) {
+        setTask(
+          options.initialTask ?? {
+            task_id: taskId,
+            task_type: '',
+            status: 'queued',
+            message: 'Запрос статуса задачи…',
+            progress_percent: 0,
+            progress_stage: 'Подключение к серверу…',
+          },
+        )
+      } else {
+        setTask(null)
+      }
 
       inFlightRef.current = true
       void pollOnceRef

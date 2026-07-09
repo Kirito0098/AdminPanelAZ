@@ -558,12 +558,18 @@ def _check_port(
 
 
 def _health_probe_url(env: dict[str, str]) -> tuple[str, list[str]]:
+    from app.services.panel_paths import api_prefix, normalize_access_path
+
+    class _PathSettings:
+        access_path = normalize_access_path(env.get("ACCESS_PATH", ""))
+
+    health_path = f"{api_prefix(_PathSettings())}/health"
     app_port = env.get("BACKEND_PORT", env.get("APP_PORT", "8000"))
     use_https = _env_bool(env.get("USE_HTTPS"))
     ssl_cert = (env.get("SSL_CERT") or "").strip()
     if use_https and ssl_cert:
-        return f"https://127.0.0.1:{app_port}/api/health", ["curl", "-ksf", "--max-time", "5"]
-    return f"http://127.0.0.1:{app_port}/api/health", ["curl", "-sf", "--max-time", "5"]
+        return f"https://127.0.0.1:{app_port}{health_path}", ["curl", "-ksf", "--max-time", "5"]
+    return f"http://127.0.0.1:{app_port}{health_path}", ["curl", "-sf", "--max-time", "5"]
 
 
 def _check_http_probe(
@@ -578,7 +584,12 @@ def _check_http_probe(
         domain = (env.get("DOMAIN") or "").strip()
         host = domain.split(":")[0] if domain else ""
         if host and shutil.which("curl"):
-            public_url = f"https://{host}/api/health"
+            from app.services.panel_paths import api_prefix, normalize_access_path
+
+            class _PathSettings:
+                access_path = normalize_access_path(env.get("ACCESS_PATH", ""))
+
+            public_url = f"https://{host}{api_prefix(_PathSettings())}/health"
             proc = run_cmd(["curl", "-sf", "--max-time", "5", public_url], 8.0)
             if proc.returncode == 0:
                 _append_result(

@@ -12,24 +12,30 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from app.config import get_settings
+from app.services.panel_paths import expand_paths_for_access
 
-NOINDEX_PATH_PREFIXES = (
-    "/",
-    "/login",
-    "/settings",
-    "/routing",
-    "/antizapret",
-    "/server-monitor",
-    "/logs",
-    "/edit-files",
-    "/feature-disabled",
-    "/tg-mini",
-    "/api/public/qr-download/",
-    "/api/public/route-download/",
-    "/api/auth/",
-    "/api/ip-blocked",
-    "/ip-blocked",
-    "/api/",
+settings = get_settings()
+
+NOINDEX_PATH_PREFIXES = expand_paths_for_access(
+    settings,
+    (
+        "/",
+        "/login",
+        "/settings",
+        "/routing",
+        "/antizapret",
+        "/server-monitor",
+        "/logs",
+        "/edit-files",
+        "/feature-disabled",
+        "/tg-mini",
+        "/api/public/qr-download/",
+        "/api/public/route-download/",
+        "/api/auth/",
+        "/api/ip-blocked",
+        "/ip-blocked",
+        "/api/",
+    ),
 )
 
 
@@ -94,7 +100,9 @@ def build_security_txt(branding: Mapping[str, Any] | None = None) -> str:
 
 
 def is_tg_mini_path(path: str) -> bool:
-    return path.startswith("/api/tg-mini")
+    from app.services.panel_paths import api_prefix
+
+    return path.startswith(f"{api_prefix(settings)}/tg-mini")
 
 
 TG_MINI_FRAME_ANCESTORS = (
@@ -190,7 +198,11 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
         if not tg_mini:
             response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         if request is not None and HttpSecurityMiddleware._is_secure(request):
-            coop = "same-origin-allow-popups" if path.rstrip("/") in ("/login", "") else "same-origin"
+            from app.services.panel_paths import access_path as panel_access_path, with_access_path
+
+            login_path = with_access_path(settings, "/login").rstrip("/")
+            root_path = (panel_access_path(settings) or "/").rstrip("/")
+            coop = "same-origin-allow-popups" if path.rstrip("/") in {login_path, root_path} else "same-origin"
             response.headers.setdefault("Cross-Origin-Opener-Policy", coop)
         response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
         response.headers.setdefault(

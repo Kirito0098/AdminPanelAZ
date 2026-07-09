@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { routerBasename } from './lib/panelBase'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import RouteProgress from './components/RouteProgress'
@@ -33,7 +34,7 @@ export default function App() {
         <NotificationProvider>
           <ProgressProvider>
             <NodeProvider>
-            <BrowserRouter>
+            <BrowserRouter basename={routerBasename}>
               <RouteProgress />
               <Routes>
                 <Route path="/login" element={<LoginPage />} />

@@ -10,11 +10,11 @@ import {
   Terminal,
   Wifi,
 } from 'lucide-react'
-import { ApiError, getVpnNetworkDomainSsl, getVpnNetworkPortStatus, getVpnNetworkSettings, publishVpnNetwork } from '@/api/client'
+import { ApiError, getBackgroundTask, getBackgroundTaskForApiBase, getVpnNetworkDomainSsl, getVpnNetworkPortStatus, getVpnNetworkSettings, publishVpnNetwork } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
+import PublishAwaitDialog, { type PublishAwaitDialogState } from '@/components/settings/PublishAwaitDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
-import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -44,7 +44,15 @@ import {
   guessPublishAccessUrl,
   hasLetsEncryptHint,
   inlinePublishWarnings,
+  isPublishPathMovedPollMessage,
+  isPublishStartTransientError,
+  isPublishTransientRestartError,
+  formatPublishStartError,
+  publishConflictTaskId,
+  PUBLISH_START_LOST_CONNECTION_NOTICE,
+  resolvePublishTaskErrorMessage,
 } from '@/components/settings/publishWizardUi'
+import { apiBase, apiBaseForAccessPath, normalizeAccessPathInput } from '@/lib/panelBase'
 
 const MODE_LABELS: Record<string, string> = {
   reverse_proxy: 'Через Nginx с HTTPS',
@@ -177,7 +185,7 @@ function orderPublishModes(modes: VpnNetworkPublishMode[]): VpnNetworkPublishMod
 }
 
 export default function VpnNetworkTab() {
-  const { success, error: notifyError } = useNotifications()
+  const { error: notifyError } = useNotifications()
   const { trackBackgroundTask, backgroundTaskPolling } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
   const [settings, setSettings] = useState<VpnNetworkSettings | null>(null)
@@ -191,7 +199,9 @@ export default function VpnNetworkTab() {
   const [httpAcmePort, setHttpAcmePort] = useState('80')
   const [sslCert, setSslCert] = useState('')
   const [sslKey, setSslKey] = useState('')
-  const [publishing, setPublishing] = useState(false)
+  const [accessPath, setAccessPath] = useState('')
+  const [nginxSubpathIntegrate, setNginxSubpathIntegrate] = useState(false)
+  const [publishAwait, setPublishAwait] = useState<PublishAwaitDialogState | null>(null)
   const [domainSslStatus, setDomainSslStatus] = useState<VpnNetworkDomainSslStatus | null>(null)
   const [portStatuses, setPortStatuses] = useState<Record<string, VpnNetworkPortStatus | null>>({})
   const userPickedModeRef = useRef(false)
@@ -218,6 +228,8 @@ export default function VpnNetworkTab() {
       if (certVal) setSslCert(certVal)
       const keyVal = data.known_ssl_key || envRowValue(data.env_rows, 'SSL_KEY')
       if (keyVal) setSslKey(keyVal)
+      const accessPathVal = envRowValue(data.env_rows, 'ACCESS_PATH')
+      setAccessPath(accessPathVal)
       if (syncSelectedMode && !userPickedModeRef.current) {
         const active = data.active_publish_mode
         if (active && data.publish_modes?.some((m) => m.key === active)) {
@@ -356,6 +368,10 @@ export default function VpnNetworkTab() {
         return
       }
     }
+    if (accessPath.trim() && !selectedMode.startsWith('nginx_')) {
+      notifyError('Путь доступа (ACCESS_PATH) поддерживается только с режимами Nginx')
+      return
+    }
 
     const confirmPlan = buildPublishConfirmPlan(
       selectedMode,
@@ -365,6 +381,7 @@ export default function VpnNetworkTab() {
       backendPort,
       httpsPublicPort,
       domainLetsEncrypt,
+      accessPath,
     )
     confirm({
       title: 'Применить настройки доступа?',
@@ -395,10 +412,19 @@ export default function VpnNetworkTab() {
               <dt className="text-muted-foreground">Порт приложения</dt>
               <dd className="font-mono text-xs">{backendPort}</dd>
             </div>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+              <dt className="text-muted-foreground">Путь доступа</dt>
+              <dd className="font-mono text-xs">{accessPath.trim() || '/'}</dd>
+            </div>
             {confirmPlan.accessUrl && (
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                <dt className="text-muted-foreground">Адрес после применения</dt>
-                <dd className="break-all font-mono text-xs text-primary">{confirmPlan.accessUrl}</dd>
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                  <dt className="text-muted-foreground">Адрес после применения</dt>
+                  <dd className="break-all font-mono text-xs text-primary">{confirmPlan.accessUrl}</dd>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Откройте этот адрес вручную после завершения. Если не загрузится — подождите до 5 минут.
+                </p>
               </div>
             )}
           </dl>
@@ -407,20 +433,36 @@ export default function VpnNetworkTab() {
       confirmLabel: 'Применить',
       destructive: confirmPlan.destructive,
       onConfirm: async () => {
-        setPublishing(true)
         userPickedModeRef.current = false
-        try {
-          const resp = await publishVpnNetwork({
-            mode: selectedMode as VpnNetworkPublishModeKey,
-            backend_port: port,
-            domain: domain.trim() || null,
-            email: email.trim() || null,
-            https_public_port: httpsPort,
-            http_acme_port: httpPort,
-            ssl_cert: sslCert.trim() || null,
-            ssl_key: sslKey.trim() || null,
-          })
-          trackBackgroundTask(resp.task_id, {
+        const expectedAccessUrl = confirmPlan.accessUrl?.trim() || ''
+        const fallbackApiBase = accessPath.trim() ? apiBaseForAccessPath(accessPath) : null
+        const publishTaskFetcher = async (taskId: string) => {
+          try {
+            return await getBackgroundTask(taskId)
+          } catch (err) {
+            if (
+              fallbackApiBase &&
+              fallbackApiBase !== apiBase &&
+              err instanceof ApiError &&
+              (err.status === 404 || err.status === 502 || err.status === 503)
+            ) {
+              return await getBackgroundTaskForApiBase(taskId, fallbackApiBase)
+            }
+            throw err
+          }
+        }
+        const publishPollOptions = {
+          showProgress: false as const,
+          fetchTask: fallbackApiBase && fallbackApiBase !== apiBase ? publishTaskFetcher : undefined,
+          formatPollError: (message: string) => resolvePublishTaskErrorMessage(message, expectedAccessUrl),
+          isTransientPollError: (err: unknown, message: string) =>
+            isPublishTransientRestartError(err, message) ||
+            isPublishPathMovedPollMessage(message, expectedAccessUrl),
+        }
+        const startPublishTracking = (taskId: string, fallbackMessage?: string) => {
+          setPublishAwait({ accessUrl: expectedAccessUrl, status: 'running' })
+          trackBackgroundTask(taskId, {
+            ...publishPollOptions,
             onComplete: (task) => {
               const result = task?.result as
                 | {
@@ -432,31 +474,76 @@ export default function VpnNetworkTab() {
                 | undefined
               const restartCmd =
                 result?.restart_command || settings?.panel_restart_command || 'sudo systemctl restart adminpanelaz'
-              const accessUrl = result?.access_url?.trim()
-              if (result?.requires_manual_restart) {
-                success(
-                  `${task?.message || 'Публикация завершена'}. Выполните: ${restartCmd}${accessUrl ? ` · ${accessUrl}` : ''}`,
-                )
-              } else if (result?.panel_restarted) {
-                success(
-                  accessUrl
-                    ? `${task?.message || 'Публикация завершена'}. Откройте: ${accessUrl}`
-                    : task?.message || 'Публикация завершена. Панель перезапускается…',
-                )
-              } else {
-                success(task?.message || resp.message || 'Публикация завершена')
-              }
+              const accessUrl = result?.access_url?.trim() || expectedAccessUrl
+              const baseMessage = task?.message || fallbackMessage || 'Публикация завершена'
+              setPublishAwait({
+                accessUrl,
+                status: 'completed',
+                message: result?.requires_manual_restart
+                  ? `${baseMessage}. Выполните: ${restartCmd}`
+                  : baseMessage,
+                restartCommand: result?.requires_manual_restart ? restartCmd : undefined,
+              })
               userPickedModeRef.current = false
               void loadSettings({ syncSelectedMode: true })
             },
             onError: (task, message) => {
-              notifyError(task?.error || task?.message || message)
+              if (task?.status === 'failed') {
+                setPublishAwait({
+                  accessUrl: expectedAccessUrl,
+                  status: 'failed',
+                  message: task.error || task.message || message,
+                })
+                return
+              }
+              if (
+                expectedAccessUrl &&
+                (isPublishPathMovedPollMessage(message, expectedAccessUrl) ||
+                  isPublishTransientRestartError(null, message))
+              ) {
+                return
+              }
+              setPublishAwait({
+                accessUrl: expectedAccessUrl,
+                status: 'failed',
+                message: task?.error || task?.message || message,
+              })
             },
           })
+        }
+        try {
+          const resp = await publishVpnNetwork({
+            mode: selectedMode as VpnNetworkPublishModeKey,
+            backend_port: port,
+            domain: domain.trim() || null,
+            email: email.trim() || null,
+            https_public_port: httpsPort,
+            http_acme_port: httpPort,
+            ssl_cert: sslCert.trim() || null,
+            ssl_key: sslKey.trim() || null,
+            access_path: accessPath.trim() || null,
+            nginx_subpath_integrate: nginxSubpathIntegrate,
+          })
+          startPublishTracking(resp.task_id, resp.message)
         } catch (err) {
-          notifyError(err instanceof ApiError ? err.message : 'Ошибка запуска публикации')
-        } finally {
-          setPublishing(false)
+          const conflictTaskId = publishConflictTaskId(err)
+          if (conflictTaskId) {
+            startPublishTracking(conflictTaskId)
+            return
+          }
+          if (isPublishStartTransientError(err)) {
+            setPublishAwait({
+              accessUrl: expectedAccessUrl,
+              status: 'running',
+              message: PUBLISH_START_LOST_CONNECTION_NOTICE,
+            })
+            return
+          }
+          setPublishAwait({
+            accessUrl: expectedAccessUrl,
+            status: 'failed',
+            message: formatPublishStartError(err),
+          })
         }
       },
     })
@@ -494,7 +581,11 @@ export default function VpnNetworkTab() {
     httpsPublicPort,
     settings,
     domainLetsEncrypt,
+    accessPath,
   )
+  const showAccessPathField = selectedMode.startsWith('nginx_')
+  const showSubpathIntegrate =
+    showAccessPathField && Boolean(accessPath.trim()) && settings.shared_domain_foreign_vhost
   const showOptionalDomain =
     !selectedModeInfo?.requires_domain &&
     (selectedMode === 'uvicorn_custom' ||
@@ -515,7 +606,7 @@ export default function VpnNetworkTab() {
 
   return (
     <div className="space-y-4">
-      <InlineProgressBar active={publishing} label="Применение настроек..." />
+      <PublishAwaitDialog state={publishAwait} onDismiss={() => setPublishAwait(null)} />
       <ConfirmDialogHost dialogProps={dialogProps} />
 
       <div className="grid gap-4 md:grid-cols-2 md:items-start">
@@ -836,6 +927,37 @@ export default function VpnNetworkTab() {
                     </p>
                   </div>
                 )}
+                {showAccessPathField && (
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="vpn-access-path">Путь доступа на домене (необязательно)</Label>
+                    <Input
+                      id="vpn-access-path"
+                      value={accessPath}
+                      onChange={(e) => setAccessPath(e.target.value)}
+                      onBlur={() => setAccessPath((value) => normalizeAccessPathInput(value))}
+                      placeholder="/panel"
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Для общего домена с другими проектами, например <code className="text-xs">/panel</code> рядом с{' '}
+                      <code className="text-xs">/monitor</code>. Пусто — корень домена. Это дополнительная мера, не замена 2FA.
+                    </p>
+                    {showSubpathIntegrate && (
+                      <label className="flex items-start gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={nginxSubpathIntegrate}
+                          onChange={(e) => setNginxSubpathIntegrate(e.target.checked)}
+                        />
+                        <span>
+                          Автоматически добавить <code className="text-xs">include</code> в существующий nginx vhost домена
+                          (с бэкапом конфига)
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                )}
                 {showLetsEncryptEmail && (
                   <div className="space-y-2">
                     <Label htmlFor="vpn-email">Email для сертификата</Label>
@@ -946,12 +1068,12 @@ export default function VpnNetworkTab() {
             <div className="flex justify-end border-t pt-4">
               <Button
                 onClick={handlePublish}
-                disabled={publishing || backgroundTaskPolling}
+                disabled={backgroundTaskPolling}
                 className="gap-1.5"
                 size="lg"
               >
-                <Rocket size={18} className={publishing ? 'animate-pulse' : ''} />
-                {publishing ? 'Применение...' : 'Применить настройки'}
+                <Rocket size={18} className={backgroundTaskPolling ? 'animate-pulse' : ''} />
+                {backgroundTaskPolling ? 'Применение...' : 'Применить настройки'}
               </Button>
             </div>
           </CardContent>

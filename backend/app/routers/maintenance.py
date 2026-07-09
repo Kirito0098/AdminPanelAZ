@@ -47,6 +47,7 @@ from app.services.noc_report import send_noc_report_preview, send_weekly_image_p
 from app.services.action_log import log_action
 from app.services.panel_publish_info import (
     build_panel_publish_context,
+    build_subpath_publish_warnings,
     build_vpn_network_publish_modes,
     discover_ssl_certificate_candidates,
     build_uvicorn_publish_warnings,
@@ -623,6 +624,13 @@ def get_vpn_network_settings(
         backend_port=ctx["backend_port"],
         ssl_cert_suggestions=suggestions,
     )
+    access_path_value = env.get_env_value("ACCESS_PATH", "")
+    subpath_warnings = build_subpath_publish_warnings(
+        domain=domain,
+        access_path=access_path_value,
+        publish_mode=ctx.get("active_publish_mode") or "",
+    )
+    uvicorn_warnings = [*subpath_warnings, *uvicorn_warnings]
     return VpnNetworkSettingsResponse(
         mode_key=ctx["mode_key"],
         mode_title=ctx["mode_title"],
@@ -639,6 +647,7 @@ def get_vpn_network_settings(
         nginx_installed=is_nginx_installed(),
         panel_restart_command=panel_restart_command(),
         uvicorn_publish_warnings=uvicorn_warnings,
+        shared_domain_foreign_vhost=bool(ctx.get("shared_domain_foreign_vhost")),
         server_primary_ip=server_primary_ip(),
     )
 
@@ -700,6 +709,25 @@ def publish_vpn_network(
     if payload.mode in {"nginx_le", "uvicorn_le"} and not (payload.domain or "").strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="DOMAIN обязателен для Let's Encrypt")
 
+    from app.services.panel_paths import AccessPathError, normalize_access_path
+
+    normalized_access_path = ""
+    if payload.access_path:
+        try:
+            normalized_access_path = normalize_access_path(payload.access_path)
+        except AccessPathError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if normalized_access_path and payload.mode.startswith("uvicorn_"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ACCESS_PATH поддерживается только с nginx reverse proxy",
+        )
+    if normalized_access_path and payload.mode == "http_direct":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ACCESS_PATH поддерживается только с nginx reverse proxy",
+        )
+
     env_path = Path(__file__).resolve().parents[2] / ".env"
     env = EnvFileService(env_path)
 
@@ -741,6 +769,10 @@ def publish_vpn_network(
         )
 
     task_payload = payload.model_dump()
+    if normalized_access_path:
+        task_payload["access_path"] = normalized_access_path
+    else:
+        task_payload["access_path"] = None
 
     def _callable(progress_updater=None):
         return background_task_service.task_vpn_network_publish(task_payload, progress_updater)

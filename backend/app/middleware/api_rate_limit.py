@@ -20,6 +20,10 @@ _EXEMPT_PREFIXES = (
 
 
 def is_api_rate_limit_exempt(path: str) -> bool:
+    from app.config import get_settings
+    from app.services.panel_paths import strip_access_path
+
+    path = strip_access_path(path, get_settings())
     if not path.startswith("/api/"):
         return True
     return any(path == prefix or path.startswith(f"{prefix}/") for prefix in _EXEMPT_PREFIXES)

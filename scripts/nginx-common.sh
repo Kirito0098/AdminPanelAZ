@@ -168,6 +168,188 @@ nginx_public_origin_host() {
   printf '%s%s' "$domain" "$(nginx_https_redirect_suffix "$https_port")"
 }
 
+nginx_normalize_access_path() {
+  local raw="${1:-}"
+  raw="${raw// /}"
+  raw="${raw#/}"
+  raw="${raw%/}"
+  if [[ -z "$raw" ]]; then
+    printf ''
+    return 0
+  fi
+  if [[ "$raw" == *".."* ]]; then
+    nginx_die "ACCESS_PATH не должен содержать '..'"
+  fi
+  if [[ ! "$raw" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*(/[a-zA-Z0-9][a-zA-Z0-9_-]*)*$ ]]; then
+    nginx_die "Некорректный ACCESS_PATH: ${raw}"
+  fi
+  printf '/%s' "$raw"
+}
+
+nginx_access_path_suffix() {
+  local access_path="$1"
+  if [[ -z "$access_path" ]]; then
+    printf '/'
+  else
+    printf '%s/' "$access_path"
+  fi
+}
+
+nginx_render_subpath_template() {
+  local access_path="$1"
+  local backend_port="$2"
+  sed \
+    -e "s|__ACCESS_PATH__|${access_path}|g" \
+    -e "s|__BACKEND_PORT__|${backend_port}|g" \
+    "$NGINX_TEMPLATE_DIR/adminpanelaz-subpath.conf.template"
+}
+
+nginx_root_panel_location_blocks() {
+  local backend_port="$1"
+  cat <<EOF
+    # Telegram Mini App — без X-Frame-Options (WebView Telegram блокируется SAMEORIGIN)
+    location ^~ /api/tg-mini {
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        add_header Strict-Transport-Security "max-age=63072000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    }
+
+    # API, SPA, WebSocket (/api/server-monitor/ws)
+    location / {
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+EOF
+}
+
+nginx_panel_location_blocks() {
+  local access_path="$1"
+  local backend_port="$2"
+  if [[ -z "$access_path" ]]; then
+    nginx_root_panel_location_blocks "$backend_port"
+  else
+    nginx_render_subpath_template "$access_path" "$backend_port"
+  fi
+}
+
+nginx_has_vhost_for_domain() {
+  local domain="$1"
+  [[ -n "$domain" ]] || return 1
+  local base path
+  base="$(nginx_conf_basename "$domain")"
+  [[ -f "/etc/nginx/sites-enabled/${base}" || -f "/etc/nginx/sites-available/${base}" ]] && return 0
+  if grep -Rsl "server_name[^;]*\b${domain}\b" /etc/nginx/sites-enabled /etc/nginx/sites-available 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  return 1
+}
+
+nginx_is_foreign_vhost_for_domain() {
+  local domain="$1"
+  local base our_site
+  base="$(nginx_conf_basename "$domain")"
+  our_site="/etc/nginx/sites-available/${base}"
+  if ! nginx_has_vhost_for_domain "$domain"; then
+    return 1
+  fi
+  [[ -f "$our_site" ]] && return 1
+  return 0
+}
+
+nginx_subpath_snippet_basename() {
+  local domain="$1"
+  local access_path="$2"
+  local domain_slug path_slug
+  domain_slug="$(nginx_conf_basename "$domain")"
+  path_slug="${access_path#/}"
+  path_slug="${path_slug//\//_}"
+  printf 'adminpanelaz-%s-%s' "$domain_slug" "$path_slug"
+}
+
+nginx_install_subpath_snippet() {
+  local access_path="$1"
+  local backend_port="$2"
+  local domain="$3"
+  local snippet_name snippet_path content
+  snippet_name="$(nginx_subpath_snippet_basename "$domain" "$access_path")"
+  snippet_path="/etc/nginx/snippets/${snippet_name}.conf"
+  mkdir -p /etc/nginx/snippets /etc/nginx/backups
+  content="$(nginx_render_subpath_template "$access_path" "$backend_port")"
+  printf '%s\n' "$content" >"$snippet_path"
+  nginx_log "Snippet subpath: ${snippet_path}"
+  nginx_log "Добавьте в server { } для ${domain}: include snippets/${snippet_name}.conf;"
+  NGINX_SUBPATH_SNIPPET_PATH="$snippet_path"
+  NGINX_SUBPATH_SNIPPET_INCLUDE="snippets/${snippet_name}.conf"
+}
+
+nginx_integrate_subpath_snippet() {
+  local domain="$1"
+  local include_line="$2"
+  local target backup stamp
+  [[ -n "$domain" && -n "$include_line" ]] || return 1
+  target="$(grep -Rsl "server_name[^;]*\b${domain}\b" /etc/nginx/sites-enabled /etc/nginx/sites-available 2>/dev/null | head -1)"
+  [[ -n "$target" && -f "$target" ]] || {
+    nginx_warn "Не найден vhost для ${domain} — добавьте include вручную: include ${include_line};"
+    return 1
+  }
+  if grep -qF "include ${include_line}" "$target"; then
+    nginx_log "Include уже присутствует в ${target}"
+    return 0
+  fi
+  stamp="$(date +%Y%m%d%H%M%S)"
+  backup="/etc/nginx/backups/$(basename "$target").${stamp}.bak"
+  cp "$target" "$backup"
+  sed -i "/server_name[^;]*\b${domain}\b/a\\    include ${include_line};" "$target"
+  nginx_log "Include добавлен в ${target} (бэкап: ${backup})"
+}
+
+# Удалить subpath-snippet'ы панели с домена (при возврате на корень или смене пути).
+nginx_cleanup_subpath_snippets_for_domain() {
+  local domain="$1"
+  [[ -n "$domain" ]] || return 0
+
+  mkdir -p /etc/nginx/backups
+  local target stamp backup
+  while IFS= read -r target; do
+    [[ -n "$target" && -f "$target" ]] || continue
+    if ! grep -qF "$domain" "$target"; then
+      continue
+    fi
+    if ! grep -qF 'include snippets/adminpanelaz-' "$target"; then
+      continue
+    fi
+    stamp="$(date +%Y%m%d%H%M%S)"
+    backup="/etc/nginx/backups/$(basename "$target").${stamp}.bak"
+    cp "$target" "$backup"
+    sed -i '\|include snippets/adminpanelaz-|d' "$target"
+    nginx_log "Удалён subpath include из ${target} (бэкап: ${backup})"
+  done < <(grep -Rsl "server_name" /etc/nginx/sites-enabled /etc/nginx/sites-available 2>/dev/null || true)
+
+  local domain_slug snippet
+  domain_slug="$(nginx_conf_basename "$domain")"
+  shopt -s nullglob
+  for snippet in /etc/nginx/snippets/adminpanelaz-"${domain_slug}"-*.conf; do
+    rm -f "$snippet"
+    nginx_log "Удалён snippet: ${snippet}"
+  done
+  shopt -u nullglob
+}
+
 nginx_render_template() {
   local template="$1"
   local domain="$2"
@@ -176,9 +358,11 @@ nginx_render_template() {
   local ssl_key="${5:-}"
   local https_port="${6:-443}"
   local http_port="${7:-80}"
-  local https_redirect_suffix
+  local https_redirect_suffix access_path panel_blocks rendered
   https_redirect_suffix="$(nginx_https_redirect_suffix "$https_port")"
-  sed \
+  access_path="$(nginx_normalize_access_path "${ACCESS_PATH:-}")"
+  panel_blocks="$(nginx_panel_location_blocks "$access_path" "$backend_port")"
+  rendered="$(sed \
     -e "s|__DOMAIN__|${domain}|g" \
     -e "s|__BACKEND_PORT__|${backend_port}|g" \
     -e "s|__HTTPS_PORT__|${https_port}|g" \
@@ -187,7 +371,11 @@ nginx_render_template() {
     -e "s|__SSL_CERT__|${ssl_cert}|g" \
     -e "s|__SSL_KEY__|${ssl_key}|g" \
     -e "s|__UVICORN_PORT__|${backend_port}|g" \
-    "$template"
+    "$template")"
+  ACCESS_PATH="$access_path" PANEL_BLOCKS="$panel_blocks" RENDERED="$rendered" python3 - <<'PY'
+import os
+print(os.environ["RENDERED"].replace("__PANEL_LOCATION_BLOCKS__", os.environ["PANEL_BLOCKS"]), end="")
+PY
 }
 
 nginx_render_redirect_template() {
@@ -325,6 +513,13 @@ nginx_apply_behind_proxy_env() {
   nginx_env_set FORWARDED_ALLOW_IPS "127.0.0.1,::1"
   nginx_env_set REFRESH_TOKEN_COOKIE_SECURE "true"
   nginx_env_set ENFORCE_HTTPS "true"
+  local normalized_access_path
+  normalized_access_path="$(nginx_normalize_access_path "${ACCESS_PATH:-}")"
+  if [[ -n "$normalized_access_path" ]]; then
+    nginx_env_set ACCESS_PATH "$normalized_access_path"
+  else
+    nginx_env_unset ACCESS_PATH
+  fi
   nginx_update_cors_for_domain "$domain" "$scheme" "$https_public_port"
 }
 
@@ -378,9 +573,8 @@ nginx_install_site() {
   nginx_conf_paths "$domain"
   printf '%s\n' "$conf_content" >"$NGINX_CONF_FILE"
   ln -sf "$NGINX_CONF_FILE" "$NGINX_ENABLED_LINK"
-  if [[ "$(nginx_count_other_enabled_sites "$domain")" -eq 0 ]]; then
-    rm -f /etc/nginx/sites-enabled/default
-  fi
+  # Стандартный default мешает: на корне домена показывается «Welcome to nginx».
+  rm -f /etc/nginx/sites-enabled/default
   nginx -t || nginx_die "nginx -t не прошёл (конфиг: $NGINX_CONF_FILE)"
   systemctl enable nginx >/dev/null 2>&1 || true
   if [[ "$reload_only" == "true" ]]; then

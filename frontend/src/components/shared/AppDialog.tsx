@@ -42,10 +42,11 @@ export default function AppDialog({
   size = 'lg',
   className,
   contentClassName,
+  hideClose,
 }: AppDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={cn(sizeClasses[size], className, contentClassName)}>
+      <DialogContent className={cn(sizeClasses[size], className, contentClassName)} hideClose={hideClose}>
         <DialogHeader>
           <DialogTitle className={Icon ? 'flex items-center gap-2' : undefined}>
             {Icon && <Icon className="h-5 w-5 shrink-0 text-muted-foreground" />}

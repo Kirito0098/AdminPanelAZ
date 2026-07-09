@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     serve_frontend: bool = False
     frontend_dist_path: Path = Path("../frontend/dist")
     domain: str = ""
+    access_path: str = ""
     https_public_port: int = 443
     behind_nginx: bool = False
     trusted_proxy_ips: str = "127.0.0.1,::1"
@@ -213,6 +214,16 @@ class Settings(BaseSettings):
         if normalized not in {"active", "all_online", "node_ids"}:
             raise ValueError("CIDR_DB_DEPLOY_TARGET must be active, all_online, or node_ids")
         return normalized
+
+    @field_validator("access_path")
+    @classmethod
+    def normalize_access_path_field(cls, value: str) -> str:
+        from app.services.panel_paths import AccessPathError, normalize_access_path
+
+        try:
+            return normalize_access_path(value)
+        except AccessPathError as exc:
+            raise ValueError(str(exc)) from exc
 
     @property
     def is_production(self) -> bool:

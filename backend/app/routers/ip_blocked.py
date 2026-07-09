@@ -6,10 +6,16 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database import get_db
 from app.services.ip_restriction import ip_restriction_service
+from app.services.panel_paths import api_prefix, with_access_path
 
 router = APIRouter(tags=["ip-blocked"])
+settings = get_settings()
+_BLOCKED_PAGE_PATH = with_access_path(settings, "/ip-blocked")
+_BLOCKED_PING_PATH = f"{api_prefix(settings)}/ip-blocked/ping"
+_LOGIN_PATH = with_access_path(settings, "/login")
 
 BLOCKED_HTML = """<!DOCTYPE html>
 <html lang="ru">
@@ -39,7 +45,7 @@ h1{{color:#f87171;margin:0 0 8px}}
 <script>
 const dwellEnabled={dwell_enabled};
 const dwellSeconds={dwell_seconds};
-const pingUrl="/api/ip-blocked/ping";
+const pingUrl="{ping_url}";
 let pingTimer=null;
 async function ping(){{
   if(!dwellEnabled)return;
@@ -55,14 +61,14 @@ if(dwellEnabled){{ping();pingTimer=setInterval(ping,5000);}}
 </html>"""
 
 
-@router.get("/ip-blocked")
+@router.get(_BLOCKED_PAGE_PATH)
 def ip_blocked_page(request: Request, db: Session = Depends(get_db)):
-    settings = ip_restriction_service.get_settings(db)
-    if not settings.get("ip_restriction_enabled"):
-        return HTMLResponse('<script>location.href="/login"</script>', status_code=302)
+    ip_settings = ip_restriction_service.get_settings(db)
+    if not ip_settings.get("ip_restriction_enabled"):
+        return HTMLResponse(f'<script>location.href="{_LOGIN_PATH}"</script>', status_code=302)
     client_ip = ip_restriction_service.get_client_ip(request)
     if ip_restriction_service.is_ip_allowed(db, client_ip):
-        return HTMLResponse('<script>location.href="/login"</script>', status_code=302)
+        return HTMLResponse(f'<script>location.href="{_LOGIN_PATH}"</script>', status_code=302)
     dwell = ip_restriction_service.touch_ip_blocked_presence(db, client_ip)
     if dwell.get("banned"):
         return JSONResponse(status_code=403, content={"detail": "Доступ заблокирован"})
@@ -72,14 +78,15 @@ def ip_blocked_page(request: Request, db: Session = Depends(get_db)):
         current_time=time.strftime("%Y-%m-%d %H:%M:%S"),
         dwell_enabled="true" if scanner_settings["block_ip_blocked_dwell"] else "false",
         dwell_seconds=scanner_settings["ip_blocked_dwell_seconds"],
+        ping_url=_BLOCKED_PING_PATH,
     )
     return HTMLResponse(html)
 
 
-@router.api_route("/ip-blocked/ping", methods=["GET", "POST"])
+@router.api_route(_BLOCKED_PING_PATH, methods=["GET", "POST"])
 def ip_blocked_ping(request: Request, db: Session = Depends(get_db)):
-    settings = ip_restriction_service.get_settings(db)
-    if not settings.get("ip_restriction_enabled"):
+    ip_settings = ip_restriction_service.get_settings(db)
+    if not ip_settings.get("ip_restriction_enabled"):
         return JSONResponse(status_code=404, content={"success": False, "message": "IP-ограничения выключены"})
     client_ip = ip_restriction_service.get_client_ip(request)
     if ip_restriction_service.is_ip_allowed(db, client_ip):

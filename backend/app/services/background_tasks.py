@@ -577,6 +577,11 @@ class BackgroundTaskService:
             cmd_env["SSL_CERT"] = resolved_cert
         if resolved_key:
             cmd_env["SSL_KEY"] = resolved_key
+        access_path = str(payload.get("access_path") or "").strip()
+        # Явно передаём ACCESS_PATH (в т.ч. пустой), чтобы сбросить подпуть в .env.
+        cmd_env["ACCESS_PATH"] = access_path
+        if payload.get("nginx_subpath_integrate"):
+            cmd_env["NGINX_SUBPATH_INTEGRATE"] = "true"
 
         script = PROJECT_ROOT / "scripts" / "nginx-setup.sh"
         if not script.is_file():

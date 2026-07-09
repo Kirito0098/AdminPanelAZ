@@ -94,12 +94,21 @@ def resolve_request_url_root(
     *,
     behind_nginx: bool,
     https_public_port: int | None = None,
+    access_path_value: str | None = None,
 ) -> str:
     """Current browser URL root, honoring reverse-proxy forwarded headers."""
-    if https_public_port is None:
-        from app.config import get_settings
+    from app.config import get_settings
+    from app.services.panel_paths import append_access_path_to_url_root
 
-        https_public_port = get_settings().https_public_port
+    if https_public_port is None or access_path_value is None:
+        cfg = get_settings()
+        if https_public_port is None:
+            https_public_port = cfg.https_public_port
+        if access_path_value is None:
+            access_path_value = cfg.access_path
+
+    class _PathSettings:
+        access_path = access_path_value or ""
 
     if behind_nginx:
         proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "http").split(",")[0].strip()
@@ -112,8 +121,9 @@ def resolve_request_url_root(
         if proto and host:
             if proto == "https":
                 host = _append_public_https_port(host, proto=proto, https_public_port=https_public_port)
-            return f"{proto}://{host}/"
-    return str(request.base_url)
+            return append_access_path_to_url_root(f"{proto}://{host}/", _PathSettings())
+    base = str(request.base_url)
+    return append_access_path_to_url_root(base, _PathSettings())
 
 
 def resolve_public_base_url(request: Request) -> str:
@@ -169,6 +179,8 @@ def build_panel_publish_context(
         use_https=use_https,
     )
 
+    access_path_value = gv("ACCESS_PATH", "") or settings.access_path
+
     internal_url = f"http://{backend_host}:{backend_port}/"
 
     parsed = urlparse(request_url or "")
@@ -191,7 +203,14 @@ def build_panel_publish_context(
             f"Внутренний upstream: http://{backend_host}:{backend_port}/ (proxy_pass к BACKEND_PORT)."
         )
         if domain:
-            guess = f"https://{domain}/"
+            guess = build_publish_access_url(
+                publish_mode=gv("PUBLISH_MODE", "nginx_le"),
+                domain=domain,
+                backend_port=backend_port,
+                https_public_port=https_public_port,
+                behind_nginx=True,
+                access_path_value=access_path_value,
+            ) or f"https://{domain}/"
             primary_urls.append(
                 {"label": "Типичный публичный URL (HTTPS на nginx, порты 80/443)", "url": guess}
             )
@@ -258,6 +277,7 @@ def build_panel_publish_context(
         {"label": "BEHIND_NGINX", "value": "да" if behind_nginx else "нет", "mono": False},
         {"label": "USE_HTTPS (TLS на uvicorn)", "value": "да" if use_https else "нет", "mono": False},
         {"label": "DOMAIN (для nginx / подсказок)", "value": domain or "—", "mono": bool(domain)},
+        {"label": "ACCESS_PATH (подпуть на домене)", "value": access_path_value or "—", "mono": True},
         {"label": "HTTPS_PUBLIC_PORT", "value": str(https_public_port), "mono": True},
         {"label": "ENFORCE_HTTPS", "value": "да" if enforce_https else "нет", "mono": False},
         {"label": "REFRESH_TOKEN_COOKIE_SECURE", "value": "да" if cookie_secure else "нет", "mono": False},
@@ -292,6 +312,7 @@ def build_panel_publish_context(
             ssl_cert=ssl_cert,
             publish_mode=gv("PUBLISH_MODE", ""),
         ),
+        "shared_domain_foreign_vhost": nginx_is_foreign_vhost_for_domain(domain) if domain else False,
     }
 
 
@@ -370,6 +391,46 @@ def nginx_has_vhost_for_domain(domain: str) -> bool:
     return False
 
 
+def nginx_is_foreign_vhost_for_domain(domain: str) -> bool:
+    domain = (domain or "").strip().split(":")[0]
+    if not domain or not nginx_has_vhost_for_domain(domain):
+        return False
+    our_site = Path(f"/etc/nginx/sites-available/{domain.replace('.', '_')}")
+    return not our_site.is_file()
+
+
+def build_subpath_publish_warnings(
+    *,
+    domain: str,
+    access_path: str,
+    publish_mode: str,
+) -> list[str]:
+    warnings: list[str] = []
+    domain_host = (domain or "").strip().split(":")[0]
+    path = (access_path or "").strip()
+    if not path:
+        if domain_host and nginx_is_foreign_vhost_for_domain(domain_host):
+            warnings.append(
+                f"На домене {domain_host} уже есть другой nginx-сайт. "
+                "Для совместного хостинга укажите ACCESS_PATH, например /panel."
+            )
+        return warnings
+    if publish_mode.startswith("uvicorn_") or publish_mode == "http_direct":
+        warnings.append(
+            "ACCESS_PATH поддерживается только с nginx reverse proxy. "
+            "Выберите режим nginx_* или настройте внешний nginx вручную."
+        )
+    if domain_host and nginx_is_foreign_vhost_for_domain(domain_host):
+        warnings.append(
+            f"Домен {domain_host} уже обслуживается другим nginx vhost — "
+            f"будет создан snippet для пути {path}."
+        )
+    warnings.append(
+        "Публикация по подпути — дополнительная мера, не замена 2FA и сильного пароля."
+    )
+    return warnings
+
+
 def build_uvicorn_publish_warnings(
     *,
     domain: str,
@@ -410,8 +471,11 @@ def build_publish_access_url(
     backend_port: str | int,
     https_public_port: str | int | None = None,
     behind_nginx: bool = False,
+    access_path_value: str = "",
 ) -> str | None:
     """Primary browser URL after applying a publish mode."""
+    from app.services.panel_paths import append_access_path_to_url_root, normalize_access_path
+
     mode = (publish_mode or "").strip()
     domain_host = (domain or "").strip().split(":")[0]
     if not domain_host and mode != "http_direct":
@@ -422,15 +486,21 @@ def build_publish_access_url(
         port = 8000
     pub = int(https_public_port or (443 if behind_nginx else port))
 
+    class _PathSettings:
+        access_path = normalize_access_path(access_path_value)
+
     if mode.startswith("nginx_") or (behind_nginx and not mode.startswith("uvicorn_")):
-        return f"https://{domain_host}/" if pub == 443 else f"https://{domain_host}:{pub}/"
+        root = f"https://{domain_host}/" if pub == 443 else f"https://{domain_host}:{pub}/"
+        return append_access_path_to_url_root(root, _PathSettings())
     if mode == "http_direct":
-        return f"http://{domain_host}:{port}/" if domain_host else f"http://<сервер>:{port}/"
+        root = f"http://{domain_host}:{port}/" if domain_host else f"http://<сервер>:{port}/"
+        return append_access_path_to_url_root(root, _PathSettings())
     if mode.startswith("uvicorn_"):
         le_cert = Path(f"/etc/letsencrypt/live/{domain_host}/fullchain.pem")
         if port != 443 and le_cert.is_file():
-            return f"https://{domain_host}/"
-        return f"https://{domain_host}/" if port == 443 else f"https://{domain_host}:{port}/"
+            return append_access_path_to_url_root(f"https://{domain_host}/", _PathSettings())
+        root = f"https://{domain_host}/" if port == 443 else f"https://{domain_host}:{port}/"
+        return append_access_path_to_url_root(root, _PathSettings())
     return None
 
 

@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useNotifications } from '@/context/NotificationContext'
+import { publicApiUrl } from '@/lib/panelBase'
 import { cn } from '@/lib/utils'
 import type { RouteResultFileEntry } from '@/types'
 
@@ -32,7 +33,7 @@ const PUBLIC_SLUGS: Record<string, string> = {
 function buildPublicRouteUrl(key: string): string | null {
   const slug = PUBLIC_SLUGS[key]
   if (!slug) return null
-  return `${window.location.origin}/api/public/route-download/${slug}`
+  return publicApiUrl(`/public/route-download/${slug}`)
 }
 
 interface RouteResultsPanelProps {

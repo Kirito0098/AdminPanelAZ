@@ -40,6 +40,8 @@ usage() {
   HTTP_ACME_PORT     Публичный HTTP-порт (ACME/редирект, по умолчанию 80)
   SSL_CERT           Путь к сертификату (для --nginx-custom / --uvicorn-custom)
   SSL_KEY            Путь к приватному ключу (для --nginx-custom / --uvicorn-custom)
+  ACCESS_PATH        Подпуть на домене (например /panel) для публикации на общем домене
+  NGINX_SUBPATH_INTEGRATE  true — автоматически добавить include snippet в vhost домена
   NON_INTERACTIVE    true — пропускать prompts при заданных env
 EOF
 }
@@ -189,27 +191,29 @@ nginx_log_access_url() {
   local mode="$1"
   local domain="$2"
   local port="$3"
+  local path_suffix
+  path_suffix="$(nginx_access_path_suffix "$(nginx_normalize_access_path "${ACCESS_PATH:-}")")"
   case "$mode" in
     nginx_*)
       if [[ "$port" == "443" ]]; then
-        nginx_log "ACCESS_URL=https://${domain}/"
+        nginx_log "ACCESS_URL=https://${domain}${path_suffix}"
       else
-        nginx_log "ACCESS_URL=https://${domain}:${port}/"
+        nginx_log "ACCESS_URL=https://${domain}:${port}${path_suffix}"
       fi
       ;;
     uvicorn_*|http_direct)
       if [[ "$mode" == http_direct ]]; then
         if [[ -n "$domain" ]]; then
-          nginx_log "ACCESS_URL=http://${domain}:${port}/"
+          nginx_log "ACCESS_URL=http://${domain}:${port}${path_suffix}"
         else
-          nginx_log "ACCESS_URL=http://<сервер>:${port}/"
+          nginx_log "ACCESS_URL=http://<сервер>:${port}${path_suffix}"
         fi
       elif [[ "$port" == "443" ]]; then
-        nginx_log "ACCESS_URL=https://${domain}/"
+        nginx_log "ACCESS_URL=https://${domain}${path_suffix}"
       elif nginx_pick_redirect_cert_paths "$domain" "" "" 2>/dev/null; then
-        nginx_log "ACCESS_URL=https://${domain}/"
+        nginx_log "ACCESS_URL=https://${domain}${path_suffix}"
       else
-        nginx_log "ACCESS_URL=https://${domain}:${port}/"
+        nginx_log "ACCESS_URL=https://${domain}:${port}${path_suffix}"
       fi
       ;;
   esac
@@ -247,6 +251,41 @@ setup_http_direct() {
   restart_panel_if_needed
 }
 
+resolve_access_path() {
+  if is_non_interactive; then
+    if [[ -v ACCESS_PATH ]]; then
+      ACCESS_PATH="$(nginx_normalize_access_path "$ACCESS_PATH")"
+    else
+      ACCESS_PATH="$(nginx_normalize_access_path "$(nginx_env_get ACCESS_PATH)")"
+    fi
+    return 0
+  fi
+  if [[ -n "${ACCESS_PATH:-}" ]]; then
+    ACCESS_PATH="$(nginx_normalize_access_path "$ACCESS_PATH")"
+    return 0
+  fi
+  local reply=""
+  read -r -p "Путь доступа на домене (ENTER — корень /, например /panel): " reply
+  ACCESS_PATH="$(nginx_normalize_access_path "$reply")"
+}
+
+nginx_finalize_nginx_site() {
+  local domain="$1"
+  local backend_port="$2"
+  local access_path
+  access_path="$(nginx_normalize_access_path "${ACCESS_PATH:-}")"
+  nginx_cleanup_subpath_snippets_for_domain "$domain"
+  if [[ -n "$access_path" ]] && nginx_is_foreign_vhost_for_domain "$domain"; then
+    nginx_install_subpath_snippet "$access_path" "$backend_port" "$domain"
+    if [[ "${NGINX_SUBPATH_INTEGRATE:-false}" == "true" || "${NGINX_SUBPATH_INTEGRATE:-false}" == "1" ]]; then
+      nginx_integrate_subpath_snippet "$domain" "${NGINX_SUBPATH_SNIPPET_INCLUDE:-}" || true
+      nginx -t && systemctl reload nginx
+    fi
+    return 0
+  fi
+  return 1
+}
+
 setup_nginx_letsencrypt() {
   resolve_domain true
   local domain="$DOMAIN"
@@ -256,6 +295,7 @@ setup_nginx_letsencrypt() {
   fi
   resolve_backend_port
   resolve_public_ports
+  resolve_access_path
 
   nginx_ensure_nginx || nginx_die "Не удалось установить nginx"
   nginx_obtain_letsencrypt_cert "$domain" "$email"
@@ -263,11 +303,15 @@ setup_nginx_letsencrypt() {
   local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
   local key="/etc/letsencrypt/live/${domain}/privkey.pem"
   local conf
-  conf="$(nginx_render_template \
-    "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-    "$domain" "$BACKEND_PORT" "$cert" "$key" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")"
-  nginx_install_site "$conf" "$domain"
-  nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
+  if nginx_finalize_nginx_site "$domain" "$BACKEND_PORT"; then
+    nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
+  else
+    conf="$(nginx_render_template \
+      "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
+      "$domain" "$BACKEND_PORT" "$cert" "$key" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")"
+    nginx_install_site "$conf" "$domain"
+    nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
+  fi
 
   systemctl enable --now snap.certbot.renew.timer 2>/dev/null || \
     systemctl enable --now certbot.timer 2>/dev/null || true
@@ -287,6 +331,7 @@ setup_nginx_selfsigned() {
   [[ -n "$domain" ]] || nginx_die "Не удалось определить CN для самоподписанного сертификата"
   resolve_backend_port
   resolve_public_ports
+  resolve_access_path
   nginx_ensure_nginx || nginx_die "Не удалось установить nginx"
 
   mkdir -p /etc/ssl/private
@@ -298,12 +343,16 @@ setup_nginx_selfsigned() {
   fi
 
   local conf
-  conf="$(nginx_render_template \
-    "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-    "$domain" "$BACKEND_PORT" "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" \
-    "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")"
-  nginx_install_site "$conf" "$domain"
-  nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
+  if nginx_finalize_nginx_site "$domain" "$BACKEND_PORT"; then
+    nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
+  else
+    conf="$(nginx_render_template \
+      "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
+      "$domain" "$BACKEND_PORT" "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" \
+      "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")"
+    nginx_install_site "$conf" "$domain"
+    nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
+  fi
   if [[ "$HTTPS_PUBLIC_PORT" == "443" ]]; then
     nginx_log "Nginx + самоподписанный SSL: https://${domain}/"
   else
@@ -345,15 +394,20 @@ setup_nginx_custom_certs() {
   [[ -f "$cert_path" && -f "$key_path" ]] || nginx_die "Файлы сертификата не найдены"
   resolve_backend_port
   resolve_public_ports
+  resolve_access_path
   nginx_ensure_nginx || nginx_die "Не удалось установить nginx"
 
   local conf
-  conf="$(nginx_render_template \
-    "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-    "$domain" "$BACKEND_PORT" "$cert_path" "$key_path" \
-    "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")"
-  nginx_install_site "$conf" "$domain"
-  nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
+  if nginx_finalize_nginx_site "$domain" "$BACKEND_PORT"; then
+    nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
+  else
+    conf="$(nginx_render_template \
+      "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
+      "$domain" "$BACKEND_PORT" "$cert_path" "$key_path" \
+      "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")"
+    nginx_install_site "$conf" "$domain"
+    nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
+  fi
   if [[ "$HTTPS_PUBLIC_PORT" == "443" ]]; then
     nginx_log "Nginx + пользовательские сертификаты: https://${domain}/"
   else

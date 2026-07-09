@@ -66,6 +66,7 @@ from app.services.active_web_session import active_web_session_service
 from app.services.admin_notify import admin_notify_service
 from app.services.user_agent_format import user_agent_from_request
 from app.services.notify_time import get_client_timezone_from_request
+from app.services.panel_paths import auth_cookie_path, with_access_path
 from app.services.panel_publish_info import resolve_request_url_root
 from app.services.telegram_oidc import (
     build_authorization_url,
@@ -142,7 +143,7 @@ def _telegram_login_redirect(user: User) -> RedirectResponse:
         data={"sub": user.username, "role": user.role.value},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
-    return RedirectResponse(url=f"/login#token={access_token}", status_code=302)
+    return RedirectResponse(url=f"{with_access_path(settings, '/login')}#token={access_token}", status_code=302)
 
 
 def _complete_telegram_login(
@@ -179,7 +180,7 @@ def _complete_telegram_login(
 
 
 def _oidc_login_error_redirect(message: str) -> RedirectResponse:
-    return RedirectResponse(url=f"/login?tg_error={quote(message)}", status_code=302)
+    return RedirectResponse(url=f"{with_access_path(settings, '/login')}?tg_error={quote(message)}", status_code=302)
 
 
 def _verify_telegram_login(payload: dict[str, str], bot_token: str, max_age: int) -> tuple[bool, str]:
@@ -211,7 +212,7 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
         secure=secure,
         samesite=settings.refresh_token_cookie_samesite,
         max_age=settings.refresh_token_expire_days * 86400,
-        path="/api/auth",
+        path=auth_cookie_path(settings),
     )
 
 
@@ -284,7 +285,7 @@ def _issue_token_pair(
 
 
 def _clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie(key=settings.refresh_token_cookie_name, path="/api/auth")
+    response.delete_cookie(key=settings.refresh_token_cookie_name, path=auth_cookie_path(settings))
 
 
 def _login_with_checks(
