@@ -56,7 +56,10 @@ import {
 } from '@/components/ui/table'
 import { useNotifications } from '@/context/NotificationContext'
 import { HA_PRIMARY, HA_PUSH_FULL, HA_REPLICA, nodeStatusRu } from '@/lib/uiLabels'
-import { formatHaSyncTaskSummary } from '@/lib/haSyncSummary'
+import HaSyncResultDialog from '@/components/nodes/HaSyncResultDialog'
+import HaVerifyResultDialog from '@/components/nodes/HaVerifyResultDialog'
+import { parseHaSyncTaskResult, type HaSyncResultView } from '@/lib/haSyncSummary'
+import { parseHaVerifyResult, type HaVerifyResultView } from '@/lib/haVerifySummary'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import type { BackgroundTask, Node, NodeSyncGroup, NodeSyncVerifyResult, SyncStatus } from '@/types'
 
@@ -147,13 +150,16 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<NodeSyncGroup | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [verifyResult, setVerifyResult] = useState<NodeSyncVerifyResult | null>(null)
+  const [verifyDialogView, setVerifyDialogView] = useState<HaVerifyResultView | null>(null)
+  const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<NodeSyncGroup | null>(null)
   const [setupTarget, setSetupTarget] = useState<NodeSyncGroup | null>(null)
   const [setupStage, setSetupStage] = useState<string | null>(null)
   const [dnsTarget, setDnsTarget] = useState<NodeSyncGroup | null>(null)
   const [copiedHost, setCopiedHost] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<number | null>(null)
+  const [syncResult, setSyncResult] = useState<HaSyncResultView | null>(null)
+  const [syncResultOpen, setSyncResultOpen] = useState(false)
 
   const [name, setName] = useState('')
   const [sharedDomain, setSharedDomain] = useState('')
@@ -289,6 +295,46 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
     )
   }
 
+  const showVerifyResult = useCallback((group: NodeSyncGroup, result: NodeSyncVerifyResult) => {
+    setVerifyDialogView(parseHaVerifyResult(result, group.name))
+    setVerifyDialogOpen(true)
+  }, [])
+
+  const patchGroupVerify = useCallback((groupId: number, result: NodeSyncVerifyResult) => {
+    setGroups((prev) =>
+      prev.map((group) =>
+        group.id === groupId
+          ? {
+              ...group,
+              ready: result.ready,
+              last_verify_result: result,
+              last_verify_at: new Date().toISOString(),
+              sync_status: result.ready ? 'synced' : group.sync_status,
+            }
+          : group,
+      ),
+    )
+  }, [])
+
+  const showSyncResult = useCallback((task: BackgroundTask, verifyReady?: boolean | null) => {
+    const result = parseHaSyncTaskResult(task)
+    if (!result) return
+
+    const withVerify =
+      verifyReady === false
+        ? {
+            ...result,
+            variant: 'warning' as const,
+            description: result.description
+              ? `${result.description}. Проверка нашла расхождения — см. «Проверить».`
+              : 'Проверка нашла расхождения — см. «Проверить».',
+          }
+        : result
+
+    setSyncResult(withVerify)
+    setSyncResultOpen(true)
+  }, [])
+
   /** Wrap the callback-based background poll in a promise so steps can be chained. */
   const pollToCompletion = useCallback(
     (taskId: string) =>
@@ -313,21 +359,18 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
       try {
         const accepted = await setupNodeSyncGroup(group.id)
         const task = await pollToCompletion(accepted.task_id)
-        const summary = formatHaSyncTaskSummary(task)
 
         const fresh = await fetchGroups()
         applyGroups(fresh)
         const updated = fresh.find((g) => g.id === group.id)
-        if (updated?.last_verify_result) setVerifyResult(updated.last_verify_result)
+        if (updated?.last_verify_result && updated.ready === false) {
+          showVerifyResult(group, updated.last_verify_result)
+        }
+        showSyncResult(task, updated?.ready)
         if (updated?.ready) {
-          success(summary || 'HA-группа настроена и готова к DNS-переключению')
+          success('HA-группа настроена и готова к DNS-переключению')
         } else {
-          notifyWarning(
-            summary ||
-              `Настройка завершена. Проверка нашла расхождения: ${
-                updated?.last_verify_result?.summary ?? 'см. «Проверить»'
-              }`,
-          )
+          notifyWarning('Настройка завершена с расхождениями — см. отчёт')
         }
       } catch (err) {
         notifyError(err instanceof ApiError ? err.message : 'Ошибка настройки HA-группы')
@@ -337,7 +380,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         setActionLoading(null)
       }
     },
-    [applyGroups, fetchGroups, load, notifyError, notifyWarning, pollToCompletion, success],
+    [applyGroups, fetchGroups, load, notifyError, notifyWarning, pollToCompletion, showSyncResult, showVerifyResult, success],
   )
 
   /** Non-destructive: re-apply the shared domain to all members (used after edits). */
@@ -348,7 +391,8 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
       try {
         const accepted = await applyNodeSyncGroupSharedDomain(group.id)
         const task = await pollToCompletion(accepted.task_id)
-        success(formatHaSyncTaskSummary(task) || `Домен ${group.shared_domain} применён на узлах`)
+        showSyncResult(task)
+        success(`Домен ${group.shared_domain} применён на узлах`)
       } catch (err) {
         notifyError(err instanceof ApiError ? err.message : 'Ошибка применения домена')
       } finally {
@@ -357,7 +401,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         await load()
       }
     },
-    [load, notifyError, pollToCompletion, success],
+    [load, notifyError, pollToCompletion, showSyncResult, success],
   )
 
   const handleSubmit = async (event: FormEvent) => {
@@ -416,11 +460,12 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
     setActionLoading(group.id)
     try {
       const result = await verifyNodeSyncGroup(group.id)
-      setVerifyResult(result)
+      patchGroupVerify(group.id, result)
+      showVerifyResult(group, result)
       if (result.ready) {
         success('Проверка: готово к DNS-переключению')
       } else {
-        notifyError(`Проверка: ${result.summary}`)
+        notifyWarning('Проверка нашла расхождения')
       }
       await load()
     } catch (err) {
@@ -429,6 +474,11 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
       setActionLoading(null)
     }
   }
+
+  const openStoredVerifyResult = useCallback((group: NodeSyncGroup) => {
+    if (!group.last_verify_result) return
+    showVerifyResult(group, group.last_verify_result)
+  }, [showVerifyResult])
 
   const handleRunSetup = async () => {
     if (!setupTarget) return
@@ -562,6 +612,15 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                           Проверка: {formatTimestamp(group.last_verify_at)}
                         </p>
                       ) : null}
+                      {group.last_verify_result ? (
+                        <button
+                          type="button"
+                          onClick={() => openStoredVerifyResult(group)}
+                          className="mt-1 text-xs text-primary hover:underline"
+                        >
+                          Отчёт проверки
+                        </button>
+                      ) : null}
                       {group.last_sync_error ? (
                         <p className="mt-1 text-xs text-destructive">{group.last_sync_error}</p>
                       ) : null}
@@ -615,25 +674,6 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
             </Table>
           )}
 
-          {verifyResult ? (
-            <SettingsAlert variant={verifyResult.ready ? 'info' : 'warning'}>
-              <strong>Проверка:</strong> {verifyResult.summary}
-              {verifyResult.replicas.some((r) => r.mismatches.length > 0) ? (
-                <ul className="mt-2 list-disc pl-5 text-sm">
-                  {verifyResult.replicas.flatMap((replica) =>
-                    replica.mismatches.map((m, idx) => (
-                      <li key={`${replica.node_id}-${idx}`}>
-                        {replica.node_name ?? replica.node_id}: {m.kind}
-                        {m.only_primary?.length ? ` (+только основной: ${m.only_primary.join(', ')})` : ''}
-                        {m.only_replica?.length ? ` (+только реплика: ${m.only_replica.join(', ')})` : ''}
-                        {m.path ? ` [${m.path}]` : ''}
-                      </li>
-                    )),
-                  )}
-                </ul>
-              ) : null}
-            </SettingsAlert>
-          ) : null}
         </CardContent>
       </Card>
 
@@ -868,6 +908,18 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <HaSyncResultDialog
+        open={syncResultOpen}
+        onOpenChange={setSyncResultOpen}
+        result={syncResult}
+      />
+
+      <HaVerifyResultDialog
+        open={verifyDialogOpen}
+        onOpenChange={setVerifyDialogOpen}
+        result={verifyDialogView}
+      />
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}

@@ -10,8 +10,18 @@ from sqlalchemy.orm import Session
 
 from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus
 from app.services.node_adapter import NodeAdapter
-from app.services.node_manager import get_adapter_for_node
+from app.services.node_manager import check_node_health, get_adapter_for_node, update_node_from_health
 from app.services.node_sync.groups import parse_replica_node_ids
+
+
+def _refresh_node_online(db: Session, node: Node | None) -> bool:
+    """Live health check before parity verify — avoids stale offline status in DB."""
+    if not node:
+        return False
+    health = check_node_health(node)
+    update_node_from_health(node, health, db)
+    db.refresh(node)
+    return node.status == NodeStatus.online
 
 
 def _client_set_diff(primary: set[str], replica: set[str]) -> dict[str, list[str]]:
@@ -34,13 +44,14 @@ def verify_sync_group(
 
     progress(5, "Проверка паритета…", "Primary")
     primary_node = db.get(Node, group.primary_node_id)
-    if not primary_node or primary_node.status != NodeStatus.online:
+    primary_online = _refresh_node_online(db, primary_node)
+    if not primary_node or not primary_online:
         result = {
             "ready": False,
             "shared_domain": group.shared_domain,
             "primary_node_id": group.primary_node_id,
             "replicas": [],
-            "summary": "primary offline или не найден",
+            "summary": "Основной узел offline или не найден",
         }
         group.last_verify_at = datetime.utcnow()
         group.last_verify_result = json.dumps(result, ensure_ascii=False)
@@ -63,7 +74,7 @@ def verify_sync_group(
         progress(percent, f"Verify: {node_name}")
 
         mismatches: list[dict[str, Any]] = []
-        online = node is not None and node.status == NodeStatus.online
+        online = _refresh_node_online(db, node)
         if not online:
             ready = False
             mismatches.append({"kind": "node_status", "detail": "узел offline или не найден"})
@@ -113,7 +124,7 @@ def verify_sync_group(
             }
         )
 
-    summary = "ready for DNS failover" if ready else "расхождения между primary и replica"
+    summary = "Готово к DNS-переключению" if ready else "Расхождения между основным узлом и репликой"
     result = {
         "ready": ready,
         "shared_domain": group.shared_domain,
