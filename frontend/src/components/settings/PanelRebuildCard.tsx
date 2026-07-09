@@ -3,6 +3,14 @@ import { Hammer, Rocket, Server } from 'lucide-react'
 import { ApiError, rebuildPanel } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import {
+  UPDATE_CONFIRM_DURATION_NOTICE,
+  UPDATE_LONG_RUNNING_NOTICE,
+  UPDATE_POLL_BUSY_ALERT_BODY,
+  UPDATE_POLL_BUSY_ALERT_TITLE,
+  isLikelyBuildBusyPollError,
+  resolveUpdateTaskErrorMessage,
+} from '@/components/settings/updateGuidance'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
@@ -20,7 +28,7 @@ type Props = {
 }
 
 export default function PanelRebuildCard({ className }: Props) {
-  const { success, error: notifyError } = useNotifications()
+  const { success, error: notifyError, warning: notifyWarning } = useNotifications()
   const { trackBackgroundTask } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
   const [rebuilding, setRebuilding] = useState(false)
@@ -31,9 +39,15 @@ export default function PanelRebuildCard({ className }: Props) {
       description: 'Выполнит npm run build:all и перезапустит сервис панели.',
       alert: {
         variant: 'warning',
-        title: 'Займёт несколько минут',
-        children:
-          'Панель будет недоступна после завершения сборки. Не запускайте одновременно с обновлением из Git.',
+        title: 'Займёт продолжительное время',
+        children: (
+          <>
+            Панель будет недоступна после завершения сборки. Не запускайте одновременно с обновлением из Git.
+            <br />
+            <br />
+            {UPDATE_CONFIRM_DURATION_NOTICE}
+          </>
+        ),
       },
       confirmLabel: 'Пересобрать и перезапустить',
       destructive: true,
@@ -46,7 +60,12 @@ export default function PanelRebuildCard({ className }: Props) {
               success(resp.message || 'Пересборка завершена, панель перезапускается')
             },
             onError: (task, message) => {
-              notifyError(task?.error || task?.message || message)
+              const resolved = resolveUpdateTaskErrorMessage(message, task)
+              if (isLikelyBuildBusyPollError(message, task)) {
+                notifyWarning(resolved)
+                return
+              }
+              notifyError(resolved)
             },
           })
         } catch (err) {
@@ -90,6 +109,12 @@ export default function PanelRebuildCard({ className }: Props) {
               </div>
             ))}
           </div>
+          <SettingsAlert variant="info" title="Длительность пересборки">
+            {UPDATE_LONG_RUNNING_NOTICE}
+          </SettingsAlert>
+          <SettingsAlert variant="info" title={UPDATE_POLL_BUSY_ALERT_TITLE}>
+            {UPDATE_POLL_BUSY_ALERT_BODY}
+          </SettingsAlert>
           <SettingsAlert variant="info" title="Когда использовать">
             После ручного изменения файлов frontend на сервере или если UI не обновился после деплоя.
           </SettingsAlert>

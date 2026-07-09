@@ -15,6 +15,14 @@ import {
 import { ApiError, applySystemUpdate, checkSystemUpdates, getLatestChangelog } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import {
+  UPDATE_CONFIRM_DURATION_NOTICE,
+  UPDATE_LONG_RUNNING_NOTICE,
+  UPDATE_POLL_BUSY_ALERT_BODY,
+  UPDATE_POLL_BUSY_ALERT_TITLE,
+  isLikelyBuildBusyPollError,
+  resolveUpdateTaskErrorMessage,
+} from '@/components/settings/updateGuidance'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Button } from '@/components/ui/button'
@@ -182,7 +190,7 @@ function ChangelogPanel({
 }
 
 export default function UpdatesTab() {
-  const { success, error: notifyError } = useNotifications()
+  const { success, error: notifyError, warning: notifyWarning } = useNotifications()
   const { trackBackgroundTask } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
   const [info, setInfo] = useState<{
@@ -223,7 +231,14 @@ export default function UpdatesTab() {
       alert: {
         variant: 'warning',
         title: 'Перед обновлением',
-        children: 'Рекомендуется создать бэкап. Панель перезапустится автоматически через несколько секунд после сборки.',
+        children: (
+          <>
+            Рекомендуется создать бэкап. Панель перезапустится автоматически через несколько секунд после сборки.
+            <br />
+            <br />
+            {UPDATE_CONFIRM_DURATION_NOTICE}
+          </>
+        ),
       },
       confirmLabel: 'Применить обновление',
       destructive: true,
@@ -237,7 +252,12 @@ export default function UpdatesTab() {
               void load()
             },
             onError: (task, message) => {
-              notifyError(task?.error || task?.message || message)
+              const resolved = resolveUpdateTaskErrorMessage(message, task)
+              if (isLikelyBuildBusyPollError(message, task)) {
+                notifyWarning(resolved)
+                return
+              }
+              notifyError(resolved)
             },
           })
         } catch (err) {
@@ -325,7 +345,7 @@ export default function UpdatesTab() {
               </div>
               <p className="mt-1 max-w-xl text-sm text-muted-foreground">
                 {hasUpdate
-                  ? 'Новая версия готова к установке. Процесс займёт несколько минут и завершится перезапуском панели.'
+                  ? 'Новая версия готова к установке. Процесс может занять до 15–20 минут и завершится перезапуском панели.'
                   : info?.error
                     ? 'Проверьте подключение к GitHub и доступ к репозиторию на сервере.'
                     : 'Установлена последняя версия с сервера разработчиков. Проверяйте обновления периодически.'}
@@ -418,6 +438,12 @@ export default function UpdatesTab() {
             </CardHeader>
             <CardContent className="space-y-4">
               <UpdatePipeline />
+              <SettingsAlert variant="info" title="Длительность обновления">
+                {UPDATE_LONG_RUNNING_NOTICE}
+              </SettingsAlert>
+              <SettingsAlert variant="info" title={UPDATE_POLL_BUSY_ALERT_TITLE}>
+                {UPDATE_POLL_BUSY_ALERT_BODY}
+              </SettingsAlert>
               <SettingsAlert variant="warning" title="Перед обновлением">
                 Рекомендуется создать резервную копию в разделе «Резервные копии». Панель ненадолго
                 перезапустится — дождитесь завершения процесса.
