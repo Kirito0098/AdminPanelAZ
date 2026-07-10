@@ -2,9 +2,20 @@ import type { NodeSyncMismatch, NodeSyncVerifyResult } from '@/types'
 
 export type HaVerifyResultVariant = 'success' | 'warning'
 
+export interface HaVerifyFileEntry {
+  filename: string
+  title?: string
+}
+
+export interface HaVerifyFileGroup {
+  label: string
+  files: HaVerifyFileEntry[]
+}
+
 export interface HaVerifyMismatchView {
   title: string
   details: string[]
+  fileGroups?: HaVerifyFileGroup[]
   hint?: string
 }
 
@@ -42,6 +53,92 @@ const FINGERPRINT_LABELS: Record<string, string> = {
   'easyrsa3/pki/serial': 'Счётчик серийных номеров PKI',
   'wireguard/conf_files': 'Конфигурации WireGuard (/etc/wireguard/*.conf)',
   'antizapret/config': 'Файлы настроек AntiZapret (config/)',
+}
+
+const CONFIG_FILE_TITLES: Record<string, string> = {
+  'include-hosts.txt': 'Включить домены',
+  'exclude-hosts.txt': 'Исключить домены',
+  'include-ips.txt': 'Включить IP/CIDR',
+  'exclude-ips.txt': 'Исключить IP/CIDR',
+  'allow-ips.txt': 'Разрешённые IP',
+  'drop-ips.txt': 'Блокировать IP',
+  'forward-ips.txt': 'Перенаправлять IP',
+  'include-adblock-hosts.txt': 'Adblock — включить',
+  'exclude-adblock-hosts.txt': 'Adblock — исключить',
+  'remove-hosts.txt': 'Удалить домены',
+  'deny-ips.txt': 'Запретить входящие IP',
+}
+
+function formatConfigFileEntry(filename: string): HaVerifyFileEntry {
+  return { filename, title: CONFIG_FILE_TITLES[filename] }
+}
+
+function categorizeConfigFileEntries(files: string[]): HaVerifyFileGroup[] {
+  const providers: HaVerifyFileEntry[] = []
+  const routing: HaVerifyFileEntry[] = []
+  const other: HaVerifyFileEntry[] = []
+
+  for (const filename of [...files].sort()) {
+    const entry = formatConfigFileEntry(filename)
+    if (filename.startsWith('AP-') || filename.startsWith('AZ-')) {
+      providers.push(entry)
+    } else if (CONFIG_FILE_TITLES[filename]) {
+      routing.push(entry)
+    } else {
+      other.push(entry)
+    }
+  }
+
+  const groups: HaVerifyFileGroup[] = []
+  if (providers.length) {
+    groups.push({ label: 'Файлы провайдеров (CIDR)', files: providers })
+  }
+  if (routing.length) {
+    groups.push({ label: 'Списки маршрутизации', files: routing })
+  }
+  if (other.length) {
+    groups.push({ label: 'Прочие файлы', files: other })
+  }
+  return groups
+}
+
+function appendFileDiffGroups(
+  groups: HaVerifyFileGroup[],
+  prefix: string,
+  files: string[],
+): void {
+  const categorized = categorizeConfigFileEntries(files)
+  if (categorized.length > 1) {
+    for (const group of categorized) {
+      groups.push({
+        label: `${prefix} — ${group.label} (${group.files.length})`,
+        files: group.files,
+      })
+    }
+    return
+  }
+  groups.push({
+    label: `${prefix} (${files.length})`,
+    files: files.map(formatConfigFileEntry),
+  })
+}
+
+function buildConfigFileGroups(
+  changed: string[] | undefined,
+  onlyPrimary: string[] | undefined,
+  onlyReplica: string[] | undefined,
+): HaVerifyFileGroup[] {
+  const groups: HaVerifyFileGroup[] = []
+  if (changed?.length) {
+    appendFileDiffGroups(groups, 'Отличается содержимое', changed)
+  }
+  if (onlyPrimary?.length) {
+    appendFileDiffGroups(groups, 'Только на основном', onlyPrimary)
+  }
+  if (onlyReplica?.length) {
+    appendFileDiffGroups(groups, 'Только на реплике', onlyReplica)
+  }
+  return groups
 }
 
 function shortHash(value?: string | null): string {
@@ -102,11 +199,43 @@ export function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismat
   if (mismatch.kind === 'fingerprint') {
     const path = mismatch.path || ''
     const label = FINGERPRINT_LABELS[path] || path || 'Файлы на диске'
-    const details = [`Сравниваемый объект: ${label}`]
-    if (mismatch.primary || mismatch.replica) {
+    const details: string[] = []
+
+    if (path === 'antizapret/config') {
+      const fileGroups = buildConfigFileGroups(
+        mismatch.changed_files,
+        mismatch.only_primary,
+        mismatch.only_replica,
+      )
+      const hasFileDetails = fileGroups.length > 0
+      if (mismatch.detail) {
+        details.push(mismatch.detail)
+      }
+      if (hasFileDetails && (mismatch.primary || mismatch.replica)) {
+        details.push(
+          `Хеш каталога config/: основной ${shortHash(mismatch.primary)}, реплика ${shortHash(mismatch.replica)}`,
+        )
+      } else if (mismatch.primary || mismatch.replica) {
+        details.push(`Хеш на основном: ${shortHash(mismatch.primary)}`)
+        details.push(`Хеш на реплике: ${shortHash(mismatch.replica)}`)
+      }
+
+      const hint =
+        'Файлы config/ различаются — проверьте правки на основном узле или выполните синхронизацию.'
+      return {
+        title: 'Разное содержимое файлов',
+        details,
+        fileGroups: hasFileDetails ? fileGroups : undefined,
+        hint,
+      }
+    } else if (mismatch.primary || mismatch.replica) {
+      details.push(`Сравниваемый объект: ${label}`)
       details.push(`Хеш на основном: ${shortHash(mismatch.primary)}`)
       details.push(`Хеш на реплике: ${shortHash(mismatch.replica)}`)
+    } else {
+      details.push(`Сравниваемый объект: ${label}`)
     }
+
     const hint =
       path.startsWith('easyrsa3/') || path === 'wireguard/conf_files'
         ? 'Скорее всего реплика отстаёт от основного — нажмите «Синхронизировать» (копирует PKI и WireGuard).'

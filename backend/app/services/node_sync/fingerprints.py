@@ -15,6 +15,7 @@ from pathlib import Path
 #
 # Add new filenames here when a path is intentionally per-node in HA auto-sync.
 CONFIG_FINGERPRINT_EXCLUDE: frozenset[str] = frozenset({"warper-include-ips.txt"})
+CONFIG_FP_PREFIX = "antizapret/config"
 
 
 def _sha256_file(path: Path) -> str | None:
@@ -55,6 +56,26 @@ def _sha256_directory_glob(
     return hasher.hexdigest()
 
 
+def collect_config_file_fingerprints(
+    config_dir: Path,
+    *,
+    exclude_names: frozenset[str] | None = None,
+) -> dict[str, str]:
+    """Return filename → sha256 for each file in config/ (parity scope)."""
+    if not config_dir.is_dir():
+        return {}
+    result: dict[str, str] = {}
+    for file_path in sorted(config_dir.glob("*")):
+        if not file_path.is_file():
+            continue
+        if exclude_names and file_path.name in exclude_names:
+            continue
+        digest = _sha256_file(file_path)
+        if digest:
+            result[file_path.name] = digest
+    return result
+
+
 def collect_antizapret_fingerprints(install_dir: str | Path = "/root/antizapret") -> dict[str, str]:
     """Return stable path keys → sha256 hex for parity verify."""
     base = Path(install_dir or "/root/antizapret").resolve()
@@ -73,12 +94,20 @@ def collect_antizapret_fingerprints(install_dir: str | Path = "/root/antizapret"
     if wg_hash:
         fingerprints["wireguard/conf_files"] = wg_hash
 
+    config_dir = base / "config"
+    config_file_hashes = collect_config_file_fingerprints(
+        config_dir,
+        exclude_names=CONFIG_FINGERPRINT_EXCLUDE,
+    )
+    for filename, digest in config_file_hashes.items():
+        fingerprints[f"{CONFIG_FP_PREFIX}/{filename}"] = digest
+
     config_hash = _sha256_directory_glob(
-        base / "config",
+        config_dir,
         "*",
         exclude_names=CONFIG_FINGERPRINT_EXCLUDE,
     )
     if config_hash:
-        fingerprints["antizapret/config"] = config_hash
+        fingerprints[CONFIG_FP_PREFIX] = config_hash
 
     return fingerprints

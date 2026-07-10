@@ -1102,6 +1102,7 @@ class NodeSyncMismatch(BaseModel):
     kind: str
     only_primary: list[str] = []
     only_replica: list[str] = []
+    changed_files: list[str] = []
     path: str | None = None
     primary: str | None = None
     replica: str | None = None

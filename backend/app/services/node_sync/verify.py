@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus
 from app.services.node_adapter import NodeAdapter
 from app.services.node_manager import check_node_health, get_adapter_for_node, update_node_from_health
+from app.services.node_sync.fingerprints import CONFIG_FP_PREFIX
 from app.services.node_sync.groups import parse_replica_node_ids
 
 
@@ -30,6 +31,122 @@ def _client_set_diff(primary: set[str], replica: set[str]) -> dict[str, list[str
     if not only_primary and not only_replica:
         return {}
     return {"only_primary": only_primary, "only_replica": only_replica}
+
+
+def _config_file_maps(fingerprints: dict[str, str]) -> dict[str, str]:
+    prefix = f"{CONFIG_FP_PREFIX}/"
+    return {
+        key[len(prefix) :]: value
+        for key, value in fingerprints.items()
+        if key.startswith(prefix) and key != CONFIG_FP_PREFIX
+    }
+
+
+def _has_config_file_detail(fingerprints: dict[str, str]) -> bool:
+    return bool(_config_file_maps(fingerprints))
+
+
+def _enrich_config_fingerprints(fingerprints: dict[str, str], adapter: NodeAdapter) -> dict[str, str]:
+    if _has_config_file_detail(fingerprints):
+        return fingerprints
+    try:
+        file_hashes = adapter.get_config_file_fingerprints()
+    except Exception:
+        return fingerprints
+    if not file_hashes:
+        return fingerprints
+    enriched = dict(fingerprints)
+    for filename, digest in file_hashes.items():
+        enriched[f"{CONFIG_FP_PREFIX}/{filename}"] = digest
+    return enriched
+
+
+def _config_files_diff(primary_fp: dict[str, str], replica_fp: dict[str, str]) -> dict[str, Any] | None:
+    primary_agg = primary_fp.get(CONFIG_FP_PREFIX)
+    replica_agg = replica_fp.get(CONFIG_FP_PREFIX)
+    primary_files = _config_file_maps(primary_fp)
+    replica_files = _config_file_maps(replica_fp)
+    has_primary_detail = bool(primary_files)
+    has_replica_detail = bool(replica_files)
+
+    changed_files: list[str] = []
+    only_primary: list[str] = []
+    only_replica: list[str] = []
+    detail: str | None = None
+
+    if has_primary_detail and has_replica_detail:
+        for name in sorted(set(primary_files) | set(replica_files)):
+            primary_hash = primary_files.get(name)
+            replica_hash = replica_files.get(name)
+            if primary_hash is None:
+                only_replica.append(name)
+            elif replica_hash is None:
+                only_primary.append(name)
+            elif primary_hash != replica_hash:
+                changed_files.append(name)
+    elif has_primary_detail != has_replica_detail:
+        if has_primary_detail:
+            detail = (
+                "Детализация по файлам недоступна на реплике — обновите node agent и повторите проверку."
+            )
+        else:
+            detail = (
+                "Детализация по файлам недоступна на основном узле — "
+                "обновите node agent и повторите проверку."
+            )
+
+    if (
+        primary_agg == replica_agg
+        and not changed_files
+        and not only_primary
+        and not only_replica
+        and not detail
+    ):
+        return None
+
+    result: dict[str, Any] = {
+        "changed_files": changed_files,
+        "only_primary": only_primary,
+        "only_replica": only_replica,
+    }
+    if detail:
+        result["detail"] = detail
+    return result
+
+
+def _fingerprint_mismatches(primary_fp: dict[str, str], replica_fp: dict[str, str]) -> list[dict[str, Any]]:
+    config_prefix = f"{CONFIG_FP_PREFIX}/"
+    skip_keys = {CONFIG_FP_PREFIX} | {
+        key for key in (set(primary_fp) | set(replica_fp)) if key.startswith(config_prefix)
+    }
+    mismatches: list[dict[str, Any]] = []
+
+    for key in sorted((set(primary_fp) | set(replica_fp)) - skip_keys):
+        primary_hash = primary_fp.get(key)
+        replica_hash = replica_fp.get(key)
+        if primary_hash != replica_hash:
+            mismatches.append(
+                {
+                    "kind": "fingerprint",
+                    "path": key,
+                    "primary": primary_hash,
+                    "replica": replica_hash,
+                }
+            )
+
+    config_diff = _config_files_diff(primary_fp, replica_fp)
+    if config_diff:
+        mismatches.append(
+            {
+                "kind": "fingerprint",
+                "path": CONFIG_FP_PREFIX,
+                "primary": primary_fp.get(CONFIG_FP_PREFIX),
+                "replica": replica_fp.get(CONFIG_FP_PREFIX),
+                **config_diff,
+            }
+        )
+
+    return mismatches
 
 
 def verify_sync_group(
@@ -61,7 +178,10 @@ def verify_sync_group(
     primary_adapter = get_adapter_for_node(primary_node)
     primary_ovpn = set(primary_adapter.list_openvpn_clients())
     primary_wg = set(primary_adapter.list_wireguard_clients())
-    primary_fp = primary_adapter.get_antizapret_fingerprints()
+    primary_fp = _enrich_config_fingerprints(
+        primary_adapter.get_antizapret_fingerprints(),
+        primary_adapter,
+    )
 
     replica_results: list[dict[str, Any]] = []
     replica_ids = parse_replica_node_ids(group.replica_node_ids)
@@ -99,21 +219,14 @@ def verify_sync_group(
             ready = False
             mismatches.append({"kind": "wireguard_clients", **wg_diff})
 
-        replica_fp = adapter.get_antizapret_fingerprints()
-        all_keys = sorted(set(primary_fp) | set(replica_fp))
-        for key in all_keys:
-            primary_hash = primary_fp.get(key)
-            replica_hash = replica_fp.get(key)
-            if primary_hash != replica_hash:
-                ready = False
-                mismatches.append(
-                    {
-                        "kind": "fingerprint",
-                        "path": key,
-                        "primary": primary_hash,
-                        "replica": replica_hash,
-                    }
-                )
+        replica_fp = _enrich_config_fingerprints(
+            adapter.get_antizapret_fingerprints(),
+            adapter,
+        )
+        fp_mismatches = _fingerprint_mismatches(primary_fp, replica_fp)
+        if fp_mismatches:
+            ready = False
+            mismatches.extend(fp_mismatches)
 
         replica_results.append(
             {

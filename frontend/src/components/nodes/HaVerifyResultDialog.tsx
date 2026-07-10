@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import type { HaVerifyResultVariant, HaVerifyResultView } from '@/lib/haVerifySummary'
+import type { HaVerifyFileGroup, HaVerifyResultVariant, HaVerifyResultView } from '@/lib/haVerifySummary'
 import { cn } from '@/lib/utils'
 
 const variantStyles: Record<
@@ -32,6 +32,29 @@ type HaVerifyResultDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   result: HaVerifyResultView | null
+}
+
+function VerifyFileGroupList({ group }: { group: HaVerifyFileGroup }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs font-medium text-foreground">{group.label}</p>
+      <ul
+        className={cn(
+          'space-y-1 rounded-md border bg-background/70 p-2',
+          group.files.length > 6 && 'max-h-36 overflow-y-auto',
+        )}
+      >
+        {group.files.map((file) => (
+          <li key={file.filename} className="text-xs leading-snug">
+            <span className="font-mono text-foreground">{file.filename}</span>
+            {file.title ? (
+              <span className="mt-0.5 block text-[11px] text-muted-foreground">{file.title}</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 export default function HaVerifyResultDialog({ open, onOpenChange, result }: HaVerifyResultDialogProps) {
@@ -112,11 +135,20 @@ export default function HaVerifyResultDialog({ open, onOpenChange, result }: HaV
                               className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3"
                             >
                               <p className="text-sm font-medium text-foreground">{mismatch.title}</p>
-                              <ul className="mt-1 space-y-0.5 text-sm text-muted-foreground">
-                                {mismatch.details.map((detail) => (
-                                  <li key={detail}>{detail}</li>
-                                ))}
-                              </ul>
+                              {mismatch.details.length ? (
+                                <ul className="mt-1 space-y-0.5 text-sm text-muted-foreground">
+                                  {mismatch.details.map((detail) => (
+                                    <li key={detail}>{detail}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                              {mismatch.fileGroups?.length ? (
+                                <div className="mt-2 space-y-2">
+                                  {mismatch.fileGroups.map((group) => (
+                                    <VerifyFileGroupList key={group.label} group={group} />
+                                  ))}
+                                </div>
+                              ) : null}
                               {mismatch.hint ? (
                                 <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
                                   <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0" />

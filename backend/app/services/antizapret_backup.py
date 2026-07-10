@@ -10,7 +10,7 @@ import subprocess
 import tarfile
 from pathlib import Path
 
-from app.services.node_sync.fingerprints import collect_antizapret_fingerprints
+from app.services.node_sync.fingerprints import collect_antizapret_fingerprints, collect_config_file_fingerprints, CONFIG_FINGERPRINT_EXCLUDE
 
 
 class AntizapretBackupService:
@@ -118,6 +118,12 @@ class AntizapretBackupService:
 
     def get_fingerprints(self) -> dict[str, str]:
         return collect_antizapret_fingerprints(self.install_dir)
+
+    def get_config_file_fingerprints(self) -> dict[str, str]:
+        return collect_config_file_fingerprints(
+            Path(self.install_dir) / "config",
+            exclude_names=CONFIG_FINGERPRINT_EXCLUDE,
+        )
 
     def _copy_tree(self, src: Path, dst: Path) -> None:
         if not src.is_dir():

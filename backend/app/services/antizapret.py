@@ -114,6 +114,9 @@ class AntiZapretService:
     def get_antizapret_fingerprints(self) -> dict[str, str]:
         return AntizapretBackupService(install_dir=self.base_path).get_fingerprints()
 
+    def get_config_file_fingerprints(self) -> dict[str, str]:
+        return AntizapretBackupService(install_dir=self.base_path).get_config_file_fingerprints()
+
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]:
         files: list[dict[str, str]] = []
         if vpn_type == VpnType.openvpn:

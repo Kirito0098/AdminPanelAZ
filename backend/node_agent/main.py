@@ -343,6 +343,17 @@ def antizapret_fingerprints(_: None = Depends(verify_api_key)):
     return {"fingerprints": service.get_antizapret_fingerprints()}
 
 
+@app.get("/backups/antizapret/config-file-fingerprints")
+def antizapret_config_file_fingerprints(_: None = Depends(verify_api_key)):
+    from app.services.node_sync.fingerprints import CONFIG_FINGERPRINT_EXCLUDE, collect_config_file_fingerprints
+
+    files = collect_config_file_fingerprints(
+        ANTIZAPRET_PATH / "config",
+        exclude_names=CONFIG_FINGERPRINT_EXCLUDE,
+    )
+    return {"files": files}
+
+
 @app.post("/services/restart")
 def restart_service(payload: ServiceRestartRequest, _: None = Depends(verify_api_key)):
     output = service.restart_service(payload.service_name)

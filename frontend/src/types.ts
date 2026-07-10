@@ -39,6 +39,7 @@ export interface NodeSyncMismatch {
   kind: string
   only_primary?: string[]
   only_replica?: string[]
+  changed_files?: string[]
   path?: string | null
   primary?: string | null
   replica?: string | null

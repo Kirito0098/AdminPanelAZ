@@ -371,6 +371,9 @@ class LocalNodeAdapter(NodeAdapter):
     def get_antizapret_fingerprints(self) -> dict[str, str]:
         return self._service.get_antizapret_fingerprints()
 
+    def get_config_file_fingerprints(self) -> dict[str, str]:
+        return self._service.get_config_file_fingerprints()
+
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]:
         return self._service.get_profile_files(client_name, vpn_type)
 
@@ -895,6 +898,15 @@ class RemoteNodeAdapter(NodeAdapter):
     def get_antizapret_fingerprints(self) -> dict[str, str]:
         data = self._request("GET", "/backups/antizapret/fingerprints", timeout=60.0)
         return dict(data.get("fingerprints") or {})
+
+    def get_config_file_fingerprints(self) -> dict[str, str]:
+        try:
+            data = self._request("GET", "/backups/antizapret/config-file-fingerprints", timeout=60.0)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                return {}
+            raise
+        return dict(data.get("files") or {})
 
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]:
         data = self._request(
