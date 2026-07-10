@@ -15,6 +15,10 @@ from app.models import Node, NodeSyncGroup, SyncStatus, VpnConfig, VpnType
 from app.services.action_log import log_action
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.groups import get_replica_nodes, is_auto_sync_enabled
+from app.services.node_sync.vpn_state_sync import (
+    sync_openvpn_pki_from_primary,
+    sync_vpn_crypto_from_primary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,19 +85,25 @@ def iter_replica_adapters(db: Session, group: NodeSyncGroup) -> Iterator[tuple[N
         yield replica_node, get_adapter_for_node(replica_node)
 
 
+def _primary_adapter(db: Session, group: NodeSyncGroup):
+    primary_node = db.get(Node, group.primary_node_id)
+    if primary_node is None:
+        raise ValueError(f"Primary node {group.primary_node_id} not found")
+    return get_adapter_for_node(primary_node)
+
+
 def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, Any]) -> ReplicateResult:
     primary_config: VpnConfig = payload["primary_config"]
     result = ReplicateResult(operation=ReplicateOperation.CLIENT_CREATE)
+    primary_adapter = _primary_adapter(db, group)
 
     for replica_node, adapter in iter_replica_adapters(db, group):
         try:
-            if primary_config.vpn_type == VpnType.openvpn:
-                adapter.add_openvpn_client(
-                    primary_config.client_name,
-                    primary_config.cert_expire_days or 3650,
-                )
-            else:
-                adapter.add_wireguard_client(primary_config.client_name)
+            sync_vpn_crypto_from_primary(
+                primary_adapter,
+                adapter,
+                primary_config.vpn_type,
+            )
         except Exception as exc:
             logger.warning(
                 "HA auto-sync create failed on replica %s: %s",
@@ -141,6 +151,7 @@ def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, 
 def _handle_client_delete(db: Session, group: NodeSyncGroup, payload: dict[str, Any]) -> ReplicateResult:
     primary_config: VpnConfig = payload["primary_config"]
     result = ReplicateResult(operation=ReplicateOperation.CLIENT_DELETE)
+    primary_adapter = _primary_adapter(db, group)
 
     for shadow in get_shadow_configs(db, group, primary_config):
         replica_node = db.get(Node, shadow.node_id)
@@ -149,10 +160,7 @@ def _handle_client_delete(db: Session, group: NodeSyncGroup, payload: dict[str, 
             continue
         adapter = get_adapter_for_node(replica_node)
         try:
-            if shadow.vpn_type == VpnType.openvpn:
-                adapter.delete_openvpn_client(shadow.client_name)
-            else:
-                adapter.delete_wireguard_client(shadow.client_name)
+            sync_vpn_crypto_from_primary(primary_adapter, adapter, shadow.vpn_type)
         except Exception as exc:
             logger.warning(
                 "HA auto-sync delete failed on replica %s: %s",
@@ -178,6 +186,7 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
         result.errors.append({"error": "cert renew applies only to OpenVPN clients"})
         return result
 
+    primary_adapter = _primary_adapter(db, group)
     shadow_by_node_id = {shadow.node_id: shadow for shadow in get_shadow_configs(db, group, primary_config)}
     for replica_node in get_replica_nodes(db, group):
         shadow = shadow_by_node_id.get(replica_node.id)
@@ -192,7 +201,7 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
             continue
         adapter = get_adapter_for_node(replica_node)
         try:
-            adapter.add_openvpn_client(primary_config.client_name, cert_expire_days)
+            sync_openvpn_pki_from_primary(primary_adapter, adapter)
             shadow.cert_expire_days = cert_expire_days
             db.flush()
         except Exception as exc:

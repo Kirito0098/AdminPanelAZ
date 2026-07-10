@@ -176,6 +176,24 @@ def block_client_runtime(client_name: str) -> dict:
     }
 
 
+def sync_all_wireguard_interfaces(*, timeout: int = COMMAND_TIMEOUT_SECONDS) -> dict:
+    """Apply on-disk WireGuard server configs to running interfaces via wg syncconf."""
+    synced: list[str] = []
+    errors: list[dict] = []
+    for interface_name in sorted(WG_CONFIG_FILES):
+        ok, stderr = _sync_interface_from_stripped_config(interface_name, timeout=timeout)
+        if ok:
+            synced.append(interface_name)
+        else:
+            errors.append({"interface": interface_name, "stderr": stderr})
+    return {
+        "success": not errors,
+        "synced": synced,
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
 def unblock_client_runtime(client_name: str) -> dict:
     config_files = WG_CONFIG_FILES
     specs = _peer_specs_for_client(client_name, config_files=config_files)

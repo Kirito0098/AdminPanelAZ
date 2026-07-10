@@ -54,8 +54,8 @@ Node agent: `POST /backups/antizapret/restore`, `GET /backups/antizapret/downloa
 
 | Операция | Replica |
 |----------|---------|
-| Create / delete client | OVPN cert / WG peer + shadow `VpnConfig` |
-| Renew OpenVPN cert | Тот же `client_name`, новый срок |
+| Create / delete client | Копия crypto-состояния primary: `/etc/wireguard/*.conf` + `client.sh 7` (WG/AWG) или `/etc/openvpn/easyrsa3/` + `client.sh 7` + restart OpenVPN (OVPN); shadow `VpnConfig` |
+| Renew OpenVPN cert | Копия easyrsa3 с primary + перегенерация профилей; тот же `client_name`, новый срок |
 | Temp / permanent block, unblock | Та же политика в БД + runtime (iptables/WG) |
 | Set / clear traffic limit | Те же `traffic_limit_*` + reconcile runtime |
 | WG set-expiry | Тот же `expires_at` + runtime |
@@ -114,7 +114,7 @@ Node agent: `POST /backups/antizapret/restore`, `GET /backups/antizapret/downloa
 - Primary **не откатывается** при ошибке на одной replica.
 - `sync_status=failed`, `last_sync_error` — детали; audit `ha_replicate_partial_failure`.
 - UI: warning-toast при `sync_status=failed` (polling auto-групп) или при `warnings` в API.
-- **Auto-heal** (opt-in, `NODE_SYNC_AUTO_HEAL=true`): reconcile worker пытается incremental heal (`policy_sync` / `config_sync` / `antizapret_sync`); **никогда** auto Push full. После N неудач — notify + `failed`.
+- **Auto-heal** (opt-in, `NODE_SYNC_AUTO_HEAL=true`): reconcile worker пытается incremental heal (`crypto_sync` / `policy_sync` / `config_sync` / `antizapret_sync`); **никогда** auto Push full. После N неудач — notify + `failed`.
 
 ### Reconcile worker
 

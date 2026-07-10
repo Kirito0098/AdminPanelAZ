@@ -338,6 +338,21 @@ class LocalNodeAdapter(NodeAdapter):
     def recreate_profiles(self) -> str:
         return self._service.recreate_profiles()
 
+    def read_wireguard_server_config(self, interface: str) -> str:
+        return self._service.read_wireguard_server_config(interface)
+
+    def write_wireguard_server_config(self, interface: str, content: str) -> None:
+        self._service.write_wireguard_server_config(interface, content)
+
+    def apply_wireguard_runtime(self) -> dict:
+        return self._service.apply_wireguard_runtime()
+
+    def export_easyrsa3_archive(self) -> bytes:
+        return self._service.export_easyrsa3_archive()
+
+    def import_easyrsa3_archive(self, data: bytes) -> None:
+        self._service.import_easyrsa3_archive(data)
+
     def create_antizapret_backup(self) -> dict[str, str]:
         return self._service.create_antizapret_backup()
 
@@ -864,6 +879,32 @@ class RemoteNodeAdapter(NodeAdapter):
     def recreate_profiles(self) -> str:
         data = self._request("POST", "/configs/recreate-profiles", timeout=300.0)
         return data.get("detail") or data.get("message", "ok")
+
+    def read_wireguard_server_config(self, interface: str) -> str:
+        data = self._request("GET", f"/wireguard/server-config/{interface}", timeout=60.0)
+        return data.get("content", "")
+
+    def write_wireguard_server_config(self, interface: str, content: str) -> None:
+        self._request(
+            "PUT",
+            f"/wireguard/server-config/{interface}",
+            json={"content": content},
+            timeout=60.0,
+        )
+
+    def apply_wireguard_runtime(self) -> dict:
+        return self._request("POST", "/wireguard/apply-runtime", timeout=60.0)
+
+    def export_easyrsa3_archive(self) -> bytes:
+        return self._request_bytes("GET", "/openvpn/easyrsa3/export", timeout=120.0)
+
+    def import_easyrsa3_archive(self, data: bytes) -> None:
+        self._request(
+            "POST",
+            "/openvpn/easyrsa3/import",
+            files={"archive": ("easyrsa3.tar.gz", data, "application/gzip")},
+            timeout=120.0,
+        )
 
     def create_antizapret_backup(self) -> dict[str, str]:
         data = self._request("POST", "/backups/antizapret", timeout=600.0)

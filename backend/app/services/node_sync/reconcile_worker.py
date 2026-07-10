@@ -15,6 +15,7 @@ from app.services.node_sync.antizapret_sync import heal_antizapret_drift
 from app.services.node_sync.config_sync import heal_config_drift
 from app.services.node_sync.groups import is_auto_sync_enabled
 from app.services.node_sync.policy_sync import heal_policy_drift
+from app.services.node_sync.vpn_state_sync import heal_crypto_drift
 from app.services.node_sync.verify import verify_sync_group
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ def classify_heal_actions(verify_result: dict[str, Any]) -> tuple[set[str], bool
                 has_unhealable = True
                 continue
             if kind in _CLIENT_DRIFT_KINDS:
+                actions.add("crypto_sync")
                 actions.add("policy")
                 has_healable = True
                 continue
@@ -47,7 +49,8 @@ def classify_heal_actions(verify_result: dict[str, Any]) -> tuple[set[str], bool
                     actions.add("antizapret")
                     has_healable = True
                 elif path == "wireguard/conf_files" or path.startswith(_PKI_FP_PREFIX):
-                    has_unhealable = True
+                    actions.add("crypto_sync")
+                    has_healable = True
                 else:
                     actions.add("config")
                     has_healable = True
@@ -85,11 +88,16 @@ def _attempt_incremental_heal(
     """Run incremental heal paths for detected drift. Never invokes Push full."""
     actions, unhealable_only = classify_heal_actions(verify_result)
     if unhealable_only:
-        return False, ["incremental heal cannot fix offline nodes, PKI, or wireguard peer drift"]
+        return False, ["incremental heal cannot fix offline nodes"]
     if not actions:
         return False, ["no incremental heal actions for detected drift"]
 
     errors: list[str] = []
+    if "crypto_sync" in actions:
+        result = heal_crypto_drift(db, group)
+        if not result.get("success"):
+            for entry in result.get("errors") or []:
+                errors.append(str(entry.get("error") or entry))
     if "config" in actions:
         result = heal_config_drift(db, group)
         if not result.get("success"):

@@ -2,6 +2,8 @@ import csv
 import io
 import re
 import subprocess
+import tarfile
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +18,9 @@ from app.services.profile_files import iter_client_profile_paths, profile_filena
 
 settings = get_settings()
 CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+WIREGUARD_SERVER_INTERFACES = frozenset({"antizapret", "vpn"})
+WIREGUARD_SERVER_CONFIG_DIR = Path("/etc/wireguard")
+EASYRSA3_ROOT = Path("/etc/openvpn/easyrsa3")
 
 
 class AntiZapretService:
@@ -104,6 +109,70 @@ class AntiZapretService:
 
     def recreate_profiles(self) -> str:
         return self._run_client_script("7", timeout=300)
+
+    def _wireguard_server_config_path(self, interface: str) -> Path:
+        normalized = (interface or "").strip().lower()
+        if normalized not in WIREGUARD_SERVER_INTERFACES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Недопустимый WireGuard interface: {interface}",
+            )
+        return WIREGUARD_SERVER_CONFIG_DIR / f"{normalized}.conf"
+
+    def read_wireguard_server_config(self, interface: str) -> str:
+        path = self._wireguard_server_config_path(interface)
+        if not path.is_file():
+            return ""
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    def write_wireguard_server_config(self, interface: str, content: str) -> None:
+        path = self._wireguard_server_config_path(interface)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content or "", encoding="utf-8")
+
+    def apply_wireguard_runtime(self) -> dict:
+        from app.services.wg_runtime import sync_all_wireguard_interfaces
+
+        return sync_all_wireguard_interfaces()
+
+    def export_easyrsa3_archive(self) -> bytes:
+        if not EASYRSA3_ROOT.is_dir():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Каталог easyrsa3 не найден: {EASYRSA3_ROOT}",
+            )
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            for item in sorted(EASYRSA3_ROOT.rglob("*")):
+                if not item.is_file():
+                    continue
+                arcname = item.relative_to(EASYRSA3_ROOT.parent).as_posix()
+                archive.add(item, arcname=arcname)
+        return buffer.getvalue()
+
+    def import_easyrsa3_archive(self, data: bytes) -> None:
+        if not data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Пустой архив easyrsa3",
+            )
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+                tmp.write(data)
+                temp_path = tmp.name
+            with tarfile.open(temp_path, "r:gz") as archive:
+                for member in archive.getmembers():
+                    if member.name == "easyrsa3" or member.name.startswith("easyrsa3/"):
+                        archive.extract(member, path="/etc/openvpn", filter="data")
+            if not EASYRSA3_ROOT.is_dir():
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Архив easyrsa3 не содержит каталог easyrsa3",
+                )
+        finally:
+            if temp_path:
+                Path(temp_path).unlink(missing_ok=True)
 
     def create_antizapret_backup(self) -> dict[str, str]:
         return AntizapretBackupService(install_dir=self.base_path).create_backup()

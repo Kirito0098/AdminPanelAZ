@@ -37,7 +37,7 @@
 
 ## [Unreleased]
 
-> **Кратко:** переработка Telegram-бота — компактное меню, сводка трафика с топ-5, метки OVPN/WG/AWG на конфигах, live-скорость сети в /status для admin; сброс Web App-кнопки меню при webhook; двусторонняя синхронизация VPN-клиентов с диском узла; CLI `reset-password.py` для сброса паролей и второго фактора; автоперезапуск панели после восстановления из бэкапа; подсказки в UI обновления о длительной сборке и ложной «Ошибке опроса»; HA — перезапуск OpenVPN после синхронизации, модальные отчёты «Синхронизировать» и «Проверить» с понятными описаниями, live health-check перед verify, **детализация расхождений config/ по файлам** (группы провайдеров/маршрутизации, без ложного «Только на основном» при устаревшем node agent); публикация панели по подпути на общем домене (`ACCESS_PATH`, nginx snippet); интеграция со [StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) на общем домене; скрипт восстановления nginx после сбоя сторонних uninstall-скриптов; согласованность «Адрес сайта и HTTPS» — нестандартные порты, `HTTP_ACME_PORT`, определение nginx-режима и единое имя вкладки; исправления багов мастера публикации (зависший диалог, залипший `ACCESS_PATH`, рассинхрон `.env`/форма, проверка портов и общего домена).
+> **Кратко:** переработка Telegram-бота — компактное меню, сводка трафика с топ-5, метки OVPN/WG/AWG на конфигах, live-скорость сети в /status для admin; сброс Web App-кнопки меню при webhook; двусторонняя синхронизация VPN-клиентов с диском узла; CLI `reset-password.py` для сброса паролей и второго фактора; автоперезапуск панели после восстановления из бэкапа; подсказки в UI обновления о длительной сборке и ложной «Ошибке опроса»; HA — **копирование ключей WG/AWG и OpenVPN с primary на replica** в `sync_mode=auto` (без `client.sh 4/1` на реплике), auto-heal `crypto_sync`, перезапуск OpenVPN после синхронизации, модальные отчёты «Синхронизировать» и «Проверить» с понятными описаниями, live health-check перед verify, **детализация расхождений config/ по файлам** (группы провайдеров/маршрутизации, без ложного «Только на основном» при устаревшем node agent); публикация панели по подпути на общем домене (`ACCESS_PATH`, nginx snippet); интеграция со [StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) на общем домене; скрипт восстановления nginx после сбоя сторонних uninstall-скриптов; согласованность «Адрес сайта и HTTPS» — нестандартные порты, `HTTP_ACME_PORT`, определение nginx-режима и единое имя вкладки; исправления багов мастера публикации (зависший диалог, залипший `ACCESS_PATH`, рассинхрон `.env`/форма, проверка портов и общего домена).
 
 ### ✨ Added
 
@@ -72,6 +72,9 @@
 #### Node Sync / HA
 
 - **Перезапуск OpenVPN после синхронизации** — после Push full на каждой реплике и после «Домен → узлы» на всех узлах группы выполняется `systemctl restart` для всех установленных `openvpn-server@*` (`openvpn_restart.py`, `push_full.py`, `shared_domain.py`).
+- **Копирование crypto-состояния primary → replica** — модуль `vpn_state_sync.py`: WireGuard — `/etc/wireguard/antizapret.conf` и `vpn.conf`, `wg syncconf`, `client.sh 7`; OpenVPN — tar `/etc/openvpn/easyrsa3/`, `client.sh 7`, restart OpenVPN (`replicate.py` create/delete/renew).
+- **API node agent для HA crypto sync** — `GET/PUT /wireguard/server-config/{interface}`, `POST /wireguard/apply-runtime`, `GET /openvpn/easyrsa3/export`, `POST /openvpn/easyrsa3/import`; прокси в `LocalNodeAdapter` / `RemoteNodeAdapter` (`antizapret.py`, `node_agent/main.py`, `node_adapter.py`).
+- **Auto-heal `crypto_sync`** — reconcile worker при drift `wireguard/conf_files`, `easyrsa3/*`, списков OVPN/WG клиентов копирует PKI и WG peers с primary на все replica (opt-in `NODE_SYNC_AUTO_HEAL=true`; без auto Push full) (`reconcile_worker.py`, `heal_crypto_drift`).
 - **Модальное окно отчёта синхронизации** — после «Синхронизировать» и «Домен → узлы» вместо длинного toast открывается `HaSyncResultDialog`: секции (домен в setup, копия AntiZapret, адреса в конфигах, перезапуск OpenVPN), пояснения к шагам и итог с рекомендацией «Проверить» (`haSyncSummary.ts`, `NodeSyncGroupSection.tsx`).
 - **Модальное окно отчёта проверки** — кнопка «Проверить» и ссылка «Отчёт проверки» открывают `HaVerifyResultDialog`: список проверок (клиенты OVPN/WG, PKI, config/), расхождения с подсказками «что делать», блок «Дальше» (DNS / синхронизация) (`haVerifySummary.ts`, `HaVerifyResultDialog.tsx`).
 - **Детализация расхождений config/ в HA verify** — per-file SHA256 для `antizapret/config/*.txt`, один mismatch с полями `changed_files` / `only_primary` / `only_replica`; в UI — сгруппированные списки (провайдеры CIDR, списки маршрутизации, прочие), моноширинные имена файлов и подписи из редактора (`fingerprints.py`, `verify.py`, `haVerifySummary.ts`).
@@ -112,6 +115,7 @@
 - **Проверка паритета (verify)** — перед сравнением primary и replica выполняется live health-check каждого узла; статус в БД обновляется, чтобы не помечать доступную реплику как `node_status: offline` после синхронизации (`verify.py`, `_refresh_node_online`).
 - **Сводки verify на русском** — итог проверки: «Готово к DNS-переключению» / «Расхождения между основным узлом и репликой» вместо англоязычных строк в API и UI.
 - **Отчёт проверки в UI** — убран общий жёлтый баннер под таблицей HA-групп; результат привязан к группе, статус в строке обновляется сразу после «Проверить».
+- **HA auto-sync create/delete/renew** — в `sync_mode=auto` на replica больше не вызывается `client.sh 4/1` (новые ключи на каждом узле); вместо этого копируется crypto-состояние primary — один профиль работает на обоих IP через общий домен (`vpn_state_sync.py`, `replicate.py`). Push full по-прежнему нужен для первичного выравнивания и recovery после split-brain.
 
 #### Адрес сайта и HTTPS
 
@@ -135,14 +139,22 @@
 
 - **OpenVPN restart после HA** — `test_node_sync_openvpn_restart.py`: перезапуск установленных `openvpn-server@*`, пропуск отсутствующих unit без ошибки.
 - **HA verify config/** — `test_node_sync_fingerprints.py`, `test_node_sync_verify_config_diff.py`: per-file ключи, симметричный и асимметричный diff, enrichment через fallback API.
+- **HA crypto sync** — `test_vpn_state_sync.py`, `test_node_sync_replicate_crypto.py`: копирование WG conf / easyrsa3 primary→replica, replicate create/delete/renew без `client.sh 4/1` на replica, classify heal `crypto_sync`.
 - **`ACCESS_PATH`** — `test_panel_paths.py`: нормализация подпути, `with_access_path`, `strip_access_path`, валидатор в `Settings`.
 - **Адрес сайта и HTTPS** — `test_panel_publish_info.py`: `public_https_origin_*`, `get_panel_branding` с нестандартным портом, `resolve_active_publish_mode_key` (nginx LE/custom/self-signed, cert из vhost), `HTTP_ACME_PORT` в `env_rows`, `nginx_listens_on_https_port`.
 - **Баги мастера публикации** — `test_panel_publish_info.py`: `inspect_tcp_port` без ложного «занят» на `:8080` при проверке `:80`, пустой `ACCESS_PATH` при явном unset в `.env`, устойчивость к невалидному `ACCESS_PATH` на GET, `uvicorn_le` при LE-сертификате на диске; `publishWizardUi.test.ts`: `isPublishStartTransientError` (404 не transient), `guessPublishAccessUrl` без подпути для non-nginx режимов.
 
 ### 🐛 Fixed
 
+#### Node Sync / HA
+
+- **Разные ключи WG/AWG и OpenVPN на replica при auto-sync** — create/delete/renew на primary реплицировался через `add_wireguard_client` / `add_openvpn_client` на каждой реплике; клиентский профиль с primary не подключался к IP replica. Исправлено копированием `/etc/wireguard/*.conf` и `/etc/openvpn/easyrsa3/` с primary (`vpn_state_sync.py`). Для уже созданных клиентов с drift — один раз **Push full** или auto-heal с `NODE_SYNC_AUTO_HEAL=true`.
+
 - **HA verify: ложный `node_status`** — проверка опиралась только на кэшированный статус узла в БД; после Push full реплика могла быть доступна, но помечалась «Есть расхождения» до ручного health-poll (`verify.py`).
 - **HA verify: ложное «Только на основном» для config/** — если реплика отдавала только агрегатный хеш `antizapret/config` (устаревший node agent), все файлы primary ошибочно считались отсутствующими на реплике; per-file diff выполняется только при симметричных данных, иначе — `detail` с просьбой обновить агент (`verify.py`, `haVerifySummary.ts`).
+
+#### Прочее
+
 - **Восстановление из бэкапа (SQLite WAL)** — после записи `adminpanel.db` и `cidr.db` удаляются файлы `-wal`/`-shm`; без этого при работающей панели восстановленная база могла оставаться пустой или битой, хотя архив содержал полные данные (`backup_manager.py`, `remove_sqlite_sidecars`).
 - **Диагностика сайта** — 500 при `BEHIND_NGINX`: в тексте health-probe не была определена `app_port` (`site_diagnostics.py`).
 - **`ACCESS_PATH` на выделенном домене** — корень и прочие пути вне подпути отдают 404 без редиректа; убирает дефолтную страницу «Welcome to nginx» (`nginx-common.sh`).

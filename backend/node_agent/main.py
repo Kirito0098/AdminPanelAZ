@@ -1,6 +1,7 @@
 """Lightweight AntiZapret node agent — runs on each VPN server node."""
 
 import ipaddress
+import io
 import json
 import os
 import secrets
@@ -267,6 +268,46 @@ def block_wireguard(client_name: str, _: None = Depends(verify_api_key)):
 @app.post("/clients/wireguard/{client_name}/unblock")
 def unblock_wireguard(client_name: str, _: None = Depends(verify_api_key)):
     return unblock_client_runtime(client_name)
+
+
+@app.get("/wireguard/server-config/{interface}")
+def read_wireguard_server_config(interface: str, _: None = Depends(verify_api_key)):
+    return {"content": service.read_wireguard_server_config(interface)}
+
+
+@app.put("/wireguard/server-config/{interface}")
+def write_wireguard_server_config(
+    interface: str,
+    payload: ConfigContent,
+    _: None = Depends(verify_api_key),
+):
+    service.write_wireguard_server_config(interface, payload.content)
+    return {"message": f"WireGuard config {interface} сохранён"}
+
+
+@app.post("/wireguard/apply-runtime")
+def apply_wireguard_runtime(_: None = Depends(verify_api_key)):
+    return service.apply_wireguard_runtime()
+
+
+@app.get("/openvpn/easyrsa3/export")
+def export_easyrsa3(_: None = Depends(verify_api_key)):
+    data = service.export_easyrsa3_archive()
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/gzip",
+        headers={"Content-Disposition": 'attachment; filename="easyrsa3.tar.gz"'},
+    )
+
+
+@app.post("/openvpn/easyrsa3/import")
+async def import_easyrsa3(
+    archive: UploadFile = File(...),
+    _: None = Depends(verify_api_key),
+):
+    content = await archive.read()
+    service.import_easyrsa3_archive(content)
+    return {"message": "easyrsa3 импортирован"}
 
 
 @app.get("/configs/files/{filename}")
