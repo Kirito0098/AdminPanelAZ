@@ -223,7 +223,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               action={
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" size="sm" variant="secondary" asChild>
-                    <Link to="/settings">Настройки → Пользователи</Link>
+                    <Link to="/settings/users">Настройки → Пользователи</Link>
                   </Button>
                   {onNavigate && (
                     <Button type="button" size="sm" variant="outline" onClick={() => onNavigate('interactive')}>
@@ -251,7 +251,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               <SettingsAlert variant="info" title="Кнопка входа не появляется?">
                 Проверьте: токен и способ входа на вкладке <strong>Бот и авторизация</strong>, адрес{' '}
                 <code>{panelDomain}</code> в BotFather (для legacy), модуль Telegram в{' '}
-                <Link to="/settings" className="font-medium text-primary underline-offset-4 hover:underline">
+                <Link to="/settings/modules" className="font-medium text-primary underline-offset-4 hover:underline">
                   Настройки → Модули
                 </Link>{' '}
                 и привязку вашего Telegram ID.
@@ -488,7 +488,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               <SettingsAlert variant="warning" title="Сначала настройте бота">
                 Сохраните токен и имя на вкладке <strong>Бот и авторизация</strong>. Убедитесь, что модуль Telegram
                 включён в{' '}
-                <Link to="/settings" className="font-medium text-primary underline-offset-4 hover:underline">
+                <Link to="/settings/modules" className="font-medium text-primary underline-offset-4 hover:underline">
                   Настройки → Модули
                 </Link>
                 .

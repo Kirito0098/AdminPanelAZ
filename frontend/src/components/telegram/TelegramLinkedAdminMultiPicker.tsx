@@ -78,7 +78,7 @@ export default function TelegramLinkedAdminMultiPicker({
         <Label htmlFor={id}>{label}</Label>
         <SettingsAlert variant="warning" title="Нет администраторов с Telegram ID">
           Укажите Telegram ID в{' '}
-          <Link to="/settings" className="font-medium text-primary underline-offset-4 hover:underline">
+          <Link to="/settings/users" className="font-medium text-primary underline-offset-4 hover:underline">
             Настройки → Пользователи
           </Link>{' '}
           для нужных администраторов.

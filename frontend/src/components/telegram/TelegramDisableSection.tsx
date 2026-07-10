@@ -45,7 +45,7 @@ export default function TelegramDisableSection() {
             Отключить Telegram
           </Button>
           <Button type="button" size="sm" variant="outline" asChild>
-            <Link to="/settings">
+            <Link to="/settings/modules">
               <Puzzle className="mr-1.5 h-4 w-4" />
               Все модули
             </Link>

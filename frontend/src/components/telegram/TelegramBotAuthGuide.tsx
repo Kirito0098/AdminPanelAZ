@@ -68,7 +68,7 @@ export default function TelegramBotAuthGuide({
         </GuideStep>
         <GuideStep step={2} title="Включите модуль Telegram">
           В{' '}
-          <Link to="/settings" className="font-medium text-primary underline-offset-4 hover:underline">
+          <Link to="/settings/modules" className="font-medium text-primary underline-offset-4 hover:underline">
             Настройки → Модули
           </Link>{' '}
           должен быть активен модуль <strong>Telegram</strong> — иначе вход и бот не работают.

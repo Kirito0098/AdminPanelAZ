@@ -59,7 +59,7 @@ export default function TelegramLinkedAdminPicker({
         ) : (
           <SettingsAlert variant="warning" title="Нет администраторов с Telegram ID">
             Укажите Telegram ID в{' '}
-            <Link to="/settings" className="font-medium text-primary underline-offset-4 hover:underline">
+            <Link to="/settings/users" className="font-medium text-primary underline-offset-4 hover:underline">
               Настройки → Пользователи
             </Link>{' '}
             для нужного администратора.
@@ -79,7 +79,7 @@ export default function TelegramLinkedAdminPicker({
         <SettingsAlert variant="warning" title="Telegram ID не привязан к администратору">
           Текущий ID <code className="font-mono">{value}</code> не найден среди администраторов. Выберите из списка
           ниже или обновите профиль в{' '}
-          <Link to="/settings" className="font-medium text-primary underline-offset-4 hover:underline">
+          <Link to="/settings/users" className="font-medium text-primary underline-offset-4 hover:underline">
             Пользователях
           </Link>
           .

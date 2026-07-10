@@ -5,7 +5,6 @@ import {
   Download,
   FlaskConical,
   Globe,
-  KeyRound,
   Puzzle,
   QrCode,
   RefreshCw,
@@ -15,7 +14,6 @@ import {
   Wrench,
 } from 'lucide-react'
 import { SECTION_META } from '@/components/settings/settingsLabels'
-import { cn } from '@/lib/utils'
 
 export type SettingsSection =
   | 'personal'
@@ -42,7 +40,7 @@ type SettingsTabKey =
   | 'qr_downloads'
   | 'monitoring'
 
-interface NavItem {
+export interface SettingsNavItem {
   id: SettingsSection
   label: string
   icon: LucideIcon
@@ -51,18 +49,18 @@ interface NavItem {
   adminOnly?: boolean
 }
 
-interface NavGroup {
+export interface SettingsNavGroup {
   label: string
   description?: string
   adminOnly?: boolean
-  items: NavItem[]
+  items: SettingsNavItem[]
 }
 
 function navItem(
   id: SettingsSection,
   icon: LucideIcon,
-  extra?: Pick<NavItem, 'settingsTab' | 'adminOnly'>,
-): NavItem {
+  extra?: Pick<SettingsNavItem, 'settingsTab' | 'adminOnly'>,
+): SettingsNavItem {
   const meta = SECTION_META[id]
   return {
     id,
@@ -73,7 +71,7 @@ function navItem(
   }
 }
 
-export const SETTINGS_NAV_GROUPS: NavGroup[] = [
+export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
   {
     label: 'Личное',
     description: 'Только ваш аккаунт',
@@ -120,17 +118,9 @@ export const SETTINGS_NAV_GROUPS: NavGroup[] = [
   },
 ]
 
-interface SettingsNavProps {
-  active: SettingsSection
-  onChange: (section: SettingsSection) => void
-  isAdmin: boolean
-  isTabEnabled: (tab: string) => boolean
-  isModuleEnabled?: (key: string) => boolean
-}
-
-function isNavItemVisible(
-  item: NavItem,
-  group: NavGroup,
+export function isNavItemVisible(
+  item: SettingsNavItem,
+  group: SettingsNavGroup,
   isAdmin: boolean,
   isTabEnabled: (tab: string) => boolean,
   isModuleEnabled: (key: string) => boolean,
@@ -143,131 +133,34 @@ function isNavItemVisible(
   return true
 }
 
-function NavGroupHeader({ label, description }: { label: string; description?: string }) {
-  return (
-    <div className="px-3 pb-1.5 pt-4 first:pt-1">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      {description && <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{description}</p>}
-    </div>
-  )
-}
-
-function NavButton({
-  item,
-  isActive,
-  onChange,
-}: {
-  item: NavItem
-  isActive: boolean
-  onChange: (section: SettingsSection) => void
-}) {
-  const Icon = item.icon
-
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(item.id)}
-      aria-current={isActive ? 'page' : undefined}
-      className={cn(
-        'group relative flex w-full items-start gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors',
-        isActive
-          ? 'bg-primary/10 ring-1 ring-primary/20'
-          : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-      )}
-    >
-      <span
-        className={cn(
-          'absolute left-0 top-2.5 bottom-2.5 w-0.5 rounded-full transition-opacity',
-          isActive ? 'bg-primary opacity-100' : 'opacity-0',
-        )}
-        aria-hidden
-      />
-      <span
-        className={cn(
-          'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors',
-          isActive
-            ? 'border-primary/25 bg-primary/15 text-primary'
-            : 'border-transparent bg-muted/60 text-muted-foreground group-hover:border-border/80 group-hover:bg-muted group-hover:text-foreground',
-        )}
-      >
-        <Icon size={18} strokeWidth={2} />
-      </span>
-      <span className="min-w-0 flex-1 pt-0.5">
-        <span
-          className={cn(
-            'block text-sm font-medium leading-snug',
-            isActive ? 'text-foreground' : 'text-foreground',
-          )}
-        >
-          {item.label}
-        </span>
-        <span
-          className={cn(
-            'mt-0.5 block text-xs leading-relaxed text-muted-foreground',
-            !isActive && 'line-clamp-2',
-          )}
-        >
-          {item.description}
-        </span>
-      </span>
-    </button>
-  )
-}
-
-export default function SettingsNav({
-  active,
-  onChange,
-  isAdmin,
-  isTabEnabled,
-  isModuleEnabled = () => true,
-}: SettingsNavProps) {
-  const visibleGroups = SETTINGS_NAV_GROUPS.map((group) => ({
+export function getVisibleNavGroups(
+  isAdmin: boolean,
+  isTabEnabled: (tab: string) => boolean,
+  isModuleEnabled: (key: string) => boolean = () => true,
+): SettingsNavGroup[] {
+  return SETTINGS_NAV_GROUPS.map((group) => ({
     ...group,
     items: group.items.filter((item) =>
       isNavItemVisible(item, group, isAdmin, isTabEnabled, isModuleEnabled),
     ),
   })).filter((group) => group.items.length > 0)
-
-  return (
-    <nav className="space-y-1" aria-label="Разделы настроек">
-      {visibleGroups.map((group) => (
-        <div key={group.label}>
-          <NavGroupHeader label={group.label} description={group.description} />
-          <ul className="space-y-1 px-1">
-            {group.items.map((item) => (
-              <li key={item.id}>
-                <NavButton item={item} isActive={active === item.id} onChange={onChange} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-
-      {!isAdmin && (
-        <div className="mx-1 mt-4 rounded-xl border border-dashed border-border/80 bg-muted/20 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
-          <div className="mb-1.5 flex items-center gap-2 font-medium text-foreground">
-            <KeyRound size={14} className="shrink-0 text-primary" />
-            Только для администратора
-          </div>
-          Остальные разделы настроек скрыты — у вашей роли нет доступа к управлению панелью.
-        </div>
-      )}
-    </nav>
-  )
 }
 
 export function getVisibleNavItems(
   isAdmin: boolean,
   isTabEnabled: (tab: string) => boolean,
   isModuleEnabled: (key: string) => boolean = () => true,
-): NavItem[] {
-  return SETTINGS_NAV_GROUPS.flatMap((group) =>
-    group.items.filter((item) => isNavItemVisible(item, group, isAdmin, isTabEnabled, isModuleEnabled)),
-  )
+): SettingsNavItem[] {
+  return getVisibleNavGroups(isAdmin, isTabEnabled, isModuleEnabled).flatMap((group) => group.items)
 }
 
 export function getDefaultSection(_isAdmin: boolean): SettingsSection {
   return 'personal'
+}
+
+export function isValidSettingsSection(section: string | undefined): section is SettingsSection {
+  if (!section) return false
+  return SETTINGS_NAV_GROUPS.some((group) => group.items.some((item) => item.id === section))
 }
 
 export function isSectionAvailable(

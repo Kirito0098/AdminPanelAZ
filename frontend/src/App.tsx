@@ -57,7 +57,7 @@ export default function App() {
                   <Route path="logs" element={<FeatureGuardRoute anyOf={['logs_dashboard', 'action_logs']}><LogsPage /></FeatureGuardRoute>} />
                   <Route path="server-monitor" element={<FeatureGuardRoute feature="server_monitor"><ServerMonitorPage /></FeatureGuardRoute>} />
                   <Route path="nodes" element={<NodesPage />} />
-                  <Route path="settings" element={<SettingsPage />} />
+                  <Route path="settings/:section?" element={<SettingsPage />} />
                 </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

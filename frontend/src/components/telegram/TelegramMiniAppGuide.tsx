@@ -189,7 +189,7 @@ export default function TelegramMiniAppGuide({
             <span className="text-muted-foreground/60">•</span>
             <span>
               Проверьте привязку: <code>/link</code> на вкладке «Команды бота» или Telegram ID в{' '}
-              <Link to="/settings" className="font-medium text-primary underline-offset-4 hover:underline">
+              <Link to="/settings/users" className="font-medium text-primary underline-offset-4 hover:underline">
                 Настройки → Пользователи
               </Link>
               .

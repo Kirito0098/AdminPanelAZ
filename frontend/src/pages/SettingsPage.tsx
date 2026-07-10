@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Settings } from 'lucide-react'
+import { Navigate, useParams } from 'react-router-dom'
 import { ApiError, changePassword, createUser, deleteUser, getSettings, getUsers } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import BackupTab from '@/components/settings/BackupTab'
@@ -9,10 +10,10 @@ import MaintenanceTab from '@/components/settings/MaintenanceTab'
 import MonitoringTab from '@/components/settings/MonitoringTab'
 import PersonalTab from '@/components/settings/PersonalTab'
 import SecurityTab from '@/components/settings/SecurityTab'
-import SettingsNav, {
+import {
   getDefaultSection,
-  getVisibleNavItems,
   isSectionAvailable,
+  isValidSettingsSection,
   type SettingsSection,
 } from '@/components/settings/SettingsNav'
 import { getSectionMeta } from '@/components/settings/settingsLabels'
@@ -22,16 +23,6 @@ import UpdatesTab from '@/components/settings/UpdatesTab'
 import UsersTab from '@/components/settings/UsersTab'
 import VpnNetworkTab from '@/components/settings/VpnNetworkTab'
 import { NodeBadge } from '@/components/NodeSelector'
-import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
@@ -42,6 +33,7 @@ import { useTheme } from '@/context/ThemeContext'
 import type { AppSettings, User, UserRole } from '@/types'
 
 export default function SettingsPage() {
+  const { section: sectionParam } = useParams<{ section?: string }>()
   const { user } = useAuth()
   const { isSettingsTabEnabled, isEnabled } = useFeatureModules()
   const { activeNode } = useNode()
@@ -58,13 +50,14 @@ export default function SettingsPage() {
   const [newPwd, setNewPwd] = useState('')
   const isAdmin = user?.role === 'admin'
 
-  const [activeSection, setActiveSection] = useState<SettingsSection>(() => getDefaultSection(isAdmin))
+  const defaultSection = getDefaultSection(isAdmin)
 
-  useEffect(() => {
-    if (!isSectionAvailable(activeSection, isAdmin, isSettingsTabEnabled, isEnabled)) {
-      setActiveSection(getDefaultSection(isAdmin))
-    }
-  }, [activeSection, isAdmin, isSettingsTabEnabled, isEnabled])
+  const activeSection = useMemo((): SettingsSection | null => {
+    if (!sectionParam) return null
+    if (!isValidSettingsSection(sectionParam)) return null
+    if (!isSectionAvailable(sectionParam, isAdmin, isSettingsTabEnabled, isEnabled)) return null
+    return sectionParam
+  }, [sectionParam, isAdmin, isSettingsTabEnabled, isEnabled])
 
   const load = async () => {
     startGlobal()
@@ -149,12 +142,11 @@ export default function SettingsPage() {
     }
   }
 
-  const sectionMeta = getSectionMeta(activeSection)
+  if (!activeSection) {
+    return <Navigate to={`/settings/${defaultSection}`} replace />
+  }
 
-  const visibleNavItems = useMemo(
-    () => getVisibleNavItems(isAdmin, isSettingsTabEnabled, isEnabled),
-    [isAdmin, isSettingsTabEnabled, isEnabled],
-  )
+  const sectionMeta = getSectionMeta(activeSection)
 
   const renderSection = () => {
     switch (activeSection) {
@@ -224,62 +216,21 @@ export default function SettingsPage() {
           </div>
           <p className="text-sm text-muted-foreground">
             {isAdmin
-              ? 'Настройте профиль, доступ, VPN и работу панели — разделы сгруппированы по смыслу'
+              ? 'Настройте профиль, доступ, VPN и работу панели — разделы в боковом меню «Система»'
               : 'Тема, пароль и дополнительная защита при входе'}
           </p>
         </div>
       </div>
 
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <div className="space-y-3 lg:hidden">
-          <div className="space-y-2">
-            <Label htmlFor="settings-section-mobile">Раздел настроек</Label>
-            <Select value={activeSection} onValueChange={(value) => setActiveSection(value as SettingsSection)}>
-              <SelectTrigger id="settings-section-mobile">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectLabel>Выберите раздел</SelectLabel>
-                  {visibleNavItems.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
+      <div className="space-y-4">
+        <div className="rounded-lg border bg-muted/30 px-4 py-3">
+          <h3 className="text-lg font-semibold tracking-tight">{sectionMeta.title}</h3>
+          <p className="text-sm text-muted-foreground">{sectionMeta.description}</p>
+          {sectionMeta.hint && (
+            <p className="mt-2 text-sm text-muted-foreground/90">{sectionMeta.hint}</p>
+          )}
         </div>
-
-        <aside className="hidden w-full shrink-0 lg:block lg:sticky lg:top-4 lg:w-72">
-          <div className="rounded-2xl border border-border/80 bg-card p-2 shadow-sm">
-            <div className="border-b border-border/60 px-3 py-3">
-              <p className="text-sm font-medium leading-snug">Разделы</p>
-              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Навигация по настройкам панели</p>
-            </div>
-            <div className="p-1.5">
-              <SettingsNav
-                active={activeSection}
-                onChange={setActiveSection}
-                isAdmin={isAdmin}
-                isTabEnabled={isSettingsTabEnabled}
-                isModuleEnabled={isEnabled}
-              />
-            </div>
-          </div>
-        </aside>
-
-        <main className="min-w-0 flex-1 space-y-4">
-          <div className="rounded-lg border bg-muted/30 px-4 py-3">
-            <h3 className="text-lg font-semibold tracking-tight">{sectionMeta.title}</h3>
-            <p className="text-sm text-muted-foreground">{sectionMeta.description}</p>
-            {sectionMeta.hint && (
-              <p className="mt-2 text-sm text-muted-foreground/90">{sectionMeta.hint}</p>
-            )}
-          </div>
-          {renderSection()}
-        </main>
+        {renderSection()}
       </div>
     </div>
   )
