@@ -205,6 +205,7 @@ class VpnConfigResponse(BaseModel):
     profile_files: list[dict[str, str]] = []
     tags: list["ConfigTagResponse"] = []
     ha: VpnConfigHaInfo | None = None
+    ha_replicate_warning: str | None = None
 
     model_config = {"from_attributes": True}
 

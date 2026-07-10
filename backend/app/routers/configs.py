@@ -28,6 +28,7 @@ from app.services.node_adapter import NodeAdapter
 from app.services.config_import import format_config_disk_sync_message, import_clients_from_disk
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.client_sync import (
+    format_ha_replicate_errors,
     maybe_replicate_cert_renew,
     maybe_replicate_create,
     maybe_replicate_delete,
@@ -156,6 +157,7 @@ def _to_response(
     adapter: NodeAdapter | None = None,
     profile_files: list[dict[str, str]] | None = None,
     tags: list[ConfigTagResponse] | None = None,
+    ha_replicate_warning: str | None = None,
 ) -> VpnConfigResponse:
     owner = db.query(User).filter(User.id == config.owner_id).first()
     files: list[dict[str, str]] = []
@@ -182,6 +184,7 @@ def _to_response(
         profile_files=files,
         tags=tags or [],
         ha=_ha_info_for_config(db, config),
+        ha_replicate_warning=ha_replicate_warning,
     )
 
 
@@ -427,9 +430,11 @@ def create_config(
     db.commit()
     db.refresh(config)
 
+    ha_replicate_warning = None
     group = find_sync_group_for_primary(db, node_id)
     if group:
-        maybe_replicate_create(db, node_id=node_id, primary_config=config)
+        replicate_result = maybe_replicate_create(db, node_id=node_id, primary_config=config)
+        ha_replicate_warning = format_ha_replicate_errors(replicate_result)
 
     node = get_active_node(db)
     admin_notify_service.send_config_create(
@@ -441,7 +446,13 @@ def create_config(
         node_name=node.name,
         client_timezone=get_client_timezone_from_request(request),
     )
-    return _to_response(config, db, include_files=True, adapter=adapter)
+    return _to_response(
+        config,
+        db,
+        include_files=True,
+        adapter=adapter,
+        ha_replicate_warning=ha_replicate_warning,
+    )
 
 
 @router.get("/{config_id}", response_model=VpnConfigResponse)

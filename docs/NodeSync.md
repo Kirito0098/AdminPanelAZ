@@ -29,7 +29,7 @@ Node agent: `POST /backups/antizapret/restore`, `GET /backups/antizapret/downloa
 - Оба сервера должны быть установлены одинаковым `setup.sh`
 - Push full **destructive** на replica
 - Split-brain: изменения только на primary; при failed sync — `sync_status=failed`, Push full или (в `auto`, opt-in) incremental auto-heal
-- **`manual_full`** (по умолчанию) — только Push full; клиенты на replica попадают в панель после Push full (импорт в БД + копирование политик + снимок трафика). HA-бейдж на карточках primary и единый список конфигов primary при активном узле в группе — **да** (`sync_group_id` на primary, без теней на replica). После расформирования группы на replica при необходимости: **Конфигурации → Синхронизировать**
+- **`manual_full`** (по умолчанию) — полное выравнивание через **Push full**; клиенты на replica попадают в панель после Push full (импорт в БД + политики + снимок трафика). HA-бейдж на primary — **да** (`sync_group_id`, без теней на replica). **Create / delete / renew OVPN на primary** дополнительно копируют **crypto-состояние** (WG conf + профили, easyrsa3) на replica — один профиль работает на обоих IP; shadow `VpnConfig` и прочая auto-репликация политик/файлов — **нет**. После расформирования группы на replica: **Конфигурации → Синхронизировать**
 - **`auto`** — см. раздел [v2 — HA auto-sync](#v2--ha-auto-sync-этапы-ac) ниже
 
 ## v2 — HA auto-sync (этапы A–C)
@@ -38,7 +38,7 @@ Node agent: `POST /backups/antizapret/restore`, `GET /backups/antizapret/downloa
 
 | Режим | Поведение | Когда использовать |
 |-------|-----------|-------------------|
-| **`manual_full`** (по умолчанию) | Авто-репликация **отключена**. Выравнивание только **Push full** (backup primary → restore на replica + импорт клиентов и политик в БД). Ручной перенос файлов — fallback. | Первая настройка HA, редкие правки, split-brain recovery |
+| **`manual_full`** (по умолчанию) | Авто-репликация политик/файлов **отключена**. Выравнивание — **Push full**. Create/delete/renew клиента на primary **копирует crypto** (WG + OVPN PKI) на replica без shadow `VpnConfig`. | Первая настройка HA, редкие правки, split-brain recovery |
 | **`auto`** | Изменения на **primary** автоматически реплицируются на все **online** replica группы. Primary — источник истины; на replica — теневые `VpnConfig` (`ha_primary_config_id`) с тем же `client_name`. | Повседневная работа: админ правит только primary |
 
 **Операционные правила (оба режима):**

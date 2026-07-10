@@ -10,6 +10,18 @@ from app.models import VpnConfig
 from app.services.node_sync.groups import find_sync_group_for_primary, is_auto_sync_enabled
 from app.services.node_sync.manual_link import link_primary_config_to_group
 from app.services.node_sync.replicate import ReplicateOperation, replicate_to_replicas
+from app.services.node_sync.vpn_state_sync import replicate_primary_crypto_to_replicas
+
+
+def format_ha_replicate_errors(result: dict[str, Any] | None) -> str | None:
+    if not result:
+        return None
+    errors = result.get("errors") or []
+    if not errors:
+        return None
+    nodes = ", ".join(str(entry.get("node_name") or entry.get("node_id") or "?") for entry in errors)
+    first_error = str(errors[0].get("error") or "неизвестная ошибка")
+    return f"Не удалось синхронизировать VPN-ключи на реплику ({nodes}): {first_error}"
 
 
 def replicate_client_create(
@@ -48,8 +60,16 @@ def maybe_replicate_create(db: Session, *, node_id: int, primary_config: VpnConf
         return None
     if is_auto_sync_enabled(group):
         return replicate_client_create(db, group, primary_config)
+
+    crypto = replicate_primary_crypto_to_replicas(db, group, primary_config)
     link_primary_config_to_group(db, group, primary_config)
-    return {"replicated": [], "skipped": False, "linked": True}
+    return {
+        "replicated": crypto.get("successes") or [],
+        "errors": crypto.get("errors") or [],
+        "skipped": False,
+        "linked": True,
+        "crypto": crypto,
+    }
 
 
 def purge_ha_shadow_configs(db: Session, primary_config_id: int) -> int:
@@ -65,7 +85,16 @@ def maybe_replicate_delete(db: Session, *, node_id: int, primary_config: VpnConf
     group = find_sync_group_for_primary(db, node_id)
     if not group:
         return None
-    return replicate_client_delete(db, group, primary_config)
+    if is_auto_sync_enabled(group):
+        return replicate_client_delete(db, group, primary_config)
+
+    crypto = replicate_primary_crypto_to_replicas(db, group, primary_config)
+    return {
+        "deleted": crypto.get("successes") or [],
+        "errors": crypto.get("errors") or [],
+        "skipped": False,
+        "crypto": crypto,
+    }
 
 
 def maybe_replicate_cert_renew(
@@ -76,15 +105,21 @@ def maybe_replicate_cert_renew(
     cert_expire_days: int,
 ) -> dict[str, Any] | None:
     group = find_sync_group_for_primary(db, node_id)
-    if not group or not is_auto_sync_enabled(group):
+    if not group:
         return None
-    result = replicate_to_replicas(
-        db,
-        group,
-        ReplicateOperation.CLIENT_RENEW_CERT,
-        {"primary_config": primary_config, "cert_expire_days": cert_expire_days},
-    )
-    return result.to_legacy_dict()
+    if is_auto_sync_enabled(group):
+        result = replicate_to_replicas(
+            db,
+            group,
+            ReplicateOperation.CLIENT_RENEW_CERT,
+            {"primary_config": primary_config, "cert_expire_days": cert_expire_days},
+        )
+        return result.to_legacy_dict()
+
+    if primary_config.vpn_type.value != "openvpn":
+        return None
+    crypto = replicate_primary_crypto_to_replicas(db, group, primary_config)
+    return {"successes": crypto.get("successes") or [], "errors": crypto.get("errors") or [], "crypto": crypto}
 
 
 def maybe_replicate_config_metadata(

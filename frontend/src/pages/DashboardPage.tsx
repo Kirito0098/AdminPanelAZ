@@ -74,7 +74,7 @@ export default function DashboardPage() {
   const canCreateClient = openvpnEnabled || wireguardEnabled
   const { activeNode } = useNode()
   const haReplicaReadonly = useHaReplicaReadonly()
-  const { success, error: notifyError } = useNotifications()
+  const { success, error: notifyError, warning: notifyWarning } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
   const { task: importTask, polling: importPolling, startPoll: startImportPoll } = useBackgroundTaskPoll()
   const csvInputRef = useRef<HTMLInputElement>(null)
@@ -242,7 +242,7 @@ export default function DashboardPage() {
     const name = trimmedName
     try {
       await withInline(async () => {
-        await createConfig({
+        const created = await createConfig({
           client_name: name,
           vpn_type: vpnType,
           cert_expire_days: vpnType === 'openvpn' ? certDays : undefined,
@@ -251,6 +251,9 @@ export default function DashboardPage() {
         })
         closeForm()
         await load({ silent: true })
+        if (created.ha_replicate_warning) {
+          notifyWarning(created.ha_replicate_warning)
+        }
       }, 'Создание клиента...')
       success(`Клиент «${name}» создан`)
     } catch (err) {

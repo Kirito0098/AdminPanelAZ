@@ -189,6 +189,7 @@ export interface VpnConfig {
   updated_at: string
   tags?: ConfigTag[]
   ha?: VpnConfigHaInfo | null
+  ha_replicate_warning?: string | null
   profile_files: Array<{
     protocol: string
     variant: string

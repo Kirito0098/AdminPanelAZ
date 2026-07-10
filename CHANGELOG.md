@@ -149,6 +149,9 @@
 #### Node Sync / HA
 
 - **Разные ключи WG/AWG и OpenVPN на replica при auto-sync** — create/delete/renew на primary реплицировался через `add_wireguard_client` / `add_openvpn_client` на каждой реплике; клиентский профиль с primary не подключался к IP replica. Исправлено копированием `/etc/wireguard/*.conf` и `/etc/openvpn/easyrsa3/` с primary (`vpn_state_sync.py`). Для уже созданных клиентов с drift — один раз **Push full** или auto-heal с `NODE_SYNC_AUTO_HEAL=true`.
+- **Crypto-sync не срабатывал в `manual_full`** — при режиме по умолчанию create/delete только привязывал `sync_group_id`, ключи на replica не обновлялись; теперь crypto копируется с primary в любом режиме (`client_sync.py`, `replicate_primary_crypto_to_replicas`).
+- **Разные PrivateKey/PSK в профиле при совпадающем PublicKey в `[Peer]`** — после копии server conf на replica вызывался `client.sh 7` / копировался один профиль; исправлено полным архивом профилей WG/AWG с primary; `wg syncconf` при ошибке не блокирует копирование файлов (`vpn_state_sync.py`).
+- **Auto-sync: пустой/неполный архив профилей WG** — server conf копировался, а профили на replica оставались старыми; import теперь заменяет каталоги `client/wireguard` и `client/amneziawg`, при пустом архиве — fallback копирование файлов нового клиента; ошибка HA показывается в toast при создании (`antizapret.py`, `configs.py`, `DashboardPage.tsx`).
 
 - **HA verify: ложный `node_status`** — проверка опиралась только на кэшированный статус узла в БД; после Push full реплика могла быть доступна, но помечалась «Есть расхождения» до ручного health-poll (`verify.py`).
 - **HA verify: ложное «Только на основном» для config/** — если реплика отдавала только агрегатный хеш `antizapret/config` (устаревший node agent), все файлы primary ошибочно считались отсутствующими на реплике; per-file diff выполняется только при симметричных данных, иначе — `detail` с просьбой обновить агент (`verify.py`, `haVerifySummary.ts`).

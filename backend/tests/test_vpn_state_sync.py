@@ -17,15 +17,12 @@ from app.services.node_sync.replicate import (
 )
 
 
-def test_sync_wireguard_state_from_primary_copies_configs_and_applies_runtime():
+def test_sync_wireguard_state_from_primary_copies_configs_profiles_and_applies_runtime():
     primary = MagicMock()
     replica = MagicMock()
     primary.read_wireguard_server_config.side_effect = lambda iface: f"{iface}-primary"
     replica.apply_wireguard_runtime.return_value = {"success": True, "synced": ["antizapret", "vpn"]}
-    primary.get_profile_files.return_value = [
-        {"path": "/root/antizapret/client/wireguard/vpn/vpn-test-1-wg.conf"},
-    ]
-    primary.read_profile_file.return_value = "profile-content"
+    primary.export_wireguard_client_profiles_archive.return_value = _sample_profile_archive()
 
     vpn_state_sync.sync_wireguard_state_from_primary(primary, replica, client_name="test-1")
 
@@ -34,25 +31,29 @@ def test_sync_wireguard_state_from_primary_copies_configs_and_applies_runtime():
         (("vpn", "vpn-primary"),),
     ]
     replica.apply_wireguard_runtime.assert_called_once()
-    replica.write_profile_file.assert_called_once_with(
-        "/root/antizapret/client/wireguard/vpn/vpn-test-1-wg.conf",
-        "profile-content",
-    )
+    replica.import_wireguard_client_profiles_archive.assert_called_once()
     replica.recreate_profiles.assert_not_called()
     primary.export_easyrsa3_archive.assert_not_called()
 
 
-def test_sync_wireguard_state_full_copies_profile_archive_when_no_client_name():
+def test_sync_wireguard_state_falls_back_to_per_client_profiles_when_archive_empty():
     primary = MagicMock()
     replica = MagicMock()
     primary.read_wireguard_server_config.return_value = "conf"
     replica.apply_wireguard_runtime.return_value = {"success": True, "synced": ["antizapret"]}
-    primary.export_wireguard_client_profiles_archive.return_value = b"profiles-archive"
+    primary.export_wireguard_client_profiles_archive.return_value = _empty_archive()
+    primary.get_profile_files.return_value = [
+        {"path": "/root/antizapret/client/wireguard/vpn/vpn-test-1-wg.conf"},
+    ]
+    primary.read_profile_file.return_value = "profile-content"
 
-    vpn_state_sync.sync_wireguard_state_from_primary(primary, replica)
+    vpn_state_sync.sync_wireguard_state_from_primary(primary, replica, client_name="test-1")
 
-    replica.import_wireguard_client_profiles_archive.assert_called_once_with(b"profiles-archive")
-    replica.recreate_profiles.assert_not_called()
+    replica.write_profile_file.assert_called_once_with(
+        "/root/antizapret/client/wireguard/vpn/vpn-test-1-wg.conf",
+        "profile-content",
+    )
+    replica.import_wireguard_client_profiles_archive.assert_not_called()
 
 
 def test_sync_openvpn_pki_from_primary_imports_archive_and_restarts():
@@ -67,20 +68,19 @@ def test_sync_openvpn_pki_from_primary_imports_archive_and_restarts():
     replica.recreate_profiles.assert_called_once()
 
 
-def test_sync_wireguard_state_raises_when_runtime_apply_fails():
+def test_sync_wireguard_state_continues_when_runtime_apply_fails():
     primary = MagicMock()
     replica = MagicMock()
     primary.read_wireguard_server_config.return_value = "conf"
+    primary.export_wireguard_client_profiles_archive.return_value = _sample_profile_archive()
     replica.apply_wireguard_runtime.return_value = {
         "success": False,
         "errors": [{"interface": "vpn", "stderr": "sync failed"}],
     }
 
-    with pytest.raises(HTTPException) as exc:
-        vpn_state_sync.sync_wireguard_state_from_primary(primary, replica)
+    vpn_state_sync.sync_wireguard_state_from_primary(primary, replica)
 
-    assert exc.value.status_code == 500
-    assert "sync failed" in str(exc.value.detail)
+    replica.import_wireguard_client_profiles_archive.assert_called_once()
 
 
 def test_antizapret_wireguard_server_config_roundtrip(tmp_path, monkeypatch):
@@ -249,7 +249,6 @@ def test_handle_client_delete_syncs_crypto_from_primary(monkeypatch):
         primary_adapter,
         replica_adapter,
         VpnType.wireguard,
-        client_name="carol",
     )
     replica_adapter.delete_wireguard_client.assert_not_called()
     assert result.successes == [{"node_id": 4, "config_id": 40}]
@@ -306,3 +305,20 @@ def test_handle_client_renew_cert_syncs_openvpn_pki(monkeypatch):
     assert result.operation == ReplicateOperation.CLIENT_RENEW_CERT
     assert result.successes == [{"node_id": 5, "config_id": 50}]
     assert shadow.cert_expire_days == 180
+
+
+def _empty_archive() -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz"):
+        pass
+    return buffer.getvalue()
+
+
+def _sample_profile_archive() -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        data = b"[Interface]\nPrivateKey = test\n"
+        info = tarfile.TarInfo(name="client/wireguard/vpn/vpn-test-wg.conf")
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()

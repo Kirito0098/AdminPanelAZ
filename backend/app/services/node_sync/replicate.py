@@ -16,6 +16,7 @@ from app.services.action_log import log_action
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.groups import get_replica_nodes, is_auto_sync_enabled
 from app.services.node_sync.vpn_state_sync import (
+    _error_detail,
     sync_openvpn_pki_from_primary,
     sync_vpn_crypto_from_primary,
 )
@@ -112,7 +113,7 @@ def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, 
                 exc,
             )
             result.errors.append(
-                {"node_id": replica_node.id, "node_name": replica_node.name, "error": str(exc)}
+                {"node_id": replica_node.id, "node_name": replica_node.name, "error": _error_detail(exc)}
             )
             continue
 
@@ -165,7 +166,6 @@ def _handle_client_delete(db: Session, group: NodeSyncGroup, payload: dict[str, 
                 primary_adapter,
                 adapter,
                 shadow.vpn_type,
-                client_name=shadow.client_name,
             )
         except Exception as exc:
             logger.warning(
@@ -174,7 +174,7 @@ def _handle_client_delete(db: Session, group: NodeSyncGroup, payload: dict[str, 
                 exc,
             )
             result.errors.append(
-                {"node_id": replica_node.id, "node_name": replica_node.name, "error": str(exc)}
+                {"node_id": replica_node.id, "node_name": replica_node.name, "error": _error_detail(exc)}
             )
             continue
         result.successes.append({"node_id": replica_node.id, "config_id": shadow.id})
@@ -217,7 +217,7 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
                 exc,
             )
             result.errors.append(
-                {"node_id": replica_node.id, "node_name": replica_node.name, "error": str(exc)}
+                {"node_id": replica_node.id, "node_name": replica_node.name, "error": _error_detail(exc)}
             )
             continue
         result.successes.append({"node_id": replica_node.id, "config_id": shadow.id})

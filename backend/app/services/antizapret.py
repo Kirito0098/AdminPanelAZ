@@ -1,6 +1,7 @@
 import csv
 import io
 import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -282,6 +283,24 @@ class AntiZapretService:
             with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
                 tmp.write(data)
                 temp_path = tmp.name
+            with tarfile.open(temp_path, "r:gz") as archive:
+                has_profile_file = any(
+                    member.isfile()
+                    and (
+                        member.name.startswith("client/wireguard/")
+                        or member.name.startswith("client/amneziawg/")
+                    )
+                    for member in archive.getmembers()
+                )
+                if not has_profile_file:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Архив профилей WireGuard не содержит файлов client/wireguard или client/amneziawg",
+                    )
+            for subdir in WIREGUARD_CLIENT_PROFILE_DIRS:
+                root = self.client_dir / subdir
+                if root.is_dir():
+                    shutil.rmtree(root)
             with tarfile.open(temp_path, "r:gz") as archive:
                 for member in archive.getmembers():
                     name = member.name
