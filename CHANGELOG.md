@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.13.0](#2130---2026-07-11) — 2026-07-11
 - [2.12.0](#2120---2026-07-10) — 2026-07-10
 - [2.11.0](#2110---2026-07-08) — 2026-07-08
 - [2.10.0](#2100---2026-07-05) — 2026-07-05
@@ -37,7 +38,11 @@
 
 ## [Unreleased]
 
-> **Кратко:** переработка Telegram-бота — компактное меню, сводка трафика с топ-5, метки OVPN/WG/AWG на конфигах, live-скорость сети в /status для admin; сброс Web App-кнопки меню при webhook; двусторонняя синхронизация VPN-клиентов с диском узла; CLI `reset-password.py` для сброса паролей и второго фактора; автоперезапуск панели после восстановления из бэкапа; подсказки в UI обновления о длительной сборке и ложной «Ошибке опроса»; HA — **копирование ключей WG/AWG и OpenVPN с primary на replica** в `sync_mode=auto` (без `client.sh 4/1` на реплике), auto-heal `crypto_sync`, перезапуск OpenVPN после синхронизации, модальные отчёты «Синхронизировать» и «Проверить» с понятными описаниями, live health-check перед verify, **детализация расхождений config/ по файлам** (группы провайдеров/маршрутизации, без ложного «Только на основном» при устаревшем node agent); публикация панели по подпути на общем домене (`ACCESS_PATH`, nginx snippet); интеграция со [StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) на общем домене; скрипт восстановления nginx после сбоя сторонних uninstall-скриптов; согласованность «Адрес сайта и HTTPS» — нестандартные порты, `HTTP_ACME_PORT`, определение nginx-режима и единое имя вкладки; исправления багов мастера публикации (зависший диалог, залипший `ACCESS_PATH`, рассинхрон `.env`/форма, проверка портов и общего домена).
+---
+
+## [2.13.0] - 2026-07-11
+
+> **Кратко:** переработка Telegram-бота — компактное меню, сводка трафика с топ-5, метки OVPN/WG/AWG на конфигах, live-скорость сети в /status для admin; сброс Web App-кнопки меню при webhook; двусторонняя синхронизация VPN-клиентов с диском узла; CLI `reset-password.py` для сброса паролей и второго фактора; автоперезапуск панели после восстановления из бэкапа; подсказки в UI обновления о длительной сборке и ложной «Ошибке опроса»; HA — **копирование ключей WG/AWG и OpenVPN с primary на replica** (в `sync_mode=auto` и crypto-sync при create/delete в `manual_full`), без `client.sh 4/1` на реплике; полная замена каталогов профилей WG/AWG на replica; **предупреждение в UI**, если репликация ключей после создания клиента не удалась; auto-heal `crypto_sync`, перезапуск OpenVPN после синхронизации, модальные отчёты «Синхронизировать» и «Проверить» с понятными описаниями, live health-check перед verify, **детализация расхождений config/ по файлам** (группы провайдеров/маршрутизации, без ложного «Только на основном» при устаревшем node agent); публикация панели по подпути на общем домене (`ACCESS_PATH`, nginx snippet); интеграция со [StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) на общем домене; скрипт восстановления nginx после сбоя сторонних uninstall-скриптов; согласованность «Адрес сайта и HTTPS» — нестандартные порты, `HTTP_ACME_PORT`, определение nginx-режима и единое имя вкладки; исправления багов мастера публикации (зависший диалог, залипший `ACCESS_PATH`, рассинхрон `.env`/форма, проверка портов и общего домена); **node agent 1.3.0**.
 
 ### ✨ Added
 
@@ -78,8 +83,13 @@
 - **Модальное окно отчёта синхронизации** — после «Синхронизировать» и «Домен → узлы» вместо длинного toast открывается `HaSyncResultDialog`: секции (домен в setup, копия AntiZapret, адреса в конфигах, перезапуск OpenVPN), пояснения к шагам и итог с рекомендацией «Проверить» (`haSyncSummary.ts`, `NodeSyncGroupSection.tsx`).
 - **Модальное окно отчёта проверки** — кнопка «Проверить» и ссылка «Отчёт проверки» открывают `HaVerifyResultDialog`: список проверок (клиенты OVPN/WG, PKI, config/), расхождения с подсказками «что делать», блок «Дальше» (DNS / синхронизация) (`haVerifySummary.ts`, `HaVerifyResultDialog.tsx`).
 - **Детализация расхождений config/ в HA verify** — per-file SHA256 для `antizapret/config/*.txt`, один mismatch с полями `changed_files` / `only_primary` / `only_replica`; в UI — сгруппированные списки (провайдеры CIDR, списки маршрутизации, прочие), моноширинные имена файлов и подписи из редактора (`fingerprints.py`, `verify.py`, `haVerifySummary.ts`).
-- **Fallback per-file fingerprints через node agent** — `GET /backups/antizapret/config-file-fingerprints`, `get_config_file_fingerprints()` в адаптерах, обогащение отпечатков перед сравнением (`node_agent/main.py`, `node_adapter.py`, `verify.py`); требуется node agent **1.2.0** на всех узлах HA-группы.
+- **Fallback per-file fingerprints через node agent** — `GET /backups/antizapret/config-file-fingerprints`, `get_config_file_fingerprints()` в адаптерах, обогащение отпечатков перед сравнением (`node_agent/main.py`, `node_adapter.py`, `verify.py`); для HA verify — node agent **≥ 1.2.0**, для crypto-sync — **1.3.0** на всех узлах группы.
 - **Понятные формулировки в отчётах** — человекочитаемые названия профилей OpenVPN (AntiZapret UDP/TCP и т.д.), доменов в конфигах, объектов PKI и файлов AntiZapret вместо технических ключей и `openvpn-server@*`.
+- **Предупреждение HA при создании клиента** — поле `ha_replicate_warning` в ответе `POST /configs`; жёлтый toast на Dashboard, если копирование ключей на replica не удалось (`format_ha_replicate_errors`, `client_sync.py`, `DashboardPage.tsx`).
+
+#### Node agent
+
+- **Версия node agent `1.3.0`** — API HA crypto-sync: `GET/PUT /wireguard/server-config/{interface}`, `POST /wireguard/apply-runtime`, `GET/POST /profiles/wireguard/export|import`, `PUT /profiles/upload`, `GET/POST /openvpn/easyrsa3/export|import`; import профилей WG/AWG с полной заменой каталогов на диске (`NODE_AGENT_VERSION`, `node_agent/main.py`, `antizapret.py`).
 
 ### 🔄 Changed
 
@@ -116,6 +126,9 @@
 - **Сводки verify на русском** — итог проверки: «Готово к DNS-переключению» / «Расхождения между основным узлом и репликой» вместо англоязычных строк в API и UI.
 - **Отчёт проверки в UI** — убран общий жёлтый баннер под таблицей HA-групп; результат привязан к группе, статус в строке обновляется сразу после «Проверить».
 - **HA auto-sync create/delete/renew** — в `sync_mode=auto` на replica больше не вызывается `client.sh 4/1` (новые ключи на каждом узле); вместо этого копируется crypto-состояние primary — один профиль работает на обоих IP через общий домен (`vpn_state_sync.py`, `replicate.py`). Push full по-прежнему нужен для первичного выравнивания и recovery после split-brain.
+- **Crypto-sync в `manual_full`** — create/delete/renew OVPN на primary дополнительно копирует WG conf + профили и easyrsa3 на replica; shadow `VpnConfig` и прочая auto-репликация политик/файлов — только в `auto` (`client_sync.py`, `replicate_primary_crypto_to_replicas`, `docs/NodeSync.md`).
+- **Import профилей WG/AWG на replica** — перед распаковкой архива удаляются каталоги `client/wireguard` и `client/amneziawg`, чтобы не оставались старые ключи (`antizapret.import_wireguard_client_profiles_archive`).
+- **Описание auto-sync в UI** — уточнено: копия WG conf + профилей и PKI OVPN с primary, shadow `VpnConfig` в режиме auto (`NodeSyncGroupSection.tsx`, `AUTO_SYNC_OPERATIONS`).
 
 #### Адрес сайта и HTTPS
 
@@ -139,7 +152,7 @@
 
 - **OpenVPN restart после HA** — `test_node_sync_openvpn_restart.py`: перезапуск установленных `openvpn-server@*`, пропуск отсутствующих unit без ошибки.
 - **HA verify config/** — `test_node_sync_fingerprints.py`, `test_node_sync_verify_config_diff.py`: per-file ключи, симметричный и асимметричный diff, enrichment через fallback API.
-- **HA crypto sync** — `test_vpn_state_sync.py`, `test_node_sync_replicate_crypto.py`: копирование WG conf / easyrsa3 primary→replica, replicate create/delete/renew без `client.sh 4/1` на replica, classify heal `crypto_sync`.
+- **HA crypto sync** — `test_vpn_state_sync.py`, `test_node_sync_replicate_crypto.py`: копирование WG conf / easyrsa3 primary→replica, replicate create/delete/renew без `client.sh 4/1` на replica, classify heal `crypto_sync`; fallback копирование профилей одного клиента при пустом архиве; import с полной заменой каталогов профилей.
 - **`ACCESS_PATH`** — `test_panel_paths.py`: нормализация подпути, `with_access_path`, `strip_access_path`, валидатор в `Settings`.
 - **Адрес сайта и HTTPS** — `test_panel_publish_info.py`: `public_https_origin_*`, `get_panel_branding` с нестандартным портом, `resolve_active_publish_mode_key` (nginx LE/custom/self-signed, cert из vhost), `HTTP_ACME_PORT` в `env_rows`, `nginx_listens_on_https_port`.
 - **Баги мастера публикации** — `test_panel_publish_info.py`: `inspect_tcp_port` без ложного «занят» на `:8080` при проверке `:80`, пустой `ACCESS_PATH` при явном unset в `.env`, устойчивость к невалидному `ACCESS_PATH` на GET, `uvicorn_le` при LE-сертификате на диске; `publishWizardUi.test.ts`: `isPublishStartTransientError` (404 не transient), `guessPublishAccessUrl` без подпути для non-nginx режимов.
@@ -152,7 +165,6 @@
 - **Crypto-sync не срабатывал в `manual_full`** — при режиме по умолчанию create/delete только привязывал `sync_group_id`, ключи на replica не обновлялись; теперь crypto копируется с primary в любом режиме (`client_sync.py`, `replicate_primary_crypto_to_replicas`).
 - **Разные PrivateKey/PSK в профиле при совпадающем PublicKey в `[Peer]`** — после копии server conf на replica вызывался `client.sh 7` / копировался один профиль; исправлено полным архивом профилей WG/AWG с primary; `wg syncconf` при ошибке не блокирует копирование файлов (`vpn_state_sync.py`).
 - **Auto-sync: пустой/неполный архив профилей WG** — server conf копировался, а профили на replica оставались старыми; import теперь заменяет каталоги `client/wireguard` и `client/amneziawg`, при пустом архиве — fallback копирование файлов нового клиента; ошибка HA показывается в toast при создании (`antizapret.py`, `configs.py`, `DashboardPage.tsx`).
-
 - **HA verify: ложный `node_status`** — проверка опиралась только на кэшированный статус узла в БД; после Push full реплика могла быть доступна, но помечалась «Есть расхождения» до ручного health-poll (`verify.py`).
 - **HA verify: ложное «Только на основном» для config/** — если реплика отдавала только агрегатный хеш `antizapret/config` (устаревший node agent), все файлы primary ошибочно считались отсутствующими на реплике; per-file diff выполняется только при симметричных данных, иначе — `detail` с просьбой обновить агент (`verify.py`, `haVerifySummary.ts`).
 
@@ -1648,7 +1660,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.12.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.13.0...HEAD
+[2.13.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.12.0...v2.13.0
 [2.12.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.9.0...v2.10.0
