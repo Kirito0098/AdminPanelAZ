@@ -103,6 +103,7 @@ def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, 
                 primary_adapter,
                 adapter,
                 primary_config.vpn_type,
+                client_name=primary_config.client_name,
             )
         except Exception as exc:
             logger.warning(
@@ -160,7 +161,12 @@ def _handle_client_delete(db: Session, group: NodeSyncGroup, payload: dict[str, 
             continue
         adapter = get_adapter_for_node(replica_node)
         try:
-            sync_vpn_crypto_from_primary(primary_adapter, adapter, shadow.vpn_type)
+            sync_vpn_crypto_from_primary(
+                primary_adapter,
+                adapter,
+                shadow.vpn_type,
+                client_name=shadow.client_name,
+            )
         except Exception as exc:
             logger.warning(
                 "HA auto-sync delete failed on replica %s: %s",

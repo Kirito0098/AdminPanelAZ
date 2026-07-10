@@ -22,16 +22,37 @@ def test_sync_wireguard_state_from_primary_copies_configs_and_applies_runtime():
     replica = MagicMock()
     primary.read_wireguard_server_config.side_effect = lambda iface: f"{iface}-primary"
     replica.apply_wireguard_runtime.return_value = {"success": True, "synced": ["antizapret", "vpn"]}
+    primary.get_profile_files.return_value = [
+        {"path": "/root/antizapret/client/wireguard/vpn/vpn-test-1-wg.conf"},
+    ]
+    primary.read_profile_file.return_value = "profile-content"
 
-    vpn_state_sync.sync_wireguard_state_from_primary(primary, replica)
+    vpn_state_sync.sync_wireguard_state_from_primary(primary, replica, client_name="test-1")
 
     assert replica.write_wireguard_server_config.call_args_list == [
         (("antizapret", "antizapret-primary"),),
         (("vpn", "vpn-primary"),),
     ]
     replica.apply_wireguard_runtime.assert_called_once()
-    replica.recreate_profiles.assert_called_once()
+    replica.write_profile_file.assert_called_once_with(
+        "/root/antizapret/client/wireguard/vpn/vpn-test-1-wg.conf",
+        "profile-content",
+    )
+    replica.recreate_profiles.assert_not_called()
     primary.export_easyrsa3_archive.assert_not_called()
+
+
+def test_sync_wireguard_state_full_copies_profile_archive_when_no_client_name():
+    primary = MagicMock()
+    replica = MagicMock()
+    primary.read_wireguard_server_config.return_value = "conf"
+    replica.apply_wireguard_runtime.return_value = {"success": True, "synced": ["antizapret"]}
+    primary.export_wireguard_client_profiles_archive.return_value = b"profiles-archive"
+
+    vpn_state_sync.sync_wireguard_state_from_primary(primary, replica)
+
+    replica.import_wireguard_client_profiles_archive.assert_called_once_with(b"profiles-archive")
+    replica.recreate_profiles.assert_not_called()
 
 
 def test_sync_openvpn_pki_from_primary_imports_archive_and_restarts():
@@ -131,7 +152,12 @@ def test_handle_client_create_uses_crypto_sync(monkeypatch):
 
     result = _handle_client_create(db, group, {"primary_config": primary_config})
 
-    sync_mock.assert_called_once_with(primary_adapter, replica_adapter, VpnType.wireguard)
+    sync_mock.assert_called_once_with(
+        primary_adapter,
+        replica_adapter,
+        VpnType.wireguard,
+        client_name="alice",
+    )
     replica_adapter.add_wireguard_client.assert_not_called()
     assert len(result.successes) == 1
     assert result.successes[0]["node_id"] == 2
@@ -219,7 +245,12 @@ def test_handle_client_delete_syncs_crypto_from_primary(monkeypatch):
 
     result = _handle_client_delete(db, group, {"primary_config": primary_config})
 
-    sync_mock.assert_called_once_with(primary_adapter, replica_adapter, VpnType.wireguard)
+    sync_mock.assert_called_once_with(
+        primary_adapter,
+        replica_adapter,
+        VpnType.wireguard,
+        client_name="carol",
+    )
     replica_adapter.delete_wireguard_client.assert_not_called()
     assert result.successes == [{"node_id": 4, "config_id": 40}]
     db.delete.assert_called_once_with(shadow)

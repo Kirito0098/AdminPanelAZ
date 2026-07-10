@@ -20,6 +20,7 @@ settings = get_settings()
 CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 WIREGUARD_SERVER_INTERFACES = frozenset({"antizapret", "vpn"})
 WIREGUARD_SERVER_CONFIG_DIR = Path("/etc/wireguard")
+WIREGUARD_CLIENT_PROFILE_DIRS = ("wireguard", "amneziawg")
 EASYRSA3_ROOT = Path("/etc/openvpn/easyrsa3")
 
 
@@ -239,13 +240,61 @@ class AntiZapretService:
         return files
 
     def read_profile_file(self, path: str) -> str:
+        file_path = self._resolve_profile_file_path(path)
+        if not file_path.exists():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
+        return file_path.read_text(encoding="utf-8", errors="replace")
+
+    def write_profile_file(self, path: str, content: str) -> None:
+        file_path = self._resolve_profile_file_path(path)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content or "", encoding="utf-8")
+
+    def _resolve_profile_file_path(self, path: str) -> Path:
         file_path = Path(path).resolve()
         client_root = self.client_dir.resolve()
         if not str(file_path).startswith(str(client_root)):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ к файлу запрещён")
-        if not file_path.exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
-        return file_path.read_text(encoding="utf-8", errors="replace")
+        return file_path
+
+    def export_wireguard_client_profiles_archive(self) -> bytes:
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            for subdir in WIREGUARD_CLIENT_PROFILE_DIRS:
+                root = self.client_dir / subdir
+                if not root.is_dir():
+                    continue
+                for item in sorted(root.rglob("*")):
+                    if not item.is_file():
+                        continue
+                    arcname = ("client/" + item.relative_to(self.client_dir).as_posix())
+                    archive.add(item, arcname=arcname)
+        return buffer.getvalue()
+
+    def import_wireguard_client_profiles_archive(self, data: bytes) -> None:
+        if not data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Пустой архив профилей WireGuard",
+            )
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+                tmp.write(data)
+                temp_path = tmp.name
+            with tarfile.open(temp_path, "r:gz") as archive:
+                for member in archive.getmembers():
+                    name = member.name
+                    if not (
+                        name.startswith("client/wireguard/")
+                        or name.startswith("client/amneziawg/")
+                        or name in {"client/wireguard", "client/amneziawg"}
+                    ):
+                        continue
+                    archive.extract(member, path=str(self.base_path), filter="data")
+        finally:
+            if temp_path:
+                Path(temp_path).unlink(missing_ok=True)
 
     _CONFIG_FILES = frozenset(
         {

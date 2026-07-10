@@ -54,7 +54,7 @@ Node agent: `POST /backups/antizapret/restore`, `GET /backups/antizapret/downloa
 
 | Операция | Replica |
 |----------|---------|
-| Create / delete client | Копия crypto-состояния primary: `/etc/wireguard/*.conf` + `client.sh 7` (WG/AWG) или `/etc/openvpn/easyrsa3/` + `client.sh 7` + restart OpenVPN (OVPN); shadow `VpnConfig` |
+| Create / delete client | Копия crypto-состояния primary: `/etc/wireguard/*.conf` + **те же файлы профилей** WG/AWG (PrivateKey/PSK) или `/etc/openvpn/easyrsa3/` + `client.sh 7` + restart OpenVPN (OVPN); shadow `VpnConfig` |
 | Renew OpenVPN cert | Копия easyrsa3 с primary + перегенерация профилей; тот же `client_name`, новый срок |
 | Temp / permanent block, unblock | Та же политика в БД + runtime (iptables/WG) |
 | Set / clear traffic limit | Те же `traffic_limit_*` + reconcile runtime |

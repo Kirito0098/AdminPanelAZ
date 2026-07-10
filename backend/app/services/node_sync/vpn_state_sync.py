@@ -10,8 +10,33 @@ from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
 WIREGUARD_INTERFACES = ("antizapret", "vpn")
 
 
-def sync_wireguard_state_from_primary(primary_adapter, replica_adapter) -> None:
-    """Copy WireGuard server configs from primary and apply on replica."""
+def _copy_client_wireguard_profiles_from_primary(
+    primary_adapter,
+    replica_adapter,
+    client_name: str,
+) -> None:
+    """Copy downloadable WG/AWG profile files for one client (same PrivateKey/PSK as primary)."""
+    files = primary_adapter.get_profile_files(client_name, VpnType.wireguard)
+    for entry in files:
+        path = entry.get("path")
+        if not path:
+            continue
+        content = primary_adapter.read_profile_file(path)
+        replica_adapter.write_profile_file(path, content)
+
+
+def _copy_all_wireguard_profiles_from_primary(primary_adapter, replica_adapter) -> None:
+    archive = primary_adapter.export_wireguard_client_profiles_archive()
+    replica_adapter.import_wireguard_client_profiles_archive(archive)
+
+
+def sync_wireguard_state_from_primary(
+    primary_adapter,
+    replica_adapter,
+    *,
+    client_name: str | None = None,
+) -> None:
+    """Copy WireGuard server configs and client profile files from primary to replica."""
     for interface in WIREGUARD_INTERFACES:
         content = primary_adapter.read_wireguard_server_config(interface)
         replica_adapter.write_wireguard_server_config(interface, content)
@@ -25,7 +50,10 @@ def sync_wireguard_state_from_primary(primary_adapter, replica_adapter) -> None:
         ) or "WireGuard runtime apply failed"
         raise HTTPException(status_code=500, detail=detail)
 
-    replica_adapter.recreate_profiles()
+    if client_name:
+        _copy_client_wireguard_profiles_from_primary(primary_adapter, replica_adapter, client_name)
+    else:
+        _copy_all_wireguard_profiles_from_primary(primary_adapter, replica_adapter)
 
 
 def sync_openvpn_pki_from_primary(primary_adapter, replica_adapter) -> None:
@@ -43,12 +71,22 @@ def sync_openvpn_pki_from_primary(primary_adapter, replica_adapter) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
-def sync_vpn_crypto_from_primary(primary_adapter, replica_adapter, vpn_type: VpnType) -> None:
+def sync_vpn_crypto_from_primary(
+    primary_adapter,
+    replica_adapter,
+    vpn_type: VpnType,
+    *,
+    client_name: str | None = None,
+) -> None:
     """Copy primary VPN crypto material to replica for HA failover parity."""
     if vpn_type == VpnType.openvpn:
         sync_openvpn_pki_from_primary(primary_adapter, replica_adapter)
         return
-    sync_wireguard_state_from_primary(primary_adapter, replica_adapter)
+    sync_wireguard_state_from_primary(
+        primary_adapter,
+        replica_adapter,
+        client_name=client_name,
+    )
 
 
 def sync_all_vpn_crypto_from_primary(primary_adapter, replica_adapter) -> None:

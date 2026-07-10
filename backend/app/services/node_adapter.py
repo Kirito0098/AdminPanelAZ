@@ -395,6 +395,15 @@ class LocalNodeAdapter(NodeAdapter):
     def read_profile_file(self, path: str) -> str:
         return self._service.read_profile_file(path)
 
+    def write_profile_file(self, path: str, content: str) -> None:
+        self._service.write_profile_file(path, content)
+
+    def export_wireguard_client_profiles_archive(self) -> bytes:
+        return self._service.export_wireguard_client_profiles_archive()
+
+    def import_wireguard_client_profiles_archive(self, data: bytes) -> None:
+        self._service.import_wireguard_client_profiles_archive(data)
+
     def read_config_file(self, filename: str) -> str:
         return self._service.read_config_file(filename)
 
@@ -976,6 +985,20 @@ class RemoteNodeAdapter(NodeAdapter):
     def read_profile_file(self, path: str) -> str:
         data = self._request("GET", "/profiles/download", params={"path": path})
         return data.get("content", "")
+
+    def write_profile_file(self, path: str, content: str) -> None:
+        self._request("PUT", "/profiles/upload", json={"path": path, "content": content}, timeout=60.0)
+
+    def export_wireguard_client_profiles_archive(self) -> bytes:
+        return self._request_bytes("GET", "/profiles/wireguard/export", timeout=120.0)
+
+    def import_wireguard_client_profiles_archive(self, data: bytes) -> None:
+        self._request(
+            "POST",
+            "/profiles/wireguard/import",
+            files={"archive": ("wireguard-profiles.tar.gz", data, "application/gzip")},
+            timeout=120.0,
+        )
 
     def read_config_file(self, filename: str) -> str:
         data = self._request("GET", f"/configs/files/{filename}")

@@ -118,6 +118,11 @@ class ProfileFilesBatchRequest(BaseModel):
     clients: list[ProfileFilesClientRequest] = Field(default_factory=list)
 
 
+class ProfileUploadRequest(BaseModel):
+    path: str
+    content: str = ""
+
+
 class ServiceRestartRequest(BaseModel):
     service_name: str
 
@@ -424,6 +429,32 @@ def profile_files_batch(payload: ProfileFilesBatchRequest, _: None = Depends(ver
 @app.get("/profiles/download")
 def profile_download(path: str, _: None = Depends(verify_api_key)):
     return {"content": service.read_profile_file(path)}
+
+
+@app.put("/profiles/upload")
+def profile_upload(payload: ProfileUploadRequest, _: None = Depends(verify_api_key)):
+    service.write_profile_file(payload.path, payload.content)
+    return {"message": "Профиль сохранён"}
+
+
+@app.get("/profiles/wireguard/export")
+def export_wireguard_profiles(_: None = Depends(verify_api_key)):
+    data = service.export_wireguard_client_profiles_archive()
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/gzip",
+        headers={"Content-Disposition": 'attachment; filename="wireguard-profiles.tar.gz"'},
+    )
+
+
+@app.post("/profiles/wireguard/import")
+async def import_wireguard_profiles(
+    archive: UploadFile = File(...),
+    _: None = Depends(verify_api_key),
+):
+    content = await archive.read()
+    service.import_wireguard_client_profiles_archive(content)
+    return {"message": "Профили WireGuard/AmneziaWG импортированы"}
 
 
 @app.get("/routing/overview")
