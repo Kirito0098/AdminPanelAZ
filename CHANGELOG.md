@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.12.0](#2120---2026-07-10) — 2026-07-10
 - [2.11.0](#2110---2026-07-08) — 2026-07-08
 - [2.10.0](#2100---2026-07-05) — 2026-07-05
 - [2.9.0](#290---2026-07-05) — 2026-07-05
@@ -36,7 +37,7 @@
 
 ## [Unreleased]
 
-> **Кратко:** переработка Telegram-бота — компактное меню, сводка трафика с топ-5, метки OVPN/WG/AWG на конфигах, live-скорость сети в /status для admin; сброс Web App-кнопки меню при webhook; двусторонняя синхронизация VPN-клиентов с диском узла; CLI `reset-password.py` для сброса паролей и второго фактора; автоперезапуск панели после восстановления из бэкапа; подсказки в UI обновления о длительной сборке и ложной «Ошибке опроса»; HA — перезапуск OpenVPN после синхронизации, модальные отчёты «Синхронизировать» и «Проверить» с понятными описаниями, live health-check перед verify; публикация панели по подпути на общем домене (`ACCESS_PATH`, nginx snippet); интеграция со [StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) на общем домене; скрипт восстановления nginx после сбоя сторонних uninstall-скриптов; согласованность «Адрес сайта и HTTPS» — нестандартные порты, `HTTP_ACME_PORT`, определение nginx-режима и единое имя вкладки; исправления багов мастера публикации (зависший диалог, залипший `ACCESS_PATH`, рассинхрон `.env`/форма, проверка портов и общего домена).
+> **Кратко:** переработка Telegram-бота — компактное меню, сводка трафика с топ-5, метки OVPN/WG/AWG на конфигах, live-скорость сети в /status для admin; сброс Web App-кнопки меню при webhook; двусторонняя синхронизация VPN-клиентов с диском узла; CLI `reset-password.py` для сброса паролей и второго фактора; автоперезапуск панели после восстановления из бэкапа; подсказки в UI обновления о длительной сборке и ложной «Ошибке опроса»; HA — перезапуск OpenVPN после синхронизации, модальные отчёты «Синхронизировать» и «Проверить» с понятными описаниями, live health-check перед verify, **детализация расхождений config/ по файлам** (группы провайдеров/маршрутизации, без ложного «Только на основном» при устаревшем node agent); публикация панели по подпути на общем домене (`ACCESS_PATH`, nginx snippet); интеграция со [StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) на общем домене; скрипт восстановления nginx после сбоя сторонних uninstall-скриптов; согласованность «Адрес сайта и HTTPS» — нестандартные порты, `HTTP_ACME_PORT`, определение nginx-режима и единое имя вкладки; исправления багов мастера публикации (зависший диалог, залипший `ACCESS_PATH`, рассинхрон `.env`/форма, проверка портов и общего домена).
 
 ### ✨ Added
 
@@ -73,6 +74,8 @@
 - **Перезапуск OpenVPN после синхронизации** — после Push full на каждой реплике и после «Домен → узлы» на всех узлах группы выполняется `systemctl restart` для всех установленных `openvpn-server@*` (`openvpn_restart.py`, `push_full.py`, `shared_domain.py`).
 - **Модальное окно отчёта синхронизации** — после «Синхронизировать» и «Домен → узлы» вместо длинного toast открывается `HaSyncResultDialog`: секции (домен в setup, копия AntiZapret, адреса в конфигах, перезапуск OpenVPN), пояснения к шагам и итог с рекомендацией «Проверить» (`haSyncSummary.ts`, `NodeSyncGroupSection.tsx`).
 - **Модальное окно отчёта проверки** — кнопка «Проверить» и ссылка «Отчёт проверки» открывают `HaVerifyResultDialog`: список проверок (клиенты OVPN/WG, PKI, config/), расхождения с подсказками «что делать», блок «Дальше» (DNS / синхронизация) (`haVerifySummary.ts`, `HaVerifyResultDialog.tsx`).
+- **Детализация расхождений config/ в HA verify** — per-file SHA256 для `antizapret/config/*.txt`, один mismatch с полями `changed_files` / `only_primary` / `only_replica`; в UI — сгруппированные списки (провайдеры CIDR, списки маршрутизации, прочие), моноширинные имена файлов и подписи из редактора (`fingerprints.py`, `verify.py`, `haVerifySummary.ts`).
+- **Fallback per-file fingerprints через node agent** — `GET /backups/antizapret/config-file-fingerprints`, `get_config_file_fingerprints()` в адаптерах, обогащение отпечатков перед сравнением (`node_agent/main.py`, `node_adapter.py`, `verify.py`); требуется node agent **1.2.0** на всех узлах HA-группы.
 - **Понятные формулировки в отчётах** — человекочитаемые названия профилей OpenVPN (AntiZapret UDP/TCP и т.д.), доменов в конфигах, объектов PKI и файлов AntiZapret вместо технических ключей и `openvpn-server@*`.
 
 ### 🔄 Changed
@@ -131,6 +134,7 @@
 ### 🧪 Tests
 
 - **OpenVPN restart после HA** — `test_node_sync_openvpn_restart.py`: перезапуск установленных `openvpn-server@*`, пропуск отсутствующих unit без ошибки.
+- **HA verify config/** — `test_node_sync_fingerprints.py`, `test_node_sync_verify_config_diff.py`: per-file ключи, симметричный и асимметричный diff, enrichment через fallback API.
 - **`ACCESS_PATH`** — `test_panel_paths.py`: нормализация подпути, `with_access_path`, `strip_access_path`, валидатор в `Settings`.
 - **Адрес сайта и HTTPS** — `test_panel_publish_info.py`: `public_https_origin_*`, `get_panel_branding` с нестандартным портом, `resolve_active_publish_mode_key` (nginx LE/custom/self-signed, cert из vhost), `HTTP_ACME_PORT` в `env_rows`, `nginx_listens_on_https_port`.
 - **Баги мастера публикации** — `test_panel_publish_info.py`: `inspect_tcp_port` без ложного «занят» на `:8080` при проверке `:80`, пустой `ACCESS_PATH` при явном unset в `.env`, устойчивость к невалидному `ACCESS_PATH` на GET, `uvicorn_le` при LE-сертификате на диске; `publishWizardUi.test.ts`: `isPublishStartTransientError` (404 не transient), `guessPublishAccessUrl` без подпути для non-nginx режимов.
@@ -138,6 +142,7 @@
 ### 🐛 Fixed
 
 - **HA verify: ложный `node_status`** — проверка опиралась только на кэшированный статус узла в БД; после Push full реплика могла быть доступна, но помечалась «Есть расхождения» до ручного health-poll (`verify.py`).
+- **HA verify: ложное «Только на основном» для config/** — если реплика отдавала только агрегатный хеш `antizapret/config` (устаревший node agent), все файлы primary ошибочно считались отсутствующими на реплике; per-file diff выполняется только при симметричных данных, иначе — `detail` с просьбой обновить агент (`verify.py`, `haVerifySummary.ts`).
 - **Восстановление из бэкапа (SQLite WAL)** — после записи `adminpanel.db` и `cidr.db` удаляются файлы `-wal`/`-shm`; без этого при работающей панели восстановленная база могла оставаться пустой или битой, хотя архив содержал полные данные (`backup_manager.py`, `remove_sqlite_sidecars`).
 - **Диагностика сайта** — 500 при `BEHIND_NGINX`: в тексте health-probe не была определена `app_port` (`site_diagnostics.py`).
 - **`ACCESS_PATH` на выделенном домене** — корень и прочие пути вне подпути отдают 404 без редиректа; убирает дефолтную страницу «Welcome to nginx» (`nginx-common.sh`).
@@ -169,6 +174,33 @@
 - **Нельзя очистить поля cert/key** — effect автоподстановки снова подставлял `known_ssl_*` после ручной очистки (`suppressSslAutofillRef`, `VpnNetworkTab.tsx`).
 - **Режим `uvicorn_le` определялся как самоподписанный** — при пустом `SSL_CERT` в `.env`, но наличии LE-сертификата на диске (`resolve_active_publish_mode_key`).
 - **Подсказка URL для `direct_https`** — использовала `HTTPS_PUBLIC_PORT` вместо `BACKEND_PORT` при рассинхроне `.env` (`panel_publish_info.py`).
+
+---
+
+## [2.12.0] - 2026-07-10
+
+> **Кратко:** HA verify показывает расхождения `config/` по конкретным файлам (группы провайдеров и маршрутизации), без ложного «Только на основном» при устаревшем node agent; fallback API per-file fingerprints на агенте; **node agent 1.2.0**.
+
+### ✨ Added
+
+#### Node Sync / HA
+
+- **Детализация расхождений config/ в HA verify** — per-file SHA256 для `antizapret/config/*.txt`, один mismatch с `changed_files` / `only_primary` / `only_replica`; в модалке — сгруппированные списки файлов с подписями (`fingerprints.py`, `verify.py`, `haVerifySummary.ts`, `HaVerifyResultDialog.tsx`).
+- **Fallback per-file fingerprints** — `GET /backups/antizapret/config-file-fingerprints` на node agent; `get_config_file_fingerprints()` в локальном и удалённом адаптере; обогащение отпечатков перед сравнением (`node_agent/main.py`, `node_adapter.py`).
+
+#### Node agent
+
+- **Версия node agent `1.2.0`** — per-file fingerprints в `GET /backups/antizapret/fingerprints`, новый `GET /backups/antizapret/config-file-fingerprints` для fallback HA verify (`NODE_AGENT_VERSION`, `fingerprints.py`).
+
+### 🐛 Fixed
+
+#### Node Sync / HA
+
+- **Ложное «Только на основном»** — при асимметрии per-file отпечатков (панель с новым кодом, реплика со старым агентом) файлы на диске реплики ошибочно помечались как отсутствующие; теперь — агрегатный хеш и понятный `detail` («обновите node agent») без списка из десятков ложных имён.
+
+### 🧪 Tests
+
+- **`test_node_sync_fingerprints.py`**, **`test_node_sync_verify_config_diff.py`** — per-file ключи, симметричный/асимметричный diff, enrichment fallback.
 
 ---
 
@@ -1601,7 +1633,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.11.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.12.0...HEAD
+[2.12.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.8.0...v2.9.0

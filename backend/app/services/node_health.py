@@ -21,7 +21,7 @@ HEALTH_METADATA_KEYS = (
 )
 
 # Keep in sync with node agent HTTP API; shared by local adapter and node_agent/main.py.
-NODE_AGENT_VERSION = "1.1.0"
+NODE_AGENT_VERSION = "1.2.0"
 
 
 def build_health_payload(service: AntiZapretService, *, agent_version: str = NODE_AGENT_VERSION) -> dict:
