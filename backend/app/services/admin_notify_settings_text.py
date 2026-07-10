@@ -23,7 +23,7 @@ SETTINGS_CHANGE_LABELS: dict[str, str] = {
     "settings_cidr_generate_from_db": "Генерация CIDR из базы",
     "settings_antifilter_refresh": "Обновление AntiFilter",
     "settings_run_doall": "Перегенерация конфигурации VPN (doall.sh)",
-    "settings_vpn_network_publish": "Публикация панели (VPN-сеть)",
+    "settings_vpn_network_publish": "Публикация панели (адрес и HTTPS)",
 }
 
 _ROLE_LABELS_RU = {

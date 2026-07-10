@@ -4,11 +4,13 @@ import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
+import { formatPublicHttpsOrigin } from '@/components/settings/publishWizardUi'
 import type { VpnNetworkSettings } from '@/types'
 
 type SharedDomainPublishSectionProps = {
   domain: string
   accessPath: string
+  httpsPublicPort: string
   previewAccessUrl?: string
   settings: VpnNetworkSettings
   nginxSubpathIntegrate: boolean
@@ -87,6 +89,7 @@ function IntegrateToggleRow({
 export default function SharedDomainPublishSection({
   domain,
   accessPath,
+  httpsPublicPort,
   previewAccessUrl,
   settings,
   nginxSubpathIntegrate,
@@ -99,7 +102,7 @@ export default function SharedDomainPublishSection({
   const host = domainHost(domain)
   const segment = pathSegment(accessPath)
   const hasPath = Boolean(segment)
-  const origin = host ? `https://${host}` : 'https://ваш-домен'
+  const origin = host ? formatPublicHttpsOrigin(host, httpsPublicPort) : 'https://ваш-домен'
 
   return (
     <div className="space-y-4 rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 via-card/50 to-card p-4 sm:col-span-2">

@@ -13,7 +13,7 @@
 | Доступ к панели | ✓ | — | — |
 | Раздача конфигов | ✓ | — | — |
 | Обслуживание | ✓ | — | — |
-| Сеть и публикация | ✓ | — | — |
+| Адрес сайта и HTTPS | ✓ | — | — |
 | Резервные копии | ✓ | — | — |
 | Мониторинг и алерты | ✓ | — | — |
 | Модули | ✓ | — | — |
@@ -31,7 +31,7 @@
 | **Доступ к панели** | IP, баны, секреты | [bezopasnost.md](bezopasnost.md) |
 | **Раздача конфигов** | QR-ссылки, публичные файлы | [razdacha-konfigov.md](razdacha-konfigov.md) |
 | **Обслуживание** | VPN-службы, GeoIP | [obsluzhivanie.md](obsluzhivanie.md) |
-| **Сеть и публикация** | HTTPS, домен | [set-i-publikaciya.md](set-i-publikaciya.md) |
+| **Адрес сайта и HTTPS** | HTTPS, домен | [set-i-publikaciya.md](set-i-publikaciya.md) |
 | **Резервные копии** | Бэкапы и расписание | [rezervnye-kopii.md](rezervnye-kopii.md) |
 | **Мониторинг и алерты** | Пороги CPU/RAM | [monitoring-i-alerty.md](monitoring-i-alerty.md) |
 | **Модули** | Разделы панели, профили | [moduli.md](moduli.md) |

@@ -15,6 +15,22 @@ function domainHost(domain: string): string {
   return domain.trim().split(':')[0]
 }
 
+export function formatPublicHttpsHost(host: string, httpsPublicPort: string | number): string {
+  const trimmed = host.trim().split(':')[0]
+  if (!trimmed) return ''
+  const port = Number(httpsPublicPort)
+  if (!Number.isInteger(port) || port < 1 || port > 65535 || port === 443) {
+    return trimmed
+  }
+  return `${trimmed}:${port}`
+}
+
+export function formatPublicHttpsOrigin(host: string, httpsPublicPort: string | number): string {
+  const publicHost = formatPublicHttpsHost(host, httpsPublicPort)
+  if (!publicHost) return 'https://ваш-домен'
+  return `https://${publicHost}`
+}
+
 function hasLetsEncryptForDomain(settings: VpnNetworkSettings | null, domain: string): boolean {
   const host = domainHost(domain)
   if (!host) return false
@@ -76,7 +92,7 @@ export function guessPublishAccessUrl(
   accessPath = '',
 ): string | undefined {
   const host = domainHost(domain)
-  const pathSuffix = publishPathSuffix(accessPath)
+  const pathSuffix = mode.startsWith('nginx_') ? publishPathSuffix(accessPath) : '/'
 
   if (mode.startsWith('nginx_')) {
     if (!host) return undefined
@@ -337,11 +353,18 @@ export function shouldShowAddressHint(mode: string): boolean {
   )
 }
 
-export function publishAddressHint(mode: string): { title: string; lines: string[] } {
+export function publishAddressHint(
+  mode: string,
+  httpsPublicPort = '443',
+): { title: string; lines: string[] } {
+  const portHint =
+    Number(httpsPublicPort) === 443
+      ? 'https://домен/'
+      : `https://домен:${httpsPublicPort}/`
   if (mode === 'nginx_le') {
     return {
       title: 'Адрес входа (Nginx)',
-      lines: ["Let's Encrypt на домен — открывайте https://домен/ (TLS на Nginx)."],
+      lines: [`Let's Encrypt на домен — открывайте ${portHint} (TLS на Nginx).`],
     }
   }
   if (mode === 'uvicorn_le') {
@@ -353,7 +376,7 @@ export function publishAddressHint(mode: string): { title: string; lines: string
   if (mode === 'nginx_custom') {
     return {
       title: 'Адрес входа (Nginx)',
-      lines: ['Открывайте https://домен/ — сертификат должен совпадать с адресом.'],
+      lines: [`Открывайте ${portHint} — сертификат должен совпадать с адресом.`],
     }
   }
   if (mode === 'uvicorn_custom') {
@@ -365,7 +388,7 @@ export function publishAddressHint(mode: string): { title: string; lines: string
   if (mode === 'nginx_selfsigned') {
     return {
       title: 'Адрес входа (Nginx)',
-      lines: ['https://домен/ или https://IP/ — HTTPS принимает Nginx (обычно порт 443).'],
+      lines: [`${portHint} или https://IP/ — HTTPS принимает Nginx (порт из поля «Публичный порт HTTPS»).`],
     }
   }
   if (mode === 'uvicorn_selfsigned') {
@@ -435,7 +458,7 @@ export const PUBLISH_START_LOST_CONNECTION_NOTICE =
 
 export function isPublishStartTransientError(err: unknown): boolean {
   if (err instanceof ApiError) {
-    if (err.status === 0 || [502, 503, 504, 404].includes(err.status)) return true
+    if (err.status === 0 || [502, 503, 504].includes(err.status)) return true
   }
   if (err instanceof TypeError) return true
   if (err instanceof Error) {

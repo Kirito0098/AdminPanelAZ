@@ -696,6 +696,7 @@ nginx_apply_direct_https_env() {
   else
     nginx_env_unset ENFORCE_HTTPS
   fi
+  nginx_env_unset ACCESS_PATH
   nginx_update_cors_for_direct_https "$domain" "$backend_port"
 }
 
@@ -712,6 +713,7 @@ nginx_apply_direct_http_env() {
   nginx_env_unset FORWARDED_ALLOW_IPS
   nginx_env_unset ENFORCE_HTTPS
   nginx_env_unset REFRESH_TOKEN_COOKIE_SECURE
+  nginx_env_unset ACCESS_PATH
 }
 
 nginx_remove_all_vhosts_for_domain() {

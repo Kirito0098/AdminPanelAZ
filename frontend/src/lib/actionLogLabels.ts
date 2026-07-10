@@ -86,7 +86,7 @@ const ACTION_LOG_LABELS: Record<string, string> = {
   settings_user_role_update: 'Изменение роли пользователя',
   settings_run_doall: 'Перегенерация конфигурации VPN',
   settings_recreate_profiles: 'Пересоздание профилей',
-  settings_vpn_network_publish: 'Публикация панели в VPN-сети',
+  settings_vpn_network_publish: 'Публикация панели (адрес и HTTPS)',
   settings_public_download_toggle: 'Переключение публичного скачивания',
   settings_monitor_update: 'Изменение мониторинга',
   settings_retention_update: 'Изменение срока хранения журналов',

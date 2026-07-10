@@ -69,10 +69,23 @@ function envRowValue(rows: VpnNetworkSettings['env_rows'], labelPrefix: string):
   return row && row.value !== '—' ? row.value : ''
 }
 
-function modeBadgeVariant(modeKey: string): 'default' | 'secondary' | 'outline' | 'success' {
-  if (modeKey === 'reverse_proxy' || modeKey === 'nginx_le' || modeKey === 'direct_https') return 'success'
-  if (modeKey === 'direct_http' || modeKey === 'http_direct') return 'secondary'
+function modeBadgeVariant(settings: VpnNetworkSettings): 'default' | 'secondary' | 'outline' | 'success' {
+  const active = settings.active_publish_mode
+  if (active?.startsWith('nginx_') && active !== 'nginx_selfsigned') return 'success'
+  if (
+    active?.startsWith('uvicorn_') &&
+    active !== 'uvicorn_selfsigned' &&
+    active !== 'http_direct'
+  ) {
+    return 'success'
+  }
+  if (settings.mode_key === 'reverse_proxy' || settings.mode_key === 'direct_https') return 'success'
+  if (settings.mode_key === 'direct_http' || active === 'http_direct') return 'secondary'
   return 'outline'
+}
+
+function isSecurePublishTone(settings: VpnNetworkSettings): boolean {
+  return modeBadgeVariant(settings) === 'success'
 }
 
 function SectionHeading({ title, description }: { title: string; description: string }) {
@@ -170,11 +183,15 @@ export default function VpnNetworkTab() {
   const [portStatuses, setPortStatuses] = useState<Record<string, VpnNetworkPortStatus | null>>({})
   const userPickedModeRef = useRef(false)
   const hasSettingsRef = useRef(false)
+  const suppressSslAutofillRef = useRef(false)
+  const domainSslSeqRef = useRef(0)
+  const portStatusSeqRef = useRef(0)
   const notifyErrorRef = useRef(notifyError)
   notifyErrorRef.current = notifyError
 
   const loadSettings = useCallback(async (options?: { syncSelectedMode?: boolean }) => {
     const syncSelectedMode = options?.syncSelectedMode ?? false
+    const isInitialLoad = !hasSettingsRef.current
     if (!hasSettingsRef.current) {
       setLoading(true)
     }
@@ -183,18 +200,21 @@ export default function VpnNetworkTab() {
       const data = await getVpnNetworkSettings()
       setSettings(data)
       hasSettingsRef.current = true
-      if (data.shared_domain_status_openvpn || data.shared_domain_foreign_vhost) {
+      if (
+        isInitialLoad &&
+        (data.shared_domain_status_openvpn || data.shared_domain_foreign_vhost)
+      ) {
         setNginxSubpathIntegrate(true)
       }
       setBackendPort(data.backend_port || '8000')
-      const domainVal = envRowValue(data.env_rows, 'DOMAIN')
-      if (domainVal) setDomain(domainVal)
-      const httpsPortVal = envRowValue(data.env_rows, 'HTTPS_PUBLIC_PORT')
-      if (httpsPortVal) setHttpsPublicPort(httpsPortVal)
+      setDomain(envRowValue(data.env_rows, 'DOMAIN'))
+      setHttpsPublicPort(envRowValue(data.env_rows, 'HTTPS_PUBLIC_PORT') || '443')
+      setHttpAcmePort(envRowValue(data.env_rows, 'HTTP_ACME_PORT') || '80')
       const certVal = data.known_ssl_cert || envRowValue(data.env_rows, 'SSL_CERT')
-      if (certVal) setSslCert(certVal)
+      setSslCert(certVal)
       const keyVal = data.known_ssl_key || envRowValue(data.env_rows, 'SSL_KEY')
-      if (keyVal) setSslKey(keyVal)
+      setSslKey(keyVal)
+      suppressSslAutofillRef.current = Boolean(certVal && keyVal)
       const accessPathVal = envRowValue(data.env_rows, 'ACCESS_PATH')
       setAccessPath(accessPathVal)
       if (syncSelectedMode && !userPickedModeRef.current) {
@@ -224,10 +244,15 @@ export default function VpnNetworkTab() {
       setDomainSslStatus(null)
       return
     }
+    const seq = ++domainSslSeqRef.current
     const timer = window.setTimeout(() => {
       void getVpnNetworkDomainSsl(host)
-        .then((data) => setDomainSslStatus(data))
-        .catch(() => setDomainSslStatus(null))
+        .then((data) => {
+          if (seq === domainSslSeqRef.current) setDomainSslStatus(data)
+        })
+        .catch(() => {
+          if (seq === domainSslSeqRef.current) setDomainSslStatus(null)
+        })
     }, 300)
     return () => window.clearTimeout(timer)
   }, [domain])
@@ -259,6 +284,7 @@ export default function VpnNetworkTab() {
       return
     }
 
+    const seq = ++portStatusSeqRef.current
     const timer = window.setTimeout(() => {
       void Promise.all(
         checks.map(async (check) => {
@@ -270,6 +296,7 @@ export default function VpnNetworkTab() {
           }
         }),
       ).then((entries) => {
+        if (seq !== portStatusSeqRef.current) return
         setPortStatuses(Object.fromEntries(entries))
       })
     }, 350)
@@ -279,6 +306,7 @@ export default function VpnNetworkTab() {
 
   useEffect(() => {
     if (!selectedModeInfo?.requires_ssl_cert || !settings) return
+    if (suppressSslAutofillRef.current) return
     if (sslCert.trim() && sslKey.trim()) return
     if (settings.known_ssl_cert && settings.known_ssl_key) {
       setSslCert(settings.known_ssl_cert)
@@ -290,8 +318,6 @@ export default function VpnNetworkTab() {
     settings?.known_ssl_cert,
     settings?.known_ssl_key,
     settings,
-    sslCert,
-    sslKey,
   ])
 
   const handlePublish = () => {
@@ -317,8 +343,16 @@ export default function VpnNetworkTab() {
         notifyError('Укажите корректный порт HTTPS')
         return
       }
+      if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) {
+        notifyError('Укажите корректный порт HTTP (ACME)')
+        return
+      }
       if (port === httpsPort || port === httpPort) {
         notifyError('Порт приложения не должен совпадать с публичными портами Nginx')
+        return
+      }
+      if (httpPort === httpsPort) {
+        notifyError('Порт HTTP (ACME) не должен совпадать с портом HTTPS')
         return
       }
     }
@@ -483,7 +517,7 @@ export default function VpnNetworkTab() {
           const resp = await publishVpnNetwork({
             mode: selectedMode as VpnNetworkPublishModeKey,
             backend_port: port,
-            domain: domain.trim() || null,
+            domain: domain.trim().split(':')[0] || null,
             email: email.trim() || null,
             https_public_port: httpsPort,
             http_acme_port: httpPort,
@@ -504,6 +538,7 @@ export default function VpnNetworkTab() {
               accessUrl: expectedAccessUrl,
               status: 'running',
               message: PUBLISH_START_LOST_CONNECTION_NOTICE,
+              allowDismissWhileRunning: true,
             })
             return
           }
@@ -551,13 +586,20 @@ export default function VpnNetworkTab() {
     accessPath,
   )
   const showAccessPathField = selectedMode.startsWith('nginx_')
+  const domainHostForShared = domain.trim().split(':')[0]
+  const sharedDomainForeignVhost = domainHostForShared
+    ? Boolean(domainSslStatus?.shared_domain_foreign_vhost)
+    : Boolean(settings.shared_domain_foreign_vhost)
+  const sharedDomainStatusOpenVpn = domainHostForShared
+    ? Boolean(domainSslStatus?.shared_domain_status_openvpn)
+    : Boolean(settings.shared_domain_status_openvpn)
   const showGenericSubpathIntegrate =
     showAccessPathField &&
     Boolean(accessPath.trim()) &&
-    settings.shared_domain_foreign_vhost &&
-    !settings.shared_domain_status_openvpn
+    sharedDomainForeignVhost &&
+    !sharedDomainStatusOpenVpn
   const showStatusOpenVpnIntegrate =
-    showAccessPathField && Boolean(accessPath.trim()) && settings.shared_domain_status_openvpn
+    showAccessPathField && Boolean(accessPath.trim()) && sharedDomainStatusOpenVpn
   const showOptionalDomain =
     !selectedModeInfo?.requires_domain &&
     (selectedMode === 'uvicorn_custom' ||
@@ -583,13 +625,7 @@ export default function VpnNetworkTab() {
               icon={publishModeIcon(settings.mode_key)}
               label="Режим"
               value={modeLabel}
-              tone={
-                settings.mode_key === 'reverse_proxy' ||
-                settings.mode_key === 'nginx_le' ||
-                settings.mode_key === 'direct_https'
-                  ? 'success'
-                  : 'default'
-              }
+              tone={isSecurePublishTone(settings) ? 'success' : 'default'}
             />
             <MetricPill icon={Globe} label="Домен" value={domainDisplay} />
             <MetricPill icon={Server} label="Порт приложения" value={settings.backend_port || backendPort} />
@@ -611,16 +647,14 @@ export default function VpnNetworkTab() {
           <div
             className={cn(
               'h-1 bg-gradient-to-r',
-              settings.mode_key === 'reverse_proxy' ||
-              settings.mode_key === 'nginx_le' ||
-              settings.mode_key === 'direct_https'
+              isSecurePublishTone(settings)
                 ? 'from-emerald-500/70 to-emerald-500/15'
                 : 'from-sky-500/70 to-sky-500/15',
             )}
           />
           <CardHeader className="pb-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={modeBadgeVariant(settings.mode_key)}>{modeLabel}</Badge>
+              <Badge variant={modeBadgeVariant(settings)}>{modeLabel}</Badge>
               <CardTitle className="text-base">{settings.mode_title}</CardTitle>
             </div>
             <CardDescription className="mt-1.5">
@@ -722,6 +756,10 @@ export default function VpnNetworkTab() {
           selectedMode={selectedMode}
           onSelectMode={(modeKey) => {
             userPickedModeRef.current = true
+            if (!modeKey.startsWith('nginx_') && selectedMode.startsWith('nginx_')) {
+              setAccessPath('')
+            }
+            suppressSslAutofillRef.current = false
             setSelectedMode(modeKey)
           }}
           selectedModeInfo={selectedModeInfo}
@@ -736,9 +774,15 @@ export default function VpnNetworkTab() {
           httpAcmePort={httpAcmePort}
           onHttpAcmePortChange={setHttpAcmePort}
           sslCert={sslCert}
-          onSslCertChange={setSslCert}
+          onSslCertChange={(value) => {
+            suppressSslAutofillRef.current = true
+            setSslCert(value)
+          }}
           sslKey={sslKey}
-          onSslKeyChange={setSslKey}
+          onSslKeyChange={(value) => {
+            suppressSslAutofillRef.current = true
+            setSslKey(value)
+          }}
           accessPath={accessPath}
           onAccessPathChange={setAccessPath}
           onAccessPathBlur={() => setAccessPath((value) => normalizeAccessPathInput(value))}

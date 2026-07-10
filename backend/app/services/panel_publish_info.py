@@ -16,6 +16,20 @@ from app.config import Settings
 
 PublishModeKey = str
 GetEnvValue = Callable[[str, str], str]
+EnvKeyDefined = Callable[[str], bool]
+
+
+def _resolve_env_string(
+    key: str,
+    *,
+    gv: GetEnvValue,
+    env_key_defined: EnvKeyDefined | None,
+    settings_fallback: str,
+) -> str:
+    if env_key_defined is not None and env_key_defined(key):
+        return gv(key, "")
+    value = gv(key, "")
+    return value if value else settings_fallback
 
 WHITELIST_PORT_FIREWALL_MODES = frozenset({"direct_http"})
 
@@ -89,6 +103,22 @@ def _append_public_https_port(host: str, *, proto: str, https_public_port: int) 
     return f"{host}:{https_public_port}"
 
 
+def public_https_origin_host(domain: str, https_public_port: int = 443) -> str:
+    """Public HTTPS host with optional non-standard port (no scheme)."""
+    host = (domain or "").strip().split(":")[0]
+    if not host:
+        return ""
+    return _append_public_https_port(host, proto="https", https_public_port=https_public_port)
+
+
+def public_https_origin_url(domain: str, https_public_port: int = 443) -> str:
+    """Public HTTPS origin without path or trailing slash."""
+    host = public_https_origin_host(domain, https_public_port)
+    if not host:
+        return ""
+    return f"https://{host}"
+
+
 def resolve_request_url_root(
     request: Request,
     *,
@@ -138,11 +168,41 @@ def resolve_public_base_url(request: Request) -> str:
     ).rstrip("/")
 
 
+def resolve_vpn_network_request_url(
+    request: Request,
+    *,
+    env_get: GetEnvValue,
+    env_key_defined: EnvKeyDefined | None,
+    settings: Settings,
+) -> str:
+    """Browser URL root for vpn-network tab using fresh .env values when present."""
+    behind_env = env_get("BEHIND_NGINX", "")
+    behind_nginx = _parse_bool(behind_env) if behind_env else settings.behind_nginx
+    https_raw = env_get("HTTPS_PUBLIC_PORT", "")
+    try:
+        https_public_port = int(https_raw) if https_raw else settings.https_public_port
+    except ValueError:
+        https_public_port = settings.https_public_port
+    access_path_value = _resolve_env_string(
+        "ACCESS_PATH",
+        gv=env_get,
+        env_key_defined=env_key_defined,
+        settings_fallback=settings.access_path,
+    )
+    return resolve_request_url_root(
+        request,
+        behind_nginx=behind_nginx,
+        https_public_port=https_public_port,
+        access_path_value=access_path_value,
+    )
+
+
 def build_panel_publish_context(
     *,
     get_env_value: GetEnvValue,
     request_url: str | None,
     settings: Settings,
+    env_key_defined: EnvKeyDefined | None = None,
 ) -> dict:
     """Build VPN network tab context from .env and runtime settings."""
 
@@ -156,9 +216,24 @@ def build_panel_publish_context(
         behind_nginx = _parse_bool(behind_env)
     else:
         behind_nginx = settings.behind_nginx
-    domain = gv("DOMAIN", "") or settings.domain
-    trusted = gv("TRUSTED_PROXY_IPS", "") or settings.trusted_proxy_ips
-    forwarded = gv("FORWARDED_ALLOW_IPS", "") or settings.forwarded_allow_ips
+    domain = _resolve_env_string(
+        "DOMAIN",
+        gv=gv,
+        env_key_defined=env_key_defined,
+        settings_fallback=settings.domain,
+    )
+    trusted = _resolve_env_string(
+        "TRUSTED_PROXY_IPS",
+        gv=gv,
+        env_key_defined=env_key_defined,
+        settings_fallback=settings.trusted_proxy_ips,
+    )
+    forwarded = _resolve_env_string(
+        "FORWARDED_ALLOW_IPS",
+        gv=gv,
+        env_key_defined=env_key_defined,
+        settings_fallback=settings.forwarded_allow_ips,
+    )
     enforce_https = _parse_bool(gv("ENFORCE_HTTPS", ""), default=settings.enforce_https)
     use_https = _parse_bool(gv("USE_HTTPS", "false"))
     ssl_cert = gv("SSL_CERT", "")
@@ -172,6 +247,11 @@ def build_panel_publish_context(
         https_public_port = int(https_public_port_raw)
     except ValueError:
         https_public_port = settings.https_public_port
+    http_acme_port_raw = gv("HTTP_ACME_PORT", "") or "80"
+    try:
+        http_acme_port = int(http_acme_port_raw)
+    except ValueError:
+        http_acme_port = 80
 
     mode_key = resolve_panel_publish_mode(
         behind_nginx=behind_nginx,
@@ -179,7 +259,12 @@ def build_panel_publish_context(
         use_https=use_https,
     )
 
-    access_path_value = gv("ACCESS_PATH", "") or settings.access_path
+    access_path_value = _resolve_env_string(
+        "ACCESS_PATH",
+        gv=gv,
+        env_key_defined=env_key_defined,
+        settings_fallback=settings.access_path,
+    )
 
     internal_url = f"http://{backend_host}:{backend_port}/"
 
@@ -203,20 +288,30 @@ def build_panel_publish_context(
             f"Внутренний upstream: http://{backend_host}:{backend_port}/ (proxy_pass к BACKEND_PORT)."
         )
         if domain:
-            guess = build_publish_access_url(
-                publish_mode=gv("PUBLISH_MODE", "nginx_le"),
-                domain=domain,
-                backend_port=backend_port,
-                https_public_port=https_public_port,
-                behind_nginx=True,
-                access_path_value=access_path_value,
-            ) or f"https://{domain}/"
+            from app.services.panel_paths import AccessPathError
+
+            try:
+                guess = build_publish_access_url(
+                    publish_mode=gv("PUBLISH_MODE", "nginx_le"),
+                    domain=domain,
+                    backend_port=backend_port,
+                    https_public_port=https_public_port,
+                    behind_nginx=True,
+                    access_path_value=access_path_value,
+                ) or f"https://{domain}/"
+            except AccessPathError:
+                guess = f"https://{domain}/"
+            ports_hint = (
+                f"HTTP {http_acme_port}, HTTPS {https_public_port}"
+                if http_acme_port != 80 or https_public_port != 443
+                else "HTTP 80, HTTPS 443"
+            )
             primary_urls.append(
-                {"label": "Типичный публичный URL (HTTPS на nginx, порты 80/443)", "url": guess}
+                {"label": f"Типичный публичный URL (HTTPS на nginx, {ports_hint})", "url": guess}
             )
             bullet_points.append(
                 f"В .env указан DOMAIN — ожидаемый внешний адрес: {guess} "
-                "(если nginx на стандартном 443, порт в URL не указывается)."
+                "(нестандартный HTTPS-порт указывается в URL явно)."
             )
         else:
             bullet_points.append(
@@ -238,12 +333,16 @@ def build_panel_publish_context(
             f"Uvicorn слушает TLS на {internal_url.replace('http://', 'https://')} — cert на приложении."
         )
         if domain:
-            port_suffix = "" if https_public_port == 443 else f":{https_public_port}"
-            guess = f"https://{domain}{port_suffix}/"
+            try:
+                direct_port = int(backend_port)
+            except ValueError:
+                direct_port = https_public_port
+            port_suffix = "" if direct_port == 443 else f":{direct_port}"
+            guess = f"https://{domain.split(':')[0]}{port_suffix}/"
             primary_urls.append(
                 {"label": "Публичный URL (HTTPS на uvicorn)", "url": guess}
             )
-            bullet_points.append(f"DOMAIN={domain}; HTTPS_PUBLIC_PORT={https_public_port}.")
+            bullet_points.append(f"DOMAIN={domain}; публичный HTTPS-порт uvicorn: {direct_port}.")
         if ssl_cert:
             bullet_points.append(f"SSL_CERT: {ssl_cert}")
         bullet_points.append(
@@ -279,6 +378,7 @@ def build_panel_publish_context(
         {"label": "DOMAIN (для nginx / подсказок)", "value": domain or "—", "mono": bool(domain)},
         {"label": "ACCESS_PATH (подпуть на домене)", "value": access_path_value or "—", "mono": True},
         {"label": "HTTPS_PUBLIC_PORT", "value": str(https_public_port), "mono": True},
+        {"label": "HTTP_ACME_PORT", "value": str(http_acme_port), "mono": True},
         {"label": "ENFORCE_HTTPS", "value": "да" if enforce_https else "нет", "mono": False},
         {"label": "REFRESH_TOKEN_COOKIE_SECURE", "value": "да" if cookie_secure else "нет", "mono": False},
         {"label": "TRUSTED_PROXY_IPS", "value": trusted or "—", "mono": True},
@@ -307,14 +407,53 @@ def build_panel_publish_context(
         "internal_url": internal_url,
         "env_rows": env_rows,
         "backend_port": backend_port,
+        "behind_nginx": behind_nginx,
+        "https_public_port": https_public_port,
+        "access_path_value": access_path_value,
         "active_publish_mode": resolve_active_publish_mode_key(
             mode_key=mode_key,
             ssl_cert=ssl_cert,
             publish_mode=gv("PUBLISH_MODE", ""),
+            domain=domain,
         ),
         "shared_domain_foreign_vhost": nginx_is_foreign_vhost_for_domain(domain) if domain else False,
         "shared_domain_status_openvpn": nginx_is_status_openvpn_on_domain(domain) if domain else False,
     }
+
+
+def nginx_ssl_cert_path_for_domain(domain: str) -> str:
+    """Best-effort SSL cert path from panel nginx vhost or known locations."""
+    domain_host = (domain or "").strip().split(":")[0]
+    if not domain_host:
+        return ""
+    for path in _nginx_iter_vhost_files_for_domain(domain_host):
+        if not _nginx_is_our_panel_vhost_file(path):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        match = re.search(r"ssl_certificate\s+([^;\s]+)", text)
+        if match:
+            return match.group(1).strip()
+    cert, _ = letsencrypt_cert_paths(domain_host)
+    if Path(cert).is_file():
+        return cert
+    if SELF_SIGNED_CERT_PATH.is_file():
+        return str(SELF_SIGNED_CERT_PATH)
+    return ""
+
+
+def infer_nginx_publish_mode_from_cert(cert: str, *, domain: str = "") -> str:
+    cert_lower = (cert or "").lower()
+    domain_host = (domain or "").strip().split(":")[0]
+    if "/etc/letsencrypt/" in cert_lower or (domain_host and letsencrypt_exists_for_domain(domain_host)):
+        return "nginx_le"
+    if "adminpanelaz" in cert_lower or cert == str(SELF_SIGNED_CERT_PATH):
+        return "nginx_selfsigned"
+    if cert:
+        return "nginx_custom"
+    return "nginx_le"
 
 
 def resolve_active_publish_mode_key(
@@ -322,6 +461,7 @@ def resolve_active_publish_mode_key(
     mode_key: str,
     ssl_cert: str,
     publish_mode: str = "",
+    domain: str = "",
 ) -> str | None:
     """Best-effort mapping of runtime mode to publish wizard key."""
     explicit = (publish_mode or "").strip()
@@ -332,8 +472,11 @@ def resolve_active_publish_mode_key(
     if mode_key == "local_http":
         return None
     if mode_key == "direct_https":
-        cert = ssl_cert.lower()
-        if "/etc/letsencrypt/" in cert:
+        cert = (ssl_cert or "").lower()
+        domain_host = (domain or "").strip().split(":")[0]
+        if cert and "/etc/letsencrypt/" in cert:
+            return "uvicorn_le"
+        if domain_host and not ssl_cert and letsencrypt_exists_for_domain(domain_host):
             return "uvicorn_le"
         if "adminpanelaz" in cert:
             return "uvicorn_selfsigned"
@@ -341,9 +484,8 @@ def resolve_active_publish_mode_key(
             return "uvicorn_custom"
         return "uvicorn_selfsigned"
     if mode_key == "reverse_proxy":
-        if ssl_cert and "letsencrypt" not in ssl_cert.lower() and "adminpanelaz" not in ssl_cert.lower():
-            return "nginx_custom"
-        return "nginx_le"
+        cert = (ssl_cert or "").strip() or nginx_ssl_cert_path_for_domain(domain)
+        return infer_nginx_publish_mode_from_cert(cert, domain=domain)
     return None
 
 
@@ -351,8 +493,8 @@ def is_nginx_installed() -> bool:
     return shutil.which("nginx") is not None
 
 
-def nginx_listens_on_443() -> bool:
-    if not is_nginx_installed():
+def nginx_listens_on_https_port(port: int = 443) -> bool:
+    if not is_nginx_installed() or port < 1 or port > 65535:
         return False
     try:
         result = subprocess.run(
@@ -362,9 +504,13 @@ def nginx_listens_on_443() -> bool:
             timeout=5,
             check=False,
         )
-        return ":443 " in (result.stdout or "")
+        return f":{port} " in (result.stdout or "")
     except (OSError, subprocess.TimeoutExpired):
         return False
+
+
+def nginx_listens_on_443() -> bool:
+    return nginx_listens_on_https_port(443)
 
 
 def nginx_has_vhost_for_domain(domain: str) -> bool:
@@ -524,14 +670,19 @@ def build_uvicorn_publish_warnings(
     domain: str,
     backend_port: str | int,
     ssl_cert_suggestions: list[dict[str, str]] | None = None,
+    https_public_port: str | int = 443,
 ) -> list[str]:
-    """Warnings when publishing via uvicorn HTTPS on a server that already uses nginx:443."""
+    """Warnings when publishing via uvicorn HTTPS on a server that already uses nginx HTTPS."""
     warnings: list[str] = []
     domain_host = (domain or "").strip().split(":")[0]
     try:
         port = int(backend_port)
     except (TypeError, ValueError):
         port = 8000
+    try:
+        nginx_https_port = int(https_public_port)
+    except (TypeError, ValueError):
+        nginx_https_port = 443
 
     has_le = letsencrypt_exists_for_domain(domain_host)
     if has_le and domain_host:
@@ -539,14 +690,16 @@ def build_uvicorn_publish_warnings(
             f"Сертификат Let's Encrypt для {domain_host} уже есть — повторный выпуск не нужен."
         )
 
-    if nginx_listens_on_443() and port != 443 and domain_host:
+    if nginx_listens_on_https_port(nginx_https_port) and port != nginx_https_port and domain_host:
+        nginx_origin = public_https_origin_url(domain_host, nginx_https_port)
+        panel_origin = public_https_origin_url(domain_host, port)
         if not nginx_has_vhost_for_domain(domain_host):
             warnings.append(
-                f"Nginx на 443 без сайта для {domain_host} — открывайте https://{domain_host}:{port}/"
+                f"Nginx на {nginx_https_port} без сайта для {domain_host} — открывайте {panel_origin}/"
             )
         else:
             warnings.append(
-                f"https://{domain_host}/ идёт в Nginx, панель — https://{domain_host}:{port}/"
+                f"{nginx_origin}/ идёт в Nginx, панель — {panel_origin}/"
             )
 
     return warnings
@@ -609,10 +762,10 @@ def panel_restart_command() -> str:
 
 
 def _parse_ss_listeners(ss_output: str, port: int) -> list[str]:
-    port_marker = f":{port}"
+    port_pattern = re.compile(rf":{port}\s")
     listeners: list[str] = []
     for line in ss_output.splitlines():
-        if port_marker in line:
+        if port_pattern.search(line):
             listeners.append(line.strip())
     return listeners
 
@@ -895,7 +1048,7 @@ def build_vpn_network_publish_modes() -> list[dict[str, str | bool | None]]:
             "uses_uvicorn_https_port": False,
             "warning": (
                 "Только для тестов — браузер не доверяет сертификату.\n"
-                "Nginx примет HTTPS снаружи (порты 80/443); для интернета — Let's Encrypt · Nginx."
+                "Nginx примет HTTPS снаружи (порты из полей ниже); для интернета — Let's Encrypt · Nginx."
             ),
         },
         {

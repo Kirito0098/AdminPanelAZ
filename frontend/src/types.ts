@@ -725,6 +725,8 @@ export interface VpnNetworkDomainSslStatus {
   has_letsencrypt: boolean
   cert?: string | null
   key?: string | null
+  shared_domain_foreign_vhost?: boolean
+  shared_domain_status_openvpn?: boolean
 }
 
 export type VpnNetworkPortRole = 'backend' | 'nginx_https' | 'nginx_http'

@@ -585,11 +585,17 @@ def _check_http_probe(
         host = domain.split(":")[0] if domain else ""
         if host and shutil.which("curl"):
             from app.services.panel_paths import api_prefix, normalize_access_path
+            from app.services.panel_publish_info import public_https_origin_host
 
             class _PathSettings:
                 access_path = normalize_access_path(env.get("ACCESS_PATH", ""))
 
-            public_url = f"https://{host}{api_prefix(_PathSettings())}/health"
+            try:
+                https_public_port = int(env.get("HTTPS_PUBLIC_PORT", "443") or "443")
+            except ValueError:
+                https_public_port = 443
+            origin_host = public_https_origin_host(host, https_public_port)
+            public_url = f"https://{origin_host}{api_prefix(_PathSettings())}/health"
             proc = run_cmd(["curl", "-sf", "--max-time", "5", public_url], 8.0)
             if proc.returncode == 0:
                 _append_result(

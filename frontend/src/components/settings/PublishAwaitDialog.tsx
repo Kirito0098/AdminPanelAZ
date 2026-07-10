@@ -15,6 +15,7 @@ export type PublishAwaitDialogState = {
   status: 'running' | 'completed' | 'failed'
   message?: string
   restartCommand?: string
+  allowDismissWhileRunning?: boolean
 }
 
 interface PublishAwaitDialogProps {
@@ -25,7 +26,7 @@ interface PublishAwaitDialogProps {
 export default function PublishAwaitDialog({ state, onDismiss }: PublishAwaitDialogProps) {
   if (!state) return null
 
-  const closable = state.status !== 'running'
+  const closable = state.status !== 'running' || state.allowDismissWhileRunning === true
   const accessUrl = state.accessUrl.trim()
 
   const handleOpenChange = (open: boolean) => {
@@ -72,8 +73,9 @@ export default function PublishAwaitDialog({ state, onDismiss }: PublishAwaitDia
               ) : null}
               <p className="text-muted-foreground">{PUBLISH_RESTART_WAIT_NOTICE}</p>
               <p className="text-xs text-muted-foreground">
-                Пока идёт публикация, это окно нельзя закрыть. Если связь прервалась — просто откройте адрес выше через
-                несколько минут.
+                {state.allowDismissWhileRunning
+                  ? 'Связь с сервером могла прерваться при перезапуске — откройте адрес выше через несколько минут.'
+                  : 'Пока идёт публикация, это окно нельзя закрыть. Если связь прервалась — просто откройте адрес выше через несколько минут.'}
               </p>
             </>
           )}

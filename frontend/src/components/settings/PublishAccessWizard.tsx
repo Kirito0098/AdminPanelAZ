@@ -194,12 +194,12 @@ export default function PublishAccessWizard({
 }: PublishAccessWizardProps) {
   const [activeStack, setActiveStack] = useState<PublishStackId>(() => stackForMode(selectedMode))
   const domainLetsEncrypt = domainSslStatus?.has_letsencrypt ?? null
-  const addressHint = publishAddressHint(selectedMode)
+  const addressHint = publishAddressHint(selectedMode, httpsPublicPort)
   const showAddressHint = shouldShowAddressHint(selectedMode) && addressHint.lines.length > 0
   const modeWarningLines = parsePublishModeWarning(selectedModeInfo?.warning)
   const showServerUvicornHints =
     uvicornWarnings.length > 0 && (selectedMode === 'uvicorn_le' || selectedMode === 'uvicorn_custom')
-  const foundLetsEncryptPaths = getLetsEncryptPathsForDomain(settings, domain, domainLetsEncrypt)
+  const foundLetsEncryptPaths = getLetsEncryptPathsForDomain(settings, domain, domainSslStatus)
 
   useEffect(() => {
     setActiveStack(stackForMode(selectedMode))
@@ -463,6 +463,7 @@ export default function PublishAccessWizard({
               <SharedDomainPublishSection
                 domain={domain}
                 accessPath={accessPath}
+                httpsPublicPort={httpsPublicPort}
                 previewAccessUrl={previewAccessUrl}
                 settings={settings}
                 nginxSubpathIntegrate={nginxSubpathIntegrate}

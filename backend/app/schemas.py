@@ -965,6 +965,8 @@ class VpnNetworkDomainSslStatusResponse(BaseModel):
     has_letsencrypt: bool
     cert: str | None = None
     key: str | None = None
+    shared_domain_foreign_vhost: bool = False
+    shared_domain_status_openvpn: bool = False
 
 
 class VpnNetworkPortStatusResponse(BaseModel):

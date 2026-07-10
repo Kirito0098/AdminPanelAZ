@@ -329,10 +329,10 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
     FeatureToggleDefinition(
         key="vpn_network",
         env_key="FEATURE_VPN_NETWORK_ENABLED",
-        label="Порт, HTTPS и Nginx",
-        description="Вкладка «Порт, HTTPS и Nginx»: публикация панели и reverse-proxy (фаза 17).",
+        label="Адрес сайта и HTTPS",
+        description="Вкладка «Адрес сайта и HTTPS»: публикация панели, домен и reverse-proxy (фаза 17).",
         icon="🌐",
-        disable_hint="Вкладка «Порт, HTTPS и Nginx» будет недоступна.",
+        disable_hint="Вкладка «Адрес сайта и HTTPS» будет недоступна.",
         resource_impact_level="minimal",
         default=True,
         group="app_module",

@@ -55,10 +55,12 @@ from app.services.panel_publish_info import (
     is_nginx_installed,
     letsencrypt_cert_paths,
     letsencrypt_exists_for_domain,
+    nginx_is_foreign_vhost_for_domain,
+    nginx_is_status_openvpn_on_domain,
     panel_restart_command,
     server_primary_ip,
     resolve_publish_ssl_paths,
-    resolve_request_url_root,
+    resolve_vpn_network_request_url,
 )
 from app.services.telegram import send_tg_message
 from app.services.telegram_recipients import (
@@ -602,8 +604,14 @@ def get_vpn_network_settings(
     env = EnvFileService(env_path)
     ctx = build_panel_publish_context(
         get_env_value=env.get_env_value,
-        request_url=resolve_request_url_root(request, behind_nginx=settings.behind_nginx),
+        request_url=resolve_vpn_network_request_url(
+            request,
+            env_get=env.get_env_value,
+            env_key_defined=env.env_key_defined_in_file,
+            settings=settings,
+        ),
         settings=settings,
+        env_key_defined=env.env_key_defined_in_file,
     )
     publish_modes = [VpnNetworkPublishModeInfo(**row) for row in build_vpn_network_publish_modes()]
     domain = env.get_env_value("DOMAIN", "")
@@ -623,6 +631,7 @@ def get_vpn_network_settings(
         domain=domain,
         backend_port=ctx["backend_port"],
         ssl_cert_suggestions=suggestions,
+        https_public_port=env.get_env_value("HTTPS_PUBLIC_PORT", "443") or "443",
     )
     access_path_value = env.get_env_value("ACCESS_PATH", "")
     subpath_warnings = build_subpath_publish_warnings(
@@ -673,6 +682,8 @@ def get_vpn_network_domain_ssl(
         has_letsencrypt=has_le,
         cert=cert if has_le else None,
         key=key if has_le else None,
+        shared_domain_foreign_vhost=nginx_is_foreign_vhost_for_domain(domain_host),
+        shared_domain_status_openvpn=nginx_is_status_openvpn_on_domain(domain_host),
     )
 
 
@@ -770,11 +781,14 @@ def publish_vpn_network(
         )
 
     task_payload = payload.model_dump()
+    if task_payload.get("domain"):
+        domain_host = str(task_payload["domain"]).strip().split(":")[0]
+        task_payload["domain"] = domain_host or None
     if normalized_access_path:
         task_payload["access_path"] = normalized_access_path
     else:
         task_payload["access_path"] = None
-    domain_host = (payload.domain or env.get_env_value("DOMAIN", "") or "").strip().split(":")[0]
+    domain_host = (task_payload.get("domain") or env.get_env_value("DOMAIN", "") or "").strip().split(":")[0]
 
     def _callable(progress_updater=None):
         return background_task_service.task_vpn_network_publish(task_payload, progress_updater)

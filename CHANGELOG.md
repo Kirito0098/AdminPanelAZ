@@ -36,7 +36,7 @@
 
 ## [Unreleased]
 
-> **Кратко:** переработка Telegram-бота — компактное меню, сводка трафика с топ-5, метки OVPN/WG/AWG на конфигах, live-скорость сети в /status для admin; сброс Web App-кнопки меню при webhook; двусторонняя синхронизация VPN-клиентов с диском узла; CLI `reset-password.py` для сброса паролей и второго фактора; автоперезапуск панели после восстановления из бэкапа; подсказки в UI обновления о длительной сборке и ложной «Ошибке опроса»; HA — перезапуск OpenVPN после синхронизации, модальные отчёты «Синхронизировать» и «Проверить» с понятными описаниями, live health-check перед verify; публикация панели по подпути на общем домене (`ACCESS_PATH`, nginx snippet); интеграция со [StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) на общем домене; скрипт восстановления nginx после сбоя сторонних uninstall-скриптов.
+> **Кратко:** переработка Telegram-бота — компактное меню, сводка трафика с топ-5, метки OVPN/WG/AWG на конфигах, live-скорость сети в /status для admin; сброс Web App-кнопки меню при webhook; двусторонняя синхронизация VPN-клиентов с диском узла; CLI `reset-password.py` для сброса паролей и второго фактора; автоперезапуск панели после восстановления из бэкапа; подсказки в UI обновления о длительной сборке и ложной «Ошибке опроса»; HA — перезапуск OpenVPN после синхронизации, модальные отчёты «Синхронизировать» и «Проверить» с понятными описаниями, live health-check перед verify; публикация панели по подпути на общем домене (`ACCESS_PATH`, nginx snippet); интеграция со [StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) на общем домене; скрипт восстановления nginx после сбоя сторонних uninstall-скриптов; согласованность «Адрес сайта и HTTPS» — нестандартные порты, `HTTP_ACME_PORT`, определение nginx-режима и единое имя вкладки; исправления багов мастера публикации (зависший диалог, залипший `ACCESS_PATH`, рассинхрон `.env`/форма, проверка портов и общего домена).
 
 ### ✨ Added
 
@@ -47,6 +47,7 @@
 - **`scripts/nginx-repair.sh`** — восстановление nginx для панели после поломки сторонними скриптами (например `uninstall.sh` StatusOpenVPN): чтение `backend/.env`, удаление сломанных vhost'ов домена, установка выделенного vhost AdminPanelAZ, перезапуск панели; пункт в `adminpanel-menu.sh` → «Диагностика».
 - **Секция «Общий домен» в мастере публикации** — карточка с префиксом URL (`https://домен/` + подпуть), превью полного адреса, схема сосуществования путей при StatusOpenVPN (`SharedDomainPublishSection.tsx`).
 - **Блокирующий диалог публикации** — `PublishAwaitDialog`: модальное окно на время применения настроек (running / completed / failed), без сырого HTML nginx в toast; ручное открытие URL вместо авто-редиректа (`VpnNetworkTab.tsx`, `publishWizardUi.ts`).
+- **Хелперы публичного HTTPS-origin** — `public_https_origin_host()` / `public_https_origin_url()` в `panel_publish_info.py`; `formatPublicHttpsHost()` / `formatPublicHttpsOrigin()` во frontend (`publishWizardUi.ts`) — единая сборка `https://домен[:порт]` для диагностики, `security.txt` и превью подпути.
 
 #### Операции и CLI
 
@@ -109,6 +110,18 @@
 - **Сводки verify на русском** — итог проверки: «Готово к DNS-переключению» / «Расхождения между основным узлом и репликой» вместо англоязычных строк в API и UI.
 - **Отчёт проверки в UI** — убран общий жёлтый баннер под таблицей HA-групп; результат привязан к группе, статус в строке обновляется сразу после «Проверить».
 
+#### Адрес сайта и HTTPS
+
+- **Единое название вкладки** — «Адрес сайта и HTTPS» в документации, README, переключателях модулей и журнале действий (раньше в разных местах: «Сеть и публикация», «Порт, HTTPS и Nginx», «VPN-сеть») (`feature_toggles.py`, `set-i-publikaciya.md`, `actionLogLabels.ts`).
+- **`HTTP_ACME_PORT` в сводке .env** — переменная отображается в `env_rows` и подхватывается формой мастера при загрузке (`panel_publish_info.py`, `VpnNetworkTab.tsx`).
+- **Подсказки по портам** — тексты мастера, карточки текущего режима и предупреждение `nginx_selfsigned` учитывают значения из полей `HTTPS_PUBLIC_PORT` / `HTTP_ACME_PORT`, а не жёсткое «80/443» (`publishWizardUi.ts`, `panel_publish_info.py`).
+- **Определение активного nginx-режима** — без `PUBLISH_MODE` режим выводится из cert в vhost на диске (`nginx_ssl_cert_path_for_domain`, `infer_nginx_publish_mode_from_cert`, `resolve_active_publish_mode_key`).
+- **Предупреждения uvicorn + nginx** — `nginx_listens_on_https_port(port)` с учётом `HTTPS_PUBLIC_PORT` из `.env`, не только проверка `:443` (`build_uvicorn_publish_warnings`).
+- **Индикатор безопасного режима в UI** — вместо мёртвой проверки `mode_key === 'nginx_le'` используется `active_publish_mode` (`VpnNetworkTab.tsx`).
+- **`GET /settings/vpn-network/domain-ssl`** — в ответ добавлены `shared_domain_foreign_vhost` и `shared_domain_status_openvpn` для введённого домена (не только из `.env`); секция «Общий домен» и переключатель интеграции обновляются при смене домена в мастере (`maintenance.py`, `VpnNetworkTab.tsx`).
+- **Чтение `.env` на вкладке** — `build_panel_publish_context` и «Текущий адрес в браузере» различают отсутствие ключа и пустое значение (`env_key_defined_in_file`, `_resolve_env_string`, `resolve_vpn_network_request_url`); после unset в `.env` API не подставляет устаревший кэш `get_settings()` до перезапуска uvicorn.
+- **Диалог публикации при обрыве связи** — `PublishAwaitDialog` можно закрыть в состоянии `running`, если старт задачи завершился transient-ошибкой (502/сеть), без зависания модалки (`allowDismissWhileRunning`).
+
 #### Сеть и публикация
 
 - **Мастер публикации по подпути** — переключатель интеграции (Switch) вместо чекбокса; отдельный UX для StatusOpenVPN и для прочих сторонних vhost; предупреждения и план подтверждения учитывают выключенную интеграцию (`publishWizardUi.ts`, `VpnNetworkTab.tsx`).
@@ -119,6 +132,8 @@
 
 - **OpenVPN restart после HA** — `test_node_sync_openvpn_restart.py`: перезапуск установленных `openvpn-server@*`, пропуск отсутствующих unit без ошибки.
 - **`ACCESS_PATH`** — `test_panel_paths.py`: нормализация подпути, `with_access_path`, `strip_access_path`, валидатор в `Settings`.
+- **Адрес сайта и HTTPS** — `test_panel_publish_info.py`: `public_https_origin_*`, `get_panel_branding` с нестандартным портом, `resolve_active_publish_mode_key` (nginx LE/custom/self-signed, cert из vhost), `HTTP_ACME_PORT` в `env_rows`, `nginx_listens_on_https_port`.
+- **Баги мастера публикации** — `test_panel_publish_info.py`: `inspect_tcp_port` без ложного «занят» на `:8080` при проверке `:80`, пустой `ACCESS_PATH` при явном unset в `.env`, устойчивость к невалидному `ACCESS_PATH` на GET, `uvicorn_le` при LE-сертификате на диске; `publishWizardUi.test.ts`: `isPublishStartTransientError` (404 не transient), `guessPublishAccessUrl` без подпути для non-nginx режимов.
 
 ### 🐛 Fixed
 
@@ -133,6 +148,27 @@
 - **500 на странице «VPN / Сеть»** — `access_path_value` использовался до определения в `panel_publish_info.py`.
 - **Опрос фоновой публикации** — `ReferenceError: opts is not defined` в `useBackgroundTaskPoll.startPoll`.
 - **HTML nginx в уведомлениях** — нормализация ошибок proxy/502 при опросе задачи публикации (`httpErrorMessage.ts`, `publishWizardUi.ts`).
+- **`HTTP_ACME_PORT` сбрасывался при повторной публикации** — UI не загружал значение из `.env`, поле всегда оставалось `80`; повторный запуск мастера мог перезаписать нестандартный HTTP-порт (`VpnNetworkTab.tsx`).
+- **Нестандартный `HTTPS_PUBLIC_PORT` вне QR/one-time URL** — диагностика сайта, `security.txt` (`/.well-known/security.txt`) и префикс «Общий домен» строили URL без порта — ложные предупреждения и неверный canonical (`site_diagnostics.py`, `http_security.py`, `SharedDomainPublishSection.tsx`).
+- **Все nginx-режимы без `PUBLISH_MODE` отображались как Let's Encrypt** — после `nginx_clear_app_ssl_env` в `.env` пустые `SSL_CERT`/`SSL_KEY`, хотя cert лежит в nginx vhost (`resolve_active_publish_mode_key`).
+
+#### Адрес сайта и HTTPS — мастер публикации
+
+- **Зависший диалог «Публикация запущена»** — при сетевой ошибке или 502 на `POST /settings/vpn-network/publish` UI ставил `status: running` без опроса задачи и без кнопки закрытия; HTTP **404** ошибочно считался transient-ошибкой и запускал тот же сценарий (`isPublishStartTransientError`, `PublishAwaitDialog`, `VpnNetworkTab.tsx`).
+- **`ACCESS_PATH` не сбрасывался при переходе на uvicorn / HTTP-direct** — после публикации с подпутём `/panel` через nginx переключение на `uvicorn_le` или `http_direct` оставляло старый путь в `.env`, хотя мастер показывал корневой URL (`nginx_apply_direct_http_env`, `nginx_apply_direct_https_env` в `nginx-common.sh`).
+- **Форма не сбрасывала domain и порты** — при пустых `DOMAIN` / `HTTPS_PUBLIC_PORT` / `HTTP_ACME_PORT` в ответе API поля сохраняли прежние значения (`VpnNetworkTab.tsx`).
+- **Переключатель интеграции сбрасывался после публикации** — `nginxSubpathIntegrate` принудительно включался при каждом `loadSettings`, если на домене есть foreign vhost; теперь только при первой загрузке вкладки.
+- **Ложное «порт занят»** — `inspect_tcp_port` матчил `:80` внутри `:8080` / `:8000` и `:443` внутри `:4430`; проверка по границе порта (`panel_publish_info.py`).
+- **Нет валидации `HTTP_ACME_PORT` в UI** — пустое поле, диапазон 1–65535 и совпадение с HTTPS-портом не проверялись до запроса на backend (`VpnNetworkTab.tsx`, `handlePublish`).
+- **Preview URL с устаревшим подпутём** — при смене nginx → `http_direct` preview показывал `/panel/`, хотя поле скрыто; подпуть не участвует в `guessPublishAccessUrl` для non-nginx режимов, state очищается при выходе из `nginx_*` (`publishWizardUi.ts`, `VpnNetworkTab.tsx`).
+- **Домен с `:port` уходил в publish** — `panel.example.com:8443` ломал certbot/LE; host нормализуется на backend и во frontend перед отправкой (`maintenance.py`, `VpnNetworkTab.tsx`).
+- **500 на всей вкладке при невалидном `ACCESS_PATH`** — `GET /settings/vpn-network` падал на `normalize_access_path` (например `/api`); ошибка перехватывается, вкладка остаётся доступной (`panel_publish_info.py`).
+- **«Текущий адрес в браузере» после publish** — до перезапуска uvicorn строился из кэшированного `behind_nginx` без актуального `ACCESS_PATH` и порта (`resolve_vpn_network_request_url`).
+- **Блок «Сертификат найден» без путей LE** — в `getLetsEncryptPathsForDomain` передавался `boolean` вместо `domainSslStatus` (`PublishAccessWizard.tsx`).
+- **Гонки при быстрой смене домена/портов** — устаревший ответ domain-ssl или port-status перезаписывал новый; sequence guard в debounced effects (`domainSslSeqRef`, `portStatusSeqRef`).
+- **Нельзя очистить поля cert/key** — effect автоподстановки снова подставлял `known_ssl_*` после ручной очистки (`suppressSslAutofillRef`, `VpnNetworkTab.tsx`).
+- **Режим `uvicorn_le` определялся как самоподписанный** — при пустом `SSL_CERT` в `.env`, но наличии LE-сертификата на диске (`resolve_active_publish_mode_key`).
+- **Подсказка URL для `direct_https`** — использовала `HTTPS_PUBLIC_PORT` вместо `BACKEND_PORT` при рассинхроне `.env` (`panel_publish_info.py`).
 
 ---
 

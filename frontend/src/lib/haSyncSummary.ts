@@ -293,7 +293,6 @@ export function parseHaSyncTaskResult(
   const parsed = parseTaskOutput(task)
   const sections: HaSyncResultSection[] = []
   let title = task?.message?.trim() || 'Синхронизация завершена'
-  let description: string | undefined
   let mode: 'setup' | 'domain' | 'push' | undefined
   let domain: string | undefined
 
@@ -347,7 +346,7 @@ export function parseHaSyncTaskResult(
     }
   }
 
-  description = buildOverviewDescription(sections, domain, mode)
+  const description = buildOverviewDescription(sections, domain, mode)
 
   return {
     title,

@@ -74,13 +74,18 @@ Disallow: /api/
 def get_panel_branding(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     import os
 
+    from app.services.panel_publish_info import public_https_origin_url
+
     getter = environ if environ is not None else os.environ
     domain = (getter.get("DOMAIN", "") or "").strip()
     brand = (getter.get("PANEL_BRAND_NAME", "") or "").strip() or "Admin Panel"
     panel_base_url = None
     if domain:
-        host = domain.split(":")[0]
-        panel_base_url = f"https://{host}"
+        try:
+            https_public_port = int((getter.get("HTTPS_PUBLIC_PORT", "") or "443").strip() or "443")
+        except ValueError:
+            https_public_port = 443
+        panel_base_url = public_https_origin_url(domain, https_public_port) or None
     return {
         "panel_brand_name": brand,
         "panel_host": domain or None,

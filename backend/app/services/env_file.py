@@ -40,6 +40,18 @@ class EnvFileService:
                     return line.split("=", 1)[1].strip()
         return os.getenv(key, default)
 
+    def env_key_defined_in_file(self, key: str) -> bool:
+        env_path = self.env_file_path
+        if not env_path.exists():
+            return False
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith(f"{key}="):
+                return True
+        return False
+
     def ensure_env_default(self, key: str, value: str) -> None:
         if self.get_env_value(key, "__missing__") == "__missing__":
             self.set_env_value(key, value)
