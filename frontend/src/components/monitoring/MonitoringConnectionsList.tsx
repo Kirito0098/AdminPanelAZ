@@ -19,6 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { formatDateTime } from '@/lib/datetime'
+import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { COL_CONNECTED_SINCE, COL_HANDSHAKE, COL_VPN_IP } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import type { OpenVpnClient, VpnConfigHaInfo, WireGuardPeer } from '@/types'
@@ -164,8 +165,8 @@ function ConnectionCard({ row, showNodeColumn }: { row: MonitoringConnectionRow;
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {row.ha ? (
-            <Badge variant="outline" className="gap-1 text-xs">
-              HA: {row.ha.shared_domain} ({row.ha.node_count} узл.)
+            <Badge variant="outline" className="gap-1 text-xs" title={haBadgeTitle(row.ha)}>
+              {formatHaBadgeLabel(row.ha)}
             </Badge>
           ) : (
             showNodeColumn && <NodeScopeBadge nodeName={row.nodeName} />
@@ -355,8 +356,8 @@ export default function MonitoringConnectionsList({ rows, showNodeColumn }: Moni
                 {showNodeColumn && (
                   <TableCell className="text-sm">
                     {row.ha ? (
-                      <Badge variant="outline" className="gap-1 text-xs">
-                        HA: {row.ha.shared_domain} ({row.ha.node_count} узл.)
+                      <Badge variant="outline" className="gap-1 text-xs" title={haBadgeTitle(row.ha)}>
+                        {formatHaBadgeLabel(row.ha)}
                       </Badge>
                     ) : (
                       row.nodeName || '—'

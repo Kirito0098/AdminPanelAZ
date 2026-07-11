@@ -31,6 +31,7 @@ import {
   resetTraffic,
   setTrafficCleanupSchedule,
 } from '@/api/client'
+import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import TrafficClientDetails from '@/components/traffic/TrafficClientDetails'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
@@ -195,8 +196,8 @@ function TrafficClientCard({ row, totalBytes, expanded, onToggle, children }: Tr
             {row.is_active ? 'Онлайн' : 'Офлайн'}
           </Badge>
           {row.ha && (
-            <Badge variant="outline" className="text-[10px]">
-              HA: {row.ha.shared_domain} ({row.ha.node_count} узл.)
+            <Badge variant="outline" className="text-[10px]" title={haBadgeTitle(row.ha)}>
+              {formatHaBadgeLabel(row.ha)}
             </Badge>
           )}
         </div>
@@ -640,7 +641,8 @@ export default function TrafficPage() {
         <SettingsAlert variant="info" title="Суммарный трафик HA-группы">
           Активный узел входит в HA-группу <strong>{data.ha_context.group_name}</strong> ({data.ha_context.shared_domain}).
           Показан <strong>суммарный</strong> объём трафика клиентов по всем {data.ha_context.node_count} узлам группы.
-          Лимиты трафика по-прежнему считаются по каждому узлу отдельно.
+          Лимиты трафика по-прежнему считаются по каждому узлу отдельно. Чтобы работать с другой HA-группой или одиночным
+          узлом, выберите его в селекторе в шапке.
         </SettingsAlert>
       ) : (
         <SettingsAlert variant="info" title="Данные активного узла">

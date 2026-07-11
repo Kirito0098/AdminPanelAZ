@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
-import { Activity, CircleCheck, CircleX, HelpCircle, Server } from 'lucide-react'
+import { Activity, CircleCheck, CircleX, HelpCircle, Layers, Server } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
 import { ApiError } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -12,6 +13,13 @@ import {
 import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import {
+  buildHaSelectorOptions,
+  getHaScopeDisplayLabel,
+  isHaGroupScopePath,
+  resolveHaSelectorValue,
+  type HaSelectorOption,
+} from '@/lib/haNodeScope'
 import { cn } from '@/lib/utils'
 import { NODE_STATUS_LABELS } from '@/lib/uiLabels'
 import type { NodeStatus } from '@/types'
@@ -37,10 +45,20 @@ const statusVariants: Record<NodeStatus, 'success' | 'destructive' | 'warning'> 
 }
 
 export default function NodeSelector() {
+  const location = useLocation()
   const { user } = useAuth()
-  const { activeNode, nodes, loading, activate } = useNode()
+  const { activeNode, activeNodeHa, nodes, syncGroups, syncGroupsLoaded, loading, activate } = useNode()
   const { success, error: notifyError } = useNotifications()
   const isAdmin = user?.role === 'admin'
+  const isHaScope = isHaGroupScopePath(location.pathname)
+  const useHaSelector = isHaScope && syncGroupsLoaded && isAdmin
+
+  const handleActivate = (id: number, label: string) => {
+    if (id === activeNode?.id) return
+    void activate(id)
+      .then(() => success(`Активный узел: ${label}`))
+      .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка активации узла'))
+  }
 
   if (loading || !activeNode) {
     return (
@@ -52,28 +70,92 @@ export default function NodeSelector() {
   }
 
   if (!isAdmin) {
+    const label = getHaScopeDisplayLabel(activeNodeHa, activeNode, isHaScope)
     return (
       <div className="flex items-center gap-2">
-        <Server size={14} className="text-muted-foreground" />
-        <span className="max-w-[140px] truncate text-xs font-medium">{activeNode.name}</span>
-        <StatusDot status={activeNode.status} />
+        {isHaScope && activeNodeHa ? (
+          <Layers size={14} className="text-muted-foreground" />
+        ) : (
+          <Server size={14} className="text-muted-foreground" />
+        )}
+        <span className="max-w-[140px] truncate text-xs font-medium">{label}</span>
+        {isHaScope && activeNodeHa ? (
+          <Badge variant="outline" className="h-4 px-1 text-[10px]">
+            HA
+          </Badge>
+        ) : (
+          <StatusDot status={activeNode.status} />
+        )}
       </div>
+    )
+  }
+
+  if (useHaSelector) {
+    const options = buildHaSelectorOptions(nodes, syncGroups)
+    const currentValue = resolveHaSelectorValue(activeNode, activeNodeHa, syncGroups)
+    const activeGroup =
+      activeNodeHa ??
+      (() => {
+        const group = syncGroups.find((item) => `group:${item.id}` === currentValue)
+        if (!group) return null
+        return {
+          group_name: group.name,
+          shared_domain: group.shared_domain,
+        }
+      })()
+
+    return (
+      <Select
+        value={currentValue}
+        onValueChange={(value) => {
+          if (value === currentValue) return
+          if (value.startsWith('group:')) {
+            const groupId = Number(value.slice('group:'.length))
+            const group = syncGroups.find((item) => item.id === groupId)
+            if (!group) return
+            handleActivate(group.primary_node_id, group.name)
+            return
+          }
+          if (value.startsWith('node:')) {
+            const nodeId = Number(value.slice('node:'.length))
+            const node = nodes.find((item) => item.id === nodeId)
+            handleActivate(nodeId, node?.name ?? String(nodeId))
+          }
+        }}
+      >
+        <SelectTrigger className="h-8 w-[220px] gap-2 text-xs">
+          <Layers size={14} className="shrink-0 text-muted-foreground" />
+          <SelectValue placeholder="Выберите HA-группу">
+            {activeGroup ? (
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate">{activeGroup.group_name}</span>
+                <Badge variant="outline" className="h-4 max-w-[96px] truncate px-1 text-[10px] font-normal">
+                  {activeGroup.shared_domain}
+                </Badge>
+              </span>
+            ) : (
+              <span className="truncate">{activeNode.name}</span>
+            )}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.key} value={option.key}>
+              <HaSelectorOptionLabel option={option} />
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     )
   }
 
   return (
     <Select
       value={String(activeNode.id)}
-      onValueChange={(v) => {
-        const id = Number(v)
-        if (id !== activeNode.id) {
-          const node = nodes.find((n) => n.id === id)
-          void activate(id)
-            .then(() => success(`Активный узел: ${node?.name ?? id}`))
-            .catch((err) =>
-              notifyError(err instanceof ApiError ? err.message : 'Ошибка активации узла'),
-            )
-        }
+      onValueChange={(value) => {
+        const id = Number(value)
+        const node = nodes.find((item) => item.id === id)
+        handleActivate(id, node?.name ?? value)
       }}
     >
       <SelectTrigger className="h-8 w-[200px] gap-2 text-xs">
@@ -96,6 +178,32 @@ export default function NodeSelector() {
         ))}
       </SelectContent>
     </Select>
+  )
+}
+
+function HaSelectorOptionLabel({ option }: { option: HaSelectorOption }) {
+  if (option.type === 'group') {
+    return (
+      <span className="flex items-center gap-2">
+        <StatusDot status={option.primaryStatus} />
+        <span className="truncate">{option.label}</span>
+        <Badge variant="outline" className="ml-1 h-4 max-w-[120px] truncate px-1 text-[10px]">
+          {option.sharedDomain}
+        </Badge>
+      </span>
+    )
+  }
+
+  return (
+    <span className="flex items-center gap-2">
+      <StatusDot status={option.status} />
+      <span className="truncate">{option.label}</span>
+      {option.isLocal && (
+        <Badge variant="outline" className="ml-1 h-4 px-1 text-[10px]">
+          локальный
+        </Badge>
+      )}
+    </span>
   )
 }
 

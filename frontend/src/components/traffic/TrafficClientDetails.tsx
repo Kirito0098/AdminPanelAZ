@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/table'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { formatDateTime } from '@/lib/datetime'
+import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { COL_VPN_IP } from '@/lib/uiLabels'
 import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficClientSessions } from '@/types'
 
@@ -237,8 +238,8 @@ export default function TrafficClientDetails({
           </Badge>
         )}
         {row.ha && (
-          <Badge variant="outline" className="gap-1">
-            HA: {row.ha.shared_domain} ({row.ha.node_count} узл.)
+          <Badge variant="outline" className="gap-1" title={haBadgeTitle(row.ha)}>
+            {formatHaBadgeLabel(row.ha)}
           </Badge>
         )}
       </div>

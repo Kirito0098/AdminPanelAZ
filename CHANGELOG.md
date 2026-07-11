@@ -63,6 +63,8 @@
 
 #### Node Sync / HA
 
+- **Селектор узлов на HA-scope страницах** — на Dashboard, Traffic, Routing, Edit Files, Settings и AntiZapret в шапке показывается название HA-группы (а не отдельные primary/replica); replica скрыта из списка. При переходе на эти страницы с активной replica автоматически переключается primary. На диагностических страницах (Логи, Мониторинг сервера, Warper, Monitoring, Узлы) список узлов без изменений.
+- **Бейдж HA на карточках и в таблицах** — вместо непонятного `(2)` показывается `· 2 узла`; при наведении — подсказка, что клиент доступен на всех узлах группы.
 - **Reconcile пропускает `pending`** — фоновый worker не выставляет `failed` и не запускает auto-heal во время Push full / Setup (`reconcile_worker.py`).
 - **Push full continue-on-error** — ошибка restore на одной реплике не прерывает цикл; shadow link только если все restore OK; итог `sync_status=failed` при partial failure (`push_full.py`).
 - **Verify не затирает `sync_status`** — обновляет только `last_verify_at` / `last_verify_result`; счётчик `auto_heal_failures` сохраняется между verify (`verify.py`, `reconcile_worker.py`).

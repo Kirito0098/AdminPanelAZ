@@ -51,6 +51,7 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import {
   buildLightDiff,

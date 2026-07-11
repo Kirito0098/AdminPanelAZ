@@ -21,6 +21,7 @@ import {
   Sun,
 } from 'lucide-react'
 import NodeSelector from '@/components/NodeSelector'
+import HaScopeEnforcer from '@/components/HaScopeEnforcer'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -251,6 +252,7 @@ export default function Layout() {
   return (
     <div className="flex min-h-screen bg-background">
       <ForcePasswordChange />
+      <HaScopeEnforcer />
       <aside className="hidden h-screen w-72 shrink-0 overflow-hidden border-r border-border/80 bg-card lg:sticky lg:top-0 lg:block">
         <SidebarContent />
       </aside>

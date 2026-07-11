@@ -47,6 +47,7 @@ import {
   type AccentPresentation,
   type ConfigCardViewPrefs,
 } from '@/lib/configCardViewPrefs'
+import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { cn } from '@/lib/utils'
 
 type ActionKey = 'download' | 'qr' | 'block' | 'unblock' | 'delete'
@@ -532,8 +533,8 @@ export default function ConfigCard({
                 </Badge>
               ))}
             {fields.tags && config.ha ? (
-              <Badge variant="outline" className="gap-1 px-1.5 text-[10px]">
-                HA: {config.ha.shared_domain} ({config.ha.node_count})
+              <Badge variant="outline" className="gap-1 px-1.5 text-[10px]" title={haBadgeTitle(config.ha)}>
+                {formatHaBadgeLabel(config.ha)}
               </Badge>
             ) : null}
             {fields.profileBadges && hasVpnProfiles(config, tab) && (

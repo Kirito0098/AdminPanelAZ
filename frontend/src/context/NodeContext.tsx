@@ -1,15 +1,18 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import * as api from '@/api/client'
 import { useAuth } from '@/context/AuthContext'
-import type { Node, NodeHaContext } from '@/types'
+import type { Node, NodeHaContext, NodeSyncGroup } from '@/types'
 
 interface NodeContextValue {
   activeNode: Node | null
   activeNodeHa: NodeHaContext | null
   nodes: Node[]
+  syncGroups: NodeSyncGroup[]
+  syncGroupsLoaded: boolean
   loading: boolean
   refresh: () => Promise<void>
   refreshNodes: () => Promise<void>
+  refreshSyncGroups: () => Promise<void>
   activate: (id: number) => Promise<void>
 }
 
@@ -20,6 +23,8 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
   const [activeNode, setActiveNode] = useState<Node | null>(null)
   const [activeNodeHa, setActiveNodeHa] = useState<NodeHaContext | null>(null)
   const [nodes, setNodes] = useState<Node[]>([])
+  const [syncGroups, setSyncGroups] = useState<NodeSyncGroup[]>([])
+  const [syncGroupsLoaded, setSyncGroupsLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
@@ -53,12 +58,30 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user])
 
-  const activate = useCallback(async (id: number) => {
-    const data = await api.activateNode(id)
-    setActiveNode(data.node)
-    setActiveNodeHa(data.ha ?? null)
-    await refreshNodes()
-  }, [refreshNodes])
+  const refreshSyncGroups = useCallback(async () => {
+    if (!user || user.role !== 'admin') {
+      setSyncGroups([])
+      setSyncGroupsLoaded(false)
+      return
+    }
+    try {
+      setSyncGroups(await api.getNodeSyncGroups())
+    } catch {
+      setSyncGroups([])
+    } finally {
+      setSyncGroupsLoaded(true)
+    }
+  }, [user])
+
+  const activate = useCallback(
+    async (id: number) => {
+      const data = await api.activateNode(id)
+      setActiveNode(data.node)
+      setActiveNodeHa(data.ha ?? null)
+      await Promise.all([refreshNodes(), refreshSyncGroups()])
+    },
+    [refreshNodes, refreshSyncGroups],
+  )
 
   useEffect(() => {
     refresh()
@@ -69,11 +92,18 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
   }, [refreshNodes])
 
   useEffect(() => {
+    refreshSyncGroups()
+  }, [refreshSyncGroups])
+
+  useEffect(() => {
     if (!user) return
 
     const interval = window.setInterval(() => {
       void refresh()
-      if (user.role === 'admin') void refreshNodes()
+      if (user.role === 'admin') {
+        void refreshNodes()
+        void refreshSyncGroups()
+      }
     }, 45_000)
 
     const onVisible = () => {
@@ -85,11 +115,33 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
       window.clearInterval(interval)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [user, refresh, refreshNodes])
+  }, [user, refresh, refreshNodes, refreshSyncGroups])
 
   const value = useMemo(
-    () => ({ activeNode, activeNodeHa, nodes, loading, refresh, refreshNodes, activate }),
-    [activeNode, activeNodeHa, nodes, loading, refresh, refreshNodes, activate],
+    () => ({
+      activeNode,
+      activeNodeHa,
+      nodes,
+      syncGroups,
+      syncGroupsLoaded,
+      loading,
+      refresh,
+      refreshNodes,
+      refreshSyncGroups,
+      activate,
+    }),
+    [
+      activeNode,
+      activeNodeHa,
+      nodes,
+      syncGroups,
+      syncGroupsLoaded,
+      loading,
+      refresh,
+      refreshNodes,
+      refreshSyncGroups,
+      activate,
+    ],
   )
 
   return <NodeContext.Provider value={value}>{children}</NodeContext.Provider>
