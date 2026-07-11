@@ -92,12 +92,14 @@
 - **Запись на replica без ограничений** — edit-files, routing и settings принимали изменения с replica-узла, риск split-brain (`edit_files.py`, `routing.py`, `settings.py`).
 - **`synced` при ненулевом `last_sync_error`** — Push full мог оставить успешный статус при проблемах shadow link или verify (`push_full.py`).
 - **Verify маскировал failed репликацию** — один badge «готово» при `sync_status=failed` и успешном паритете; исправлено разделением badge и `warnings`.
+- **OpenVPN restart после HA sync** — `systemctl restart openvpn-server@*` больше не поднимает службы, остановленные вручную; перезапускаются только unit'ы в состоянии `active` (`openvpn_restart.py`).
 
 ### 🧪 Tests
 
 - **Auto-heal counter и pending skip** — `test_node_sync_reconcile_worker.py`: накопление `auto_heal_failures`, notify после исчерпания лимита, reconcile пропускает `pending`.
 - **Push full continue-on-error** — `test_node_sync_push_full.py`: partial failure на одной из трёх реплик, обработка всех узлов, shadow link только при полном restore.
 - **Edit-files 403 на replica** — `test_edit_files_ha_replica.py`: сохранение файла с replica-узла возвращает 403.
+- **OpenVPN restart только active** — `test_node_sync_openvpn_restart.py`: пропуск stopped unit'ов, fallback при недоступном monitoring.
 
 ---
 
