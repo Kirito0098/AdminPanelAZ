@@ -58,6 +58,7 @@ from app.services.panel_publish_info import (
     nginx_is_foreign_vhost_for_domain,
     nginx_is_status_openvpn_on_domain,
     panel_restart_command,
+    resolve_request_url_root,
     server_primary_ip,
     resolve_publish_ssl_paths,
     resolve_vpn_network_request_url,
