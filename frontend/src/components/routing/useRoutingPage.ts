@@ -48,7 +48,8 @@ export type ConfirmAction =
   | null
 
 export function useRoutingPage() {
-  const { activeNode } = useNode()
+  const { activeNode, activeNodeHa } = useNode()
+  const haReplicaReadonly = activeNodeHa?.role === 'replica'
   const { success, error: notifyError } = useNotifications()
   const {
     startGlobal,
@@ -289,6 +290,10 @@ export function useRoutingPage() {
     stage: PipelineStage,
     ingestKind?: IngestKind,
   ) => {
+    if (haReplicaReadonly) {
+      notifyError('HA replica: изменения маршрутизации только на primary')
+      return
+    }
     setActionLoading(true)
     try {
       const resp = await fn()
@@ -339,6 +344,10 @@ export function useRoutingPage() {
     okMsg: string,
     progressLabel = 'Выполнение операции...',
   ) => {
+    if (haReplicaReadonly) {
+      notifyError('HA replica: изменения маршрутизации только на primary')
+      return
+    }
     setActionLoading(true)
     try {
       await withInline(fn, progressLabel)
@@ -355,6 +364,10 @@ export function useRoutingPage() {
     fn: () => Promise<{ task_id: string; message?: string }>,
     okMsg: string,
   ) => {
+    if (haReplicaReadonly) {
+      notifyError('HA replica: изменения маршрутизации только на primary')
+      return
+    }
     setActionLoading(true)
     try {
       const resp = await fn()

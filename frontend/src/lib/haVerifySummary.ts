@@ -173,7 +173,7 @@ export function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismat
     return {
       title: 'Разные клиенты OpenVPN',
       details: details.length ? details : ['Наборы имён клиентов на узлах не совпадают.'],
-      hint: 'Создайте или удалите клиентов на основном узле и дождитесь авто-синхронизации, либо нажмите «Синхронизировать» для полного выравнивания.',
+      hint: 'Создайте или удалите клиентов на основном узле и дождитесь авто-синхронизации, либо выполните Push full для полного выравнивания.',
     }
   }
 
@@ -253,6 +253,7 @@ export function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismat
 export function parseHaVerifyResult(
   result: NodeSyncVerifyResult,
   groupName?: string,
+  syncMode?: string,
 ): HaVerifyResultView {
   const replicas = (result.replicas ?? []).map((replica) => {
     const nodeName = replica.node_name || String(replica.node_id)
@@ -274,12 +275,15 @@ export function parseHaVerifyResult(
   const offlineReplicas = replicas.filter((replica) => !replica.online).map((replica) => replica.nodeName)
 
   let nextStep: string | undefined
+  const manualMode = syncMode === 'manual_full'
   if (result.ready) {
     nextStep = 'Настройте DNS: A-записи домена на IP всех узлов и health-check у провайдера (кнопка «Настройка DNS»).'
   } else if (offlineReplicas.length) {
     nextStep = `Сначала восстановите связь с ${offlineReplicas.join(', ')}, затем повторите проверку.`
   } else if (mismatchCount) {
-    nextStep = 'Нажмите «Синхронизировать» для выравнивания реплики с основным узлом.'
+    nextStep = manualMode
+      ? 'В режиме manual_full выполните Push full для выравнивания реплики с основным узлом.'
+      : 'Устраните отличия на primary (авто-синхронизация) или выполните Push full / «Настройка».'
   }
 
   const groupLabel = groupName ? `«${groupName}»` : `домен ${result.shared_domain}`

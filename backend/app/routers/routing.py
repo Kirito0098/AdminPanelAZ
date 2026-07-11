@@ -21,7 +21,7 @@ from app.services.background_tasks import background_task_service
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.antizapret_sync import enqueue_ha_routing_apply_replicas, replicate_antizapret_settings
 from app.services.node_sync.config_sync import maybe_replicate_config_files
-from app.services.node_sync.groups import find_sync_group_for_primary, is_auto_sync_enabled
+from app.services.node_sync.groups import find_sync_group_for_primary, is_auto_sync_enabled, require_ha_primary_for_config_ops
 from app.services.node_sync.provider_sync import deploy_compiled_providers_to_replicas, replicate_provider_content
 
 router = APIRouter(prefix="/routing", tags=["routing"])
@@ -94,6 +94,7 @@ def save_provider(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    require_ha_primary_for_config_ops(db)
     result = get_active_adapter(db).save_provider_content(filename, payload.content)
     active_node = get_active_node(db)
     group = find_sync_group_for_primary(db, active_node.id)
@@ -109,11 +110,13 @@ def toggle_provider(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    require_ha_primary_for_config_ops(db)
     return get_active_adapter(db).set_provider_enabled(filename, payload.enabled)
 
 
 @router.post("/sync")
 def sync_providers(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    require_ha_primary_for_config_ops(db)
     adapter = get_active_adapter(db)
     result = adapter.sync_cidr_providers()
     active_node = get_active_node(db)
@@ -136,6 +139,7 @@ def write_route_file(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    require_ha_primary_for_config_ops(db)
     result = get_active_adapter(db).write_route_file(file_key, payload.content)
     maybe_replicate_config_files(
         db,
@@ -177,6 +181,7 @@ def put_antizapret_settings(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    require_ha_primary_for_config_ops(db)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ожидается JSON-объект")
     filtered = filter_known_keys(payload)
@@ -197,6 +202,7 @@ def put_antizapret_settings(
 
 @router.post("/apply", status_code=status.HTTP_202_ACCEPTED)
 def apply_routing(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    require_ha_primary_for_config_ops(db)
     active = background_task_service.find_active_task("routing_apply")
     if active:
         return JSONResponse(

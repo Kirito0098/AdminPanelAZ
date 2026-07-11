@@ -12,8 +12,8 @@ export default function HaReplicaBanner() {
   return (
     <SettingsAlert variant="warning" title="HA: узел replica — только просмотр">
       Активный узел — <strong>replica</strong> в группе «{activeNodeHa.group_name}» ({activeNodeHa.shared_domain}
-      ). Создание и изменение клиентов доступно только на primary{primaryLabel}. Переключите активный узел в шапке
-      или на странице «Узлы».
+      ). Создание и изменение клиентов, файлов конфигурации, маршрутизации и списков AntiZapret доступно только на
+      primary{primaryLabel}. Переключите активный узел в шапке или на странице «Узлы».
     </SettingsAlert>
   )
 }

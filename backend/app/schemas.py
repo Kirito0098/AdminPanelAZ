@@ -1145,6 +1145,7 @@ class NodeSyncGroupResponse(BaseModel):
     replica_node_names: list[str] = []
     members: list[NodeSyncGroupMember] = []
     ready: bool | None = None
+    warnings: list[str] = []
     sync_mode: str
     sync_status: SyncStatus
     last_sync_at: datetime | None = None

@@ -4,6 +4,7 @@ import {
   getAntizapretSettings,
   updateAntizapretSettings,
 } from '@/api/client'
+import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
@@ -18,6 +19,7 @@ import { Switch } from '@/components/ui/switch'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import { cn } from '@/lib/utils'
 import type { AntizapretSettingField } from '@/types'
 import type { LucideIcon } from 'lucide-react'
@@ -411,6 +413,7 @@ export default function AntizapretConfigTab() {
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
   const { trackBackgroundTask } = useProgress()
+  const haReplicaReadonly = useHaReplicaReadonly()
 
   const [schema, setSchema] = useState<AntizapretSettingField[]>([])
   const [saved, setSaved] = useState<Record<string, string>>({})
@@ -423,6 +426,8 @@ export default function AntizapretConfigTab() {
   const [applying, setApplying] = useState(false)
   const [needsApply, setNeedsApply] = useState(false)
   const [applyOpen, setApplyOpen] = useState(false)
+
+  const controlsDisabled = saving || applying || haReplicaReadonly
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -470,7 +475,7 @@ export default function AntizapretConfigTab() {
         section={section}
         draft={draft}
         dirtySet={dirtySet}
-        disabled={saving || applying}
+        disabled={controlsDisabled}
         onDraftChange={(key, value) => setDraft((prev) => ({ ...prev, [key]: value }))}
       />
     )
@@ -562,6 +567,7 @@ export default function AntizapretConfigTab() {
 
   return (
     <div className="space-y-6">
+      <HaReplicaBanner />
       <InlineProgressBar active={saving} label="Сохранение настроек..." />
       <InlineProgressBar active={applying} label="Применение doall.sh..." />
 
@@ -608,7 +614,7 @@ export default function AntizapretConfigTab() {
               variant="secondary"
               size="sm"
               onClick={() => void load()}
-              disabled={saving || applying}
+              disabled={controlsDisabled}
             >
               <RefreshCw className="mr-1.5 h-4 w-4" />
               Обновить
@@ -619,7 +625,7 @@ export default function AntizapretConfigTab() {
                 variant="ghost"
                 size="sm"
                 onClick={resetDraft}
-                disabled={saving || applying}
+                disabled={controlsDisabled}
               >
                 Сбросить
               </Button>
@@ -628,7 +634,7 @@ export default function AntizapretConfigTab() {
               type="button"
               size="sm"
               onClick={() => void save()}
-              disabled={!dirty || saving || applying}
+              disabled={!dirty || controlsDisabled}
             >
               <Save className="mr-1.5 h-4 w-4" />
               Сохранить
@@ -638,7 +644,7 @@ export default function AntizapretConfigTab() {
               size="sm"
               variant="default"
               onClick={() => setApplyOpen(true)}
-              disabled={saving || applying || dirty}
+              disabled={controlsDisabled || dirty}
             >
               <Play className="mr-1.5 h-4 w-4" />
               Применить
@@ -673,10 +679,10 @@ export default function AntizapretConfigTab() {
           <div className="flex flex-wrap gap-2">
             {dirty ? (
               <>
-                <Button type="button" variant="ghost" size="sm" onClick={resetDraft} disabled={saving || applying}>
+                <Button type="button" variant="ghost" size="sm" onClick={resetDraft} disabled={controlsDisabled}>
                   Сбросить
                 </Button>
-                <Button type="button" size="sm" onClick={() => void save()} disabled={saving || applying}>
+                <Button type="button" size="sm" onClick={() => void save()} disabled={controlsDisabled}>
                   <Save className="mr-1.5 h-4 w-4" />
                   Сохранить
                 </Button>
@@ -686,7 +692,7 @@ export default function AntizapretConfigTab() {
                 type="button"
                 size="sm"
                 onClick={() => setApplyOpen(true)}
-                disabled={saving || applying}
+                disabled={controlsDisabled}
               >
                 <Play className="mr-1.5 h-4 w-4" />
                 Применить doall.sh
@@ -724,7 +730,7 @@ export default function AntizapretConfigTab() {
             section={section}
             draft={draft}
             dirtySet={dirtySet}
-            disabled={saving || applying}
+            disabled={controlsDisabled}
             onDraftChange={(key, value) => setDraft((prev) => ({ ...prev, [key]: value }))}
           />
         ))}

@@ -217,6 +217,41 @@ def require_ha_primary_node(db: Session, node_id: int) -> None:
     )
 
 
+def require_ha_primary_for_config_ops(db: Session, *, node: Node | None = None) -> None:
+    """Reject config/routing/settings writes on HA replica nodes."""
+    if node is None:
+        from app.services.node_manager import get_active_node
+
+        node = get_active_node(db)
+    _raise_ha_replica_forbidden(
+        db,
+        node_id=node.id,
+        operation_hint="Редактируйте файлы, маршрутизацию и настройки",
+    )
+
+
+def build_group_warnings(group: NodeSyncGroup, verify_result: dict[str, Any] | None) -> list[str]:
+    """Surface partial replication / shadow / auto-heal issues for the UI."""
+    warnings: list[str] = []
+    if isinstance(verify_result, dict):
+        failures = verify_result.get("auto_heal_failures")
+        try:
+            if failures is not None and int(failures) > 0:
+                warnings.append(f"Auto-heal: {int(failures)} неудачных попыток")
+        except (TypeError, ValueError):
+            pass
+        if group.sync_status == SyncStatus.failed and verify_result.get("ready"):
+            err = (group.last_sync_error or "").strip()
+            if err:
+                warnings.append(f"Репликация: {err}")
+            else:
+                warnings.append("Репликация не удалась, но проверка паритета успешна")
+    err = (group.last_sync_error or "").strip()
+    if err and "HA shadow linking" in err and err not in warnings:
+        warnings.append(err)
+    return warnings
+
+
 def get_replica_nodes(db: Session, group: NodeSyncGroup) -> list[Node]:
     replica_ids = parse_replica_node_ids(group.replica_node_ids)
     if not replica_ids:
@@ -297,9 +332,11 @@ def group_to_dict(group: NodeSyncGroup, db: Session) -> dict[str, Any]:
     ready = None
     if isinstance(verify_result, dict) and "ready" in verify_result:
         ready = bool(verify_result.get("ready"))
+    warnings = build_group_warnings(group, verify_result if isinstance(verify_result, dict) else None)
     return {
         "members": _build_members(group, nodes_by_id, replicas, client_counts),
         "ready": ready,
+        "warnings": warnings,
         "id": group.id,
         "name": group.name,
         "shared_domain": group.shared_domain,

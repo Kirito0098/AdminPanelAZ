@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.14.0](#2140---2026-07-11) — 2026-07-11
 - [2.13.0](#2130---2026-07-11) — 2026-07-11
 - [2.12.0](#2120---2026-07-10) — 2026-07-10
 - [2.11.0](#2110---2026-07-08) — 2026-07-08
@@ -37,6 +38,64 @@
 ---
 
 ## [Unreleased]
+
+---
+
+## [2.14.0] - 2026-07-11
+
+> **Кратко:** устранение критических проблем HA Node Sync — накопление счётчика auto-heal и notify после N неудач; reconcile не трогает группы в `pending`; Push full continue-on-error без прерывания на первой упавшей реплике; запрет записи на replica (backend 403 + баннер readonly в Edit Files, Routing, Settings, AntiZapret); разделение статусов verify и репликации (два badge); `warnings` в API групп; возобновление опроса фоновой задачи после reload; renew OVPN без shadow — crypto PKI fallback; очистка shadow при переходе auto→manual; prompt Push full при смене состава группы; `NODE_SYNC_AUTO_REPLICATE_POLICIES`; подсказки verify с учётом `manual_full`; ссылки на runbook в секции HA; **node agent 1.4.0**.
+
+### ✨ Added
+
+#### Node Sync / HA
+
+- **Backend guards для replica** — `require_ha_primary_for_client_ops` / `require_ha_primary_for_config_ops` на edit-files, routing, settings, configs и bulk-операциях; HTTP 403 при попытке записи не с primary (`groups.py`, `edit_files.py`, `routing.py`, `settings.py`).
+- **Компонент `HaReplicaBanner`** — предупреждение «HA: узел replica — только просмотр» на Dashboard, Edit Files, Routing, Settings, AntiZapret (`HaReplicaBanner.tsx`, `useHaReplicaReadonly`).
+- **Readonly AntiZapret на replica** — отключены сохранение, apply и правка списков в `AntizapretConfigTab` при активном replica-узле.
+- **Два badge в таблице HA-групп** — отдельно «Verify: …» и «Репликация: …», чтобы расхождения паритета не скрывали `sync_status=failed` (`verifyBadge`, `replicationBadge`, `NodeSyncGroupSection.tsx`).
+- **Поле `warnings` в API групп** — auto-heal failures, ошибки репликации при успешном verify, shadow linking (`build_group_warnings`, `group_to_dict`, `groups.py`).
+- **Возобновление опроса pending-задачи** — после reload UI подхватывает `last_sync_task_id` и продолжает poll Push full / Setup / «Домен → узлы» (`NodeSyncGroupSection.tsx`, `node_sync.py`).
+- **Раздельные действия синхронизации** — кнопки «Настройка», «Push full» и «Домен» вместо одной «Синхронизировать»; диалог подтверждения «Применить shared domain».
+- **Prompt Push full при смене состава** — после изменения primary или списка replica — диалог «Обязательна полная синхронизация» (`NodeSyncGroupSection.tsx`).
+- **Runbook в описании секции HA** — ссылки на `docs/NodeSync.md` и `reviews/HA-sync-remediation-plan.md`.
+
+### 🔄 Changed
+
+#### Node Sync / HA
+
+- **Reconcile пропускает `pending`** — фоновый worker не выставляет `failed` и не запускает auto-heal во время Push full / Setup (`reconcile_worker.py`).
+- **Push full continue-on-error** — ошибка restore на одной реплике не прерывает цикл; shadow link только если все restore OK; итог `sync_status=failed` при partial failure (`push_full.py`).
+- **Verify не затирает `sync_status`** — обновляет только `last_verify_at` / `last_verify_result`; счётчик `auto_heal_failures` сохраняется между verify (`verify.py`, `reconcile_worker.py`).
+- **Push full → `failed` при shadow/verify issues** — частичный restore, конфликты shadow linking или verify not ready помечают репликацию как failed с понятным `last_sync_error` (`push_full.py`).
+- **Renew OVPN без shadow — crypto fallback** — при отсутствии shadow `VpnConfig` на replica копируется easyrsa3 с primary вместо hard error (`replicate.py`, `_handle_client_renew_cert`).
+- **Переход auto→manual очищает shadow** — `clear_shadow_links_for_group` сбрасывает `ha_primary_config_id` при смене режима (`node_sync.py`, `dissolve.py`).
+- **`NODE_SYNC_AUTO_REPLICATE_POLICIES`** — флаг из `.env` учитывается в `replicate_policy_op`, `replicate_node_default_policy` и `heal_policy_drift` (`policy_sync.py`).
+- **Подсказки verify с учётом режима** — в отчёте «Проверить» для `manual_full` рекомендуется Push full, для `auto` — incremental heal / синхронизация (`haVerifySummary.ts`).
+
+#### Документация
+
+- **`docs/NodeSync.md`** — домен применяется через Setup / «Домен → узлы», а не автоматически при создании группы; уточнения по `manual_full` / `auto` и auto-heal.
+
+#### Node agent
+
+- **Версия node agent `1.4.0`** — без изменений HTTP API; маркер релиза вместе с панелью 2.14.0 (`NODE_AGENT_VERSION`, `node_health.py`, `node_agent/main.py`). Минимум для HA crypto-sync и verify по-прежнему **≥ 1.3.0**; после обновления панели перезапустите агент на узлах, чтобы в «Узлах» отображалась актуальная версия.
+
+### 🐛 Fixed
+
+#### Node Sync / HA
+
+- **Счётчик auto-heal не накапливался** — `prior_failures` читался из свежего verify вместо `group.last_verify_result`; после N неудач не срабатывал admin notify (`reconcile_worker.py`).
+- **Reconcile во время Push full** — мог выставить `sync_status=failed` поверх активной синхронизации (`reconcile_worker.py`).
+- **Push full прерывался на первой ошибке** — оставшиеся реплики не обрабатывались (`push_full.py`).
+- **Запись на replica без ограничений** — edit-files, routing и settings принимали изменения с replica-узла, риск split-brain (`edit_files.py`, `routing.py`, `settings.py`).
+- **`synced` при ненулевом `last_sync_error`** — Push full мог оставить успешный статус при проблемах shadow link или verify (`push_full.py`).
+- **Verify маскировал failed репликацию** — один badge «готово» при `sync_status=failed` и успешном паритете; исправлено разделением badge и `warnings`.
+
+### 🧪 Tests
+
+- **Auto-heal counter и pending skip** — `test_node_sync_reconcile_worker.py`: накопление `auto_heal_failures`, notify после исчерпания лимита, reconcile пропускает `pending`.
+- **Push full continue-on-error** — `test_node_sync_push_full.py`: partial failure на одной из трёх реплик, обработка всех узлов, shadow link только при полном restore.
+- **Edit-files 403 на replica** — `test_edit_files_ha_replica.py`: сохранение файла с replica-узла возвращает 403.
 
 ---
 
@@ -1660,7 +1719,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.13.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.14.0...HEAD
+[2.14.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.12.0...v2.13.0
 [2.12.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.10.0...v2.11.0

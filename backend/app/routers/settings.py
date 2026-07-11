@@ -15,6 +15,7 @@ from app.services.env_file import EnvFileService
 from app.services.file_editor import EDITABLE_FILES
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 from app.services.node_sync.config_sync import maybe_replicate_config_files
+from app.services.node_sync.groups import require_ha_primary_for_config_ops
 from app.services.notify_time import _normalize_timezone_name, get_client_timezone_from_request
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -119,6 +120,7 @@ def update_settings(
         db.add(current_user)
 
     if current_user.role.value == "admin":
+        require_ha_primary_for_config_ops(db)
         adapter = get_active_adapter(db)
         changed_file_keys: list[str] = []
         content_overrides: dict[str, str] = {}
@@ -175,6 +177,7 @@ def recreate_profiles(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    require_ha_primary_for_config_ops(db)
     output = get_active_adapter(db).recreate_profiles()
     node = get_active_node(db)
     admin_notify_service.send_settings_change(

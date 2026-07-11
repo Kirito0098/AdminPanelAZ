@@ -21,6 +21,7 @@ from app.services.node_sync.groups import (
 )
 from app.services.node_sync.manual_link import link_primary_configs_to_group
 from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
+from app.services.node_sync.shadow_link import format_shadow_link_warning, link_shadow_configs_for_group
 from app.services.node_sync.verify import verify_sync_group
 from app.services.policy_import import copy_access_policies_from_node
 from app.services.traffic.collector import collect_traffic_snapshot_for_node
@@ -165,45 +166,57 @@ def run_push_full(
                     )
         except Exception as exc:
             failed.append({"node_id": replica_id, "node_name": replica_name, "error": str(exc)})
-            group.sync_status = SyncStatus.failed
-            group.last_sync_error = str(exc)
-            group.last_sync_at = datetime.utcnow()
-            db.commit()
-            progress(100, "Push full завершился с ошибкой")
-            return {
-                "success": False,
-                "message": f"Restore failed on {replica_name}: {exc}",
-                "backup": backup_info,
-                "restored": restored,
-                "failed": failed,
-                "host_copy": host_copy,
-                "openvpn_restart": openvpn_restart,
-            }
+            logger.warning("Push full: restore failed on %s: %s", replica_name, exc)
 
-    group.sync_status = SyncStatus.synced
     group.last_sync_at = datetime.utcnow()
-    group.last_sync_error = None
-    if not is_auto_sync_enabled(group):
-        link_primary_configs_to_group(db, group)
+    shadow_link_result = None
+    verify_result = None
+    all_restored = not failed and len(restored) == len(replica_ids)
+
+    if all_restored:
+        if is_auto_sync_enabled(group):
+            shadow_link_result = link_shadow_configs_for_group(db, group)
+        else:
+            link_primary_configs_to_group(db, group)
     db.commit()
 
-    verify_result = None
-    if auto_verify:
+    if auto_verify and all_restored:
         progress(90, "Verify после sync…")
         verify_result = verify_sync_group(db, group)
 
-    progress(100, "Push full завершён")
+    shadow_warning = format_shadow_link_warning(shadow_link_result) if shadow_link_result else None
+    verify_not_ready = isinstance(verify_result, dict) and verify_result.get("ready") is False
+
+    if failed:
+        group.sync_status = SyncStatus.failed
+        error_parts = [f"{item.get('node_name')}: {item.get('error')}" for item in failed]
+        group.last_sync_error = "; ".join(error_parts)
+        success = False
+        message = f"Push full: ошибки на {len(failed)} из {len(replica_ids)} реплик"
+    elif shadow_warning or verify_not_ready:
+        group.sync_status = SyncStatus.failed
+        group.last_sync_error = shadow_warning or str(verify_result.get("summary") or "Verify не готов")
+        success = False
+        message = "Push full завершён с предупреждениями — см. last_sync_error"
+    else:
+        group.sync_status = SyncStatus.synced
+        group.last_sync_error = None
+        success = True
+        message = "Полная синхронизация завершена"
+
+    db.commit()
+    progress(100, "Push full завершён" if success else "Push full завершился с ошибкой")
     restart_names = [item.get("node_name") for item in openvpn_restart if item.get("restarted")]
-    message = "Полная синхронизация завершена"
-    if restart_names:
+    if success and restart_names:
         message += f". OpenVPN перезапущен на: {', '.join(str(n) for n in restart_names if n)}"
     return {
-        "success": True,
+        "success": success,
         "message": message,
         "backup": backup_info,
         "restored": restored,
         "failed": failed,
         "host_copy": host_copy,
         "openvpn_restart": openvpn_restart,
+        "shadow_link": shadow_link_result,
         "verify": verify_result,
     }

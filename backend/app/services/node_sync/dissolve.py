@@ -57,3 +57,18 @@ def dissolve_sync_group(db: Session, group: NodeSyncGroup) -> dict[str, Any]:
         "replica_configs_detached": len(shadows) + len(stray_replica_configs),
         "replica_node_ids": sorted(replica_ids),
     }
+
+
+def clear_shadow_links_for_group(db: Session, group: NodeSyncGroup) -> int:
+    """Clear ha_primary_config_id on replica rows when switching auto → manual_full."""
+    shadows = (
+        db.query(VpnConfig)
+        .filter(
+            VpnConfig.sync_group_id == group.id,
+            VpnConfig.ha_primary_config_id.isnot(None),
+        )
+        .all()
+    )
+    for shadow in shadows:
+        shadow.ha_primary_config_id = None
+    return len(shadows)

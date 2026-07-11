@@ -115,6 +115,8 @@ def replicate_policy_op(
     """Apply the same access-policy operation on all replica shadows (sync, blocking)."""
     if not is_auto_sync_enabled(group):
         return {"applied": [], "errors": [], "skipped": True}
+    if not get_settings().node_sync_auto_replicate_policies:
+        return {"applied": [], "errors": [], "skipped": True}
 
     _validate_policy_op(primary_config, op)
 
@@ -212,6 +214,8 @@ def replicate_node_default_policy(
     """Copy __node_default__ policy rows from primary to all HA replicas."""
     if not is_auto_sync_enabled(group):
         return {"applied": [], "errors": [], "skipped": True}
+    if not get_settings().node_sync_auto_replicate_policies:
+        return {"applied": [], "errors": [], "skipped": True}
 
     primary_node = db.get(Node, primary_node_id)
     if primary_node is None:
@@ -262,6 +266,8 @@ def replicate_node_default_policy(
 def heal_policy_drift(db: Session, group: NodeSyncGroup) -> dict[str, Any]:
     """Incremental reconcile heal: copy all access policies from primary to replicas."""
     if not is_auto_sync_enabled(group):
+        return {"success": False, "skipped": True, "errors": [], "applied": []}
+    if not get_settings().node_sync_auto_replicate_policies:
         return {"success": False, "skipped": True, "errors": [], "applied": []}
 
     primary_node = db.get(Node, group.primary_node_id)

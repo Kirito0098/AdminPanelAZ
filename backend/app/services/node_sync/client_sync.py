@@ -86,7 +86,17 @@ def maybe_replicate_delete(db: Session, *, node_id: int, primary_config: VpnConf
     if not group:
         return None
     if is_auto_sync_enabled(group):
-        return replicate_client_delete(db, group, primary_config)
+        result = replicate_client_delete(db, group, primary_config)
+        if not (result.get("deleted") or result.get("errors")):
+            crypto = replicate_primary_crypto_to_replicas(db, group, primary_config)
+            return {
+                "deleted": crypto.get("successes") or [],
+                "errors": crypto.get("errors") or [],
+                "skipped": False,
+                "crypto": crypto,
+                "fallback": True,
+            }
+        return result
 
     crypto = replicate_primary_crypto_to_replicas(db, group, primary_config)
     return {

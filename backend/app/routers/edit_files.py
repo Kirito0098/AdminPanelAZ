@@ -11,6 +11,7 @@ from app.services.edit_files_transfer import run_edit_files_transfer
 from app.services.file_editor import EDITABLE_FILES, FileEditorService
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.config_sync import maybe_replicate_config_files
+from app.services.node_sync.groups import require_ha_primary_for_config_ops
 
 router = APIRouter(prefix="/edit-files", tags=["edit-files"])
 
@@ -66,6 +67,7 @@ def save_edit_file(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    require_ha_primary_for_config_ops(db)
     try:
         adapter = get_active_adapter(db)
         adapter.write_config_file(_filename_for_key(file_key), payload.content)
@@ -90,6 +92,7 @@ def save_batch(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
+    require_ha_primary_for_config_ops(db)
     adapter = get_active_adapter(db)
     for key, content in payload.files.items():
         adapter.write_config_file(_filename_for_key(key), content)
@@ -112,6 +115,7 @@ def transfer_edit_files(
     db: Session = Depends(get_db),
     user: User = Depends(require_admin),
 ):
+    require_ha_primary_for_config_ops(db)
     try:
         result = run_edit_files_transfer(
             db,

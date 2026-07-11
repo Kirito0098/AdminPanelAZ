@@ -29,10 +29,11 @@ from app.services.node_sync.groups import (
     raise_if_preflight_errors,
     validate_sync_group_payload,
 )
-from app.services.node_sync.dissolve import dissolve_sync_group
+from app.services.node_sync.dissolve import clear_shadow_links_for_group, dissolve_sync_group
 from app.services.node_sync.manual_link import link_primary_configs_to_group
 from app.services.node_sync.push_full import run_push_full
 from app.services.node_sync.setup import make_group_setup_callable
+from app.services.node_sync.shadow_link import link_shadow_configs_for_group
 from app.services.node_sync.shared_domain import make_shared_domain_callable
 from app.services.node_sync.verify import verify_sync_group
 
@@ -72,7 +73,10 @@ def create_sync_group(
     db.add(group)
     db.commit()
     db.refresh(group)
-    if not is_auto_sync_enabled(group):
+    if is_auto_sync_enabled(group):
+        link_shadow_configs_for_group(db, group)
+        db.commit()
+    else:
         link_primary_configs_to_group(db, group)
     return _to_response(group, db)
 
@@ -113,6 +117,7 @@ def update_sync_group(
     )
     raise_if_preflight_errors(errors)
 
+    previous_sync_mode = group.sync_mode
     apply_group_fields(
         group,
         name=payload.name,
@@ -123,6 +128,14 @@ def update_sync_group(
     )
     db.commit()
     db.refresh(group)
+    new_mode = str(group.sync_mode or "").strip().lower()
+    prev_mode = str(previous_sync_mode or "").strip().lower()
+    if prev_mode == "auto" and new_mode == "manual_full":
+        clear_shadow_links_for_group(db, group)
+        db.commit()
+    if is_auto_sync_enabled(group) and prev_mode != "auto":
+        link_shadow_configs_for_group(db, group)
+        db.commit()
     return _to_response(group, db)
 
 

@@ -17,6 +17,7 @@ import {
   createNodeSyncGroup,
   deleteNodeSyncGroup,
   getNodeSyncGroups,
+  pushNodeSyncGroupFull,
   setupNodeSyncGroup,
   updateNodeSyncGroup,
   verifyNodeSyncGroup,
@@ -90,12 +91,17 @@ function formatTimestamp(value?: string | null): string | null {
 
 type ReadinessBadge = { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }
 
-function readinessBadge(group: NodeSyncGroup): ReadinessBadge {
-  if (group.sync_status === 'pending') return { label: 'Синхронизация…', variant: 'secondary' }
-  if (group.ready === true) return { label: 'Готово к переключению', variant: 'default' }
-  if (group.sync_status === 'failed') return { label: 'Ошибка синхронизации', variant: 'destructive' }
-  if (group.ready === false) return { label: 'Есть расхождения', variant: 'destructive' }
-  return { label: 'Не синхронизировано', variant: 'outline' }
+function verifyBadge(group: NodeSyncGroup): ReadinessBadge {
+  if (group.ready === true) return { label: 'Verify: готово', variant: 'default' }
+  if (group.ready === false) return { label: 'Verify: расхождения', variant: 'destructive' }
+  return { label: 'Verify: не проверено', variant: 'outline' }
+}
+
+function replicationBadge(group: NodeSyncGroup): ReadinessBadge {
+  if (group.sync_status === 'pending') return { label: 'Репликация…', variant: 'secondary' }
+  if (group.sync_status === 'failed') return { label: 'Репликация: ошибка', variant: 'destructive' }
+  if (group.sync_status === 'synced') return { label: 'Репликация: OK', variant: 'default' }
+  return { label: 'Репликация: —', variant: 'outline' }
 }
 
 function AutoSyncModeDescription({ compact = false }: { compact?: boolean }) {
@@ -154,6 +160,8 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<NodeSyncGroup | null>(null)
   const [setupTarget, setSetupTarget] = useState<NodeSyncGroup | null>(null)
+  const [pushFullTarget, setPushFullTarget] = useState<NodeSyncGroup | null>(null)
+  const [domainApplyTarget, setDomainApplyTarget] = useState<NodeSyncGroup | null>(null)
   const [setupStage, setSetupStage] = useState<string | null>(null)
   const [dnsTarget, setDnsTarget] = useState<NodeSyncGroup | null>(null)
   const [copiedHost, setCopiedHost] = useState<string | null>(null)
@@ -171,6 +179,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
   const onlineNodes = useMemo(() => nodes.filter((n) => n.status === 'online'), [nodes])
   const prevSyncStatusRef = useRef<Map<number, SyncStatus>>(new Map())
   const notifiedReplicationRef = useRef<Set<string>>(new Set())
+  const resumedTaskIdsRef = useRef<Set<string>>(new Set())
 
   const clearGroupReplicationNotices = (groupId: number) => {
     for (const key of notifiedReplicationRef.current) {
@@ -296,7 +305,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
   }
 
   const showVerifyResult = useCallback((group: NodeSyncGroup, result: NodeSyncVerifyResult) => {
-    setVerifyDialogView(parseHaVerifyResult(result, group.name))
+    setVerifyDialogView(parseHaVerifyResult(result, group.name, group.sync_mode))
     setVerifyDialogOpen(true)
   }, [])
 
@@ -309,7 +318,6 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
               ready: result.ready,
               last_verify_result: result,
               last_verify_at: new Date().toISOString(),
-              sync_status: result.ready ? 'synced' : group.sync_status,
             }
           : group,
       ),
@@ -334,6 +342,29 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
     setSyncResult(withVerify)
     setSyncResultOpen(true)
   }, [])
+
+  useEffect(() => {
+    if (loading || polling) return
+    for (const group of groups) {
+      const taskId = group.last_sync_task_id
+      if (group.sync_status !== 'pending' || !taskId) continue
+      if (resumedTaskIdsRef.current.has(taskId)) continue
+      resumedTaskIdsRef.current.add(taskId)
+      setSetupStage(`Возобновление синхронизации «${group.name}»…`)
+      startPoll(taskId, {
+        onComplete: (task) => {
+          void load()
+          showSyncResult(task)
+          setSetupStage(null)
+        },
+        onError: () => {
+          void load()
+          setSetupStage(null)
+        },
+      })
+      break
+    }
+  }, [groups, loading, load, polling, showSyncResult, startPoll])
 
   /** Wrap the callback-based background poll in a promise so steps can be chained. */
   const pollToCompletion = useCallback(
@@ -381,6 +412,33 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
       }
     },
     [applyGroups, fetchGroups, load, notifyError, notifyWarning, pollToCompletion, showSyncResult, showVerifyResult, success],
+  )
+
+  const runPushFull = useCallback(
+    async (group: NodeSyncGroup) => {
+      setActionLoading(group.id)
+      setSetupStage(`Push full «${group.name}»: копия состояния primary на реплики…`)
+      try {
+        const accepted = await pushNodeSyncGroupFull(group.id)
+        const task = await pollToCompletion(accepted.task_id)
+        const fresh = await fetchGroups()
+        applyGroups(fresh)
+        const updated = fresh.find((g) => g.id === group.id)
+        showSyncResult(task, updated?.ready)
+        if (task.status === 'completed') {
+          success('Push full завершён')
+        } else {
+          notifyWarning('Push full завершился с ошибками — см. отчёт')
+        }
+      } catch (err) {
+        notifyError(err instanceof ApiError ? err.message : 'Ошибка Push full')
+        await load()
+      } finally {
+        setSetupStage(null)
+        setActionLoading(null)
+      }
+    },
+    [applyGroups, fetchGroups, load, notifyError, notifyWarning, pollToCompletion, showSyncResult, success],
   )
 
   /** Non-destructive: re-apply the shared domain to all members (used after edits). */
@@ -446,7 +504,9 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         if (autoSetup) {
           await runHaSetup(savedGroup)
         }
-      } else if (domainChanged || membersChanged) {
+      } else if (membersChanged) {
+        setPushFullTarget(savedGroup)
+      } else if (domainChanged) {
         await runDomainApply(savedGroup)
       }
     } catch (err) {
@@ -479,6 +539,20 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
     if (!group.last_verify_result) return
     showVerifyResult(group, group.last_verify_result)
   }, [showVerifyResult])
+
+  const handleRunPushFull = async () => {
+    if (!pushFullTarget) return
+    const group = pushFullTarget
+    setPushFullTarget(null)
+    await runPushFull(group)
+  }
+
+  const handleRunDomainApply = async () => {
+    if (!domainApplyTarget) return
+    const group = domainApplyTarget
+    setDomainApplyTarget(null)
+    await runDomainApply(group)
+  }
 
   const handleRunSetup = async () => {
     if (!setupTarget) return
@@ -524,8 +598,10 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
               Группы синхронизации (HA)
             </CardTitle>
             <CardDescription>
-              Один домен на два узла: при падении основного DNS переключает на реплику. Кнопка
-              «Синхронизировать» делает всё за раз — домен, копию состояния на реплику и проверку.
+              Один домен на два узла: при падении основного DNS переключает на реплику. Настройка — полный цикл;
+              Push full — только копия состояния; «Домен» — только хосты в setup. Runbook:{' '}
+              <code className="text-xs">docs/NodeSync.md</code>,{' '}
+              <code className="text-xs">reviews/HA-sync-remediation-plan.md</code>.
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -598,10 +674,23 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                       )}
                     </TableCell>
                     <TableCell>
-                      {(() => {
-                        const badge = readinessBadge(group)
-                        return <Badge variant={badge.variant}>{badge.label}</Badge>
-                      })()}
+                      <div className="flex flex-wrap gap-1">
+                        {(() => {
+                          const verify = verifyBadge(group)
+                          const replication = replicationBadge(group)
+                          return (
+                            <>
+                              <Badge variant={verify.variant}>{verify.label}</Badge>
+                              <Badge variant={replication.variant}>{replication.label}</Badge>
+                            </>
+                          )
+                        })()}
+                      </div>
+                      {(group.warnings ?? []).map((item) => (
+                        <p key={item} className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                          {item}
+                        </p>
+                      ))}
                       {formatTimestamp(group.last_sync_at) ? (
                         <p className="mt-1 text-xs text-muted-foreground">
                           Синхронизация: {formatTimestamp(group.last_sync_at)}
@@ -631,14 +720,33 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                           size="sm"
                           disabled={actionLoading === group.id || group.sync_status === 'pending'}
                           onClick={() => setSetupTarget(group)}
-                          title="Записать домен на узлы, полностью синхронизировать реплику из основного узла и проверить готовность — в один шаг"
+                          title="Домен → Push full → Verify (полный цикл)"
                         >
                           {actionLoading === group.id ? (
                             <Loader2 size={14} className="animate-spin" />
                           ) : (
                             <Wand2 size={14} />
                           )}
-                          Синхронизировать
+                          Настройка
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={actionLoading === group.id || group.sync_status === 'pending'}
+                          onClick={() => void runPushFull(group)}
+                          title="Только Push full: backup primary → restore на все реплики"
+                        >
+                          Push full
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={actionLoading === group.id || group.sync_status === 'pending'}
+                          onClick={() => setDomainApplyTarget(group)}
+                          title="Только shared domain → setup + doall + client.sh 7"
+                        >
+                          <Globe size={14} />
+                          Домен
                         </Button>
                         <Button
                           variant="outline"
@@ -919,6 +1027,30 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         open={verifyDialogOpen}
         onOpenChange={setVerifyDialogOpen}
         result={verifyDialogView}
+      />
+
+      <ConfirmDialog
+        open={Boolean(pushFullTarget)}
+        title="Обязательна полная синхронизация"
+        description={`Состав группы «${pushFullTarget?.name ?? ''}» изменился. Shadow-связи могут быть устаревшими — выполните Push full или полную настройку.`}
+        confirmLabel="Push full"
+        onConfirm={() => void handleRunPushFull()}
+        onOpenChange={(open) => {
+          if (!open && actionLoading === null) setPushFullTarget(null)
+        }}
+        loading={actionLoading !== null}
+      />
+
+      <ConfirmDialog
+        open={Boolean(domainApplyTarget)}
+        title="Применить shared domain"
+        description={`Записать ${domainApplyTarget?.shared_domain ?? 'домен'} в setup на всех узлах группы «${domainApplyTarget?.name ?? ''}»?`}
+        confirmLabel="Применить домен"
+        onConfirm={() => void handleRunDomainApply()}
+        onOpenChange={(open) => {
+          if (!open && actionLoading === null) setDomainApplyTarget(null)
+        }}
+        loading={actionLoading !== null}
       />
 
       <ConfirmDialog

@@ -124,9 +124,20 @@ def reconcile_sync_groups_once() -> dict:
     try:
         groups = db.query(NodeSyncGroup).order_by(NodeSyncGroup.id).all()
         for group in groups:
+            if group.sync_status == SyncStatus.pending:
+                continue
+            prior_verify: dict[str, Any] | None = None
+            if group.last_verify_result:
+                try:
+                    parsed = json.loads(group.last_verify_result)
+                    if isinstance(parsed, dict):
+                        prior_verify = parsed
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    prior_verify = None
+            prior_failures = _read_heal_failure_count(prior_verify)
+
             result = verify_sync_group(db, group)
             checked += 1
-            prior_failures = _read_heal_failure_count(result)
 
             if result.get("ready"):
                 if prior_failures:

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
+import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import AnalysisTab from '@/components/routing/AnalysisTab'
 import ConfirmActionDialog from '@/components/routing/ConfirmActionDialog'
 import CidrPipelineTab from '@/components/routing/CidrPipelineTab'
@@ -168,6 +169,7 @@ export default function RoutingPage() {
 
   return (
     <div className="space-y-5">
+      <HaReplicaBanner />
       <RoutingPageHeader
         nodeName={activeNode?.name ?? data.node_name}
         nodeStatus={activeNode?.status}

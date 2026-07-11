@@ -16,6 +16,7 @@
 |--------|-------|
 | GET/POST | `/api/nodes/sync-groups` |
 | GET/PUT/DELETE | `/api/nodes/sync-groups/{id}` |
+| POST | `/api/nodes/sync-groups/{id}/setup` |
 | POST | `/api/nodes/sync-groups/{id}/push-full` |
 | POST | `/api/nodes/sync-groups/{id}/apply-shared-domain` |
 | POST | `/api/nodes/sync-groups/{id}/verify` |
@@ -41,9 +42,17 @@ Node agent: `POST /backups/antizapret/restore`, `GET /backups/antizapret/downloa
 | **`manual_full`** (по умолчанию) | Авто-репликация политик/файлов **отключена**. Выравнивание — **Push full**. Create/delete/renew клиента на primary **копирует crypto** (WG + OVPN PKI) на replica без shadow `VpnConfig`. | Первая настройка HA, редкие правки, split-brain recovery |
 | **`auto`** | Изменения на **primary** автоматически реплицируются на все **online** replica группы. Primary — источник истины; на replica — теневые `VpnConfig` (`ha_primary_config_id`) с тем же `client_name`. | Повседневная работа: админ правит только primary |
 
+**Shadow-связи (`ha_primary_config_id`):**
+
+- **Push full** выравнивает ключи и файлы на диске replica; shadow-связи в БД нужны панели для event-driven операций (delete, block, metadata, renew).
+- После **Push full**, **HA Setup** или переключения группы на **`auto`** выполняется автоматическое связывание существующих клиентов primary ↔ replica по `(client_name, vpn_type)`.
+- Клиенты, созданные через панель уже в режиме `auto`, получают shadow при create.
+- Если shadow ещё нет (редкий edge case), **delete** на primary дополнительно копирует crypto-состояние на все replica (fallback, как в `manual_full`).
+- Клиенты только на replica без пары на primary не удаляются автоматически — Verify покажет drift; устранение: Push full с primary.
+
 **Операционные правила (оба режима):**
 
-- Работайте с HA **только на primary** (на replica create/delete/renew/block и правки defaults — **403**).
+- Работайте с HA **только на primary** (на replica create/delete/renew/block, правки defaults, **редактор файлов**, **маршрутизация**, **списки доменов/IP в настройках** — **403**).
 - Правки по SSH вне панели → drift; устранение: Push full или (в `auto`, opt-in) incremental auto-heal.
 - После split-brain, смены primary или состава группы — **Push full**.
 - DNS панель не настраивает — второй A-record добавляется у регистратора **после Verify ready=true**.
@@ -106,7 +115,7 @@ Node agent: `POST /backups/antizapret/restore`, `GET /backups/antizapret/downloa
 
 ### Apply shared domain (`POST …/apply-shared-domain`)
 
-Записывает `shared_domain` группы в `OPENVPN_HOST` и `WIREGUARD_HOST` в `/root/antizapret/setup` на **primary и всех replica**, затем на каждом узле выполняет `doall.sh` (apply_config_changes) + `client.sh 7` (recreate_profiles), чтобы новый хост попал в перегенерированные профили клиентов. Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается автоматически при создании группы и при изменении `shared_domain`, а также вручную кнопкой «Домен → узлы».
+Записывает `shared_domain` группы в `OPENVPN_HOST` и `WIREGUARD_HOST` в `/root/antizapret/setup` на **primary и всех replica**, затем на каждом узле выполняет `doall.sh` (apply_config_changes) + `client.sh 7` (recreate_profiles), чтобы новый хост попал в перегенерированные профили клиентов. Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается при **HA Setup** (если включён toggle «Сразу настроить» при создании), при изменении `shared_domain` в группе, а также вручную кнопкой «Домен → узлы». Создание группы **без** Setup **не** применяет домен автоматически.
 | Verify / Push full | Excluded config не ломают паритет fingerprint `antizapret/config` | `fingerprints.py` |
 
 ### Partial failure

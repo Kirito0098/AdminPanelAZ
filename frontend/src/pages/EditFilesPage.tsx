@@ -50,7 +50,8 @@ import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
-import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
+import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import {
   buildLightDiff,
   countDiffOps,
@@ -184,6 +185,7 @@ export default function EditFilesPage() {
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
+  const haReplicaReadonly = useHaReplicaReadonly()
   const [searchParams] = useSearchParams()
 
   const [files, setFiles] = useState<EditFileEntry[]>([])
@@ -204,6 +206,7 @@ export default function EditFilesPage() {
   const [transferLoading, setTransferLoading] = useState(false)
 
   const nodeOffline = activeNode?.status === 'offline'
+  const nodeReadonly = nodeOffline || haReplicaReadonly
   const nodeUnknown = activeNode?.status === 'unknown'
   const isAdmin = user?.role === 'admin'
   const isHaAutoPrimary =
@@ -452,6 +455,7 @@ export default function EditFilesPage() {
   return (
     <div className="space-y-6">
       <ConfirmDialogHost dialogProps={dialogProps} />
+      <HaReplicaBanner />
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-start gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -479,7 +483,7 @@ export default function EditFilesPage() {
               <Button
                 variant="outline"
                 onClick={() => setTransferOpen(true)}
-                disabled={nodeOffline || transferLoading || files.length === 0}
+                disabled={nodeReadonly || transferLoading || files.length === 0}
               >
                 <ArrowRightLeft size={16} />
                 Скопировать на другие серверы
@@ -775,7 +779,7 @@ export default function EditFilesPage() {
                         variant="outline"
                         size="sm"
                         onClick={() => void handleCompareWithDisk()}
-                        disabled={diskCompareLoading || nodeOffline}
+                        disabled={diskCompareLoading || nodeReadonly}
                       >
                         {diskCompareLoading ? (
                           <Loader2 size={16} className="animate-spin" />
@@ -806,7 +810,7 @@ export default function EditFilesPage() {
                     <Button
                       variant="outline"
                       onClick={handleRevert}
-                      disabled={!hasUnsavedChanges || saving || nodeOffline}
+                      disabled={!hasUnsavedChanges || saving || nodeReadonly}
                     >
                       <RotateCcw size={16} />
                       Отменить правки
@@ -814,7 +818,7 @@ export default function EditFilesPage() {
                     <Button
                       variant="secondary"
                       onClick={handleSaveOnly}
-                      disabled={!hasUnsavedChanges || saving || nodeOffline}
+                      disabled={!hasUnsavedChanges || saving || nodeReadonly}
                       title="Записать на сервер без обновления VPN"
                     >
                       {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
@@ -822,7 +826,7 @@ export default function EditFilesPage() {
                     </Button>
                     <Button
                       onClick={() => setConfirmApply(true)}
-                      disabled={!hasUnsavedChanges || saving || nodeOffline}
+                      disabled={!hasUnsavedChanges || saving || nodeReadonly}
                       title="Записать и обновить правила VPN"
                     >
                       {saving ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}

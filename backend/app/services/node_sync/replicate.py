@@ -93,6 +93,34 @@ def _primary_adapter(db: Session, group: NodeSyncGroup):
     return get_adapter_for_node(primary_node)
 
 
+def upsert_shadow_config(
+    db: Session,
+    group: NodeSyncGroup,
+    replica_node_id: int,
+    primary_config: VpnConfig,
+    existing: VpnConfig | None,
+) -> VpnConfig:
+    """Create or update a replica shadow VpnConfig linked to the primary row."""
+    if existing is not None:
+        existing.sync_group_id = group.id
+        existing.ha_primary_config_id = primary_config.id
+        return existing
+
+    shadow = VpnConfig(
+        node_id=replica_node_id,
+        client_name=primary_config.client_name,
+        vpn_type=primary_config.vpn_type,
+        owner_id=primary_config.owner_id,
+        cert_expire_days=primary_config.cert_expire_days,
+        description=primary_config.description,
+        sync_group_id=group.id,
+        ha_primary_config_id=primary_config.id,
+    )
+    db.add(shadow)
+    db.flush()
+    return shadow
+
+
 def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, Any]) -> ReplicateResult:
     primary_config: VpnConfig = payload["primary_config"]
     result = ReplicateResult(operation=ReplicateOperation.CLIENT_CREATE)
@@ -126,23 +154,7 @@ def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, 
             )
             .first()
         )
-        if existing:
-            existing.sync_group_id = group.id
-            existing.ha_primary_config_id = primary_config.id
-            shadow = existing
-        else:
-            shadow = VpnConfig(
-                node_id=replica_node.id,
-                client_name=primary_config.client_name,
-                vpn_type=primary_config.vpn_type,
-                owner_id=primary_config.owner_id,
-                cert_expire_days=primary_config.cert_expire_days,
-                description=primary_config.description,
-                sync_group_id=group.id,
-                ha_primary_config_id=primary_config.id,
-            )
-            db.add(shadow)
-        db.flush()
+        shadow = upsert_shadow_config(db, group, replica_node.id, primary_config, existing)
         result.successes.append({"node_id": replica_node.id, "config_id": shadow.id})
 
     primary_config.sync_group_id = group.id
@@ -196,16 +208,27 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
     shadow_by_node_id = {shadow.node_id: shadow for shadow in get_shadow_configs(db, group, primary_config)}
     for replica_node in get_replica_nodes(db, group):
         shadow = shadow_by_node_id.get(replica_node.id)
-        if shadow is None:
-            message = (
-                f"shadow VpnConfig not found for client {primary_config.client_name} "
-                f"on replica {replica_node.name}"
-            )
-            result.errors.append(
-                {"node_id": replica_node.id, "node_name": replica_node.name, "error": message}
-            )
-            continue
         adapter = get_adapter_for_node(replica_node)
+        if shadow is None:
+            try:
+                sync_openvpn_pki_from_primary(primary_adapter, adapter)
+                result.successes.append(
+                    {"node_id": replica_node.id, "node_name": replica_node.name, "fallback": True}
+                )
+            except Exception as exc:
+                logger.warning(
+                    "HA auto-sync cert renew fallback failed on replica %s: %s",
+                    replica_node.name,
+                    exc,
+                )
+                result.errors.append(
+                    {
+                        "node_id": replica_node.id,
+                        "node_name": replica_node.name,
+                        "error": _error_detail(exc),
+                    }
+                )
+            continue
         try:
             sync_openvpn_pki_from_primary(primary_adapter, adapter)
             shadow.cert_expire_days = cert_expire_days

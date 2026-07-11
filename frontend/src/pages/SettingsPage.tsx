@@ -3,6 +3,7 @@ import { Settings } from 'lucide-react'
 import { Navigate, useParams } from 'react-router-dom'
 import { ApiError, changePassword, createUser, deleteUser, getSettings, getUsers } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
+import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import BackupTab from '@/components/settings/BackupTab'
 import ConfigDeliveryTab from '@/components/settings/ConfigDeliveryTab'
 import FeatureTogglesTab from '@/components/settings/FeatureTogglesTab'
@@ -205,6 +206,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <ConfirmDialogHost dialogProps={dialogProps} />
+      <HaReplicaBanner />
       <div className="flex items-start gap-3">
         <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Settings size={22} />

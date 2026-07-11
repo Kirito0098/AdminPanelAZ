@@ -246,10 +246,16 @@ def verify_sync_group(
         "summary": summary,
     }
 
+    if group.last_verify_result:
+        try:
+            prior = json.loads(group.last_verify_result)
+            if isinstance(prior, dict) and "auto_heal_failures" in prior:
+                result["auto_heal_failures"] = prior["auto_heal_failures"]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+
     group.last_verify_at = datetime.utcnow()
     group.last_verify_result = json.dumps(result, ensure_ascii=False)
-    if ready and group.sync_status != SyncStatus.pending:
-        group.sync_status = SyncStatus.synced
     db.commit()
 
     progress(100, "Verify завершён")
