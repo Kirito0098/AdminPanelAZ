@@ -40,17 +40,11 @@
 
 ## [Unreleased]
 
-### 🔄 Changed
-
-#### Node Sync / HA
-
-- **`ANTIZAPRET_WARP` / `VPN_WARP` синхронизируются** — встроенные флаги Cloudflare WARP из «Конфиг AntiZapret» больше не в `ANTIZAPRET_HA_SETTING_EXCLUDE` (это не AZ-WARP / Warper). На реплику уходит тот же setup, что на primary; node-local по-прежнему только `warper-include-ips.txt` (`antizapret_params.py`, UI HA, docs).
-
 ---
 
 ## [2.15.0] - 2026-07-12
 
-> **Кратко:** адаптивная вёрстка панели для телефонов и планшетов — safe area и `100dvh`, карточные списки вместо широких таблиц, компактный header и toolbar; общие компоненты `ResponsiveDataView`, `PageSectionHeader`, `ToolbarButton`; мобильные **Настройки** с inline-accordion и выпадающим переключателем разделов; улучшения HA-селектора узлов и бейджей группы; HA UI — одна кнопка «Синхронизировать» вместо «Настройка» + «Push full»; Telegram Mini App — синхронизация темы WebApp и исправление загрузки assets; понятные ошибки при «Подключить бота к панели» (сеть/DNS/timeout вместо сырого `Errno 101`); dev-proxy Vite для `ENFORCE_HTTPS`; **HA OpenVPN parity без перевыпуска сертификатов** — byte-copy PKI и `.ovpn` с primary на replica, read-only download/verify, Push full с копией профилей после restore; **строгая идентичность replica** — wipe-and-replace VPN/crypto при полной синхронизации, prune лишних клиентов, защита профилей от «Домен», routing apply и CSV/шаблонов; исправление ложных расхождений Verify из-за `parse_easyrsa_index`; исправления OpenVPN restart после HA sync, сломанных `/traffic` и `/edit-files`, flyout настроек за пределами экрана; **node agent 1.5.0**.
+> **Кратко:** адаптивная вёрстка панели для телефонов и планшетов — safe area и `100dvh`, карточные списки вместо широких таблиц, компактный header и toolbar; общие компоненты `ResponsiveDataView`, `PageSectionHeader`, `ToolbarButton`; мобильные **Настройки** с inline-accordion и выпадающим переключателем разделов; улучшения HA-селектора узлов и бейджей группы; HA UI — одна кнопка «Синхронизировать» вместо «Настройка» + «Push full»; **`ANTIZAPRET_WARP` / `VPN_WARP` синхронизируются** с конфигом AntiZapret (не AZ-WARP); Telegram Mini App — синхронизация темы WebApp и исправление загрузки assets; понятные ошибки при «Подключить бота к панели» (сеть/DNS/timeout вместо сырого `Errno 101`); dev-proxy Vite для `ENFORCE_HTTPS`; **HA OpenVPN parity без перевыпуска сертификатов** — byte-copy PKI и `.ovpn` с primary на replica, read-only download/verify, полная синхронизация с копией профилей после restore; **строгая идентичность replica** — wipe-and-replace VPN/crypto, prune лишних клиентов, защита профилей от «Домен», routing apply и CSV/шаблонов; исправление ложных расхождений Verify из-за `parse_easyrsa_index`; исправления OpenVPN restart после HA sync, сломанных `/traffic` и `/edit-files`, flyout настроек за пределами экрана; **node agent 1.5.0**.
 
 ### ✨ Added
 
@@ -108,19 +102,21 @@
 - **Push full OpenVPN** — убран auto-repair/re-issue перед backup; после restore на replica — копия `.ovpn` с primary (restore вызывает `client.sh 7`, copy выравнивает профили) (`push_full.py`).
 - **OpenVPN profile helpers** — `recreate_openvpn_profiles()` (только `client.sh 7`), `validate_openvpn_profiles()` (read-only), `recreate_openvpn_profiles_after_admin_change()` после явного create/renew (`openvpn_profile_repair.py`).
 - **Download / QR / Telegram** — отдают `.ovpn` as-is с диска, без repair и перевыпуска cert (`configs.py`, `public_download.py`, `telegram_config_send.py`).
-- **Отчёт Push full в UI** — секция «OpenVPN-профили на реплике» вместо «перевыпуск на primary»; подсказки verify рекомендуют Push full, а не renew cert (`haSyncSummary.ts`, `haVerifySummary.ts`).
-- **Push full: HA restore (`?ha_replica=true`)** — перед копированием бэкапа на replica выполняется wipe VPN/crypto путей (`easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG); **без `client.sh 7`** на replica. Каталог `config/` — merge, как раньше (`push_full.py`, `antizapret_backup.py`).
-- **Push full: prune** — после copy `.ovpn` удаляются VPN-клиенты OpenVPN/WireGuard, которых нет на primary (`replica_prune` в JSON результата и отчёте синхронизации) (`vpn_state_sync.py`, `push_full.py`).
-- **Push full: hard fail** — ошибки copy `.ovpn`, prune, restart OpenVPN или apply WireGuard runtime помечают replica как failed (не «успех с предупреждениями»); пустой архив профилей с primary и недействительные сертификаты в `.ovpn` после копии на replica также прерывают шаг (`push_full.py`, `vpn_state_sync.py`).
+- **Отчёт полной синхронизации в UI** — секция «OpenVPN-профили на реплике» вместо «перевыпуск на primary»; подсказки verify рекомендуют «Синхронизировать», а не renew cert (`haSyncSummary.ts`, `haVerifySummary.ts`).
+- **Полная синхронизация: HA restore (`?ha_replica=true`)** — перед копированием бэкапа на replica выполняется wipe VPN/crypto путей (`easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG); **без `client.sh 7`** на replica. Каталог `config/` — merge, как раньше (`push_full.py`, `antizapret_backup.py`).
+- **Полная синхронизация: prune** — после copy `.ovpn` удаляются VPN-клиенты OpenVPN/WireGuard, которых нет на primary (`replica_prune` в JSON результата и отчёте синхронизации) (`vpn_state_sync.py`, `push_full.py`).
+- **Полная синхронизация: hard fail** — ошибки copy `.ovpn`, prune, restart OpenVPN или apply WireGuard runtime помечают replica как failed (не «успех с предупреждениями»); пустой архив профилей с primary и недействительные сертификаты в `.ovpn` после копии на replica также прерывают шаг (`push_full.py`, `vpn_state_sync.py`).
 - **HA crypto sync** — `import_easyrsa3_archive` делает `rmtree` PKI перед extract; WireGuard server `.conf` — mirror-sync (лишние файлы на replica удаляются) (`vpn_state_sync.py`).
-- **«Домен» / shared domain** — после `client.sh 7` на replica выполняется byte-copy `.ovpn` с primary (как в Push full), чтобы профили оставались идентичными основному узлу (`shared_domain.py`).
+- **«Домен» / shared domain** — после `client.sh 7` на replica выполняется byte-copy `.ovpn` с primary (как при полной синхронизации), чтобы профили оставались идентичными основному узлу (`shared_domain.py`).
 - **HA auto: routing apply на replica** — `routing_apply_replica` больше не вызывает `client.sh 7` на реплике (`recreate_profiles=False`): только `sync_cidr_providers` + `doall.sh` (`background_tasks.py`, `antizapret_sync.py`).
 - **CSV-импорт и шаблоны клиентов** — после batch-создания OpenVPN-клиентов один раз вызывается `client.sh 7`; на HA-primary затем копируются `.ovpn` на реплики (`config_csv_ops.py`, `client_templates.py`).
-- **UI HA-групп** — одна кнопка «Синхронизировать» вместо «Настройка» + «Push full» (полный цикл: домен → wipe/копия VPN/crypto на реплику → проверка); отдельно «Домен» и «Проверить»; явные подсказки, что синхронизация удаляет VPN/crypto на реплике (`NodeSyncGroupSection.tsx`).
+- **UI HA-групп** — одна кнопка «Синхронизировать» вместо «Настройка» + «Push full» (полный цикл: домен → wipe/копия VPN/crypto на реплику → проверка); отдельно «Домен» и «Проверить»; при смене состава группы — тот же диалог полной синхронизации; явные подсказки, что синхронизация удаляет VPN/crypto на реплике (`NodeSyncGroupSection.tsx`).
+- **`ANTIZAPRET_WARP` / `VPN_WARP` синхронизируются** — встроенные флаги Cloudflare WARP из «Конфиг AntiZapret» убраны из `ANTIZAPRET_HA_SETTING_EXCLUDE` (это не AZ-WARP / Warper). На реплику уходит тот же setup, что на primary; node-local по-прежнему только `warper-include-ips.txt` (`antizapret_params.py`, UI подсказки HA, docs).
 
 #### Документация
 
-- **`docs/NodeSync.md`** — один `.ovpn` + один cert на обоих IP; HA копирует PKI и файлы профилей; `client.sh 1` только по кнопке «Обновить сертификат»; verify сравнивает `openvpn/client_profiles`.
+- **`docs/NodeSync.md`** — один `.ovpn` + один cert на обоих IP; HA копирует PKI и файлы профилей; `client.sh 1` только по кнопке «Обновить сертификат»; verify сравнивает `openvpn/client_profiles`; `ANTIZAPRET_HA_SETTING_EXCLUDE` пуст (WARP-флаги setup реплицируются).
+- **`docs/antizapret-config.md`** — `ANTIZAPRET_WARP` / `VPN_WARP` входят в HA-репликацию setup; отличие от AZ-WARP / `warper-include-ips.txt`.
 
 #### Node agent
 
@@ -167,6 +163,13 @@
 - **Shared domain: byte-copy `.ovpn`** — `test_node_sync_shared_domain.py`: копия профилей primary → replica после `client.sh 7`.
 - **Routing apply без `client.sh 7` на replica** — `test_background_tasks_doall.py`: `recreate_profiles=False` для `routing_apply_replica`.
 - **Ошибки Telegram webhook** — `test_telegram_api_errors.py`: `Network is unreachable`, timeout, HTTPS URL required, fallback для неизвестных ошибок.
+- **HA setup: WARP-флаги реплицируются** — `test_antizapret_ha_settings.py`: `ANTIZAPRET_WARP` / `VPN_WARP` не в exclude, проходят `filter_ha_replicable_settings`.
+
+### 🗑️ Removed
+
+#### Node Sync / HA
+
+- **Отдельные кнопки «Настройка» и «Push full» в UI групп** — заменены одной «Синхронизировать» (API `POST …/setup` и `POST …/push-full` сохранены для совместимости).
 
 ---
 
