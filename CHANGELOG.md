@@ -40,6 +40,46 @@
 
 ## [Unreleased]
 
+> **Кратко:** роль **Пользователь** — self-service без ops-утечек: привязка Telegram в **Мой профиль**, упрощённый Mini App, NOC/журналы/маршрутизация/редактор файлов только для admin; 2FA и passkeys для своего аккаунта; фикс белого экрана при F5 на вложенных URL.
+
+### ✨ Added
+
+#### Telegram / профиль
+
+- **Привязка Telegram в «Мой профиль»** — любой залогиненный пользователь получает одноразовый код `/link` без доступа к админскому разделу Telegram (`PersonalTelegramCard.tsx`, `GET /telegram/link-code`).
+- **Ссылка на бота** — `GET /telegram/bot-info` (`bot_username`, `bot_url`); кнопка «Открыть бота» в профиле (`telegram_webhook.py`, `PersonalTelegramCard.tsx`).
+- **Самостоятельная отвязка** — пользователь может очистить свой `telegram_id` через `PATCH /users/{id}` (установка чужого ID по-прежнему только admin) (`users.py`).
+
+### 🔄 Changed
+
+#### Роли и навигация
+
+- **Пункт «Мой профиль»** вместо вложенных «Настроек» для non-admin — прямой переход на `/settings/personal`; у admin flyout «Настройки» без изменений (`Layout.tsx`, `SettingsPage.tsx`).
+- **Подпись роли** в футере сайдбара — «Пользователь» вместо «Оператор» (`ROLE_LABELS`, `Layout.tsx`).
+- **NOC Мониторинг, Журналы, Маршрутизация / CIDR, Редактор файлов** — только admin (меню, редирект страниц, API `require_admin`) (`Layout.tsx`, `monitoring.py`, `logs.py`, `routing.py`, `cidr_db.py`, `edit_files.py`).
+- **Дашборд для non-admin** — только счётчик своих конфигов; без глобального «онлайн», IP сервера и служб (`DashboardPage.tsx`, `GET /monitoring/summary`).
+- **Мониторинг трафика** — без изменений по доступу: по-прежнему scoped по `owner_id` (свои клиенты).
+
+#### Telegram Mini App
+
+- **Навигация user/viewer** — вкладки **Конфиги** + **Настройки**, старт с конфигов (без Дашборда) (`MiniBottomNav.tsx`, `HomeRoute` в `App.tsx`).
+- **Настройки Mini App для non-admin** — привязка TG и 3 персональных напоминания (`cert_expiry` / `traffic_limit` / `temp_block`); без IP сервера и полного каталога admin-notify (`Settings.tsx`, `tg_mini.py`).
+- **Admin-notify broadcast** — события не из персональных напоминаний доставляются только роли `admin` (defaults user больше не ловят чужие логины/CRUD) (`admin_notify.py`).
+
+#### Документация и бот
+
+- Подсказки `/start`, `/link` и docs указывают на **Мой профиль** вместо «Telegram → Команды бота» / «Настройки → Личное» (`telegram_bot_i18n.py`, `telegram_link.py`, `docs/Telegram.md` и др.).
+
+### 🔒 Security
+
+- **2FA и passkeys** — настройка своего аккаунта доступна любому залогиненному (раньше `require_admin` → 403 в профиле пользователя) (`auth.py`: `/2fa/*`, `/passkeys/*`).
+- **Mini `PATCH /admin-notify`** — non-admin не может менять `recipient_user_ids` и admin-события; только персональные ключи напоминаний (`tg_mini.py`).
+- **`GET /monitoring/dashboard` overview/stream** — admin-only (живые IP/сессии всех клиентов) (`monitoring.py`).
+
+### 🐛 Fixed
+
+- **Белый экран при F5 на `/settings/...`** — Vite `base: './'` резолвил assets как `/settings/assets/...` (HTML MIME). При раздаче SPA пути переписываются в абсолютные `/assets/...` (с учётом `ACCESS_PATH`) (`html_csp.py`, `rewrite_relative_asset_urls`).
+
 ---
 
 ## [2.15.0] - 2026-07-12
