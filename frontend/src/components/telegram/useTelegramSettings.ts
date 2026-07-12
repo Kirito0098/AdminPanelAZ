@@ -205,7 +205,7 @@ export function useTelegramSettings() {
       setSettings(updated)
       success('Webhook зарегистрирован')
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка регистрации webhook')
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось подключить бота к панели')
     } finally {
       setRegisteringWebhook(false)
     }
@@ -218,7 +218,7 @@ export function useTelegramSettings() {
       setSettings(updated)
       success('Webhook удалён')
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка удаления webhook')
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось отключить бота от панели')
     } finally {
       setDeletingWebhook(false)
     }

@@ -11,6 +11,74 @@ logger = logging.getLogger(__name__)
 
 _API_BASE = "https://api.telegram.org/bot{token}/{method}"
 _TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+_TELEGRAM_API_HOST = "api.telegram.org"
+
+
+def format_telegram_connect_error(message: str, *, operation: str) -> str:
+    """Turn low-level httpx/socket errors into actionable Russian messages."""
+    msg = (message or "").strip()
+    lower = msg.lower()
+
+    if "network is unreachable" in lower or "errno 101" in lower or "[errno 101]" in lower:
+        return (
+            f"Не удалось {operation}: сервер панели не может достучаться до {_TELEGRAM_API_HOST} "
+            "(сеть недоступна). Панель отправляет исходящий запрос к Telegram API, чтобы "
+            "зарегистрировать webhook — это не связано с HTTPS вашего сайта. "
+            "Проверьте интернет на сервере, маршрутизацию, исходящий фаервол и не блокирует ли "
+            "хостинг Telegram. На сервере выполните: curl -4 https://api.telegram.org/. "
+            f"Технически: {msg}"
+        )
+
+    if "connection refused" in lower or "errno 111" in lower or "[errno 111]" in lower:
+        return (
+            f"Не удалось {operation}: соединение с {_TELEGRAM_API_HOST} отклонено. "
+            "Проверьте исходящий доступ сервера к интернету и правила фаервола. "
+            f"Технически: {msg}"
+        )
+
+    if (
+        "timed out" in lower
+        or "timeout" in lower
+        or "errno 110" in lower
+        or "[errno 110]" in lower
+    ):
+        return (
+            f"Не удалось {operation}: истекло время ожидания ответа от {_TELEGRAM_API_HOST}. "
+            "Проверьте стабильность интернета на сервере и повторите попытку. "
+            f"Технически: {msg}"
+        )
+
+    if (
+        "name or service not known" in lower
+        or "nodename nor servname provided" in lower
+        or "getaddrinfo" in lower
+        or "errno -2" in lower
+        or "errno -3" in lower
+    ):
+        return (
+            f"Не удалось {operation}: сервер не может разрешить DNS-имя {_TELEGRAM_API_HOST}. "
+            "Проверьте DNS на сервере (/etc/resolv.conf) и доступность резолвера. "
+            f"Технически: {msg}"
+        )
+
+    if "certificate verify failed" in lower or ("ssl" in lower and "error" in lower):
+        return (
+            f"Не удалось {operation}: ошибка TLS при подключении к {_TELEGRAM_API_HOST}. "
+            "Проверьте системное время на сервере и корневые сертификаты CA. "
+            f"Технически: {msg}"
+        )
+
+    if "https url must be provided" in lower:
+        return (
+            f"Не удалось {operation}: Telegram принимает webhook только по HTTPS. "
+            "Укажите в настройках панели публичный адрес с https:// и доступным сертификатом. "
+            f"Технически: {msg}"
+        )
+
+    if msg:
+        return f"Не удалось {operation}: {msg}"
+
+    return f"Не удалось {operation}: неизвестная ошибка соединения с Telegram API."
 
 
 async def call_bot_api(
@@ -121,9 +189,14 @@ async def set_webhook(bot_token: str, url: str, *, secret_token: str | None = No
             data = response.json()
             if data.get("ok"):
                 return True, ""
-            return False, str(data.get("description") or "setWebhook failed")
+            return False, format_telegram_connect_error(
+                str(data.get("description") or "setWebhook failed"),
+                operation="подключить бота к панели",
+            )
     except Exception as exc:
-        return False, str(exc)
+        return False, format_telegram_connect_error(
+            str(exc), operation="подключить бота к панели"
+        )
 
 
 async def delete_webhook(bot_token: str) -> tuple[bool, str]:
@@ -136,9 +209,14 @@ async def delete_webhook(bot_token: str) -> tuple[bool, str]:
             data = response.json()
             if data.get("ok"):
                 return True, ""
-            return False, str(data.get("description") or "deleteWebhook failed")
+            return False, format_telegram_connect_error(
+                str(data.get("description") or "deleteWebhook failed"),
+                operation="отключить бота от панели",
+            )
     except Exception as exc:
-        return False, str(exc)
+        return False, format_telegram_connect_error(
+            str(exc), operation="отключить бота от панели"
+        )
 
 
 def delete_webhook_sync(bot_token: str) -> tuple[bool, str]:
@@ -151,9 +229,14 @@ def delete_webhook_sync(bot_token: str) -> tuple[bool, str]:
             data = response.json()
             if data.get("ok"):
                 return True, ""
-            return False, str(data.get("description") or "deleteWebhook failed")
+            return False, format_telegram_connect_error(
+                str(data.get("description") or "deleteWebhook failed"),
+                operation="отключить бота от панели",
+            )
     except Exception as exc:
-        return False, str(exc)
+        return False, format_telegram_connect_error(
+            str(exc), operation="отключить бота от панели"
+        )
 
 
 def set_webhook_sync(bot_token: str, url: str, *, secret_token: str | None = None) -> tuple[bool, str]:
@@ -173,9 +256,14 @@ def set_webhook_sync(bot_token: str, url: str, *, secret_token: str | None = Non
             data = response.json()
             if data.get("ok"):
                 return True, ""
-            return False, str(data.get("description") or "setWebhook failed")
+            return False, format_telegram_connect_error(
+                str(data.get("description") or "setWebhook failed"),
+                operation="подключить бота к панели",
+            )
     except Exception as exc:
-        return False, str(exc)
+        return False, format_telegram_connect_error(
+            str(exc), operation="подключить бота к панели"
+        )
 
 
 async def get_webhook_info(bot_token: str) -> dict[str, Any]:
@@ -208,9 +296,14 @@ def set_my_commands_sync(bot_token: str, commands: list[dict[str, str]]) -> tupl
             data = response.json()
             if data.get("ok"):
                 return True, ""
-            return False, str(data.get("description") or "setMyCommands failed")
+            return False, format_telegram_connect_error(
+                str(data.get("description") or "setMyCommands failed"),
+                operation="настроить команды бота",
+            )
     except Exception as exc:
-        return False, str(exc)
+        return False, format_telegram_connect_error(
+            str(exc), operation="настроить команды бота"
+        )
 
 
 def reset_chat_menu_button_sync(bot_token: str) -> tuple[bool, str]:
@@ -225,6 +318,11 @@ def reset_chat_menu_button_sync(bot_token: str) -> tuple[bool, str]:
             data = response.json()
             if data.get("ok"):
                 return True, ""
-            return False, str(data.get("description") or "setChatMenuButton failed")
+            return False, format_telegram_connect_error(
+                str(data.get("description") or "setChatMenuButton failed"),
+                operation="сбросить кнопку меню бота",
+            )
     except Exception as exc:
-        return False, str(exc)
+        return False, format_telegram_connect_error(
+            str(exc), operation="сбросить кнопку меню бота"
+        )

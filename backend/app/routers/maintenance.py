@@ -539,18 +539,18 @@ def register_telegram_webhook(
     url = _webhook_url(request, secret)
     ok, error = set_webhook_sync(bot_token, url, secret_token=secret)
     if not ok:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setWebhook: {error}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
 
     from app.services.telegram_bot_handlers.menu import build_bot_commands
     from app.services.telegram_api import reset_chat_menu_button_sync, set_my_commands_sync
 
     cmd_ok, cmd_error = set_my_commands_sync(bot_token, build_bot_commands())
     if not cmd_ok:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setMyCommands: {cmd_error}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=cmd_error)
 
     menu_ok, menu_error = reset_chat_menu_button_sync(bot_token)
     if not menu_ok:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setChatMenuButton: {menu_error}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=menu_error)
 
     _set_setting(db, "telegram_webhook_set_at", datetime.now(timezone.utc).isoformat())
     db.commit()
@@ -573,12 +573,12 @@ def unregister_telegram_webhook(
     if bot_token:
         ok, error = delete_webhook_sync(bot_token)
         if not ok:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"deleteWebhook: {error}")
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
         from app.services.telegram_api import reset_chat_menu_button_sync
 
         menu_ok, menu_error = reset_chat_menu_button_sync(bot_token)
         if not menu_ok:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"setChatMenuButton: {menu_error}")
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=menu_error)
     _set_setting(db, "telegram_webhook_set_at", "")
     db.commit()
     admin_notify_service.send_settings_change(

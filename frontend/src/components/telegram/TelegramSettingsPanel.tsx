@@ -640,7 +640,8 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
             </div>
             <p className="text-xs text-muted-foreground">
               После подключения webhook Telegram передаёт сообщения на панель — бот отвечает в личке. Нужен HTTPS и
-              доступ сервера из интернета.
+              доступ сервера из интернета. При ошибке «сеть недоступна» проверьте исходящий доступ сервера к
+              api.telegram.org (команда на сервере: curl -4 https://api.telegram.org/).
             </p>
 
             <TelegramBotCommandsGuide />
