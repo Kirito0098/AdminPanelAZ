@@ -43,12 +43,6 @@
 
 ### ✨ Added
 
-#### Telegram / узлы
-
-- **TG-алерт «узел offline / восстановление»** — событие AdminNotify `node_offline` (по умолчанию вкл.): после непрерывного offline дольше grace-порога (по умолчанию **3 мин**, диапазон 60–86400 с) + сообщение о восстановлении только если offline-алерт уже уходил; дедуп через `node_metadata.tg_offline_alert_sent` (`node_status_notify.py`, `update_node_from_health`).
-- **Настройка grace** — `AppSetting` `node_offline_notify_grace_seconds` в `GET/PATCH /settings/admin-notify` (`node_offline_grace_seconds`); UI на **Узлы** (`NodeOfflineNotifyCard`) и **Telegram → Уведомления** (пресеты 1 / 3 / 5 / 10 мин).
-- **Журнал / webhooks** — `log_action` `node_offline` / `node_online` (подпись восстановления в `actionLogLabels.ts`).
-
 ### 🔄 Changed
 
 ### 🐛 Fixed
@@ -57,7 +51,7 @@
 
 ## [2.16.0] - 2026-07-13
 
-> **Кратко:** **NOC Ops** — federated SSE, Mbps/длительность сессий, лента инцидентов, health score, фильтры, история подключений, HA physical node, действия disconnect/restart; UX сводки узлов; быстрее появление Mbps; GeoIP для `tcp4-server:`; роль **Пользователь** — self-service без ops-утечек (Telegram в профиле, упрощённый Mini App, NOC/журналы/маршрутизация/редактор только admin); фикс белого экрана при F5.
+> **Кратко:** **NOC Ops** — federated SSE, Mbps/длительность, лента инцидентов, health score, фильтры, история подключений, HA physical node, disconnect/restart; **TG-алерт offline узла с grace**; UX сводки узлов (табы «Сводка / Сравнение», full-width); роль **Пользователь** — Telegram в профиле, упрощённый Mini App, ops-разделы только admin; фикс GeoIP `tcp4-server:` и белого экрана при F5.
 
 ### ✨ Added
 
@@ -73,6 +67,12 @@
 - **HA physical node** — `active_node_*`, `ha_nodes`, toggle `ha_mode=raw` («Показать по узлам»).
 - **Действия NOC** — OVPN disconnect с confirm; restart службы в `ServiceMatrix` только на scope=node.
 
+#### Telegram / узлы (offline)
+
+- **TG-алерт «узел offline / восстановление»** — событие AdminNotify `node_offline` (по умолчанию вкл.): после непрерывного offline дольше grace-порога (по умолчанию **3 мин**, 60–86400 с) + recovery только если offline-алерт уже уходил; дедуп `node_metadata.tg_offline_alert_sent` / якорь `offline_since` (`node_status_notify.py`, `update_node_from_health`).
+- **Настройка grace** — `AppSetting` `node_offline_notify_grace_seconds` в `GET/PATCH /settings/admin-notify` (`node_offline_grace_seconds`); UI на **Узлы** (`NodeOfflineNotifyCard`) и **Telegram → Уведомления** (пресеты 1 / 3 / 5 / 10 мин).
+- **Журнал / webhooks** — `log_action` `node_offline` / `node_online` (подпись в `actionLogLabels.ts`).
+
 #### Telegram / профиль
 
 - **Привязка Telegram в «Мой профиль»** — любой залогиненный пользователь получает одноразовый код `/link` без доступа к админскому разделу Telegram (`PersonalTelegramCard.tsx`, `GET /telegram/link-code`).
@@ -85,7 +85,7 @@
 
 - **SSE interval** — отдельный `monitoring_stream_interval_seconds` (по умолчанию **10 с**); стрим всегда свежий snapshot (без overview-кэша), чтобы Mbps появлялись быстрее (`config.py`, `monitoring.py`).
 - **Пока считается rate** — в колонках Mbps показывается `…` вместо «—»; последняя валидная скорость сохраняется на дублирующих тиках (`useConnectionRates.ts`).
-- **Сводка по узлам** — компактные CPU/RAM (бар + %), цветной health, `table-fixed`, короткие OVPN/WG, точка вместо бейджа «активный», подсветка неполных служб (`nodeSummaryMetrics.tsx`, `MonitoringPage.tsx`, `NodeSummaryCard.tsx`).
+- **Сводка по узлам** — одна карточка с табами **Сводка** / **Сравнение** (отдельный `NodesCompareSection` на NOC убран); full-width `table-fixed`, компактные CPU/RAM (растягиваемый бар + %), цветной health, точка «активный», подсветка неполных служб (`MonitoringPage.tsx`, `nodeSummaryMetrics.tsx`, `NodeSummaryCard.tsx`).
 - **Бейдж статуса** — `whitespace-nowrap`, чтобы «В сети» не переносилось (`NodeSelector.tsx`).
 
 #### Роли и навигация
@@ -106,12 +106,12 @@
 #### Документация и бот
 
 - Подсказки `/start`, `/link` и docs указывают на **Мой профиль** вместо «Telegram → Команды бота» / «Настройки → Личное» (`telegram_bot_i18n.py`, `telegram_link.py`, `docs/Telegram.md` и др.).
-- **`docs/noc-monitoring.md`** и план `docs/plans/noc-ops/` — покрытие NOC Ops (все 10 эпиков `done`).
+- **`docs/noc-monitoring.md`**, `docs/Telegram.md`, `docs/nastrojki/monitoring-i-alerty.md` и план `docs/plans/noc-ops/` — NOC Ops (10 эпиков `done`) + grace offline-алерты.
 
 ### 🔒 Security
 
 - **2FA и passkeys** — настройка своего аккаунта доступна любому залогиненному (раньше `require_admin` → 403 в профиле пользователя) (`auth.py`: `/2fa/*`, `/passkeys/*`).
-- **Mini `PATCH /admin-notify`** — non-admin не может менять `recipient_user_ids` и admin-события; только персональные ключи напоминаний (`tg_mini.py`).
+- **Mini `PATCH /admin-notify`** — non-admin не может менять `recipient_user_ids`, admin-события и grace offline; только персональные ключи напоминаний (`tg_mini.py`).
 - **`GET /monitoring/dashboard` overview/stream** — admin-only (живые IP/сессии всех клиентов) (`monitoring.py`).
 
 ### 🐛 Fixed
@@ -123,6 +123,7 @@
 ### 🧪 Tests
 
 - **NOC Ops** — `tests/test_noc_ops.py`: health score, HA aggregate, разбор `tcp4-server:` endpoint.
+- **Node offline notify** — `tests/test_node_status_notify.py`: grace ниже порога / один алерт / recovery только после алерта / clamp grace.
 
 ---
 
