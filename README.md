@@ -293,7 +293,7 @@ sudo ./scripts/nginx-setup.sh       # сменить HTTPS после устан
 
 **Текущая версия: панель 2.16.0 · node agent 1.5.0** (2026-07-13)
 
-Последний релиз — **NOC Ops** (federated SSE, Mbps, инциденты, health, фильтры, история подключений, HA physical node) и **self-service для роли Пользователь** (Telegram в профиле, упрощённый Mini App, ops-разделы только admin).
+Последний релиз — **NOC Ops** (federated SSE, Mbps, инциденты, health, фильтры, история подключений, HA physical node), **TG-алерт offline узла с grace** и **self-service для роли Пользователь** (Telegram в профиле, упрощённый Mini App, ops-разделы только admin).
 
 Полный список: **[CHANGELOG.md](CHANGELOG.md)** · runbook аудита HA: [reviews/HA-sync-remediation-plan.md](reviews/HA-sync-remediation-plan.md)
 
