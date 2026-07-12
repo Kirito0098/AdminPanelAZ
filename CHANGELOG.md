@@ -40,41 +40,11 @@
 
 ## [Unreleased]
 
-### 🔄 Changed
-
-#### Node Sync / HA — strict VPN/crypto parity на replica
-
-- **Push full: HA restore (`?ha_replica=true`)** — перед копированием бэкапа на replica выполняется wipe VPN/crypto путей (`easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG); **без `client.sh 7`** на replica. Каталог `config/` — merge, как раньше.
-- **Push full: prune** — после copy `.ovpn` удаляются VPN-клиенты OpenVPN/WireGuard, которых нет на primary (`replica_prune` в JSON результата и отчёте синхронизации).
-- **Push full: hard fail** — ошибки copy `.ovpn`, prune, restart OpenVPN или apply WireGuard runtime помечают replica как failed (не «успех с предупреждениями»); пустой архив профилей с primary и недействительные сертификаты в `.ovpn` после копии на replica также прерывают шаг.
-- **HA crypto sync** — `import_easyrsa3_archive` делает `rmtree` PKI перед extract; WireGuard server `.conf` — mirror-sync (лишние файлы на replica удаляются).
-- **«Домен» / shared domain** — после `client.sh 7` на replica выполняется byte-copy `.ovpn` с primary (как в Push full), чтобы профили оставались идентичными основному узлу.
-- **HA auto: routing apply на replica** — `routing_apply_replica` больше не вызывает `client.sh 7` на реплике (`recreate_profiles=False`): только `sync_cidr_providers` + `doall.sh`.
-- **CSV-импорт и шаблоны клиентов** — после batch-создания OpenVPN-клиентов один раз вызывается `client.sh 7`; на HA-primary затем копируются `.ovpn` на реплики.
-- **UI HA-групп** — явные подсказки, что «Настройка» / «Push full» удаляют VPN/crypto на реплике и заменяют копией с основного; диалог Push full при смене состава группы.
-
-### 🐛 Fixed
-
-#### Node Sync / HA — ложные расхождения и разъезд профилей
-
-- **`parse_easyrsa_index`** — корректный разбор строк `V`/`E` с пустым полем revocation в реальном `index.txt` EasyRSA (`V\texpiry\t\tserial\t…`). Раньше все валидные сертификаты пропускались → ложные `not_in_index` в Verify и блокировка Push full при рабочем VPN.
-- **«Домен» без Push full** — `client.sh 7` на реплике из локального PKI больше не оставляет `.ovpn` рассинхронизированными с primary.
-- **Авто-применение маршрутизации** — фоновый `routing_apply_replica` не пересобирает `.ovpn` на реплике из локального PKI.
-
-### 🧪 Tests
-
-- `test_antizapret_backup_ha_restore.py` — HA restore без `client.sh 7`, wipe перед copy.
-- `test_vpn_state_sync.py` — `prune_replica_vpn_clients`, mirror WireGuard server configs, hard fail при пустом архиве `.ovpn`.
-- `test_node_sync_push_full.py` — HA restore flag, prune, hard fail при ошибке copy профилей и при invalid certs после копии.
-- `test_openvpn_pki.py` — пустая revocation-колонка в `index.txt` для `V`/`E`.
-- `test_node_sync_shared_domain.py` — byte-copy `.ovpn` primary → replica при apply shared domain.
-- `test_background_tasks_doall.py` — `recreate_profiles=False` для routing apply на replica.
-
 ---
 
 ## [2.15.0] - 2026-07-12
 
-> **Кратко:** адаптивная вёрстка панели для телефонов и планшетов — safe area и `100dvh`, карточные списки вместо широких таблиц, компактный header и toolbar; общие компоненты `ResponsiveDataView`, `PageSectionHeader`, `ToolbarButton`; мобильные **Настройки** с inline-accordion и выпадающим переключателем разделов; улучшения HA-селектора узлов и бейджей группы; Telegram Mini App — синхронизация темы WebApp; dev-proxy Vite для `ENFORCE_HTTPS`; **HA OpenVPN parity без перевыпуска сертификатов** — byte-copy PKI и `.ovpn` с primary на replica, read-only download/verify, Push full с копией профилей после restore; исправления OpenVPN restart после HA sync, сломанных `/traffic` и `/edit-files`, flyout настроек за пределами экрана; **node agent 1.5.0**.
+> **Кратко:** адаптивная вёрстка панели для телефонов и планшетов — safe area и `100dvh`, карточные списки вместо широких таблиц, компактный header и toolbar; общие компоненты `ResponsiveDataView`, `PageSectionHeader`, `ToolbarButton`; мобильные **Настройки** с inline-accordion и выпадающим переключателем разделов; улучшения HA-селектора узлов и бейджей группы; Telegram Mini App — синхронизация темы WebApp и исправление загрузки assets; dev-proxy Vite для `ENFORCE_HTTPS`; **HA OpenVPN parity без перевыпуска сертификатов** — byte-copy PKI и `.ovpn` с primary на replica, read-only download/verify, Push full с копией профилей после restore; **строгая идентичность replica** — wipe-and-replace VPN/crypto при Push full/Setup, prune лишних клиентов, защита профилей от «Домен», routing apply и CSV/шаблонов; исправление ложных расхождений Verify из-за `parse_easyrsa_index`; исправления OpenVPN restart после HA sync, сломанных `/traffic` и `/edit-files`, flyout настроек за пределами экрана; **node agent 1.5.0**.
 
 ### ✨ Added
 
@@ -133,6 +103,14 @@
 - **OpenVPN profile helpers** — `recreate_openvpn_profiles()` (только `client.sh 7`), `validate_openvpn_profiles()` (read-only), `recreate_openvpn_profiles_after_admin_change()` после явного create/renew (`openvpn_profile_repair.py`).
 - **Download / QR / Telegram** — отдают `.ovpn` as-is с диска, без repair и перевыпуска cert (`configs.py`, `public_download.py`, `telegram_config_send.py`).
 - **Отчёт Push full в UI** — секция «OpenVPN-профили на реплике» вместо «перевыпуск на primary»; подсказки verify рекомендуют Push full, а не renew cert (`haSyncSummary.ts`, `haVerifySummary.ts`).
+- **Push full: HA restore (`?ha_replica=true`)** — перед копированием бэкапа на replica выполняется wipe VPN/crypto путей (`easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG); **без `client.sh 7`** на replica. Каталог `config/` — merge, как раньше (`push_full.py`, `antizapret_backup.py`).
+- **Push full: prune** — после copy `.ovpn` удаляются VPN-клиенты OpenVPN/WireGuard, которых нет на primary (`replica_prune` в JSON результата и отчёте синхронизации) (`vpn_state_sync.py`, `push_full.py`).
+- **Push full: hard fail** — ошибки copy `.ovpn`, prune, restart OpenVPN или apply WireGuard runtime помечают replica как failed (не «успех с предупреждениями»); пустой архив профилей с primary и недействительные сертификаты в `.ovpn` после копии на replica также прерывают шаг (`push_full.py`, `vpn_state_sync.py`).
+- **HA crypto sync** — `import_easyrsa3_archive` делает `rmtree` PKI перед extract; WireGuard server `.conf` — mirror-sync (лишние файлы на replica удаляются) (`vpn_state_sync.py`).
+- **«Домен» / shared domain** — после `client.sh 7` на replica выполняется byte-copy `.ovpn` с primary (как в Push full), чтобы профили оставались идентичными основному узлу (`shared_domain.py`).
+- **HA auto: routing apply на replica** — `routing_apply_replica` больше не вызывает `client.sh 7` на реплике (`recreate_profiles=False`): только `sync_cidr_providers` + `doall.sh` (`background_tasks.py`, `antizapret_sync.py`).
+- **CSV-импорт и шаблоны клиентов** — после batch-создания OpenVPN-клиентов один раз вызывается `client.sh 7`; на HA-primary затем копируются `.ovpn` на реплики (`config_csv_ops.py`, `client_templates.py`).
+- **UI HA-групп** — явные подсказки, что «Настройка» / «Push full» удаляют VPN/crypto на реплике и заменяют копией с основного; диалог Push full при смене состава группы (`NodeSyncGroupSection.tsx`).
 
 #### Документация
 
@@ -154,6 +132,13 @@
 - **OpenVPN restart после HA sync** — `systemctl restart openvpn-server@*` больше не поднимает службы, остановленные вручную; перезапускаются только unit'ы в состоянии `active` (`openvpn_restart.py`).
 - **Replica отклоняла тот же `.ovpn`, что работал на primary** — при рассинхроне PKI/CRL/профилей replica возвращала `certificate revoked` для того же serial; исправлено byte-copy PKI + `.ovpn` с primary без `recreate_profiles` на replica (`vpn_state_sync.py`, `push_full.py`).
 - **Auto `client.sh 1` при sync/download ломал рабочие cert** — панель могла перевыпустить cert при Push full, HA sync или скачивании конфига; auto re-issue убран из автоматических путей, остаётся только при явном create/renew в UI (`openvpn_profile_repair.py`).
+- **`parse_easyrsa_index`** — корректный разбор строк `V`/`E` с пустым полем revocation в реальном `index.txt` EasyRSA (`V\texpiry\t\tserial\t…`). Раньше все валидные сертификаты пропускались → ложные `not_in_index` в Verify и блокировка Push full при рабочем VPN (`openvpn_pki.py`).
+- **«Домен» без Push full** — `client.sh 7` на реплике из локального PKI больше не оставляет `.ovpn` рассинхронизированными с primary (`shared_domain.py`).
+- **Авто-применение маршрутизации** — фоновый `routing_apply_replica` не пересобирает `.ovpn` на реплике из локального PKI (`antizapret_sync.py`, `background_tasks.py`).
+
+#### Telegram Mini App
+
+- **Зависание на «Загрузка Mini App…»** — относительные пути `./assets/…` при открытии `/api/tg-mini` (без trailing slash) резолвились в `/api/assets/…` и отдавали 404; JS/CSS не загружались. При отдаче страницы пути переписываются в `/api/tg-mini/assets/…` (`tg_mini.py`).
 
 ### 🧪 Tests
 
@@ -164,6 +149,12 @@
 - **HA crypto sync OpenVPN** — `test_vpn_state_sync.py`: replica import PKI + `.ovpn`, без `recreate_profiles`.
 - **Push full: copy `.ovpn` после restore** — `test_node_sync_push_full.py`: `copy_openvpn_profiles_from_primary` на успешных репликах, поле `openvpn_profile_copy`.
 - **Verify: `openvpn_profile_certs`** — `test_node_sync_verify_profiles.py`: `ready=false` при revoked cert в профиле primary.
+- **HA restore без `client.sh 7`** — `test_antizapret_backup_ha_restore.py`: wipe VPN/crypto перед copy на replica.
+- **Prune, mirror WG, hard fail `.ovpn`** — `test_vpn_state_sync.py`: `prune_replica_vpn_clients`, mirror WireGuard server configs, ошибка при пустом архиве профилей.
+- **Push full: HA restore, prune, invalid certs** — `test_node_sync_push_full.py`: флаг `ha_replica`, prune, hard fail при ошибке copy профилей и при invalid certs после копии.
+- **EasyRSA `index.txt` с пустой revocation-колонкой** — `test_openvpn_pki.py`: строки `V`/`E` с `V\texpiry\t\tserial\t…`.
+- **Shared domain: byte-copy `.ovpn`** — `test_node_sync_shared_domain.py`: копия профилей primary → replica после `client.sh 7`.
+- **Routing apply без `client.sh 7` на replica** — `test_background_tasks_doall.py`: `recreate_profiles=False` для `routing_apply_replica`.
 
 ---
 
