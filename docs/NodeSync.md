@@ -7,13 +7,13 @@
 ## MVP (этап 5.1–5.3)
 
 - **Sync Group** — primary + 1+ replica, shared domain
-- **Push full** — `client.sh 8` на primary → transfer → restore на replica (как `setup.sh`). Дополнительно копирует непустые `OPENVPN_HOST` / `WIREGUARD_HOST` из `setup` primary на каждую replica **перед** restore. После restore — **байт-копия `.ovpn`** с primary (restore вызывает `client.sh 7`, который может перегенерировать профили; copy выравнивает их с primary).
+- **Push full** — `client.sh 8` на primary → transfer → **HA restore** на replica (`?ha_replica=true`): **wipe-and-replace** VPN/crypto (PKI `easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG) — **без `client.sh 7`**. Каталог `config/` — **merge** (как раньше). Дополнительно копирует непустые `OPENVPN_HOST` / `WIREGUARD_HOST` из `setup` primary на каждую replica **перед** restore. После restore — **байт-копия `.ovpn`** с primary, **prune** VPN-клиентов only-on-replica, restart OpenVPN + apply WireGuard runtime. Ошибки copy/prune/restart → `sync_status=failed` (не warning).
 - **Verify** — списки OVPN/WG клиентов + checksums PKI/WG/config/**`.ovpn`** + **read-only проверка сертификатов в `.ovpn`**
 
 ### OpenVPN-профили и HA
 
 - Один `.ovpn` и один сертификат должны работать на **обоих** IP за общим доменом. HA копирует **PKI** (`easyrsa3`, включая `crl.pem`) и **байт-идентичные файлы `.ovpn`** с primary на replica — без перевыпуска сертификатов.
-- **Push full** и **HA crypto sync** не вызывают `client.sh 1`. На replica не выполняется `client.sh 7` для выравнивания — только import PKI + copy `.ovpn` с primary.
+- **Push full** и **HA crypto sync** не вызывают `client.sh 1`. На replica при Push full / crypto sync **не** выполняется `client.sh 7` — только wipe + import PKI + copy `.ovpn` с primary. **HA crypto sync** перед import `easyrsa3` делает `rmtree` каталога PKI; WireGuard server `.conf` — mirror-sync (лишние `.conf` на replica удаляются).
 - **Create** и **renew** на primary (явное действие админа) вызывают `client.sh 1` на primary, затем `client.sh 7` и crypto sync на replica.
 - **Download / QR / Telegram** отдают файл с диска as-is, без repair.
 - **Verify** сравнивает fingerprint `openvpn/client_profiles` и блок `openvpn_profile_certs` (read-only). При расхождении — **Push full**, не автоматический renew.
@@ -30,13 +30,14 @@
 | POST | `/api/nodes/sync-groups/{id}/verify` |
 | GET | `/api/nodes/sync-groups/{id}/status` |
 
-Node agent **≥ 1.5.0** (для byte-copy `.ovpn`): `POST /backups/antizapret/restore`, `GET /backups/antizapret/download`, `GET /backups/antizapret/fingerprints`, `GET/POST /profiles/openvpn/export|import`, `GET /openvpn/easyrsa3/index`.
+Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backups/antizapret/restore?ha_replica=true`, `GET /backups/antizapret/download`, `GET /backups/antizapret/fingerprints`, `GET/POST /profiles/openvpn/export|import`, `GET /openvpn/easyrsa3/index`, `GET /wireguard/server-config-files`, `DELETE /wireguard/server-config-file/{filename}`.
 
 ## Ограничения
 
 - DNS панель не настраивает — второй IP добавляется у регистратора вручную **после Verify ready=true**
 - Оба сервера должны быть установлены одинаковым `setup.sh`
-- Push full **destructive** на replica
+- Push full **destructive** на replica для **VPN/crypto** (wipe-and-replace, не merge). `config/` остаётся merge; `warper-include-ips.txt` — node-local (excluded из fingerprint parity)
+- Удаление HA-группы **не** очищает диск replica — для выравнивания выполните Push full
 - Split-brain: изменения только на primary; при failed sync — `sync_status=failed`, Push full или (в `auto`, opt-in) incremental auto-heal
 - **`manual_full`** (по умолчанию) — полное выравнивание через **Push full**; клиенты на replica попадают в панель после Push full (импорт в БД + политики + снимок трафика). HA-бейдж на primary — **да** (`sync_group_id`, без теней на replica). **Create / delete / renew OVPN на primary** дополнительно копируют **crypto-состояние** (WG conf + профили, easyrsa3) на replica — один профиль работает на обоих IP; shadow `VpnConfig` и прочая auto-репликация политик/файлов — **нет**. После расформирования группы на replica: **Конфигурации → Синхронизировать**
 - **`auto`** — см. раздел [v2 — HA auto-sync](#v2--ha-auto-sync-этапы-ac) ниже
@@ -56,7 +57,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn`): `POST /backups/antizapret/r
 - После **Push full**, **HA Setup** или переключения группы на **`auto`** выполняется автоматическое связывание существующих клиентов primary ↔ replica по `(client_name, vpn_type)`.
 - Клиенты, созданные через панель уже в режиме `auto`, получают shadow при create.
 - Если shadow ещё нет (редкий edge case), **delete** на primary дополнительно копирует crypto-состояние на все replica (fallback, как в `manual_full`).
-- Клиенты только на replica без пары на primary не удаляются автоматически — Verify покажет drift; устранение: Push full с primary.
+- Клиенты только на replica без пары на primary удаляются при **Push full** (prune); до этого Verify покажет drift `only_replica`.
 
 **Операционные правила (оба режима):**
 

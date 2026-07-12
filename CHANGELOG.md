@@ -40,6 +40,21 @@
 
 ## [Unreleased]
 
+### 🔄 Changed
+
+#### Node Sync / HA — strict VPN/crypto parity на replica
+
+- **Push full: HA restore (`?ha_replica=true`)** — перед копированием бэкапа на replica выполняется wipe VPN/crypto путей (`easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG); **без `client.sh 7`** на replica. Каталог `config/` — merge, как раньше.
+- **Push full: prune** — после copy `.ovpn` удаляются VPN-клиенты OpenVPN/WireGuard, которых нет на primary (`replica_prune` в JSON результата и отчёте синхронизации).
+- **Push full: hard fail** — ошибки copy `.ovpn`, prune, restart OpenVPN или apply WireGuard runtime помечают replica как failed (не «успех с предупреждениями»).
+- **HA crypto sync** — `import_easyrsa3_archive` делает `rmtree` PKI перед extract; WireGuard server `.conf` — mirror-sync (лишние файлы на replica удаляются).
+
+### 🧪 Tests
+
+- `test_antizapret_backup_ha_restore.py` — HA restore без `client.sh 7`, wipe перед copy.
+- `test_vpn_state_sync.py` — `prune_replica_vpn_clients`, mirror WireGuard server configs.
+- `test_node_sync_push_full.py` — HA restore flag, prune, hard fail при ошибке copy профилей.
+
 ---
 
 ## [2.15.0] - 2026-07-12

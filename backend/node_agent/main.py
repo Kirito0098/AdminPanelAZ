@@ -295,6 +295,17 @@ def apply_wireguard_runtime(_: None = Depends(verify_api_key)):
     return service.apply_wireguard_runtime()
 
 
+@app.get("/wireguard/server-config-files")
+def list_wireguard_server_config_files(_: None = Depends(verify_api_key)):
+    return {"files": service.list_wireguard_server_config_files()}
+
+
+@app.delete("/wireguard/server-config-file/{filename}")
+def delete_wireguard_server_config_file(filename: str, _: None = Depends(verify_api_key)):
+    service.delete_wireguard_server_config_file(filename)
+    return {"message": f"WireGuard config {filename} удалён"}
+
+
 @app.get("/openvpn/easyrsa3/export")
 def export_easyrsa3(_: None = Depends(verify_api_key)):
     data = service.export_easyrsa3_archive()
@@ -365,6 +376,7 @@ def download_antizapret_backup(
 @app.post("/backups/antizapret/restore")
 async def restore_antizapret_backup(
     archive: UploadFile = File(...),
+    ha_replica: bool = Query(False),
     _: None = Depends(verify_api_key),
 ):
     import tempfile
@@ -375,7 +387,10 @@ async def restore_antizapret_backup(
         tmp.write(content)
         tmp_path = tmp.name
     try:
-        result = service.restore_antizapret_backup(tmp_path)
+        if ha_replica:
+            result = service.restore_antizapret_backup_for_ha_replica(tmp_path)
+        else:
+            result = service.restore_antizapret_backup(tmp_path)
     finally:
         Path(tmp_path).unlink(missing_ok=True)
     return {

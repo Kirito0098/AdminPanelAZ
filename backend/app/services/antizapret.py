@@ -170,6 +170,8 @@ class AntiZapretService:
             with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
                 tmp.write(data)
                 temp_path = tmp.name
+            if EASYRSA3_ROOT.is_dir():
+                shutil.rmtree(EASYRSA3_ROOT, ignore_errors=True)
             with tarfile.open(temp_path, "r:gz") as archive:
                 for member in archive.getmembers():
                     if member.name == "easyrsa3" or member.name.startswith("easyrsa3/"):
@@ -188,6 +190,24 @@ class AntiZapretService:
 
     def restore_antizapret_backup(self, archive_path: str) -> dict[str, str]:
         return AntizapretBackupService(install_dir=self.base_path).restore_backup(archive_path)
+
+    def restore_antizapret_backup_for_ha_replica(self, archive_path: str) -> dict[str, str]:
+        return AntizapretBackupService(install_dir=self.base_path).restore_backup_for_ha_replica(archive_path)
+
+    def list_wireguard_server_config_files(self) -> list[str]:
+        if not WIREGUARD_SERVER_CONFIG_DIR.is_dir():
+            return []
+        return sorted(path.name for path in WIREGUARD_SERVER_CONFIG_DIR.glob("*.conf") if path.is_file())
+
+    def delete_wireguard_server_config_file(self, filename: str) -> None:
+        if not filename.endswith(".conf") or "/" in filename or ".." in filename:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Недопустимое имя WireGuard config: {filename}",
+            )
+        path = WIREGUARD_SERVER_CONFIG_DIR / filename
+        if path.is_file():
+            path.unlink()
 
     def get_antizapret_fingerprints(self) -> dict[str, str]:
         return AntizapretBackupService(install_dir=self.base_path).get_fingerprints()

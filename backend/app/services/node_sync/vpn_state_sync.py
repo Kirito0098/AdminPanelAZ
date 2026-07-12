@@ -92,6 +92,53 @@ def _copy_all_wireguard_profiles_from_primary(
     )
 
 
+def _mirror_wireguard_server_configs(primary_adapter, replica_adapter) -> None:
+    """Copy WG server .conf from primary and remove extras on replica."""
+    primary_files = set(primary_adapter.list_wireguard_server_config_files())
+    for interface in WIREGUARD_INTERFACES:
+        conf_name = f"{interface}.conf"
+        if conf_name in primary_files:
+            content = primary_adapter.read_wireguard_server_config(interface)
+            replica_adapter.write_wireguard_server_config(interface, content)
+    replica_files = set(replica_adapter.list_wireguard_server_config_files())
+    for extra in sorted(replica_files - primary_files):
+        replica_adapter.delete_wireguard_server_config_file(extra)
+
+
+def prune_replica_vpn_clients(primary_adapter, replica_adapter) -> dict[str, object]:
+    """Remove VPN clients that exist on replica but not on primary."""
+    primary_ovpn = set(primary_adapter.list_openvpn_clients())
+    primary_wg = set(primary_adapter.list_wireguard_clients())
+    removed_ovpn: list[str] = []
+    removed_wg: list[str] = []
+    errors: list[str] = []
+
+    for client_name in replica_adapter.list_openvpn_clients():
+        if client_name in primary_ovpn:
+            continue
+        try:
+            replica_adapter.delete_openvpn_client(client_name)
+            removed_ovpn.append(client_name)
+        except Exception as exc:
+            errors.append(f"openvpn {client_name}: {_error_detail(exc)}")
+
+    for client_name in replica_adapter.list_wireguard_clients():
+        if client_name in primary_wg:
+            continue
+        try:
+            replica_adapter.delete_wireguard_client(client_name)
+            removed_wg.append(client_name)
+        except Exception as exc:
+            errors.append(f"wireguard {client_name}: {_error_detail(exc)}")
+
+    return {
+        "removed_ovpn": removed_ovpn,
+        "removed_wg": removed_wg,
+        "errors": errors,
+        "success": not errors,
+    }
+
+
 def sync_wireguard_state_from_primary(
     primary_adapter,
     replica_adapter,
@@ -99,9 +146,7 @@ def sync_wireguard_state_from_primary(
     client_name: str | None = None,
 ) -> None:
     """Copy WireGuard server configs and all WG/AWG profile files from primary to replica."""
-    for interface in WIREGUARD_INTERFACES:
-        content = primary_adapter.read_wireguard_server_config(interface)
-        replica_adapter.write_wireguard_server_config(interface, content)
+    _mirror_wireguard_server_configs(primary_adapter, replica_adapter)
 
     runtime = replica_adapter.apply_wireguard_runtime()
     if not runtime.get("success"):

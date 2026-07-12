@@ -22,11 +22,21 @@ type HaOpenVpnProfileCopy = {
   error?: string
 }
 
+type HaReplicaPrune = {
+  node_name?: string
+  node_id?: number
+  removed_ovpn?: string[]
+  removed_wg?: string[]
+  errors?: string[]
+  success?: boolean
+}
+
 type HaPushFullPayload = {
   host_copy?: HaHostCopy[]
   restored?: Array<{ node_name?: string; node_id?: number }>
   openvpn_restart?: HaOpenVpnRestart[]
   openvpn_profile_copy?: HaOpenVpnProfileCopy[]
+  replica_prune?: HaReplicaPrune[]
   message?: string
 }
 
@@ -218,13 +228,62 @@ function buildRestoredSection(items: HaPushFullPayload['restored']): HaSyncResul
   return {
     title: 'Копия состояния AntiZapret',
     description:
-      'С основного узла на реплику перенесены PKI (сертификаты OpenVPN), ключи WireGuard, файлы config/ и маршрутизация — как при восстановлении из бэкапа.',
+      'VPN/crypto на реплике заменены содержимым с primary (wipe-and-replace): PKI OpenVPN, ключи WireGuard и профили клиентов. Каталог config/ по-прежнему merge; без client.sh 7 на реплике.',
     items: items.map((item) => ({
       nodeName: nodeLabel(item),
-      text: 'Состояние AntiZapret на реплике выровнено с основным',
-      explanation: 'Реплика готова принимать тех же VPN-клиентов, что и основной сервер.',
+      text: 'VPN/crypto на реплике совпадает с основным узлом',
+      explanation: 'Лишние сертификаты и файлы на реплике удалены перед копированием — не merge поверх старого состояния.',
       status: 'success' as const,
     })),
+  }
+}
+
+function buildReplicaPruneSection(items: HaReplicaPrune[] | undefined): HaSyncResultSection | null {
+  if (!items?.length) return null
+  return {
+    title: 'Очистка лишних VPN-клиентов на replica',
+    description:
+      'Клиенты OpenVPN и WireGuard, которых нет на primary, удалены с диска и из runtime реплики — чтобы Verify не показывал only_replica.',
+    items: items.map((item) => {
+      const name = nodeLabel(item)
+      const removedOvpn = item.removed_ovpn ?? []
+      const removedWg = item.removed_wg ?? []
+      const errors = item.errors ?? []
+      const details: string[] = []
+      if (removedOvpn.length) {
+        details.push(`OpenVPN: ${removedOvpn.join(', ')}`)
+      }
+      if (removedWg.length) {
+        details.push(`WireGuard: ${removedWg.join(', ')}`)
+      }
+      if (errors.length) {
+        details.push(...errors.map((entry) => `Ошибка: ${entry}`))
+      }
+      if (errors.length) {
+        return {
+          nodeName: name,
+          text: 'Не все лишние клиенты удалены',
+          explanation: 'На реплике могут остаться сертификаты или peers, которых нет на primary — повторите Push full.',
+          status: 'error' as const,
+          details: details.length ? details : undefined,
+        }
+      }
+      if (!removedOvpn.length && !removedWg.length) {
+        return {
+          nodeName: name,
+          text: 'Лишних VPN-клиентов не было',
+          explanation: 'Состав клиентов на реплике уже совпадал с primary.',
+          status: 'skipped' as const,
+        }
+      }
+      return {
+        nodeName: name,
+        text: `Удалено клиентов: OpenVPN ${removedOvpn.length}, WireGuard ${removedWg.length}`,
+        explanation: 'После очистки реплика содержит только тех VPN-клиентов, что есть на основном узле.',
+        status: 'success' as const,
+        details: details.length ? details : undefined,
+      }
+    }),
   }
 }
 
@@ -287,7 +346,9 @@ function buildOverviewDescription(
         : 'Домен применён на всех узлах группы.',
     )
   } else if (mode === 'push') {
-    parts.push('Полная синхронизация: бэкап с основного узла восстановлен на реплике.')
+    parts.push(
+      'Полная синхронизация: VPN/crypto на реплике заменены бэкапом с primary; лишние клиенты удалены.',
+    )
   }
 
   const stats: string[] = []
@@ -356,6 +417,7 @@ export function parseHaSyncTaskResult(
       pushSection(sections, buildHostCopySection(setup.push_full?.host_copy))
       pushSection(sections, buildRestoredSection(setup.push_full?.restored))
       pushSection(sections, buildOpenVpnProfileCopySection(setup.push_full?.openvpn_profile_copy))
+      pushSection(sections, buildReplicaPruneSection(setup.push_full?.replica_prune))
       pushSection(sections, buildOpenVpnSection(setup.push_full?.openvpn_restart, 'replica'))
     } else if ('host_copy' in parsed || 'restored' in parsed) {
       const push = parsed as HaPushFullPayload
@@ -364,6 +426,7 @@ export function parseHaSyncTaskResult(
       pushSection(sections, buildHostCopySection(push.host_copy))
       pushSection(sections, buildRestoredSection(push.restored))
       pushSection(sections, buildOpenVpnProfileCopySection(push.openvpn_profile_copy))
+      pushSection(sections, buildReplicaPruneSection(push.replica_prune))
       pushSection(sections, buildOpenVpnSection(push.openvpn_restart, 'replica'))
     } else if ('updated' in parsed || 'domain' in parsed) {
       const domainPayload = parsed as HaSharedDomainPayload

@@ -21,6 +21,8 @@ from app.services.node_sync.replicate import (
 def test_sync_wireguard_state_from_primary_copies_configs_profiles_and_applies_runtime():
     primary = MagicMock()
     replica = MagicMock()
+    primary.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf"]
+    replica.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf", "orphan.conf"]
     primary.read_wireguard_server_config.side_effect = lambda iface: f"{iface}-primary"
     replica.apply_wireguard_runtime.return_value = {"success": True, "synced": ["antizapret", "vpn"]}
     primary.export_wireguard_client_profiles_archive.return_value = _sample_profile_archive()
@@ -31,15 +33,51 @@ def test_sync_wireguard_state_from_primary_copies_configs_profiles_and_applies_r
         (("antizapret", "antizapret-primary"),),
         (("vpn", "vpn-primary"),),
     ]
+    replica.delete_wireguard_server_config_file.assert_called_once_with("orphan.conf")
     replica.apply_wireguard_runtime.assert_called_once()
     replica.import_wireguard_client_profiles_archive.assert_called_once()
     replica.recreate_profiles.assert_not_called()
     primary.export_easyrsa3_archive.assert_not_called()
 
 
+def test_prune_replica_vpn_clients_removes_only_replica_clients():
+    primary = MagicMock()
+    replica = MagicMock()
+    primary.list_openvpn_clients.return_value = ["shared-ovpn", "primary-only"]
+    primary.list_wireguard_clients.return_value = ["shared-wg"]
+    replica.list_openvpn_clients.return_value = ["shared-ovpn", "replica-only-ovpn"]
+    replica.list_wireguard_clients.return_value = ["shared-wg", "replica-only-wg"]
+
+    result = vpn_state_sync.prune_replica_vpn_clients(primary, replica)
+
+    replica.delete_openvpn_client.assert_called_once_with("replica-only-ovpn")
+    replica.delete_wireguard_client.assert_called_once_with("replica-only-wg")
+    assert result["removed_ovpn"] == ["replica-only-ovpn"]
+    assert result["removed_wg"] == ["replica-only-wg"]
+    assert result["success"] is True
+    assert result["errors"] == []
+
+
+def test_prune_replica_vpn_clients_collects_errors():
+    primary = MagicMock()
+    replica = MagicMock()
+    primary.list_openvpn_clients.return_value = []
+    primary.list_wireguard_clients.return_value = []
+    replica.list_openvpn_clients.return_value = ["bad-ovpn"]
+    replica.list_wireguard_clients.return_value = []
+    replica.delete_openvpn_client.side_effect = RuntimeError("delete failed")
+
+    result = vpn_state_sync.prune_replica_vpn_clients(primary, replica)
+
+    assert result["success"] is False
+    assert result["errors"] == ["openvpn bad-ovpn: delete failed"]
+
+
 def test_sync_wireguard_state_falls_back_to_per_client_profiles_when_archive_empty():
     primary = MagicMock()
     replica = MagicMock()
+    primary.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf"]
+    replica.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf"]
     primary.read_wireguard_server_config.return_value = "conf"
     replica.apply_wireguard_runtime.return_value = {"success": True, "synced": ["antizapret"]}
     primary.export_wireguard_client_profiles_archive.return_value = _empty_archive()
@@ -84,6 +122,8 @@ def test_sync_openvpn_pki_from_primary_imports_pki_and_profiles_without_recreate
 def test_sync_wireguard_state_continues_when_runtime_apply_fails():
     primary = MagicMock()
     replica = MagicMock()
+    primary.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf"]
+    replica.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf"]
     primary.read_wireguard_server_config.return_value = "conf"
     primary.export_wireguard_client_profiles_archive.return_value = _sample_profile_archive()
     replica.apply_wireguard_runtime.return_value = {

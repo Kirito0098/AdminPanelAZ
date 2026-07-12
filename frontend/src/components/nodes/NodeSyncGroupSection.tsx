@@ -244,7 +244,7 @@ function SyncGroupActions({
         size="sm"
         disabled={syncBusy}
         onClick={onPushFull}
-        title="Только Push full: backup primary → restore на все реплики"
+        title="Только Push full: замена VPN/crypto на реплике с primary; лишние клиенты удаляются"
       >
         Push full
       </Button>
@@ -854,7 +854,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
             </CardTitle>
             <CardDescription>
               Один домен на два узла: при падении основного DNS переключает на реплику. Настройка — полный цикл;
-              Push full — только копия состояния; «Домен» — только хосты в setup. Runbook:{' '}
+              Push full — wipe-and-replace VPN/crypto с primary (лишние клиенты на реплике удаляются); «Домен» — только хосты в setup. Runbook:{' '}
               <code className="text-xs">docs/NodeSync.md</code>,{' '}
               <code className="text-xs">reviews/HA-sync-remediation-plan.md</code>.
             </CardDescription>

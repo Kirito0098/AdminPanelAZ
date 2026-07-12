@@ -347,6 +347,12 @@ class LocalNodeAdapter(NodeAdapter):
     def apply_wireguard_runtime(self) -> dict:
         return self._service.apply_wireguard_runtime()
 
+    def list_wireguard_server_config_files(self) -> list[str]:
+        return self._service.list_wireguard_server_config_files()
+
+    def delete_wireguard_server_config_file(self, filename: str) -> None:
+        self._service.delete_wireguard_server_config_file(filename)
+
     def export_easyrsa3_archive(self) -> bytes:
         return self._service.export_easyrsa3_archive()
 
@@ -369,7 +375,13 @@ class LocalNodeAdapter(NodeAdapter):
             )
         return path.read_bytes()
 
-    def restore_antizapret_backup(self, archive: str | bytes, archive_name: str = "restore.tar.gz") -> dict[str, str]:
+    def restore_antizapret_backup(
+        self,
+        archive: str | bytes,
+        archive_name: str = "restore.tar.gz",
+        *,
+        ha_replica: bool = False,
+    ) -> dict[str, str]:
         import os
         import tempfile
 
@@ -378,9 +390,13 @@ class LocalNodeAdapter(NodeAdapter):
                 tmp.write(archive)
                 path = tmp.name
             try:
+                if ha_replica:
+                    return self._service.restore_antizapret_backup_for_ha_replica(path)
                 return self._service.restore_antizapret_backup(path)
             finally:
                 os.unlink(path)
+        if ha_replica:
+            return self._service.restore_antizapret_backup_for_ha_replica(str(archive))
         return self._service.restore_antizapret_backup(str(archive))
 
     def get_antizapret_fingerprints(self) -> dict[str, str]:
@@ -913,6 +929,13 @@ class RemoteNodeAdapter(NodeAdapter):
     def apply_wireguard_runtime(self) -> dict:
         return self._request("POST", "/wireguard/apply-runtime", timeout=60.0)
 
+    def list_wireguard_server_config_files(self) -> list[str]:
+        data = self._request("GET", "/wireguard/server-config-files", timeout=60.0)
+        return list(data.get("files") or [])
+
+    def delete_wireguard_server_config_file(self, filename: str) -> None:
+        self._request("DELETE", f"/wireguard/server-config-file/{filename}", timeout=60.0)
+
     def export_easyrsa3_archive(self) -> bytes:
         return self._request_bytes("GET", "/openvpn/easyrsa3/export", timeout=120.0)
 
@@ -939,13 +962,21 @@ class RemoteNodeAdapter(NodeAdapter):
             timeout=600.0,
         )
 
-    def restore_antizapret_backup(self, archive: str | bytes, archive_name: str = "restore.tar.gz") -> dict[str, str]:
+    def restore_antizapret_backup(
+        self,
+        archive: str | bytes,
+        archive_name: str = "restore.tar.gz",
+        *,
+        ha_replica: bool = False,
+    ) -> dict[str, str]:
         if not isinstance(archive, bytes):
             archive = Path(archive).read_bytes()
+        params = {"ha_replica": "true"} if ha_replica else None
         data = self._request(
             "POST",
             "/backups/antizapret/restore",
             files={"archive": (archive_name, archive, "application/gzip")},
+            params=params,
             timeout=600.0,
         )
         return {
