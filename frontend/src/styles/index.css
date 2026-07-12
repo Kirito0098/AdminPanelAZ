@@ -28,6 +28,10 @@
     --scrollbar-track: transparent;
     --scrollbar-thumb: 215 16% 47% / 0.28;
     --scrollbar-thumb-hover: 187 85% 38% / 0.55;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
   }
 
   .dark {
@@ -93,6 +97,61 @@
 @layer utilities {
   .mono {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .pt-safe {
+    padding-top: var(--safe-top);
+  }
+
+  .pb-safe {
+    padding-bottom: calc(1rem + var(--safe-bottom));
+  }
+
+  .px-safe {
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .orientation-compact-tabs-list {
+    height: 2rem;
+    padding: 0.125rem;
+  }
+
+  .orientation-compact-tabs-trigger {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+
+  .orientation-compact-header {
+    height: auto;
+    min-height: 2.5rem;
+    padding-top: calc(0.25rem + var(--safe-top));
+    padding-bottom: 0.25rem;
+  }
+
+  .orientation-compact-header-subtitle {
+    display: none;
+  }
+
+  .orientation-compact-settings-page {
+    gap: 0.75rem;
+  }
+
+  .orientation-compact-settings-section {
+    gap: 0.5rem;
+  }
+
+  .orientation-compact-settings-section-header {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .orientation-compact-settings-tab {
+    gap: 0.75rem;
   }
 }
 

@@ -45,7 +45,7 @@ export default function DiffPanel({
           <div
             key={`${op.type}-${op.lineNumber}-${index}`}
             className={cn(
-              'grid grid-cols-[auto_auto_minmax(0,1fr)] items-start gap-2 rounded-md border px-2 py-1 font-mono text-xs leading-relaxed',
+              'flex flex-col gap-1 rounded-md border px-2 py-1 font-mono text-xs leading-relaxed sm:grid sm:grid-cols-[auto_auto_minmax(0,1fr)] sm:items-start sm:gap-2',
               op.type === 'add'
                 ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-100'
                 : 'border-red-500/50 bg-red-500/20 text-red-100',

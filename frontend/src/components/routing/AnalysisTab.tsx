@@ -12,13 +12,16 @@ import {
 import { analyzeDpiLog } from '@/api/client'
 import MetricCard from '@/components/noc/MetricCard'
 import StatusPanel from '@/components/noc/StatusPanel'
+import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import type { RoutingTab } from '@/components/routing/routingWorkflow'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import type {
   CidrProviderInfo,
+  DpiAnalysisNode,
   DpiAnalysisRecommendation,
   DpiAnalysisResult,
   DpiAnalysisTriggerNode,
@@ -133,6 +136,103 @@ function NodeChip({ node }: { node: DpiAnalysisTriggerNode }) {
         <div className="mt-1 text-[11px] text-muted-foreground">{node.status_text}</div>
       )}
     </div>
+  )
+}
+
+function DpiLogNodeCard({
+  node,
+  provider,
+  providerName,
+  routeLabel,
+}: {
+  node: DpiAnalysisNode
+  provider?: CidrProviderInfo
+  providerName: string
+  routeLabel: string
+}) {
+  const severity = SEVERITY_META[node.severity] ?? SEVERITY_META.unknown
+  const url = hostUrl(node.host)
+
+  return (
+    <Card className="p-4">
+      <div className="font-mono text-xs font-medium">{node.node_id}</div>
+      <dl className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+        <div>
+          <dt className="text-muted-foreground">Хост checker</dt>
+          <dd className="mt-0.5">
+            {node.host ? (
+              <>
+                <a
+                  href={url ?? '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="break-all font-mono text-primary hover:underline"
+                >
+                  {node.host}
+                </a>
+                {node.checker_country && (
+                  <div className="text-[11px] text-muted-foreground">{node.checker_country}</div>
+                )}
+              </>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">CIDR-список</dt>
+          <dd className="mt-0.5">
+            {node.file ? (
+              <>
+                <div>{providerName}</div>
+                <div className="text-[11px] text-muted-foreground">{node.file}</div>
+              </>
+            ) : (
+              <span className="text-muted-foreground">не сопоставлен</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Alive</dt>
+          <dd className="mt-0.5">
+            {node.alive ? (
+              <Badge variant="outline" className="text-[10px]">
+                {ALIVE_LABELS[node.alive] ?? node.alive}
+              </Badge>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">tcp 16-20</dt>
+          <dd className="mt-0.5">
+            <Badge variant={severity.badge}>{severity.label}</Badge>
+            {node.dpi_method != null && (
+              <div className="mt-1 text-[11px] text-muted-foreground">method {node.dpi_method}</div>
+            )}
+            <div className="mt-1 text-[11px] text-muted-foreground">{node.status_text}</div>
+          </dd>
+        </div>
+        <div className="sm:col-span-2">
+          <dt className="text-muted-foreground">Маршрут</dt>
+          <dd className="mt-0.5">
+            <Badge
+              variant={
+                provider?.enabled ? 'default' : provider?.has_source ? 'secondary' : provider ? 'outline' : 'outline'
+              }
+            >
+              {routeLabel}
+            </Badge>
+            {provider?.has_source && provider.cidr_count > 0 && (
+              <div className="mt-1 text-[11px] text-muted-foreground tabular-nums">
+                {formatCompactCount(provider.cidr_count)} CIDR
+              </div>
+            )}
+          </dd>
+        </div>
+      </dl>
+    </Card>
   )
 }
 
@@ -303,7 +403,7 @@ export default function AnalysisTab({ providers, onNavigateTab }: AnalysisTabPro
             </div>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard
               label="Узлов в логе"
               value={result.summary.total_nodes ?? 0}
@@ -452,92 +552,118 @@ export default function AnalysisTab({ providers, onNavigateTab }: AnalysisTabPro
                 Полная расшифровка: ID checker → hostname → результат tcp 16-20
               </p>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/30 text-left text-xs text-muted-foreground">
-                    <th className="px-4 py-2 font-medium">Узел</th>
-                    <th className="px-4 py-2 font-medium">Хост checker</th>
-                    <th className="px-4 py-2 font-medium">CIDR-список</th>
-                    <th className="px-4 py-2 font-medium">Alive</th>
-                    <th className="px-4 py-2 font-medium">tcp 16-20</th>
-                    <th className="px-4 py-2 font-medium">Маршрут</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.nodes.map((node) => {
-                    const provider = node.file ? providerByFile.get(node.file) : undefined
-                    const severity = SEVERITY_META[node.severity] ?? SEVERITY_META.unknown
-                    const url = hostUrl(node.host)
-                    return (
-                      <tr key={node.node_id} className="border-b last:border-0 align-top">
-                        <td className="px-4 py-2.5 font-mono text-xs">{node.node_id}</td>
-                        <td className="px-4 py-2.5">
-                          {node.host ? (
-                            <div>
-                              <a
-                                href={url ?? '#'}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="font-mono text-xs text-primary hover:underline"
-                              >
-                                {node.host}
-                              </a>
-                              {node.checker_country && (
-                                <div className="text-[11px] text-muted-foreground">{node.checker_country}</div>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {node.file ? (
-                            <>
-                              <div>{providerLabel(node.file)}</div>
-                              <div className="text-[11px] text-muted-foreground">{node.file}</div>
-                            </>
-                          ) : (
-                            <span className="text-muted-foreground">не сопоставлен</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {node.alive ? (
-                            <Badge variant="outline" className="text-[10px]">
-                              {ALIVE_LABELS[node.alive] ?? node.alive}
-                            </Badge>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <Badge variant={severity.badge}>{severity.label}</Badge>
-                          {node.dpi_method != null && (
-                            <div className="mt-1 text-[11px] text-muted-foreground">method {node.dpi_method}</div>
-                          )}
-                          <div className="mt-1 text-[11px] text-muted-foreground">{node.status_text}</div>
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {provider?.enabled ? (
-                            <Badge variant="default">включён</Badge>
-                          ) : provider?.has_source ? (
-                            <Badge variant="secondary">выключен</Badge>
-                          ) : provider ? (
-                            <Badge variant="outline">нет на узле</Badge>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                          {provider?.has_source && provider.cidr_count > 0 && (
-                            <div className="mt-1 text-[11px] text-muted-foreground tabular-nums">
-                              {formatCompactCount(provider.cidr_count)} CIDR
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+            <div className="p-4">
+              <ResponsiveDataView
+                mobile={result.nodes.map((node) => {
+                  const provider = node.file ? providerByFile.get(node.file) : undefined
+                  const routeLabel = provider?.enabled
+                    ? 'включён'
+                    : provider?.has_source
+                      ? 'выключен'
+                      : provider
+                        ? 'нет на узле'
+                        : '—'
+                  return (
+                    <DpiLogNodeCard
+                      key={node.node_id}
+                      node={node}
+                      provider={provider}
+                      providerName={node.file ? providerLabel(node.file) : '—'}
+                      routeLabel={routeLabel}
+                    />
+                  )
+                })}
+                desktop={
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/30 text-left text-xs text-muted-foreground">
+                          <th className="px-4 py-2 font-medium">Узел</th>
+                          <th className="px-4 py-2 font-medium">Хост checker</th>
+                          <th className="px-4 py-2 font-medium">CIDR-список</th>
+                          <th className="px-4 py-2 font-medium">Alive</th>
+                          <th className="px-4 py-2 font-medium">tcp 16-20</th>
+                          <th className="px-4 py-2 font-medium">Маршрут</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.nodes.map((node) => {
+                          const provider = node.file ? providerByFile.get(node.file) : undefined
+                          const severity = SEVERITY_META[node.severity] ?? SEVERITY_META.unknown
+                          const url = hostUrl(node.host)
+                          return (
+                            <tr key={node.node_id} className="border-b last:border-0 align-top">
+                              <td className="px-4 py-2.5 font-mono text-xs">{node.node_id}</td>
+                              <td className="px-4 py-2.5">
+                                {node.host ? (
+                                  <div>
+                                    <a
+                                      href={url ?? '#'}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="font-mono text-xs text-primary hover:underline"
+                                    >
+                                      {node.host}
+                                    </a>
+                                    {node.checker_country && (
+                                      <div className="text-[11px] text-muted-foreground">{node.checker_country}</div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                {node.file ? (
+                                  <>
+                                    <div>{providerLabel(node.file)}</div>
+                                    <div className="text-[11px] text-muted-foreground">{node.file}</div>
+                                  </>
+                                ) : (
+                                  <span className="text-muted-foreground">не сопоставлен</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                {node.alive ? (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    {ALIVE_LABELS[node.alive] ?? node.alive}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <Badge variant={severity.badge}>{severity.label}</Badge>
+                                {node.dpi_method != null && (
+                                  <div className="mt-1 text-[11px] text-muted-foreground">method {node.dpi_method}</div>
+                                )}
+                                <div className="mt-1 text-[11px] text-muted-foreground">{node.status_text}</div>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                {provider?.enabled ? (
+                                  <Badge variant="default">включён</Badge>
+                                ) : provider?.has_source ? (
+                                  <Badge variant="secondary">выключен</Badge>
+                                ) : provider ? (
+                                  <Badge variant="outline">нет на узле</Badge>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                                {provider?.has_source && provider.cidr_count > 0 && (
+                                  <div className="mt-1 text-[11px] text-muted-foreground tabular-nums">
+                                    {formatCompactCount(provider.cidr_count)} CIDR
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                }
+                mobileClassName="space-y-3"
+              />
             </div>
           </div>
         </>

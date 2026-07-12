@@ -257,7 +257,7 @@ export default function MonitorSettingsCard() {
               />
             </div>
 
-            <div className="grid gap-4 rounded-xl border bg-muted/10 p-4 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 rounded-xl border bg-muted/10 p-4 sm:grid-cols-2 lg:grid-cols-3">
               <div className="space-y-3">
                 <Label className="text-xs text-muted-foreground">Как часто проверять</Label>
                 <PresetButtons

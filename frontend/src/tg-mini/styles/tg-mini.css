@@ -3,6 +3,7 @@
   --tg-mini-safe-right: env(safe-area-inset-right, 0px);
   --tg-mini-safe-bottom: env(safe-area-inset-bottom, 0px);
   --tg-mini-safe-left: env(safe-area-inset-left, 0px);
+  --tg-main-button-height: 0px;
 }
 
 body.tg-mini-app {
@@ -22,7 +23,7 @@ body.tg-mini-app {
   padding:
     calc(0.75rem + var(--tg-mini-safe-top))
     calc(clamp(10px, 2.5vw, 22px) + var(--tg-mini-safe-right))
-    calc(5.5rem + var(--tg-mini-safe-bottom))
+    calc(5.5rem + var(--tg-mini-safe-bottom) + var(--tg-main-button-height, 0px))
     calc(clamp(10px, 2.5vw, 22px) + var(--tg-mini-safe-left));
 }
 
@@ -159,6 +160,44 @@ body.tg-mini-app {
 .tg-mini-tabs.is-compact .tg-mini-tab.is-active::before {
   left: 18%;
   right: 18%;
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .tg-mini-shell {
+    padding-top: calc(0.35rem + var(--tg-mini-safe-top));
+    padding-bottom: calc(4.25rem + var(--tg-mini-safe-bottom) + var(--tg-main-button-height, 0px));
+  }
+
+  .tg-mini-header {
+    margin-bottom: 0.5rem;
+  }
+
+  .tg-mini-kicker {
+    display: none;
+  }
+
+  .tg-mini-brand {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.2;
+  }
+
+  .tg-mini-status {
+    font-size: 0.6875rem;
+    padding: 0.15rem 0.45rem;
+  }
+
+  .tg-mini-tabs .tg-mini-tab {
+    min-height: 2.75rem;
+    font-size: 0.625rem;
+    gap: 0.15rem;
+    padding-inline: 0.1rem;
+  }
+
+  .tg-mini-config-sheet,
+  .tg-mini-dialog-sheet {
+    max-height: min(88dvh, 680px) !important;
+  }
 }
 
 .tg-mini-cards {

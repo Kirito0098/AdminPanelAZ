@@ -79,7 +79,7 @@ function ToggleRow({
   onCheckedChange: (checked: boolean) => void
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+    <div className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0 space-y-1">
         <Label htmlFor={id} className="cursor-pointer font-medium">
           {label}
@@ -106,11 +106,11 @@ function CopyReadonlyField({
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
       <div className="flex flex-col gap-2 sm:flex-row">
-        <Input id={id} readOnly value={value} className="font-mono text-xs" placeholder="Загрузка..." />
+        <Input id={id} readOnly value={value} className="w-full font-mono text-xs" placeholder="Загрузка..." />
         <Button
           type="button"
           variant="secondary"
-          className="shrink-0"
+          className="w-full shrink-0 sm:w-auto"
           disabled={!value}
           onClick={() => {
             if (value) void navigator.clipboard.writeText(value)
@@ -307,31 +307,41 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
             <form onSubmit={(e) => void tg.handleSaveBot(e)} className="space-y-6">
               <div className="space-y-4">
                 <p className="text-sm font-medium">Данные бота</p>
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="botToken">Токен бота</Label>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                    <Label htmlFor="botToken" className="shrink-0 sm:w-36 sm:pt-2">
+                      Токен бота
+                    </Label>
+                    <div className="min-w-0 flex-1 space-y-2">
                     <Input
                       id="botToken"
                       type="password"
                       value={tg.botToken}
                       onChange={(e) => tg.setBotToken(e.target.value)}
                       placeholder={tg.settings?.bot_token_set ? '•••••••• (оставьте пустым)' : '123456:ABC...'}
+                      className="w-full"
                     />
                     <p className="text-xs text-muted-foreground">
                       {tg.settings?.bot_token_set
                         ? 'Оставьте пустым, если менять не нужно'
                         : 'BotFather выдаёт его при создании бота'}
                     </p>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="botUsername">Имя бота (username)</Label>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                    <Label htmlFor="botUsername" className="shrink-0 sm:w-36 sm:pt-2">
+                      Имя бота (username)
+                    </Label>
+                    <div className="min-w-0 flex-1 space-y-2">
                     <Input
                       id="botUsername"
                       value={tg.botUsername}
                       onChange={(e) => tg.setBotUsername(e.target.value)}
                       placeholder="mybot"
+                      className="w-full"
                     />
                     <p className="text-xs text-muted-foreground">Латиницей, без символа @ — как в ссылке t.me/mybot</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -345,7 +355,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                 </div>
                 <div className="space-y-2">
                   <Label>Способ входа</Label>
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <AuthMethodOption
                       active={tg.authMethod === 'legacy'}
                       title="Классический виджет"
@@ -374,8 +384,11 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                         Скопировать домен
                       </Button>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="authMaxAge">Срок действия входа (секунды)</Label>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                      <Label htmlFor="authMaxAge" className="shrink-0 sm:w-48 sm:pt-2">
+                        Срок действия входа (секунды)
+                      </Label>
+                      <div className="min-w-0 flex-1 space-y-2">
                       <Input
                         id="authMaxAge"
                         type="number"
@@ -383,10 +396,12 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                         max={86400}
                         value={tg.authMaxAge}
                         onChange={(e) => tg.setAuthMaxAge(e.target.value)}
+                        className="w-full"
                       />
                       <p className="text-xs text-muted-foreground">
                         Сколько секунд действует кнопка «Войти через Telegram». Обычно хватает 300.
                       </p>
+                      </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
                       Сохраните <strong>токен</strong> и <strong>username</strong> бота выше. На странице входа
@@ -418,19 +433,27 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                         Telegram OIDC обычно не работает по HTTP. Откройте панель по <code>https://</code>.
                       </SettingsAlert>
                     )}
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="oidcClientId">Client ID</Label>
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                        <Label htmlFor="oidcClientId" className="shrink-0 sm:w-36 sm:pt-2">
+                          Client ID
+                        </Label>
+                        <div className="min-w-0 flex-1 space-y-2">
                         <Input
                           id="oidcClientId"
                           value={tg.oidcClientId}
                           onChange={(e) => tg.setOidcClientId(e.target.value)}
                           placeholder="123456789"
+                          className="w-full"
                         />
                         <p className="text-xs text-muted-foreground">Числовой ID из BotFather → Web Login</p>
+                        </div>
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="oidcClientSecret">Client Secret</Label>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                        <Label htmlFor="oidcClientSecret" className="shrink-0 sm:w-36 sm:pt-2">
+                          Client Secret
+                        </Label>
+                        <div className="min-w-0 flex-1">
                         <Input
                           id="oidcClientSecret"
                           type="password"
@@ -439,7 +462,9 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                           placeholder={
                             tg.settings?.oidc_client_secret_set ? '•••••••• (оставьте пустым)' : 'секрет из BotFather'
                           }
+                          className="w-full"
                         />
+                        </div>
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
@@ -502,13 +527,13 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   id="miniAppUrl"
                   readOnly
                   value={tg.settings?.mini_app_url || ''}
-                  className="font-mono text-xs"
+                  className="w-full font-mono text-xs"
                   placeholder={tg.loginConfigured ? 'Загрузка ссылки...' : 'Появится после настройки бота'}
                 />
                 <Button
                   type="button"
                   variant="secondary"
-                  className="shrink-0"
+                  className="w-full shrink-0 sm:w-auto"
                   onClick={() => void tg.handleCopyMiniAppUrl()}
                   disabled={!tg.settings?.mini_app_url}
                 >
@@ -569,7 +594,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               onCheckedChange={(checked) => void tg.handleSaveInteractive(checked)}
             />
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-muted-foreground">Связь с панелью</p>
                 <Badge variant={tg.webhookReady ? 'success' : 'secondary'} className="mt-1">
@@ -745,7 +770,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   <Send size={12} className="inline align-text-bottom" aria-hidden /> — отправить
                   пример в Telegram.
                 </p>
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {tg.adminNotify?.events.map((event) => {
                     const enabled = tg.eventToggles[event.key] ?? false
                     const sending = tg.testingNotifyEvent === event.key

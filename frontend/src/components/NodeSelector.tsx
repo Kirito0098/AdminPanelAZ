@@ -44,7 +44,7 @@ const statusVariants: Record<NodeStatus, 'success' | 'destructive' | 'warning'> 
   unknown: 'warning',
 }
 
-export default function NodeSelector() {
+export default function NodeSelector({ compact = false }: { compact?: boolean }) {
   const location = useLocation()
   const { user } = useAuth()
   const { activeNode, activeNodeHa, nodes, syncGroups, syncGroupsLoaded, loading, activate } = useNode()
@@ -60,11 +60,14 @@ export default function NodeSelector() {
       .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка активации узла'))
   }
 
+  const triggerWidth = compact ? 'w-[130px]' : 'w-[200px]'
+  const haTriggerWidth = compact ? 'w-[140px]' : 'w-[220px]'
+
   if (loading || !activeNode) {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Server size={14} />
-        <span>Узел...</span>
+        {!compact && <span>Узел...</span>}
       </div>
     )
   }
@@ -78,7 +81,9 @@ export default function NodeSelector() {
         ) : (
           <Server size={14} className="text-muted-foreground" />
         )}
-        <span className="max-w-[140px] truncate text-xs font-medium">{label}</span>
+        <span className={cn('truncate text-xs font-medium', compact ? 'max-w-[90px]' : 'max-w-[140px]')}>
+          {label}
+        </span>
         {isHaScope && activeNodeHa ? (
           <Badge variant="outline" className="h-4 px-1 text-[10px]">
             HA
@@ -123,15 +128,17 @@ export default function NodeSelector() {
           }
         }}
       >
-        <SelectTrigger className="h-8 w-[220px] gap-2 text-xs">
+        <SelectTrigger className={cn('h-8 gap-2 text-xs', haTriggerWidth)}>
           <Layers size={14} className="shrink-0 text-muted-foreground" />
           <SelectValue placeholder="Выберите HA-группу">
             {activeGroup ? (
               <span className="flex min-w-0 items-center gap-2">
                 <span className="truncate">{activeGroup.group_name}</span>
-                <Badge variant="outline" className="h-4 max-w-[96px] truncate px-1 text-[10px] font-normal">
-                  {activeGroup.shared_domain}
-                </Badge>
+                {!compact && (
+                  <Badge variant="outline" className="h-4 max-w-[96px] truncate px-1 text-[10px] font-normal">
+                    {activeGroup.shared_domain}
+                  </Badge>
+                )}
               </span>
             ) : (
               <span className="truncate">{activeNode.name}</span>
@@ -158,7 +165,7 @@ export default function NodeSelector() {
         handleActivate(id, node?.name ?? value)
       }}
     >
-      <SelectTrigger className="h-8 w-[200px] gap-2 text-xs">
+      <SelectTrigger className={cn('h-8 gap-2 text-xs', triggerWidth)}>
         <Server size={14} className="shrink-0 text-muted-foreground" />
         <SelectValue placeholder="Выберите узел" />
       </SelectTrigger>

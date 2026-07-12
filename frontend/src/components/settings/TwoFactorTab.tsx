@@ -212,9 +212,9 @@ export default function TwoFactorTab({ className }: { className?: string }) {
         {backupCodes.length > 0 && (
           <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
             <p className="mb-2 text-sm font-medium">Сохраните резервные коды (одноразовые):</p>
-            <ul className="grid grid-cols-2 gap-1.5 font-mono text-xs sm:grid-cols-3">
+            <ul className="grid grid-cols-1 gap-1.5 font-mono text-xs sm:grid-cols-2 md:grid-cols-3">
               {backupCodes.map((c) => (
-                <li key={c} className="rounded-md bg-background/60 px-2 py-1 text-center">
+                <li key={c} className="break-all rounded-md bg-background/60 px-2 py-1 text-center">
                   {c}
                 </li>
               ))}

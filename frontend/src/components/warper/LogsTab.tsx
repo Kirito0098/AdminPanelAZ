@@ -51,9 +51,9 @@ export default function LogsTab({ health, embedded = false, hideTitle = false }:
 
   const body = (
     <>
-      <div className={`flex flex-wrap gap-2 ${embedded ? 'mb-3' : 'mb-4'}`}>
+      <div className={`flex flex-col gap-2 sm:flex-row sm:flex-wrap ${embedded ? 'mb-3' : 'mb-4'}`}>
         <Input
-          className="w-28"
+          className="w-full sm:w-28"
           type="number"
           min={1}
           max={2000}
@@ -62,12 +62,12 @@ export default function LogsTab({ health, embedded = false, hideTitle = false }:
           disabled={!health?.installed || loading}
         />
         <Input
-          className="min-w-[200px] flex-1"
+          className="w-full min-w-0 sm:min-w-[200px] sm:flex-1"
           placeholder="Фильтр по тексту..."
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <Button size="sm" disabled={!health?.installed || loading} onClick={() => void load()}>
+        <Button size="sm" className="w-full sm:w-auto" disabled={!health?.installed || loading} onClick={() => void load()}>
           <RefreshCw className="mr-1.5 h-4 w-4" />
           Обновить
         </Button>

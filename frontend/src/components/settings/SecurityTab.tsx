@@ -91,7 +91,7 @@ function ToggleRow({
   return (
     <div
       className={cn(
-        'flex items-start justify-between gap-4 rounded-xl border bg-card/50 p-4 transition-colors',
+        'flex flex-col gap-3 rounded-xl border bg-card/50 p-4 transition-colors sm:flex-row sm:items-start sm:justify-between',
         checked && !disabled && 'border-primary/20 bg-primary/5',
         disabled && 'opacity-60',
       )}
@@ -349,7 +349,7 @@ export default function SecurityTab() {
   if (!settings) return null
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4 orientation-compact-settings-tab">
       <InlineProgressBar active={saving} label="Сохранение настроек..." />
 
       <div className="grid gap-4 md:grid-cols-2 md:items-start">
@@ -425,7 +425,7 @@ export default function SecurityTab() {
                     value={allowedIps}
                     onChange={(e) => setAllowedIps(e.target.value)}
                     placeholder="192.168.1.0/24, 10.0.0.1"
-                    className="font-mono text-sm"
+                    className="w-full font-mono text-sm"
                   />
                   <p className="text-xs text-muted-foreground">
                     Несколько адресов через запятую. Подсеть:{' '}
@@ -452,8 +452,8 @@ export default function SecurityTab() {
                   onCheckedChange={(checked) => saveWithSettingsPatch({ whitelist_firewall: checked })}
                 />
 
-                <div className="flex justify-end border-t pt-4">
-                  <Button onClick={save} disabled={saving}>
+                <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:justify-end">
+                  <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
                     <Save size={16} />
                     {saving ? 'Сохранение...' : 'Сохранить'}
                   </Button>
@@ -511,7 +511,7 @@ export default function SecurityTab() {
                     value={tempIpInput}
                     onChange={(e) => setTempIpInput(e.target.value)}
                     placeholder={clientIp ? `Пусто = ${clientIp}` : '192.168.1.100'}
-                    className="font-mono"
+                    className="w-full font-mono"
                   />
                 </div>
 
@@ -609,7 +609,7 @@ export default function SecurityTab() {
             </div>
 
             {settings.block_scanners && (
-              <div className="grid gap-3 rounded-xl border bg-muted/20 p-4 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 rounded-xl border bg-muted/20 p-4 sm:grid-cols-2 md:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="scanner-max" className="text-xs">
                     Неудачных попыток
@@ -675,8 +675,8 @@ export default function SecurityTab() {
             )}
 
             {scannerDetailsVisible && (
-              <div className="flex justify-end border-t pt-4">
-                <Button onClick={save} disabled={saving}>
+              <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:justify-end">
+                <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
                   <Save size={16} />
                   {saving ? 'Сохранение...' : 'Сохранить'}
                 </Button>

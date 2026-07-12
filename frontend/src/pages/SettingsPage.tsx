@@ -4,6 +4,8 @@ import { Navigate, useParams } from 'react-router-dom'
 import { ApiError, changePassword, createUser, deleteUser, getSettings, getUsers } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
+import MobileSettingsSectionPicker from '@/components/settings/MobileSettingsSectionPicker'
+import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import BackupTab from '@/components/settings/BackupTab'
 import ConfigDeliveryTab from '@/components/settings/ConfigDeliveryTab'
 import FeatureTogglesTab from '@/components/settings/FeatureTogglesTab'
@@ -204,28 +206,24 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6 orientation-compact-settings-page">
       <ConfirmDialogHost dialogProps={dialogProps} />
       <HaReplicaBanner />
-      <div className="flex items-start gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <Settings size={22} />
-        </div>
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-2xl font-bold tracking-tight">Настройки</h2>
-            <NodeBadge name={activeNode?.name ?? settings?.node_name} status={activeNode?.status} />
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {isAdmin
-              ? 'Настройте профиль, доступ, VPN и работу панели — разделы в боковом меню «Система»'
-              : 'Тема, пароль и дополнительная защита при входе'}
-          </p>
-        </div>
-      </div>
+      <PageSectionHeader
+        icon={Settings}
+        title="Настройки"
+        titleAddon={<NodeBadge name={activeNode?.name ?? settings?.node_name} status={activeNode?.status} />}
+        description={
+          isAdmin
+            ? 'Настройте профиль, доступ, VPN и работу панели — разделы в боковом меню «Система»'
+            : 'Тема, пароль и дополнительная защита при входе'
+        }
+      />
 
-      <div className="space-y-4">
-        <div className="rounded-lg border bg-muted/30 px-4 py-3">
+      <MobileSettingsSectionPicker value={activeSection} />
+
+      <div className="flex flex-col gap-4 orientation-compact-settings-section">
+        <div className="rounded-lg border bg-muted/30 px-4 py-3 orientation-compact-settings-section-header">
           <h3 className="text-lg font-semibold tracking-tight">{sectionMeta.title}</h3>
           <p className="text-sm text-muted-foreground">{sectionMeta.description}</p>
           {sectionMeta.hint && (

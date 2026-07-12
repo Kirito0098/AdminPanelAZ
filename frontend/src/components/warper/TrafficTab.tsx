@@ -172,7 +172,7 @@ export default function TrafficTab({ health, embedded = false, hideTitle = false
       ) : (
         <div className="space-y-4">
           {embedded ? (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <WarperStatTile
                 label="Исходящий ↑"
                 value={tx == null ? '—' : formatBytes(tx)}
@@ -184,7 +184,7 @@ export default function TrafficTab({ health, embedded = false, hideTitle = false
               {uptime && <WarperStatTile label="Аптайм sing-box" value={uptime} />}
             </div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">Исходящий ↑</CardTitle>

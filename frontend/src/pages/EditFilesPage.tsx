@@ -41,7 +41,9 @@ import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -60,6 +62,9 @@ import {
 import { ALL_NODES_ONLINE_PHRASE } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import type { EditFileEntry } from '@/types'
+
+const EDITOR_TEXTAREA_CLASS =
+  'min-h-[16rem] resize-y border-zinc-800 bg-zinc-950 font-mono text-sm leading-relaxed text-zinc-200 placeholder:text-zinc-500 focus-visible:ring-zinc-700 sm:min-h-[22rem] lg:min-h-[28rem]'
 
 type FileGroup = 'hosts' | 'ips' | 'adblock'
 
@@ -478,25 +483,33 @@ export default function EditFilesPage() {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
           {showTransferButton && (
-            <div className="flex flex-col items-start gap-0.5">
+            <div className="flex w-full flex-col items-stretch gap-0.5 sm:w-auto sm:items-start">
               <Button
                 variant="outline"
+                className="w-full sm:w-auto"
                 onClick={() => setTransferOpen(true)}
                 disabled={nodeReadonly || transferLoading || files.length === 0}
               >
                 <ArrowRightLeft size={16} />
-                Скопировать на другие серверы
+                <span className="hidden sm:inline">Скопировать на другие серверы</span>
+                <span className="sm:hidden">На узлы</span>
               </Button>
               {isHaAutoPrimary && (
                 <span className="px-1 text-[10px] text-muted-foreground">Запасной вариант</span>
               )}
             </div>
           )}
-          <Button variant="outline" onClick={handleRefresh} disabled={loading || fileLoading}>
+          <Button
+            variant="outline"
+            className="w-full sm:w-auto"
+            onClick={handleRefresh}
+            disabled={loading || fileLoading}
+            aria-label="Обновить"
+          >
             <RefreshCw size={16} className={loading || fileLoading ? 'animate-spin' : ''} />
-            Обновить
+            <span className="hidden sm:inline">Обновить</span>
           </Button>
         </div>
       </div>
@@ -603,7 +616,7 @@ export default function EditFilesPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
           <Card className="hidden lg:block">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm">Что изменить?</CardTitle>
@@ -700,17 +713,27 @@ export default function EditFilesPage() {
               <div className="lg:hidden">
                 <Label className="mb-1.5 block text-xs text-muted-foreground">Какой список открыть?</Label>
                 <Select value={activeKey ?? undefined} onValueChange={selectFile}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full min-w-0">
                     <SelectValue placeholder="Выберите список" />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(GROUP_LABELS) as FileGroup[]).map((group) =>
-                      groupedFiles[group].map((f) => (
-                        <SelectItem key={f.key} value={f.key}>
-                          {GROUP_LABELS[group]} · {f.title}
-                        </SelectItem>
-                      )),
-                    )}
+                    {(Object.keys(GROUP_LABELS) as FileGroup[]).map((group) => {
+                      const groupFiles = groupedFiles[group]
+                      if (groupFiles.length === 0) return null
+                      return (
+                        <SelectGroup key={group}>
+                          <SelectLabel>{GROUP_LABELS[group]}</SelectLabel>
+                          {groupFiles.map((f) => {
+                            const label = f.filename ? `${f.title} — ${f.filename}` : f.title
+                            return (
+                              <SelectItem key={f.key} value={f.key} title={label}>
+                                <span className="block truncate">{f.title}</span>
+                              </SelectItem>
+                            )
+                          })}
+                        </SelectGroup>
+                      )
+                    })}
                   </SelectContent>
                 </Select>
               </div>
@@ -746,7 +769,7 @@ export default function EditFilesPage() {
                       value={content}
                       onChange={(e) => setContent(e.target.value)}
                       placeholder={activeMeta?.placeholder ?? 'Введите значения — по одному на строку'}
-                      className="min-h-[20rem] resize-y border-zinc-800 bg-zinc-950 font-mono text-sm leading-relaxed text-zinc-200 placeholder:text-zinc-500 focus-visible:ring-zinc-700"
+                      className={EDITOR_TEXTAREA_CLASS}
                       spellCheck={false}
                     />
                   )}
@@ -757,37 +780,50 @@ export default function EditFilesPage() {
                   onChange={(e) => setContent(e.target.value)}
                   readOnly={!isAdmin}
                   placeholder={activeMeta?.placeholder}
-                  className="min-h-[28rem] resize-y border-zinc-800 bg-zinc-950 font-mono text-sm leading-relaxed text-zinc-200 placeholder:text-zinc-500 focus-visible:ring-zinc-700"
+                  className={EDITOR_TEXTAREA_CLASS}
                   spellCheck={false}
                 />
               )}
 
               {!fileLoading && !fileError && (
                 <div className="space-y-3" aria-live="polite">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
+                      className="w-full sm:w-auto"
                       aria-expanded={diffOpen}
                       onClick={() => setDiffOpen((open) => !open)}
                     >
-                      {diffOpen ? 'Скрыть изменения' : 'Показать изменения'}
+                      {diffOpen ? (
+                        <>
+                          <span className="hidden sm:inline">Скрыть изменения</span>
+                          <span className="sm:hidden">Скрыть</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="hidden sm:inline">Показать изменения</span>
+                          <span className="sm:hidden">Изменения</span>
+                        </>
+                      )}
                     </Button>
                     {isAdmin && (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
+                        className="w-full sm:w-auto"
                         onClick={() => void handleCompareWithDisk()}
                         disabled={diskCompareLoading || nodeReadonly}
+                        aria-label="Сравнить с сервером"
                       >
                         {diskCompareLoading ? (
                           <Loader2 size={16} className="animate-spin" />
                         ) : (
                           <GitCompare size={16} />
                         )}
-                        Сравнить с сервером
+                        <span className="hidden sm:inline">Сравнить с сервером</span>
                       </Button>
                     )}
                     <span className="text-xs text-muted-foreground">{diffSummaryText}</span>
@@ -807,31 +843,37 @@ export default function EditFilesPage() {
                     маршрутизации (может занять несколько минут).
                     {isHaAutoPrimary && ' На резервный сервер списки скопируются автоматически.'}
                   </p>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
                     <Button
                       variant="outline"
+                      className="w-full sm:w-auto"
                       onClick={handleRevert}
                       disabled={!hasUnsavedChanges || saving || nodeReadonly}
+                      aria-label="Отменить правки"
                     >
                       <RotateCcw size={16} />
-                      Отменить правки
+                      <span className="hidden sm:inline">Отменить правки</span>
                     </Button>
                     <Button
                       variant="secondary"
+                      className="w-full sm:w-auto"
                       onClick={handleSaveOnly}
                       disabled={!hasUnsavedChanges || saving || nodeReadonly}
                       title="Записать на сервер без обновления VPN"
+                      aria-label="Сохранить"
                     >
                       {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                      Сохранить
+                      <span className="hidden sm:inline">Сохранить</span>
                     </Button>
                     <Button
+                      className="w-full sm:w-auto"
                       onClick={() => setConfirmApply(true)}
                       disabled={!hasUnsavedChanges || saving || nodeReadonly}
                       title="Записать и обновить правила VPN"
                     >
                       {saving ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
-                      Сохранить и применить
+                      <span className="hidden sm:inline">Сохранить и применить</span>
+                      <span className="sm:hidden">Применить</span>
                     </Button>
                   </div>
                 </div>

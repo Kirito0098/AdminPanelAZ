@@ -89,26 +89,29 @@ export default function WarperPage() {
 
       {warperReady ? (
       <Tabs value={tab} onValueChange={(v) => setTab(v as WarperTab)} className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-muted/50 p-1 sm:inline-flex sm:w-auto">
-          <TabsTrigger value="domains" className="gap-1.5 data-[state=active]:shadow-sm">
+        <TabsList className="flex h-auto w-full snap-x snap-mandatory gap-1 overflow-x-auto bg-muted/50 p-1 [-ms-overflow-style:none] [scrollbar-width:none] sm:inline-flex sm:w-auto sm:overflow-visible sm:snap-none [&::-webkit-scrollbar]:hidden">
+          <TabsTrigger value="domains" className="shrink-0 snap-start gap-1.5 data-[state=active]:shadow-sm">
             <Globe className="h-4 w-4" />
             <span>Домены</span>
           </TabsTrigger>
-          <TabsTrigger value="catalog" className="gap-1.5 data-[state=active]:shadow-sm">
+          <TabsTrigger value="catalog" className="shrink-0 snap-start gap-1.5 data-[state=active]:shadow-sm">
             <Library className="h-4 w-4" />
             <span>Каталог</span>
           </TabsTrigger>
-          <TabsTrigger value="ip-ranges" className="gap-1.5 data-[state=active]:shadow-sm">
+          <TabsTrigger value="ip-ranges" className="shrink-0 snap-start gap-1.5 data-[state=active]:shadow-sm">
             <Network className="h-4 w-4" />
-            <span>IP-подсети</span>
+            <span className="sm:hidden">Подсети</span>
+            <span className="hidden sm:inline">IP-подсети</span>
           </TabsTrigger>
-          <TabsTrigger value="monitoring" className="gap-1.5 data-[state=active]:shadow-sm">
+          <TabsTrigger value="monitoring" className="shrink-0 snap-start gap-1.5 data-[state=active]:shadow-sm">
             <Activity className="h-4 w-4" />
-            <span>Мониторинг</span>
+            <span className="sm:hidden">Монит.</span>
+            <span className="hidden sm:inline">Мониторинг</span>
           </TabsTrigger>
-          <TabsTrigger value="settings" className="gap-1.5 data-[state=active]:shadow-sm">
+          <TabsTrigger value="settings" className="shrink-0 snap-start gap-1.5 data-[state=active]:shadow-sm">
             <Settings2 className="h-4 w-4" />
-            <span>Настройки</span>
+            <span className="sm:hidden">Настр.</span>
+            <span className="hidden sm:inline">Настройки</span>
           </TabsTrigger>
         </TabsList>
 

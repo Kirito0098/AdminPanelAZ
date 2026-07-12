@@ -144,7 +144,7 @@ export default function TelegramRecipientsPanel({
         )}
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {admins.map((admin) => {
           const notifyChecked = notifyRecipientIds.includes(admin.id)
           const backupChecked = chatIds.includes(admin.telegram_id!)
@@ -160,11 +160,11 @@ export default function TelegramRecipientsPanel({
                 <p className="truncate font-medium leading-snug">{admin.username}</p>
                 <p className="font-mono text-xs text-muted-foreground">{admin.telegram_id}</p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
                 <label
                   htmlFor={`notify-${admin.id}`}
                   className={cn(
-                    'flex flex-1 min-w-[7.5rem] cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition-colors',
+                    'flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition-colors sm:min-w-[7.5rem] sm:flex-1',
                     notifyChecked
                       ? 'border-sky-500/40 bg-sky-500/10 text-foreground'
                       : 'border-transparent bg-muted/40 text-muted-foreground hover:bg-muted/60',
@@ -182,7 +182,7 @@ export default function TelegramRecipientsPanel({
                 <label
                   htmlFor={`backup-${admin.id}`}
                   className={cn(
-                    'flex flex-1 min-w-[7.5rem] cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition-colors',
+                    'flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition-colors sm:min-w-[7.5rem] sm:flex-1',
                     backupChecked
                       ? 'border-emerald-500/40 bg-emerald-500/10 text-foreground'
                       : 'border-transparent bg-muted/40 text-muted-foreground hover:bg-muted/60',
@@ -212,7 +212,7 @@ export default function TelegramRecipientsPanel({
           value={manualChatIds.join(', ')}
           onChange={(e) => setManualChatIds(e.target.value)}
           placeholder="-1001234567890"
-          className="h-9 font-mono text-sm"
+          className="h-9 w-full font-mono text-sm"
         />
         <p className="text-xs text-muted-foreground">
           Chat ID через запятую — если архивы нужны в общий чат, а не в личку администратора.

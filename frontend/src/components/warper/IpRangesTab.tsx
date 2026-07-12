@@ -135,10 +135,10 @@ export default function IpRangesTab({ health }: IpRangesTabProps) {
         </p>
 
         <div className="mb-4 flex flex-wrap items-end gap-2">
-          <div className="min-w-[220px] flex-1">
+          <div className="w-full min-w-0 sm:min-w-[220px] sm:flex-1">
             <label className="mb-1 block text-xs text-muted-foreground">Режим маршрутизации</label>
             <Select value={routeMode} onValueChange={setRouteMode} disabled={disabled || busy || saving}>
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

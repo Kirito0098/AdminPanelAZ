@@ -35,10 +35,18 @@ import { NodeBadge, NodeStatusBadge, statusLabels } from '@/components/NodeSelec
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
+import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
@@ -198,7 +206,7 @@ function NodeActions({
   const iconSize = compact ? 16 : 14
 
   return (
-    <div className={cn('flex items-center', compact ? 'justify-end gap-0.5' : 'flex-wrap gap-2')}>
+    <div className={cn('flex flex-wrap items-center', compact ? 'justify-end gap-0.5' : 'gap-2')}>
       {!isActive && (
         <Button
           variant={compact ? 'ghost' : 'outline'}
@@ -374,7 +382,7 @@ function NodeCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 text-sm">
+        <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
           <div>
             <p className="text-xs text-muted-foreground">IP сервера</p>
             <p className="font-mono text-xs">{meta.serverIp ?? '—'}</p>
@@ -459,84 +467,127 @@ function NodeBulkActionsBar({
   if (nodes.length === 0) return null
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
-      <span className="text-xs text-muted-foreground">
-        Выбрано: {selectedNodeIds.length} из {nodes.length}
-      </span>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-7 text-xs"
-        disabled={busy || allSelected}
-        onClick={onSelectAll}
-      >
-        Выбрать все
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-7 text-xs"
-        disabled={busy || selectedNodeIds.length === 0}
-        onClick={onClearSelection}
-      >
-        Сброс
-      </Button>
-      <div className="hidden h-5 w-px bg-border sm:block" />
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-7 text-xs"
-        disabled={busy || selectedNodeIds.length === 0}
-        onClick={onBulkHealth}
-      >
-        <HeartPulse size={12} />
-        Проверить здоровье
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-7 text-xs"
-        disabled={busy || selectedNodeIds.length === 0}
-        onClick={onBulkRollingUpdate}
-      >
-        {rollingUpdating || rollPolling ? (
-          <Loader2 size={12} className="animate-spin" />
-        ) : (
-          <Download size={12} />
-        )}
-        Rolling update
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-7 text-xs"
-        disabled={busy || mtlsCandidates.length === 0}
-        onClick={onBulkEnableMtls}
-        title={
-          mtlsCandidates.length === 0 && remoteSelected.length > 0
-            ? 'У выбранных удалённых узлов mTLS уже включён'
-            : undefined
-        }
-      >
-        <Shield size={12} />
-        Включить mTLS{mtlsCandidates.length > 0 ? ` (${mtlsCandidates.length})` : ''}
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant="destructive"
-        className="h-7 text-xs"
-        disabled={busy || remoteSelected.length === 0}
-        onClick={onBulkDelete}
-      >
-        <Trash2 size={12} />
-        Удалить{remoteSelected.length > 0 ? ` (${remoteSelected.length})` : ''}
-      </Button>
+    <div className="mb-4 rounded-md border bg-muted/30 p-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">
+          Выбрано: {selectedNodeIds.length} из {nodes.length}
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          disabled={busy || allSelected}
+          onClick={onSelectAll}
+        >
+          Выбрать все
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          disabled={busy || selectedNodeIds.length === 0}
+          onClick={onClearSelection}
+        >
+          Сброс
+        </Button>
+        <div className="hidden h-5 w-px bg-border md:block" />
+        <div className="hidden flex-wrap items-center gap-2 md:flex">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={busy || selectedNodeIds.length === 0}
+            onClick={onBulkHealth}
+          >
+            <HeartPulse size={12} />
+            Проверить здоровье
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={busy || selectedNodeIds.length === 0}
+            onClick={onBulkRollingUpdate}
+          >
+            {rollingUpdating || rollPolling ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <Download size={12} />
+            )}
+            Rolling update
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={busy || mtlsCandidates.length === 0}
+            onClick={onBulkEnableMtls}
+            title={
+              mtlsCandidates.length === 0 && remoteSelected.length > 0
+                ? 'У выбранных удалённых узлов mTLS уже включён'
+                : undefined
+            }
+          >
+            <Shield size={12} />
+            Включить mTLS{mtlsCandidates.length > 0 ? ` (${mtlsCandidates.length})` : ''}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            className="h-7 text-xs"
+            disabled={busy || remoteSelected.length === 0}
+            onClick={onBulkDelete}
+          >
+            <Trash2 size={12} />
+            Удалить{remoteSelected.length > 0 ? ` (${remoteSelected.length})` : ''}
+          </Button>
+        </div>
+        <div className="md:hidden">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                disabled={busy || selectedNodeIds.length === 0}
+              >
+                <MoreHorizontal size={12} />
+                Действия с выбранными
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem disabled={busy || selectedNodeIds.length === 0} onClick={onBulkHealth}>
+                <HeartPulse size={14} />
+                Проверить здоровье
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={busy || selectedNodeIds.length === 0} onClick={onBulkRollingUpdate}>
+                <Download size={14} />
+                Rolling update
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={busy || mtlsCandidates.length === 0} onClick={onBulkEnableMtls}>
+                <Shield size={14} />
+                Включить mTLS{mtlsCandidates.length > 0 ? ` (${mtlsCandidates.length})` : ''}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                disabled={busy || remoteSelected.length === 0}
+                onClick={onBulkDelete}
+              >
+                <Trash2 size={14} />
+                Удалить{remoteSelected.length > 0 ? ` (${remoteSelected.length})` : ''}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1132,8 +1183,9 @@ export default function NodesPage() {
                 onBulkDelete={() => openBulkConfirm('delete')}
               />
 
-              <div className="space-y-4 lg:hidden">
-                {nodes.map((node) => (
+              <ResponsiveDataView
+                breakpoint="xl"
+                mobile={nodes.map((node) => (
                   <NodeCard
                     key={node.id}
                     node={node}
@@ -1153,10 +1205,8 @@ export default function NodesPage() {
                     onDelete={() => handleDelete(node)}
                   />
                 ))}
-              </div>
-
-              <div className="hidden overflow-x-auto rounded-md border lg:block">
-                <Table>
+                desktop={
+                  <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-10">
@@ -1270,7 +1320,10 @@ export default function NodesPage() {
                     })}
                   </TableBody>
                 </Table>
-              </div>
+                }
+                mobileClassName="space-y-4"
+                desktopClassName="overflow-x-auto rounded-md border"
+              />
             </>
           )}
         </CardContent>

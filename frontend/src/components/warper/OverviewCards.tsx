@@ -101,7 +101,7 @@ export default function OverviewCards({
 
   if (loading && !health) {
     return (
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <Card key={i} className="border-l-4 border-l-muted">
             <CardHeader className="pb-2">
@@ -119,7 +119,7 @@ export default function OverviewCards({
 
   return (
     <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map((card, index) => (
           <Card
             key={`${card.key}-${card.title}-${index}`}

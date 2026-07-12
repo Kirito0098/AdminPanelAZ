@@ -103,18 +103,19 @@ export default function MonitoringTab({
       )}
 
       <Tabs value={view} onValueChange={(value) => setView(value as MonitorView)} className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-3 gap-1 bg-muted/50 p-1 sm:inline-flex sm:w-auto">
-          <TabsTrigger value="overview" className="gap-1.5 data-[state=active]:shadow-sm">
+        <TabsList className="flex h-auto w-full snap-x snap-mandatory gap-1 overflow-x-auto bg-muted/50 p-1 [-ms-overflow-style:none] [scrollbar-width:none] sm:inline-flex sm:w-auto sm:overflow-visible sm:snap-none [&::-webkit-scrollbar]:hidden">
+          <TabsTrigger value="overview" className="shrink-0 snap-start gap-1.5 data-[state=active]:shadow-sm">
             <Activity className="h-4 w-4" />
             Обзор
           </TabsTrigger>
-          <TabsTrigger value="logs" className="gap-1.5 data-[state=active]:shadow-sm">
+          <TabsTrigger value="logs" className="shrink-0 snap-start gap-1.5 data-[state=active]:shadow-sm">
             <FileText className="h-4 w-4" />
             Логи
           </TabsTrigger>
-          <TabsTrigger value="doctor" className="gap-1.5 data-[state=active]:shadow-sm">
+          <TabsTrigger value="doctor" className="shrink-0 snap-start gap-1.5 data-[state=active]:shadow-sm">
             <Stethoscope className="h-4 w-4" />
-            Диагностика
+            <span className="sm:hidden">Доктор</span>
+            <span className="hidden sm:inline">Диагностика</span>
           </TabsTrigger>
         </TabsList>
 

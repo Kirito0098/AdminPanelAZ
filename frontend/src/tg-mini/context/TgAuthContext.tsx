@@ -7,6 +7,7 @@ import {
   getTgToken,
   refreshTgSessionFromInitData,
 } from '@/tg-mini/api'
+import { initTelegramWebApp } from '@/tg-mini/lib/telegramWebAppInit'
 import { getTelegramWebApp, TG_MINI_NO_INIT_DATA, waitForTelegramInitData } from '@/tg-mini/lib/telegramInitData'
 import type { TgMiniSettings } from '@/types'
 
@@ -73,6 +74,7 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
   }, [loadSettings])
 
   useEffect(() => {
+    initTelegramWebApp()
     void authenticate()
   }, [authenticate])
 

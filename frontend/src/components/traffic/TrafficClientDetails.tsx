@@ -244,7 +244,7 @@ export default function TrafficClientDetails({
         )}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricTile
           label="Всего"
           value={formatBytes(row.total_bytes)}
@@ -295,7 +295,7 @@ export default function TrafficClientDetails({
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-3 rounded-lg border bg-background p-4">
           <p className="text-sm font-medium">Разбивка VPN / AntiZapret</p>
           <SplitBar label="VPN" value={row.total_bytes_vpn} total={row.total_bytes} variant="vpn" />
@@ -305,7 +305,7 @@ export default function TrafficClientDetails({
             total={row.total_bytes}
             variant="antizapret"
           />
-          <div className="grid grid-cols-2 gap-3 pt-1 text-xs text-muted-foreground">
+          <div className="grid grid-cols-1 gap-3 pt-1 text-xs text-muted-foreground sm:grid-cols-2">
             <span>
               Подключений:{' '}
               <strong className="text-foreground">
@@ -457,7 +457,7 @@ export default function TrafficClientDetails({
             </p>
           </div>
           <Select value={chartRange} onValueChange={onChartRangeChange}>
-            <SelectTrigger className="h-9 w-[140px] text-xs">
+            <SelectTrigger className="h-9 w-full text-xs sm:w-[140px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

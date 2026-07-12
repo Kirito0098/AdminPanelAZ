@@ -3,7 +3,7 @@
 Веб-панель для администрирования VPN-сервера [AntiZapret](https://github.com/GubernievS/AntiZapret-VPN)
 
 [![GitHub](https://img.shields.io/badge/GitHub-Kirito0098%2FAdminPanelAZ-181717?style=for-the-badge&logo=github)](https://github.com/Kirito0098/AdminPanelAZ)
-[![Version](https://img.shields.io/badge/Панель-2.14.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Панель-2.15.0-blue?style=for-the-badge)](CHANGELOG.md)
 [![Node agent](https://img.shields.io/badge/Node_agent-1.4.0-555?style=for-the-badge)](CHANGELOG.md)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](backend/)
 [![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)](frontend/)
@@ -291,9 +291,9 @@ sudo ./scripts/nginx-setup.sh       # сменить HTTPS после устан
   <img src="docs/assets/telegram-promo/05-whats-new.png" alt="Последние обновления AdminPanel AntiZapret" width="900">
 </p>
 
-**Текущая версия: панель 2.14.0 · node agent 1.4.0** (2026-07-11)
+**Текущая версия: панель 2.15.0 · node agent 1.4.0** (2026-07-12)
 
-Последний релиз — укрепление **HA Node Sync**: защита от split-brain (запись только на primary), Push full без прерывания на первой ошибке реплики, раздельные статусы verify и репликации, auto-heal с накоплением счётчика, кнопки **Настройка / Push full / Домен** в UI.
+Последний релиз — **адаптивная вёрстка** для телефонов и планшетов: safe area и `100dvh`, карточные списки вместо широких таблиц, компактный header; мобильные **Настройки** с inline-accordion; общие компоненты `ResponsiveDataView` / `PageSectionHeader` / `ToolbarButton`; улучшения HA-селектора и бейджей группы; синхронизация темы Telegram Mini App.
 
 Полный список: **[CHANGELOG.md](CHANGELOG.md)** · runbook аудита HA: [reviews/HA-sync-remediation-plan.md](reviews/HA-sync-remediation-plan.md)
 

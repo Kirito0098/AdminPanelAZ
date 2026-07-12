@@ -343,7 +343,7 @@ function ConfigSectionCard({
           className={cn(
             'flex flex-1 flex-col border-t',
             useGrid
-              ? 'grid sm:grid-cols-2 sm:divide-x divide-y sm:divide-y-0'
+              ? 'grid grid-cols-1 divide-y sm:grid-cols-2 sm:divide-x sm:divide-y-0'
               : 'divide-y',
           )}
         >
@@ -608,31 +608,36 @@ export default function AntizapretConfigTab() {
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => void load()}
-              disabled={controlsDisabled}
-            >
-              <RefreshCw className="mr-1.5 h-4 w-4" />
-              Обновить
-            </Button>
-            {dirty && (
+          <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap lg:justify-end">
+            <div className="grid w-full grid-cols-2 gap-2 sm:contents">
               <Button
                 type="button"
-                variant="ghost"
+                variant="secondary"
                 size="sm"
-                onClick={resetDraft}
+                className="w-full sm:w-auto"
+                onClick={() => void load()}
                 disabled={controlsDisabled}
               >
-                Сбросить
+                <RefreshCw className="mr-1.5 h-4 w-4" />
+                Обновить
               </Button>
-            )}
+              {dirty && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-full sm:w-auto"
+                  onClick={resetDraft}
+                  disabled={controlsDisabled}
+                >
+                  Сбросить
+                </Button>
+              )}
+            </div>
             <Button
               type="button"
               size="sm"
+              className="w-full sm:w-auto"
               onClick={() => void save()}
               disabled={!dirty || controlsDisabled}
             >
@@ -643,6 +648,7 @@ export default function AntizapretConfigTab() {
               type="button"
               size="sm"
               variant="default"
+              className="w-full sm:w-auto"
               onClick={() => setApplyOpen(true)}
               disabled={controlsDisabled || dirty}
             >
@@ -665,24 +671,39 @@ export default function AntizapretConfigTab() {
       {(dirty || needsApply) && (
         <div
           className={cn(
-            'sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/90',
+            'sticky top-0 z-30 flex flex-col gap-3 rounded-lg border px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/90 sm:flex-row sm:items-center sm:justify-between',
             dirty ? 'border-amber-500/30 bg-amber-500/5' : 'border-amber-500/30 bg-background/95',
           )}
         >
-          <p className="text-sm">
+          <p className="w-full text-sm sm:min-w-0 sm:flex-1">
             {dirty ? (
               <>Есть несохранённые изменения ({dirtyKeys.length}). Сохраните перед применением.</>
             ) : (
               <>Настройки сохранены — осталось выполнить doall.sh на узле.</>
             )}
           </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
             {dirty ? (
               <>
-                <Button type="button" variant="ghost" size="sm" onClick={resetDraft} disabled={controlsDisabled}>
-                  Сбросить
-                </Button>
-                <Button type="button" size="sm" onClick={() => void save()} disabled={controlsDisabled}>
+                <div className="grid w-full grid-cols-2 gap-2 sm:contents">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full sm:w-auto"
+                    onClick={resetDraft}
+                    disabled={controlsDisabled}
+                  >
+                    Сбросить
+                  </Button>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-full sm:w-auto"
+                  onClick={() => void save()}
+                  disabled={controlsDisabled}
+                >
                   <Save className="mr-1.5 h-4 w-4" />
                   Сохранить
                 </Button>
@@ -691,6 +712,7 @@ export default function AntizapretConfigTab() {
               <Button
                 type="button"
                 size="sm"
+                className="w-full sm:w-auto"
                 onClick={() => setApplyOpen(true)}
                 disabled={controlsDisabled}
               >

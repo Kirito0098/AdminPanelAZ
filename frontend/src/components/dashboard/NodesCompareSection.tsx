@@ -4,6 +4,7 @@ import { ApiError, getNodesCompare } from '@/api/client'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import { NodeStatusBadge } from '@/components/NodeSelector'
 import Spinner from '@/components/ui/Spinner'
+import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -137,7 +138,7 @@ export default function NodesCompareSection({
                 Недостаточно узлов для сравнения
               </p>
             ) : (
-              <CompareTable nodes={nodes} metricRows={metricRows} />
+              <CompareView nodes={nodes} metricRows={metricRows} />
             )}
           </CardContent>
         )}
@@ -173,7 +174,75 @@ export default function NodesCompareSection({
         </Button>
       </CardHeader>
       <CardContent>
-        <CompareTable nodes={nodes} metricRows={metricRows} />
+        <CompareView nodes={nodes} metricRows={metricRows} />
+      </CardContent>
+    </Card>
+  )
+}
+
+function CompareView({
+  nodes,
+  metricRows,
+}: {
+  nodes: MonitoringNodeSummary[]
+  metricRows: CompareMetric[]
+}) {
+  return (
+    <ResponsiveDataView
+      mobile={nodes.map((node) => (
+        <CompareNodeCard key={node.node_id} node={node} metricRows={metricRows} />
+      ))}
+      desktop={<CompareTable nodes={nodes} metricRows={metricRows} />}
+      mobileClassName="space-y-3"
+    />
+  )
+}
+
+function CompareNodeCard({
+  node,
+  metricRows,
+}: {
+  node: MonitoringNodeSummary
+  metricRows: CompareMetric[]
+}) {
+  return (
+    <Card className="border-border/80">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-sm font-semibold">{node.node_name}</CardTitle>
+          <NodeStatusBadge status={node.status as NodeStatus} />
+        </div>
+        {node.error && <p className="text-[11px] text-destructive">{node.error}</p>}
+      </CardHeader>
+      <CardContent className="space-y-3 pt-0">
+        {metricRows
+          .filter((metric) => metric.key !== 'status')
+          .map((metric) => (
+            <div key={metric.key} className="flex items-start justify-between gap-3 text-xs">
+              <span className="shrink-0 text-muted-foreground">{metric.label}</span>
+              {metric.key === 'cpu' || metric.key === 'ram' ? (
+                <div className="min-w-0 flex-1 space-y-1 text-right">
+                  {metric.key === 'cpu' && node.cpu_percent != null ? (
+                    <Progress
+                      value={Math.min(100, node.cpu_percent)}
+                      barClassName={metricBarClass(node.cpu_percent)}
+                      className="h-2"
+                    />
+                  ) : null}
+                  {metric.key === 'ram' && node.memory_percent != null ? (
+                    <Progress
+                      value={Math.min(100, node.memory_percent)}
+                      barClassName={metricBarClass(node.memory_percent)}
+                      className="h-2"
+                    />
+                  ) : null}
+                  <span className="font-mono">{metric.format(node)}</span>
+                </div>
+              ) : (
+                <span className="font-mono text-right">{metric.format(node)}</span>
+              )}
+            </div>
+          ))}
       </CardContent>
     </Card>
   )

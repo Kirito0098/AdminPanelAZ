@@ -468,8 +468,8 @@ export default function ConfigCardsSection({
         </CardHeader>
         <CardContent className="space-y-4 p-4 sm:p-5">
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ProtocolTab)}>
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <TabsList className="h-auto w-full flex-wrap justify-start bg-muted/40 p-1 sm:w-auto">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <TabsList className="h-auto w-full min-w-0 flex-wrap justify-start gap-1 bg-muted/40 p-1 sm:w-auto">
                 {visibleTabs.includes('openvpn') && (
                   <TabsTrigger value="openvpn" className="gap-1.5 data-[state=active]:shadow-sm">
                     OpenVPN
@@ -497,14 +497,14 @@ export default function ConfigCardsSection({
               </TabsList>
 
               {activeTab === 'openvpn' && openvpnTabEnabled && openvpnGroupOptions.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1 rounded-xl border bg-muted/30 p-1">
+                <div className="-mx-1 flex gap-1 overflow-x-auto rounded-xl border bg-muted/30 p-1 snap-x snap-mandatory [-ms-overflow-style:none] [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible [&::-webkit-scrollbar]:hidden">
                   {openvpnGroupOptions.map((option) => (
                     <Button
                       key={option.key}
                       type="button"
                       size="sm"
                       variant={openvpnGroup === option.key ? 'default' : 'ghost'}
-                      className="h-8 px-2.5 text-xs"
+                      className="h-8 shrink-0 snap-start px-2.5 text-xs sm:shrink"
                       disabled={groupBusy}
                       onClick={() => void handleOpenVpnGroupChange(option.key)}
                     >
@@ -626,24 +626,24 @@ export default function ConfigCardsSection({
                   </div>
                 </div>
                 {(selectedCount > 0 || tagFilterIds.length > 0) && (
-                  <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-background/80 p-2.5">
-                    <span className="text-xs text-muted-foreground">
+                  <div className="grid grid-cols-2 gap-2 rounded-xl border bg-background/80 p-2.5 md:flex md:flex-wrap md:items-center">
+                    <span className="col-span-2 text-xs text-muted-foreground md:col-span-1 md:shrink-0">
                       Выбрано: {selectedCount}
                       {tagFilterIds.length > 0 ? ` · теги: ${tagFilterIds.length}` : ''}
                     </span>
-                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={selectAllVisible}>
+                    <Button type="button" size="sm" variant="outline" className="h-7 w-full text-xs md:w-auto" onClick={selectAllVisible}>
                       Все на вкладке
                     </Button>
-                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={clearSelection}>
+                    <Button type="button" size="sm" variant="outline" className="h-7 w-full text-xs md:w-auto" onClick={clearSelection}>
                       Сброс
                     </Button>
-                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => openBulkAction('block_temp')}>
+                    <Button type="button" size="sm" variant="outline" className="h-7 w-full text-xs md:w-auto" disabled={haReplicaReadonly} onClick={() => openBulkAction('block_temp')}>
                       Заблокировать
                     </Button>
-                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => openBulkAction('unblock')}>
+                    <Button type="button" size="sm" variant="outline" className="h-7 w-full text-xs md:w-auto" disabled={haReplicaReadonly} onClick={() => openBulkAction('unblock')}>
                       Разблокировать
                     </Button>
-                    <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => openBulkAction('renew_cert')}>
+                    <Button type="button" size="sm" variant="outline" className="h-7 w-full text-xs md:w-auto" disabled={haReplicaReadonly} onClick={() => openBulkAction('renew_cert')}>
                       Продлить сертификат
                     </Button>
                     {ownerCandidates.length > 0 && (
@@ -651,14 +651,14 @@ export default function ConfigCardsSection({
                         type="button"
                         size="sm"
                         variant="outline"
-                        className="h-7 text-xs"
+                        className="h-7 w-full text-xs md:w-auto"
                         disabled={haReplicaReadonly}
                         onClick={() => openBulkAction('change_owner')}
                       >
                         Сменить владельца
                       </Button>
                     )}
-                    <Button type="button" size="sm" variant="destructive" className="h-7 text-xs" disabled={haReplicaReadonly} onClick={() => openBulkAction('delete')}>
+                    <Button type="button" size="sm" variant="destructive" className="col-span-2 h-7 w-full text-xs md:col-span-1 md:w-auto" disabled={haReplicaReadonly} onClick={() => openBulkAction('delete')}>
                       Удалить
                     </Button>
                   </div>

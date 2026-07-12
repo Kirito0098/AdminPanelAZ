@@ -8,6 +8,7 @@ import {
   NodeScopeBadge,
 } from '@/components/monitoring/ConnectionAddress'
 import EmptyState from '@/components/ui/EmptyState'
+import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -180,7 +181,7 @@ function ConnectionCard({ row, showNodeColumn }: { row: MonitoringConnectionRow;
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
           <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Адрес</p>
           <AddressBlock address={row.address} geoLabel={row.geoLabel} />
@@ -288,7 +289,7 @@ export default function MonitoringConnectionsList({ rows, showNodeColumn }: Moni
 
   return (
     <>
-      <div className="mb-3 flex items-center justify-between gap-2 text-xs text-muted-foreground xl:hidden">
+      <div className="mb-3 flex items-center justify-between gap-2 text-xs text-muted-foreground lg:hidden">
         <span>
           Показано {visibleRows.length} из {sortedRows.length}
         </span>
@@ -311,99 +312,100 @@ export default function MonitoringConnectionsList({ rows, showNodeColumn }: Moni
         </div>
       </div>
 
-      <div className="space-y-3 xl:hidden">
-        {visibleRows.map((row) => (
+      <ResponsiveDataView
+        mobile={visibleRows.map((row) => (
           <ConnectionCard key={row.key} row={row} showNodeColumn={showNodeColumn} />
         ))}
-      </div>
-
-      <div className="hidden overflow-x-auto rounded-xl border xl:block">
-        <Table className="min-w-[1080px]">
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="w-[120px] text-xs uppercase tracking-wide">Протокол</TableHead>
-              {showNodeColumn && <TableHead className="min-w-[120px]">Узел</TableHead>}
-              <TableHead className="min-w-[160px]">
-                <SortHeader label="Клиент" sortKey="client" active={sortKey === 'client'} dir={sortDir} onSort={handleSort} />
-              </TableHead>
-              <TableHead className="min-w-[240px]">Адрес / локация</TableHead>
-              <TableHead className="min-w-[140px]">{COL_VPN_IP}</TableHead>
-              <TableHead className="min-w-[110px] text-right">
-                <SortHeader label="RX" sortKey="traffic" active={sortKey === 'traffic'} dir={sortDir} onSort={handleSort} className="justify-end" />
-              </TableHead>
-              <TableHead className="min-w-[110px] text-right">TX</TableHead>
-              <TableHead className="min-w-[180px]">
-                <SortHeader label="Активность" sortKey="time" active={sortKey === 'time'} dir={sortDir} onSort={handleSort} />
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {visibleRows.map((row) => (
-              <TableRow
-                key={row.key}
-                className={cn('align-top', row.online && row.protocol === 'wireguard' && 'bg-emerald-500/5')}
-              >
-                <TableCell>
-                  <div className="flex flex-col gap-1.5">
-                    <Badge variant={row.protocol === 'openvpn' ? 'default' : 'secondary'} className="w-fit text-xs">
-                      {row.protocol === 'openvpn' ? 'OpenVPN' : 'WireGuard'}
-                    </Badge>
-                    <Badge variant={row.online ? 'success' : 'secondary'} className="w-fit text-xs">
-                      {row.online ? 'Онлайн' : 'Офлайн'}
-                    </Badge>
-                  </div>
-                </TableCell>
-                {showNodeColumn && (
-                  <TableCell className="text-sm">
-                    {row.ha ? (
-                      <Badge variant="outline" className="gap-1 text-xs" title={haBadgeTitle(row.ha)}>
-                        {formatHaBadgeLabel(row.ha)}
-                      </Badge>
-                    ) : (
-                      row.nodeName || '—'
-                    )}
-                  </TableCell>
-                )}
-                <TableCell>
-                  <div className="space-y-1">
-                    <Link
-                      to={`/traffic?client=${encodeURIComponent(row.clientName)}`}
-                      className="text-sm font-semibold text-primary hover:underline"
-                    >
-                      {row.clientName}
-                    </Link>
-                    {row.interfaceName && (
-                      <p className="font-mono text-xs text-muted-foreground">{row.interfaceName}</p>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <AddressBlock address={row.address} geoLabel={row.geoLabel} />
-                </TableCell>
-                <TableCell className="font-mono text-sm">{row.vpnIp}</TableCell>
-                <TableCell className="text-right font-mono text-sm tabular-nums">
-                  <span className="inline-flex items-center justify-end gap-1">
-                    <ArrowDownToLine size={13} className="text-primary" />
-                    {formatBytes(row.rx)}
-                  </span>
-                </TableCell>
-                <TableCell className="text-right font-mono text-sm tabular-nums">
-                  <span className="inline-flex items-center justify-end gap-1">
-                    <ArrowUpFromLine size={13} className="text-amber-500" />
-                    {formatBytes(row.tx)}
-                  </span>
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  <span className="inline-flex items-start gap-1.5">
-                    <Clock size={14} className="mt-0.5 shrink-0" />
-                    <span className="leading-snug">{row.timeLabel}</span>
-                  </span>
-                </TableCell>
+        desktop={
+          <Table className="min-w-[1080px]">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-[120px] text-xs uppercase tracking-wide">Протокол</TableHead>
+                {showNodeColumn && <TableHead className="min-w-[120px]">Узел</TableHead>}
+                <TableHead className="min-w-[160px]">
+                  <SortHeader label="Клиент" sortKey="client" active={sortKey === 'client'} dir={sortDir} onSort={handleSort} />
+                </TableHead>
+                <TableHead className="min-w-[240px]">Адрес / локация</TableHead>
+                <TableHead className="min-w-[140px]">{COL_VPN_IP}</TableHead>
+                <TableHead className="min-w-[110px] text-right">
+                  <SortHeader label="RX" sortKey="traffic" active={sortKey === 'traffic'} dir={sortDir} onSort={handleSort} className="justify-end" />
+                </TableHead>
+                <TableHead className="min-w-[110px] text-right">TX</TableHead>
+                <TableHead className="min-w-[180px]">
+                  <SortHeader label="Активность" sortKey="time" active={sortKey === 'time'} dir={sortDir} onSort={handleSort} />
+                </TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {visibleRows.map((row) => (
+                <TableRow
+                  key={row.key}
+                  className={cn('align-top', row.online && row.protocol === 'wireguard' && 'bg-emerald-500/5')}
+                >
+                  <TableCell>
+                    <div className="flex flex-col gap-1.5">
+                      <Badge variant={row.protocol === 'openvpn' ? 'default' : 'secondary'} className="w-fit text-xs">
+                        {row.protocol === 'openvpn' ? 'OpenVPN' : 'WireGuard'}
+                      </Badge>
+                      <Badge variant={row.online ? 'success' : 'secondary'} className="w-fit text-xs">
+                        {row.online ? 'Онлайн' : 'Офлайн'}
+                      </Badge>
+                    </div>
+                  </TableCell>
+                  {showNodeColumn && (
+                    <TableCell className="text-sm">
+                      {row.ha ? (
+                        <Badge variant="outline" className="gap-1 text-xs" title={haBadgeTitle(row.ha)}>
+                          {formatHaBadgeLabel(row.ha)}
+                        </Badge>
+                      ) : (
+                        row.nodeName || '—'
+                      )}
+                    </TableCell>
+                  )}
+                  <TableCell>
+                    <div className="space-y-1">
+                      <Link
+                        to={`/traffic?client=${encodeURIComponent(row.clientName)}`}
+                        className="text-sm font-semibold text-primary hover:underline"
+                      >
+                        {row.clientName}
+                      </Link>
+                      {row.interfaceName && (
+                        <p className="font-mono text-xs text-muted-foreground">{row.interfaceName}</p>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <AddressBlock address={row.address} geoLabel={row.geoLabel} />
+                  </TableCell>
+                  <TableCell className="font-mono text-sm">{row.vpnIp}</TableCell>
+                  <TableCell className="text-right font-mono text-sm tabular-nums">
+                    <span className="inline-flex items-center justify-end gap-1">
+                      <ArrowDownToLine size={13} className="text-primary" />
+                      {formatBytes(row.rx)}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm tabular-nums">
+                    <span className="inline-flex items-center justify-end gap-1">
+                      <ArrowUpFromLine size={13} className="text-amber-500" />
+                      {formatBytes(row.tx)}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    <span className="inline-flex items-start gap-1.5">
+                      <Clock size={14} className="mt-0.5 shrink-0" />
+                      <span className="leading-snug">{row.timeLabel}</span>
+                    </span>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        }
+        mobileClassName="space-y-3"
+        desktopClassName="overflow-x-auto rounded-xl border"
+      />
 
       {hasMore && (
         <div className="mt-4 flex items-center justify-center gap-3">

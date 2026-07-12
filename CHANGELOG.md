@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.15.0](#2150---2026-07-12) — 2026-07-12
 - [2.14.0](#2140---2026-07-11) — 2026-07-11
 - [2.13.0](#2130---2026-07-11) — 2026-07-11
 - [2.12.0](#2120---2026-07-10) — 2026-07-10
@@ -38,6 +39,76 @@
 ---
 
 ## [Unreleased]
+
+---
+
+## [2.15.0] - 2026-07-12
+
+> **Кратко:** адаптивная вёрстка панели для телефонов и планшетов — safe area и `100dvh`, карточные списки вместо широких таблиц, компактный header и toolbar; общие компоненты `ResponsiveDataView`, `PageSectionHeader`, `ToolbarButton`; мобильные **Настройки** с inline-accordion и выпадающим переключателем разделов; улучшения HA-селектора узлов и бейджей группы; Telegram Mini App — синхронизация темы WebApp; dev-proxy Vite для `ENFORCE_HTTPS`; исправления OpenVPN restart после HA sync, сломанных `/traffic` и `/edit-files`, flyout настроек за пределами экрана.
+
+### ✨ Added
+
+#### Адаптивный UI
+
+- **`ResponsiveDataView`** — единый переключатель card/list ↔ table по Tailwind-breakpoint без runtime `matchMedia` (`ResponsiveDataView.tsx`).
+- **`PageSectionHeader`** — стандартный hero страницы: иконка, заголовок, описание и flex-wrap toolbar; колонка на mobile, строка с `sm` (`PageSectionHeader.tsx`).
+- **`ToolbarButton`** — кнопки панели инструментов с icon-only на узких экранах (`aria-label`), короткими подписями на `sm` и `touch-manipulation` (`ToolbarButton.tsx`).
+- **`MobileSettingsSectionPicker`** — выпадающий выбор раздела настроек на экранах `< lg`, с той же видимостью пунктов, что и в боковой навигации (`MobileSettingsSectionPicker.tsx`, `SettingsPage.tsx`).
+- **`NodeSummaryCard`** — карточный список узлов на **Monitoring** вместо широкой таблицы сводки (`NodeSummaryCard.tsx`, `MonitoringPage.tsx`).
+- **Карточные layout'ы на mobile** — `ResponsiveDataView` на **Traffic** (клиенты, топ, детали), **Logs** (подключения, QR-аудит, сокеты OpenVPN, журнал действий), **Monitoring** (подключения, сводка узлов), **Узлы** (таблица узлов и HA-группы), **Настройки → Пользователи**, **Routing → Анализ DPI**, **Dashboard → сравнение узлов**, **Node Sync** (группы HA, политики узлов).
+- **Safe area и динамическая высота viewport** — CSS-переменные `--safe-*`, утилиты `pt-safe` / `pb-safe` / `px-safe`, `viewport-fit=cover` в `index.html`, Tailwind `min-h-dscreen` / `h-dscreen` / `max-h-90dscreen` (`index.css`, `tailwind.config.js`).
+- **Компактный режим в landscape** — классы `orientation-compact-*` для header, вкладок и страницы настроек на низких экранах в альбомной ориентации (`index.css`, `Layout.tsx`).
+- **Компактный `NodeSelector` в mobile-header** — выбор узла/HA-группы в шапке на экранах `< sm`, без переполнения toolbar (`Layout.tsx`, `NodeSelector.tsx`).
+
+#### Node Sync / HA
+
+- **`HaScopeEnforcer`** — при входе на HA-scope страницы с активной replica автоматически переключает контекст на primary (`HaScopeEnforcer.tsx`, `Layout.tsx`).
+- **Хелперы `haNodeScope` / `haBadgeLabel`** — единая логика scope страниц (shared vs diagnostic), подписи HA-группы в селекторе и tooltip бейджа `· N узла` (`haNodeScope.ts`, `haBadgeLabel.ts`).
+
+#### Telegram Mini App
+
+- **`initTelegramWebApp`** — `ready()`, `expand()`, синхронизация `--tg-theme-*` и высоты MainButton при `themeChanged` / `viewportChanged` (`telegramWebAppInit.ts`, `tg-mini/main.tsx`).
+- **Safe area в Mini App** — отступы с учётом `env(safe-area-inset-*)` в `tg-mini.css`.
+
+#### Разработка
+
+- **Dev-proxy Vite с `X-Forwarded-Proto: https`** — локальный `npm run dev` работает с backend при `ENFORCE_HTTPS=true` без правки `.env` (`vite.config.ts`, `devApiProxy()`).
+- **esbuild target `es2022`** — для dev-сборки и `optimizeDeps` (`vite.config.ts`).
+
+### 🔄 Changed
+
+#### Адаптивный UI
+
+- **Оболочка панели** — `min-h-screen` → `min-h-dscreen`, sidebar/sheet/nav на полную высоту `dscreen`, `pb-safe` у footer sidebar, subtitle NOC и часы скрываются в landscape-compact (`Layout.tsx`).
+- **Настройки на mobile** — flyout подменю заменён на **inline accordion** с chevron и подсветкой активного раздела; на `< lg` навигация по разделам через `MobileSettingsSectionPicker` (`SettingsSidebarSection.tsx`, `SettingsPage.tsx`).
+- **Dashboard** — toolbar синхронизации на `ToolbarButton` с короткими подписями; карточки конфигов — горизонтальный scroll вкладок протоколов и сетка bulk-действий на mobile (`DashboardPage.tsx`, `ConfigCardsSection.tsx`).
+- **Edit Files** — двухколоночный layout с `Select` файлов на mobile, адаптивные кнопки diff/копирования, уменьшаемая высота редактора (`EditFilesPage.tsx`).
+- **Login** — `min-h-dscreen`, блок 2FA/passkey в bordered-секции, без горизонтального overflow (`LoginPage.tsx`).
+- **Telegram (настройки)** — формы бота/OIDC/mini app в колонку на mobile, полная ширина полей и кнопок (`TelegramSettingsPanel.tsx`, `TelegramRecipientsPanel.tsx`).
+- **HA-группы и диалоги** — карточки групп на mobile, `max-h-[min(90dvh,…)]` для модалок Push/verify (`NodeSyncGroupSection.tsx`, `HaSyncResultDialog.tsx`, `HaVerifyResultDialog.tsx`).
+- **Узлы, Server Monitor, Warper** — карточный список узлов и адаптивные grid карточек метрик; bulk-toolbar с full-width кнопками на mobile (`NodesPage.tsx`, `ServerMonitorPage.tsx`, `WarperPage.tsx`, `OverviewCards.tsx`).
+- **Sheet навигации** — `SheetDescription` для доступности mobile menu (`sheet.tsx`).
+
+#### Node Sync / HA
+
+- **Селектор узлов на HA-scope страницах** — на Dashboard, Traffic, Routing, Edit Files, Settings и AntiZapret в шапке показывается название HA-группы (а не отдельные primary/replica); replica скрыта из списка. На диагностических страницах (Логи, Мониторинг сервера, Warper, Monitoring, Узлы) список узлов без изменений (`NodeSelector.tsx`, `NodeContext.tsx`).
+- **Бейдж HA на карточках и в таблицах** — вместо непонятного `(2)` показывается `· 2 узла`; при наведении — подсказка, что клиент доступен на всех узлах группы (`ConfigCard.tsx`, `TrafficClientDetails.tsx`, `MonitoringConnectionsList.tsx`).
+
+### 🐛 Fixed
+
+#### Адаптивный UI
+
+- **Flyout «Настройки» за пределами экрана на mobile** — подменю открывалось off-screen на узких viewport; заменено inline-accordion с видимой обратной связью (`SettingsSidebarSection.tsx`).
+- **Сломанные `/traffic` и `/edit-files`** — отсутствующие импорты `formatBytes` и `useConfirmDialog` после рефакторинга HA-scope (`TrafficPage.tsx`, `EditFilesPage.tsx`).
+
+#### Node Sync / HA
+
+- **OpenVPN restart после HA sync** — `systemctl restart openvpn-server@*` больше не поднимает службы, остановленные вручную; перезапускаются только unit'ы в состоянии `active` (`openvpn_restart.py`).
+
+### 🧪 Tests
+
+- **`haNodeScope` / `haBadgeLabel`** — unit-тесты scope страниц, подписей группы и tooltip (`haNodeScope.test.ts`, `haBadgeLabel.test.ts`).
+- **OpenVPN restart только active** — `test_node_sync_openvpn_restart.py`: пропуск stopped unit'ов, fallback при недоступном monitoring.
 
 ---
 
@@ -63,8 +134,6 @@
 
 #### Node Sync / HA
 
-- **Селектор узлов на HA-scope страницах** — на Dashboard, Traffic, Routing, Edit Files, Settings и AntiZapret в шапке показывается название HA-группы (а не отдельные primary/replica); replica скрыта из списка. При переходе на эти страницы с активной replica автоматически переключается primary. На диагностических страницах (Логи, Мониторинг сервера, Warper, Monitoring, Узлы) список узлов без изменений.
-- **Бейдж HA на карточках и в таблицах** — вместо непонятного `(2)` показывается `· 2 узла`; при наведении — подсказка, что клиент доступен на всех узлах группы.
 - **Reconcile пропускает `pending`** — фоновый worker не выставляет `failed` и не запускает auto-heal во время Push full / Setup (`reconcile_worker.py`).
 - **Push full continue-on-error** — ошибка restore на одной реплике не прерывает цикл; shadow link только если все restore OK; итог `sync_status=failed` при partial failure (`push_full.py`).
 - **Verify не затирает `sync_status`** — обновляет только `last_verify_at` / `last_verify_result`; счётчик `auto_heal_failures` сохраняется между verify (`verify.py`, `reconcile_worker.py`).
@@ -92,14 +161,12 @@
 - **Запись на replica без ограничений** — edit-files, routing и settings принимали изменения с replica-узла, риск split-brain (`edit_files.py`, `routing.py`, `settings.py`).
 - **`synced` при ненулевом `last_sync_error`** — Push full мог оставить успешный статус при проблемах shadow link или verify (`push_full.py`).
 - **Verify маскировал failed репликацию** — один badge «готово» при `sync_status=failed` и успешном паритете; исправлено разделением badge и `warnings`.
-- **OpenVPN restart после HA sync** — `systemctl restart openvpn-server@*` больше не поднимает службы, остановленные вручную; перезапускаются только unit'ы в состоянии `active` (`openvpn_restart.py`).
 
 ### 🧪 Tests
 
 - **Auto-heal counter и pending skip** — `test_node_sync_reconcile_worker.py`: накопление `auto_heal_failures`, notify после исчерпания лимита, reconcile пропускает `pending`.
 - **Push full continue-on-error** — `test_node_sync_push_full.py`: partial failure на одной из трёх реплик, обработка всех узлов, shadow link только при полном restore.
 - **Edit-files 403 на replica** — `test_edit_files_ha_replica.py`: сохранение файла с replica-узла возвращает 403.
-- **OpenVPN restart только active** — `test_node_sync_openvpn_restart.py`: пропуск stopped unit'ов, fallback при недоступном monitoring.
 
 ---
 
@@ -1723,7 +1790,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.14.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.15.0...HEAD
+[2.15.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.12.0...v2.13.0
 [2.12.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.11.0...v2.12.0

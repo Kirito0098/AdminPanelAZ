@@ -402,7 +402,7 @@ export default function ServerMonitorPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <Cpu size={22} />
@@ -429,7 +429,7 @@ export default function ServerMonitorPage() {
             </p>
           </div>
         </div>
-        <Button variant="outline" onClick={handleRefresh} disabled={refreshing}>
+        <Button variant="outline" className="w-full sm:w-auto" onClick={handleRefresh} disabled={refreshing}>
           <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
           Обновить
         </Button>
@@ -489,7 +489,7 @@ export default function ServerMonitorPage() {
         </Card>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <ResourceGauge label="CPU" value={cpu} icon={Cpu} sub="Загрузка процессора" />
             <ResourceGauge label="RAM" value={ram} icon={MemoryStick} sub={ramSub} />
             <ResourceGauge label="Диск" value={disk} icon={HardDrive} sub="Использование корневого раздела" />
@@ -509,7 +509,7 @@ export default function ServerMonitorPage() {
             }`}
           />
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <LiveMetricCard
               label="RX (live)"
               value={liveBw ? `${liveBw.rx} Mbps` : '—'}
@@ -541,7 +541,7 @@ export default function ServerMonitorPage() {
           </div>
 
           <Card>
-            <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Activity size={18} />
@@ -552,9 +552,9 @@ export default function ServerMonitorPage() {
                   {selectedGroups.length > 0 && ` · ${selectedGroups.join(', ')}`}
                 </CardDescription>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
                 <Select value={iface} onValueChange={setIface}>
-                  <SelectTrigger className="h-9 w-full min-w-[220px] max-w-[320px] text-xs sm:w-[280px]">
+                  <SelectTrigger className="h-9 w-full text-xs sm:min-w-[220px] sm:max-w-[320px]">
                     <SelectValue placeholder="Интерфейс" />
                   </SelectTrigger>
                   <SelectContent>
@@ -565,11 +565,13 @@ export default function ServerMonitorPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                {(['1d', '7d', '30d'] as const).map((r) => (
-                  <Button key={r} size="sm" variant={range === r ? 'default' : 'outline'} onClick={() => setRange(r)}>
-                    {RANGE_LABELS[r]}
-                  </Button>
-                ))}
+                <div className="grid grid-cols-3 gap-1 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
+                  {(['1d', '7d', '30d'] as const).map((r) => (
+                    <Button key={r} size="sm" variant={range === r ? 'default' : 'outline'} onClick={() => setRange(r)}>
+                      {RANGE_LABELS[r]}
+                    </Button>
+                  ))}
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -665,7 +667,7 @@ export default function ServerMonitorPage() {
               <CardDescription>Средняя загрузка системы за 1, 5 и 15 минут</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {[
                   { key: 'load_1m', label: '1 мин' },
                   { key: 'load_5m', label: '5 мин' },

@@ -65,7 +65,7 @@ function CidrCountsGrid({
   ]
 
   return (
-    <div className="grid grid-cols-3 divide-x divide-border rounded-md border bg-muted/20">
+    <div className="grid grid-cols-1 divide-y divide-border rounded-md border bg-muted/20 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
       {items.map(({ label, value }) => (
         <div key={label} className="px-2 py-1.5 text-center">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
@@ -139,7 +139,7 @@ function ProviderListItem({
         </div>
 
         {isAdmin && (
-          <div className="flex shrink-0 gap-1.5">
+          <div className="flex flex-wrap shrink-0 gap-1.5">
             <Button
               size="sm"
               variant="outline"
@@ -420,17 +420,17 @@ export default function ProvidersTab({
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
+            <div className="relative w-full min-w-0 sm:max-w-sm sm:flex-1">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder="Поиск по имени или категории…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
+                className="w-full pl-9"
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[160px]">
+              <SelectTrigger className="w-full sm:w-[160px]">
                 <SelectValue placeholder="Статус БД" />
               </SelectTrigger>
               <SelectContent>
@@ -442,7 +442,7 @@ export default function ProvidersTab({
               </SelectContent>
             </Select>
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-[160px]">
+              <SelectTrigger className="w-full sm:w-[160px]">
                 <SelectValue placeholder="Категория" />
               </SelectTrigger>
               <SelectContent>

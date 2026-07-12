@@ -171,7 +171,7 @@ export default function LoginPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="flex min-h-dscreen items-center justify-center bg-background">
         <Spinner label="Загрузка..." />
       </div>
     )
@@ -240,8 +240,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-4">
-      <Card className="w-full max-w-md shadow-lg">
+    <div className="flex min-h-dscreen min-w-0 items-center justify-center overflow-x-hidden bg-gradient-to-br from-background via-background to-primary/5 p-4">
+      <Card className="w-full min-w-0 max-w-md shadow-lg">
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Shield size={28} />
@@ -249,7 +249,7 @@ export default function LoginPage() {
           <CardTitle className="text-2xl">AntiZapret VPN</CardTitle>
           <CardDescription>Панель администрирования</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="min-w-0">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="username">Логин</Label>
@@ -275,38 +275,51 @@ export default function LoginPage() {
               />
             </div>
             {needs2FA && (
-              <div className="space-y-2">
-                <Label htmlFor="totp">Код 2FA</Label>
-                <Input
-                  id="totp"
-                  value={totpCode}
-                  onChange={(e) => setTotpCode(e.target.value.replace(/\s/g, ''))}
-                  placeholder="123456"
-                  autoComplete="one-time-code"
-                />
+              <div className="space-y-3 rounded-lg border bg-muted/30 p-3 sm:p-4">
+                <div className="space-y-2">
+                  <Label htmlFor="totp" className="text-sm">
+                    Код 2FA
+                  </Label>
+                  <Input
+                    id="totp"
+                    value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value.replace(/\s/g, ''))}
+                    placeholder="123456"
+                    autoComplete="one-time-code"
+                  />
+                </div>
                 {passkeyAvailable && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full"
-                    disabled={submitting}
-                    onClick={() => void handlePasskeyLogin()}
-                  >
-                    Войти с passkey
-                  </Button>
+                  <div className="space-y-2 border-t pt-3">
+                    <p className="text-sm text-muted-foreground">Или войдите с passkey на этом устройстве</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      disabled={submitting}
+                      onClick={() => void handlePasskeyLogin()}
+                    >
+                      Войти с passkey
+                    </Button>
+                  </div>
                 )}
               </div>
             )}
             {captchaRequired && !needs2FA && (
               <div className="space-y-2">
-                <Label>Капча</Label>
-                <div className="flex items-center gap-2">
+                <Label className="text-sm">Капча</Label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <img
                     src={captchaImageUrl || undefined}
                     alt="captcha"
-                    className="h-12 rounded border"
+                    className="h-12 max-w-full rounded border object-contain"
                   />
-                  <Button type="button" variant="outline" size="sm" onClick={refreshCaptcha}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full shrink-0 sm:w-auto"
+                    onClick={refreshCaptcha}
+                  >
                     ↻
                   </Button>
                 </div>
@@ -345,7 +358,9 @@ export default function LoginPage() {
                 </Button>
               )}
               {tgLegacyEnabled && (
-                <div ref={telegramLoginRef} className="flex min-h-[44px] justify-center" />
+                <div className="max-w-full overflow-hidden">
+                  <div ref={telegramLoginRef} className="flex min-h-[44px] max-w-full justify-center overflow-hidden" />
+                </div>
               )}
               {telegramModuleEnabled && tgLoginReason && (tgOidcStartUrl || tgBot) && (
                 <p className="text-center text-xs text-muted-foreground">{tgLoginReason}</p>

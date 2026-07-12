@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   Eye,
+  MoreHorizontal,
   Pencil,
   Save,
   Search,
@@ -13,13 +14,28 @@ import {
 } from 'lucide-react'
 import { ApiError, getConfigs, getViewerAccess, setViewerAccess, updateUser } from '@/api/client'
 import AppDialog from '@/components/shared/AppDialog'
+import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { useNotifications } from '@/context/NotificationContext'
 import { ROLE_HINTS, ROLE_LABELS } from '@/components/settings/settingsLabels'
 import { cn } from '@/lib/utils'
@@ -104,12 +120,85 @@ function UserAvatar({ username }: { username: string }) {
   )
 }
 
-function ListRow({ children, action }: { children: ReactNode; action?: ReactNode }) {
+function UserMetaLine({ user }: { user: PanelUser }) {
   return (
-    <li className="flex items-center justify-between gap-3 rounded-xl border bg-card/50 px-3 py-3 transition-colors hover:bg-muted/30">
-      <div className="flex min-w-0 flex-1 items-center gap-3">{children}</div>
-      {action ? <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">{action}</div> : null}
-    </li>
+    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+      <span>ID {user.id}</span>
+      {user.telegram_id ? (
+        <span className="font-mono">TG {user.telegram_id}</span>
+      ) : (
+        <span>Telegram не привязан</span>
+      )}
+      {user.role === 'user' && user.config_quota != null && user.config_quota > 0 && (
+        <span>Квота: {user.config_quota}</span>
+      )}
+    </div>
+  )
+}
+
+function UserNameLine({ user, currentUserId }: { user: PanelUser; currentUserId?: number }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="font-medium">{user.username}</span>
+      {user.id === currentUserId && (
+        <Badge variant="default" className="text-[10px]">
+          вы
+        </Badge>
+      )}
+      <RoleBadge role={user.role} />
+      <Badge variant={user.is_active ? 'success' : 'destructive'} className="text-[10px]">
+        {user.is_active ? 'Активен' : 'Отключён'}
+      </Badge>
+    </div>
+  )
+}
+
+function UserCard({
+  user,
+  currentUserId,
+  onEdit,
+  onDelete,
+}: {
+  user: PanelUser
+  currentUserId?: number
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  return (
+    <Card className="p-4">
+      <div className="flex items-start gap-3">
+        <UserAvatar username={user.username} />
+        <div className="min-w-0 flex-1">
+          <UserNameLine user={user} currentUserId={currentUserId} />
+          <UserMetaLine user={user} />
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={onEdit}>
+          <Pencil size={14} />
+          Изменить
+        </Button>
+        {user.id !== currentUserId ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <MoreHorizontal size={14} />
+                Ещё
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={onDelete}
+              >
+                <Trash2 size={14} />
+                Удалить
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+      </div>
+    </Card>
   )
 }
 
@@ -335,7 +424,7 @@ export default function UsersTab({
           </CardHeader>
           <CardContent>
             <form noValidate onSubmit={onCreateUser} className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="newUsername">Логин</Label>
                   <Input
@@ -424,59 +513,76 @@ export default function UsersTab({
                 className="py-8"
               />
             ) : (
-              <ul className="space-y-2">
-                {usersList.map((u) => (
-                  <ListRow
+              <ResponsiveDataView
+                mobile={usersList.map((u) => (
+                  <UserCard
                     key={u.id}
-                    action={
-                      <>
-                        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => openUserEditor(u)}>
-                          <Pencil size={14} />
-                          <span className="hidden sm:inline">Изменить</span>
-                        </Button>
-                        {u.id !== currentUserId && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
-                            onClick={() => onDeleteUser(u.id, u.username)}
-                          >
-                            <Trash2 size={14} />
-                            <span className="hidden sm:inline">Удалить</span>
-                          </Button>
-                        )}
-                      </>
-                    }
-                  >
-                    <UserAvatar username={u.username} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium">{u.username}</span>
-                        {u.id === currentUserId && (
-                          <Badge variant="default" className="text-[10px]">
-                            вы
-                          </Badge>
-                        )}
-                        <RoleBadge role={u.role} />
-                        <Badge variant={u.is_active ? 'success' : 'destructive'} className="text-[10px]">
-                          {u.is_active ? 'Активен' : 'Отключён'}
-                        </Badge>
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                        <span>ID {u.id}</span>
-                        {u.telegram_id ? (
-                          <span className="font-mono">TG {u.telegram_id}</span>
-                        ) : (
-                          <span>Telegram не привязан</span>
-                        )}
-                        {u.role === 'user' && u.config_quota != null && u.config_quota > 0 && (
-                          <span>Квота: {u.config_quota}</span>
-                        )}
-                      </div>
-                    </div>
-                  </ListRow>
+                    user={u}
+                    currentUserId={currentUserId}
+                    onEdit={() => openUserEditor(u)}
+                    onDelete={() => onDeleteUser(u.id, u.username)}
+                  />
                 ))}
-              </ul>
+                desktop={
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Пользователь</TableHead>
+                        <TableHead>Роль</TableHead>
+                        <TableHead>Telegram</TableHead>
+                        <TableHead className="text-right">Действия</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {usersList.map((u) => (
+                        <TableRow key={u.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <UserAvatar username={u.username} />
+                              <div className="min-w-0">
+                                <UserNameLine user={u} currentUserId={currentUserId} />
+                                <UserMetaLine user={u} />
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <RoleBadge role={u.role} />
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {u.telegram_id || '—'}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex flex-wrap justify-end gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5"
+                                onClick={() => openUserEditor(u)}
+                              >
+                                <Pencil size={14} />
+                                Изменить
+                              </Button>
+                              {u.id !== currentUserId && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
+                                  onClick={() => onDeleteUser(u.id, u.username)}
+                                >
+                                  <Trash2 size={14} />
+                                  Удалить
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                }
+                mobileClassName="space-y-3"
+                desktopClassName="overflow-x-auto rounded-md border"
+              />
             )}
           </CardContent>
         </Card>
@@ -510,7 +616,7 @@ export default function UsersTab({
                 className="py-8"
               />
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {viewerUsers.map((vu) => {
                   const granted = countGranted(vu.id)
                   const total = clientGroups.length

@@ -31,6 +31,8 @@ import { NodeBadge } from '@/components/NodeSelector'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
+import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
@@ -191,13 +193,13 @@ function LogViewer({ lines, emptyTitle, emptyDescription, profileName }: LogView
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center">
-        <div className="relative min-w-[12rem] flex-1">
+        <div className="relative w-full flex-1 sm:min-w-[12rem]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Поиск по строкам..."
-            className="pl-9"
+            className="w-full pl-9"
           />
         </div>
         <Select value={levelFilter} onValueChange={(v) => setLevelFilter(v as LogLevel)}>
@@ -233,9 +235,16 @@ function LogViewer({ lines, emptyTitle, emptyDescription, profileName }: LogView
             <ArrowDownToLine size={14} />
             Хвост
           </Button>
-          <Button type="button" variant="outline" size="sm" onClick={handleCopy} disabled={filteredLines.length === 0}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleCopy}
+            disabled={filteredLines.length === 0}
+            aria-label="Копировать логи"
+          >
             <Copy size={14} />
-            Копировать
+            <span className="hidden sm:inline">Копировать</span>
           </Button>
           <Button
             type="button"
@@ -243,9 +252,10 @@ function LogViewer({ lines, emptyTitle, emptyDescription, profileName }: LogView
             size="sm"
             onClick={handleDownload}
             disabled={filteredLines.length === 0}
+            aria-label="Скачать логи"
           >
             <Download size={14} />
-            Скачать
+            <span className="hidden sm:inline">Скачать</span>
           </Button>
         </div>
       </div>
@@ -366,6 +376,52 @@ function WireGuardPeerCard({ name, handshake }: WireGuardPeerCardProps) {
   )
 }
 
+function QrDownloadCard({ entry }: { entry: QrDownloadAuditEntry }) {
+  return (
+    <div className="rounded-lg border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Badge variant="secondary">{entry.event_type}</Badge>
+        <span className="text-xs text-muted-foreground">{formatDateTime(entry.created_at)}</span>
+      </div>
+      <p className="mt-2 text-sm font-medium">{entry.actor_username || '—'}</p>
+      <div className="mt-2 space-y-2 text-xs">
+        <div>
+          <p className="text-muted-foreground">IP</p>
+          <p className="font-mono break-all">{entry.remote_addr || '—'}</p>
+        </div>
+        {entry.details && (
+          <div>
+            <p className="text-muted-foreground">Детали</p>
+            <p className="break-words text-muted-foreground">{entry.details}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SocketCard({ socket }: { socket: OpenVpnSocketStatus }) {
+  return (
+    <div className="rounded-lg border p-3">
+      <p className="font-medium">{socket.profile}</p>
+      <div className="mt-2 space-y-2 text-xs">
+        <div>
+          <p className="text-muted-foreground">Путь сокета</p>
+          <p className="font-mono break-all">{socket.socket_path}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={socket.socket_exists ? 'default' : 'destructive'}>
+            {socket.socket_exists ? 'Файл есть' : 'Файла нет'}
+          </Badge>
+          <Badge variant={socket.responsive ? 'default' : 'secondary'}>
+            {socket.responsive ? 'Отвечает' : 'Нет ответа'}
+          </Badge>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 type ActionLogCardProps = {
   entry: ActionLogEntry
   nested?: boolean
@@ -452,7 +508,7 @@ function ActionLogTableRow({ entry, nested = false }: ActionLogTableRowProps) {
   const detailsText = formatActionDetails(entry)
   return (
     <TableRow className={nested ? 'bg-muted/20' : undefined}>
-      <TableCell className={cn('text-xs whitespace-nowrap', nested && 'pl-8')}>
+      <TableCell className={cn('text-xs', nested && 'pl-8')}>
         {formatDateTime(entry.created_at)}
       </TableCell>
       <TableCell>{entry.username || '—'}</TableCell>
@@ -489,7 +545,7 @@ function ActionLogGroupTableRows({ group, expanded, onToggle }: ActionLogGroupTa
         onClick={onToggle}
         aria-expanded={expanded}
       >
-        <TableCell className="text-xs whitespace-nowrap">
+        <TableCell className="text-xs">
           <div className="flex items-center gap-2">
             {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             <div>
@@ -733,33 +789,27 @@ export default function LogsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <ScrollText size={22} />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-2xl font-bold tracking-tight">Журналы</h2>
-              <NodeBadge name={activeNode?.name} status={activeNode?.status} />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Подключения, события OpenVPN, аудит QR и действия администраторов
-              {connections?.timestamp && (
-                <> · обновлено {formatDateTime(connections.timestamp)}</>
-              )}
-            </p>
-          </div>
-        </div>
-        <AutoRefreshControl
-          enabled={autoRefresh}
-          onToggle={() => setAutoRefresh((v) => !v)}
-          countdown={countdown}
-          intervalSec={REFRESH_INTERVAL}
-          refreshing={refreshing}
-          onManualRefresh={handleRefresh}
-        />
-      </div>
+      <PageSectionHeader
+        icon={ScrollText}
+        title="Журналы"
+        titleAddon={<NodeBadge name={activeNode?.name} status={activeNode?.status} />}
+        description={
+          <>
+            Подключения, события OpenVPN, аудит QR и действия администраторов
+            {connections?.timestamp && <> · обновлено {formatDateTime(connections.timestamp)}</>}
+          </>
+        }
+        actions={
+          <AutoRefreshControl
+            enabled={autoRefresh}
+            onToggle={() => setAutoRefresh((v) => !v)}
+            countdown={countdown}
+            intervalSec={REFRESH_INTERVAL}
+            refreshing={refreshing}
+            onManualRefresh={handleRefresh}
+          />
+        }
+      />
 
       <SettingsAlert variant="info" title="Данные активного узла">
         Логи собираются с <strong>{activeNode?.name ?? 'активного узла'}</strong>
@@ -888,8 +938,16 @@ export default function LogsPage() {
                       className="py-8"
                     />
                   ) : (
-                    <>
-                      <div className="hidden overflow-x-auto md:block">
+                    <ResponsiveDataView
+                      mobile={openvpnClients.map((c) => (
+                        <ConnectionClientCard
+                          key={`${c.common_name}-${c.real_address}`}
+                          name={c.common_name}
+                          realIp={c.real_address}
+                          vpnIp={c.virtual_address}
+                        />
+                      ))}
+                      desktop={
                         <Table>
                           <TableHeader>
                             <TableRow>
@@ -908,18 +966,10 @@ export default function LogsPage() {
                             ))}
                           </TableBody>
                         </Table>
-                      </div>
-                      <div className="space-y-2 md:hidden">
-                        {openvpnClients.map((c) => (
-                          <ConnectionClientCard
-                            key={`${c.common_name}-${c.real_address}`}
-                            name={c.common_name}
-                            realIp={c.real_address}
-                            vpnIp={c.virtual_address}
-                          />
-                        ))}
-                      </div>
-                    </>
+                      }
+                      mobileClassName="space-y-2"
+                      desktopClassName="overflow-x-auto"
+                    />
                   )}
                 </CardContent>
               </Card>
@@ -945,8 +995,17 @@ export default function LogsPage() {
                       className="py-8"
                     />
                   ) : (
-                    <>
-                      <div className="hidden overflow-x-auto md:block">
+                    <ResponsiveDataView
+                      mobile={activeWireguardPeers.map((p) => (
+                        <WireGuardPeerCard
+                          key={p.public_key}
+                          name={String(p.client_name || '—')}
+                          handshake={
+                            p.latest_handshake ? formatDateTime(p.latest_handshake) : '—'
+                          }
+                        />
+                      ))}
+                      desktop={
                         <Table>
                           <TableHeader>
                             <TableRow>
@@ -959,29 +1018,16 @@ export default function LogsPage() {
                               <TableRow key={p.public_key}>
                                 <TableCell>{String(p.client_name || '—')}</TableCell>
                                 <TableCell className="text-xs">
-                                  {p.latest_handshake
-                                    ? formatDateTime(p.latest_handshake)
-                                    : '—'}
+                                  {p.latest_handshake ? formatDateTime(p.latest_handshake) : '—'}
                                 </TableCell>
                               </TableRow>
                             ))}
                           </TableBody>
                         </Table>
-                      </div>
-                      <div className="space-y-2 md:hidden">
-                        {activeWireguardPeers.map((p) => (
-                          <WireGuardPeerCard
-                            key={p.public_key}
-                            name={String(p.client_name || '—')}
-                            handshake={
-                              p.latest_handshake
-                                ? formatDateTime(p.latest_handshake)
-                                : '—'
-                            }
-                          />
-                        ))}
-                      </div>
-                    </>
+                      }
+                      mobileClassName="space-y-2"
+                      desktopClassName="overflow-x-auto"
+                    />
                   )}
                 </CardContent>
               </Card>
@@ -1121,8 +1167,16 @@ export default function LogsPage() {
                       className="py-8"
                     />
                   ) : (
-                    <>
-                      <div className="hidden overflow-x-auto md:block">
+                    <ResponsiveDataView
+                      mobile={groupedActions.map((group) => (
+                        <ActionLogGroupCard
+                          key={group.id}
+                          group={group}
+                          expanded={expandedActionGroups.has(group.id)}
+                          onToggle={() => toggleActionGroup(group.id)}
+                        />
+                      ))}
+                      desktop={
                         <Table>
                           <TableHeader>
                             <TableRow>
@@ -1143,18 +1197,10 @@ export default function LogsPage() {
                             ))}
                           </TableBody>
                         </Table>
-                      </div>
-                      <div className="space-y-2 md:hidden">
-                        {groupedActions.map((group) => (
-                          <ActionLogGroupCard
-                            key={group.id}
-                            group={group}
-                            expanded={expandedActionGroups.has(group.id)}
-                            onToggle={() => toggleActionGroup(group.id)}
-                          />
-                        ))}
-                      </div>
-                    </>
+                      }
+                      mobileClassName="space-y-2"
+                      desktopClassName="overflow-x-auto"
+                    />
                   )}
                 </CardContent>
               </Card>
@@ -1182,36 +1228,43 @@ export default function LogsPage() {
                       className="py-10"
                     />
                   ) : (
-                    <div className="overflow-x-auto rounded-md border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Время</TableHead>
-                            <TableHead>Событие</TableHead>
-                            <TableHead>Пользователь</TableHead>
-                            <TableHead>IP</TableHead>
-                            <TableHead>Детали</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {qrDownloads.map((entry) => (
-                            <TableRow key={entry.id}>
-                              <TableCell className="text-xs whitespace-nowrap">
-                                {formatDateTime(entry.created_at)}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="secondary">{entry.event_type}</Badge>
-                              </TableCell>
-                              <TableCell>{entry.actor_username || '—'}</TableCell>
-                              <TableCell className="font-mono text-xs">{entry.remote_addr || '—'}</TableCell>
-                              <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
-                                {entry.details || '—'}
-                              </TableCell>
+                    <ResponsiveDataView
+                      mobile={qrDownloads.map((entry) => (
+                        <QrDownloadCard key={entry.id} entry={entry} />
+                      ))}
+                      desktop={
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Время</TableHead>
+                              <TableHead>Событие</TableHead>
+                              <TableHead>Пользователь</TableHead>
+                              <TableHead>IP</TableHead>
+                              <TableHead>Детали</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
+                          </TableHeader>
+                          <TableBody>
+                            {qrDownloads.map((entry) => (
+                              <TableRow key={entry.id}>
+                                <TableCell className="text-xs">
+                                  {formatDateTime(entry.created_at)}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="secondary">{entry.event_type}</Badge>
+                                </TableCell>
+                                <TableCell>{entry.actor_username || '—'}</TableCell>
+                                <TableCell className="font-mono text-xs">{entry.remote_addr || '—'}</TableCell>
+                                <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
+                                  {entry.details || '—'}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      }
+                      mobileClassName="space-y-2"
+                      desktopClassName="overflow-x-auto rounded-md border"
+                    />
                   )}
                 </CardContent>
               </Card>
@@ -1242,38 +1295,45 @@ export default function LogsPage() {
                       className="py-10"
                     />
                   ) : (
-                    <div className="overflow-x-auto rounded-md border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Профиль</TableHead>
-                            <TableHead>Путь сокета</TableHead>
-                            <TableHead>Файл</TableHead>
-                            <TableHead>Ответ</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {openVpnSockets.map((socket) => (
-                            <TableRow key={socket.profile}>
-                              <TableCell className="font-medium">{socket.profile}</TableCell>
-                              <TableCell className="max-w-xs truncate font-mono text-xs">
-                                {socket.socket_path}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant={socket.socket_exists ? 'default' : 'destructive'}>
-                                  {socket.socket_exists ? 'Есть' : 'Нет'}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant={socket.responsive ? 'default' : 'secondary'}>
-                                  {socket.responsive ? 'Отвечает' : 'Нет ответа'}
-                                </Badge>
-                              </TableCell>
+                    <ResponsiveDataView
+                      mobile={openVpnSockets.map((socket) => (
+                        <SocketCard key={socket.profile} socket={socket} />
+                      ))}
+                      desktop={
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Профиль</TableHead>
+                              <TableHead>Путь сокета</TableHead>
+                              <TableHead>Файл</TableHead>
+                              <TableHead>Ответ</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
+                          </TableHeader>
+                          <TableBody>
+                            {openVpnSockets.map((socket) => (
+                              <TableRow key={socket.profile}>
+                                <TableCell className="font-medium">{socket.profile}</TableCell>
+                                <TableCell className="max-w-xs truncate font-mono text-xs">
+                                  {socket.socket_path}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant={socket.socket_exists ? 'default' : 'destructive'}>
+                                    {socket.socket_exists ? 'Есть' : 'Нет'}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant={socket.responsive ? 'default' : 'secondary'}>
+                                    {socket.responsive ? 'Отвечает' : 'Нет ответа'}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      }
+                      mobileClassName="space-y-2"
+                      desktopClassName="overflow-x-auto rounded-md border"
+                    />
                   )}
                 </CardContent>
               </Card>

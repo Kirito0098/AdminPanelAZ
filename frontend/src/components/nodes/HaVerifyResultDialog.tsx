@@ -64,8 +64,8 @@ export default function HaVerifyResultDialog({ open, onOpenChange, result }: HaV
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[min(90vh,40rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="space-y-3 border-b px-6 py-5 text-left">
+      <DialogContent className="flex max-h-[min(90dvh,40rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 space-y-3 border-b px-6 py-5 text-left">
           <DialogTitle className="flex items-start gap-3 pr-8 text-left text-lg leading-snug">
             <HeaderIcon className={cn('mt-0.5 h-5 w-5 shrink-0', iconClass)} />
             <span className="min-w-0">{result.title}</span>
@@ -179,7 +179,7 @@ export default function HaVerifyResultDialog({ open, onOpenChange, result }: HaV
           ) : null}
         </div>
 
-        <DialogFooter className="border-t px-6 py-4 sm:justify-end">
+        <DialogFooter className="shrink-0 border-t px-6 py-4 sm:justify-end">
           <Button type="button" onClick={() => onOpenChange(false)}>
             Закрыть
           </Button>

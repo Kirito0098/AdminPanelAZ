@@ -5,6 +5,19 @@ import react from '@vitejs/plugin-react'
 const CSP_NONCE_PLACEHOLDER = '%CSP_NONCE%'
 const DEV_ACCESS_PATH = (process.env.VITE_ACCESS_PATH || '').replace(/\/+$/, '')
 
+/** Local Vite proxy: satisfy ENFORCE_HTTPS on prod-like backend without changing .env. */
+function devApiProxy() {
+  return {
+    target: 'http://127.0.0.1:8000',
+    changeOrigin: true,
+    configure: (proxy: { on: (event: string, fn: (...args: unknown[]) => void) => void }) => {
+      proxy.on('proxyReq', (proxyReq: { setHeader: (name: string, value: string) => void }) => {
+        proxyReq.setHeader('X-Forwarded-Proto', 'https')
+      })
+    },
+  }
+}
+
 function cspNoncePlaceholder(): Plugin {
   const injectNonce = (html: string) =>
     html
@@ -78,6 +91,14 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), cspNoncePlaceholder(), cspNoncePlaceholderPost(), ...(isTgMini ? [tgMiniMoveScriptToBody()] : [])],
+    esbuild: {
+      target: 'es2022',
+    },
+    optimizeDeps: {
+      esbuildOptions: {
+        target: 'es2022',
+      },
+    },
     base: './',
     resolve: {
       alias: {
@@ -107,16 +128,10 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       proxy: {
-        '/api': {
-          target: 'http://127.0.0.1:8000',
-          changeOrigin: true,
-        },
+        '/api': devApiProxy(),
         ...(DEV_ACCESS_PATH
           ? {
-              [`${DEV_ACCESS_PATH}/api`]: {
-                target: 'http://127.0.0.1:8000',
-                changeOrigin: true,
-              },
+              [`${DEV_ACCESS_PATH}/api`]: devApiProxy(),
             }
           : {}),
       },

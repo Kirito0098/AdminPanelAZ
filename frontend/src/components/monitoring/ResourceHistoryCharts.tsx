@@ -89,7 +89,7 @@ export default function ResourceHistoryCharts({
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
               <Activity size={18} />
@@ -97,7 +97,7 @@ export default function ResourceHistoryCharts({
             </CardTitle>
             <CardDescription>{cardDescription}</CardDescription>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid w-full grid-cols-3 gap-1 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-2">
             {(['1d', '7d', '30d'] as const).map((r) => (
               <Button
                 key={r}
@@ -123,7 +123,7 @@ export default function ResourceHistoryCharts({
           ) : (
             <div className="space-y-6">
               {showLatestSummary && latest && (
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <div className="rounded-lg border p-3">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Cpu size={14} />

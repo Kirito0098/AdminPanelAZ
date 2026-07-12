@@ -206,7 +206,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         ))}
       </nav>
 
-      <div className="shrink-0 space-y-2 border-t border-border/60 bg-card p-3">
+      <div className="shrink-0 space-y-2 border-t border-border/60 bg-card p-3 pb-safe">
         <div className="flex items-center justify-between rounded-lg bg-muted/30 px-2 py-1.5">
           <LiveClock />
           <Button
@@ -250,15 +250,15 @@ export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex min-h-dscreen bg-background">
       <ForcePasswordChange />
       <HaScopeEnforcer />
-      <aside className="hidden h-screen w-72 shrink-0 overflow-hidden border-r border-border/80 bg-card lg:sticky lg:top-0 lg:block">
+      <aside className="hidden h-dscreen w-72 shrink-0 overflow-hidden border-r border-border/80 bg-card lg:sticky lg:top-0 lg:block">
         <SidebarContent />
       </aside>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="flex w-72 flex-col overflow-hidden p-0">
+        <SheetContent side="left" className="flex h-dscreen max-h-dscreen w-72 flex-col overflow-hidden p-0">
           <SheetHeader className="sr-only">
             <SheetTitle>Навигация</SheetTitle>
             <SheetDescription>Меню разделов панели</SheetDescription>
@@ -268,18 +268,23 @@ export default function Layout() {
       </Sheet>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-background px-4 lg:px-6">
+        <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-background px-4 pt-safe lg:px-6 lg:pt-0 orientation-compact-header">
           <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileOpen(true)}>
             <Menu size={20} />
           </Button>
           <div className="min-w-0 flex-1">
-            <p className="text-xs text-muted-foreground">Network Operations Center</p>
+            <p className="orientation-compact-header-subtitle text-xs text-muted-foreground">Network Operations Center</p>
             <h1 className="truncate text-sm font-semibold leading-tight">AntiZapret VPN</h1>
+          </div>
+          <div className="shrink-0 sm:hidden">
+            <NodeSelector compact />
           </div>
           <div className="hidden items-center gap-3 sm:flex">
             <NodeSelector />
             <span className="mono text-xs text-muted-foreground">SESS · {user?.username?.toUpperCase()}</span>
-            <LiveClock />
+            <span className="orientation-compact-header-subtitle">
+              <LiveClock />
+            </span>
           </div>
         </header>
 

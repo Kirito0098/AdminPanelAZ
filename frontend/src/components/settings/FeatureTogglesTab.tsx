@@ -559,7 +559,7 @@ export default function FeatureTogglesTab() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-3 md:items-stretch">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 md:items-stretch">
             {profiles.map((profile) => (
               <ProfileCard
                 key={profile.key}
@@ -605,7 +605,7 @@ export default function FeatureTogglesTab() {
               </Badge>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {groupItems.map((item) => (
                   <ModuleToggleCard
                     key={item.key}
@@ -621,7 +621,7 @@ export default function FeatureTogglesTab() {
       ))}
 
       {dirty && (
-        <div className="sticky bottom-2 z-10 flex justify-end md:col-span-2">
+        <div className="sticky bottom-2 z-10 flex flex-col-reverse gap-2 pb-safe sm:flex-row sm:justify-end md:col-span-2">
           <Button type="button" className="gap-1.5 shadow-lg" onClick={() => void save()} disabled={saving}>
             <Save size={16} />
             {saving ? 'Сохранение...' : 'Сохранить изменения'}

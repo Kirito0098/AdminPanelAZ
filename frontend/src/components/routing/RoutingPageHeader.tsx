@@ -32,7 +32,7 @@ export default function RoutingPageHeader({
   onApplyDoall,
 }: RoutingPageHeaderProps) {
   return (
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between lg:gap-4">
       <div className="flex items-start gap-3">
         <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <GitBranch size={22} />
@@ -48,7 +48,7 @@ export default function RoutingPageHeader({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <AutoRefreshControl
           enabled={autoRefresh}
           countdown={countdown}
@@ -62,13 +62,14 @@ export default function RoutingPageHeader({
             <Button
               variant="outline"
               size="sm"
+              className="w-full sm:w-auto"
               disabled={pipelineBusy}
               onClick={onSyncProviders}
             >
               <RefreshCw size={14} className="mr-1.5" />
               Синхронизировать
             </Button>
-            <Button size="sm" disabled={pipelineBusy} onClick={onApplyDoall}>
+            <Button size="sm" className="w-full sm:w-auto" disabled={pipelineBusy} onClick={onApplyDoall}>
               <Play size={14} className="mr-1.5" />
               Применить doall + client.sh 7
             </Button>

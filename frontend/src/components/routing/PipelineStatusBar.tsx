@@ -40,7 +40,7 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
 
   return (
     <div className="rounded-lg border bg-card p-4">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
         <div className="flex items-start gap-3">
           <div className="rounded-md bg-muted p-2 text-primary">
             <Database size={16} />
@@ -59,7 +59,10 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
             <CloudDownload size={16} />
           </div>
           <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">Последняя {STAGE_LOAD.toLowerCase()}</div>
+            <div className="text-xs text-muted-foreground">
+              <span className="sm:hidden">Загрузка</span>
+              <span className="hidden sm:inline">Последняя {STAGE_LOAD.toLowerCase()}</span>
+            </div>
             <div className="text-sm font-medium">{formatDt(cidrDb?.last_refresh_finished)}</div>
             <div className="text-xs text-muted-foreground truncate">
               {cidrDb?.last_refresh_triggered_by ?? '—'}
@@ -72,7 +75,10 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
             <FileOutput size={16} />
           </div>
           <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">Последняя {STAGE_BUILD.toLowerCase()}</div>
+            <div className="text-xs text-muted-foreground">
+              <span className="sm:hidden">Сборка</span>
+              <span className="hidden sm:inline">Последняя {STAGE_BUILD.toLowerCase()}</span>
+            </div>
             {lastCompile ? (
               <>
                 <div className="text-sm font-medium">{formatDt(lastCompile.finished_at)}</div>
@@ -95,7 +101,10 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
             <Rocket size={16} />
           </div>
           <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">Последнее {STAGE_DEPLOY.toLowerCase()}</div>
+            <div className="text-xs text-muted-foreground">
+              <span className="sm:hidden">Deploy</span>
+              <span className="hidden sm:inline">Последнее {STAGE_DEPLOY.toLowerCase()}</span>
+            </div>
             {lastDeploy ? (
               <>
                 <div className="text-sm font-medium">{formatDt(lastDeploy.finished_at)}</div>
@@ -125,7 +134,10 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
             <Shield size={16} />
           </div>
           <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">Antifilter.download</div>
+            <div className="text-xs text-muted-foreground">
+              <span className="sm:hidden">Antifilter</span>
+              <span className="hidden sm:inline">Antifilter.download</span>
+            </div>
             <div className="mono text-lg font-bold">{antifilter?.cidr_count ?? 0}</div>
             <div className="text-xs text-muted-foreground">{formatDt(antifilter?.last_refreshed_at)}</div>
           </div>
@@ -136,7 +148,10 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
             <AlertTriangle size={16} />
           </div>
           <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">Предупреждения</div>
+            <div className="text-xs text-muted-foreground">
+              <span className="sm:hidden">Алерты</span>
+              <span className="hidden sm:inline">Предупреждения</span>
+            </div>
             {hasAlerts ? (
               <div className="text-sm text-amber-700 dark:text-amber-300">
                 {cidrDb!.alerts!.length} активных

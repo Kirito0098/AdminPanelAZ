@@ -163,7 +163,7 @@ export default function SecretsRotationWizard() {
           <SettingsAlert variant="info" title="Безопасный flow">
             предпросмотр → подтверждение → запись. Подробнее см. SECURITY.md в репозитории.
           </SettingsAlert>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {catalog.map((item) => (
               <div key={item.secret_id} className="rounded-md border p-3 text-sm">
                 <div className="mb-1 flex items-center justify-between gap-2">

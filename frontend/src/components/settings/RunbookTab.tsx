@@ -462,7 +462,7 @@ export default function RunbookTab() {
       </div>
 
       {report && !running && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <MetricPill icon={CheckCircle2} label="Успешно" value={String(report.summary.ok)} tone="success" />
           <MetricPill icon={AlertTriangle} label="Предупреждения" value={String(report.summary.warn)} tone="warning" />
           <MetricPill icon={XCircle} label="Ошибки" value={String(report.summary.fail)} tone="danger" />

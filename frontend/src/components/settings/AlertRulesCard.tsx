@@ -48,7 +48,7 @@ const controlBtnClass = (active: boolean) =>
     'inline-flex h-10 min-w-10 items-center justify-center rounded-lg border px-3 text-sm font-medium transition-all',
     active
       ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
-      : 'hover:border-muted-foreground/30 hover:bg-muted/50',
+      : 'hover:border-muted-foreground/30 [@media(hover:hover)]:hover:bg-muted/50',
   )
 
 function FormField({
@@ -82,7 +82,7 @@ function SectionHeading({ title, description }: { title: string; description: st
 
 function ListRow({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border bg-card/50 p-3 transition-colors hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-xl border bg-card/50 p-3 transition-colors [@media(hover:hover)]:hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 flex-1">{children}</div>
       {action && <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div>}
     </div>

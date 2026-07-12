@@ -21,11 +21,12 @@ export default function AutoRefreshControl({
   onManualRefresh,
 }: AutoRefreshControlProps) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2 touch-manipulation">
       <Button
         type="button"
         variant={enabled ? 'secondary' : 'outline'}
         size="sm"
+        className="max-md:min-h-[44px]"
         onClick={onToggle}
         title={enabled ? 'Приостановить автообновление' : 'Включить автообновление'}
       >
@@ -43,7 +44,7 @@ export default function AutoRefreshControl({
           <span className="relative">{countdown}с</span>
         </span>
       )}
-      <Button type="button" variant="secondary" size="sm" onClick={onManualRefresh} disabled={refreshing}>
+      <Button type="button" variant="secondary" size="sm" className="max-md:min-h-[44px]" onClick={onManualRefresh} disabled={refreshing}>
         <RefreshCw size={14} className={cn(refreshing && 'animate-spin')} />
         {refreshing ? '...' : 'Обновить'}
       </Button>

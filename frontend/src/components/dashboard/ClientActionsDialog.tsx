@@ -585,8 +585,8 @@ export default function ClientActionsDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={handleMainOpenChange}>
-        <DialogContent className="max-h-[90vh] max-w-md gap-0 overflow-y-auto p-0 sm:max-w-md">
-          <DialogHeader className="space-y-3 border-b px-6 pb-4 pt-6">
+        <DialogContent className="flex max-h-[min(90dvh,40rem)] max-w-md flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+          <DialogHeader className="shrink-0 space-y-3 border-b px-6 pb-4 pt-6">
             <div className="pr-6">
               <DialogTitle className="text-xl font-semibold tracking-tight">{config.client_name}</DialogTitle>
               {config.description && (
@@ -620,7 +620,7 @@ export default function ClientActionsDialog({
             </div>
           </DialogHeader>
 
-          <div className="space-y-5 px-6 py-5">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {isAdmin && ownerCandidates.length > 0 && (
               <section className="space-y-3">
                 <SectionTitle>Владелец</SectionTitle>

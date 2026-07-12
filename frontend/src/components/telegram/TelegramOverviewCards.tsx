@@ -89,7 +89,7 @@ export default function TelegramOverviewCards({ tg, loading = false, onNavigate 
   ]
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       {cards.map((card) => (
         <button
           key={card.key}

@@ -38,6 +38,7 @@ import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
+import ToolbarButton from '@/components/shared/ToolbarButton'
 import {
   Dialog,
   DialogContent,
@@ -405,7 +406,7 @@ export default function DashboardPage() {
     <div className="space-y-4">
       <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-primary/5 via-card to-card p-5 shadow-sm">
         <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
-        <div className="relative flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-start gap-4">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary shadow-sm">
               <Shield size={26} strokeWidth={2} />
@@ -424,30 +425,42 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2 xl:max-w-xl xl:justify-end">
+          <div className="flex w-full flex-wrap gap-2 lg:max-w-xl lg:justify-end">
             {user?.role === 'admin' && (
               <>
-                <Button variant="outline" className="gap-2 bg-card/80" onClick={handleSync} disabled={syncing || haReplicaReadonly}>
-                  {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                  {syncing ? 'Синхронизация...' : 'Синхронизировать'}
-                </Button>
-                <Button variant="outline" className="gap-2 bg-card/80" onClick={() => void handleExportCsv()} disabled={csvExporting}>
-                  {csvExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                  Экспорт CSV
-                </Button>
-                <Button
+                <ToolbarButton
                   variant="outline"
-                  className="gap-2 bg-card/80"
+                  className="bg-card/80"
+                  icon={syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                  label={syncing ? 'Синхронизация...' : 'Синхронизировать'}
+                  shortLabel={syncing ? '...' : 'Синхр.'}
+                  onClick={handleSync}
+                  disabled={syncing || haReplicaReadonly}
+                />
+                <ToolbarButton
+                  variant="outline"
+                  className="bg-card/80"
+                  icon={csvExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                  label="Экспорт CSV"
+                  shortLabel="Экспорт"
+                  onClick={() => void handleExportCsv()}
+                  disabled={csvExporting}
+                />
+                <ToolbarButton
+                  variant="outline"
+                  className="bg-card/80"
+                  icon={
+                    csvImporting || importPolling ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <Upload size={16} />
+                    )
+                  }
+                  label="Импорт CSV"
+                  shortLabel="Импорт"
                   onClick={() => csvInputRef.current?.click()}
                   disabled={csvImporting || importPolling || haReplicaReadonly}
-                >
-                  {csvImporting || importPolling ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <Upload size={16} />
-                  )}
-                  Импорт CSV
-                </Button>
+                />
                 <input
                   ref={csvInputRef}
                   type="file"
@@ -462,18 +475,18 @@ export default function DashboardPage() {
               </>
             )}
             {user?.role !== 'viewer' && canCreateClient && (
-              <Button
+              <ToolbarButton
                 size="lg"
-                className="gap-2"
+                variant="default"
+                icon={<Plus size={18} />}
+                label="Новый клиент"
+                shortLabel="Новый"
                 onClick={() => {
                   setOwnerId(user?.id ?? null)
                   setShowForm(true)
                 }}
                 disabled={quotaReached || haReplicaReadonly}
-              >
-                <Plus size={18} />
-                Новый клиент
-              </Button>
+              />
             )}
           </div>
         </div>

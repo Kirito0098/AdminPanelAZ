@@ -220,7 +220,7 @@ export default function PublishAccessWizard({
   }
 
   return (
-    <Card className="overflow-hidden shadow-sm md:col-span-2">
+    <Card className="flex max-h-[90dvh] flex-col overflow-hidden shadow-sm md:col-span-2">
       <div className="h-1 bg-gradient-to-r from-primary/80 to-primary/15" />
       <CardHeader className="space-y-4 pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -246,7 +246,8 @@ export default function PublishAccessWizard({
         ) : null}
       </CardHeader>
 
-      <CardContent className="space-y-6 pb-0">
+      <CardContent className="flex min-h-0 flex-1 flex-col space-y-0 pb-0">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pb-4">
         <FormSection title="1. Способ публикации" description="Сначала выберите стек, затем конкретный режим сертификата.">
           <div className="flex flex-col gap-2 sm:flex-row">
             {PUBLISH_STACKS.map((stack) => {
@@ -546,8 +547,9 @@ export default function PublishAccessWizard({
             </SettingsAlert>
           ) : null}
         </div>
+        </div>
 
-        <div className="sticky bottom-0 -mx-6 flex flex-col gap-3 border-t bg-card/95 px-6 py-4 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="sticky bottom-0 -mx-6 flex shrink-0 flex-col gap-3 border-t bg-card/95 px-6 py-4 pb-safe backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 space-y-0.5">
             <p className="text-xs font-medium text-muted-foreground">Готово к применению</p>
             {previewAccessUrl ? (

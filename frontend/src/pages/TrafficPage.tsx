@@ -38,6 +38,8 @@ import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import { NodeBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
+import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
@@ -145,7 +147,7 @@ type TrafficShareBarProps = {
 function TrafficShareBar({ value, max }: TrafficShareBarProps) {
   return (
     <div className="flex items-center gap-2">
-      <PercentBar value={value} max={max} className="h-1.5 min-w-[4rem] flex-1" />
+      <PercentBar value={value} max={max} className="h-1.5 min-w-0 flex-1" />
       <span className="mono w-10 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
         {max > 0 ? Math.min((value / max) * 100, 100).toFixed(0) : '0'}%
       </span>
@@ -231,6 +233,61 @@ function TrafficClientCard({ row, totalBytes, expanded, onToggle, children }: Tr
       {expanded && children && (
         <div className="border-t bg-muted/20 p-4">{children}</div>
       )}
+    </div>
+  )
+}
+
+type NeverConnectedCardProps = {
+  row: TrafficNeverConnectedRow
+}
+
+function NeverConnectedCard({ row }: NeverConnectedCardProps) {
+  return (
+    <div className="rounded-lg border border-border/80 bg-card p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="min-w-0 truncate font-medium">{row.common_name}</p>
+        <Badge variant={getProtocolVariant(row.protocol_type)} className="text-[10px]">
+          {getProtocolLabel(row.protocol_type)}
+        </Badge>
+      </div>
+      <p className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
+        <Clock size={12} className="shrink-0" />
+        Конфиг создан: {formatLastSeen(row.created_at)}
+      </p>
+    </div>
+  )
+}
+
+type DeletedTrafficCardProps = {
+  row: {
+    common_name: string
+    protocol_type: string
+    total_bytes: number
+  }
+  onDelete: () => void
+  disabled: boolean
+}
+
+function DeletedTrafficCard({ row, onDelete, disabled }: DeletedTrafficCardProps) {
+  return (
+    <div className="rounded-lg border border-border/80 bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-medium">{row.common_name}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{getProtocolLabel(row.protocol_type)}</p>
+          <p className="mono mt-2 text-sm font-medium tabular-nums">{formatBytes(row.total_bytes)}</p>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0 text-destructive"
+          disabled={disabled}
+          onClick={onDelete}
+          aria-label={`Удалить статистику ${row.common_name}`}
+        >
+          <Trash2 size={14} />
+        </Button>
+      </div>
     </div>
   )
 }
@@ -577,65 +634,63 @@ export default function TrafficPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Network size={22} />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-2xl font-bold tracking-tight">Мониторинг трафика</h2>
-              <NodeBadge name={activeNode?.name ?? data?.node_name} status={activeNode?.status} />
-              {liveLoading && (
-                <Badge variant="secondary" className="gap-1 text-[10px]">
-                  <Loader2 size={10} className="animate-spin" />
-                  Live-статус
-                </Badge>
-              )}
-              {summary?.db_is_stale && (
-                <Badge variant="warning" className="gap-1 text-[10px]">
-                  <Database size={10} />
-                  БД устарела ({summary.db_age_seconds}с)
-                </Badge>
-              )}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Накопленная статистика RX/TX по клиентам VPN и AntiZapret
-              {data?.timestamp && (
-                <> · обновлено {formatDateTime(data.timestamp)}</>
-              )}
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <AutoRefreshControl
-            enabled={autoRefresh}
-            onToggle={() => setAutoRefresh((v) => !v)}
-            countdown={countdown}
-            intervalSec={REFRESH_INTERVAL}
-            refreshing={refreshing}
-            onManualRefresh={handleRefresh}
-          />
-          {isAdmin && (
-            <>
-              <Select value={resetScope} onValueChange={(v) => setResetScope(v as typeof resetScope)}>
-                <SelectTrigger className="h-9 w-[160px] text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Сброс: всё</SelectItem>
-                  <SelectItem value="openvpn">Сброс: OpenVPN</SelectItem>
-                  <SelectItem value="wireguard">Сброс: WG/AWG</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting}>
-                {resetting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                Сбросить
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
+      <PageSectionHeader
+        icon={Network}
+        title="Мониторинг трафика"
+        titleAddon={
+          <>
+            <NodeBadge name={activeNode?.name ?? data?.node_name} status={activeNode?.status} />
+            {liveLoading && (
+              <Badge variant="secondary" className="gap-1 text-[10px]">
+                <Loader2 size={10} className="animate-spin" />
+                Live-статус
+              </Badge>
+            )}
+            {summary?.db_is_stale && (
+              <Badge variant="warning" className="gap-1 text-[10px]">
+                <Database size={10} />
+                БД устарела ({summary.db_age_seconds}с)
+              </Badge>
+            )}
+          </>
+        }
+        description={
+          <>
+            Накопленная статистика RX/TX по клиентам VPN и AntiZapret
+            {data?.timestamp && <> · обновлено {formatDateTime(data.timestamp)}</>}
+          </>
+        }
+        actions={
+          <>
+            <AutoRefreshControl
+              enabled={autoRefresh}
+              onToggle={() => setAutoRefresh((v) => !v)}
+              countdown={countdown}
+              intervalSec={REFRESH_INTERVAL}
+              refreshing={refreshing}
+              onManualRefresh={handleRefresh}
+            />
+            {isAdmin && (
+              <>
+                <Select value={resetScope} onValueChange={(v) => setResetScope(v as typeof resetScope)}>
+                  <SelectTrigger className="h-9 w-full text-xs sm:w-[160px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Сброс: всё</SelectItem>
+                    <SelectItem value="openvpn">Сброс: OpenVPN</SelectItem>
+                    <SelectItem value="wireguard">Сброс: WG/AWG</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting}>
+                  {resetting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                  Сбросить
+                </Button>
+              </>
+            )}
+          </>
+        }
+      />
 
       {data?.ha_context ? (
         <SettingsAlert variant="info" title="Суммарный трафик HA-группы">
@@ -774,9 +829,8 @@ export default function TrafficPage() {
                   className="py-8"
                 />
               ) : (
-                <>
-                  <div className="space-y-3 lg:hidden">
-                    {filteredRows.map((r) => {
+                <ResponsiveDataView
+                  mobile={filteredRows.map((r) => {
                       const expanded =
                         selectedClient === r.common_name && selectedProtocol === r.protocol_type
                       return (
@@ -801,9 +855,7 @@ export default function TrafficPage() {
                         </TrafficClientCard>
                       )
                     })}
-                  </div>
-
-                  <div className="hidden overflow-x-auto rounded-md border lg:block">
+                  desktop={
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -904,8 +956,10 @@ export default function TrafficPage() {
                         })}
                       </TableBody>
                     </Table>
-                  </div>
-                </>
+                  }
+                  mobileClassName="space-y-3"
+                  desktopClassName="overflow-x-auto rounded-md border"
+                />
               )}
             </CardContent>
           </Card>
@@ -940,35 +994,45 @@ export default function TrafficPage() {
               </CardHeader>
               {neverConnectedExpanded && (
                 <CardContent>
-                  <div className="overflow-x-auto rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Клиент</TableHead>
-                          <TableHead>Протокол</TableHead>
-                          <TableHead>Конфиг создан</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {neverConnectedRows.map((row) => (
-                          <TableRow key={`${row.common_name}-${row.protocol_type}-${row.config_id ?? 'na'}`}>
-                            <TableCell className="font-medium">{row.common_name}</TableCell>
-                            <TableCell>
-                              <Badge variant={getProtocolVariant(row.protocol_type)} className="text-[10px]">
-                                {getProtocolLabel(row.protocol_type)}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">
-                              <span className="inline-flex items-center gap-1">
-                                <Clock size={12} className="shrink-0" />
-                                {formatLastSeen(row.created_at)}
-                              </span>
-                            </TableCell>
+                  <ResponsiveDataView
+                    mobile={neverConnectedRows.map((row) => (
+                      <NeverConnectedCard
+                        key={`${row.common_name}-${row.protocol_type}-${row.config_id ?? 'na'}`}
+                        row={row}
+                      />
+                    ))}
+                    desktop={
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Клиент</TableHead>
+                            <TableHead>Протокол</TableHead>
+                            <TableHead>Конфиг создан</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {neverConnectedRows.map((row) => (
+                            <TableRow key={`${row.common_name}-${row.protocol_type}-${row.config_id ?? 'na'}`}>
+                              <TableCell className="font-medium">{row.common_name}</TableCell>
+                              <TableCell>
+                                <Badge variant={getProtocolVariant(row.protocol_type)} className="text-[10px]">
+                                  {getProtocolLabel(row.protocol_type)}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                <span className="inline-flex items-center gap-1">
+                                  <Clock size={12} className="shrink-0" />
+                                  {formatLastSeen(row.created_at)}
+                                </span>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    }
+                    mobileClassName="space-y-3"
+                    desktopClassName="overflow-x-auto rounded-md border"
+                  />
                 </CardContent>
               )}
             </Card>
@@ -986,15 +1050,15 @@ export default function TrafficPage() {
               </CardHeader>
               <CardContent className="space-y-6">
                 {openvpnLogEnabled && (
-                  <div className="flex flex-wrap items-end gap-3">
-                    <div className="space-y-2">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                    <div className="w-full space-y-2 sm:w-auto">
                       <Label className="text-xs text-muted-foreground">Расписание очистки .log</Label>
                       <Select
                         value={cleanupPeriod}
                         onValueChange={(v) => void handleCleanupScheduleChange(v)}
                         disabled={maintenanceLoading}
                       >
-                        <SelectTrigger className="h-9 w-[180px]">
+                        <SelectTrigger className="h-9 w-full sm:w-[180px]">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1024,38 +1088,50 @@ export default function TrafficPage() {
                       className="py-6"
                     />
                   ) : (
-                    <div className="overflow-x-auto rounded-md border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Клиент</TableHead>
-                            <TableHead>Протокол</TableHead>
-                            <TableHead className="text-right">Всего</TableHead>
-                            <TableHead className="w-[100px]" />
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {deletedRows.map((row) => (
-                            <TableRow key={`${row.common_name}-${row.protocol_type}`}>
-                              <TableCell>{row.common_name}</TableCell>
-                              <TableCell>{getProtocolLabel(row.protocol_type)}</TableCell>
-                              <TableCell className="text-right font-mono text-xs">{formatBytes(row.total_bytes)}</TableCell>
-                              <TableCell>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-destructive"
-                                  disabled={maintenanceLoading}
-                                  onClick={() => void handleDeleteDeletedClient(row.common_name)}
-                                >
-                                  <Trash2 size={14} />
-                                </Button>
-                              </TableCell>
+                    <ResponsiveDataView
+                      mobile={deletedRows.map((row) => (
+                        <DeletedTrafficCard
+                          key={`${row.common_name}-${row.protocol_type}`}
+                          row={row}
+                          disabled={maintenanceLoading}
+                          onDelete={() => void handleDeleteDeletedClient(row.common_name)}
+                        />
+                      ))}
+                      desktop={
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Клиент</TableHead>
+                              <TableHead>Протокол</TableHead>
+                              <TableHead className="text-right">Всего</TableHead>
+                              <TableHead className="w-[100px]" />
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
+                          </TableHeader>
+                          <TableBody>
+                            {deletedRows.map((row) => (
+                              <TableRow key={`${row.common_name}-${row.protocol_type}`}>
+                                <TableCell>{row.common_name}</TableCell>
+                                <TableCell>{getProtocolLabel(row.protocol_type)}</TableCell>
+                                <TableCell className="text-right font-mono text-xs">{formatBytes(row.total_bytes)}</TableCell>
+                                <TableCell>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-destructive"
+                                    disabled={maintenanceLoading}
+                                    onClick={() => void handleDeleteDeletedClient(row.common_name)}
+                                  >
+                                    <Trash2 size={14} />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      }
+                      mobileClassName="space-y-3"
+                      desktopClassName="overflow-x-auto rounded-md border"
+                    />
                   )}
                 </div>
               </CardContent>

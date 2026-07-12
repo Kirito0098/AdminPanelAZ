@@ -22,6 +22,9 @@ import MonitoringConnectionsList, {
   buildMonitoringConnectionRows,
 } from '@/components/monitoring/MonitoringConnectionsList'
 import MonitoringGeoSummary from '@/components/monitoring/MonitoringGeoSummary'
+import NodeSummaryCard from '@/components/monitoring/NodeSummaryCard'
+import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import { getConnectionDisplayAddress, getConnectionGeoLabel } from '@/components/monitoring/ConnectionAddress'
 import PanelResourceHistoryCharts from '@/components/monitoring/PanelResourceHistoryCharts'
 import ResourceHistoryCharts from '@/components/monitoring/ResourceHistoryCharts'
@@ -442,48 +445,48 @@ export default function MonitoringPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Radio size={22} />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-2xl font-bold tracking-tight">NOC Мониторинг</h2>
-              <NodeBadge
-                name={isFederated ? `Все узлы (${data?.nodes_online ?? 0}/${data?.nodes_total ?? nodes.length})` : (activeNode?.name ?? data?.node_name)}
-                status={isFederated ? 'online' : activeNode?.status}
-              />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {isFederated
-                ? 'Сводка активных VPN-подключений со всех узлов'
-                : 'Активные VPN-подключения OpenVPN и WireGuard в реальном времени'}
-              {data?.timestamp && (
-                <> · обновлено {formatDateTime(data.timestamp)}</>
-              )}
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {hasMultipleNodes && (
-            <ScopeToggle
-              value={scope}
-              onChange={setScope}
-              nodesOnline={data?.nodes_online}
-              nodesTotal={data?.nodes_total ?? nodes.length}
-            />
-          )}
-          <AutoRefreshControl
-          enabled={autoRefresh}
-          onToggle={() => setAutoRefresh((v) => !v)}
-          countdown={countdown}
-          intervalSec={REFRESH_INTERVAL}
-          refreshing={refreshing}
-          onManualRefresh={handleRefresh}
+      <PageSectionHeader
+        icon={Radio}
+        title="NOC Мониторинг"
+        titleAddon={
+          <NodeBadge
+            name={
+              isFederated
+                ? `Все узлы (${data?.nodes_online ?? 0}/${data?.nodes_total ?? nodes.length})`
+                : (activeNode?.name ?? data?.node_name)
+            }
+            status={isFederated ? 'online' : activeNode?.status}
           />
-        </div>
-      </div>
+        }
+        description={
+          <>
+            {isFederated
+              ? 'Сводка активных VPN-подключений со всех узлов'
+              : 'Активные VPN-подключения OpenVPN и WireGuard в реальном времени'}
+            {data?.timestamp && <> · обновлено {formatDateTime(data.timestamp)}</>}
+          </>
+        }
+        actions={
+          <>
+            {hasMultipleNodes && (
+              <ScopeToggle
+                value={scope}
+                onChange={setScope}
+                nodesOnline={data?.nodes_online}
+                nodesTotal={data?.nodes_total ?? nodes.length}
+              />
+            )}
+            <AutoRefreshControl
+              enabled={autoRefresh}
+              onToggle={() => setAutoRefresh((v) => !v)}
+              countdown={countdown}
+              intervalSec={REFRESH_INTERVAL}
+              refreshing={refreshing}
+              onManualRefresh={handleRefresh}
+            />
+          </>
+        }
+      />
 
       <SettingsAlert variant="info" title={isFederated ? 'Сводка по всем узлам' : 'Данные активного узла'}>
         {isFederated ? (
@@ -618,8 +621,17 @@ export default function MonitoringPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="overflow-x-auto rounded-md border">
-                    <Table>
+                  <ResponsiveDataView
+                    mobile={sortedNodeSummary.map((node: MonitoringNodeSummary) => (
+                      <NodeSummaryCard
+                        key={node.node_id}
+                        node={node}
+                        isActive={node.node_id === activeNode?.id}
+                        onSelect={() => goToNode(node.node_id, node.node_name)}
+                      />
+                    ))}
+                    desktop={
+                      <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Узел</TableHead>
@@ -706,7 +718,10 @@ export default function MonitoringPage() {
                         })}
                       </TableBody>
                     </Table>
-                  </div>
+                    }
+                    mobileClassName="space-y-3"
+                    desktopClassName="overflow-x-auto rounded-md border"
+                  />
                 </CardContent>
               </Card>
             )}
@@ -842,7 +857,7 @@ export default function MonitoringPage() {
                           checked={onlineOnly}
                           onCheckedChange={setOnlineOnly}
                         />
-                        <Label htmlFor="monitoring-online-only" className="whitespace-nowrap text-xs text-muted-foreground">
+                        <Label htmlFor="monitoring-online-only" className="text-xs text-muted-foreground">
                           Только онлайн
                         </Label>
                       </div>

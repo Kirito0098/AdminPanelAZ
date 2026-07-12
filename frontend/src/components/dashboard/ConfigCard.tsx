@@ -242,7 +242,7 @@ function MetaLine({ row }: { row: MetaRow }) {
     <div
       className={cn(
         'flex min-w-0 items-baseline gap-1.5 text-xs leading-snug',
-        row.wide && 'col-span-2',
+        row.wide && 'sm:col-span-2',
         row.tone === 'danger' && 'text-destructive',
         row.tone === 'warning' && 'text-amber-700 dark:text-amber-300',
         row.tone === 'success' && 'text-emerald-600 dark:text-emerald-400',
@@ -301,11 +301,12 @@ function IconActionButton({
       )}
       style={style}
       title={title}
+      aria-label={title}
       disabled={disabled}
       onClick={onClick}
     >
       {loading ? <Loader2 size={14} className="animate-spin shrink-0" /> : children}
-      {label ? <span className="whitespace-nowrap">{label}</span> : null}
+      {label ? <span className="hidden min-w-0 sm:inline">{label}</span> : null}
     </Button>
   )
 }
@@ -334,9 +335,9 @@ function IconActionLink({
       style={style}
       title={title}
     >
-      <Link to={to}>
+      <Link to={to} aria-label={title}>
         {children}
-        <span className="whitespace-nowrap">{label}</span>
+        <span className="hidden min-w-0 sm:inline">{label}</span>
       </Link>
     </Button>
   )
@@ -565,7 +566,7 @@ export default function ConfigCard({
 
       <CardContent className="flex flex-1 flex-col space-y-2.5 p-4 pt-0">
         {metaRows.length > 0 && (
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
             {metaRows.map((row) => (
               <MetaLine key={row.key} row={row} />
             ))}
@@ -574,14 +575,14 @@ export default function ConfigCard({
 
         <div className="mt-auto space-y-2 border-t border-border/60 pt-2.5">
           {filesLoading && !primaryFile && showDownloads && (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="h-9 animate-pulse rounded-lg bg-muted" />
               <div className="h-9 animate-pulse rounded-lg bg-muted" />
             </div>
           )}
 
           {primaryFile && showDownloads && (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {hasBothProfiles ? (
                 <>
                   <DownloadButton
@@ -611,7 +612,7 @@ export default function ConfigCard({
                   loading={loadingAction === 'download'}
                   accentClassName={(actionAccent ?? vpnDownloadAccent).className}
                   accentStyle={(actionAccent ?? vpnDownloadAccent).style}
-                  className="col-span-2 w-full"
+                  className="col-span-full w-full sm:col-span-2"
                   onClick={() => runFileAction(primaryFile, onDownload)}
                 />
               )}
@@ -619,7 +620,7 @@ export default function ConfigCard({
           )}
 
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
               {primaryFile && showQr && (
                 <>
                   {hasBothProfiles ? (

@@ -5,6 +5,7 @@ import {
   Globe,
   GitCompare,
   Loader2,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -23,12 +24,20 @@ import {
   verifyNodeSyncGroup,
 } from '@/api/client'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
+import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Dialog,
   DialogContent,
@@ -102,6 +111,252 @@ function replicationBadge(group: NodeSyncGroup): ReadinessBadge {
   if (group.sync_status === 'failed') return { label: 'Репликация: ошибка', variant: 'destructive' }
   if (group.sync_status === 'synced') return { label: 'Репликация: OK', variant: 'default' }
   return { label: 'Репликация: —', variant: 'outline' }
+}
+
+function SyncGroupStatusBlock({
+  group,
+  onOpenVerifyReport,
+}: {
+  group: NodeSyncGroup
+  onOpenVerifyReport: () => void
+}) {
+  const verify = verifyBadge(group)
+  const replication = replicationBadge(group)
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1">
+        <Badge variant={verify.variant}>{verify.label}</Badge>
+        <Badge variant={replication.variant}>{replication.label}</Badge>
+      </div>
+      {(group.warnings ?? []).map((item) => (
+        <p key={item} className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+          {item}
+        </p>
+      ))}
+      {formatTimestamp(group.last_sync_at) ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Синхронизация: {formatTimestamp(group.last_sync_at)}
+        </p>
+      ) : null}
+      {formatTimestamp(group.last_verify_at) ? (
+        <p className="text-xs text-muted-foreground">Проверка: {formatTimestamp(group.last_verify_at)}</p>
+      ) : null}
+      {group.last_verify_result ? (
+        <button
+          type="button"
+          onClick={onOpenVerifyReport}
+          className="mt-1 text-xs text-primary hover:underline"
+        >
+          Отчёт проверки
+        </button>
+      ) : null}
+      {group.last_sync_error ? (
+        <p className="mt-1 text-xs text-destructive">{group.last_sync_error}</p>
+      ) : null}
+    </div>
+  )
+}
+
+type SyncGroupActionsProps = {
+  group: NodeSyncGroup
+  actionLoading: number | null
+  compact?: boolean
+  onSetup: () => void
+  onPushFull: () => void
+  onDomain: () => void
+  onVerify: () => void
+  onEdit: () => void
+  onDelete: () => void
+}
+
+function SyncGroupActions({
+  group,
+  actionLoading,
+  compact = false,
+  onSetup,
+  onPushFull,
+  onDomain,
+  onVerify,
+  onEdit,
+  onDelete,
+}: SyncGroupActionsProps) {
+  const syncBusy = actionLoading === group.id || group.sync_status === 'pending'
+  const actionBusy = actionLoading === group.id
+
+  if (compact) {
+    return (
+      <div className="flex flex-wrap gap-1">
+        <Button size="sm" disabled={syncBusy} onClick={onSetup} title="Домен → Push full → Verify (полный цикл)">
+          {actionBusy ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+          Настройка
+        </Button>
+        <Button variant="outline" size="sm" disabled={actionBusy} onClick={onVerify}>
+          <ShieldCheck size={14} />
+          Проверить
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" disabled={actionBusy}>
+              <MoreHorizontal size={14} />
+              Ещё
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem disabled={syncBusy} onClick={onPushFull}>
+              Push full
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={syncBusy} onClick={onDomain}>
+              <Globe size={14} />
+              Домен
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={actionBusy} onClick={onEdit}>
+              Изменить
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              disabled={actionBusy}
+              onClick={onDelete}
+            >
+              <Trash2 size={14} />
+              Расформировать
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-wrap justify-end gap-1">
+      <Button
+        size="sm"
+        disabled={syncBusy}
+        onClick={onSetup}
+        title="Домен → Push full → Verify (полный цикл)"
+      >
+        {actionBusy ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+        Настройка
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={syncBusy}
+        onClick={onPushFull}
+        title="Только Push full: backup primary → restore на все реплики"
+      >
+        Push full
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={syncBusy}
+        onClick={onDomain}
+        title="Только shared domain → setup + doall + client.sh 7"
+      >
+        <Globe size={14} />
+        Домен
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={actionBusy}
+        onClick={onVerify}
+        title="Только проверить расхождения между основным узлом и репликой (без изменений)"
+      >
+        <ShieldCheck size={14} />
+        Проверить
+      </Button>
+      <Button variant="ghost" size="sm" disabled={actionBusy} onClick={onEdit}>
+        Изменить
+      </Button>
+      <Button variant="ghost" size="sm" disabled={actionBusy} onClick={onDelete}>
+        <Trash2 size={14} />
+      </Button>
+    </div>
+  )
+}
+
+function SyncGroupCard({
+  group,
+  actionLoading,
+  onDns,
+  onOpenVerifyReport,
+  onSetup,
+  onPushFull,
+  onDomain,
+  onVerify,
+  onEdit,
+  onDelete,
+}: {
+  group: NodeSyncGroup
+  actionLoading: number | null
+  onDns: () => void
+  onOpenVerifyReport: () => void
+  onSetup: () => void
+  onPushFull: () => void
+  onDomain: () => void
+  onVerify: () => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  return (
+    <Card className="p-4">
+      <div className="font-medium">{group.name}</div>
+      {group.sync_mode === 'manual_full' ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          После расформирования группы на реплике выполните Конфигурации → Синхронизировать.
+        </p>
+      ) : group.sync_mode === 'auto' ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Авто: правки с основного на реплику (см. режим синхронизации при редактировании).
+        </p>
+      ) : null}
+      <dl className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+        <div>
+          <dt className="text-xs text-muted-foreground">Домен</dt>
+          <dd className="mt-0.5">
+            <div>{group.shared_domain}</div>
+            <button
+              type="button"
+              onClick={onDns}
+              className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              <Globe size={12} />
+              Настройка DNS
+            </button>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-muted-foreground">{HA_PRIMARY}</dt>
+          <dd className="mt-0.5">{group.primary_node_name ?? group.primary_node_id}</dd>
+        </div>
+        <div className="sm:col-span-2">
+          <dt className="text-xs text-muted-foreground">{HA_REPLICA}</dt>
+          <dd className="mt-0.5">
+            {(group.replica_node_names?.length ? group.replica_node_names : group.replica_node_ids).join(', ')}
+          </dd>
+        </div>
+      </dl>
+      <div className="mt-3">
+        <SyncGroupStatusBlock group={group} onOpenVerifyReport={onOpenVerifyReport} />
+      </div>
+      <div className="mt-3">
+        <SyncGroupActions
+          group={group}
+          actionLoading={actionLoading}
+          compact
+          onSetup={onSetup}
+          onPushFull={onPushFull}
+          onDomain={onDomain}
+          onVerify={onVerify}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
+      </div>
+    </Card>
+  )
 }
 
 function AutoSyncModeDescription({ compact = false }: { compact?: boolean }) {
@@ -630,163 +885,100 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
               первичную синхронизацию.
             </SettingsAlert>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Группа</TableHead>
-                  <TableHead>Домен</TableHead>
-                  <TableHead>{HA_PRIMARY}</TableHead>
-                  <TableHead>{HA_REPLICA}</TableHead>
-                  <TableHead>Статус</TableHead>
-                  <TableHead className="text-right">Действия</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {groups.map((group) => (
-                  <TableRow key={group.id}>
-                    <TableCell className="font-medium">
-                      {group.name}
-                      {group.sync_mode === 'manual_full' ? (
-                        <p className="mt-1 text-xs font-normal text-muted-foreground">
-                          После расформирования группы на реплике выполните Конфигурации → Синхронизировать.
-                        </p>
-                      ) : group.sync_mode === 'auto' ? (
-                        <p className="mt-1 text-xs font-normal text-muted-foreground">
-                          Авто: правки с основного на реплику (см. режим синхронизации при редактировании).
-                        </p>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      <div>{group.shared_domain}</div>
-                      <button
-                        type="button"
-                        onClick={() => setDnsTarget(group)}
-                        className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                      >
-                        <Globe size={12} />
-                        Настройка DNS
-                      </button>
-                    </TableCell>
-                    <TableCell>{group.primary_node_name ?? group.primary_node_id}</TableCell>
-                    <TableCell>
-                      {(group.replica_node_names?.length ? group.replica_node_names : group.replica_node_ids).join(
-                        ', ',
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {(() => {
-                          const verify = verifyBadge(group)
-                          const replication = replicationBadge(group)
-                          return (
-                            <>
-                              <Badge variant={verify.variant}>{verify.label}</Badge>
-                              <Badge variant={replication.variant}>{replication.label}</Badge>
-                            </>
-                          )
-                        })()}
-                      </div>
-                      {(group.warnings ?? []).map((item) => (
-                        <p key={item} className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                          {item}
-                        </p>
-                      ))}
-                      {formatTimestamp(group.last_sync_at) ? (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Синхронизация: {formatTimestamp(group.last_sync_at)}
-                        </p>
-                      ) : null}
-                      {formatTimestamp(group.last_verify_at) ? (
-                        <p className="text-xs text-muted-foreground">
-                          Проверка: {formatTimestamp(group.last_verify_at)}
-                        </p>
-                      ) : null}
-                      {group.last_verify_result ? (
-                        <button
-                          type="button"
-                          onClick={() => openStoredVerifyResult(group)}
-                          className="mt-1 text-xs text-primary hover:underline"
-                        >
-                          Отчёт проверки
-                        </button>
-                      ) : null}
-                      {group.last_sync_error ? (
-                        <p className="mt-1 text-xs text-destructive">{group.last_sync_error}</p>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex flex-wrap justify-end gap-1">
-                        <Button
-                          size="sm"
-                          disabled={actionLoading === group.id || group.sync_status === 'pending'}
-                          onClick={() => setSetupTarget(group)}
-                          title="Домен → Push full → Verify (полный цикл)"
-                        >
-                          {actionLoading === group.id ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : (
-                            <Wand2 size={14} />
-                          )}
-                          Настройка
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={actionLoading === group.id || group.sync_status === 'pending'}
-                          onClick={() => void runPushFull(group)}
-                          title="Только Push full: backup primary → restore на все реплики"
-                        >
-                          Push full
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={actionLoading === group.id || group.sync_status === 'pending'}
-                          onClick={() => setDomainApplyTarget(group)}
-                          title="Только shared domain → setup + doall + client.sh 7"
-                        >
-                          <Globe size={14} />
-                          Домен
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={actionLoading === group.id}
-                          onClick={() => void handleVerify(group)}
-                          title="Только проверить расхождения между основным узлом и репликой (без изменений)"
-                        >
-                          <ShieldCheck size={14} />
-                          Проверить
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={actionLoading === group.id}
-                          onClick={() => openEdit(group)}
-                        >
-                          Изменить
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={actionLoading === group.id}
-                          onClick={() => setDeleteTarget(group)}
-                        >
-                          <Trash2 size={14} />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <ResponsiveDataView
+              mobile={groups.map((group) => (
+                <SyncGroupCard
+                  key={group.id}
+                  group={group}
+                  actionLoading={actionLoading}
+                  onDns={() => setDnsTarget(group)}
+                  onOpenVerifyReport={() => openStoredVerifyResult(group)}
+                  onSetup={() => setSetupTarget(group)}
+                  onPushFull={() => void runPushFull(group)}
+                  onDomain={() => setDomainApplyTarget(group)}
+                  onVerify={() => void handleVerify(group)}
+                  onEdit={() => openEdit(group)}
+                  onDelete={() => setDeleteTarget(group)}
+                />
+              ))}
+              desktop={
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Группа</TableHead>
+                      <TableHead>Домен</TableHead>
+                      <TableHead>{HA_PRIMARY}</TableHead>
+                      <TableHead>{HA_REPLICA}</TableHead>
+                      <TableHead>Статус</TableHead>
+                      <TableHead className="text-right">Действия</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {groups.map((group) => (
+                      <TableRow key={group.id}>
+                        <TableCell className="font-medium">
+                          {group.name}
+                          {group.sync_mode === 'manual_full' ? (
+                            <p className="mt-1 text-xs font-normal text-muted-foreground">
+                              После расформирования группы на реплике выполните Конфигурации → Синхронизировать.
+                            </p>
+                          ) : group.sync_mode === 'auto' ? (
+                            <p className="mt-1 text-xs font-normal text-muted-foreground">
+                              Авто: правки с основного на реплику (см. режим синхронизации при редактировании).
+                            </p>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>
+                          <div>{group.shared_domain}</div>
+                          <button
+                            type="button"
+                            onClick={() => setDnsTarget(group)}
+                            className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                          >
+                            <Globe size={12} />
+                            Настройка DNS
+                          </button>
+                        </TableCell>
+                        <TableCell>{group.primary_node_name ?? group.primary_node_id}</TableCell>
+                        <TableCell>
+                          {(group.replica_node_names?.length
+                            ? group.replica_node_names
+                            : group.replica_node_ids
+                          ).join(', ')}
+                        </TableCell>
+                        <TableCell>
+                          <SyncGroupStatusBlock
+                            group={group}
+                            onOpenVerifyReport={() => openStoredVerifyResult(group)}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <SyncGroupActions
+                            group={group}
+                            actionLoading={actionLoading}
+                            onSetup={() => setSetupTarget(group)}
+                            onPushFull={() => void runPushFull(group)}
+                            onDomain={() => setDomainApplyTarget(group)}
+                            onVerify={() => void handleVerify(group)}
+                            onEdit={() => openEdit(group)}
+                            onDelete={() => setDeleteTarget(group)}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              }
+              mobileClassName="space-y-3"
+              desktopClassName="overflow-x-auto rounded-md border"
+            />
           )}
 
         </CardContent>
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <DialogContent className="flex max-h-[min(90dvh,40rem)] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
           <form
             onSubmit={(e) => void handleSubmit(e)}
             className="flex min-h-0 flex-1 flex-col"

@@ -36,7 +36,7 @@ export default function PublishAwaitDialog({ state, onDismiss }: PublishAwaitDia
   return (
     <Dialog open onOpenChange={handleOpenChange}>
       <DialogContent
-        className="max-w-lg"
+        className="flex max-h-[min(90dvh,40rem)] w-full flex-col gap-0 overflow-hidden p-4 sm:max-w-lg"
         hideClose={!closable}
         onPointerDownOutside={(event) => {
           if (!closable) event.preventDefault()
@@ -45,7 +45,7 @@ export default function PublishAwaitDialog({ state, onDismiss }: PublishAwaitDia
           if (!closable) event.preventDefault()
         }}
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             {state.status === 'running' && <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />}
             {state.status === 'completed' && <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />}
@@ -61,7 +61,7 @@ export default function PublishAwaitDialog({ state, onDismiss }: PublishAwaitDia
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 text-sm leading-relaxed">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto text-sm leading-relaxed">
           {state.status === 'running' && (
             <>
               <p>{state.message || 'Настройки применяются на сервере. Это может занять несколько минут.'}</p>
@@ -102,7 +102,7 @@ export default function PublishAwaitDialog({ state, onDismiss }: PublishAwaitDia
         </div>
 
         {closable && (
-          <DialogFooter className="gap-2 sm:gap-0">
+          <DialogFooter className="shrink-0 gap-2 sm:gap-0">
             {state.status === 'completed' && accessUrl ? (
               <Button asChild>
                 <a href={accessUrl} target="_blank" rel="noopener noreferrer">

@@ -495,7 +495,7 @@ export default function BackupTab() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <BackupScopeBlock
                 icon={LayoutDashboard}
                 title="AdminPanel"

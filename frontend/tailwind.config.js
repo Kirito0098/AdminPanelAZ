@@ -50,6 +50,15 @@ export default {
       fontFamily: {
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
       },
+      height: {
+        dscreen: '100dvh',
+      },
+      minHeight: {
+        dscreen: '100dvh',
+      },
+      maxHeight: {
+        '90dscreen': '90dvh',
+      },
       keyframes: {
         'accordion-down': {
           from: { height: '0' },

@@ -102,7 +102,7 @@ export default function PersonalTab({
     : `Браузер (${getTimeZoneLabel(browserTimeZone)})`
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4 orientation-compact-settings-tab">
       <div className="grid gap-4 md:grid-cols-2 md:items-start">
         <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card p-4 md:col-span-2">
           <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/10 blur-2xl" />
@@ -134,7 +134,7 @@ export default function PersonalTab({
             <CardDescription>Выберите тему интерфейса панели</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col">
-            <div className="grid flex-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 flex-1 gap-3 sm:grid-cols-2">
               {THEME_OPTIONS.map(({ value, label, hint, icon: Icon, preview, bar, dot }) => (
                 <button
                   key={value}
@@ -245,6 +245,7 @@ export default function PersonalTab({
                     value={currentPwd}
                     onChange={(e) => onCurrentPwdChange(e.target.value)}
                     autoComplete="current-password"
+                    className="w-full"
                   />
                 </div>
                 <div className="flex flex-col space-y-2 rounded-xl border bg-muted/20 p-4">
@@ -255,12 +256,13 @@ export default function PersonalTab({
                     value={newPwd}
                     onChange={(e) => onNewPwdChange(e.target.value)}
                     autoComplete="new-password"
+                    className="w-full"
                   />
                 </div>
               </div>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs text-muted-foreground">Минимум 4 символа</p>
-                <Button type="submit" className="gap-1.5 sm:shrink-0">
+                <Button type="submit" className="w-full gap-1.5 sm:w-auto sm:shrink-0">
                   <Save size={16} />
                   Сохранить пароль
                 </Button>

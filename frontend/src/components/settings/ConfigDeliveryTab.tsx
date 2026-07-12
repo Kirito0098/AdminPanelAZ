@@ -175,7 +175,7 @@ export default function ConfigDeliveryTab() {
           <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/10 blur-2xl" />
           <div
             className={cn(
-              'relative grid gap-3',
+              'relative grid grid-cols-1 gap-3',
               openvpnEnabled && qrDownloadsEnabled
                 ? 'sm:grid-cols-2 lg:grid-cols-3'
                 : 'sm:grid-cols-2',
