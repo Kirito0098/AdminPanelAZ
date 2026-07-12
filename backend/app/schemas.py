@@ -870,6 +870,11 @@ class TelegramLinkCodeResponse(BaseModel):
     expires_in_seconds: int
 
 
+class TelegramBotInfoResponse(BaseModel):
+    bot_username: str = ""
+    bot_url: str = ""
+
+
 class AdminNotifyEventItem(BaseModel):
     key: str
     label: str

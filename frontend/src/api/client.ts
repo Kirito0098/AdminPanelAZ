@@ -875,6 +875,10 @@ export async function getTelegramLinkCode() {
   return apiFetch<import('../types').TelegramLinkCode>('/telegram/link-code')
 }
 
+export async function getTelegramBotInfo() {
+  return apiFetch<import('../types').TelegramBotInfo>('/telegram/bot-info')
+}
+
 export async function testTelegram() {
   return apiFetch('/settings/telegram/test', { method: 'POST' })
 }

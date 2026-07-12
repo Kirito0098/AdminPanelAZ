@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth import create_access_token, get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import DEFAULT_TG_NOTIFY_EVENTS, AppSetting, User, VpnConfig, VpnType
+from app.models import DEFAULT_TG_NOTIFY_EVENTS, AppSetting, User, UserRole, VpnConfig, VpnType
 from app.routers.maintenance import (
     _admin_notify_settings_response,
     _get_setting,
@@ -30,13 +30,19 @@ from app.routers.maintenance import (
     update_telegram_settings,
 )
 from app.schemas import (
+    AdminNotifyEventItem,
     AdminNotifySettingsResponse,
     AdminNotifySettingsUpdate,
     MessageResponse,
     TelegramSettingsResponse,
     TelegramSettingsUpdate,
 )
-from app.services.admin_notify import TG_NOTIFY_EVENT_LABELS, admin_notify_service
+from app.services.admin_notify import (
+    PERSONAL_OWNER_NOTIFY_KEY_ORDER,
+    PERSONAL_OWNER_NOTIFY_KEYS,
+    TG_NOTIFY_EVENT_LABELS,
+    admin_notify_service,
+)
 from app.services.action_log import log_action
 from app.services.feature_guards import get_feature_service
 from app.services.ip_restriction import ip_restriction_service
@@ -370,16 +376,13 @@ def tg_auth(payload: TelegramAuthRequest, request: Request, db: Session = Depend
 
 
 @router.get("/dashboard")
-def mini_dashboard(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def mini_dashboard(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
     adapter = get_active_adapter(db)
     ovpn = adapter.parse_openvpn_status()
     wg = adapter.parse_wireguard_status()
     wg_online = [p for p in wg if wireguard_peer_is_online(p)]
     node = get_active_node(db)
-    configs_query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id)
-    if current_user.role.value != "admin":
-        configs_query = configs_query.filter(VpnConfig.owner_id == current_user.id)
-    configs = configs_query.count()
+    configs = db.query(VpnConfig).filter(VpnConfig.node_id == node.id).count()
     return {
         "total_configs": configs,
         "connected_openvpn": len(ovpn),
@@ -482,8 +485,9 @@ def mini_qr_link(
 def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     adapter = get_active_adapter(db)
     token = _get_bot_token(db)
+    is_admin = current_user.role == UserRole.admin
     return {
-        "server_ip": adapter.get_server_ip(),
+        "server_ip": adapter.get_server_ip() if is_admin else "",
         "bot_configured": bool(token),
         "user_id": current_user.id,
         "username": current_user.username,
@@ -492,12 +496,34 @@ def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(ge
     }
 
 
+def _mini_notify_settings_response(db: Session, user: User) -> AdminNotifySettingsResponse:
+    response = _admin_notify_settings_response(db, user)
+    if user.role == UserRole.admin:
+        return response
+    labels = dict(TG_NOTIFY_EVENT_LABELS)
+    merged = user.merged_tg_notify_events()
+    return AdminNotifySettingsResponse(
+        telegram_id=response.telegram_id,
+        recipient_user_ids=[],
+        notify_enabled=response.notify_enabled,
+        bot_token_set=response.bot_token_set,
+        events=[
+            AdminNotifyEventItem(
+                key=key,
+                label=labels.get(key, key),
+                enabled=merged.get(key, False),
+            )
+            for key in PERSONAL_OWNER_NOTIFY_KEY_ORDER
+        ],
+    )
+
+
 @router.get("/admin-notify", response_model=AdminNotifySettingsResponse)
 def mini_get_admin_notify(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _admin_notify_settings_response(db, current_user)
+    return _mini_notify_settings_response(db, current_user)
 
 
 @router.patch("/admin-notify", response_model=AdminNotifySettingsResponse)
@@ -506,14 +532,21 @@ def mini_update_admin_notify(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    is_admin = current_user.role == UserRole.admin
     if payload.telegram_id is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Изменение Telegram ID в Mini App недоступно — используйте /link в боте или веб-панель",
         )
+    if payload.recipient_user_ids is not None and not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Только администратор может менять получателей уведомлений",
+        )
     if payload.events is not None:
         merged = current_user.merged_tg_notify_events()
-        for key in DEFAULT_TG_NOTIFY_EVENTS:
+        allowed_keys = DEFAULT_TG_NOTIFY_EVENTS if is_admin else PERSONAL_OWNER_NOTIFY_KEYS
+        for key in allowed_keys:
             if key in payload.events:
                 merged[key] = bool(payload.events[key])
         current_user.tg_notify_events = json.dumps(merged)
@@ -523,7 +556,7 @@ def mini_update_admin_notify(
         _set_setting(db, "telegram_notify_recipient_user_ids", join_user_ids(payload.recipient_user_ids))
     db.commit()
     db.refresh(current_user)
-    return _admin_notify_settings_response(db, current_user)
+    return _mini_notify_settings_response(db, current_user)
 
 
 @router.post("/admin-notify/test", response_model=MessageResponse)
@@ -535,13 +568,28 @@ def mini_test_admin_notify(
     if not bot_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
     merged = current_user.merged_tg_notify_events()
-    enabled = [label for key, label in TG_NOTIFY_EVENT_LABELS if merged.get(key)]
+    if current_user.role == UserRole.admin:
+        enabled = [label for key, label in TG_NOTIFY_EVENT_LABELS if merged.get(key)]
+    else:
+        labels = dict(TG_NOTIFY_EVENT_LABELS)
+        enabled = [labels[key] for key in PERSONAL_OWNER_NOTIFY_KEY_ORDER if merged.get(key)]
     events_text = "\n".join(f"  ✓ {item}" for item in enabled) if enabled else "  (нет включённых событий)"
     text = (
         "🔔 <b>Тест уведомлений AdminPanelAZ</b>\n\n"
         f"Аккаунт: <code>{current_user.username}</code>\n\n"
         f"Включённые события:\n{events_text}"
     )
+    if current_user.role != UserRole.admin:
+        if not current_user.telegram_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Привяжите Telegram через /link в боте",
+            )
+        from app.services.telegram import send_tg_message
+
+        if not send_tg_message(bot_token, current_user.telegram_id, text, run_async=False):
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
+        return MessageResponse(message="Тестовое сообщение отправлено")
     sent, total = _send_test_message_to_recipients(db, current_user, text)
     return MessageResponse(message=f"Тестовое сообщение отправлено ({sent} из {total})")
 

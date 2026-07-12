@@ -54,7 +54,7 @@ export default function TelegramLinkedAccountsPanel({
 
         {accounts.length === 0 ? (
           <SettingsAlert variant="info" title="Пока никто не привязан">
-            Получите код ниже и отправьте боту <code>/link &lt;код&gt;</code>, либо укажите Telegram ID в{' '}
+            Получите код ниже (или в <Link to="/settings/personal" className="font-medium text-primary underline-offset-4 hover:underline">Настройки → Личное</Link>) и отправьте боту <code>/link &lt;код&gt;</code>, либо укажите Telegram ID в{' '}
             <Link to="/settings/users" className="font-medium text-primary underline-offset-4 hover:underline">
               Настройки → Пользователи
             </Link>

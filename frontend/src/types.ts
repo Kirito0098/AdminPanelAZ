@@ -580,6 +580,11 @@ export interface TelegramLinkCode {
   expires_in_seconds: number
 }
 
+export interface TelegramBotInfo {
+  bot_username: string
+  bot_url: string
+}
+
 export interface AdminNotifyEventItem {
   key: string
   label: string

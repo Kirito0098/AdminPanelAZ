@@ -1,5 +1,5 @@
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { TgAuthProvider } from '@/tg-mini/context/TgAuthContext'
+import { TgAuthProvider, useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import MiniShell from '@/tg-mini/layout/MiniShell'
 import Configs from '@/tg-mini/pages/Configs'
 import Cidr from '@/tg-mini/pages/Cidr'
@@ -8,13 +8,18 @@ import Nodes from '@/tg-mini/pages/Nodes'
 import Settings from '@/tg-mini/pages/Settings'
 import Warper from '@/tg-mini/pages/Warper'
 
+function HomeRoute() {
+  const { isAdmin } = useTgAuth()
+  return isAdmin ? <Dashboard /> : <Configs />
+}
+
 export default function TgMiniApp() {
   return (
     <TgAuthProvider>
       <HashRouter>
         <Routes>
           <Route element={<MiniShell />}>
-            <Route index element={<Dashboard />} />
+            <Route index element={<HomeRoute />} />
             <Route path="configs" element={<Configs />} />
             <Route path="nodes" element={<Nodes />} />
             <Route path="warper" element={<Warper />} />

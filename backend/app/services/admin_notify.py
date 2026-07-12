@@ -11,7 +11,7 @@ import psutil
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AppSetting, User
+from app.models import AppSetting, User, UserRole
 from app.services.admin_notify_settings_text import (
     parse_mini_details_kv,
     user_action_tg_action_line,
@@ -54,6 +54,18 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("noc_report", "NOC: ежедневная/еженедельная сводка"),
     ("alert_rule", "Alert rule: срабатывание порога"),
 ]
+
+# Owner self-service reminders (Mini App / personal prefs). Not admin broadcast events.
+PERSONAL_OWNER_NOTIFY_KEYS = frozenset({
+    "cert_expiry_reminder",
+    "traffic_limit_reminder",
+    "temp_block_reminder",
+})
+PERSONAL_OWNER_NOTIFY_KEY_ORDER = (
+    "cert_expiry_reminder",
+    "traffic_limit_reminder",
+    "temp_block_reminder",
+)
 
 CLIENT_BLOCK_NOTIFY_EVENTS = frozenset({
     "openvpn_client_block_toggle",
@@ -452,6 +464,10 @@ class AdminNotifyService:
                 u for u in db.query(User).filter(User.telegram_id.isnot(None)).all()
                 if u.has_tg_notify_event(pref_key)
             ]
+            # Admin broadcast events must not go to role=user via defaults.
+            # Owner reminders (PERSONAL_OWNER_NOTIFY_KEYS) are delivered via user_reminder_service.
+            if pref_key not in PERSONAL_OWNER_NOTIFY_KEYS:
+                notify_users = [u for u in notify_users if u.role == UserRole.admin]
             notify_users = filter_notify_recipients(
                 db,
                 notify_users,
