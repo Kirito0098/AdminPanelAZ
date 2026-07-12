@@ -28,6 +28,22 @@ def _sha256_file(path: Path) -> str | None:
     return hasher.hexdigest()
 
 
+def _sha256_directory_tree(directory: Path) -> str | None:
+    if not directory.is_dir():
+        return None
+    files = sorted(path for path in directory.rglob("*") if path.is_file())
+    if not files:
+        return None
+    hasher = hashlib.sha256()
+    for file_path in files:
+        rel = file_path.relative_to(directory).as_posix()
+        hasher.update(rel.encode())
+        with file_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                hasher.update(chunk)
+    return hasher.hexdigest()
+
+
 def _sha256_directory_glob(
     directory: Path,
     pattern: str,
@@ -81,6 +97,7 @@ def collect_antizapret_fingerprints(install_dir: str | Path = "/root/antizapret"
     base = Path(install_dir or "/root/antizapret").resolve()
     entries: list[tuple[str, Path]] = [
         ("easyrsa3/pki/ca.crt", Path("/etc/openvpn/easyrsa3/pki/ca.crt")),
+        ("easyrsa3/pki/crl.pem", Path("/etc/openvpn/easyrsa3/pki/crl.pem")),
         ("easyrsa3/pki/index.txt", Path("/etc/openvpn/easyrsa3/pki/index.txt")),
         ("easyrsa3/pki/serial", Path("/etc/openvpn/easyrsa3/pki/serial")),
     ]
@@ -93,6 +110,10 @@ def collect_antizapret_fingerprints(install_dir: str | Path = "/root/antizapret"
     wg_hash = _sha256_directory_glob(Path("/etc/wireguard"), "*.conf")
     if wg_hash:
         fingerprints["wireguard/conf_files"] = wg_hash
+
+    ovpn_hash = _sha256_directory_tree(base / "client" / "openvpn")
+    if ovpn_hash:
+        fingerprints["openvpn/client_profiles"] = ovpn_hash
 
     config_dir = base / "config"
     config_file_hashes = collect_config_file_fingerprints(

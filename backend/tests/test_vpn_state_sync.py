@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from app.models import VpnType
 from app.services.antizapret import AntiZapretService
 from app.services.node_sync import vpn_state_sync
+from app.services.openvpn_pki import ProfileValidationResult
 from app.services.node_sync.replicate import (
     ReplicateOperation,
     _handle_client_create,
@@ -56,16 +57,28 @@ def test_sync_wireguard_state_falls_back_to_per_client_profiles_when_archive_emp
     replica.import_wireguard_client_profiles_archive.assert_not_called()
 
 
-def test_sync_openvpn_pki_from_primary_imports_archive_and_restarts():
+def test_sync_openvpn_pki_from_primary_imports_pki_and_profiles_without_recreate(monkeypatch):
     primary = MagicMock()
     replica = MagicMock()
     primary.export_easyrsa3_archive.return_value = b"archive-bytes"
+    primary.export_openvpn_client_profiles_archive.return_value = b"ovpn-profiles"
+
+    monkeypatch.setattr(
+        "app.services.node_sync.vpn_state_sync.validate_all_openvpn_profiles",
+        lambda adapter: ProfileValidationResult(ready=True, issues=()),
+    )
+    monkeypatch.setattr(
+        "app.services.node_sync.vpn_state_sync.restart_all_openvpn_servers",
+        lambda adapter: {"success": True, "restarted": [], "skipped": [], "failed": []},
+    )
 
     vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
 
     primary.export_easyrsa3_archive.assert_called_once()
     replica.import_easyrsa3_archive.assert_called_once_with(b"archive-bytes")
-    replica.recreate_profiles.assert_called_once()
+    replica.recreate_profiles.assert_not_called()
+    primary.export_openvpn_client_profiles_archive.assert_called_once()
+    replica.import_openvpn_client_profiles_archive.assert_called_once_with(b"ovpn-profiles")
 
 
 def test_sync_wireguard_state_continues_when_runtime_apply_fails():

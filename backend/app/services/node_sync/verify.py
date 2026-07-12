@@ -13,6 +13,7 @@ from app.services.node_adapter import NodeAdapter
 from app.services.node_manager import check_node_health, get_adapter_for_node, update_node_from_health
 from app.services.node_sync.fingerprints import CONFIG_FP_PREFIX
 from app.services.node_sync.groups import parse_replica_node_ids
+from app.services.openvpn_pki import profile_issues_payload, validate_all_openvpn_profiles
 
 
 def _refresh_node_online(db: Session, node: Node | None) -> bool:
@@ -182,10 +183,16 @@ def verify_sync_group(
         primary_adapter.get_antizapret_fingerprints(),
         primary_adapter,
     )
+    primary_profile_validation = validate_all_openvpn_profiles(primary_adapter)
+    profile_cert_ready = primary_profile_validation.ready
 
     replica_results: list[dict[str, Any]] = []
     replica_ids = parse_replica_node_ids(group.replica_node_ids)
     ready = True
+    if not profile_cert_ready:
+        ready = False
+
+    replica_profile_issues: dict[int, list[dict[str, str | None]]] = {}
 
     for index, replica_id in enumerate(replica_ids):
         percent = 10 + int((index / max(len(replica_ids), 1)) * 80)
@@ -228,6 +235,18 @@ def verify_sync_group(
             ready = False
             mismatches.extend(fp_mismatches)
 
+        replica_profile_validation = validate_all_openvpn_profiles(adapter)
+        if not replica_profile_validation.ready:
+            ready = False
+            profile_cert_ready = False
+            replica_profile_issues[replica_id] = profile_issues_payload(replica_profile_validation)
+            mismatches.append(
+                {
+                    "kind": "openvpn_profile_certs",
+                    "issues": profile_issues_payload(replica_profile_validation),
+                }
+            )
+
         replica_results.append(
             {
                 "node_id": replica_id,
@@ -244,6 +263,13 @@ def verify_sync_group(
         "primary_node_id": group.primary_node_id,
         "replicas": replica_results,
         "summary": summary,
+        "openvpn_profile_certs": {
+            "ready": profile_cert_ready,
+            "primary_issues": profile_issues_payload(primary_profile_validation),
+            "replica_issues": {
+                str(node_id): issues for node_id, issues in replica_profile_issues.items()
+            },
+        },
     }
 
     if group.last_verify_result:

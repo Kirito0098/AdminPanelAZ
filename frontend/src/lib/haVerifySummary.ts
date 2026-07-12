@@ -35,6 +35,7 @@ export interface HaVerifyResultView {
   groupName?: string
   domain: string
   checkedSummary: string[]
+  primaryProfileIssues?: HaVerifyMismatchView[]
   replicas: HaVerifyReplicaView[]
   nextStep?: string
 }
@@ -44,14 +45,25 @@ const VERIFY_CHECKS = [
   'список клиентов OpenVPN',
   'список клиентов WireGuard',
   'сертификаты PKI и файлы WireGuard',
+  'сертификаты в файлах .ovpn (не отозваны)',
   'файлы настроек AntiZapret (config/)',
 ] as const
 
+const PROFILE_CERT_STATUS_LABELS: Record<string, string> = {
+  revoked: 'отозван',
+  expired: 'истёк',
+  unknown_serial: 'не удалось прочитать serial',
+  missing_cert: 'нет блока <cert>',
+  not_in_index: 'нет в реестре PKI',
+}
+
 const FINGERPRINT_LABELS: Record<string, string> = {
   'easyrsa3/pki/ca.crt': 'Корневой сертификат CA (OpenVPN)',
+  'easyrsa3/pki/crl.pem': 'Список отозванных сертификатов (CRL)',
   'easyrsa3/pki/index.txt': 'Реестр выданных сертификатов',
   'easyrsa3/pki/serial': 'Счётчик серийных номеров PKI',
   'wireguard/conf_files': 'Конфигурации WireGuard (/etc/wireguard/*.conf)',
+  'openvpn/client_profiles': 'Файлы профилей OpenVPN (.ovpn)',
   'antizapret/config': 'Файлы настроек AntiZapret (config/)',
 }
 
@@ -177,6 +189,21 @@ export function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismat
     }
   }
 
+  if (mismatch.kind === 'openvpn_profile_certs') {
+    const issues = mismatch.issues ?? []
+    const details = issues.map(
+      (issue) =>
+        `${issue.client_name}: ${issue.filename} — сертификат ${PROFILE_CERT_STATUS_LABELS[issue.status] || issue.status}${
+          issue.serial_hex ? ` (${issue.serial_hex})` : ''
+        }`,
+    )
+    return {
+      title: 'Недействительный сертификат в .ovpn',
+      details: details.length ? details : ['В профиле OpenVPN встроен отозванный или просроченный сертификат.'],
+      hint: 'Выполните Push full — PKI и .ovpn будут скопированы с primary на replica без перевыпуска сертификатов.',
+    }
+  }
+
   if (mismatch.kind === 'wireguard_clients') {
     const details: string[] = []
     if (mismatch.only_primary?.length) {
@@ -237,8 +264,8 @@ export function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismat
     }
 
     const hint =
-      path.startsWith('easyrsa3/') || path === 'wireguard/conf_files'
-        ? 'Скорее всего реплика отстаёт от основного — нажмите «Синхронизировать» (копирует PKI и WireGuard).'
+      path.startsWith('easyrsa3/') || path === 'wireguard/conf_files' || path === 'openvpn/client_profiles'
+        ? 'Скорее всего реплика отстаёт от основного — нажмите «Синхронизировать» (копирует PKI, .ovpn и WireGuard).'
         : 'Файлы config/ различаются — проверьте правки на основном узле или выполните синхронизацию.'
     return { title: 'Разное содержимое файлов', details, hint }
   }
@@ -248,6 +275,18 @@ export function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismat
     details: [mismatch.detail || 'Обнаружено отличие между основным узлом и репликой.'],
     hint: 'Выполните «Синхронизировать» или устраните отличие вручную на основном узле.',
   }
+}
+
+function formatPrimaryProfileIssues(
+  issues: import('@/types').OpenVpnProfileCertIssue[] | undefined,
+): HaVerifyMismatchView[] {
+  if (!issues?.length) return []
+  return [
+    formatVerifyMismatch({
+      kind: 'openvpn_profile_certs',
+      issues,
+    }),
+  ]
 }
 
 export function parseHaVerifyResult(
@@ -297,6 +336,7 @@ export function parseHaVerifyResult(
     groupName,
     domain: result.shared_domain,
     checkedSummary: [...VERIFY_CHECKS],
+    primaryProfileIssues: formatPrimaryProfileIssues(result.openvpn_profile_certs?.primary_issues),
     replicas,
     nextStep,
   }

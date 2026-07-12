@@ -96,6 +96,37 @@ export default function HaVerifyResultDialog({ open, onOpenChange, result }: HaV
             </ul>
           </section>
 
+          {result.primaryProfileIssues?.length ? (
+            <section className="mb-4 space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Основной узел
+              </p>
+              <ul className="space-y-2">
+                {result.primaryProfileIssues.map((mismatch, index) => (
+                  <li
+                    key={`primary-profile-${mismatch.title}-${index}`}
+                    className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3"
+                  >
+                    <p className="text-sm font-medium text-foreground">{mismatch.title}</p>
+                    {mismatch.details.length ? (
+                      <ul className="mt-1 space-y-0.5 text-sm text-muted-foreground">
+                        {mismatch.details.map((detail) => (
+                          <li key={detail}>{detail}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {mismatch.hint ? (
+                      <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+                        <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span>{mismatch.hint}</span>
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
           {result.replicas.length ? (
             <ul className="space-y-3">
               {result.replicas.map((replica) => (

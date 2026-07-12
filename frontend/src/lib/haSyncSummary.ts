@@ -15,10 +15,18 @@ type HaOpenVpnRestart = {
   failed?: Array<{ unit?: string; error?: string }>
 }
 
+type HaOpenVpnProfileCopy = {
+  node_name?: string
+  node_id?: number
+  success?: boolean
+  error?: string
+}
+
 type HaPushFullPayload = {
   host_copy?: HaHostCopy[]
   restored?: Array<{ node_name?: string; node_id?: number }>
   openvpn_restart?: HaOpenVpnRestart[]
+  openvpn_profile_copy?: HaOpenVpnProfileCopy[]
   message?: string
 }
 
@@ -92,6 +100,35 @@ function parseTaskOutput(task: BackgroundTask | null | undefined): unknown {
     return JSON.parse(raw) as unknown
   } catch {
     return null
+  }
+}
+
+function buildOpenVpnProfileCopySection(
+  items: HaOpenVpnProfileCopy[] | undefined,
+): HaSyncResultSection | null {
+  if (!items?.length) return null
+  return {
+    title: 'OpenVPN-профили на реплике',
+    description:
+      'После restore с primary на реплику скопированы те же .ovpn-файлы — один конфиг и один сертификат работают на обоих IP.',
+    items: items.map((item) => {
+      const name = nodeLabel(item)
+      if (item.error) {
+        return {
+          nodeName: name,
+          text: 'Не удалось скопировать .ovpn с primary',
+          explanation: 'Replica может отклонять тот же сертификат, что принимает primary — повторите Push full.',
+          status: 'error' as const,
+          details: [item.error],
+        }
+      }
+      return {
+        nodeName: name,
+        text: 'Профили OpenVPN совпадают с primary',
+        explanation: 'Сертификаты в .ovpn не перевыпускались — только байт-копия с основного узла.',
+        status: 'success' as const,
+      }
+    }),
   }
 }
 
@@ -318,6 +355,7 @@ export function parseHaSyncTaskResult(
       pushSection(sections, buildOpenVpnSection(setup.shared_domain?.openvpn_restart, 'domain'))
       pushSection(sections, buildHostCopySection(setup.push_full?.host_copy))
       pushSection(sections, buildRestoredSection(setup.push_full?.restored))
+      pushSection(sections, buildOpenVpnProfileCopySection(setup.push_full?.openvpn_profile_copy))
       pushSection(sections, buildOpenVpnSection(setup.push_full?.openvpn_restart, 'replica'))
     } else if ('host_copy' in parsed || 'restored' in parsed) {
       const push = parsed as HaPushFullPayload
@@ -325,6 +363,7 @@ export function parseHaSyncTaskResult(
       title = 'Полная синхронизация завершена'
       pushSection(sections, buildHostCopySection(push.host_copy))
       pushSection(sections, buildRestoredSection(push.restored))
+      pushSection(sections, buildOpenVpnProfileCopySection(push.openvpn_profile_copy))
       pushSection(sections, buildOpenVpnSection(push.openvpn_restart, 'replica'))
     } else if ('updated' in parsed || 'domain' in parsed) {
       const domainPayload = parsed as HaSharedDomainPayload

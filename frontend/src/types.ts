@@ -44,6 +44,21 @@ export interface NodeSyncMismatch {
   primary?: string | null
   replica?: string | null
   detail?: string | null
+  issues?: OpenVpnProfileCertIssue[]
+}
+
+export interface OpenVpnProfileCertIssue {
+  client_name: string
+  path: string
+  filename: string
+  serial_hex?: string | null
+  status: string
+}
+
+export interface OpenVpnProfileCertsVerify {
+  ready: boolean
+  primary_issues: OpenVpnProfileCertIssue[]
+  replica_issues: Record<string, OpenVpnProfileCertIssue[]>
 }
 
 export interface NodeSyncReplicaVerifyResult {
@@ -59,6 +74,7 @@ export interface NodeSyncVerifyResult {
   primary_node_id: number
   replicas: NodeSyncReplicaVerifyResult[]
   summary: string
+  openvpn_profile_certs?: OpenVpnProfileCertsVerify
 }
 
 export interface NodeSyncGroupMember {

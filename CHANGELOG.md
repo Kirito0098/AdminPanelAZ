@@ -44,7 +44,7 @@
 
 ## [2.15.0] - 2026-07-12
 
-> **Кратко:** адаптивная вёрстка панели для телефонов и планшетов — safe area и `100dvh`, карточные списки вместо широких таблиц, компактный header и toolbar; общие компоненты `ResponsiveDataView`, `PageSectionHeader`, `ToolbarButton`; мобильные **Настройки** с inline-accordion и выпадающим переключателем разделов; улучшения HA-селектора узлов и бейджей группы; Telegram Mini App — синхронизация темы WebApp; dev-proxy Vite для `ENFORCE_HTTPS`; исправления OpenVPN restart после HA sync, сломанных `/traffic` и `/edit-files`, flyout настроек за пределами экрана.
+> **Кратко:** адаптивная вёрстка панели для телефонов и планшетов — safe area и `100dvh`, карточные списки вместо широких таблиц, компактный header и toolbar; общие компоненты `ResponsiveDataView`, `PageSectionHeader`, `ToolbarButton`; мобильные **Настройки** с inline-accordion и выпадающим переключателем разделов; улучшения HA-селектора узлов и бейджей группы; Telegram Mini App — синхронизация темы WebApp; dev-proxy Vite для `ENFORCE_HTTPS`; **HA OpenVPN parity без перевыпуска сертификатов** — byte-copy PKI и `.ovpn` с primary на replica, read-only download/verify, Push full с копией профилей после restore; исправления OpenVPN restart после HA sync, сломанных `/traffic` и `/edit-files`, flyout настроек за пределами экрана; **node agent 1.5.0**.
 
 ### ✨ Added
 
@@ -64,6 +64,11 @@
 
 - **`HaScopeEnforcer`** — при входе на HA-scope страницы с активной replica автоматически переключает контекст на primary (`HaScopeEnforcer.tsx`, `Layout.tsx`).
 - **Хелперы `haNodeScope` / `haBadgeLabel`** — единая логика scope страниц (shared vs diagnostic), подписи HA-группы в селекторе и tooltip бейджа `· N узла` (`haNodeScope.ts`, `haBadgeLabel.ts`).
+- **Модуль `openvpn_pki`** — разбор `easyrsa3/pki/index.txt`, извлечение serial из PEM в `.ovpn`, read-only валидация профилей (`openvpn_pki.py`).
+- **Verify: блок `openvpn_profile_certs`** — диагностика отозванных/просроченных cert в `.ovpn` на primary и replica без изменения файлов на диске (`verify.py`, `haVerifySummary.ts`, `types.ts`).
+- **Fingerprints для HA parity** — `easyrsa3/pki/crl.pem` и агрегированный hash каталога `openvpn/client_profiles` в отчёте «Проверить» (`fingerprints.py`, `haVerifySummary.ts`).
+- **Export/import `.ovpn` через node agent** — `GET/POST /profiles/openvpn/export|import` для byte-copy профилей между узлами (`node_agent/main.py`, `antizapret.py`, `node_adapter.py`).
+- **Push full: поле `openvpn_profile_copy`** — в JSON результата синхронизации — статус копии `.ovpn` с primary на каждую replica (`push_full.py`, `haSyncSummary.ts`).
 
 #### Telegram Mini App
 
@@ -93,6 +98,19 @@
 
 - **Селектор узлов на HA-scope страницах** — на Dashboard, Traffic, Routing, Edit Files, Settings и AntiZapret в шапке показывается название HA-группы (а не отдельные primary/replica); replica скрыта из списка. На диагностических страницах (Логи, Мониторинг сервера, Warper, Monitoring, Узлы) список узлов без изменений (`NodeSelector.tsx`, `NodeContext.tsx`).
 - **Бейдж HA на карточках и в таблицах** — вместо непонятного `(2)` показывается `· 2 узла`; при наведении — подсказка, что клиент доступен на всех узлах группы (`ConfigCard.tsx`, `TrafficClientDetails.tsx`, `MonitoringConnectionsList.tsx`).
+- **HA crypto sync OpenVPN** — порядок: import PKI с primary → byte-copy `.ovpn` → restart; **без** `client.sh 7` на replica (`vpn_state_sync.py`, `copy_openvpn_profiles_from_primary`).
+- **Push full OpenVPN** — убран auto-repair/re-issue перед backup; после restore на replica — копия `.ovpn` с primary (restore вызывает `client.sh 7`, copy выравнивает профили) (`push_full.py`).
+- **OpenVPN profile helpers** — `recreate_openvpn_profiles()` (только `client.sh 7`), `validate_openvpn_profiles()` (read-only), `recreate_openvpn_profiles_after_admin_change()` после явного create/renew (`openvpn_profile_repair.py`).
+- **Download / QR / Telegram** — отдают `.ovpn` as-is с диска, без repair и перевыпуска cert (`configs.py`, `public_download.py`, `telegram_config_send.py`).
+- **Отчёт Push full в UI** — секция «OpenVPN-профили на реплике» вместо «перевыпуск на primary»; подсказки verify рекомендуют Push full, а не renew cert (`haSyncSummary.ts`, `haVerifySummary.ts`).
+
+#### Документация
+
+- **`docs/NodeSync.md`** — один `.ovpn` + один cert на обоих IP; HA копирует PKI и файлы профилей; `client.sh 1` только по кнопке «Обновить сертификат»; verify сравнивает `openvpn/client_profiles`.
+
+#### Node agent
+
+- **Версия node agent `1.5.0`** — `GET/POST /profiles/openvpn/export|import` для byte-copy `.ovpn` между узлами при HA sync и Push full (`NODE_AGENT_VERSION`, `node_agent/main.py`, `antizapret.py`). Минимум для PKI/WG crypto-sync — **≥ 1.3.0**; для копии OpenVPN-профилей — **≥ 1.5.0**; после обновления панели перезапустите агент на VPN-узлах.
 
 ### 🐛 Fixed
 
@@ -104,11 +122,18 @@
 #### Node Sync / HA
 
 - **OpenVPN restart после HA sync** — `systemctl restart openvpn-server@*` больше не поднимает службы, остановленные вручную; перезапускаются только unit'ы в состоянии `active` (`openvpn_restart.py`).
+- **Replica отклоняла тот же `.ovpn`, что работал на primary** — при рассинхроне PKI/CRL/профилей replica возвращала `certificate revoked` для того же serial; исправлено byte-copy PKI + `.ovpn` с primary без `recreate_profiles` на replica (`vpn_state_sync.py`, `push_full.py`).
+- **Auto `client.sh 1` при sync/download ломал рабочие cert** — панель могла перевыпустить cert при Push full, HA sync или скачивании конфига; auto re-issue убран из автоматических путей, остаётся только при явном create/renew в UI (`openvpn_profile_repair.py`).
 
 ### 🧪 Tests
 
 - **`haNodeScope` / `haBadgeLabel`** — unit-тесты scope страниц, подписей группы и tooltip (`haNodeScope.test.ts`, `haBadgeLabel.test.ts`).
 - **OpenVPN restart только active** — `test_node_sync_openvpn_restart.py`: пропуск stopped unit'ов, fallback при недоступном monitoring.
+- **OpenVPN PKI и profile validation** — `test_openvpn_pki.py`: разбор `index.txt`, serial из PEM, статусы revoked/expired.
+- **Profile repair без auto re-issue** — `test_openvpn_profile_repair.py`: `recreate_openvpn_profiles` не вызывает `add_openvpn_client`.
+- **HA crypto sync OpenVPN** — `test_vpn_state_sync.py`: replica import PKI + `.ovpn`, без `recreate_profiles`.
+- **Push full: copy `.ovpn` после restore** — `test_node_sync_push_full.py`: `copy_openvpn_profiles_from_primary` на успешных репликах, поле `openvpn_profile_copy`.
+- **Verify: `openvpn_profile_certs`** — `test_node_sync_verify_profiles.py`: `ready=false` при revoked cert в профиле primary.
 
 ---
 

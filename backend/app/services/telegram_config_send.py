@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models import User, VpnConfig, VpnType
 from app.services.node_manager import get_active_adapter
+from app.services.node_manager import get_active_adapter
 from app.services.profile_download_name import build_profile_download_filename
 from app.services.telegram_profile_ui import file_caption
 from app.services.telegram import send_tg_document, send_tg_message

@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from app.models import VpnType
 from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
+from app.services.openvpn_pki import validate_all_openvpn_profiles
 
 logger = logging.getLogger(__name__)
 
@@ -121,11 +122,36 @@ def sync_wireguard_state_from_primary(
     )
 
 
+def copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter) -> None:
+    """Byte-copy all .ovpn profile files from primary to replica."""
+    archive = primary_adapter.export_openvpn_client_profiles_archive()
+    if not archive:
+        logger.warning("HA crypto sync: primary OpenVPN profile archive is empty")
+        return
+    replica_adapter.import_openvpn_client_profiles_archive(archive)
+
+
 def sync_openvpn_pki_from_primary(primary_adapter, replica_adapter) -> None:
-    """Copy OpenVPN PKI (easyrsa3) from primary and reload services on replica."""
+    """Copy OpenVPN PKI and .ovpn profiles from primary to replica (no cert re-issue)."""
     archive = primary_adapter.export_easyrsa3_archive()
     replica_adapter.import_easyrsa3_archive(archive)
-    replica_adapter.recreate_profiles()
+    copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter)
+
+    replica_validation = validate_all_openvpn_profiles(replica_adapter)
+    if not replica_validation.ready:
+        logger.warning(
+            "HA crypto sync: replica OpenVPN profile cert validation issues after copy: %s",
+            [
+                {
+                    "client": issue.client_name,
+                    "file": issue.filename,
+                    "status": issue.status,
+                    "serial": issue.serial_hex,
+                }
+                for issue in replica_validation.issues
+            ],
+        )
+
     restart_result = restart_all_openvpn_servers(replica_adapter)
     if not restart_result.get("success"):
         failed = restart_result.get("failed") or []
@@ -246,3 +272,4 @@ def heal_crypto_drift(db, group) -> dict[str, object]:
         applied.append(replica_node.id)
 
     return {"success": not errors, "applied": applied, "errors": errors}
+

@@ -457,6 +457,31 @@ async def import_wireguard_profiles(
     return {"message": "Профили WireGuard/AmneziaWG импортированы"}
 
 
+@app.get("/openvpn/easyrsa3/index")
+def read_easyrsa_index(_: None = Depends(verify_api_key)):
+    return {"content": service.read_easyrsa_index()}
+
+
+@app.get("/profiles/openvpn/export")
+def export_openvpn_profiles(_: None = Depends(verify_api_key)):
+    data = service.export_openvpn_client_profiles_archive()
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/gzip",
+        headers={"Content-Disposition": 'attachment; filename="openvpn-profiles.tar.gz"'},
+    )
+
+
+@app.post("/profiles/openvpn/import")
+async def import_openvpn_profiles(
+    archive: UploadFile = File(...),
+    _: None = Depends(verify_api_key),
+):
+    content = await archive.read()
+    service.import_openvpn_client_profiles_archive(content)
+    return {"message": "Профили OpenVPN импортированы"}
+
+
 @app.get("/routing/overview")
 def routing_overview(_: None = Depends(verify_api_key)):
     return cidr_service.get_overview()

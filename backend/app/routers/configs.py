@@ -42,6 +42,7 @@ from app.services.node_sync.groups import (
     require_ha_primary_for_client_ops,
 )
 from app.services.openvpn_cert import resolve_openvpn_cert_days_remaining
+from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
 from app.services.openvpn_group import (
     filter_openvpn_profile_files,
     get_user_openvpn_group,
@@ -415,6 +416,10 @@ def create_config(
     adapter = get_active_adapter(db)
     if payload.vpn_type == VpnType.openvpn:
         adapter.add_openvpn_client(payload.client_name, payload.cert_expire_days or 3650)
+        recreate_openvpn_profiles_after_admin_change(
+            adapter,
+            client_names=[payload.client_name],
+        )
     else:
         adapter.add_wireguard_client(payload.client_name)
 
@@ -501,7 +506,12 @@ def update_config(
         config.owner_id = payload.owner_id
         metadata_changed = True
     if payload.cert_expire_days is not None and config.vpn_type == VpnType.openvpn:
-        get_active_adapter(db).add_openvpn_client(config.client_name, payload.cert_expire_days)
+        adapter = get_active_adapter(db)
+        adapter.add_openvpn_client(config.client_name, payload.cert_expire_days)
+        recreate_openvpn_profiles_after_admin_change(
+            adapter,
+            client_names=[config.client_name],
+        )
         config.cert_expire_days = payload.cert_expire_days
         cert_renewed = True
         renewed_days = payload.cert_expire_days
@@ -579,7 +589,8 @@ def download_profile(
     if not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
-    content = get_active_adapter(db).read_profile_file(path)
+    adapter = get_active_adapter(db)
+    content = adapter.read_profile_file(path)
     filename = build_profile_download_filename(config.client_name, path=path)
     return PlainTextResponse(content, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
@@ -598,7 +609,8 @@ def generate_qr(
     if not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
-    content = get_active_adapter(db).read_profile_file(path)
+    adapter = get_active_adapter(db)
+    content = adapter.read_profile_file(path)
     qr_mode = "profile"
     headers: dict[str, str] = {"X-Qr-Content": qr_mode}
     try:

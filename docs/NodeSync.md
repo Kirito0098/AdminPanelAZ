@@ -7,8 +7,16 @@
 ## MVP (этап 5.1–5.3)
 
 - **Sync Group** — primary + 1+ replica, shared domain
-- **Push full** — `client.sh 8` на primary → transfer → restore на replica (как `setup.sh`). Дополнительно копирует непустые `OPENVPN_HOST` / `WIREGUARD_HOST` из `setup` primary на каждую replica **перед** restore, чтобы перегенерированные профили (`client.sh 7`) получили правильный хост.
-- **Verify** — списки OVPN/WG клиентов + checksums PKI/WG/config
+- **Push full** — `client.sh 8` на primary → transfer → restore на replica (как `setup.sh`). Дополнительно копирует непустые `OPENVPN_HOST` / `WIREGUARD_HOST` из `setup` primary на каждую replica **перед** restore. После restore — **байт-копия `.ovpn`** с primary (restore вызывает `client.sh 7`, который может перегенерировать профили; copy выравнивает их с primary).
+- **Verify** — списки OVPN/WG клиентов + checksums PKI/WG/config/**`.ovpn`** + **read-only проверка сертификатов в `.ovpn`**
+
+### OpenVPN-профили и HA
+
+- Один `.ovpn` и один сертификат должны работать на **обоих** IP за общим доменом. HA копирует **PKI** (`easyrsa3`, включая `crl.pem`) и **байт-идентичные файлы `.ovpn`** с primary на replica — без перевыпуска сертификатов.
+- **Push full** и **HA crypto sync** не вызывают `client.sh 1`. На replica не выполняется `client.sh 7` для выравнивания — только import PKI + copy `.ovpn` с primary.
+- **Create** и **renew** на primary (явное действие админа) вызывают `client.sh 1` на primary, затем `client.sh 7` и crypto sync на replica.
+- **Download / QR / Telegram** отдают файл с диска as-is, без repair.
+- **Verify** сравнивает fingerprint `openvpn/client_profiles` и блок `openvpn_profile_certs` (read-only). При расхождении — **Push full**, не автоматический renew.
 
 ## API
 
@@ -22,7 +30,7 @@
 | POST | `/api/nodes/sync-groups/{id}/verify` |
 | GET | `/api/nodes/sync-groups/{id}/status` |
 
-Node agent: `POST /backups/antizapret/restore`, `GET /backups/antizapret/download`, `GET /backups/antizapret/fingerprints`.
+Node agent **≥ 1.5.0** (для byte-copy `.ovpn`): `POST /backups/antizapret/restore`, `GET /backups/antizapret/download`, `GET /backups/antizapret/fingerprints`, `GET/POST /profiles/openvpn/export|import`, `GET /openvpn/easyrsa3/index`.
 
 ## Ограничения
 
@@ -63,8 +71,8 @@ Node agent: `POST /backups/antizapret/restore`, `GET /backups/antizapret/downloa
 
 | Операция | Replica |
 |----------|---------|
-| Create / delete client | Копия crypto-состояния primary: `/etc/wireguard/*.conf` + **те же файлы профилей** WG/AWG (PrivateKey/PSK) или `/etc/openvpn/easyrsa3/` + `client.sh 7` + restart OpenVPN (OVPN); shadow `VpnConfig` |
-| Renew OpenVPN cert | Копия easyrsa3 с primary + перегенерация профилей; тот же `client_name`, новый срок |
+| Create / delete client | Копия crypto-состояния primary: `/etc/wireguard/*.conf` + **те же файлы профилей** WG/AWG (PrivateKey/PSK) или `/etc/openvpn/easyrsa3/` + **байт-копия `.ovpn`** с primary + restart OpenVPN (OVPN); shadow `VpnConfig` |
+| Renew OpenVPN cert | Копия easyrsa3 + `.ovpn` с primary после явного `client.sh 1` на primary; тот же `client_name`, новый срок |
 | Temp / permanent block, unblock | Та же политика в БД + runtime (iptables/WG) |
 | Set / clear traffic limit | Те же `traffic_limit_*` + reconcile runtime |
 | WG set-expiry | Тот же `expires_at` + runtime |

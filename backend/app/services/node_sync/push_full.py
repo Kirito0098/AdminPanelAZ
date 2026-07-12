@@ -23,6 +23,7 @@ from app.services.node_sync.manual_link import link_primary_configs_to_group
 from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
 from app.services.node_sync.shadow_link import format_shadow_link_warning, link_shadow_configs_for_group
 from app.services.node_sync.verify import verify_sync_group
+from app.services.node_sync.vpn_state_sync import copy_openvpn_profiles_from_primary
 from app.services.policy_import import copy_access_policies_from_node
 from app.services.traffic.collector import collect_traffic_snapshot_for_node
 
@@ -96,6 +97,7 @@ def run_push_full(
     failed: list[dict[str, Any]] = []
     host_copy: list[dict[str, Any]] = []
     openvpn_restart: list[dict[str, Any]] = []
+    openvpn_profile_copy: list[dict[str, Any]] = []
     admin = db.query(User).filter(User.role == UserRole.admin).first()
 
     for index, replica_id in enumerate(replica_ids):
@@ -136,6 +138,20 @@ def run_push_full(
             else:
                 result = replica_adapter.restore_antizapret_backup(archive_bytes, archive_name)
             restored.append({"node_id": replica_id, "node_name": replica_name, "result": result})
+
+            progress(percent, f"Копия OpenVPN-профилей primary → {replica_name}…")
+            try:
+                copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter)
+                openvpn_profile_copy.append({"node_id": replica_id, "node_name": replica_name, "success": True})
+            except Exception as exc:
+                logger.warning(
+                    "Push full: OpenVPN profile copy failed on %s: %s",
+                    replica_name,
+                    exc,
+                )
+                openvpn_profile_copy.append(
+                    {"node_id": replica_id, "node_name": replica_name, "error": str(exc)}
+                )
 
             progress(percent, f"Перезапуск OpenVPN на {replica_name}…")
             restart_result = restart_all_openvpn_servers(replica_adapter)
@@ -217,6 +233,7 @@ def run_push_full(
         "failed": failed,
         "host_copy": host_copy,
         "openvpn_restart": openvpn_restart,
+        "openvpn_profile_copy": openvpn_profile_copy,
         "shadow_link": shadow_link_result,
         "verify": verify_result,
     }

@@ -22,7 +22,9 @@ CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 WIREGUARD_SERVER_INTERFACES = frozenset({"antizapret", "vpn"})
 WIREGUARD_SERVER_CONFIG_DIR = Path("/etc/wireguard")
 WIREGUARD_CLIENT_PROFILE_DIRS = ("wireguard", "amneziawg")
+OPENVPN_CLIENT_PROFILE_DIR = "openvpn"
 EASYRSA3_ROOT = Path("/etc/openvpn/easyrsa3")
+EASYRSA_INDEX_PATH = EASYRSA3_ROOT / "pki" / "index.txt"
 
 
 class AntiZapretService:
@@ -111,6 +113,11 @@ class AntiZapretService:
 
     def recreate_profiles(self) -> str:
         return self._run_client_script("7", timeout=300)
+
+    def read_easyrsa_index(self) -> str:
+        if not EASYRSA_INDEX_PATH.is_file():
+            return ""
+        return EASYRSA_INDEX_PATH.read_text(encoding="utf-8", errors="replace")
 
     def _wireguard_server_config_path(self, interface: str) -> Path:
         normalized = (interface or "").strip().lower()
@@ -308,6 +315,55 @@ class AntiZapretService:
                         name.startswith("client/wireguard/")
                         or name.startswith("client/amneziawg/")
                         or name in {"client/wireguard", "client/amneziawg"}
+                    ):
+                        continue
+                    archive.extract(member, path=str(self.base_path), filter="data")
+        finally:
+            if temp_path:
+                Path(temp_path).unlink(missing_ok=True)
+
+    def export_openvpn_client_profiles_archive(self) -> bytes:
+        buffer = io.BytesIO()
+        root = self.client_dir / OPENVPN_CLIENT_PROFILE_DIR
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            if root.is_dir():
+                for item in sorted(root.rglob("*")):
+                    if not item.is_file():
+                        continue
+                    arcname = "client/" + item.relative_to(self.client_dir).as_posix()
+                    archive.add(item, arcname=arcname)
+        return buffer.getvalue()
+
+    def import_openvpn_client_profiles_archive(self, data: bytes) -> None:
+        if not data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Пустой архив профилей OpenVPN",
+            )
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+                tmp.write(data)
+                temp_path = tmp.name
+            with tarfile.open(temp_path, "r:gz") as archive:
+                has_profile_file = any(
+                    member.isfile() and member.name.startswith("client/openvpn/")
+                    for member in archive.getmembers()
+                )
+                if not has_profile_file:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Архив профилей OpenVPN не содержит файлов client/openvpn",
+                    )
+            openvpn_root = self.client_dir / OPENVPN_CLIENT_PROFILE_DIR
+            if openvpn_root.is_dir():
+                shutil.rmtree(openvpn_root)
+            with tarfile.open(temp_path, "r:gz") as archive:
+                for member in archive.getmembers():
+                    name = member.name
+                    if not (
+                        name.startswith("client/openvpn/")
+                        or name == "client/openvpn"
                     ):
                         continue
                     archive.extract(member, path=str(self.base_path), filter="data")

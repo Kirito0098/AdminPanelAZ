@@ -25,6 +25,7 @@ from app.services.node_sync.client_sync import (
 )
 from app.services.node_sync.policy_sync import maybe_replicate_policy_op
 from app.services.node_sync.groups import find_sync_group_for_primary, require_ha_primary_for_client_ops
+from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,7 @@ def _run_single_op(
             if config.vpn_type != VpnType.openvpn:
                 return {"config_id": config_id, "ok": False, "error": "not openvpn"}
             adapter.add_openvpn_client(name, renew_cert_days)
+            recreate_openvpn_profiles_after_admin_change(adapter, client_names=[name])
             config.cert_expire_days = renew_cert_days
             db.commit()
             maybe_replicate_cert_renew(

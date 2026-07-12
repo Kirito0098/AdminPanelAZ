@@ -404,6 +404,15 @@ class LocalNodeAdapter(NodeAdapter):
     def import_wireguard_client_profiles_archive(self, data: bytes) -> None:
         self._service.import_wireguard_client_profiles_archive(data)
 
+    def read_easyrsa_index(self) -> str:
+        return self._service.read_easyrsa_index()
+
+    def export_openvpn_client_profiles_archive(self) -> bytes:
+        return self._service.export_openvpn_client_profiles_archive()
+
+    def import_openvpn_client_profiles_archive(self, data: bytes) -> None:
+        self._service.import_openvpn_client_profiles_archive(data)
+
     def read_config_file(self, filename: str) -> str:
         return self._service.read_config_file(filename)
 
@@ -997,6 +1006,21 @@ class RemoteNodeAdapter(NodeAdapter):
             "POST",
             "/profiles/wireguard/import",
             files={"archive": ("wireguard-profiles.tar.gz", data, "application/gzip")},
+            timeout=120.0,
+        )
+
+    def read_easyrsa_index(self) -> str:
+        data = self._request("GET", "/openvpn/easyrsa3/index")
+        return data.get("content", "")
+
+    def export_openvpn_client_profiles_archive(self) -> bytes:
+        return self._request_bytes("GET", "/profiles/openvpn/export", timeout=120.0)
+
+    def import_openvpn_client_profiles_archive(self, data: bytes) -> None:
+        self._request(
+            "POST",
+            "/profiles/openvpn/import",
+            files={"archive": ("openvpn-profiles.tar.gz", data, "application/gzip")},
             timeout=120.0,
         )
 
