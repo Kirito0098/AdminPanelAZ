@@ -44,7 +44,7 @@
 
 ## [2.15.0] - 2026-07-12
 
-> **Кратко:** адаптивная вёрстка панели для телефонов и планшетов — safe area и `100dvh`, карточные списки вместо широких таблиц, компактный header и toolbar; общие компоненты `ResponsiveDataView`, `PageSectionHeader`, `ToolbarButton`; мобильные **Настройки** с inline-accordion и выпадающим переключателем разделов; улучшения HA-селектора узлов и бейджей группы; Telegram Mini App — синхронизация темы WebApp и исправление загрузки assets; dev-proxy Vite для `ENFORCE_HTTPS`; **HA OpenVPN parity без перевыпуска сертификатов** — byte-copy PKI и `.ovpn` с primary на replica, read-only download/verify, Push full с копией профилей после restore; **строгая идентичность replica** — wipe-and-replace VPN/crypto при Push full/Setup, prune лишних клиентов, защита профилей от «Домен», routing apply и CSV/шаблонов; исправление ложных расхождений Verify из-за `parse_easyrsa_index`; исправления OpenVPN restart после HA sync, сломанных `/traffic` и `/edit-files`, flyout настроек за пределами экрана; **node agent 1.5.0**.
+> **Кратко:** адаптивная вёрстка панели для телефонов и планшетов — safe area и `100dvh`, карточные списки вместо широких таблиц, компактный header и toolbar; общие компоненты `ResponsiveDataView`, `PageSectionHeader`, `ToolbarButton`; мобильные **Настройки** с inline-accordion и выпадающим переключателем разделов; улучшения HA-селектора узлов и бейджей группы; Telegram Mini App — синхронизация темы WebApp и исправление загрузки assets; понятные ошибки при «Подключить бота к панели» (сеть/DNS/timeout вместо сырого `Errno 101`); dev-proxy Vite для `ENFORCE_HTTPS`; **HA OpenVPN parity без перевыпуска сертификатов** — byte-copy PKI и `.ovpn` с primary на replica, read-only download/verify, Push full с копией профилей после restore; **строгая идентичность replica** — wipe-and-replace VPN/crypto при Push full/Setup, prune лишних клиентов, защита профилей от «Домен», routing apply и CSV/шаблонов; исправление ложных расхождений Verify из-за `parse_easyrsa_index`; исправления OpenVPN restart после HA sync, сломанных `/traffic` и `/edit-files`, flyout настроек за пределами экрана; **node agent 1.5.0**.
 
 ### ✨ Added
 
@@ -140,6 +140,11 @@
 
 - **Зависание на «Загрузка Mini App…»** — относительные пути `./assets/…` при открытии `/api/tg-mini` (без trailing slash) резолвились в `/api/assets/…` и отдавали 404; JS/CSS не загружались. При отдаче страницы пути переписываются в `/api/tg-mini/assets/…` (`tg_mini.py`).
 
+#### Telegram-бот
+
+- **Непонятный `setWebhook: [Errno 101] Network is unreachable`** — при сбое исходящего доступа к `api.telegram.org` показывался сырой errno. Теперь `format_telegram_connect_error` объясняет: сеть недоступна / timeout / DNS / TLS / нужен HTTPS, с подсказкой `curl -4 https://api.telegram.org/` (`telegram_api.py`, `maintenance.py`).
+- **Подсказка в UI** — под кнопкой «Подключить бота к панели» уточнено про исходящий доступ сервера к Telegram API (`TelegramSettingsPanel.tsx`).
+
 ### 🧪 Tests
 
 - **`haNodeScope` / `haBadgeLabel`** — unit-тесты scope страниц, подписей группы и tooltip (`haNodeScope.test.ts`, `haBadgeLabel.test.ts`).
@@ -155,6 +160,7 @@
 - **EasyRSA `index.txt` с пустой revocation-колонкой** — `test_openvpn_pki.py`: строки `V`/`E` с `V\texpiry\t\tserial\t…`.
 - **Shared domain: byte-copy `.ovpn`** — `test_node_sync_shared_domain.py`: копия профилей primary → replica после `client.sh 7`.
 - **Routing apply без `client.sh 7` на replica** — `test_background_tasks_doall.py`: `recreate_profiles=False` для `routing_apply_replica`.
+- **Ошибки Telegram webhook** — `test_telegram_api_errors.py`: `Network is unreachable`, timeout, HTTPS URL required, fallback для неизвестных ошибок.
 
 ---
 
