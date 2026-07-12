@@ -104,7 +104,9 @@ function isNavItemVisible(
 
 function NavGroupHeader({ label }: { label: string }) {
   return (
-    <p className="px-3 pb-1 pt-3 text-xs font-medium text-muted-foreground first:pt-1">{label}</p>
+    <p className="orientation-compact-sidebar-group-label px-3 pb-1 pt-3 text-xs font-medium text-muted-foreground first:pt-1">
+      {label}
+    </p>
   )
 }
 
@@ -124,7 +126,7 @@ function SidebarNavLink({
       onClick={onNavigate}
       className={({ isActive }) =>
         cn(
-          'group relative flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-medium transition-colors',
+          'orientation-compact-sidebar-link group relative flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-medium transition-colors',
           isActive
             ? 'bg-primary/10 text-foreground ring-1 ring-primary/20'
             : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
@@ -142,7 +144,7 @@ function SidebarNavLink({
           />
           <span
             className={cn(
-              'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors',
+              'orientation-compact-sidebar-link-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors',
               isActive
                 ? 'border-primary/25 bg-primary/15 text-primary'
                 : 'border-transparent bg-muted/60 text-muted-foreground group-hover:bg-muted group-hover:text-foreground',
@@ -168,20 +170,34 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     items: group.items.filter((item) => isNavItemVisible(item, user?.role, isEnabled)),
   })).filter((group) => group.items.length > 0)
 
+  const themeToggle = (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-8 w-8 shrink-0"
+      onClick={() => toggleTheme()}
+      aria-label={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+    >
+      {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+    </Button>
+  )
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 border-b border-border/60 px-3 py-4">
+      <div className="orientation-compact-sidebar-header shrink-0 border-b border-border/60 px-3 py-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+          <div className="orientation-compact-sidebar-brand-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
             <Shield size={20} strokeWidth={2} />
           </div>
           <div className="min-w-0">
             <h1 className="text-sm font-semibold leading-tight">AntiZapret</h1>
-            <p className="text-xs leading-relaxed text-muted-foreground">NOC · VPN OPS</p>
+            <p className="orientation-compact-sidebar-brand-sub text-xs leading-relaxed text-muted-foreground">
+              NOC · VPN OPS
+            </p>
           </div>
         </div>
 
-        <div className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2">
+        <div className="orientation-compact-sidebar-status mt-3 flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2">
           <span className="relative flex h-2 w-2 shrink-0">
             <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
           </span>
@@ -190,7 +206,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       </div>
 
-      <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2" aria-label="Основная навигация">
+      <nav
+        className="orientation-compact-sidebar-nav flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2"
+        aria-label="Основная навигация"
+      >
         {visibleGroups.map((group) => (
           <div key={group.label}>
             <NavGroupHeader label={group.label} />
@@ -206,40 +225,51 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         ))}
       </nav>
 
-      <div className="shrink-0 space-y-2 border-t border-border/60 bg-card p-3 pb-safe">
-        <div className="flex items-center justify-between rounded-lg bg-muted/30 px-2 py-1.5">
-          <LiveClock />
+      <div className="orientation-compact-sidebar-footer shrink-0 border-t border-border/60 bg-card p-3 pb-safe">
+        <div className="orientation-compact-sidebar-footer-stack space-y-2">
+          <div className="flex items-center justify-between rounded-lg bg-muted/30 px-2 py-1.5">
+            <LiveClock />
+            {themeToggle}
+          </div>
+
+          <div className="flex items-center gap-3 rounded-xl border border-border/80 bg-muted/20 p-2.5">
+            <Avatar className="h-9 w-9 shrink-0">
+              <AvatarFallback className="bg-primary/15 text-xs font-semibold text-primary">{initials}</AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium leading-tight">{user?.username}</p>
+              <p className="text-xs text-muted-foreground">
+                {user?.role === 'admin' ? 'Администратор' : user?.role === 'viewer' ? 'Только просмотр' : 'Оператор'}
+              </p>
+            </div>
+          </div>
+
           <Button
             variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0"
-            onClick={() => toggleTheme()}
-            aria-label={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+            className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={logout}
           >
-            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            <LogOut size={16} />
+            Выйти
           </Button>
         </div>
 
-        <div className="flex items-center gap-3 rounded-xl border border-border/80 bg-muted/20 p-2.5">
-          <Avatar className="h-9 w-9 shrink-0">
+        <div className="orientation-compact-sidebar-footer-inline hidden items-center gap-2">
+          <Avatar className="h-8 w-8 shrink-0">
             <AvatarFallback className="bg-primary/15 text-xs font-semibold text-primary">{initials}</AvatarFallback>
           </Avatar>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium leading-tight">{user?.username}</p>
-            <p className="text-xs text-muted-foreground">
-              {user?.role === 'admin' ? 'Администратор' : user?.role === 'viewer' ? 'Только просмотр' : 'Оператор'}
-            </p>
-          </div>
+          <p className="min-w-0 flex-1 truncate text-sm font-medium">{user?.username}</p>
+          {themeToggle}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={logout}
+            aria-label="Выйти"
+          >
+            <LogOut size={16} />
+          </Button>
         </div>
-
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onClick={logout}
-        >
-          <LogOut size={16} />
-          Выйти
-        </Button>
       </div>
     </div>
   )
@@ -258,7 +288,10 @@ export default function Layout() {
       </aside>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="flex h-dscreen max-h-dscreen w-72 flex-col overflow-hidden p-0">
+        <SheetContent
+          side="left"
+          className="orientation-compact-sidebar-sheet flex h-dscreen max-h-dscreen w-72 flex-col overflow-hidden p-0"
+        >
           <SheetHeader className="sr-only">
             <SheetTitle>Навигация</SheetTitle>
             <SheetDescription>Меню разделов панели</SheetDescription>

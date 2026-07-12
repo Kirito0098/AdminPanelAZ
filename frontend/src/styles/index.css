@@ -153,6 +153,72 @@
   .orientation-compact-settings-tab {
     gap: 0.75rem;
   }
+
+  /* Mobile/desktop sidebar: free vertical space for nav links */
+  .orientation-compact-sidebar-header {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .orientation-compact-sidebar-brand-icon {
+    height: 2rem;
+    width: 2rem;
+    border-radius: 0.5rem;
+  }
+
+  .orientation-compact-sidebar-brand-icon svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .orientation-compact-sidebar-brand-sub,
+  .orientation-compact-sidebar-status {
+    display: none;
+  }
+
+  .orientation-compact-sidebar-nav {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+
+  .orientation-compact-sidebar-nav .orientation-compact-sidebar-group-label {
+    padding-top: 0.35rem;
+    padding-bottom: 0.15rem;
+  }
+
+  .orientation-compact-sidebar-link {
+    gap: 0.5rem;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+
+  .orientation-compact-sidebar-link-icon {
+    height: 1.75rem;
+    width: 1.75rem;
+  }
+
+  .orientation-compact-sidebar-link-icon svg {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+
+  .orientation-compact-sidebar-footer {
+    padding: 0.5rem;
+    padding-bottom: calc(0.5rem + var(--safe-bottom));
+  }
+
+  .orientation-compact-sidebar-footer-stack {
+    display: none;
+  }
+
+  .orientation-compact-sidebar-footer-inline {
+    display: flex;
+  }
+
+  .orientation-compact-sidebar-sheet {
+    width: min(20rem, 70vw) !important;
+    max-width: min(20rem, 70vw) !important;
+  }
 }
 
 /* Recharts hover: полоса/линия по времени и точки на сериях */
