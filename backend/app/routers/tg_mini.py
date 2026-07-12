@@ -515,6 +515,7 @@ def _mini_notify_settings_response(db: Session, user: User) -> AdminNotifySettin
             )
             for key in PERSONAL_OWNER_NOTIFY_KEY_ORDER
         ],
+        node_offline_grace_seconds=response.node_offline_grace_seconds,
     )
 
 
@@ -554,6 +555,15 @@ def mini_update_admin_notify(
         from app.services.telegram_recipients import join_user_ids
 
         _set_setting(db, "telegram_notify_recipient_user_ids", join_user_ids(payload.recipient_user_ids))
+    if payload.node_offline_grace_seconds is not None:
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только администратор может менять таймаут offline-уведомлений",
+            )
+        from app.services.node_status_notify import set_node_offline_grace_seconds
+
+        set_node_offline_grace_seconds(db, payload.node_offline_grace_seconds)
     db.commit()
     db.refresh(current_user)
     return _mini_notify_settings_response(db, current_user)

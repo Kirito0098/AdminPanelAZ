@@ -716,11 +716,12 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def _get_monitoring_overview(self) -> dict[str, Any]:
         ttl = max(0, int(_settings.monitoring_overview_cache_ttl_seconds))
-        return get_cached_monitoring_overview(
+        overview, _from_cache = get_cached_monitoring_overview(
             self._overview_cache_key,
             ttl,
             lambda: self._request("GET", "/monitoring/overview"),
         )
+        return overview
 
     def _headers(self) -> dict[str, str]:
         return {"X-Node-Key": self.api_key}

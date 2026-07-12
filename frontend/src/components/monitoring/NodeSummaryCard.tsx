@@ -1,16 +1,12 @@
 import { ChevronRight } from 'lucide-react'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
+import {
+  HealthScoreBadge,
+  ResourceMetricInline,
+} from '@/components/monitoring/nodeSummaryMetrics'
 import { NodeStatusBadge } from '@/components/NodeSelector'
-import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
-import { metricBarClass } from '@/lib/metricColors'
 import { cn } from '@/lib/utils'
 import type { MonitoringNodeSummary, NodeStatus } from '@/types'
-
-function formatMetricPercent(value?: number | null) {
-  if (value == null || Number.isNaN(value)) return '—'
-  return `${value.toFixed(1)}%`
-}
 
 type NodeSummaryCardProps = {
   node: MonitoringNodeSummary
@@ -19,6 +15,9 @@ type NodeSummaryCardProps = {
 }
 
 export default function NodeSummaryCard({ node, isActive, onSelect }: NodeSummaryCardProps) {
+  const servicesIncomplete =
+    node.total_services > 0 && node.active_services < node.total_services
+
   return (
     <button
       type="button"
@@ -32,82 +31,69 @@ export default function NodeSummaryCard({ node, isActive, onSelect }: NodeSummar
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <ChevronRight
               size={14}
               className="shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
             />
             <span className="truncate font-medium">{node.node_name}</span>
             {isActive && (
-              <Badge variant="outline" className="h-4 px-1 text-[10px]">
-                активный
-              </Badge>
+              <span
+                className="size-1.5 shrink-0 rounded-full bg-primary"
+                title="Активный узел"
+                aria-label="Активный узел"
+              />
             )}
           </div>
-          <div className="mt-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <NodeStatusBadge status={node.status as NodeStatus} />
-            {node.error && <p className="mt-1 text-[11px] text-destructive">{node.error}</p>}
+            <HealthScoreBadge score={node.health_score} level={node.health_level} />
+            {node.error && <p className="mt-1 w-full text-[11px] text-destructive">{node.error}</p>}
           </div>
         </div>
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs sm:grid-cols-4">
         <div>
-          <dt className="text-muted-foreground">OpenVPN</dt>
-          <dd className="mono mt-0.5 font-medium tabular-nums">{node.connected_openvpn}</dd>
+          <dt className="text-muted-foreground">OVPN</dt>
+          <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">{node.connected_openvpn}</dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">WireGuard</dt>
-          <dd className="mono mt-0.5 font-medium tabular-nums">{node.connected_wireguard}</dd>
+          <dt className="text-muted-foreground">WG</dt>
+          <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">{node.connected_wireguard}</dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Службы</dt>
-          <dd className="mono mt-0.5 font-medium tabular-nums">
-            {node.active_services}/{node.total_services}
+          <dd
+            className={cn(
+              'mt-0.5 font-mono text-sm font-medium tabular-nums',
+              servicesIncomplete && 'text-amber-600 dark:text-amber-400',
+            )}
+          >
+            {node.active_services}
+            <span className="text-muted-foreground">/{node.total_services}</span>
           </dd>
         </div>
         <div>
           <dt className="text-muted-foreground">CIDR</dt>
-          <dd className="mono mt-0.5 font-medium tabular-nums">{node.cidr_routes_count ?? '—'}</dd>
+          <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">{node.cidr_routes_count ?? '—'}</dd>
         </div>
-        <div className="col-span-2">
+        <div className="col-span-2 sm:col-span-4">
           <dt className="text-muted-foreground">Трафик</dt>
-          <dd className="mono mt-0.5 font-medium tabular-nums">
+          <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">
             {node.total_traffic_bytes != null ? formatBytes(node.total_traffic_bytes) : '—'}
           </dd>
         </div>
-        <div>
-          <dt className="mb-1 text-muted-foreground">CPU</dt>
+        <div className="col-span-1 sm:col-span-2">
+          <dt className="mb-1.5 text-muted-foreground">CPU</dt>
           <dd>
-            {node.cpu_percent != null ? (
-              <div className="space-y-1">
-                <Progress
-                  value={Math.min(100, node.cpu_percent)}
-                  barClassName={metricBarClass(node.cpu_percent)}
-                  className="h-2"
-                />
-                <span className="text-[10px] text-muted-foreground">{formatMetricPercent(node.cpu_percent)}</span>
-              </div>
-            ) : (
-              <span className="text-muted-foreground">н/д</span>
-            )}
+            <ResourceMetricInline value={node.cpu_percent} label={`CPU ${node.node_name}`} />
           </dd>
         </div>
-        <div>
-          <dt className="mb-1 text-muted-foreground">RAM</dt>
+        <div className="col-span-1 sm:col-span-2">
+          <dt className="mb-1.5 text-muted-foreground">RAM</dt>
           <dd>
-            {node.memory_percent != null ? (
-              <div className="space-y-1">
-                <Progress
-                  value={Math.min(100, node.memory_percent)}
-                  barClassName={metricBarClass(node.memory_percent)}
-                  className="h-2"
-                />
-                <span className="text-[10px] text-muted-foreground">{formatMetricPercent(node.memory_percent)}</span>
-              </div>
-            ) : (
-              <span className="text-muted-foreground">н/д</span>
-            )}
+            <ResourceMetricInline value={node.memory_percent} label={`RAM ${node.node_name}`} />
           </dd>
         </div>
       </dl>

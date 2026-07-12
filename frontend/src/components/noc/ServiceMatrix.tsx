@@ -1,13 +1,22 @@
-import { Wifi, WifiOff } from 'lucide-react'
+import { RefreshCw, Wifi, WifiOff } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { MonitoringService } from '@/types'
 
 interface ServiceMatrixProps {
   services: MonitoringService[]
+  allowRestart?: boolean
+  onRestart?: (serviceName: string) => void
+  restartingName?: string | null
 }
 
-export default function ServiceMatrix({ services }: ServiceMatrixProps) {
+export default function ServiceMatrix({
+  services,
+  allowRestart = false,
+  onRestart,
+  restartingName = null,
+}: ServiceMatrixProps) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {services.map((s) => (
@@ -27,6 +36,19 @@ export default function ServiceMatrix({ services }: ServiceMatrixProps) {
               {s.status}
             </Badge>
           </div>
+          {allowRestart && onRestart && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0 gap-1"
+              disabled={restartingName === s.name}
+              onClick={() => onRestart(s.name)}
+              title={s.active ? 'Перезапустить службу' : 'Перезапустить неактивную службу'}
+            >
+              <RefreshCw size={12} className={cn(restartingName === s.name && 'animate-spin')} />
+            </Button>
+          )}
         </div>
       ))}
     </div>

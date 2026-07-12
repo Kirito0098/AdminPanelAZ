@@ -15,7 +15,16 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react'
-import { ApiError, getMonitoring, getResourceHistory, openMonitoringStream } from '@/api/client'
+import {
+  ApiError,
+  getConnectionHistory,
+  getMonitoring,
+  getNocIncidents,
+  getResourceHistory,
+  openMonitoringStream,
+  openvpnDisconnect,
+  restartService,
+} from '@/api/client'
 import GeoRoutingHintBanner from '@/components/dashboard/GeoRoutingHintBanner'
 import NodesCompareSection from '@/components/dashboard/NodesCompareSection'
 import MonitoringCharts, { formatBytes, totalTraffic } from '@/components/monitoring/MonitoringCharts'
@@ -24,18 +33,30 @@ import MonitoringConnectionsList, {
 } from '@/components/monitoring/MonitoringConnectionsList'
 import MonitoringGeoSummary from '@/components/monitoring/MonitoringGeoSummary'
 import NodeSummaryCard from '@/components/monitoring/NodeSummaryCard'
+import {
+  HealthScoreBadge,
+  ResourceMetricInline,
+} from '@/components/monitoring/nodeSummaryMetrics'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import { getConnectionDisplayAddress, getConnectionGeoLabel } from '@/components/monitoring/ConnectionAddress'
 import PanelResourceHistoryCharts from '@/components/monitoring/PanelResourceHistoryCharts'
 import ResourceHistoryCharts from '@/components/monitoring/ResourceHistoryCharts'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
+import NocConnectionFilters, {
+  minDurationSeconds,
+  NOC_FILTER_NONE,
+  type MinDurationFilter,
+  type NocSortKey,
+} from '@/components/noc/NocConnectionFilters'
+import NocDataFreshness from '@/components/noc/NocDataFreshness'
+import NocIncidentFeed from '@/components/noc/NocIncidentFeed'
 import ServiceMatrix from '@/components/noc/ServiceMatrix'
 import { NodeBadge, NodeStatusBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
-import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -63,14 +84,21 @@ import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import { useConnectionRates } from '@/hooks/useConnectionRates'
 import { formatDateTime } from '@/lib/datetime'
-import { isResourceCritical, metricBarClass } from '@/lib/metricColors'
-import { connectionSourceLabel } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
-import type { MonitoringNodeSummary, MonitoringOverview, NodeStatus, ResourceHistory } from '@/types'
+import type {
+  ConnectionHistoryResponse,
+  MonitoringNodeSummary,
+  MonitoringOverview,
+  NodeStatus,
+  NocIncidentItem,
+  ResourceHistory,
+} from '@/types'
 
-const REFRESH_INTERVAL = 30
+const REFRESH_INTERVAL = 10
 const STORAGE_PREFIX = 'noc-monitoring'
 
 type MonitoringScope = 'node' | 'all'
@@ -93,19 +121,6 @@ function writeStored(key: string, value: string) {
   } catch {
     /* ignore quota / privacy mode */
   }
-}
-
-function dataSourceLabel(source?: string) {
-  if (source === 'federated') return 'Все узлы'
-  if (source === 'management_socket') return connectionSourceLabel('management_socket')
-  if (source === 'status_log') return 'Status-логи'
-  return 'Нет данных'
-}
-
-function dataSourceVariant(source?: string): 'default' | 'secondary' | 'outline' {
-  if (source === 'management_socket') return 'default'
-  if (source === 'status_log') return 'secondary'
-  return 'outline'
 }
 
 type SummaryCardProps = {
@@ -131,16 +146,6 @@ function SummaryCard({ label, value, icon: Icon, sub, accent }: SummaryCardProps
       </CardContent>
     </Card>
   )
-}
-
-function formatMetricPercent(value?: number | null) {
-  if (value == null || Number.isNaN(value)) return '—'
-  return `${value.toFixed(1)}%`
-}
-
-function MetricProgress({ value }: { value: number }) {
-  const clamped = Math.min(100, Math.max(0, value))
-  return <Progress value={clamped} barClassName={metricBarClass(value)} className="h-2" />
 }
 
 type ScopeToggleProps = {
@@ -192,10 +197,18 @@ export default function MonitoringPage() {
   const { activeNode, nodes, loading: nodesLoading, activate } = useNode()
   const isAdmin = user?.role === 'admin'
   const { success, error: notifyError } = useNotifications()
+  const { confirm, dialogProps } = useConfirmDialog()
   const { startGlobal, doneGlobal } = useProgress()
   const [scope, setScope] = useState<MonitoringScope>(() => readStored('scope', ['node', 'all'] as const) ?? 'node')
   const [scopeInitialized, setScopeInitialized] = useState(() => readStored('scope', ['node', 'all'] as const) != null)
+  const [haMode, setHaMode] = useState<'dedupe' | 'raw'>(
+    () => readStored('haMode', ['dedupe', 'raw'] as const) ?? 'dedupe',
+  )
   const [data, setData] = useState<MonitoringOverview | null>(null)
+  const [incidents, setIncidents] = useState<NocIncidentItem[]>([])
+  const [connectionHistory, setConnectionHistory] = useState<ConnectionHistoryResponse | null>(null)
+  const [connectionHistoryPeriod, setConnectionHistoryPeriod] = useState<'1h' | '6h' | '24h'>('1h')
+  const [connectionHistoryLoading, setConnectionHistoryLoading] = useState(false)
   const [liveLoading, setLiveLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -206,11 +219,62 @@ export default function MonitoringPage() {
   const [protocolFilter, setProtocolFilter] = useState<ProtocolFilter>(
     () => readStored('protocol', ['all', 'openvpn', 'wireguard'] as const) ?? 'all',
   )
+  const [filterNode, setFilterNode] = useState(() => {
+    try {
+      return window.localStorage.getItem(`${STORAGE_PREFIX}:filterNode`) || ''
+    } catch {
+      return ''
+    }
+  })
+  const [filterCity, setFilterCity] = useState(() => {
+    try {
+      return window.localStorage.getItem(`${STORAGE_PREFIX}:filterCity`) || ''
+    } catch {
+      return ''
+    }
+  })
+  const [filterIsp, setFilterIsp] = useState(() => {
+    try {
+      return window.localStorage.getItem(`${STORAGE_PREFIX}:filterIsp`) || ''
+    } catch {
+      return ''
+    }
+  })
+  const [minDuration, setMinDuration] = useState<MinDurationFilter>(
+    () => readStored('minDuration', ['any', '15m', '1h', '4h'] as const) ?? 'any',
+  )
+  const [sortKey, setSortKey] = useState<NocSortKey>(
+    () => readStored('sortKey', ['client', 'traffic', 'time', 'rate', 'duration'] as const) ?? 'traffic',
+  )
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(
+    () => readStored('sortDir', ['asc', 'desc'] as const) ?? 'desc',
+  )
+  const [restartingService, setRestartingService] = useState<string | null>(null)
   const [resourcePeriod, setResourcePeriod] = useState<'1d' | '7d' | '30d'>('1d')
   const [panelResourcePeriod, setPanelResourcePeriod] = useState<'1d' | '7d' | '30d'>('1d')
   const [resourceHistory, setResourceHistory] = useState<ResourceHistory | null>(null)
   const [resourceLoading, setResourceLoading] = useState(false)
   const loadRef = useRef<(opts?: { initial?: boolean; manual?: boolean }) => Promise<void>>()
+
+  const refreshIncidents = useCallback(async () => {
+    try {
+      const resp = await getNocIncidents(20)
+      setIncidents(resp.items)
+    } catch {
+      /* keep previous */
+    }
+  }, [])
+
+  const loadConnectionHistory = useCallback(async (period: '1h' | '6h' | '24h', historyScope: MonitoringScope) => {
+    setConnectionHistoryLoading(true)
+    try {
+      setConnectionHistory(await getConnectionHistory(period, historyScope))
+    } catch {
+      /* chart falls back to live tail */
+    } finally {
+      setConnectionHistoryLoading(false)
+    }
+  }, [])
 
   const load = useCallback(
     async (opts: { initial?: boolean; manual?: boolean } = {}) => {
@@ -222,8 +286,9 @@ export default function MonitoringPage() {
         setRefreshing(true)
       }
       try {
-        setData(await getMonitoring(scope))
+        setData(await getMonitoring(scope, haMode))
         setLoadError(null)
+        void refreshIncidents()
         if (manual) success('Данные мониторинга обновлены')
         setCountdown(REFRESH_INTERVAL)
       } catch (err) {
@@ -236,7 +301,7 @@ export default function MonitoringPage() {
         if (initial) doneGlobal()
       }
     },
-    [startGlobal, doneGlobal, success, notifyError, scope],
+    [startGlobal, doneGlobal, success, notifyError, scope, haMode, refreshIncidents],
   )
 
   loadRef.current = load
@@ -259,6 +324,34 @@ export default function MonitoringPage() {
     writeStored('protocol', protocolFilter)
   }, [protocolFilter])
 
+  useEffect(() => {
+    writeStored('haMode', haMode)
+  }, [haMode])
+
+  useEffect(() => {
+    writeStored('filterNode', filterNode)
+  }, [filterNode])
+
+  useEffect(() => {
+    writeStored('filterCity', filterCity)
+  }, [filterCity])
+
+  useEffect(() => {
+    writeStored('filterIsp', filterIsp)
+  }, [filterIsp])
+
+  useEffect(() => {
+    writeStored('minDuration', minDuration)
+  }, [minDuration])
+
+  useEffect(() => {
+    writeStored('sortKey', sortKey)
+  }, [sortKey])
+
+  useEffect(() => {
+    writeStored('sortDir', sortDir)
+  }, [sortDir])
+
   const loadResourceHistory = useCallback(
     async (period: '1d' | '7d' | '30d') => {
       setResourceLoading(true)
@@ -277,22 +370,29 @@ export default function MonitoringPage() {
   useEffect(() => {
     if (nodesLoading && !scopeInitialized) return
     load({ initial: true })
-  }, [load, activeNode?.id, scope, nodesLoading, scopeInitialized])
+  }, [load, activeNode?.id, scope, haMode, nodesLoading, scopeInitialized])
 
   useEffect(() => {
     loadResourceHistory(resourcePeriod)
   }, [loadResourceHistory, activeNode?.id, resourcePeriod])
 
   useEffect(() => {
-    if (!autoRefresh || scope !== 'node') return
+    void loadConnectionHistory(connectionHistoryPeriod, scope)
+  }, [loadConnectionHistory, connectionHistoryPeriod, scope, activeNode?.id])
+
+  useEffect(() => {
+    if (!autoRefresh) return
 
     const source = openMonitoringStream(
       (payload) => {
         setData(payload)
         setLoadError(null)
         setCountdown(REFRESH_INTERVAL)
+        void refreshIncidents()
       },
       () => {},
+      scope,
+      haMode,
     )
 
     const tick = setInterval(() => {
@@ -303,21 +403,7 @@ export default function MonitoringPage() {
       source?.close()
       clearInterval(tick)
     }
-  }, [autoRefresh, scope, activeNode?.id])
-
-  useEffect(() => {
-    if (!autoRefresh || scope !== 'all') return
-    const poll = setInterval(() => {
-      void loadRef.current?.()
-    }, REFRESH_INTERVAL * 1000)
-    const tick = setInterval(() => {
-      setCountdown((c) => (c <= 1 ? REFRESH_INTERVAL : c - 1))
-    }, 1000)
-    return () => {
-      clearInterval(poll)
-      clearInterval(tick)
-    }
-  }, [autoRefresh, scope])
+  }, [autoRefresh, scope, haMode, activeNode?.id, refreshIncidents])
 
   const isFederated = scope === 'all' || data?.scope === 'all'
   const showNodeColumn = isFederated
@@ -385,7 +471,7 @@ export default function MonitoringPage() {
     (showOpenVpn ? filteredOpenVpn.length : 0) + (showWireGuard ? filteredWireGuard.length : 0)
   const hasFilteredClients = visibleCount > 0
 
-  const connectionRows = useMemo(
+  const baseConnectionRows = useMemo(
     () =>
       buildMonitoringConnectionRows(visibleOpenVpn, visibleWireGuardList, {
         showOpenVpn,
@@ -395,9 +481,114 @@ export default function MonitoringPage() {
     [visibleOpenVpn, visibleWireGuardList, showOpenVpn, showWireGuard],
   )
 
+  const rates = useConnectionRates(baseConnectionRows, data?.timestamp)
+
+  const connectionRows = useMemo(() => {
+    const minSec = minDurationSeconds(minDuration)
+    return baseConnectionRows
+      .map((row) => {
+        const rate = rates.get(row.key)
+        return {
+          ...row,
+          rxBps: rate?.rxBps ?? null,
+          txBps: rate?.txBps ?? null,
+          ratePending: rate?.pending ?? true,
+        }
+      })
+      .filter((row) => {
+        if (filterNode) {
+          const nodeLabel = row.activeNodeName || row.nodeName || ''
+          if (nodeLabel !== filterNode) return false
+        }
+        if (filterCity === NOC_FILTER_NONE) {
+          if (row.city) return false
+        } else if (filterCity && (row.city || '') !== filterCity) {
+          return false
+        }
+        if (filterIsp === NOC_FILTER_NONE) {
+          if (row.isp) return false
+        } else if (filterIsp && (row.isp || '') !== filterIsp) {
+          return false
+        }
+        if (minSec != null && (row.durationSec == null || row.durationSec < minSec)) return false
+        return true
+      })
+  }, [baseConnectionRows, rates, filterNode, filterCity, filterIsp, minDuration])
+
+  const nodeFilterOptions = useMemo(() => {
+    const names = new Set<string>()
+    for (const row of baseConnectionRows) {
+      const name = row.activeNodeName || row.nodeName
+      if (name) names.add(name)
+    }
+    for (const node of data?.nodes_summary ?? []) names.add(node.node_name)
+    return [...names].sort((a, b) => a.localeCompare(b))
+  }, [baseConnectionRows, data?.nodes_summary])
+
+  const cityFilterOptions = useMemo(() => {
+    const names = new Set<string>()
+    for (const row of baseConnectionRows) {
+      if (row.city) names.add(row.city)
+    }
+    return [...names].sort((a, b) => a.localeCompare(b))
+  }, [baseConnectionRows])
+
+  const ispFilterOptions = useMemo(() => {
+    const names = new Set<string>()
+    for (const row of baseConnectionRows) {
+      if (row.isp) names.add(row.isp)
+    }
+    return [...names].sort((a, b) => a.localeCompare(b))
+  }, [baseConnectionRows])
+
   const handleRefresh = () => {
     load({ manual: true })
     loadResourceHistory(resourcePeriod)
+    void loadConnectionHistory(connectionHistoryPeriod, scope)
+  }
+
+  const handleDisconnectOpenVpn = (clientName: string) => {
+    confirm({
+      title: 'Отключить OpenVPN-сессию?',
+      description: `Клиент «${clientName}» будет отключён от VPN.`,
+      confirmLabel: 'Отключить',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await openvpnDisconnect(clientName)
+          success(`Клиент ${clientName} отключён`)
+          await load({ manual: false })
+        } catch (err) {
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка отключения')
+        }
+      },
+    })
+  }
+
+  const handleRestartService = (serviceName: string) => {
+    confirm({
+      title: 'Перезапустить службу?',
+      description: `Служба «${serviceName}» будет перезапущена на активном узле. Критические VPN-службы могут разорвать сессии клиентов.`,
+      alert: {
+        variant: 'warning',
+        title: 'Возможен обрыв сессий',
+        children: 'Подтвердите только если понимаете последствия.',
+      },
+      confirmLabel: 'Перезапустить',
+      destructive: true,
+      onConfirm: async () => {
+        setRestartingService(serviceName)
+        try {
+          const resp = await restartService(serviceName)
+          success(resp.message || `Служба ${serviceName} перезапущена`)
+          await load({ manual: false })
+        } catch (err) {
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка перезапуска')
+        } finally {
+          setRestartingService(null)
+        }
+      },
+    })
   }
 
   const goToNode = useCallback(
@@ -415,34 +606,17 @@ export default function MonitoringPage() {
 
   const sortedNodeSummary = useMemo(() => {
     const list = data?.nodes_summary ?? []
-    const rank = (status: string) => (status === 'online' ? 2 : status === 'offline' ? 0 : 1)
+    const levelRank = (level?: string) =>
+      level === 'critical' ? 0 : level === 'warn' ? 1 : level === 'ok' ? 2 : 3
+    const statusRank = (status: string) => (status === 'online' ? 2 : status === 'offline' ? 0 : 1)
     return [...list].sort((a, b) => {
-      const byStatus = rank(a.status) - rank(b.status)
+      const byLevel = levelRank(a.health_level) - levelRank(b.health_level)
+      if (byLevel !== 0) return byLevel
+      const byStatus = statusRank(a.status) - statusRank(b.status)
       if (byStatus !== 0) return byStatus
       return a.node_name.localeCompare(b.node_name)
     })
   }, [data?.nodes_summary])
-
-  const nodeHealthIssues = useMemo(() => {
-    if (!isFederated) return { offline: [], overloaded: [] as string[] }
-    const list = data?.nodes_summary ?? []
-    const offline = list.filter((n) => n.status !== 'online').map((n) => n.node_name)
-    const overloaded = list
-      .filter(
-        (n) =>
-          n.status === 'online' &&
-          (isResourceCritical(n.cpu_percent) || isResourceCritical(n.memory_percent)),
-      )
-      .map((n) => {
-        const parts: string[] = []
-        if (isResourceCritical(n.cpu_percent)) parts.push(`CPU ${formatMetricPercent(n.cpu_percent)}`)
-        if (isResourceCritical(n.memory_percent)) parts.push(`RAM ${formatMetricPercent(n.memory_percent)}`)
-        return `${n.node_name} (${parts.join(', ')})`
-      })
-    return { offline, overloaded }
-  }, [isFederated, data?.nodes_summary])
-
-  const hasHealthIssues = nodeHealthIssues.offline.length > 0 || nodeHealthIssues.overloaded.length > 0
 
   if (!isAdmin) {
     return <Navigate to="/" replace />
@@ -450,6 +624,7 @@ export default function MonitoringPage() {
 
   return (
     <div className="space-y-6">
+      <ConfirmDialogHost dialogProps={dialogProps} />
       <PageSectionHeader
         icon={Radio}
         title="NOC Мониторинг"
@@ -464,12 +639,21 @@ export default function MonitoringPage() {
           />
         }
         description={
-          <>
-            {isFederated
-              ? 'Сводка активных VPN-подключений со всех узлов'
-              : 'Активные VPN-подключения OpenVPN и WireGuard в реальном времени'}
-            {data?.timestamp && <> · обновлено {formatDateTime(data.timestamp)}</>}
-          </>
+          <div className="space-y-1">
+            <div>
+              {isFederated
+                ? 'Сводка активных VPN-подключений со всех узлов'
+                : 'Активные VPN-подключения OpenVPN и WireGuard в реальном времени'}
+              {data?.timestamp && <> · обновлено {formatDateTime(data.timestamp)}</>}
+            </div>
+            <NocDataFreshness
+              timestamp={data?.timestamp}
+              refreshIntervalSec={REFRESH_INTERVAL}
+              geoipMode={data?.geoip_mode}
+              dataSource={data?.openvpn_data_source}
+              servedFromCache={data?.served_from_cache}
+            />
+          </div>
         }
         actions={
           <>
@@ -510,26 +694,7 @@ export default function MonitoringPage() {
 
       <GeoRoutingHintBanner enabled={hasMultipleNodes} />
 
-      {isFederated && hasHealthIssues && (
-        <SettingsAlert
-          variant={nodeHealthIssues.offline.length > 0 ? 'danger' : 'warning'}
-          title="Требуют внимания"
-        >
-          <div className="space-y-1">
-            {nodeHealthIssues.offline.length > 0 && (
-              <p>
-                Недоступны ({nodeHealthIssues.offline.length}):{' '}
-                <strong>{nodeHealthIssues.offline.join(', ')}</strong>
-              </p>
-            )}
-            {nodeHealthIssues.overloaded.length > 0 && (
-              <p>
-                Высокая нагрузка: <strong>{nodeHealthIssues.overloaded.join(' · ')}</strong>
-              </p>
-            )}
-          </div>
-        </SettingsAlert>
-      )}
+      <NocIncidentFeed items={incidents} />
 
       {!isFederated && nodeOffline && (
         <SettingsAlert variant="warning" title="Узел офлайн">
@@ -597,9 +762,6 @@ export default function MonitoringPage() {
         data && (
           <>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={dataSourceVariant(data?.openvpn_data_source)}>
-                Источник OVPN: {dataSourceLabel(data?.openvpn_data_source)}
-              </Badge>
               {data?.server_ip && (
                 <Badge variant="outline" className="gap-1">
                   <Globe size={10} />
@@ -612,20 +774,32 @@ export default function MonitoringPage() {
                   ? `Узлы: ${data.nodes_online ?? 0}/${data.nodes_total ?? 0}`
                   : `Службы: ${activeServices}/${totalServices}`}
               </Badge>
+              {isFederated && (
+                <div className="ml-auto flex items-center gap-2">
+                  <Switch
+                    id="noc-ha-raw"
+                    checked={haMode === 'raw'}
+                    onCheckedChange={(checked) => setHaMode(checked ? 'raw' : 'dedupe')}
+                  />
+                  <Label htmlFor="noc-ha-raw" className="text-xs text-muted-foreground">
+                    Показать по узлам
+                  </Label>
+                </div>
+              )}
             </div>
 
             {isFederated && (data.nodes_summary?.length ?? 0) > 0 && (
               <Card>
-                <CardHeader>
+                <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Server size={18} />
                     Сводка по узлам
                   </CardTitle>
                   <CardDescription>
-                    Подключения и службы на каждом VPN-узле · нажмите на узел, чтобы открыть его детально
+                    Нажмите на узел, чтобы открыть его детально
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-0">
                   <ResponsiveDataView
                     mobile={sortedNodeSummary.map((node: MonitoringNodeSummary) => (
                       <NodeSummaryCard
@@ -636,96 +810,109 @@ export default function MonitoringPage() {
                       />
                     ))}
                     desktop={
-                      <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Узел</TableHead>
-                          <TableHead>Статус</TableHead>
-                          <TableHead className="text-right">OpenVPN</TableHead>
-                          <TableHead className="text-right">WireGuard</TableHead>
-                          <TableHead className="text-right">Службы</TableHead>
-                          <TableHead>CPU</TableHead>
-                          <TableHead>RAM</TableHead>
-                          <TableHead className="text-right">Трафик</TableHead>
-                          <TableHead className="text-right">CIDR</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {sortedNodeSummary.map((node: MonitoringNodeSummary) => {
-                          const isActive = node.node_id === activeNode?.id
-                          return (
-                            <TableRow
-                              key={node.node_id}
-                              onClick={() => goToNode(node.node_id, node.node_name)}
-                              className={cn(
-                                'group cursor-pointer transition-colors',
-                                node.status === 'offline' && 'bg-destructive/5 hover:bg-destructive/10',
-                                isActive && 'bg-primary/5',
-                              )}
-                            >
-                              <TableCell className="font-medium">
-                                <span className="inline-flex items-center gap-1.5">
-                                  <ChevronRight
-                                    size={14}
-                                    className="text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
-                                  />
-                                  {node.node_name}
-                                  {isActive && (
-                                    <Badge variant="outline" className="h-4 px-1 text-[10px]">
-                                      активный
-                                    </Badge>
+                      <Table
+                        className="w-auto min-w-0 table-auto"
+                        containerClassName="w-max max-w-full"
+                      >
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent">
+                            <TableHead className="h-9 whitespace-nowrap px-2.5">Узел</TableHead>
+                            <TableHead className="h-9 whitespace-nowrap px-2.5">Статус</TableHead>
+                            <TableHead className="h-9 whitespace-nowrap px-2.5 text-center">Health</TableHead>
+                            <TableHead className="h-9 whitespace-nowrap px-2.5 text-right">OVPN</TableHead>
+                            <TableHead className="h-9 whitespace-nowrap px-2.5 text-right">WG</TableHead>
+                            <TableHead className="h-9 whitespace-nowrap px-2.5 text-right">Службы</TableHead>
+                            <TableHead className="h-9 whitespace-nowrap px-2.5">CPU</TableHead>
+                            <TableHead className="h-9 whitespace-nowrap px-2.5">RAM</TableHead>
+                            <TableHead className="h-9 whitespace-nowrap px-2.5 text-right">Трафик</TableHead>
+                            <TableHead className="h-9 whitespace-nowrap px-2.5 text-right">CIDR</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {sortedNodeSummary.map((node: MonitoringNodeSummary) => {
+                            const isActive = node.node_id === activeNode?.id
+                            const servicesIncomplete =
+                              node.total_services > 0 && node.active_services < node.total_services
+                            return (
+                              <TableRow
+                                key={node.node_id}
+                                onClick={() => goToNode(node.node_id, node.node_name)}
+                                className={cn(
+                                  'group cursor-pointer transition-colors',
+                                  node.status === 'offline' && 'bg-destructive/5 hover:bg-destructive/10',
+                                  isActive && 'bg-primary/5',
+                                )}
+                              >
+                                <TableCell className="max-w-[14rem] whitespace-nowrap px-2.5 py-2 font-medium">
+                                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                                    <ChevronRight
+                                      size={14}
+                                      className="shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+                                    />
+                                    <span className="truncate">{node.node_name}</span>
+                                    {isActive && (
+                                      <span
+                                        className="size-1.5 shrink-0 rounded-full bg-primary"
+                                        title="Активный узел"
+                                        aria-label="Активный узел"
+                                      />
+                                    )}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="whitespace-nowrap px-2.5 py-2">
+                                  <NodeStatusBadge status={node.status as NodeStatus} />
+                                  {node.error && (
+                                    <p className="mt-1 max-w-[10rem] truncate text-[11px] text-destructive" title={node.error}>
+                                      {node.error}
+                                    </p>
                                   )}
-                                </span>
-                              </TableCell>
-                              <TableCell>
-                                <NodeStatusBadge status={node.status as NodeStatus} />
-                                {node.error && (
-                                  <p className="mt-1 text-[11px] text-destructive">{node.error}</p>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right font-mono text-xs">{node.connected_openvpn}</TableCell>
-                              <TableCell className="text-right font-mono text-xs">{node.connected_wireguard}</TableCell>
-                              <TableCell className="text-right font-mono text-xs">
-                                {node.active_services}/{node.total_services}
-                              </TableCell>
-                              <TableCell className="min-w-[110px]">
-                                {node.cpu_percent != null ? (
-                                  <div className="space-y-1">
-                                    <MetricProgress value={node.cpu_percent} />
-                                    <span className="text-[10px] text-muted-foreground">
-                                      {formatMetricPercent(node.cpu_percent)}
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">н/д</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="min-w-[110px]">
-                                {node.memory_percent != null ? (
-                                  <div className="space-y-1">
-                                    <MetricProgress value={node.memory_percent} />
-                                    <span className="text-[10px] text-muted-foreground">
-                                      {formatMetricPercent(node.memory_percent)}
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">н/д</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right font-mono text-xs">
-                                {node.total_traffic_bytes != null ? formatBytes(node.total_traffic_bytes) : '—'}
-                              </TableCell>
-                              <TableCell className="text-right font-mono text-xs">
-                                {node.cidr_routes_count ?? '—'}
-                              </TableCell>
-                            </TableRow>
-                          )
-                        })}
-                      </TableBody>
-                    </Table>
+                                </TableCell>
+                                <TableCell className="px-2.5 py-2 text-center">
+                                  <HealthScoreBadge score={node.health_score} level={node.health_level} />
+                                </TableCell>
+                                <TableCell className="px-2.5 py-2 text-right font-mono text-xs tabular-nums">
+                                  {node.connected_openvpn}
+                                </TableCell>
+                                <TableCell className="px-2.5 py-2 text-right font-mono text-xs tabular-nums">
+                                  {node.connected_wireguard}
+                                </TableCell>
+                                <TableCell
+                                  className={cn(
+                                    'px-2.5 py-2 text-right font-mono text-xs tabular-nums',
+                                    servicesIncomplete && 'text-amber-600 dark:text-amber-400',
+                                  )}
+                                >
+                                  {node.active_services}
+                                  <span className="text-muted-foreground">/{node.total_services}</span>
+                                </TableCell>
+                                <TableCell className="whitespace-nowrap px-2.5 py-2">
+                                  <ResourceMetricInline
+                                    value={node.cpu_percent}
+                                    label={`CPU ${node.node_name}`}
+                                  />
+                                </TableCell>
+                                <TableCell className="whitespace-nowrap px-2.5 py-2">
+                                  <ResourceMetricInline
+                                    value={node.memory_percent}
+                                    label={`RAM ${node.node_name}`}
+                                  />
+                                </TableCell>
+                                <TableCell className="whitespace-nowrap px-2.5 py-2 text-right font-mono text-xs tabular-nums">
+                                  {node.total_traffic_bytes != null
+                                    ? formatBytes(node.total_traffic_bytes)
+                                    : '—'}
+                                </TableCell>
+                                <TableCell className="whitespace-nowrap px-2.5 py-2 text-right font-mono text-xs tabular-nums">
+                                  {node.cidr_routes_count ?? '—'}
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })}
+                        </TableBody>
+                      </Table>
                     }
                     mobileClassName="space-y-3"
-                    desktopClassName="overflow-x-auto rounded-md border"
+                    desktopClassName="w-max max-w-full overflow-x-auto rounded-md border"
                   />
                 </CardContent>
               </Card>
@@ -769,7 +956,13 @@ export default function MonitoringPage() {
             </div>
 
             <div className="space-y-4">
-              <MonitoringCharts data={data} />
+              <MonitoringCharts
+                data={data}
+                serverHistory={connectionHistory?.points}
+                historyPeriod={connectionHistoryPeriod}
+                onHistoryPeriodChange={setConnectionHistoryPeriod}
+                historyLoading={connectionHistoryLoading}
+              />
               {totalConnections > 0 && hasFilteredClients && (
                 <MonitoringGeoSummary
                   openvpnClients={visibleOpenVpn}
@@ -868,7 +1061,27 @@ export default function MonitoringPage() {
                       </div>
                     </div>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="space-y-4">
+                    <NocConnectionFilters
+                      className="w-full"
+                      showNodeFilter={isFederated}
+                      filterNode={filterNode}
+                      filterCity={filterCity}
+                      filterIsp={filterIsp}
+                      minDuration={minDuration}
+                      sortKey={sortKey}
+                      nodeOptions={nodeFilterOptions}
+                      cityOptions={cityFilterOptions}
+                      ispOptions={ispFilterOptions}
+                      onFilterNode={setFilterNode}
+                      onFilterCity={setFilterCity}
+                      onFilterIsp={setFilterIsp}
+                      onMinDuration={setMinDuration}
+                      onSortKey={(key) => {
+                        setSortKey(key)
+                        setSortDir(key === 'client' ? 'asc' : 'desc')
+                      }}
+                    />
                     {totalConnections === 0 ? (
                       <EmptyState
                         icon={WifiOff}
@@ -888,7 +1101,17 @@ export default function MonitoringPage() {
                         className="py-8"
                       />
                     ) : (
-                      <MonitoringConnectionsList rows={connectionRows} showNodeColumn={showNodeColumn} />
+                      <MonitoringConnectionsList
+                        rows={connectionRows}
+                        showNodeColumn={showNodeColumn}
+                        sortKey={sortKey}
+                        sortDir={sortDir}
+                        onSortChange={(key, dir) => {
+                          setSortKey(key)
+                          setSortDir(dir)
+                        }}
+                        onDisconnectOpenVpn={handleDisconnectOpenVpn}
+                      />
                     )}
                   </CardContent>
                 </Card>
@@ -966,7 +1189,12 @@ export default function MonitoringPage() {
                         className="py-8"
                       />
                     ) : (
-                      <ServiceMatrix services={data.services} />
+                      <ServiceMatrix
+                        services={data.services}
+                        allowRestart={!isFederated}
+                        onRestart={handleRestartService}
+                        restartingName={restartingService}
+                      />
                     )}
                   </CardContent>
                 </Card>

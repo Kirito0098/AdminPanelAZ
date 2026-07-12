@@ -290,6 +290,8 @@ def update_telegram_settings(
 
 
 def _admin_notify_settings_response(db: Session, user: User) -> AdminNotifySettingsResponse:
+    from app.services.node_status_notify import get_node_offline_grace_seconds
+
     merged = user.merged_tg_notify_events()
     recipient_user_ids = get_notify_recipient_user_ids(lambda key, default="": _get_setting(db, key, default)) or []
     return AdminNotifySettingsResponse(
@@ -301,6 +303,7 @@ def _admin_notify_settings_response(db: Session, user: User) -> AdminNotifySetti
             AdminNotifyEventItem(key=key, label=label, enabled=merged.get(key, False))
             for key, label in TG_NOTIFY_EVENT_LABELS
         ],
+        node_offline_grace_seconds=get_node_offline_grace_seconds(db),
     )
 
 
@@ -366,6 +369,10 @@ def update_admin_notify_settings(
             if key in payload.events:
                 merged[key] = bool(payload.events[key])
         admin.tg_notify_events = json.dumps(merged)
+    if payload.node_offline_grace_seconds is not None:
+        from app.services.node_status_notify import set_node_offline_grace_seconds
+
+        set_node_offline_grace_seconds(db, payload.node_offline_grace_seconds)
     db.commit()
     db.refresh(admin)
     return _admin_notify_settings_response(db, admin)

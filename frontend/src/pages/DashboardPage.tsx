@@ -159,9 +159,9 @@ export default function DashboardPage() {
       } else {
         setQuota(null)
       }
-      if (user?.role === 'admin' && configsData.length > 0) {
+      if (configsData.length > 0) {
         const names = configsData.map((c) => c.client_name).join(',')
-        getClientPolicies(names).then(setPolicies).catch(() => {})
+        getClientPolicies(names).then(setPolicies).catch(() => setPolicies({}))
       } else {
         setPolicies({})
       }

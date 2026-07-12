@@ -30,6 +30,7 @@ import {
   updateNode,
 } from '@/api/client'
 import NodeUpdateDialog from '@/components/NodeUpdateDialog'
+import NodeOfflineNotifyCard from '@/components/nodes/NodeOfflineNotifyCard'
 import NodeSyncGroupSection from '@/components/nodes/NodeSyncGroupSection'
 import { NodeBadge, NodeStatusBadge, statusLabels } from '@/components/NodeSelector'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
@@ -1102,6 +1103,8 @@ export default function NodesPage() {
       </SettingsAlert>
 
       {showMtlsStatus && <MtlsCaStatusAlert status={mtlsStatus} />}
+
+      <NodeOfflineNotifyCard />
 
       <NodeSyncGroupSection nodes={nodes} />
 

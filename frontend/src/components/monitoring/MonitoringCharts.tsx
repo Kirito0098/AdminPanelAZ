@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { BarChart3, TrendingUp } from 'lucide-react'
 import {
   Bar,
@@ -22,9 +22,14 @@ import {
   monitoringChartTooltipProps,
   getProtocolBarColor,
 } from '@/components/monitoring/monitoringChartTheme'
-import type { MonitoringOverview } from '@/types'
-
-const MAX_HISTORY = 20
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import type { ConnectionHistoryPoint, MonitoringOverview } from '@/types'
 
 interface HistoryPoint {
   time: string
@@ -35,6 +40,10 @@ interface HistoryPoint {
 
 interface MonitoringChartsProps {
   data: MonitoringOverview
+  serverHistory?: ConnectionHistoryPoint[]
+  historyPeriod?: '1h' | '6h' | '24h'
+  onHistoryPeriodChange?: (period: '1h' | '6h' | '24h') => void
+  historyLoading?: boolean
 }
 
 function formatBytes(n: number) {
@@ -52,9 +61,14 @@ function totalTraffic(data: MonitoringOverview) {
   return ovpn + wg
 }
 
-export default function MonitoringCharts({ data }: MonitoringChartsProps) {
-  const historyRef = useRef<HistoryPoint[]>([])
-  const [, bump] = useState(0)
+export default function MonitoringCharts({
+  data,
+  serverHistory,
+  historyPeriod = '1h',
+  onHistoryPeriodChange,
+  historyLoading = false,
+}: MonitoringChartsProps) {
+  const [liveTail, setLiveTail] = useState<HistoryPoint[]>([])
 
   useEffect(() => {
     const wgActive = data.wireguard_peers.filter(isWireGuardOnline).length
@@ -64,14 +78,24 @@ export default function MonitoringCharts({ data }: MonitoringChartsProps) {
       ovpn: data.openvpn_clients.length,
       wg: wgActive,
     }
-    const last = historyRef.current[historyRef.current.length - 1]
-    if (!last || last.time !== point.time) {
-      historyRef.current = [...historyRef.current.slice(-(MAX_HISTORY - 1)), point]
-      bump((n) => n + 1)
-    }
+    setLiveTail((prev) => {
+      const last = prev[prev.length - 1]
+      if (last && last.time === point.time) return prev
+      return [...prev.slice(-4), point]
+    })
   }, [data])
 
-  const history = historyRef.current
+  const serverPoints: HistoryPoint[] = useMemo(() => {
+    if (!serverHistory?.length) return []
+    return serverHistory.map((p) => ({
+      time: formatTime(p.timestamp, { hour: '2-digit', minute: '2-digit' }),
+      connections: p.total,
+      ovpn: p.openvpn,
+      wg: p.wireguard,
+    }))
+  }, [serverHistory])
+
+  const history = serverPoints.length >= 2 ? serverPoints : liveTail
 
   const connectionsBar = useMemo(() => {
     const wgActive = data.wireguard_peers.filter(isWireGuardOnline).length
@@ -85,45 +109,68 @@ export default function MonitoringCharts({ data }: MonitoringChartsProps) {
     <div className="grid gap-4 lg:grid-cols-2">
       <MonitoringChartCard
         title="Подключения во времени"
-        description={`История автообновления (до ${MAX_HISTORY} точек)`}
+        description={
+          serverPoints.length >= 2
+            ? `Серверная история · ${historyPeriod}`
+            : 'Локальный хвост (ожидание серверных точек)'
+        }
         icon={TrendingUp}
+        actions={
+          onHistoryPeriodChange ? (
+            <Select
+              value={historyPeriod}
+              onValueChange={(v) => onHistoryPeriodChange(v as '1h' | '6h' | '24h')}
+            >
+              <SelectTrigger className="h-7 w-[88px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1h">1ч</SelectItem>
+                <SelectItem value="6h">6ч</SelectItem>
+                <SelectItem value="24h">24ч</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : undefined
+        }
       >
-        {history.length < 2 ? (
-          <MonitoringChartEmpty>Ожидание данных... (минимум 2 обновления)</MonitoringChartEmpty>
+        {historyLoading && serverPoints.length < 2 ? (
+          <MonitoringChartEmpty>Загрузка истории...</MonitoringChartEmpty>
+        ) : history.length < 2 ? (
+          <MonitoringChartEmpty>Ожидание данных... (минимум 2 точки)</MonitoringChartEmpty>
         ) : (
           <ChartResponsive height={MONITORING_CHART_HEIGHT}>
             {({ width, height }) => (
-          <LineChart width={width} height={height} data={history}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-              <XAxis dataKey="time" tick={{ fontSize: 11 }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-              <Tooltip {...monitoringChartTooltipProps} />
-              <Legend />
-              <Line
-                type="monotone"
-                dataKey="ovpn"
-                name="OpenVPN"
-                stroke={MONITORING_PROTOCOL_COLORS.openvpn}
-                strokeWidth={2}
-                dot={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="wg"
-                name="WireGuard"
-                stroke={MONITORING_PROTOCOL_COLORS.wireguard}
-                strokeWidth={2}
-                dot={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="connections"
-                name="Всего"
-                stroke={MONITORING_PROTOCOL_COLORS.total}
-                strokeWidth={2}
-                dot={false}
-              />
-            </LineChart>
+              <LineChart width={width} height={height} data={history}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                <Tooltip {...monitoringChartTooltipProps} />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="ovpn"
+                  name="OpenVPN"
+                  stroke={MONITORING_PROTOCOL_COLORS.openvpn}
+                  strokeWidth={2}
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="wg"
+                  name="WireGuard"
+                  stroke={MONITORING_PROTOCOL_COLORS.wireguard}
+                  strokeWidth={2}
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="connections"
+                  name="Всего"
+                  stroke={MONITORING_PROTOCOL_COLORS.total}
+                  strokeWidth={2}
+                  dot={false}
+                />
+              </LineChart>
             )}
           </ChartResponsive>
         )}
@@ -132,17 +179,17 @@ export default function MonitoringCharts({ data }: MonitoringChartsProps) {
       <MonitoringChartCard title="Активные подключения" description="По протоколу" icon={BarChart3}>
         <ChartResponsive height={MONITORING_CHART_HEIGHT}>
           {({ width, height }) => (
-        <BarChart width={width} height={height} data={connectionsBar}>
-            <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-            <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-            <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-            <Tooltip {...monitoringChartTooltipProps} />
-            <Bar dataKey="count" name="Клиенты" radius={[4, 4, 0, 0]}>
-              {connectionsBar.map((entry) => (
-                <Cell key={entry.name} fill={getProtocolBarColor(entry.name)} />
-              ))}
-            </Bar>
-          </BarChart>
+            <BarChart width={width} height={height} data={connectionsBar}>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+              <Tooltip {...monitoringChartTooltipProps} />
+              <Bar dataKey="count" name="Клиенты" radius={[4, 4, 0, 0]}>
+                {connectionsBar.map((entry) => (
+                  <Cell key={entry.name} fill={getProtocolBarColor(entry.name)} />
+                ))}
+              </Bar>
+            </BarChart>
           )}
         </ChartResponsive>
       </MonitoringChartCard>

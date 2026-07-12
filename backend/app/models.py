@@ -39,6 +39,7 @@ DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
     "settings_change": True,
     "high_cpu": True,
     "high_ram": True,
+    "node_offline": True,
     "cidr_deploy_failed": True,
     "cidr_ingest_partial": True,
     "noc_report": True,
@@ -391,6 +392,16 @@ class NodeResourceSample(Base):
     load_1: Mapped[float | None] = mapped_column(Float, nullable=True)
     load_5: Mapped[float | None] = mapped_column(Float, nullable=True)
     load_15: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class ConnectionCountSample(Base):
+    __tablename__ = "connection_count_samples"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    openvpn_count: Mapped[int] = mapped_column(Integer, default=0)
+    wireguard_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 

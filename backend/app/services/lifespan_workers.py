@@ -16,6 +16,7 @@ from app.services.node_health_worker import run_node_health_loop
 from app.services.node_key_rotation import run_node_key_rotation_loop
 from app.services.panel_resource_metrics_worker import run_panel_resource_metrics_loop
 from app.services.resource_metrics_worker import run_resource_metrics_loop
+from app.services.connection_history_worker import run_connection_history_loop
 from app.services.retention_worker import run_retention_loop
 from app.services.traffic.worker import run_traffic_collector_loop
 from app.services.wg_policy_sync_worker import run_wg_policy_sync_loop
@@ -53,6 +54,7 @@ def get_worker_startup_plan() -> dict[str, bool]:
         "cert_sync": should_start_cert_sync(),
         "node_health": should_start_node_health(),
         "resource_metrics": should_start_resource_metrics(),
+        "connection_history": should_start_resource_metrics(),
         "panel_resource_metrics": should_start_panel_resource_metrics(),
         "backup_scheduler": should_start_backup_scheduler(),
         "runtime_backup_cleanup": should_start_runtime_backup_cleanup(),
@@ -89,6 +91,8 @@ def spawn_background_tasks(
         tasks["node_health"] = create_task(run_node_health_loop())
     if plan["resource_metrics"]:
         tasks["resource_metrics"] = create_task(run_resource_metrics_loop())
+    if plan.get("connection_history"):
+        tasks["connection_history"] = create_task(run_connection_history_loop())
     if plan["panel_resource_metrics"]:
         tasks["panel_resource_metrics"] = create_task(run_panel_resource_metrics_loop())
     if plan["backup_scheduler"]:

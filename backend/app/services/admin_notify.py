@@ -49,6 +49,7 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("settings_change", "Изменение настроек"),
     ("high_cpu", "Высокая нагрузка CPU"),
     ("high_ram", "Высокая нагрузка RAM"),
+    ("node_offline", "Узел offline / восстановление"),
     ("cidr_deploy_failed", "Ошибка развёртывания CIDR"),
     ("cidr_ingest_partial", "Частичное обновление CIDR БД"),
     ("noc_report", "NOC: ежедневная/еженедельная сводка"),
@@ -146,6 +147,7 @@ _PREF_KEY_MAP = {
     "config_recreate": "config_create",
     "traffic_limit_block": "traffic_limit",
     "traffic_limit_unblock": "traffic_limit",
+    "node_online": "node_offline",
 }
 
 
@@ -781,6 +783,38 @@ class AdminNotifyService:
             node_name=node_name,
         )
 
+    def send_node_offline(
+        self,
+        db: Session,
+        *,
+        details: str | None = None,
+        node_id: int | None = None,
+        node_name: str | None = None,
+    ) -> None:
+        self.send(
+            db,
+            "node_offline",
+            details=details,
+            node_id=node_id,
+            node_name=node_name,
+        )
+
+    def send_node_online(
+        self,
+        db: Session,
+        *,
+        details: str | None = None,
+        node_id: int | None = None,
+        node_name: str | None = None,
+    ) -> None:
+        self.send(
+            db,
+            "node_online",
+            details=details,
+            node_id=node_id,
+            node_name=node_name,
+        )
+
     def send_cidr_deploy_failed(
         self,
         db: Session,
@@ -1119,6 +1153,24 @@ class AdminNotifyService:
                 detail_lines=detail_lines,
             )
 
+        if event_type == "node_offline":
+            detail_lines = [_line_text("📋", "Детали", details or "Узел не отвечает на health-check")]
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
+                "🔴 <b>Узел недоступен</b>",
+                when,
+                detail_lines=detail_lines,
+            )
+
+        if event_type == "node_online":
+            detail_lines = [_line_text("📋", "Детали", details or "Узел снова online")]
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
+                "🟢 <b>Узел восстановлен</b>",
+                when,
+                detail_lines=detail_lines,
+            )
+
         if event_type == "alert_rule":
             detail_lines = [
                 _line_code("📋", "Правило", target_name),
@@ -1350,6 +1402,11 @@ def _preview_event_build_kwargs(event_key: str, *, actor_username: str) -> dict 
         "high_ram": {
             "event_type": "high_ram",
             "details": "88.1% (порог 85%, sustained 180s)",
+            **node_ctx,
+        },
+        "node_offline": {
+            "event_type": "node_offline",
+            "details": "Connection refused",
             **node_ctx,
         },
         "cidr_deploy_failed": {

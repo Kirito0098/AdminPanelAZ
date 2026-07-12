@@ -589,9 +589,11 @@ export default function ClientActionsDialog({
           <DialogHeader className="shrink-0 space-y-3 border-b px-6 pb-4 pt-6">
             <div className="pr-6">
               <DialogTitle className="text-xl font-semibold tracking-tight">{config.client_name}</DialogTitle>
-              {config.description && (
-                <DialogDescription className="mt-1 line-clamp-2">{config.description}</DialogDescription>
-              )}
+              <DialogDescription
+                className={config.description ? 'mt-1 line-clamp-2' : 'sr-only'}
+              >
+                {config.description || 'Управление VPN-конфигурацией клиента'}
+              </DialogDescription>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <Badge variant={getProtocolBadgeVariant(tab)}>{protocolLabel(tab)}</Badge>

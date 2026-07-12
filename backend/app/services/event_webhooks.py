@@ -48,6 +48,7 @@ WEBHOOK_EVENT_LABELS: dict[str, str] = {
     "node_create": "Создание узла",
     "node_update_apply": "Обновление узла",
     "node_offline": "Узел offline",
+    "node_online": "Узел online",
     "backup_restore": "Восстановление бэкапа",
     "security_settings_update": "Изменение безопасности",
     "user_create": "Создание пользователя",

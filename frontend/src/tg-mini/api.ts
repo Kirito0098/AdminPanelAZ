@@ -158,6 +158,8 @@ export async function getTgAdminNotify(): Promise<AdminNotifySettings> {
 export async function updateTgAdminNotify(data: {
   telegram_id?: string
   events?: Record<string, boolean>
+  recipient_user_ids?: number[]
+  node_offline_grace_seconds?: number
 }): Promise<AdminNotifySettings> {
   return tgFetch<AdminNotifySettings>('/admin-notify', {
     method: 'PATCH',

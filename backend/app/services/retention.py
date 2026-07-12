@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import NodeResourceSample, PanelResourceSample, UserActionLog, UserTrafficSample
+from app.models import ConnectionCountSample, NodeResourceSample, PanelResourceSample, UserActionLog, UserTrafficSample
 
 
 def _utcnow() -> datetime:
@@ -66,6 +66,13 @@ def run_retention_purge(db: Session) -> dict[str, int]:
     counts["node_resource_sample"] = _purge_model_before(
         db,
         NodeResourceSample,
+        now - timedelta(days=node_days),
+        batch_size=batch_size,
+    )
+
+    counts["connection_count_samples"] = _purge_model_before(
+        db,
+        ConnectionCountSample,
         now - timedelta(days=node_days),
         batch_size=batch_size,
     )
