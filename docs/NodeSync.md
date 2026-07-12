@@ -119,7 +119,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 | Область | Исключение | Где задано |
 |---------|------------|------------|
 | Config files | `warper-include-ips.txt` и др. node-local файлы | `CONFIG_FINGERPRINT_EXCLUDE` в `fingerprints.py` |
-| Setup (`/root/antizapret/setup`) | `ANTIZAPRET_WARP`, `VPN_WARP` | `ANTIZAPRET_HA_SETTING_EXCLUDE` |
+| Setup (`/root/antizapret/setup`) | (пусто) — все ключи из `ANTIZAPRET_PARAMS`, включая `ANTIZAPRET_WARP` / `VPN_WARP` | `ANTIZAPRET_HA_SETTING_EXCLUDE` |
 | Setup | **`OPENVPN_HOST` / `WIREGUARD_HOST` реплицируются** (общий `shared_domain`) | — |
 
 ### Apply shared domain (`POST …/apply-shared-domain`)

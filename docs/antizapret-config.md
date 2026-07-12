@@ -67,16 +67,16 @@
 
 ### `ANTIZAPRET_HA_SETTING_EXCLUDE`
 
-При репликации setup в `sync_mode=auto` панель фильтрует node-specific ключи (`filter_ha_replicable_settings`):
+При репликации setup в `sync_mode=auto` панель может отфильтровать node-local ключи (`filter_ha_replicable_settings`):
 
 | Реплицируется | Не реплицируется |
 |---------------|------------------|
-| Все ключи из `ANTIZAPRET_PARAMS`, включая `openvpn_host` → `OPENVPN_HOST`, `wireguard_host` → `WIREGUARD_HOST` (общий `shared_domain` в HA) | `ANTIZAPRET_WARP`, `VPN_WARP` |
+| Все ключи из `ANTIZAPRET_PARAMS`, включая `ANTIZAPRET_WARP`, `VPN_WARP`, `openvpn_host` → `OPENVPN_HOST`, `wireguard_host` → `WIREGUARD_HOST` (общий `shared_domain` в HA) | Сейчас пусто (`ANTIZAPRET_HA_SETTING_EXCLUDE = {}`) |
 | Partial update: только поля из текущего PUT | Строки вне `ANTIZAPRET_PARAMS` (напр. `OPENVPN_LOG`) — panel API их не шлёт |
 
-Константа в коде: `ANTIZAPRET_HA_SETTING_EXCLUDE = {ANTIZAPRET_WARP, VPN_WARP}` (`antizapret_params.py`).
+Константа в коде: `ANTIZAPRET_HA_SETTING_EXCLUDE` (`antizapret_params.py`).
 
-**Почему WARP исключён:** WARPER slave и WARP-режим — per-node (см. [warper.md](warper.md), `warper-include-ips.txt` в `CONFIG_FINGERPRINT_EXCLUDE`). Hostname OpenVPN/WireGuard в HA **один** — реплицируется.
+**`ANTIZAPRET_WARP` / `VPN_WARP`** — встроенные флаги Cloudflare WARP в setup AntiZapret (не AZ-WARP / Warper). Они **реплицируются** вместе с остальным конфигом, чтобы оба узла вели трафик одинаково. Node-local остаётся файл `warper-include-ips.txt` (см. [warper.md](warper.md), `CONFIG_FINGERPRINT_EXCLUDE`).
 
 ---
 

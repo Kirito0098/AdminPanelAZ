@@ -18,7 +18,6 @@ import {
   createNodeSyncGroup,
   deleteNodeSyncGroup,
   getNodeSyncGroups,
-  pushNodeSyncGroupFull,
   setupNodeSyncGroup,
   updateNodeSyncGroup,
   verifyNodeSyncGroup,
@@ -163,7 +162,6 @@ type SyncGroupActionsProps = {
   actionLoading: number | null
   compact?: boolean
   onSetup: () => void
-  onPushFull: () => void
   onDomain: () => void
   onVerify: () => void
   onEdit: () => void
@@ -175,7 +173,6 @@ function SyncGroupActions({
   actionLoading,
   compact = false,
   onSetup,
-  onPushFull,
   onDomain,
   onVerify,
   onEdit,
@@ -187,9 +184,14 @@ function SyncGroupActions({
   if (compact) {
     return (
       <div className="flex flex-wrap gap-1">
-        <Button size="sm" disabled={syncBusy} onClick={onSetup} title="Домен → Push full → Verify (полный цикл)">
+        <Button
+          size="sm"
+          disabled={syncBusy}
+          onClick={onSetup}
+          title="Домен → полная копия на реплику → проверка (полный цикл)"
+        >
           {actionBusy ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
-          Настройка
+          Синхронизировать
         </Button>
         <Button variant="outline" size="sm" disabled={actionBusy} onClick={onVerify}>
           <ShieldCheck size={14} />
@@ -203,9 +205,6 @@ function SyncGroupActions({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem disabled={syncBusy} onClick={onPushFull}>
-              Push full
-            </DropdownMenuItem>
             <DropdownMenuItem disabled={syncBusy} onClick={onDomain}>
               <Globe size={14} />
               Домен
@@ -234,19 +233,10 @@ function SyncGroupActions({
         size="sm"
         disabled={syncBusy}
         onClick={onSetup}
-        title="Домен → Push full → Verify (полный цикл)"
+        title="Домен → полная копия на реплику → проверка (полный цикл)"
       >
         {actionBusy ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
-        Настройка
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={syncBusy}
-        onClick={onPushFull}
-        title="Push full: на реплике VPN/crypto удаляются и заменяются копией с основного (PKI, .ovpn, WG)"
-      >
-        Push full
+        Синхронизировать
       </Button>
       <Button
         variant="outline"
@@ -284,7 +274,6 @@ function SyncGroupCard({
   onDns,
   onOpenVerifyReport,
   onSetup,
-  onPushFull,
   onDomain,
   onVerify,
   onEdit,
@@ -295,7 +284,6 @@ function SyncGroupCard({
   onDns: () => void
   onOpenVerifyReport: () => void
   onSetup: () => void
-  onPushFull: () => void
   onDomain: () => void
   onVerify: () => void
   onEdit: () => void
@@ -348,7 +336,6 @@ function SyncGroupCard({
           actionLoading={actionLoading}
           compact
           onSetup={onSetup}
-          onPushFull={onPushFull}
           onDomain={onDomain}
           onVerify={onVerify}
           onEdit={onEdit}
@@ -386,7 +373,8 @@ function AutoSyncModeDescription({ compact = false }: { compact?: boolean }) {
         ))}
       </ul>
       <p className="mt-2 text-xs text-muted-foreground">
-        Не синхронизируются: warper-include-ips.txt, флаги ANTIZAPRET_WARP / VPN_WARP (локально на узле).
+        Не синхронизируются: warper-include-ips.txt (локально на узле; это AZ-WARP, не флаги
+        ANTIZAPRET_WARP / VPN_WARP из «Конфиг AntiZapret» — они синхронизируются).
         {HA_PUSH_FULL} — первичное выравнивание и восстановление после рассинхрона.
       </p>
       {compact ? (
@@ -415,7 +403,6 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<NodeSyncGroup | null>(null)
   const [setupTarget, setSetupTarget] = useState<NodeSyncGroup | null>(null)
-  const [pushFullTarget, setPushFullTarget] = useState<NodeSyncGroup | null>(null)
   const [domainApplyTarget, setDomainApplyTarget] = useState<NodeSyncGroup | null>(null)
   const [setupStage, setSetupStage] = useState<string | null>(null)
   const [dnsTarget, setDnsTarget] = useState<NodeSyncGroup | null>(null)
@@ -641,7 +628,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
   const runHaSetup = useCallback(
     async (group: NodeSyncGroup) => {
       setActionLoading(group.id)
-      setSetupStage(`Настройка «${group.name}»: домен → синхронизация реплики → OpenVPN → проверка…`)
+      setSetupStage(`Синхронизация «${group.name}»: домен → копия на реплику → OpenVPN → проверка…`)
       try {
         const accepted = await setupNodeSyncGroup(group.id)
         const task = await pollToCompletion(accepted.task_id)
@@ -654,12 +641,12 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         }
         showSyncResult(task, updated?.ready)
         if (updated?.ready) {
-          success('HA-группа настроена и готова к DNS-переключению')
+          success('HA-группа синхронизирована и готова к DNS-переключению')
         } else {
-          notifyWarning('Настройка завершена с расхождениями — см. отчёт')
+          notifyWarning('Синхронизация завершена с расхождениями — см. отчёт')
         }
       } catch (err) {
-        notifyError(err instanceof ApiError ? err.message : 'Ошибка настройки HA-группы')
+        notifyError(err instanceof ApiError ? err.message : 'Ошибка синхронизации HA-группы')
         await load()
       } finally {
         setSetupStage(null)
@@ -667,33 +654,6 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
       }
     },
     [applyGroups, fetchGroups, load, notifyError, notifyWarning, pollToCompletion, showSyncResult, showVerifyResult, success],
-  )
-
-  const runPushFull = useCallback(
-    async (group: NodeSyncGroup) => {
-      setActionLoading(group.id)
-      setSetupStage(`Push full «${group.name}»: копия состояния primary на реплики…`)
-      try {
-        const accepted = await pushNodeSyncGroupFull(group.id)
-        const task = await pollToCompletion(accepted.task_id)
-        const fresh = await fetchGroups()
-        applyGroups(fresh)
-        const updated = fresh.find((g) => g.id === group.id)
-        showSyncResult(task, updated?.ready)
-        if (task.status === 'completed') {
-          success('Push full завершён')
-        } else {
-          notifyWarning('Push full завершился с ошибками — см. отчёт')
-        }
-      } catch (err) {
-        notifyError(err instanceof ApiError ? err.message : 'Ошибка Push full')
-        await load()
-      } finally {
-        setSetupStage(null)
-        setActionLoading(null)
-      }
-    },
-    [applyGroups, fetchGroups, load, notifyError, notifyWarning, pollToCompletion, showSyncResult, success],
   )
 
   /** Non-destructive: re-apply the shared domain to all members (used after edits). */
@@ -760,7 +720,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
           await runHaSetup(savedGroup)
         }
       } else if (membersChanged) {
-        setPushFullTarget(savedGroup)
+        setSetupTarget(savedGroup)
       } else if (domainChanged) {
         await runDomainApply(savedGroup)
       }
@@ -794,13 +754,6 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
     if (!group.last_verify_result) return
     showVerifyResult(group, group.last_verify_result)
   }, [showVerifyResult])
-
-  const handleRunPushFull = async () => {
-    if (!pushFullTarget) return
-    const group = pushFullTarget
-    setPushFullTarget(null)
-    await runPushFull(group)
-  }
 
   const handleRunDomainApply = async () => {
     if (!domainApplyTarget) return
@@ -853,9 +806,9 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
               Группы синхронизации (HA)
             </CardTitle>
             <CardDescription>
-              Один домен на два узла: при падении основного DNS переключает на реплику. Настройка — полный цикл;
-              Push full — на реплике VPN/crypto (PKI, сертификаты, .ovpn) удаляются и заменяются копией с
-              основного, лишние клиенты удаляются; «Домен» — только хосты в setup. Runbook:{' '}
+              Один домен на два узла: при падении основного DNS переключает на реплику. «Синхронизировать» —
+              полный цикл (домен + копия VPN/crypto на реплику + проверка); «Домен» — только хосты в setup;
+              «Проверить» — диагностика без изменений. Runbook:{' '}
               <code className="text-xs">docs/NodeSync.md</code>,{' '}
               <code className="text-xs">reviews/HA-sync-remediation-plan.md</code>.
             </CardDescription>
@@ -895,7 +848,6 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                   onDns={() => setDnsTarget(group)}
                   onOpenVerifyReport={() => openStoredVerifyResult(group)}
                   onSetup={() => setSetupTarget(group)}
-                  onPushFull={() => void runPushFull(group)}
                   onDomain={() => setDomainApplyTarget(group)}
                   onVerify={() => void handleVerify(group)}
                   onEdit={() => openEdit(group)}
@@ -958,7 +910,6 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                             group={group}
                             actionLoading={actionLoading}
                             onSetup={() => setSetupTarget(group)}
-                            onPushFull={() => void runPushFull(group)}
                             onDomain={() => setDomainApplyTarget(group)}
                             onVerify={() => void handleVerify(group)}
                             onEdit={() => openEdit(group)}
@@ -1081,8 +1032,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                       </p>
                     ) : (
                       <p className="text-xs text-muted-foreground">
-                        После создания диск реплики не меняется — настройте группу кнопкой «Настройка» или
-                        «Push full».
+                        После создания диск реплики не меняется — настройте группу кнопкой «Синхронизировать».
                       </p>
                     )}
                   </div>
@@ -1106,7 +1056,7 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         open={Boolean(setupTarget)}
         title="Синхронизировать HA-группу"
         icon={Wand2}
-        description="Выполним за один шаг всё, что нужно для отказоустойчивости группы."
+        description="Выполним за один шаг всё, что нужно для отказоустойчивости группы: домен, полная копия на реплику и проверка."
         alert={{
           variant: 'danger',
           title: 'Состояние реплики будет перезаписано',
@@ -1224,29 +1174,6 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
         open={verifyDialogOpen}
         onOpenChange={setVerifyDialogOpen}
         result={verifyDialogView}
-      />
-
-      <ConfirmDialog
-        open={Boolean(pushFullTarget)}
-        title="Push full — перезапись реплики"
-        description={`На репликах группы «${pushFullTarget?.name ?? ''}» VPN/crypto будут удалены и заменены копией с основного (PKI, сертификаты, .ovpn, WireGuard). Лишние клиенты на реплике удаляются.`}
-        alert={{
-          variant: 'danger',
-          title: 'Состояние реплики будет перезаписано',
-          children: (
-            <p>
-              Состав группы изменился или запрошена полная синхронизация. Shadow-связи после Push full
-              пересоберутся автоматически.
-            </p>
-          ),
-        }}
-        confirmLabel="Push full"
-        destructive
-        onConfirm={() => void handleRunPushFull()}
-        onOpenChange={(open) => {
-          if (!open && actionLoading === null) setPushFullTarget(null)
-        }}
-        loading={actionLoading !== null}
       />
 
       <ConfirmDialog

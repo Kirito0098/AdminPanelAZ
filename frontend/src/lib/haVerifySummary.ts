@@ -185,7 +185,7 @@ export function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismat
     return {
       title: 'Разные клиенты OpenVPN',
       details: details.length ? details : ['Наборы имён клиентов на узлах не совпадают.'],
-      hint: 'Создайте или удалите клиентов на основном узле и дождитесь авто-синхронизации, либо выполните Push full для полного выравнивания.',
+      hint: 'Создайте или удалите клиентов на основном узле и дождитесь авто-синхронизации, либо нажмите «Синхронизировать» для полного выравнивания.',
     }
   }
 
@@ -200,7 +200,7 @@ export function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismat
     return {
       title: 'Недействительный сертификат в .ovpn',
       details: details.length ? details : ['В профиле OpenVPN встроен отозванный или просроченный сертификат.'],
-      hint: 'Выполните Push full — PKI и .ovpn будут скопированы с primary на replica без перевыпуска сертификатов.',
+      hint: 'Нажмите «Синхронизировать» — PKI и .ovpn будут скопированы с primary на replica без перевыпуска сертификатов.',
     }
   }
 
@@ -321,8 +321,8 @@ export function parseHaVerifyResult(
     nextStep = `Сначала восстановите связь с ${offlineReplicas.join(', ')}, затем повторите проверку.`
   } else if (mismatchCount) {
     nextStep = manualMode
-      ? 'В режиме manual_full выполните Push full для выравнивания реплики с основным узлом.'
-      : 'Устраните отличия на primary (авто-синхронизация) или выполните Push full / «Настройка».'
+      ? 'В режиме manual_full нажмите «Синхронизировать» для выравнивания реплики с основным узлом.'
+      : 'Устраните отличия на primary (авто-синхронизация) или нажмите «Синхронизировать».'
   }
 
   const groupLabel = groupName ? `«${groupName}»` : `домен ${result.shared_domain}`

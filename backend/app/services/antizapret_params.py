@@ -175,10 +175,12 @@ ANTIZAPRET_PARAMS = [
 
 KNOWN_SETTING_KEYS = frozenset(p["key"] for p in ANTIZAPRET_PARAMS)
 
-# Setup keys excluded from HA auto-replication (node-specific WARP). Hostnames replicate.
-ANTIZAPRET_HA_SETTING_EXCLUDE: frozenset[str] = frozenset({"ANTIZAPRET_WARP", "VPN_WARP"})
+# Setup keys excluded from HA auto-replication (node-local only).
+# ANTIZAPRET_WARP / VPN_WARP are built-in AntiZapret Cloudflare WARP flags (not AZ-WARP /
+# Warper) and must replicate with the rest of setup so both nodes route the same way.
+ANTIZAPRET_HA_SETTING_EXCLUDE: frozenset[str] = frozenset()
 
 
 def filter_ha_replicable_settings(updates: dict[str, Any]) -> dict[str, Any]:
-    """Drop node-specific WARP flags; keep shared-domain fields like openvpn_host."""
+    """Drop node-local setup keys; keep shared AntiZapret config including WARP flags."""
     return {key: value for key, value in updates.items() if key not in ANTIZAPRET_HA_SETTING_EXCLUDE}

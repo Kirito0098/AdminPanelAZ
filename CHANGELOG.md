@@ -40,11 +40,17 @@
 
 ## [Unreleased]
 
+### 🔄 Changed
+
+#### Node Sync / HA
+
+- **`ANTIZAPRET_WARP` / `VPN_WARP` синхронизируются** — встроенные флаги Cloudflare WARP из «Конфиг AntiZapret» больше не в `ANTIZAPRET_HA_SETTING_EXCLUDE` (это не AZ-WARP / Warper). На реплику уходит тот же setup, что на primary; node-local по-прежнему только `warper-include-ips.txt` (`antizapret_params.py`, UI HA, docs).
+
 ---
 
 ## [2.15.0] - 2026-07-12
 
-> **Кратко:** адаптивная вёрстка панели для телефонов и планшетов — safe area и `100dvh`, карточные списки вместо широких таблиц, компактный header и toolbar; общие компоненты `ResponsiveDataView`, `PageSectionHeader`, `ToolbarButton`; мобильные **Настройки** с inline-accordion и выпадающим переключателем разделов; улучшения HA-селектора узлов и бейджей группы; Telegram Mini App — синхронизация темы WebApp и исправление загрузки assets; понятные ошибки при «Подключить бота к панели» (сеть/DNS/timeout вместо сырого `Errno 101`); dev-proxy Vite для `ENFORCE_HTTPS`; **HA OpenVPN parity без перевыпуска сертификатов** — byte-copy PKI и `.ovpn` с primary на replica, read-only download/verify, Push full с копией профилей после restore; **строгая идентичность replica** — wipe-and-replace VPN/crypto при Push full/Setup, prune лишних клиентов, защита профилей от «Домен», routing apply и CSV/шаблонов; исправление ложных расхождений Verify из-за `parse_easyrsa_index`; исправления OpenVPN restart после HA sync, сломанных `/traffic` и `/edit-files`, flyout настроек за пределами экрана; **node agent 1.5.0**.
+> **Кратко:** адаптивная вёрстка панели для телефонов и планшетов — safe area и `100dvh`, карточные списки вместо широких таблиц, компактный header и toolbar; общие компоненты `ResponsiveDataView`, `PageSectionHeader`, `ToolbarButton`; мобильные **Настройки** с inline-accordion и выпадающим переключателем разделов; улучшения HA-селектора узлов и бейджей группы; HA UI — одна кнопка «Синхронизировать» вместо «Настройка» + «Push full»; Telegram Mini App — синхронизация темы WebApp и исправление загрузки assets; понятные ошибки при «Подключить бота к панели» (сеть/DNS/timeout вместо сырого `Errno 101`); dev-proxy Vite для `ENFORCE_HTTPS`; **HA OpenVPN parity без перевыпуска сертификатов** — byte-copy PKI и `.ovpn` с primary на replica, read-only download/verify, Push full с копией профилей после restore; **строгая идентичность replica** — wipe-and-replace VPN/crypto при полной синхронизации, prune лишних клиентов, защита профилей от «Домен», routing apply и CSV/шаблонов; исправление ложных расхождений Verify из-за `parse_easyrsa_index`; исправления OpenVPN restart после HA sync, сломанных `/traffic` и `/edit-files`, flyout настроек за пределами экрана; **node agent 1.5.0**.
 
 ### ✨ Added
 
@@ -110,7 +116,7 @@
 - **«Домен» / shared domain** — после `client.sh 7` на replica выполняется byte-copy `.ovpn` с primary (как в Push full), чтобы профили оставались идентичными основному узлу (`shared_domain.py`).
 - **HA auto: routing apply на replica** — `routing_apply_replica` больше не вызывает `client.sh 7` на реплике (`recreate_profiles=False`): только `sync_cidr_providers` + `doall.sh` (`background_tasks.py`, `antizapret_sync.py`).
 - **CSV-импорт и шаблоны клиентов** — после batch-создания OpenVPN-клиентов один раз вызывается `client.sh 7`; на HA-primary затем копируются `.ovpn` на реплики (`config_csv_ops.py`, `client_templates.py`).
-- **UI HA-групп** — явные подсказки, что «Настройка» / «Push full» удаляют VPN/crypto на реплике и заменяют копией с основного; диалог Push full при смене состава группы (`NodeSyncGroupSection.tsx`).
+- **UI HA-групп** — одна кнопка «Синхронизировать» вместо «Настройка» + «Push full» (полный цикл: домен → wipe/копия VPN/crypto на реплику → проверка); отдельно «Домен» и «Проверить»; явные подсказки, что синхронизация удаляет VPN/crypto на реплике (`NodeSyncGroupSection.tsx`).
 
 #### Документация
 

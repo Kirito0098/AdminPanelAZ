@@ -127,7 +127,7 @@ function buildOpenVpnProfileCopySection(
         return {
           nodeName: name,
           text: 'Не удалось скопировать .ovpn с primary',
-          explanation: 'Replica может отклонять тот же сертификат, что принимает primary — повторите Push full.',
+          explanation: 'Replica может отклонять тот же сертификат, что принимает primary — нажмите «Синхронизировать».',
           status: 'error' as const,
           details: [item.error],
         }
@@ -263,7 +263,7 @@ function buildReplicaPruneSection(items: HaReplicaPrune[] | undefined): HaSyncRe
         return {
           nodeName: name,
           text: 'Не все лишние клиенты удалены',
-          explanation: 'На реплике могут остаться сертификаты или peers, которых нет на primary — повторите Push full.',
+          explanation: 'На реплике могут остаться сертификаты или peers, которых нет на primary — нажмите «Синхронизировать».',
           status: 'error' as const,
           details: details.length ? details : undefined,
         }
