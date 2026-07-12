@@ -15,7 +15,7 @@ from app.services.openvpn_pki import (
 
 SAMPLE_INDEX = """\
 R\t360406211315Z\t260615203626Z\tF401806F35A8048BA0941A9F085EF9C2\tunknown\t/CN=AN_Claymore
-V\t360405210223Z\tC9014ACA2099B8A6FB3F856105979E79\tunknown\t/CN=AN_Claymore
+V\t360405210223Z\t\tC9014ACA2099B8A6FB3F856105979E79\tunknown\t/CN=AN_Claymore
 V\t350828115322Z\t197E3E2863B7E339EDD7282A8C94A8F8\tunknown\t/CN=AN_Claymore
 """
 
@@ -28,6 +28,25 @@ def test_parse_easyrsa_index_revoked_and_valid_entries():
     assert len(revoked) == 1
     assert revoked[0].serial_hex == "F401806F35A8048BA0941A9F085EF9C2"
     assert len(valid) == 2
+    assert {entry.serial_hex for entry in valid} == {
+        "C9014ACA2099B8A6FB3F856105979E79",
+        "197E3E2863B7E339EDD7282A8C94A8F8",
+    }
+
+
+def test_parse_easyrsa_index_real_empty_revocation_column():
+    """Real EasyRSA index.txt keeps an empty tab-separated revocation field for V/E."""
+    index = (
+        "V\t360709111029Z\t\t3C3C88E19A7CFF7C27F34645E0EC40CD\tunknown\t/CN=123\n"
+        "E\t250101000000Z\t\tAABBCCDDEEFF00112233445566778899\tunknown\t/CN=old\n"
+    )
+    entries = parse_easyrsa_index(index)
+    assert len(entries) == 2
+    by_cn = {entry.common_name: entry for entry in entries}
+    assert by_cn["123"].status == "V"
+    assert by_cn["123"].serial_hex == "3C3C88E19A7CFF7C27F34645E0EC40CD"
+    assert by_cn["old"].status == "E"
+    assert by_cn["old"].serial_hex == "AABBCCDDEEFF00112233445566778899"
 
 
 def test_is_serial_revoked_matches_index():

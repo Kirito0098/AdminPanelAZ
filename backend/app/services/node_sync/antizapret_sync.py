@@ -124,7 +124,12 @@ def enqueue_ha_routing_apply_replicas(
     for replica_node in get_replica_nodes(db, group):
         task = background_task_service.enqueue_background_task(
             "routing_apply_replica",
-            background_task_service.make_routing_apply_for_node_callable(replica_node.id),
+            # recreate_profiles=False: client.sh 7 on a replica would rebuild
+            # .ovpn from replica-local PKI and break byte-parity with primary;
+            # routing changes do not affect profile contents.
+            background_task_service.make_routing_apply_for_node_callable(
+                replica_node.id, recreate_profiles=False
+            ),
             created_by_username=created_by_username,
             queued_message=f"Применение маршрутизации на replica «{replica_node.name}»…",
         )

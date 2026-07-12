@@ -46,14 +46,29 @@
 
 - **Push full: HA restore (`?ha_replica=true`)** — перед копированием бэкапа на replica выполняется wipe VPN/crypto путей (`easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG); **без `client.sh 7`** на replica. Каталог `config/` — merge, как раньше.
 - **Push full: prune** — после copy `.ovpn` удаляются VPN-клиенты OpenVPN/WireGuard, которых нет на primary (`replica_prune` в JSON результата и отчёте синхронизации).
-- **Push full: hard fail** — ошибки copy `.ovpn`, prune, restart OpenVPN или apply WireGuard runtime помечают replica как failed (не «успех с предупреждениями»).
+- **Push full: hard fail** — ошибки copy `.ovpn`, prune, restart OpenVPN или apply WireGuard runtime помечают replica как failed (не «успех с предупреждениями»); пустой архив профилей с primary и недействительные сертификаты в `.ovpn` после копии на replica также прерывают шаг.
 - **HA crypto sync** — `import_easyrsa3_archive` делает `rmtree` PKI перед extract; WireGuard server `.conf` — mirror-sync (лишние файлы на replica удаляются).
+- **«Домен» / shared domain** — после `client.sh 7` на replica выполняется byte-copy `.ovpn` с primary (как в Push full), чтобы профили оставались идентичными основному узлу.
+- **HA auto: routing apply на replica** — `routing_apply_replica` больше не вызывает `client.sh 7` на реплике (`recreate_profiles=False`): только `sync_cidr_providers` + `doall.sh`.
+- **CSV-импорт и шаблоны клиентов** — после batch-создания OpenVPN-клиентов один раз вызывается `client.sh 7`; на HA-primary затем копируются `.ovpn` на реплики.
+- **UI HA-групп** — явные подсказки, что «Настройка» / «Push full» удаляют VPN/crypto на реплике и заменяют копией с основного; диалог Push full при смене состава группы.
+
+### 🐛 Fixed
+
+#### Node Sync / HA — ложные расхождения и разъезд профилей
+
+- **`parse_easyrsa_index`** — корректный разбор строк `V`/`E` с пустым полем revocation в реальном `index.txt` EasyRSA (`V\texpiry\t\tserial\t…`). Раньше все валидные сертификаты пропускались → ложные `not_in_index` в Verify и блокировка Push full при рабочем VPN.
+- **«Домен» без Push full** — `client.sh 7` на реплике из локального PKI больше не оставляет `.ovpn` рассинхронизированными с primary.
+- **Авто-применение маршрутизации** — фоновый `routing_apply_replica` не пересобирает `.ovpn` на реплике из локального PKI.
 
 ### 🧪 Tests
 
 - `test_antizapret_backup_ha_restore.py` — HA restore без `client.sh 7`, wipe перед copy.
-- `test_vpn_state_sync.py` — `prune_replica_vpn_clients`, mirror WireGuard server configs.
-- `test_node_sync_push_full.py` — HA restore flag, prune, hard fail при ошибке copy профилей.
+- `test_vpn_state_sync.py` — `prune_replica_vpn_clients`, mirror WireGuard server configs, hard fail при пустом архиве `.ovpn`.
+- `test_node_sync_push_full.py` — HA restore flag, prune, hard fail при ошибке copy профилей и при invalid certs после копии.
+- `test_openvpn_pki.py` — пустая revocation-колонка в `index.txt` для `V`/`E`.
+- `test_node_sync_shared_domain.py` — byte-copy `.ovpn` primary → replica при apply shared domain.
+- `test_background_tasks_doall.py` — `recreate_profiles=False` для routing apply на replica.
 
 ---
 

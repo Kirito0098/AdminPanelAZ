@@ -244,7 +244,7 @@ function SyncGroupActions({
         size="sm"
         disabled={syncBusy}
         onClick={onPushFull}
-        title="Только Push full: замена VPN/crypto на реплике с primary; лишние клиенты удаляются"
+        title="Push full: на реплике VPN/crypto удаляются и заменяются копией с основного (PKI, .ovpn, WG)"
       >
         Push full
       </Button>
@@ -854,7 +854,8 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
             </CardTitle>
             <CardDescription>
               Один домен на два узла: при падении основного DNS переключает на реплику. Настройка — полный цикл;
-              Push full — wipe-and-replace VPN/crypto с primary (лишние клиенты на реплике удаляются); «Домен» — только хосты в setup. Runbook:{' '}
+              Push full — на реплике VPN/crypto (PKI, сертификаты, .ovpn) удаляются и заменяются копией с
+              основного, лишние клиенты удаляются; «Домен» — только хосты в setup. Runbook:{' '}
               <code className="text-xs">docs/NodeSync.md</code>,{' '}
               <code className="text-xs">reviews/HA-sync-remediation-plan.md</code>.
             </CardDescription>
@@ -1075,12 +1076,13 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
                     </div>
                     {autoSetup ? (
                       <p className="text-xs text-destructive">
-                        Реплика будет перезаписана из основного узла (клиенты, ключи, конфиги). Выключите, если
-                        на реплике есть нужные данные.
+                        На реплике VPN/crypto будут удалены и заменены копией с основного (PKI, сертификаты,
+                        .ovpn, WireGuard). Выключите, если на реплике есть нужные данные.
                       </p>
                     ) : (
                       <p className="text-xs text-muted-foreground">
-                        После создания настройте группу кнопкой «Синхронизировать».
+                        После создания диск реплики не меняется — настройте группу кнопкой «Настройка» или
+                        «Push full».
                       </p>
                     )}
                   </div>
@@ -1116,7 +1118,10 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
               <>
                 <ol className="list-decimal space-y-0.5 pl-5">
                   <li>Запись общего домена в OPENVPN_HOST / WIREGUARD_HOST на всех узлах.</li>
-                  <li>Полная копия PKI, WireGuard и конфигов с основного узла на реплику.</li>
+                  <li>
+                    На реплике VPN/crypto удаляются и заменяются копией с основного (PKI, сертификаты, .ovpn,
+                    WireGuard) — без перевыпуска сертификатов.
+                  </li>
                   <li>Перезапуск всех служб OpenVPN (openvpn-server@*) на реплике.</li>
                   <li>Проверка готовности к DNS-переключению.</li>
                 </ol>
@@ -1223,9 +1228,20 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
 
       <ConfirmDialog
         open={Boolean(pushFullTarget)}
-        title="Обязательна полная синхронизация"
-        description={`Состав группы «${pushFullTarget?.name ?? ''}» изменился. Shadow-связи могут быть устаревшими — выполните Push full или полную настройку.`}
+        title="Push full — перезапись реплики"
+        description={`На репликах группы «${pushFullTarget?.name ?? ''}» VPN/crypto будут удалены и заменены копией с основного (PKI, сертификаты, .ovpn, WireGuard). Лишние клиенты на реплике удаляются.`}
+        alert={{
+          variant: 'danger',
+          title: 'Состояние реплики будет перезаписано',
+          children: (
+            <p>
+              Состав группы изменился или запрошена полная синхронизация. Shadow-связи после Push full
+              пересоберутся автоматически.
+            </p>
+          ),
+        }}
         confirmLabel="Push full"
+        destructive
         onConfirm={() => void handleRunPushFull()}
         onOpenChange={(open) => {
           if (!open && actionLoading === null) setPushFullTarget(null)

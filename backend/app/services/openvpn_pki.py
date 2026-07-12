@@ -82,11 +82,16 @@ def parse_easyrsa_index(index_txt: str) -> list[EasyRsaIndexEntry]:
             revocation_date = parts[2].strip() or None
             serial_hex = _normalize_serial_hex(parts[3])
         else:
-            if len(parts) < 4:
-                continue
+            # EasyRSA keeps an empty revocation column for V/E:
+            #   V\texpiry\t\tserial\tunknown\t/CN=...
+            # Some fixtures omit that empty field:
+            #   V\texpiry\tserial\tunknown\t/CN=...
             expiry = parts[1].strip()
             revocation_date = None
-            serial_hex = _normalize_serial_hex(parts[2])
+            if parts[2].strip() == "" and len(parts) >= 4:
+                serial_hex = _normalize_serial_hex(parts[3])
+            else:
+                serial_hex = _normalize_serial_hex(parts[2])
         if not serial_hex:
             continue
         entries.append(

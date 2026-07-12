@@ -410,26 +410,44 @@ class BackgroundTaskService:
             return RuntimeError(str(detail or "Ошибка операции"))
         return RuntimeError(str(exc))
 
-    def task_run_doall(self, adapter, progress_updater: Callable[[int, str, str | None], None] | None = None) -> dict[str, str]:
+    def task_run_doall(
+        self,
+        adapter,
+        progress_updater: Callable[[int, str, str | None], None] | None = None,
+        *,
+        recreate_profiles: bool = True,
+    ) -> dict[str, str]:
         if progress_updater:
             progress_updater(10, "AntiZapret: запуск doall.sh…")
         try:
             doall_output = adapter.apply_config_changes()
         except Exception as exc:
             raise self._adapter_error(exc) from exc
-        if progress_updater:
-            progress_updater(65, "AntiZapret: пересоздание профилей клиентов…")
-        try:
-            recreate_output = adapter.recreate_profiles()
-        except Exception as exc:
-            raise self._adapter_error(exc) from exc
+        recreate_output = ""
+        if recreate_profiles:
+            if progress_updater:
+                progress_updater(65, "AntiZapret: пересоздание профилей клиентов…")
+            try:
+                recreate_output = adapter.recreate_profiles()
+            except Exception as exc:
+                raise self._adapter_error(exc) from exc
         combined = "\n".join(part for part in [doall_output, recreate_output] if part).strip()
         return {
-            "message": "doall и пересоздание профилей клиентов выполнены успешно",
+            "message": (
+                "doall и пересоздание профилей клиентов выполнены успешно"
+                if recreate_profiles
+                else "doall выполнен успешно (профили не пересоздавались)"
+            ),
             "output": combined,
         }
 
-    def task_routing_apply(self, adapter, progress_updater: Callable[[int, str, str | None], None] | None = None) -> dict[str, str]:
+    def task_routing_apply(
+        self,
+        adapter,
+        progress_updater: Callable[[int, str, str | None], None] | None = None,
+        *,
+        recreate_profiles: bool = True,
+    ) -> dict[str, str]:
         if progress_updater:
             progress_updater(5, "Синхронизация провайдеров…")
         try:
@@ -437,15 +455,21 @@ class BackgroundTaskService:
         except Exception as exc:
             raise self._adapter_error(exc) from exc
         sync_text = json.dumps(sync_output, ensure_ascii=False) if isinstance(sync_output, dict) else str(sync_output or "")
-        result = self.task_run_doall(adapter, progress_updater)
+        result = self.task_run_doall(adapter, progress_updater, recreate_profiles=recreate_profiles)
         combined = "\n".join(part for part in [sync_text, result.get("output", "")] if part).strip()
         return {
             "message": "Маршрутизация применена (doall.sh)",
             "output": combined,
         }
 
-    def make_routing_apply_for_node_callable(self, node_id: int) -> BackgroundTaskCallable:
+    def make_routing_apply_for_node_callable(
+        self,
+        node_id: int,
+        *,
+        recreate_profiles: bool = True,
+    ) -> BackgroundTaskCallable:
         captured_node_id = int(node_id)
+        captured_recreate = bool(recreate_profiles)
 
         def _callable(progress_updater: Callable[[int, str, str | None], None] | None = None) -> dict[str, str]:
             from app.models import Node
@@ -467,7 +491,9 @@ class BackgroundTaskService:
                     progress_updater(percent, staged, msg)
 
                 adapter = get_adapter_for_node(node)
-                result = self.task_routing_apply(adapter, _node_progress)
+                result = self.task_routing_apply(
+                    adapter, _node_progress, recreate_profiles=captured_recreate
+                )
                 result["message"] = f"{node_label}: {result.get('message', 'Маршрутизация применена')}"
                 result["output"] = json.dumps(
                     {

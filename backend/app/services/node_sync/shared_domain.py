@@ -4,6 +4,12 @@ Writes ``OPENVPN_HOST`` / ``WIREGUARD_HOST`` = ``shared_domain`` to
 ``/root/antizapret/setup`` on the primary and all replicas, then runs
 ``doall.sh`` (apply_config_changes) and ``client.sh 7`` (recreate_profiles) on
 each node so the new hosts land in regenerated client profiles.
+
+On replicas the locally regenerated ``.ovpn`` files are then replaced with a
+byte-copy from the primary: ``client.sh 7`` rebuilds profiles from the
+*replica-local* PKI, which breaks byte-parity with the primary (and produces
+broken profiles if the replica PKI drifted). The primary is processed first,
+so its profiles already contain the new shared domain when they are copied.
 """
 
 from __future__ import annotations
@@ -19,6 +25,7 @@ from app.models import Node, NodeSyncGroup, SyncStatus
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.groups import parse_replica_node_ids
 from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
+from app.services.node_sync.vpn_state_sync import copy_openvpn_profiles_from_primary
 
 logger = logging.getLogger(__name__)
 
@@ -112,13 +119,34 @@ def apply_shared_domain_to_members(
             )
 
     if run_apply:
+        primary_adapter = None
         for index, node in enumerate(nodes):
             percent = 45 + int((index / total) * 50)
             progress(percent, f"{node.name}: doall.sh + client.sh 7…")
             adapter = get_adapter_for_node(node)
+            is_primary = node.id == group.primary_node_id
             try:
                 doall_output = adapter.apply_config_changes()
                 recreate_output = adapter.recreate_profiles()
+                if is_primary:
+                    primary_adapter = adapter
+                elif primary_adapter is not None:
+                    # Replace locally regenerated .ovpn with a byte-copy from
+                    # primary to preserve profile parity (same as Push full).
+                    progress(percent, f"{node.name}: копия .ovpn с основного узла…")
+                    copy_openvpn_profiles_from_primary(primary_adapter, adapter)
+                else:
+                    result["errors"].append(
+                        {
+                            "node_id": node.id,
+                            "node_name": node.name,
+                            "stage": "profile_copy",
+                            "error": (
+                                "Копия .ovpn с основного узла пропущена: "
+                                "apply на основном узле не выполнен"
+                            ),
+                        }
+                    )
                 progress(percent, f"{node.name}: перезапуск OpenVPN…")
                 restart_result = restart_all_openvpn_servers(adapter)
                 result["openvpn_restart"].append(

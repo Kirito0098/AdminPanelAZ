@@ -58,6 +58,27 @@ def test_prune_replica_vpn_clients_removes_only_replica_clients():
     assert result["errors"] == []
 
 
+def test_copy_openvpn_profiles_from_primary_raises_on_empty_archive():
+    primary = MagicMock()
+    replica = MagicMock()
+    primary.export_openvpn_client_profiles_archive.return_value = b""
+
+    with pytest.raises(RuntimeError, match="Пустой архив OpenVPN-профилей"):
+        vpn_state_sync.copy_openvpn_profiles_from_primary(primary, replica)
+
+    replica.import_openvpn_client_profiles_archive.assert_not_called()
+
+
+def test_copy_openvpn_profiles_from_primary_imports_archive():
+    primary = MagicMock()
+    replica = MagicMock()
+    primary.export_openvpn_client_profiles_archive.return_value = b"archive-bytes"
+
+    vpn_state_sync.copy_openvpn_profiles_from_primary(primary, replica)
+
+    replica.import_openvpn_client_profiles_archive.assert_called_once_with(b"archive-bytes")
+
+
 def test_prune_replica_vpn_clients_collects_errors():
     primary = MagicMock()
     replica = MagicMock()

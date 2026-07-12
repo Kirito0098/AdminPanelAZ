@@ -27,6 +27,7 @@ from app.services.node_sync.vpn_state_sync import (
     copy_openvpn_profiles_from_primary,
     prune_replica_vpn_clients,
 )
+from app.services.openvpn_pki import validate_all_openvpn_profiles
 from app.services.policy_import import copy_access_policies_from_node
 from app.services.traffic.collector import collect_traffic_snapshot_for_node
 
@@ -146,6 +147,16 @@ def run_push_full(
 
             progress(percent, f"Копия OpenVPN-профилей primary → {replica_name}…")
             copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter)
+            replica_profile_validation = validate_all_openvpn_profiles(replica_adapter)
+            if not replica_profile_validation.ready:
+                issue_parts = [
+                    f"{issue.client_name}:{issue.status}"
+                    for issue in replica_profile_validation.issues[:8]
+                ]
+                detail = "; ".join(issue_parts) or "недействительные сертификаты в .ovpn"
+                raise RuntimeError(
+                    f"После копии .ovpn на реплике {replica_name}: {detail}"
+                )
             openvpn_profile_copy.append({"node_id": replica_id, "node_name": replica_name, "success": True})
 
             progress(percent, f"Очистка лишних VPN-клиентов на {replica_name}…")

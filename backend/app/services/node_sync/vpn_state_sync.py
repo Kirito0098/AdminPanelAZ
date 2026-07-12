@@ -171,8 +171,9 @@ def copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter) -> None
     """Byte-copy all .ovpn profile files from primary to replica."""
     archive = primary_adapter.export_openvpn_client_profiles_archive()
     if not archive:
-        logger.warning("HA crypto sync: primary OpenVPN profile archive is empty")
-        return
+        raise RuntimeError(
+            "Пустой архив OpenVPN-профилей с primary — копия на реплику невозможна"
+        )
     replica_adapter.import_openvpn_client_profiles_archive(archive)
 
 

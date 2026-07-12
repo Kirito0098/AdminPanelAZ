@@ -10,6 +10,7 @@ from app.services.feature_guards import FeatureToggleService, require_vpn_type
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 from app.services.node_sync.client_sync import maybe_replicate_create
 from app.services.node_sync.policy_sync import maybe_replicate_policy_op
+from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
 from app.services.traffic_limit import parse_traffic_limit_bytes, parse_traffic_limit_period_days
 
 
@@ -114,6 +115,7 @@ def apply_template(
     cert_days = template.cert_expire_days or 3650
     if template.vpn_type == VpnType.openvpn:
         adapter.add_openvpn_client(client_name, cert_days)
+        recreate_openvpn_profiles_after_admin_change(adapter, client_names=[client_name])
     else:
         adapter.add_wireguard_client(client_name)
 

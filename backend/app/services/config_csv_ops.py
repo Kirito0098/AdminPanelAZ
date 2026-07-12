@@ -17,10 +17,12 @@ from app.models import OpenVpnAccessPolicy, User, UserRole, VpnConfig, VpnType, 
 from app.services.access_policy import AccessPolicyService
 from app.services.background_tasks import background_task_service
 from app.services.feature_guards import get_feature_service, require_vpn_type
-from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
-from app.services.node_sync.groups import require_ha_primary_for_client_ops
+from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node, get_node_antizapret_path
+from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes, require_ha_primary_for_client_ops
 from app.services.node_sync.client_sync import maybe_replicate_create
 from app.services.node_sync.policy_sync import maybe_replicate_policy_op
+from app.services.node_sync.vpn_state_sync import copy_openvpn_profiles_from_primary
+from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
 from app.services.traffic_limit import parse_traffic_limit_period_days
 
 logger = logging.getLogger(__name__)
@@ -413,7 +415,13 @@ def _import_single_row(
             "error": f"репликация политики: {exc}",
         }
 
-    return {"line": row.get("_line"), "client_name": client_name, "config_id": config.id, "ok": True}
+    return {
+        "line": row.get("_line"),
+        "client_name": client_name,
+        "config_id": config.id,
+        "vpn_type": vpn_type.value,
+        "ok": True,
+    }
 
 
 def run_config_csv_import(
@@ -465,17 +473,75 @@ def run_config_csv_import(
             pct = int(idx * 100 / total)
             progress_updater(pct, f"{label} ({idx}/{total})")
 
+    recreate_warnings = _recreate_ovpn_profiles_after_import(
+        succeeded, node_id=node_id, progress_updater=progress_updater
+    )
+
     summary = {
         "total": total,
         "succeeded": succeeded,
         "failed": failed,
         "actor": actor_username,
     }
+    if recreate_warnings:
+        summary["recreate_warnings"] = recreate_warnings
     msg = f"Импорт CSV: {len(succeeded)}/{total}, ошибок: {len(failed)}"
+    if recreate_warnings:
+        msg += f"; предупреждения профилей: {len(recreate_warnings)}"
     return {
         "message": msg,
         "output": json.dumps(summary, ensure_ascii=False),
     }
+
+
+def _recreate_ovpn_profiles_after_import(
+    succeeded: list[dict[str, Any]],
+    *,
+    node_id: int,
+    progress_updater: Callable[[int, str, str | None], None] | None = None,
+) -> list[str]:
+    """One batch client.sh 7 after import so new .ovpn embed current setup hosts.
+
+    On an HA primary the recreated profiles are then byte-copied to replicas to
+    keep parity (per-row crypto replication ran before the batch recreate).
+    """
+    ovpn_names = [
+        str(item.get("client_name"))
+        for item in succeeded
+        if item.get("vpn_type") == VpnType.openvpn.value and item.get("client_name")
+    ]
+    if not ovpn_names:
+        return []
+
+    warnings: list[str] = []
+    if progress_updater:
+        progress_updater(100, "Пересоздание OpenVPN-профилей…")
+    db = SessionLocal()
+    try:
+        adapter = get_active_adapter(db)
+        try:
+            recreate_openvpn_profiles_after_admin_change(adapter, client_names=ovpn_names)
+        except Exception as exc:
+            logger.warning("CSV import: profile recreate failed: %s", exc)
+            return [f"Пересоздание профилей: {exc}"]
+
+        group = find_sync_group_for_primary(db, node_id)
+        if group:
+            for replica_node in get_replica_nodes(db, group):
+                try:
+                    copy_openvpn_profiles_from_primary(
+                        adapter, get_adapter_for_node(replica_node)
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "CSV import: .ovpn copy to replica %s failed: %s",
+                        replica_node.name,
+                        exc,
+                    )
+                    warnings.append(f"Копия .ovpn на реплику {replica_node.name}: {exc}")
+    finally:
+        db.close()
+    return warnings
 
 
 def enqueue_config_csv_import(
