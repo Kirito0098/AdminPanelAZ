@@ -24,7 +24,7 @@ import NodeSelector from '@/components/NodeSelector'
 import HaScopeEnforcer from '@/components/HaScopeEnforcer'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
@@ -261,6 +261,7 @@ export default function Layout() {
         <SheetContent side="left" className="flex w-72 flex-col overflow-hidden p-0">
           <SheetHeader className="sr-only">
             <SheetTitle>Навигация</SheetTitle>
+            <SheetDescription>Меню разделов панели</SheetDescription>
           </SheetHeader>
           <SidebarContent onNavigate={() => setMobileOpen(false)} />
         </SheetContent>
