@@ -311,7 +311,9 @@ def mini_app_asset(file_path: str):
 
 @router.get("")
 def mini_app_page(request: Request):
-    from app.services.html_csp import serve_html_with_nonce
+    from fastapi.responses import HTMLResponse
+
+    from app.services.html_csp import get_request_csp_nonce, inject_csp_nonce
 
     index_path = _static_index()
     if not index_path.is_file():
@@ -319,7 +321,18 @@ def mini_app_page(request: Request):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Mini App UI не собран. Выполните: cd frontend && npm run build:tg-mini",
         )
-    return serve_html_with_nonce(request, index_path)
+    # The page lives at .../tg-mini (no trailing slash), so relative
+    # "./assets/..." URLs resolve one level up and 404. Rewrite them to the
+    # actual request path so assets load regardless of proxy prefix.
+    base_path = request.url.path.rstrip("/")
+    html = index_path.read_text(encoding="utf-8")
+    html = html.replace('"./assets/', f'"{base_path}/assets/')
+    nonce = get_request_csp_nonce(request)
+    if not nonce:
+        from app.middleware.http_security import generate_csp_nonce
+
+        nonce = generate_csp_nonce()
+    return HTMLResponse(inject_csp_nonce(html, nonce), media_type="text/html")
 
 
 @router.post("/auth")
