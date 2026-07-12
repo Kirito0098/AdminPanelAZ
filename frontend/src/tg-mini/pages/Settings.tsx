@@ -345,7 +345,7 @@ export default function Settings() {
             <p className="text-xs text-muted-foreground">{LABEL_TELEGRAM_ID}</p>
             <p className="mono mt-1 text-sm font-medium">{notify?.telegram_id || '—'}</p>
             <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-              Привязка через <span className="font-mono">/link</span> в боте (код в веб-панели → Настройки → Личное).
+              Привязка через <span className="font-mono">/link</span> в боте (код в веб-панели → Мой профиль).
             </p>
           </div>
 

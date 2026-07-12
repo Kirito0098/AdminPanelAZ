@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import require_admin
 from app.database import get_db
 from app.models import QrDownloadAuditLog, User, UserActionLog
 from app.services.node_manager import get_active_adapter
@@ -96,7 +96,7 @@ def qr_audit_logs(
 
 @router.get("/connections")
 def connection_snapshot(
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Live connection snapshot (complements traffic page with real-time status)."""
@@ -114,7 +114,7 @@ def connection_snapshot(
 
 @router.get("/openvpn-events")
 def openvpn_management_events(
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Recent OpenVPN management log lines per profile (from Unix sockets)."""

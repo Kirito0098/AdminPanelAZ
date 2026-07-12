@@ -110,7 +110,7 @@ export default function TelegramMiniAppGuide({
           <code>/panel/api/tg-mini</code>.
         </GuideStep>
         <GuideStep step={2} title="Привяжите Telegram к аккаунту">
-          В <Link to="/settings/personal">Настройки → Личное</Link> (или на вкладке{' '}
+          В <Link to="/settings/personal">Мой профиль</Link> (или на вкладке{' '}
           <Link to="/telegram?tab=interactive">Telegram → Команды бота</Link>) получите код и отправьте боту{' '}
           <code>/link &lt;код&gt;</code>. Без привязки Mini App не авторизует пользователя.
         </GuideStep>

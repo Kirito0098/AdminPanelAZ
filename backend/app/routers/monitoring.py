@@ -61,7 +61,7 @@ def _build_monitoring_overview(db: Session, scope: str = "node") -> MonitoringOv
 
 @router.get("/global-summary", response_model=GlobalDashboardSummary)
 def global_dashboard_summary(
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     try:
@@ -80,7 +80,7 @@ def global_dashboard_summary(
 
 @router.get("/nodes-compare", response_model=GlobalDashboardSummary)
 def nodes_compare(
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Side-by-side compare metrics for all nodes (same payload as global-summary)."""
@@ -101,7 +101,7 @@ def nodes_compare(
 @router.get("/overview", response_model=MonitoringOverview)
 def monitoring_overview(
     scope: str = Query(default="node", pattern="^(node|all)$"),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     try:
@@ -141,7 +141,9 @@ async def monitoring_stream(
 ):
     db = SessionLocal()
     try:
-        _user_from_access_token(token, db)
+        user = _user_from_access_token(token, db)
+        if user.role.value != "admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Требуются права администратора")
     finally:
         db.close()
 
@@ -172,7 +174,7 @@ async def monitoring_stream(
 @router.get("/resource-history", response_model=ResourceHistoryResponse)
 def resource_history(
     period: str = "1d",
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     if period not in VALID_PERIODS:
@@ -219,11 +221,25 @@ def panel_resource_current(_: User = Depends(require_admin)):
 def dashboard_summary(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
+    is_admin = current_user.role.value == "admin"
 
     query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id)
-    if current_user.role.value != "admin":
+    if not is_admin:
         query = query.filter(VpnConfig.owner_id == current_user.id)
     configs = query.all()
+
+    if not is_admin:
+        return DashboardSummary(
+            total_configs=len(configs),
+            openvpn_configs=sum(1 for c in configs if c.vpn_type == VpnType.openvpn),
+            wireguard_configs=sum(1 for c in configs if c.vpn_type == VpnType.wireguard),
+            connected_openvpn=0,
+            connected_wireguard=0,
+            active_services=0,
+            total_services=0,
+            server_ip="",
+            node_name=node.name,
+        )
 
     services = adapter.get_service_status()
     ovpn_clients = adapter.parse_openvpn_status()

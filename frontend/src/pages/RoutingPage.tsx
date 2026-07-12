@@ -144,6 +144,10 @@ export default function RoutingPage() {
     [data, cidrDb, isAdmin],
   )
 
+  if (!isAdmin) {
+    return <Navigate to="/" replace />
+  }
+
   if (searchParams.get('tab') === 'antizapret-config') {
     return <Navigate to="/antizapret" replace />
   }

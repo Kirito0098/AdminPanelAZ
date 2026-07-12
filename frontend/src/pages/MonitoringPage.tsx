@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Navigate } from 'react-router-dom'
 import {
   Activity,
   ChevronRight,
@@ -442,6 +443,10 @@ export default function MonitoringPage() {
   }, [isFederated, data?.nodes_summary])
 
   const hasHealthIssues = nodeHealthIssues.offline.length > 0 || nodeHealthIssues.overloaded.length > 0
+
+  if (!isAdmin) {
+    return <Navigate to="/" replace />
+  }
 
   return (
     <div className="space-y-6">
