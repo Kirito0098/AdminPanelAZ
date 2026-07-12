@@ -26,7 +26,6 @@ import {
   restartService,
 } from '@/api/client'
 import GeoRoutingHintBanner from '@/components/dashboard/GeoRoutingHintBanner'
-import NodesCompareSection from '@/components/dashboard/NodesCompareSection'
 import MonitoringCharts, { formatBytes, totalTraffic } from '@/components/monitoring/MonitoringCharts'
 import MonitoringConnectionsList, {
   buildMonitoringConnectionRows,
@@ -618,6 +617,19 @@ export default function MonitoringPage() {
     })
   }, [data?.nodes_summary])
 
+  const compareMetricRows = useMemo(
+    () => [
+      { key: 'status', label: 'Статус' },
+      { key: 'vpn', label: 'Online OVPN / WG' },
+      { key: 'services', label: 'Службы active/total' },
+      { key: 'cpu', label: 'CPU' },
+      { key: 'ram', label: 'RAM' },
+      { key: 'traffic', label: 'Трафик (всего)' },
+      { key: 'cidr', label: 'CIDR маршруты' },
+    ],
+    [],
+  )
+
   if (!isAdmin) {
     return <Navigate to="/" replace />
   }
@@ -800,125 +812,211 @@ export default function MonitoringPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="pt-0">
-                  <ResponsiveDataView
-                    mobile={sortedNodeSummary.map((node: MonitoringNodeSummary) => (
-                      <NodeSummaryCard
-                        key={node.node_id}
-                        node={node}
-                        isActive={node.node_id === activeNode?.id}
-                        onSelect={() => goToNode(node.node_id, node.node_name)}
-                      />
-                    ))}
-                    desktop={
-                      <Table
-                        className="w-auto min-w-0 table-auto"
-                        containerClassName="w-max max-w-full"
-                      >
-                        <TableHeader>
-                          <TableRow className="hover:bg-transparent">
-                            <TableHead className="h-9 whitespace-nowrap px-2.5">Узел</TableHead>
-                            <TableHead className="h-9 whitespace-nowrap px-2.5">Статус</TableHead>
-                            <TableHead className="h-9 whitespace-nowrap px-2.5 text-center">Health</TableHead>
-                            <TableHead className="h-9 whitespace-nowrap px-2.5 text-right">OVPN</TableHead>
-                            <TableHead className="h-9 whitespace-nowrap px-2.5 text-right">WG</TableHead>
-                            <TableHead className="h-9 whitespace-nowrap px-2.5 text-right">Службы</TableHead>
-                            <TableHead className="h-9 whitespace-nowrap px-2.5">CPU</TableHead>
-                            <TableHead className="h-9 whitespace-nowrap px-2.5">RAM</TableHead>
-                            <TableHead className="h-9 whitespace-nowrap px-2.5 text-right">Трафик</TableHead>
-                            <TableHead className="h-9 whitespace-nowrap px-2.5 text-right">CIDR</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {sortedNodeSummary.map((node: MonitoringNodeSummary) => {
-                            const isActive = node.node_id === activeNode?.id
-                            const servicesIncomplete =
-                              node.total_services > 0 && node.active_services < node.total_services
-                            return (
-                              <TableRow
-                                key={node.node_id}
-                                onClick={() => goToNode(node.node_id, node.node_name)}
-                                className={cn(
-                                  'group cursor-pointer transition-colors',
-                                  node.status === 'offline' && 'bg-destructive/5 hover:bg-destructive/10',
-                                  isActive && 'bg-primary/5',
-                                )}
-                              >
-                                <TableCell className="max-w-[14rem] whitespace-nowrap px-2.5 py-2 font-medium">
-                                  <span className="inline-flex min-w-0 items-center gap-1.5">
-                                    <ChevronRight
-                                      size={14}
-                                      className="shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
-                                    />
-                                    <span className="truncate">{node.node_name}</span>
-                                    {isActive && (
-                                      <span
-                                        className="size-1.5 shrink-0 rounded-full bg-primary"
-                                        title="Активный узел"
-                                        aria-label="Активный узел"
-                                      />
-                                    )}
-                                  </span>
-                                </TableCell>
-                                <TableCell className="whitespace-nowrap px-2.5 py-2">
-                                  <NodeStatusBadge status={node.status as NodeStatus} />
-                                  {node.error && (
-                                    <p className="mt-1 max-w-[10rem] truncate text-[11px] text-destructive" title={node.error}>
-                                      {node.error}
-                                    </p>
-                                  )}
-                                </TableCell>
-                                <TableCell className="px-2.5 py-2 text-center">
-                                  <HealthScoreBadge score={node.health_score} level={node.health_level} />
-                                </TableCell>
-                                <TableCell className="px-2.5 py-2 text-right font-mono text-xs tabular-nums">
-                                  {node.connected_openvpn}
-                                </TableCell>
-                                <TableCell className="px-2.5 py-2 text-right font-mono text-xs tabular-nums">
-                                  {node.connected_wireguard}
-                                </TableCell>
-                                <TableCell
-                                  className={cn(
-                                    'px-2.5 py-2 text-right font-mono text-xs tabular-nums',
-                                    servicesIncomplete && 'text-amber-600 dark:text-amber-400',
-                                  )}
-                                >
-                                  {node.active_services}
-                                  <span className="text-muted-foreground">/{node.total_services}</span>
-                                </TableCell>
-                                <TableCell className="whitespace-nowrap px-2.5 py-2">
-                                  <ResourceMetricInline
-                                    value={node.cpu_percent}
-                                    label={`CPU ${node.node_name}`}
-                                  />
-                                </TableCell>
-                                <TableCell className="whitespace-nowrap px-2.5 py-2">
-                                  <ResourceMetricInline
-                                    value={node.memory_percent}
-                                    label={`RAM ${node.node_name}`}
-                                  />
-                                </TableCell>
-                                <TableCell className="whitespace-nowrap px-2.5 py-2 text-right font-mono text-xs tabular-nums">
-                                  {node.total_traffic_bytes != null
-                                    ? formatBytes(node.total_traffic_bytes)
-                                    : '—'}
-                                </TableCell>
-                                <TableCell className="whitespace-nowrap px-2.5 py-2 text-right font-mono text-xs tabular-nums">
-                                  {node.cidr_routes_count ?? '—'}
-                                </TableCell>
+                  <Tabs defaultValue="summary" className="space-y-3">
+                    <TabsList className="h-8">
+                      <TabsTrigger value="summary" className="text-xs">
+                        Сводка
+                      </TabsTrigger>
+                      {hasMultipleNodes && (
+                        <TabsTrigger value="compare" className="text-xs">
+                          Сравнение
+                        </TabsTrigger>
+                      )}
+                    </TabsList>
+                    <TabsContent value="summary" className="mt-0">
+                      <ResponsiveDataView
+                        mobile={sortedNodeSummary.map((node: MonitoringNodeSummary) => (
+                          <NodeSummaryCard
+                            key={node.node_id}
+                            node={node}
+                            isActive={node.node_id === activeNode?.id}
+                            onSelect={() => goToNode(node.node_id, node.node_name)}
+                          />
+                        ))}
+                        desktop={
+                          <Table className="w-full table-fixed" containerClassName="w-full">
+                            <TableHeader>
+                              <TableRow className="hover:bg-transparent">
+                                <TableHead className="h-9 w-[18%] whitespace-nowrap px-3">Узел</TableHead>
+                                <TableHead className="h-9 w-[11%] whitespace-nowrap px-3">Статус</TableHead>
+                                <TableHead className="h-9 w-[7%] whitespace-nowrap px-3 text-center">Health</TableHead>
+                                <TableHead className="h-9 w-[6%] whitespace-nowrap px-3 text-right">OVPN</TableHead>
+                                <TableHead className="h-9 w-[6%] whitespace-nowrap px-3 text-right">WG</TableHead>
+                                <TableHead className="h-9 w-[7%] whitespace-nowrap px-3 text-right">Службы</TableHead>
+                                <TableHead className="h-9 w-[15%] whitespace-nowrap px-3">CPU</TableHead>
+                                <TableHead className="h-9 w-[15%] whitespace-nowrap px-3">RAM</TableHead>
+                                <TableHead className="h-9 w-[9%] whitespace-nowrap px-3 text-right">Трафик</TableHead>
+                                <TableHead className="h-9 w-[6%] whitespace-nowrap px-3 text-right">CIDR</TableHead>
                               </TableRow>
-                            )
-                          })}
-                        </TableBody>
-                      </Table>
-                    }
-                    mobileClassName="space-y-3"
-                    desktopClassName="w-max max-w-full overflow-x-auto rounded-md border"
-                  />
+                            </TableHeader>
+                            <TableBody>
+                              {sortedNodeSummary.map((node: MonitoringNodeSummary) => {
+                                const isActive = node.node_id === activeNode?.id
+                                const servicesIncomplete =
+                                  node.total_services > 0 && node.active_services < node.total_services
+                                return (
+                                  <TableRow
+                                    key={node.node_id}
+                                    onClick={() => goToNode(node.node_id, node.node_name)}
+                                    className={cn(
+                                      'group cursor-pointer transition-colors',
+                                      node.status === 'offline' && 'bg-destructive/5 hover:bg-destructive/10',
+                                      isActive && 'bg-primary/5',
+                                    )}
+                                  >
+                                    <TableCell className="whitespace-nowrap px-3 py-2.5 font-medium">
+                                      <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+                                        <ChevronRight
+                                          size={14}
+                                          className="shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+                                        />
+                                        <span className="truncate">{node.node_name}</span>
+                                        {isActive && (
+                                          <span
+                                            className="size-1.5 shrink-0 rounded-full bg-primary"
+                                            title="Активный узел"
+                                            aria-label="Активный узел"
+                                          />
+                                        )}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="whitespace-nowrap px-3 py-2.5">
+                                      <NodeStatusBadge status={node.status as NodeStatus} />
+                                      {node.error && (
+                                        <p
+                                          className="mt-1 max-w-full truncate text-[11px] text-destructive"
+                                          title={node.error}
+                                        >
+                                          {node.error}
+                                        </p>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="px-3 py-2.5 text-center">
+                                      <HealthScoreBadge score={node.health_score} level={node.health_level} />
+                                    </TableCell>
+                                    <TableCell className="px-3 py-2.5 text-right font-mono text-xs tabular-nums">
+                                      {node.connected_openvpn}
+                                    </TableCell>
+                                    <TableCell className="px-3 py-2.5 text-right font-mono text-xs tabular-nums">
+                                      {node.connected_wireguard}
+                                    </TableCell>
+                                    <TableCell
+                                      className={cn(
+                                        'px-3 py-2.5 text-right font-mono text-xs tabular-nums',
+                                        servicesIncomplete && 'text-amber-600 dark:text-amber-400',
+                                      )}
+                                    >
+                                      {node.active_services}
+                                      <span className="text-muted-foreground">/{node.total_services}</span>
+                                    </TableCell>
+                                    <TableCell className="px-3 py-2.5">
+                                      <ResourceMetricInline
+                                        value={node.cpu_percent}
+                                        label={`CPU ${node.node_name}`}
+                                        barClassName="w-full max-w-[9rem]"
+                                      />
+                                    </TableCell>
+                                    <TableCell className="px-3 py-2.5">
+                                      <ResourceMetricInline
+                                        value={node.memory_percent}
+                                        label={`RAM ${node.node_name}`}
+                                        barClassName="w-full max-w-[9rem]"
+                                      />
+                                    </TableCell>
+                                    <TableCell className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs tabular-nums">
+                                      {node.total_traffic_bytes != null
+                                        ? formatBytes(node.total_traffic_bytes)
+                                        : '—'}
+                                    </TableCell>
+                                    <TableCell className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs tabular-nums">
+                                      {node.cidr_routes_count ?? '—'}
+                                    </TableCell>
+                                  </TableRow>
+                                )
+                              })}
+                            </TableBody>
+                          </Table>
+                        }
+                        mobileClassName="space-y-3"
+                        desktopClassName="w-full overflow-x-auto rounded-md border"
+                      />
+                    </TabsContent>
+                    {hasMultipleNodes && (
+                      <TabsContent value="compare" className="mt-0">
+                        <div className="w-full overflow-x-auto rounded-md border">
+                          <Table className="w-full" containerClassName="w-full">
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="w-[20%] whitespace-nowrap px-3">Метрика</TableHead>
+                                {sortedNodeSummary.map((node) => (
+                                  <TableHead
+                                    key={node.node_id}
+                                    className="whitespace-nowrap px-3 text-center"
+                                  >
+                                    <div className="flex flex-col items-center gap-1">
+                                      <span className="font-medium">{node.node_name}</span>
+                                      <NodeStatusBadge status={node.status as NodeStatus} showLabel={false} />
+                                    </div>
+                                  </TableHead>
+                                ))}
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {compareMetricRows.map((metric) => (
+                                <TableRow key={metric.key}>
+                                  <TableCell className="px-3 py-2.5 text-xs font-medium text-muted-foreground">
+                                    {metric.label}
+                                  </TableCell>
+                                  {sortedNodeSummary.map((node) => (
+                                    <TableCell key={`${metric.key}-${node.node_id}`} className="px-3 py-2.5 text-center">
+                                      {metric.key === 'status' ? (
+                                        <NodeStatusBadge status={node.status as NodeStatus} />
+                                      ) : metric.key === 'vpn' ? (
+                                        <span className="font-mono text-xs">
+                                          {node.connected_openvpn} / {node.connected_wireguard}
+                                        </span>
+                                      ) : metric.key === 'services' ? (
+                                        <span className="font-mono text-xs">
+                                          {node.active_services}/{node.total_services}
+                                        </span>
+                                      ) : metric.key === 'cpu' ? (
+                                        <div className="mx-auto max-w-[12rem]">
+                                          <ResourceMetricInline
+                                            value={node.cpu_percent}
+                                            label={`CPU ${node.node_name}`}
+                                            barClassName="w-full"
+                                            className="justify-center"
+                                          />
+                                        </div>
+                                      ) : metric.key === 'ram' ? (
+                                        <div className="mx-auto max-w-[12rem]">
+                                          <ResourceMetricInline
+                                            value={node.memory_percent}
+                                            label={`RAM ${node.node_name}`}
+                                            barClassName="w-full"
+                                            className="justify-center"
+                                          />
+                                        </div>
+                                      ) : metric.key === 'traffic' ? (
+                                        <span className="font-mono text-xs">
+                                          {node.total_traffic_bytes != null ? formatBytes(node.total_traffic_bytes) : '—'}
+                                        </span>
+                                      ) : (
+                                        <span className="font-mono text-xs">{node.cidr_routes_count ?? '—'}</span>
+                                      )}
+                                    </TableCell>
+                                  ))}
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </TabsContent>
+                    )}
+                  </Tabs>
                 </CardContent>
               </Card>
             )}
-
-            {isFederated && hasMultipleNodes && <NodesCompareSection collapsible defaultOpen={false} />}
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
