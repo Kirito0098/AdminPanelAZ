@@ -19,8 +19,7 @@ export interface MiniTabItem {
 }
 
 const USER_TABS: MiniTabItem[] = [
-  { to: '/', label: 'Дашборд', icon: LayoutDashboard, end: true },
-  { to: '/configs', label: 'Конфиги', icon: FileKey },
+  { to: '/', label: 'Конфиги', icon: FileKey, end: true },
   { to: '/settings', label: 'Настройки', icon: Settings },
 ]
 

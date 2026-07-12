@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.16.0](#2160---2026-07-13) — 2026-07-13
 - [2.15.0](#2150---2026-07-12) — 2026-07-12
 - [2.14.0](#2140---2026-07-11) — 2026-07-11
 - [2.13.0](#2130---2026-07-11) — 2026-07-11
@@ -39,6 +40,90 @@
 ---
 
 ## [Unreleased]
+
+### ✨ Added
+
+### 🔄 Changed
+
+### 🐛 Fixed
+
+---
+
+## [2.16.0] - 2026-07-13
+
+> **Кратко:** **NOC Ops** — federated SSE, Mbps/длительность, лента инцидентов, health score, фильтры, история подключений, HA physical node, disconnect/restart; **TG-алерт offline узла с grace**; UX сводки узлов (табы «Сводка / Сравнение», full-width); роль **Пользователь** — Telegram в профиле, упрощённый Mini App, ops-разделы только admin; фикс GeoIP `tcp4-server:` и белого экрана при F5.
+
+### ✨ Added
+
+#### NOC / Мониторинг
+
+- **Federated SSE** — `/monitoring/stream?scope=node|all&ha_mode=dedupe|raw`; UI «Все узлы» без polling overview (`monitoring.py`, `MonitoringPage.tsx`).
+- **Лента инцидентов** — `GET /monitoring/incidents` + `NocIncidentFeed` (пусто → скрыто) (`noc_incidents.py`).
+- **Скорость и длительность** — колонки ↓/↑ Mbps и длительности OVPN; клиентский delta rate (`useConnectionRates`, `formatBitrate`, `formatDurationShort`); у WG без session start длительность не выдумывается.
+- **История подключений** — таблица `connection_count_samples`, worker (~60 с), `GET /monitoring/connection-history`, график 1h/6h/24h (`connection_history.py`, `MonitoringCharts.tsx`).
+- **Health score** — `health_score` / `health_level` в summary узлов + цветной бейдж (`node_health_score.py`, `NodeSummaryCard`).
+- **Фильтры NOC** — узел / город / ISP / длительность + sort `rate`/`duration`, persist в localStorage (`NocConnectionFilters.tsx`).
+- **Source / freshness / GeoIP** — `served_from_cache`, `geoip_mode`, возраст данных и stale (`NocDataFreshness.tsx`).
+- **HA physical node** — `active_node_*`, `ha_nodes`, toggle `ha_mode=raw` («Показать по узлам»).
+- **Действия NOC** — OVPN disconnect с confirm; restart службы в `ServiceMatrix` только на scope=node.
+
+#### Telegram / узлы (offline)
+
+- **TG-алерт «узел offline / восстановление»** — событие AdminNotify `node_offline` (по умолчанию вкл.): после непрерывного offline дольше grace-порога (по умолчанию **3 мин**, 60–86400 с) + recovery только если offline-алерт уже уходил; дедуп `node_metadata.tg_offline_alert_sent` / якорь `offline_since` (`node_status_notify.py`, `update_node_from_health`).
+- **Настройка grace** — `AppSetting` `node_offline_notify_grace_seconds` в `GET/PATCH /settings/admin-notify` (`node_offline_grace_seconds`); UI на **Узлы** (`NodeOfflineNotifyCard`) и **Telegram → Уведомления** (пресеты 1 / 3 / 5 / 10 мин).
+- **Журнал / webhooks** — `log_action` `node_offline` / `node_online` (подпись в `actionLogLabels.ts`).
+
+#### Telegram / профиль
+
+- **Привязка Telegram в «Мой профиль»** — любой залогиненный пользователь получает одноразовый код `/link` без доступа к админскому разделу Telegram (`PersonalTelegramCard.tsx`, `GET /telegram/link-code`).
+- **Ссылка на бота** — `GET /telegram/bot-info` (`bot_username`, `bot_url`); кнопка «Открыть бота» в профиле (`telegram_webhook.py`, `PersonalTelegramCard.tsx`).
+- **Самостоятельная отвязка** — пользователь может очистить свой `telegram_id` через `PATCH /users/{id}` (установка чужого ID по-прежнему только admin) (`users.py`).
+
+### 🔄 Changed
+
+#### NOC / Мониторинг
+
+- **SSE interval** — отдельный `monitoring_stream_interval_seconds` (по умолчанию **10 с**); стрим всегда свежий snapshot (без overview-кэша), чтобы Mbps появлялись быстрее (`config.py`, `monitoring.py`).
+- **Пока считается rate** — в колонках Mbps показывается `…` вместо «—»; последняя валидная скорость сохраняется на дублирующих тиках (`useConnectionRates.ts`).
+- **Сводка по узлам** — одна карточка с табами **Сводка** / **Сравнение** (отдельный `NodesCompareSection` на NOC убран); full-width `table-fixed`, компактные CPU/RAM (растягиваемый бар + %), цветной health, точка «активный», подсветка неполных служб (`MonitoringPage.tsx`, `nodeSummaryMetrics.tsx`, `NodeSummaryCard.tsx`).
+- **Бейдж статуса** — `whitespace-nowrap`, чтобы «В сети» не переносилось (`NodeSelector.tsx`).
+
+#### Роли и навигация
+
+- **Пункт «Мой профиль»** вместо вложенных «Настроек» для non-admin — прямой переход на `/settings/personal`; у admin flyout «Настройки» без изменений (`Layout.tsx`, `SettingsPage.tsx`).
+- **Подпись роли** в футере сайдбара — «Пользователь» вместо «Оператор» (`ROLE_LABELS`, `Layout.tsx`).
+- **NOC Мониторинг, Журналы, Маршрутизация / CIDR, Редактор файлов** — только admin (меню, редирект страниц, API `require_admin`) (`Layout.tsx`, `monitoring.py`, `logs.py`, `routing.py`, `cidr_db.py`, `edit_files.py`).
+- **Дашборд для non-admin** — только счётчик своих конфигов; без глобального «онлайн», IP сервера и служб (`DashboardPage.tsx`, `GET /monitoring/summary`).
+- **Мониторинг трафика** — без изменений по доступу: по-прежнему scoped по `owner_id` (свои клиенты).
+- **Лимит трафика на карточке конфига** — прогресс-бар и мета «израсходовано / лимит» для своих конфигов; `GET /client-access/policies` доступен владельцу (только свои имена на активном узле), мутации политик по-прежнему admin-only (`client_access.py`, `DashboardPage.tsx`, `ConfigCard.tsx`).
+
+#### Telegram Mini App
+
+- **Навигация user/viewer** — вкладки **Конфиги** + **Настройки**, старт с конфигов (без Дашборда) (`MiniBottomNav.tsx`, `HomeRoute` в `App.tsx`).
+- **Настройки Mini App для non-admin** — привязка TG и 3 персональных напоминания (`cert_expiry` / `traffic_limit` / `temp_block`); без IP сервера и полного каталога admin-notify (`Settings.tsx`, `tg_mini.py`).
+- **Admin-notify broadcast** — события не из персональных напоминаний доставляются только роли `admin` (defaults user больше не ловят чужие логины/CRUD) (`admin_notify.py`).
+
+#### Документация и бот
+
+- Подсказки `/start`, `/link` и docs указывают на **Мой профиль** вместо «Telegram → Команды бота» / «Настройки → Личное» (`telegram_bot_i18n.py`, `telegram_link.py`, `docs/Telegram.md` и др.).
+- **`docs/noc-monitoring.md`**, `docs/Telegram.md`, `docs/nastrojki/monitoring-i-alerty.md` и план `docs/plans/noc-ops/` — NOC Ops (10 эпиков `done`) + grace offline-алерты.
+
+### 🔒 Security
+
+- **2FA и passkeys** — настройка своего аккаунта доступна любому залогиненному (раньше `require_admin` → 403 в профиле пользователя) (`auth.py`: `/2fa/*`, `/passkeys/*`).
+- **Mini `PATCH /admin-notify`** — non-admin не может менять `recipient_user_ids`, admin-события и grace offline; только персональные ключи напоминаний (`tg_mini.py`).
+- **`GET /monitoring/dashboard` overview/stream** — admin-only (живые IP/сессии всех клиентов) (`monitoring.py`).
+
+### 🐛 Fixed
+
+- **GeoIP для OpenVPN `tcp4-server:` / `udp4-client:`** — префиксы management interface не снимались → lookup шёл по мусору вместо IP; город/провайдер и `display_address` теперь корректны (`ip_geo.py`).
+- **Белый экран при F5 на `/settings/...`** — Vite `base: './'` резолвил assets как `/settings/assets/...` (HTML MIME). При раздаче SPA пути переписываются в абсолютные `/assets/...` (с учётом `ACCESS_PATH`) (`html_csp.py`, `rewrite_relative_asset_urls`).
+- **Предупреждение Radix Dialog в консоли** — `Missing Description for DialogContent` при открытии карточки без описания; всегда есть `DialogDescription` (видимое или `sr-only`) (`ClientActionsDialog.tsx`, `AppDialog.tsx`, `ConfirmDialog.tsx`).
+
+### 🧪 Tests
+
+- **NOC Ops** — `tests/test_noc_ops.py`: health score, HA aggregate, разбор `tcp4-server:` endpoint.
+- **Node offline notify** — `tests/test_node_status_notify.py`: grace ниже порога / один алерт / recovery только после алерта / clamp grace.
 
 ---
 
@@ -1852,7 +1937,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.15.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.16.0...HEAD
+[2.16.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.12.0...v2.13.0

@@ -40,6 +40,7 @@ export function useTelegramSettings() {
   const [notifyOnBackup, setNotifyOnBackup] = useState(false)
   const [interactiveEnabled, setInteractiveEnabled] = useState(false)
   const [eventToggles, setEventToggles] = useState<Record<string, boolean>>({})
+  const [nodeOfflineGraceMinutes, setNodeOfflineGraceMinutes] = useState('3')
   const [saving, setSaving] = useState(false)
   const [savingInteractive, setSavingInteractive] = useState(false)
   const [savingNotify, setSavingNotify] = useState(false)
@@ -83,6 +84,7 @@ export function useTelegramSettings() {
       setTelegramId(notify.telegram_id)
       setNotifyRecipientIds(notify.recipient_user_ids ?? [])
       setEventToggles(Object.fromEntries(notify.events.map((e) => [e.key, e.enabled])))
+      setNodeOfflineGraceMinutes(String(Math.max(1, Math.round((notify.node_offline_grace_seconds ?? 180) / 60))))
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки')
     } finally {
@@ -156,10 +158,12 @@ export function useTelegramSettings() {
     e.preventDefault()
     setSavingNotify(true)
     try {
+      const graceMinutes = Math.max(1, Math.min(1440, Number.parseInt(nodeOfflineGraceMinutes, 10) || 3))
       const [updated, updatedTg] = await Promise.all([
         updateAdminNotifySettings({
           recipient_user_ids: notifyRecipientIds,
           events: eventToggles,
+          node_offline_grace_seconds: graceMinutes * 60,
         }),
         updateTelegramSettings({
           chat_ids: chatIds,
@@ -175,6 +179,7 @@ export function useTelegramSettings() {
       setNotifyEnabled(updatedTg.notify_enabled)
       setNotifyOnBackup(updatedTg.notify_on_backup)
       setEventToggles(Object.fromEntries(updated.events.map((item) => [item.key, item.enabled])))
+      setNodeOfflineGraceMinutes(String(Math.max(1, Math.round((updated.node_offline_grace_seconds ?? 180) / 60))))
       success('Настройки уведомлений сохранены')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
@@ -356,6 +361,8 @@ export function useTelegramSettings() {
     interactiveEnabled,
     eventToggles,
     setEventToggles,
+    nodeOfflineGraceMinutes,
+    setNodeOfflineGraceMinutes,
     saving,
     savingInteractive,
     savingNotify,

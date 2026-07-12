@@ -9,6 +9,7 @@ type MonitoringChartCardProps = {
   children: React.ReactNode
   className?: string
   panelClassName?: string
+  actions?: React.ReactNode
 }
 
 export default function MonitoringChartCard({
@@ -18,15 +19,21 @@ export default function MonitoringChartCard({
   children,
   className,
   panelClassName,
+  actions,
 }: MonitoringChartCardProps) {
   return (
     <Card className={className}>
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Icon size={16} className="shrink-0 text-muted-foreground" />
-          {title}
-        </CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Icon size={16} className="shrink-0 text-muted-foreground" />
+              {title}
+            </CardTitle>
+            <CardDescription>{description}</CardDescription>
+          </div>
+          {actions}
+        </div>
       </CardHeader>
       <CardContent className={cn('monitoring-chart-panel', panelClassName)}>{children}</CardContent>
     </Card>

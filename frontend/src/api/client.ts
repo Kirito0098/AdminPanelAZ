@@ -384,8 +384,26 @@ export async function revokeActiveWebSession(sessionId: string) {
   })
 }
 
-export async function getMonitoring(scope: 'node' | 'all' = 'node') {
-  return apiFetch<import('../types').MonitoringOverview>(`/monitoring/overview?scope=${scope}`)
+export async function getMonitoring(
+  scope: 'node' | 'all' = 'node',
+  haMode: 'dedupe' | 'raw' = 'dedupe',
+) {
+  const params = new URLSearchParams({ scope, ha_mode: haMode })
+  return apiFetch<import('../types').MonitoringOverview>(`/monitoring/overview?${params}`)
+}
+
+export async function getNocIncidents(limit = 20) {
+  return apiFetch<import('../types').NocIncidentsResponse>(`/monitoring/incidents?limit=${limit}`)
+}
+
+export async function getConnectionHistory(
+  period: '1h' | '6h' | '24h' = '1h',
+  scope: 'node' | 'all' = 'node',
+) {
+  const params = new URLSearchParams({ period, scope })
+  return apiFetch<import('../types').ConnectionHistoryResponse>(
+    `/monitoring/connection-history?${params}`,
+  )
 }
 
 export async function getGlobalDashboardSummary() {
@@ -422,10 +440,17 @@ export async function updateNodeDefaultPolicy(
 export function openMonitoringStream(
   onData: (data: import('../types').MonitoringOverview) => void,
   onError?: (message: string) => void,
+  scope: 'node' | 'all' = 'node',
+  haMode: 'dedupe' | 'raw' = 'dedupe',
 ): EventSource | null {
   const token = getToken()
   if (!token) return null
-  const url = `${API_BASE}/monitoring/stream?token=${encodeURIComponent(token)}`
+  const params = new URLSearchParams({
+    token,
+    scope,
+    ha_mode: haMode,
+  })
+  const url = `${API_BASE}/monitoring/stream?${params}`
   const source = new EventSource(url)
   source.onmessage = (event) => {
     try {
@@ -875,6 +900,10 @@ export async function getTelegramLinkCode() {
   return apiFetch<import('../types').TelegramLinkCode>('/telegram/link-code')
 }
 
+export async function getTelegramBotInfo() {
+  return apiFetch<import('../types').TelegramBotInfo>('/telegram/bot-info')
+}
+
 export async function testTelegram() {
   return apiFetch('/settings/telegram/test', { method: 'POST' })
 }
@@ -887,6 +916,7 @@ export async function updateAdminNotifySettings(data: {
   telegram_id?: string
   recipient_user_ids?: number[]
   events?: Record<string, boolean>
+  node_offline_grace_seconds?: number
 }) {
   return apiFetch<import('../types').AdminNotifySettings>('/settings/admin-notify', {
     method: 'PATCH',

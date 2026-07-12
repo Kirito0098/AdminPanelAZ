@@ -307,6 +307,46 @@ def _migrate_node_resource_sample_table() -> None:
     logger.info("DB migration: created node_resource_sample table")
 
 
+def _migrate_connection_count_samples_table() -> None:
+    inspector = inspect(engine)
+    if "connection_count_samples" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE connection_count_samples (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    node_id INTEGER NOT NULL,
+                    openvpn_count INTEGER DEFAULT 0,
+                    wireguard_count INTEGER DEFAULT 0,
+                    created_at DATETIME,
+                    FOREIGN KEY(node_id) REFERENCES nodes (id)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_connection_count_samples_node_id "
+                "ON connection_count_samples (node_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_connection_count_samples_created_at "
+                "ON connection_count_samples (created_at)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_connection_count_samples_node_created "
+                "ON connection_count_samples (node_id, created_at)"
+            )
+        )
+    logger.info("DB migration: created connection_count_samples table")
+
+
 def _migrate_active_web_session_table() -> None:
     inspector = inspect(engine)
     if "active_web_session" in inspector.get_table_names():
@@ -734,6 +774,7 @@ def run_db_migrations() -> None:
     _migrate_vpn_configs_node_scope()
     _migrate_access_policy_node_scope()
     _migrate_node_resource_sample_table()
+    _migrate_connection_count_samples_table()
     _migrate_panel_resource_sample_table()
     _migrate_active_web_session_table()
     _migrate_stage2_admin_productivity()

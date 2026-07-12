@@ -222,6 +222,12 @@ export interface MonitoringService {
   description?: string | null
 }
 
+export interface HaNodePresence {
+  node_id: number
+  node_name: string
+  online: boolean
+}
+
 export interface OpenVpnClient {
   common_name: string
   real_address: string
@@ -241,6 +247,9 @@ export interface OpenVpnClient {
   geo_label?: string | null
   node_id?: number | null
   node_name?: string | null
+  active_node_id?: number | null
+  active_node_name?: string | null
+  ha_nodes?: HaNodePresence[]
   ha?: VpnConfigHaInfo | null
 }
 
@@ -262,6 +271,9 @@ export interface WireGuardPeer {
   geo_label?: string | null
   node_id?: number | null
   node_name?: string | null
+  active_node_id?: number | null
+  active_node_name?: string | null
+  ha_nodes?: HaNodePresence[]
   ha?: VpnConfigHaInfo | null
 }
 
@@ -278,6 +290,8 @@ export interface MonitoringNodeSummary {
   total_traffic_bytes?: number | null
   cidr_routes_count?: number | null
   error?: string | null
+  health_score?: number
+  health_level?: 'ok' | 'warn' | 'critical'
 }
 
 export interface GeoRoutingNodeHint {
@@ -377,6 +391,38 @@ export interface MonitoringOverview {
   nodes_total?: number
   total_connected_openvpn?: number
   total_connected_wireguard?: number
+  served_from_cache?: boolean
+  geoip_mode?: 'local_mmdb' | 'ip_api' | 'none'
+  ha_mode?: 'dedupe' | 'raw'
+}
+
+export interface NocIncidentItem {
+  id: string
+  kind: string
+  severity: 'info' | 'warning' | 'danger'
+  title: string
+  detail?: string | null
+  at: string
+  href?: string | null
+}
+
+export interface NocIncidentsResponse {
+  items: NocIncidentItem[]
+  generated_at: string
+}
+
+export interface ConnectionHistoryPoint {
+  timestamp: string
+  openvpn: number
+  wireguard: number
+  total: number
+}
+
+export interface ConnectionHistoryResponse {
+  period: string
+  sample_count: number
+  scope: string
+  points: ConnectionHistoryPoint[]
 }
 
 export interface OpenVpnEventProfile {
@@ -580,6 +626,11 @@ export interface TelegramLinkCode {
   expires_in_seconds: number
 }
 
+export interface TelegramBotInfo {
+  bot_username: string
+  bot_url: string
+}
+
 export interface AdminNotifyEventItem {
   key: string
   label: string
@@ -592,6 +643,7 @@ export interface AdminNotifySettings {
   notify_enabled: boolean
   bot_token_set: boolean
   events: AdminNotifyEventItem[]
+  node_offline_grace_seconds: number
 }
 
 export interface TgMiniAuthResponse {

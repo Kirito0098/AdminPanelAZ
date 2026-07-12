@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from sqlalchemy.orm import Session
 
 from app.models import Node, NodeStatus, NodeSyncGroup, VpnConfig, VpnType
 from app.schemas import (
     GlobalDashboardSummary,
+    HaNodePresence,
     MonitoringNodeSummary,
     MonitoringOverview,
     MonitoringService,
@@ -17,11 +19,20 @@ from app.schemas import (
     WireGuardPeer,
 )
 from app.services.node_sync.groups import build_ha_metadata
-from app.services.ip_geo import lookup_ips_geo, parse_client_endpoint
+from app.services.ip_geo import is_local_geoip_loaded, lookup_ips_geo, parse_client_endpoint
+from app.services.node_health_score import compute_node_health_score
 from app.services.node_manager import get_active_node, get_adapter_for_node
 from app.services.node_compare_metrics import extract_cidr_routes_count, get_traffic_totals_by_node
 from app.services.resource_metrics import get_latest_samples_by_node
 from app.services.wireguard_status import wireguard_peer_is_online as _wg_is_online
+
+HaMode = Literal["dedupe", "raw"]
+
+
+def resolve_geoip_mode() -> Literal["local_mmdb", "ip_api", "none"]:
+    if is_local_geoip_loaded():
+        return "local_mmdb"
+    return "ip_api"
 
 
 def _node_status_value(node: Node) -> str:
@@ -73,19 +84,32 @@ def _build_node_summary(payload: dict) -> MonitoringNodeSummary:
     ovpn_clients: list[OpenVpnClient] = payload["ovpn_clients"]
     wireguard_peers: list[WireGuardPeer] = payload["wireguard_peers"]
     services: list[MonitoringService] = payload["services"]
+    status = _node_status_value(node)
+    active_services = sum(1 for service in services if service.active)
+    total_services = len(services)
+    health_score, health_level = compute_node_health_score(
+        status=status,
+        error=payload.get("error"),
+        cpu_percent=payload.get("cpu_percent"),
+        memory_percent=payload.get("memory_percent"),
+        active_services=active_services,
+        total_services=total_services,
+    )
     return MonitoringNodeSummary(
         node_id=node.id,
         node_name=node.name,
-        status=_node_status_value(node),
+        status=status,
         connected_openvpn=len(ovpn_clients),
         connected_wireguard=sum(1 for peer in wireguard_peers if _wg_is_online(peer)),
-        active_services=sum(1 for service in services if service.active),
-        total_services=len(services),
+        active_services=active_services,
+        total_services=total_services,
         cpu_percent=payload.get("cpu_percent"),
         memory_percent=payload.get("memory_percent"),
         total_traffic_bytes=payload.get("total_traffic_bytes"),
         cidr_routes_count=payload.get("cidr_routes_count"),
         error=payload["error"],
+        health_score=health_score,
+        health_level=health_level,
     )
 
 
@@ -205,6 +229,9 @@ def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOve
         nodes_total=1,
         total_connected_openvpn=len(ovpn_clients),
         total_connected_wireguard=sum(1 for peer in wireguard_peers if _wg_is_online(peer)),
+        served_from_cache=False,
+        geoip_mode=resolve_geoip_mode(),
+        ha_mode="dedupe",
     )
 
 
@@ -279,6 +306,17 @@ def _aggregation_key_for_client(
     return (("solo", node_id or 0, protocol, client_lower), None)
 
 
+def _ha_nodes_from_group(group_clients: list[OpenVpnClient] | list[WireGuardPeer]) -> list[HaNodePresence]:
+    seen: dict[int, HaNodePresence] = {}
+    for item in group_clients:
+        node_id = getattr(item, "node_id", None)
+        if node_id is None:
+            continue
+        node_name = getattr(item, "node_name", None) or f"node-{node_id}"
+        seen[node_id] = HaNodePresence(node_id=node_id, node_name=node_name, online=True)
+    return list(seen.values())
+
+
 def _aggregate_ha_openvpn_clients(
     clients: list[OpenVpnClient],
     ha_lookup: dict[_HaLookupKey, tuple[_AggregationKey, VpnConfigHaInfo]],
@@ -302,7 +340,11 @@ def _aggregate_ha_openvpn_clients(
         ha = ha_by_key.get(agg_key)
         updates: dict = {"ha": ha}
         if ha:
-            updates["node_name"] = None
+            updates["active_node_id"] = chosen.node_id
+            updates["active_node_name"] = chosen.node_name
+            updates["ha_nodes"] = _ha_nodes_from_group(group_clients)
+            updates["node_id"] = chosen.node_id
+            updates["node_name"] = chosen.node_name
         aggregated.append(chosen.model_copy(update=updates))
     return aggregated
 
@@ -337,12 +379,79 @@ def _aggregate_ha_wireguard_peers(
         ha = ha_by_key.get(agg_key)
         updates: dict = {"ha": ha}
         if ha:
-            updates["node_name"] = None
+            updates["active_node_id"] = chosen.node_id
+            updates["active_node_name"] = chosen.node_name
+            updates["ha_nodes"] = _ha_nodes_from_group(group_peers)
+            updates["node_id"] = chosen.node_id
+            updates["node_name"] = chosen.node_name
         aggregated.append(chosen.model_copy(update=updates))
     return aggregated
 
 
-def build_federated_monitoring_overview(db: Session) -> MonitoringOverview:
+def _annotate_raw_ha_clients(
+    clients: list[OpenVpnClient],
+    ha_lookup: dict[_HaLookupKey, tuple[_AggregationKey, VpnConfigHaInfo]],
+) -> list[OpenVpnClient]:
+    annotated: list[OpenVpnClient] = []
+    for client in clients:
+        _agg_key, ha = _aggregation_key_for_client(
+            node_id=client.node_id,
+            client_name=client.common_name,
+            protocol=VpnType.openvpn.value,
+            ha_lookup=ha_lookup,
+        )
+        updates: dict = {
+            "ha": ha,
+            "active_node_id": client.node_id,
+            "active_node_name": client.node_name,
+        }
+        if ha and client.node_id is not None:
+            updates["ha_nodes"] = [
+                HaNodePresence(
+                    node_id=client.node_id,
+                    node_name=client.node_name or f"node-{client.node_id}",
+                    online=True,
+                )
+            ]
+        annotated.append(client.model_copy(update=updates))
+    return annotated
+
+
+def _annotate_raw_ha_peers(
+    peers: list[WireGuardPeer],
+    ha_lookup: dict[_HaLookupKey, tuple[_AggregationKey, VpnConfigHaInfo]],
+) -> list[WireGuardPeer]:
+    annotated: list[WireGuardPeer] = []
+    for peer in peers:
+        client_name = (peer.client_name or "").strip() or peer.public_key
+        _agg_key, ha = _aggregation_key_for_client(
+            node_id=peer.node_id,
+            client_name=client_name,
+            protocol=VpnType.wireguard.value,
+            ha_lookup=ha_lookup,
+        )
+        updates: dict = {
+            "ha": ha,
+            "active_node_id": peer.node_id,
+            "active_node_name": peer.node_name,
+        }
+        if ha and peer.node_id is not None:
+            updates["ha_nodes"] = [
+                HaNodePresence(
+                    node_id=peer.node_id,
+                    node_name=peer.node_name or f"node-{peer.node_id}",
+                    online=True,
+                )
+            ]
+        annotated.append(peer.model_copy(update=updates))
+    return annotated
+
+
+def build_federated_monitoring_overview(
+    db: Session,
+    *,
+    ha_mode: HaMode = "dedupe",
+) -> MonitoringOverview:
     node_payloads = _collect_nodes_monitoring_data(db)
     lookup_ips: list[str | None] = []
     for payload in node_payloads:
@@ -375,10 +484,16 @@ def build_federated_monitoring_overview(db: Session) -> MonitoringOverview:
         nodes_summary.append(summary)
 
     ha_lookup = _build_ha_monitoring_lookup(db)
-    all_openvpn = _aggregate_ha_openvpn_clients(all_openvpn, ha_lookup)
-    all_wireguard = _aggregate_ha_wireguard_peers(all_wireguard, ha_lookup)
-    total_connected_openvpn = len(all_openvpn)
-    total_connected_wireguard = sum(1 for peer in all_wireguard if _wg_is_online(peer))
+    if ha_mode == "raw":
+        all_openvpn = _annotate_raw_ha_clients(all_openvpn, ha_lookup)
+        all_wireguard = _annotate_raw_ha_peers(all_wireguard, ha_lookup)
+        total_connected_openvpn = len(all_openvpn)
+        total_connected_wireguard = sum(1 for peer in all_wireguard if _wg_is_online(peer))
+    else:
+        all_openvpn = _aggregate_ha_openvpn_clients(all_openvpn, ha_lookup)
+        all_wireguard = _aggregate_ha_wireguard_peers(all_wireguard, ha_lookup)
+        total_connected_openvpn = len(all_openvpn)
+        total_connected_wireguard = sum(1 for peer in all_wireguard if _wg_is_online(peer))
 
     nodes = [payload["node"] for payload in node_payloads]
     active_node = None
@@ -402,4 +517,7 @@ def build_federated_monitoring_overview(db: Session) -> MonitoringOverview:
         nodes_total=len(nodes),
         total_connected_openvpn=total_connected_openvpn,
         total_connected_wireguard=total_connected_wireguard,
+        served_from_cache=False,
+        geoip_mode=resolve_geoip_mode(),
+        ha_mode=ha_mode,
     )

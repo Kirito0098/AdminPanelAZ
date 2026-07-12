@@ -28,6 +28,7 @@ const ACTION_LOG_LABELS: Record<string, string> = {
   node_mtls_enable: 'Включение mTLS узла',
   node_default_policy_update: 'Изменение политики узла по умолчанию',
   node_offline: 'Узел недоступен',
+  node_online: 'Узел восстановлен',
   node_sync_drift: 'Расхождение синхронизации узла',
 
   // Конфигурации

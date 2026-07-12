@@ -19,6 +19,7 @@ import {
   Settings2,
   Shield,
   Sun,
+  User,
 } from 'lucide-react'
 import NodeSelector from '@/components/NodeSelector'
 import HaScopeEnforcer from '@/components/HaScopeEnforcer'
@@ -32,6 +33,7 @@ import { useTheme } from '@/context/ThemeContext'
 import ForcePasswordChange from './ForcePasswordChange'
 import LiveClock from './noc/LiveClock'
 import SettingsSidebarSection from '@/components/settings/SettingsSidebarSection'
+import { ROLE_LABELS } from '@/components/settings/settingsLabels'
 
 type NavItemDef = {
   to: string
@@ -54,9 +56,9 @@ const NAV_GROUPS: NavGroupDef[] = [
     label: 'Операции',
     items: [
       { to: '/', label: 'Конфигурации', icon: LayoutDashboard, end: true, adminOnly: false, viewerOk: true, featureKey: null },
-      { to: '/monitoring', label: 'NOC Мониторинг', icon: Activity, end: false, adminOnly: false, viewerOk: true, featureKey: 'logs_dashboard' },
+      { to: '/monitoring', label: 'NOC Мониторинг', icon: Activity, end: false, adminOnly: true, viewerOk: false, featureKey: 'logs_dashboard' },
       { to: '/traffic', label: 'Мониторинг трафика', icon: HardDrive, end: false, adminOnly: false, viewerOk: true, featureKey: 'traffic_sync' },
-      { to: '/routing', label: 'Маршрутизация / CIDR', icon: GitBranch, end: false, adminOnly: false, viewerOk: true, featureKey: 'routing' },
+      { to: '/routing', label: 'Маршрутизация / CIDR', icon: GitBranch, end: false, adminOnly: true, viewerOk: false, featureKey: 'routing' },
     ],
   },
   {
@@ -65,7 +67,7 @@ const NAV_GROUPS: NavGroupDef[] = [
       { to: '/antizapret', label: 'Конфиг AntiZapret', icon: Settings2, end: false, adminOnly: true, viewerOk: false, featureKey: 'routing' },
       { to: '/warper', label: 'AZ-WARP', icon: Globe, end: false, adminOnly: true, viewerOk: false, featureKey: 'warper' },
       { to: '/telegram', label: 'Telegram', icon: Send, end: false, adminOnly: true, viewerOk: false, featureKey: 'telegram' },
-      { to: '/edit-files', label: 'Редактор файлов', icon: FileText, end: false, adminOnly: false, viewerOk: false, featureKey: 'edit_files' },
+      { to: '/edit-files', label: 'Редактор файлов', icon: FileText, end: false, adminOnly: true, viewerOk: false, featureKey: 'edit_files' },
     ],
   },
   {
@@ -76,8 +78,8 @@ const NAV_GROUPS: NavGroupDef[] = [
         label: 'Журналы',
         icon: ClipboardList,
         end: false,
-        adminOnly: false,
-        viewerOk: true,
+        adminOnly: true,
+        viewerOk: false,
         featureKey: null,
         featureAnyOf: ['logs_dashboard', 'action_logs'] as const,
       },
@@ -164,11 +166,23 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { isEnabled } = useFeatureModules()
   const { theme, toggleTheme } = useTheme()
   const initials = user?.username?.slice(0, 2).toUpperCase() ?? '?'
+  const isAdmin = user?.role === 'admin'
 
-  const visibleGroups = NAV_GROUPS.map((group) => ({
-    ...group,
-    items: group.items.filter((item) => isNavItemVisible(item, user?.role, isEnabled)),
-  })).filter((group) => group.items.length > 0)
+  const visibleGroups = NAV_GROUPS.map((group) => {
+    const items = group.items.filter((item) => isNavItemVisible(item, user?.role, isEnabled))
+    if (group.label === 'Система' && !isAdmin) {
+      items.push({
+        to: '/settings/personal',
+        label: 'Мой профиль',
+        icon: User,
+        end: false,
+        adminOnly: false,
+        viewerOk: true,
+        featureKey: null,
+      })
+    }
+    return { ...group, items }
+  }).filter((group) => group.items.length > 0 || (group.label === 'Система' && isAdmin))
 
   const themeToggle = (
     <Button
@@ -219,7 +233,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                   <SidebarNavLink item={item} onNavigate={onNavigate} />
                 </li>
               ))}
-              {group.label === 'Система' && <SettingsSidebarSection onNavigate={onNavigate} />}
+              {group.label === 'Система' && isAdmin && <SettingsSidebarSection onNavigate={onNavigate} />}
             </ul>
           </div>
         ))}
@@ -239,7 +253,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium leading-tight">{user?.username}</p>
               <p className="text-xs text-muted-foreground">
-                {user?.role === 'admin' ? 'Администратор' : user?.role === 'viewer' ? 'Только просмотр' : 'Оператор'}
+                {user?.role ? ROLE_LABELS[user.role] : '—'}
               </p>
             </div>
           </div>

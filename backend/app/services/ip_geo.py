@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import time
 from pathlib import Path
 from threading import Lock
@@ -11,7 +12,11 @@ import httpx
 
 from app.config import get_settings
 
-_PROTOCOL_PREFIXES = ("udp4:", "udp6:", "tcp4:", "tcp6:")
+# OpenVPN status may prefix peers as tcp4:, udp4-server:, tcp6-client:, etc.
+_PROTOCOL_PREFIX_RE = re.compile(
+    r"^(?:udp|tcp)[46](?:-(?:server|client))?:",
+    re.IGNORECASE,
+)
 _GEO_CACHE_TTL_SECONDS = 86_400
 _GEO_CACHE_MAX_ENTRIES = 2_000
 _geo_cache: dict[str, tuple[float, dict[str, str | None]]] = {}
@@ -21,11 +26,7 @@ _local_geo_initialized = False
 
 def strip_protocol_prefix(address: str) -> str:
     addr = (address or "").strip()
-    lower = addr.lower()
-    for prefix in _PROTOCOL_PREFIXES:
-        if lower.startswith(prefix):
-            return addr[len(prefix) :].strip()
-    return addr
+    return _PROTOCOL_PREFIX_RE.sub("", addr, count=1).strip()
 
 
 def parse_client_endpoint(real_address: str | None) -> dict[str, str | None]:

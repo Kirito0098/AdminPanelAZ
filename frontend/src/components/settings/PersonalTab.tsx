@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react'
 import { Clock, Globe, KeyRound, Moon, Palette, Save, Sun } from 'lucide-react'
 import TwoFactorTab from '@/components/settings/TwoFactorTab'
 import PasskeysTab from '@/components/settings/PasskeysTab'
+import PersonalTelegramCard from '@/components/settings/PersonalTelegramCard'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -219,6 +220,8 @@ export default function PersonalTab({
           </CardContent>
         </Card>
         </div>
+
+        <PersonalTelegramCard />
 
         <SectionHeading
           title="Безопасность"

@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import require_admin
+from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import User, VpnType
+from app.models import User, UserRole, VpnType
 from app.schemas import NodeDefaultPolicyResponse, NodeDefaultPolicyUpdate, NodePolicySummary
 from app.services.access_policy import (
     AccessPolicyService,
@@ -30,6 +30,7 @@ from app.services.node_sync.policy_sync import (
     maybe_replicate_policy_op,
 )
 from app.services.notify_time import get_client_timezone_from_request
+from app.services.self_service import get_owned_client_names
 from app.services.traffic_limit import (
     TrafficLimitExceededError,
     parse_traffic_limit_bytes,
@@ -142,12 +143,23 @@ def _notify_client_ban(
 def list_policies(
     clients: str = "",
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
 ):
+    """Return access policies for requested clients.
+
+    Admins may query any client. Non-admins only receive policies for configs
+    they own on the active node (mutations remain admin-only).
+    """
     names = [c.strip() for c in clients.split(",") if c.strip()] if clients else []
-    svc = _service(db)
     if not names:
         return {}
+    if current_user.role != UserRole.admin:
+        allowed = get_owned_client_names(db, current_user, node_id=get_active_node(db).id)
+        allowed_lower = {name.lower() for name in allowed}
+        names = [name for name in names if name.lower() in allowed_lower]
+        if not names:
+            return {}
+    svc = _service(db)
     return svc.get_all_policies(names)
 
 

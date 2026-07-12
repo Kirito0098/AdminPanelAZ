@@ -52,7 +52,11 @@ export default function AppDialog({
             {Icon && <Icon className="h-5 w-5 shrink-0 text-muted-foreground" />}
             {title}
           </DialogTitle>
-          {description && <DialogDescription>{description}</DialogDescription>}
+          {description ? (
+            <DialogDescription>{description}</DialogDescription>
+          ) : (
+            <DialogDescription className="sr-only">{title}</DialogDescription>
+          )}
         </DialogHeader>
 
         {children}

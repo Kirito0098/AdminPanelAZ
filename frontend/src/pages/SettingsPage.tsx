@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { Settings } from 'lucide-react'
+import { Settings, User } from 'lucide-react'
 import { Navigate, useParams } from 'react-router-dom'
 import { ApiError, changePassword, createUser, deleteUser, getSettings, getUsers } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
@@ -210,13 +210,13 @@ export default function SettingsPage() {
       <ConfirmDialogHost dialogProps={dialogProps} />
       <HaReplicaBanner />
       <PageSectionHeader
-        icon={Settings}
-        title="Настройки"
+        icon={isAdmin ? Settings : User}
+        title={isAdmin ? 'Настройки' : 'Мой профиль'}
         titleAddon={<NodeBadge name={activeNode?.name ?? settings?.node_name} status={activeNode?.status} />}
         description={
           isAdmin
             ? 'Настройте профиль, доступ, VPN и работу панели — разделы в боковом меню «Система»'
-            : 'Тема, пароль и дополнительная защита при входе'
+            : 'Тема, пароль, Telegram и дополнительная защита при входе'
         }
       />
 

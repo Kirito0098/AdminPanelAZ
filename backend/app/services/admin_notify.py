@@ -11,7 +11,7 @@ import psutil
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AppSetting, User
+from app.models import AppSetting, User, UserRole
 from app.services.admin_notify_settings_text import (
     parse_mini_details_kv,
     user_action_tg_action_line,
@@ -49,11 +49,24 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("settings_change", "Изменение настроек"),
     ("high_cpu", "Высокая нагрузка CPU"),
     ("high_ram", "Высокая нагрузка RAM"),
+    ("node_offline", "Узел offline / восстановление"),
     ("cidr_deploy_failed", "Ошибка развёртывания CIDR"),
     ("cidr_ingest_partial", "Частичное обновление CIDR БД"),
     ("noc_report", "NOC: ежедневная/еженедельная сводка"),
     ("alert_rule", "Alert rule: срабатывание порога"),
 ]
+
+# Owner self-service reminders (Mini App / personal prefs). Not admin broadcast events.
+PERSONAL_OWNER_NOTIFY_KEYS = frozenset({
+    "cert_expiry_reminder",
+    "traffic_limit_reminder",
+    "temp_block_reminder",
+})
+PERSONAL_OWNER_NOTIFY_KEY_ORDER = (
+    "cert_expiry_reminder",
+    "traffic_limit_reminder",
+    "temp_block_reminder",
+)
 
 CLIENT_BLOCK_NOTIFY_EVENTS = frozenset({
     "openvpn_client_block_toggle",
@@ -134,6 +147,7 @@ _PREF_KEY_MAP = {
     "config_recreate": "config_create",
     "traffic_limit_block": "traffic_limit",
     "traffic_limit_unblock": "traffic_limit",
+    "node_online": "node_offline",
 }
 
 
@@ -452,6 +466,10 @@ class AdminNotifyService:
                 u for u in db.query(User).filter(User.telegram_id.isnot(None)).all()
                 if u.has_tg_notify_event(pref_key)
             ]
+            # Admin broadcast events must not go to role=user via defaults.
+            # Owner reminders (PERSONAL_OWNER_NOTIFY_KEYS) are delivered via user_reminder_service.
+            if pref_key not in PERSONAL_OWNER_NOTIFY_KEYS:
+                notify_users = [u for u in notify_users if u.role == UserRole.admin]
             notify_users = filter_notify_recipients(
                 db,
                 notify_users,
@@ -760,6 +778,38 @@ class AdminNotifyService:
         self.send(
             db,
             "high_ram",
+            details=details,
+            node_id=node_id,
+            node_name=node_name,
+        )
+
+    def send_node_offline(
+        self,
+        db: Session,
+        *,
+        details: str | None = None,
+        node_id: int | None = None,
+        node_name: str | None = None,
+    ) -> None:
+        self.send(
+            db,
+            "node_offline",
+            details=details,
+            node_id=node_id,
+            node_name=node_name,
+        )
+
+    def send_node_online(
+        self,
+        db: Session,
+        *,
+        details: str | None = None,
+        node_id: int | None = None,
+        node_name: str | None = None,
+    ) -> None:
+        self.send(
+            db,
+            "node_online",
             details=details,
             node_id=node_id,
             node_name=node_name,
@@ -1103,6 +1153,24 @@ class AdminNotifyService:
                 detail_lines=detail_lines,
             )
 
+        if event_type == "node_offline":
+            detail_lines = [_line_text("📋", "Детали", details or "Узел не отвечает на health-check")]
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
+                "🔴 <b>Узел недоступен</b>",
+                when,
+                detail_lines=detail_lines,
+            )
+
+        if event_type == "node_online":
+            detail_lines = [_line_text("📋", "Детали", details or "Узел снова online")]
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
+                "🟢 <b>Узел восстановлен</b>",
+                when,
+                detail_lines=detail_lines,
+            )
+
         if event_type == "alert_rule":
             detail_lines = [
                 _line_code("📋", "Правило", target_name),
@@ -1334,6 +1402,11 @@ def _preview_event_build_kwargs(event_key: str, *, actor_username: str) -> dict 
         "high_ram": {
             "event_type": "high_ram",
             "details": "88.1% (порог 85%, sustained 180s)",
+            **node_ctx,
+        },
+        "node_offline": {
+            "event_type": "node_offline",
+            "details": "Connection refused",
             **node_ctx,
         },
         "cidr_deploy_failed": {

@@ -19,7 +19,6 @@ from app.auth import (
     decode_2fa_pending_token,
     get_current_user,
     get_password_hash,
-    require_admin,
     verify_password,
 )
 from app.config import get_settings
@@ -634,7 +633,7 @@ def change_password(
 
 
 @router.get("/2fa/status", response_model=TwoFAStatusResponse)
-def twofa_status(current_user: User = Depends(require_admin)):
+def twofa_status(current_user: User = Depends(get_current_user)):
     remaining = 0
     if current_user.totp_backup_codes_encrypted:
         try:
@@ -648,7 +647,7 @@ def twofa_status(current_user: User = Depends(require_admin)):
 
 
 @router.post("/2fa/setup", response_model=TwoFASetupResponse)
-def twofa_setup(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+def twofa_setup(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if current_user.totp_enabled:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA уже включена")
     secret = generate_totp_secret()
@@ -662,7 +661,7 @@ def twofa_setup(current_user: User = Depends(require_admin), db: Session = Depen
 def twofa_enable(
     payload: TwoFAEnableRequest,
     request: Request,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     if current_user.totp_enabled:
@@ -689,7 +688,7 @@ def twofa_enable(
 def twofa_disable(
     payload: TwoFADisableRequest,
     request: Request,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     if not current_user.totp_enabled:
@@ -713,7 +712,7 @@ def twofa_disable(
 @router.post("/2fa/regenerate-backup-codes", response_model=TwoFABackupCodesResponse)
 def twofa_regenerate_backup(
     payload: TwoFADisableRequest,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     if not current_user.totp_enabled:
@@ -728,7 +727,7 @@ def twofa_regenerate_backup(
 @router.post("/passkeys/register/options", response_model=PasskeyRegisterOptionsResponse)
 def passkey_register_options(
     request: Request,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     options = webauthn_service.registration_options(db, current_user, request)
@@ -739,7 +738,7 @@ def passkey_register_options(
 def passkey_register_verify(
     payload: PasskeyRegisterVerifyRequest,
     request: Request,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     row = webauthn_service.registration_verify(
@@ -763,7 +762,7 @@ def passkey_register_verify(
 
 
 @router.get("/passkeys", response_model=PasskeyListResponse)
-def passkey_list(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+def passkey_list(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     rows = list_passkeys(db, current_user.id)
     return PasskeyListResponse(credentials=rows, count=len(rows))
 
@@ -772,7 +771,7 @@ def passkey_list(current_user: User = Depends(require_admin), db: Session = Depe
 def passkey_rename(
     credential_id: int,
     payload: PasskeyRenameRequest,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     return webauthn_service.rename_passkey(db, current_user, credential_id, payload.nickname)
@@ -782,7 +781,7 @@ def passkey_rename(
 def passkey_delete(
     credential_id: int,
     request: Request,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     webauthn_service.delete_passkey(db, current_user, credential_id)

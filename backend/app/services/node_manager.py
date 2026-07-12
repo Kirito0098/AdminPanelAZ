@@ -289,8 +289,12 @@ def check_node_health(node: Node, api_key_override: str | None = None) -> dict:
 
 
 def update_node_from_health(node: Node, health: dict, db: Session) -> None:
+    from app.services.node_status_notify import evaluate_node_offline_notify
+
+    prev_status = node.status
     status_str = health.get("status", "offline")
-    node.status = NodeStatus.online if status_str == "online" else NodeStatus.offline
+    new_status = NodeStatus.online if status_str == "online" else NodeStatus.offline
+    node.status = new_status
     if status_str == "online":
         node.last_seen_at = datetime.utcnow()
         meta = node_metadata_dict(node)
@@ -310,6 +314,14 @@ def update_node_from_health(node: Node, health: dict, db: Session) -> None:
     db.add(node)
     db.commit()
     db.refresh(node)
+    error = health.get("error") if isinstance(health.get("error"), str) else None
+    evaluate_node_offline_notify(
+        db,
+        node,
+        prev_status=prev_status,
+        new_status=new_status,
+        error=error,
+    )
 
 
 def verify_node_api_key(node: Node, api_key: str) -> bool:

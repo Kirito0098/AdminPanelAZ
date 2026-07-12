@@ -787,6 +787,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                         className={cn(
                           'flex items-start gap-2 rounded-lg border p-3 text-sm transition-colors',
                           enabled && 'border-primary/40 bg-primary/5',
+                          event.key === 'node_offline' && 'sm:col-span-2',
                         )}
                       >
                         <button
@@ -820,6 +821,39 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                     )
                   })}
                 </div>
+                {(tg.eventToggles.node_offline ?? false) && (
+                  <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+                    <Label htmlFor="nodeOfflineGraceMinutes">
+                      Не уведомлять, пока узел offline меньше (мин)
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Алерт уйдёт только после непрерывного offline дольше порога. То же значение
+                      настраивается на странице Узлы.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        id="nodeOfflineGraceMinutes"
+                        type="number"
+                        min={1}
+                        max={1440}
+                        className="w-24"
+                        value={tg.nodeOfflineGraceMinutes}
+                        onChange={(e) => tg.setNodeOfflineGraceMinutes(e.target.value)}
+                      />
+                      {[1, 3, 5, 10].map((mins) => (
+                        <Button
+                          key={mins}
+                          type="button"
+                          size="sm"
+                          variant={tg.nodeOfflineGraceMinutes === String(mins) ? 'default' : 'outline'}
+                          onClick={() => tg.setNodeOfflineGraceMinutes(String(mins))}
+                        >
+                          {mins} мин
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-3 rounded-lg border bg-muted/20 p-4">

@@ -322,6 +322,12 @@ class MonitoringService(BaseModel):
     description: str | None = None
 
 
+class HaNodePresence(BaseModel):
+    node_id: int
+    node_name: str
+    online: bool = True
+
+
 class OpenVpnClient(BaseModel):
     common_name: str
     real_address: str
@@ -341,6 +347,9 @@ class OpenVpnClient(BaseModel):
     geo_label: str | None = None
     node_id: int | None = None
     node_name: str | None = None
+    active_node_id: int | None = None
+    active_node_name: str | None = None
+    ha_nodes: list[HaNodePresence] = Field(default_factory=list)
     ha: VpnConfigHaInfo | None = None
 
 
@@ -362,6 +371,9 @@ class WireGuardPeer(BaseModel):
     geo_label: str | None = None
     node_id: int | None = None
     node_name: str | None = None
+    active_node_id: int | None = None
+    active_node_name: str | None = None
+    ha_nodes: list[HaNodePresence] = Field(default_factory=list)
     ha: VpnConfigHaInfo | None = None
 
 
@@ -378,6 +390,8 @@ class MonitoringNodeSummary(BaseModel):
     total_traffic_bytes: int | None = None
     cidr_routes_count: int | None = None
     error: str | None = None
+    health_score: int = 100
+    health_level: Literal["ok", "warn", "critical"] = "ok"
 
 
 class GeoRoutingNodeHint(BaseModel):
@@ -477,6 +491,38 @@ class MonitoringOverview(BaseModel):
     nodes_total: int = 0
     total_connected_openvpn: int = 0
     total_connected_wireguard: int = 0
+    served_from_cache: bool = False
+    geoip_mode: Literal["local_mmdb", "ip_api", "none"] = "ip_api"
+    ha_mode: Literal["dedupe", "raw"] = "dedupe"
+
+
+class NocIncidentItem(BaseModel):
+    id: str
+    kind: str
+    severity: Literal["info", "warning", "danger"]
+    title: str
+    detail: str | None = None
+    at: datetime
+    href: str | None = None
+
+
+class NocIncidentsResponse(BaseModel):
+    items: list[NocIncidentItem]
+    generated_at: datetime
+
+
+class ConnectionHistoryPoint(BaseModel):
+    timestamp: datetime
+    openvpn: int
+    wireguard: int
+    total: int
+
+
+class ConnectionHistoryResponse(BaseModel):
+    period: str
+    sample_count: int
+    scope: str = "node"
+    points: list[ConnectionHistoryPoint]
 
 
 class ResourceHistoryPoint(BaseModel):
@@ -870,6 +916,11 @@ class TelegramLinkCodeResponse(BaseModel):
     expires_in_seconds: int
 
 
+class TelegramBotInfoResponse(BaseModel):
+    bot_username: str = ""
+    bot_url: str = ""
+
+
 class AdminNotifyEventItem(BaseModel):
     key: str
     label: str
@@ -882,12 +933,14 @@ class AdminNotifySettingsResponse(BaseModel):
     notify_enabled: bool = False
     bot_token_set: bool = False
     events: list[AdminNotifyEventItem]
+    node_offline_grace_seconds: int = 180
 
 
 class AdminNotifySettingsUpdate(BaseModel):
     telegram_id: str | None = None
     recipient_user_ids: list[int] | None = None
     events: dict[str, bool] | None = None
+    node_offline_grace_seconds: int | None = None
 
 
 class NocReportPreviewRequest(BaseModel):

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import require_admin
 from app.config import get_settings
 from app.cidr_database import get_cidr_db
 from app.database import get_db
@@ -171,7 +171,7 @@ def _deploy_target_label(payload: CidrDbDeployRequest) -> str:
 
 @router.get("/status")
 def cidr_db_status(
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
     cidr_db: Session = Depends(get_cidr_db),
 ):
@@ -197,7 +197,7 @@ def cidr_db_status(
 
 
 @router.get("/status/summary")
-def cidr_db_status_summary(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def cidr_db_status_summary(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     """Lightweight status for pipeline polling (avoids heavy ASN/history queries under SQLite load)."""
     total_cidrs = int(db.query(func.coalesce(func.sum(ProviderMeta.cidr_count), 0)).scalar() or 0)
     return {
@@ -208,7 +208,7 @@ def cidr_db_status_summary(_: User = Depends(get_current_user), db: Session = De
 
 
 @router.get("/deploy/status")
-def cidr_deploy_status(_: User = Depends(get_current_user)):
+def cidr_deploy_status(_: User = Depends(require_admin)):
     """Last completed CIDR deploy with per-node results."""
     summary = _summarize_last_deploy()
     if not summary:
@@ -217,7 +217,7 @@ def cidr_deploy_status(_: User = Depends(get_current_user)):
 
 
 @router.get("/tasks/{task_id}")
-def cidr_task_status(task_id: str, _: User = Depends(get_current_user)):
+def cidr_task_status(task_id: str, _: User = Depends(require_admin)):
     task = get_cidr_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Задача не найдена")
@@ -384,7 +384,7 @@ def cidr_deploy_preview(
 
 
 @router.get("/rollback/backups")
-def cidr_rollback_backups(_: User = Depends(get_current_user)):
+def cidr_rollback_backups(_: User = Depends(require_admin)):
     backups = list_runtime_backups()
     return {"success": True, "backups": backups}
 
@@ -545,7 +545,7 @@ def cidr_db_clear(
 
 @router.get("/antifilter/status")
 def antifilter_status(
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
     cidr_db: Session = Depends(get_cidr_db),
 ):
@@ -590,14 +590,14 @@ def antifilter_refresh(user: User = Depends(require_admin), db: Session = Depend
 
 
 @router.get("/route-budget", response_model=RouteBudgetInfo)
-def route_budget(_: User = Depends(get_current_user)):
+def route_budget(_: User = Depends(require_admin)):
     return RouteBudgetInfo(**build_route_budget_payload())
 
 
 @router.post("/analyze-dpi")
 def analyze_dpi_log_endpoint(
     payload: CidrDpiAnalyzeRequest,
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ):
     from app.services.cidr.pipeline.dpi import analyze_dpi_log
 

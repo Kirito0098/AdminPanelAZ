@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import require_admin
 from app.database import get_db
-from app.models import User, UserRole
+from app.models import User
 from app.schemas import MessageResponse
 from app.services.action_log import log_action
 from app.services.edit_files_transfer import run_edit_files_transfer
@@ -42,16 +42,12 @@ def _filename_for_key(file_key: str) -> str:
 
 
 @router.get("")
-def list_edit_files(current_user: User = Depends(get_current_user)):
-    if current_user.role == UserRole.viewer:
-        raise HTTPException(status_code=403, detail="Просмотр файлов недоступен для роли viewer")
+def list_edit_files(_: User = Depends(require_admin)):
     return FileEditorService().list_files()
 
 
 @router.get("/{file_key}")
-def read_edit_file(file_key: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if current_user.role not in (UserRole.admin, UserRole.user):
-        raise HTTPException(status_code=403, detail="Недостаточно прав")
+def read_edit_file(file_key: str, db: Session = Depends(get_db), _: User = Depends(require_admin)):
     try:
         adapter = get_active_adapter(db)
         content = adapter.read_config_file(_filename_for_key(file_key))

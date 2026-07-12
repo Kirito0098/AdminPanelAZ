@@ -130,9 +130,13 @@ def update_user(
         validate_password(payload.password, username=user.username)
         user.password_hash = get_password_hash(payload.password)
     if payload.telegram_id is not None:
-        if not is_admin:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять Telegram ID")
         tg_id = payload.telegram_id.strip()
+        # Non-admins may only clear their own telegram_id (self-unlink).
+        if not is_admin and (current_user.id != user_id or tg_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только администратор может менять Telegram ID",
+            )
         had_tg = bool((user.telegram_id or "").strip())
         if tg_id:
             existing = db.query(User).filter(User.telegram_id == tg_id, User.id != user.id).first()

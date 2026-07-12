@@ -17,7 +17,7 @@ import {
   WifiOff,
   Zap,
 } from 'lucide-react'
-import { useSearchParams } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import {
   ApiError,
   getEditFileContent,
@@ -442,16 +442,8 @@ export default function EditFilesPage() {
     }
   }
 
-  if (user?.role === 'viewer') {
-    return (
-      <div className="space-y-6">
-        <EmptyState
-          icon={FileEdit}
-          title="Редактор недоступен"
-          description="Просмотр и редактирование списков VPN недоступны для вашей роли."
-        />
-      </div>
-    )
+  if (!isAdmin) {
+    return <Navigate to="/" replace />
   }
 
   if (loading && files.length === 0) {

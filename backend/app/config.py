@@ -94,6 +94,8 @@ class Settings(BaseSettings):
     monitor_sustained_seconds: int = 180
     traffic_db_stale_seconds: int = 600
     monitoring_overview_cache_ttl_seconds: int = 45
+    # SSE push cadence for /monitoring/stream (fresh fetch each tick; keep ≤ cache TTL for rates).
+    monitoring_stream_interval_seconds: int = 10
     cert_sync_enabled: bool = True
     cert_sync_interval_seconds: int = 300
     self_service_reminder_enabled: bool = True

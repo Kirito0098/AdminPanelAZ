@@ -237,8 +237,8 @@ export function NodeBadge({ name, status }: { name?: string | null; status?: Nod
 export function NodeStatusBadge({ status, showLabel = true }: { status: NodeStatus; showLabel?: boolean }) {
   const Icon = statusIcons[status]
   return (
-    <Badge variant={statusVariants[status]} className="gap-1 font-normal">
-      <Icon size={12} />
+    <Badge variant={statusVariants[status]} className="gap-1 whitespace-nowrap font-normal">
+      <Icon size={12} className="shrink-0" />
       {showLabel && statusLabels[status]}
     </Badge>
   )

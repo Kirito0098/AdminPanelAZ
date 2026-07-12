@@ -65,6 +65,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { buildClientConnectionMap, type ClientConnectionMap } from '@/lib/configCardUtils'
+import { cn } from '@/lib/utils'
 import type { ClientAccessPolicy, ClientTemplate, DashboardSummary, SelfServiceQuota, User, VpnConfig, VpnType } from '@/types'
 
 export default function DashboardPage() {
@@ -158,17 +159,21 @@ export default function DashboardPage() {
       } else {
         setQuota(null)
       }
-      if (user?.role === 'admin' && configsData.length > 0) {
+      if (configsData.length > 0) {
         const names = configsData.map((c) => c.client_name).join(',')
-        getClientPolicies(names).then(setPolicies).catch(() => {})
+        getClientPolicies(names).then(setPolicies).catch(() => setPolicies({}))
       } else {
         setPolicies({})
       }
-      void getMonitoring('node')
-        .then((data) =>
-          setConnectionMap(buildClientConnectionMap(data.openvpn_clients, data.wireguard_peers)),
-        )
-        .catch(() => setConnectionMap(null))
+      if (user?.role === 'admin') {
+        void getMonitoring('node')
+          .then((data) =>
+            setConnectionMap(buildClientConnectionMap(data.openvpn_clients, data.wireguard_peers)),
+          )
+          .catch(() => setConnectionMap(null))
+      } else {
+        setConnectionMap(null)
+      }
       void loadProfileFiles(configsData)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки конфигураций')
@@ -528,34 +533,38 @@ export default function DashboardPage() {
       )}
 
       {summary && (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className={cn('grid gap-3 sm:grid-cols-2', isAdmin ? 'xl:grid-cols-4' : 'xl:grid-cols-2')}>
           <MetricCard
-            label="Всего клиентов"
+            label={isAdmin ? 'Всего клиентов' : 'Мои конфигурации'}
             value={String(summary.total_configs)}
             sub={`OVPN ${summary.openvpn_configs} · WG ${summary.wireguard_configs}`}
             icon={Users}
             accent="cyan"
           />
-          <MetricCard
-            label="Онлайн"
-            value={String(summary.connected_openvpn + summary.connected_wireguard)}
-            sub={`OVPN ${summary.connected_openvpn} · WG ${summary.connected_wireguard}`}
-            icon={Wifi}
-            accent="green"
-          />
-          <MetricCard
-            label="VPN-службы"
-            value={`${summary.active_services}/${summary.total_services}`}
-            sub="активных на узле"
-            icon={Shield}
-            accent="amber"
-          />
-          <MetricCard
-            label="IP сервера"
-            value={summary.server_ip || '—'}
-            sub={summary.node_name || 'активный узел'}
-            icon={FileKey}
-          />
+          {isAdmin && (
+            <>
+              <MetricCard
+                label="Онлайн"
+                value={String(summary.connected_openvpn + summary.connected_wireguard)}
+                sub={`OVPN ${summary.connected_openvpn} · WG ${summary.connected_wireguard}`}
+                icon={Wifi}
+                accent="green"
+              />
+              <MetricCard
+                label="VPN-службы"
+                value={`${summary.active_services}/${summary.total_services}`}
+                sub="активных на узле"
+                icon={Shield}
+                accent="amber"
+              />
+              <MetricCard
+                label="IP сервера"
+                value={summary.server_ip || '—'}
+                sub={summary.node_name || 'активный узел'}
+                icon={FileKey}
+              />
+            </>
+          )}
         </div>
       )}
 

@@ -7,11 +7,11 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_user
 from app.database import get_db
 from app.models import User
 from app.routers.maintenance import _get_setting, _telegram_settings_response
-from app.schemas import TelegramLinkCodeResponse
+from app.schemas import TelegramBotInfoResponse, TelegramLinkCodeResponse
 from app.services.feature_guards import get_feature_service
 from app.services.rate_limit.sliding_window import RateLimitExceeded
 from app.services.telegram_bot import telegram_bot_service
@@ -30,6 +30,14 @@ router = APIRouter(prefix="/telegram", tags=["telegram-bot"])
 def _ensure_telegram_module() -> None:
     if not get_feature_service().is_enabled("telegram"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Модуль Telegram отключён")
+
+
+def _bot_info(db: Session) -> TelegramBotInfoResponse:
+    username = (_get_setting(db, "telegram_bot_username") or "").strip().lstrip("@")
+    return TelegramBotInfoResponse(
+        bot_username=username,
+        bot_url=f"https://t.me/{username}" if username else "",
+    )
 
 
 @router.post("/webhook/{secret}")
@@ -65,6 +73,16 @@ async def telegram_webhook(
     settings = _telegram_settings_response(db, request)
     await telegram_bot_service.handle_update(db, update, mini_app_url=settings.mini_app_url)
     return {"ok": True}
+
+
+@router.get("/bot-info", response_model=TelegramBotInfoResponse)
+def telegram_bot_info(
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Bot username/URL for any logged-in user (e.g. self-link UI)."""
+    _ensure_telegram_module()
+    return _bot_info(db)
 
 
 @router.get("/link-code", response_model=TelegramLinkCodeResponse)

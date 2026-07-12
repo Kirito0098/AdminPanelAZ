@@ -71,7 +71,11 @@ export default function ConfirmDialog({
             {Icon && <Icon className="h-5 w-5 shrink-0 text-muted-foreground" />}
             {title}
           </DialogTitle>
-          {description && <DialogDescription>{description}</DialogDescription>}
+          {description ? (
+            <DialogDescription>{description}</DialogDescription>
+          ) : (
+            <DialogDescription className="sr-only">{title}</DialogDescription>
+          )}
         </DialogHeader>
 
         <form noValidate onSubmit={handleSubmit} className="space-y-4">

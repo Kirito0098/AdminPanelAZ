@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowDownToLine,
   ChevronDown,
@@ -782,6 +782,10 @@ export default function LogsPage() {
     showConnectionTabs,
     defaultLogTab,
   ])
+
+  if (user?.role !== 'admin') {
+    return <Navigate to="/" replace />
+  }
 
   if (loading && !connections && events.length === 0 && actions.length === 0) {
     return <Spinner label="Загрузка логов..." className="py-16" />

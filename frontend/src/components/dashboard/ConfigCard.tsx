@@ -48,6 +48,7 @@ import {
   type ConfigCardViewPrefs,
 } from '@/lib/configCardViewPrefs'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
+import { PercentBar } from '@/components/ui/percent-bar'
 import { cn } from '@/lib/utils'
 
 type ActionKey = 'download' | 'qr' | 'block' | 'unblock' | 'delete'
@@ -208,10 +209,7 @@ function buildCompactMeta(
     rows.push(metaRow('owner', UserRound, 'Владелец', config.owner_username))
   }
 
-  if (isAdmin) {
-    rows.push(formatTrafficMeta(policy))
-  }
-
+  rows.push(formatTrafficMeta(policy))
   rows.push(formatBlockMeta(policy))
   rows.push(formatConnectionMeta(isOnline))
 
@@ -219,7 +217,7 @@ function buildCompactMeta(
   const keyMeta = config.vpn_type === 'openvpn' ? lines.slice(1) : lines
 
   for (const line of keyMeta) {
-    if (isNoiseMetaLine(line.text, tone, { hideTraffic: isAdmin, hideBlock: true })) continue
+    if (isNoiseMetaLine(line.text, tone, { hideTraffic: true, hideBlock: true })) continue
     const parsed = splitMetaText(line.text)
     if (!parsed.value && !parsed.label) continue
     rows.push(
@@ -433,6 +431,12 @@ export default function ConfigCard({
   const showQr = fields.qrButtons && showQrDownloads
   const showTraffic = fields.trafficLink && showTrafficLink
   const showDanger = fields.dangerActions
+  const trafficLimitPercent =
+    fields.metaTraffic &&
+    policy?.traffic_limit_bytes != null &&
+    policy.traffic_limit_bytes > 0
+      ? Math.min(((policy.traffic_consumed_bytes ?? 0) / policy.traffic_limit_bytes) * 100, 100)
+      : null
 
   const vpnDownloadAccent = applyAccent(
     unifiedButtonAccent,
@@ -571,6 +575,14 @@ export default function ConfigCard({
               <MetaLine key={row.key} row={row} />
             ))}
           </div>
+        )}
+        {trafficLimitPercent != null && (
+          <PercentBar
+            value={trafficLimitPercent}
+            className="h-1.5"
+            barClassName={policy?.traffic_limit_exceeded ? 'fill-destructive' : 'fill-primary'}
+            label="Использование лимита трафика"
+          />
         )}
 
         <div className="mt-auto space-y-2 border-t border-border/60 pt-2.5">

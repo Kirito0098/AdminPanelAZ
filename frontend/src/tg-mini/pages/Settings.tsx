@@ -255,7 +255,7 @@ export default function Settings() {
     <div className="tg-mini-dashboard space-y-4">
       <MiniPageHeader
         title="Настройки"
-        subtitle="Аккаунт, уведомления и параметры бота"
+        subtitle={isAdmin ? 'Аккаунт, уведомления и параметры бота' : 'Аккаунт и личные напоминания'}
         onRefresh={() => void load({ silent: true })}
         refreshing={refreshing}
       />
@@ -284,37 +284,51 @@ export default function Settings() {
                 <Badge variant="outline" className="font-normal">
                   Тема: {themeLabel}
                 </Badge>
-                <Badge
-                  variant={settings?.bot_configured ? 'default' : 'outline'}
-                  className={cn('gap-1 font-normal', settings?.bot_configured && 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400')}
-                >
-                  <Bot size={11} aria-hidden />
-                  {settings?.bot_configured ? 'Бот настроен' : 'Бот не настроен'}
-                </Badge>
+                {isAdmin && (
+                  <Badge
+                    variant={settings?.bot_configured ? 'default' : 'outline'}
+                    className={cn('gap-1 font-normal', settings?.bot_configured && 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400')}
+                  >
+                    <Bot size={11} aria-hidden />
+                    {settings?.bot_configured ? 'Бот настроен' : 'Бот не настроен'}
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="tg-mini-cards">
-        <MetricCard
-          label="Сервер"
-          value={settings?.server_ip ? 'IP' : '—'}
-          sub={settings?.server_ip ?? 'не задан'}
-          icon={Server}
-          accent={settings?.server_ip ? 'cyan' : 'default'}
-        />
-        <MetricCard
-          label="Telegram ID"
-          value={notify?.telegram_id ? 'Привязан' : '—'}
-          sub={notify?.telegram_id || 'не привязан'}
-          icon={Shield}
-          accent={notify?.telegram_id ? 'green' : 'amber'}
-        />
-      </div>
+      {isAdmin ? (
+        <div className="tg-mini-cards">
+          <MetricCard
+            label="Сервер"
+            value={settings?.server_ip ? 'IP' : '—'}
+            sub={settings?.server_ip ?? 'не задан'}
+            icon={Server}
+            accent={settings?.server_ip ? 'cyan' : 'default'}
+          />
+          <MetricCard
+            label="Telegram ID"
+            value={notify?.telegram_id ? 'Привязан' : '—'}
+            sub={notify?.telegram_id || 'не привязан'}
+            icon={Shield}
+            accent={notify?.telegram_id ? 'green' : 'amber'}
+          />
+        </div>
+      ) : (
+        <div className="tg-mini-cards">
+          <MetricCard
+            label="Telegram ID"
+            value={notify?.telegram_id ? 'Привязан' : '—'}
+            sub={notify?.telegram_id || 'не привязан'}
+            icon={Shield}
+            accent={notify?.telegram_id ? 'green' : 'amber'}
+          />
+        </div>
+      )}
 
-      {settings?.server_ip && (
+      {isAdmin && settings?.server_ip && (
         <Card>
           <CardContent className="space-y-2 p-4">
             <SectionTitle icon={Server}>IP сервера</SectionTitle>
@@ -325,13 +339,13 @@ export default function Settings() {
 
       <Card>
         <CardContent className="space-y-4 p-4">
-          <SectionTitle icon={Bell}>Личные уведомления</SectionTitle>
+          <SectionTitle icon={Bell}>{isAdmin ? 'Личные уведомления' : 'Напоминания'}</SectionTitle>
 
           <div className="rounded-lg border bg-muted/20 px-3 py-2.5">
             <p className="text-xs text-muted-foreground">{LABEL_TELEGRAM_ID}</p>
             <p className="mono mt-1 text-sm font-medium">{notify?.telegram_id || '—'}</p>
             <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-              Привязка через <span className="font-mono">/link</span> в боте или в веб-панели → Пользователи.
+              Привязка через <span className="font-mono">/link</span> в боте (код в веб-панели → Мой профиль).
             </p>
           </div>
 

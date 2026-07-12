@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import require_admin
 from app.database import get_db
 from app.models import BackgroundTask, User
 from app.schemas import (
@@ -70,7 +70,7 @@ class ProviderEnabledUpdate(BaseModel):
 
 
 @router.get("/overview", response_model=RoutingOverview)
-def routing_overview(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def routing_overview(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     data = adapter.get_routing_overview()
@@ -83,7 +83,7 @@ def routing_overview(_: User = Depends(get_current_user), db: Session = Depends(
 
 
 @router.get("/providers/{filename}")
-def get_provider(filename: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_provider(filename: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     return get_active_adapter(db).get_provider_content(filename)
 
 
@@ -128,7 +128,7 @@ def sync_providers(_: User = Depends(require_admin), db: Session = Depends(get_d
 
 
 @router.get("/files/{file_key}")
-def read_route_file(file_key: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def read_route_file(file_key: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     return get_active_adapter(db).read_route_file(file_key)
 
 
@@ -152,12 +152,12 @@ def write_route_file(
 
 
 @router.get("/results")
-def result_files(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def result_files(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     return get_active_adapter(db).get_route_result_files()
 
 
 @router.get("/results/{key}")
-def result_content(key: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def result_content(key: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     return get_active_adapter(db).get_route_result_content(key)
 
 
