@@ -5,6 +5,7 @@ import {
   deleteConfig,
   deleteConfigTag,
   getConfigTags,
+  getEffectiveVisibleVpnProfiles,
   getOpenVpnGroup,
   openvpnPermanentBlock,
   openvpnTempBlock,
@@ -50,7 +51,15 @@ import {
   type ConfigCardViewPrefs,
 } from '@/lib/configCardViewPrefs'
 import { cn } from '@/lib/utils'
-import type { ClientAccessPolicy, ConfigTag, OpenVpnGroupOption, User, UserRole, VpnConfig } from '@/types'
+import type {
+  ClientAccessPolicy,
+  ConfigTag,
+  OpenVpnGroupOption,
+  User,
+  UserRole,
+  VisibleVpnProfilesPolicy,
+  VpnConfig,
+} from '@/types'
 import { FileKey, Filter, Search, Shield, Tag, Wifi, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
@@ -74,9 +83,13 @@ type ConfirmAction = 'delete' | 'block' | 'unblock' | null
 type BulkAction = 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert' | 'change_owner' | null
 type LoadingKey = `${number}-${'download' | 'qr' | 'block' | 'unblock' | 'delete'}` | null
 
-function useVisibleTabs(): ProtocolTab[] {
+function useVisibleTabs(visibilityPolicy: VisibleVpnProfilesPolicy | null, userRole: UserRole): ProtocolTab[] {
   const { isEnabled } = useFeatureModules()
   return TAB_ORDER.filter((tab) => {
+    if (userRole !== 'admin' && visibilityPolicy) {
+      if (!visibilityPolicy.protocols.includes(tab)) return false
+      if (tab === 'openvpn' && visibilityPolicy.openvpn_groups.length === 0) return false
+    }
     if (tab === 'openvpn') return isEnabled('openvpn')
     if (tab === 'amneziawg') return isEnabled('amneziawg')
     return isEnabled('wireguard')
@@ -101,7 +114,8 @@ export default function ConfigCardsSection({
   const { trackBackgroundTask } = useProgress()
   const qrDownloadsEnabled = isEnabled('qr_downloads')
   const trafficLinkEnabled = isEnabled('traffic_sync')
-  const visibleTabs = useVisibleTabs()
+  const [visibilityPolicy, setVisibilityPolicy] = useState<VisibleVpnProfilesPolicy | null>(null)
+  const visibleTabs = useVisibleTabs(visibilityPolicy, userRole)
   const [activeTab, setActiveTab] = useState<ProtocolTab>(visibleTabs[0] ?? 'openvpn')
   useEffect(() => {
     if (!visibleTabs.includes(activeTab) && visibleTabs.length > 0) {
@@ -136,6 +150,12 @@ export default function ConfigCardsSection({
     setViewPrefs(loadConfigCardViewPrefs())
   }, [])
 
+  useEffect(() => {
+    void getEffectiveVisibleVpnProfiles()
+      .then((data) => setVisibilityPolicy(data.policy))
+      .catch(() => setVisibilityPolicy(null))
+  }, [userRole])
+
   const handleViewPrefsChange = (next: ConfigCardViewPrefs) => {
     setViewPrefs(next)
     saveConfigCardViewPrefs(next)
@@ -143,7 +163,7 @@ export default function ConfigCardsSection({
   const [tagDeleteBusy, setTagDeleteBusy] = useState(false)
 
   const isAdmin = userRole === 'admin'
-  const openvpnTabEnabled = isEnabled('openvpn')
+  const openvpnTabEnabled = visibleTabs.includes('openvpn')
 
   useEffect(() => {
     if (!openvpnTabEnabled) return

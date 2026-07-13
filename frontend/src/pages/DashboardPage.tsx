@@ -24,6 +24,7 @@ import {
   getConfigQuota,
   getConfigs,
   getDashboardSummary,
+  getEffectiveVisibleVpnProfiles,
   getMonitoring,
   getUsers,
   importConfigsCsv,
@@ -66,13 +67,33 @@ import { useProgress } from '@/context/ProgressContext'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { buildClientConnectionMap, type ClientConnectionMap } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
-import type { ClientAccessPolicy, ClientTemplate, DashboardSummary, SelfServiceQuota, User, VpnConfig, VpnType } from '@/types'
+import type {
+  ClientAccessPolicy,
+  ClientTemplate,
+  DashboardSummary,
+  SelfServiceQuota,
+  User,
+  VisibleVpnProfilesPolicy,
+  VpnConfig,
+  VpnType,
+} from '@/types'
 
 export default function DashboardPage() {
   const { user } = useAuth()
   const { isEnabled } = useFeatureModules()
-  const openvpnEnabled = isEnabled('openvpn')
-  const wireguardEnabled = isEnabled('wireguard') || isEnabled('amneziawg')
+  const [visibilityPolicy, setVisibilityPolicy] = useState<VisibleVpnProfilesPolicy | null>(null)
+  const openvpnEnabled =
+    isEnabled('openvpn') &&
+    (user?.role === 'admin' || visibilityPolicy == null || visibilityPolicy.protocols.includes('openvpn')) &&
+    (user?.role === 'admin' ||
+      visibilityPolicy == null ||
+      (visibilityPolicy.openvpn_groups?.length ?? 0) > 0)
+  const wireguardEnabled =
+    (isEnabled('wireguard') || isEnabled('amneziawg')) &&
+    (user?.role === 'admin' ||
+      visibilityPolicy == null ||
+      visibilityPolicy.protocols.includes('wireguard') ||
+      visibilityPolicy.protocols.includes('amneziawg'))
   const canCreateClient = openvpnEnabled || wireguardEnabled
   const { activeNode } = useNode()
   const haReplicaReadonly = useHaReplicaReadonly()
@@ -110,6 +131,17 @@ export default function DashboardPage() {
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
   const isAdmin = user?.role === 'admin'
   const quotaReached = quota != null && !quota.unlimited && !quota.can_create
+
+  useEffect(() => {
+    void getEffectiveVisibleVpnProfiles()
+      .then((data) => setVisibilityPolicy(data.policy))
+      .catch(() => setVisibilityPolicy(null))
+  }, [user?.id])
+
+  useEffect(() => {
+    if (openvpnEnabled) setVpnType('openvpn')
+    else if (wireguardEnabled) setVpnType('wireguard')
+  }, [openvpnEnabled, wireguardEnabled])
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'

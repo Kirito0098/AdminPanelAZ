@@ -89,14 +89,26 @@ export default function Configs() {
   useEffect(() => {
     void getTgFeatureModules()
       .then((data) => {
-        setOpenvpnEnabled(Boolean(data.features.openvpn))
-        setWireguardEnabled(Boolean(data.features.wireguard))
+        const policy = settings?.visible_vpn_profiles
+        const allowOpenvpn =
+          Boolean(data.features.openvpn) &&
+          (isAdmin ||
+            !policy ||
+            (policy.protocols.includes('openvpn') && policy.openvpn_groups.length > 0))
+        const allowWireguard =
+          (Boolean(data.features.wireguard) || Boolean(data.features.amneziawg)) &&
+          (isAdmin ||
+            !policy ||
+            policy.protocols.includes('wireguard') ||
+            policy.protocols.includes('amneziawg'))
+        setOpenvpnEnabled(allowOpenvpn)
+        setWireguardEnabled(allowWireguard)
       })
       .catch(() => {
         setOpenvpnEnabled(true)
         setWireguardEnabled(true)
       })
-  }, [])
+  }, [isAdmin, settings?.visible_vpn_profiles])
 
   useEffect(() => {
     void load()

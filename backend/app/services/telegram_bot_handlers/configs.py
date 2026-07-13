@@ -21,7 +21,11 @@ from app.services.telegram_profile_ui import (
     format_config_protocol_badge_for_filter,
 )
 from app.services import telegram_bot_i18n as i18n
-
+from app.services.vpn_profile_visibility import (
+    EMPTY_CATALOG_MESSAGE,
+    filter_profile_files,
+    resolve_effective_visible_vpn_profiles,
+)
 _PAGE_SIZE = 12
 _COLUMNS = 2
 _NAME_MAX_LEN = 20
@@ -69,6 +73,7 @@ def _load_config_protocol_map(ctx: BotContext, configs: list[VpnConfig]) -> dict
         return {}
 
     adapter = get_active_adapter(ctx.db)
+    policy = resolve_effective_visible_vpn_profiles(ctx.db, ctx.user)
     clients = [(config.client_name, config.vpn_type) for config in configs]
     files_by_key: dict[str, list[dict[str, str]]] = {}
     try:
@@ -85,6 +90,7 @@ def _load_config_protocol_map(ctx: BotContext, configs: list[VpnConfig]) -> dict
                 files = adapter.get_profile_files(config.client_name, config.vpn_type)
             except Exception:
                 files = []
+        files = filter_profile_files(files or [], policy)
         protocol_map[config.id] = classify_config_profile_groups(files, config.vpn_type)
     return protocol_map
 
@@ -293,6 +299,8 @@ async def _get_accessible_config(ctx: BotContext, config_id: int) -> VpnConfig |
 def _load_profile_groups(ctx: BotContext, config: VpnConfig) -> list[ProfileFileGroup]:
     adapter = get_active_adapter(ctx.db)
     raw_files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
+    policy = resolve_effective_visible_vpn_profiles(ctx.db, ctx.user)
+    raw_files = filter_profile_files(raw_files, policy)
     return build_profile_file_groups(config.client_name, raw_files)
 
 
@@ -338,7 +346,7 @@ async def _show_config_picker(
     filter_key = _normalize_filter_key(filter_key)
     groups = _load_profile_groups(ctx, config)
     if not groups:
-        await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIG_FILES_NONE)
+        await send_message(ctx.bot_token, ctx.chat_id, EMPTY_CATALOG_MESSAGE)
         return
 
     active_groups = _narrow_profile_groups(groups, filter_key)
@@ -384,7 +392,7 @@ async def handle_configs(
     protocol_map = _load_config_protocol_map(ctx, configs)
     configs_with_files = _configs_with_files(configs, protocol_map)
     if not configs_with_files:
-        await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIGS_NONE_ON_NODE)
+        await send_message(ctx.bot_token, ctx.chat_id, EMPTY_CATALOG_MESSAGE)
         return
 
     filter_key = _normalize_filter_key(filter_key)
@@ -508,6 +516,8 @@ async def handle_config_file_send(
 
     adapter = get_active_adapter(ctx.db)
     raw_files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
+    policy = resolve_effective_visible_vpn_profiles(ctx.db, ctx.user)
+    raw_files = filter_profile_files(raw_files, policy)
     enriched = enrich_profile_files(config.client_name, raw_files)
     if file_index < 0 or file_index >= len(enriched):
         await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIG_FILE_NOT_FOUND)

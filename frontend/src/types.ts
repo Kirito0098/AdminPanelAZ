@@ -141,8 +141,24 @@ export interface User {
   totp_enabled?: boolean
   telegram_id?: string | null
   config_quota?: number | null
+  visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
   timezone?: string
   created_at: string
+}
+
+export interface VisibleVpnProfilesPolicy {
+  routes: string[]
+  protocols: string[]
+  openvpn_groups: string[]
+}
+
+export interface VisibleVpnProfilesDefaultResponse {
+  policy: VisibleVpnProfilesPolicy
+}
+
+export interface EffectiveVisibleVpnProfilesResponse {
+  policy: VisibleVpnProfilesPolicy
+  inherited: boolean
 }
 
 export interface SelfServiceQuota {
@@ -695,6 +711,7 @@ export interface TgMiniSettings {
   username: string
   role: string
   theme: 'light' | 'dark'
+  visible_vpn_profiles?: VisibleVpnProfilesPolicy
 }
 
 export interface TgMiniNode extends Node {

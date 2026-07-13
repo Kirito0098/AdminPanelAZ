@@ -286,6 +286,26 @@ export async function getConfigQuota() {
   return apiFetch<import('../types').SelfServiceQuota>('/configs/quota')
 }
 
+export async function getEffectiveVisibleVpnProfiles() {
+  return apiFetch<import('../types').EffectiveVisibleVpnProfilesResponse>('/configs/visible-vpn-profiles')
+}
+
+export async function getUserVpnVisibilityDefault() {
+  return apiFetch<import('../types').VisibleVpnProfilesDefaultResponse>(
+    '/settings/user-vpn-visibility-default',
+  )
+}
+
+export async function setUserVpnVisibilityDefault(policy: import('../types').VisibleVpnProfilesPolicy) {
+  return apiFetch<import('../types').VisibleVpnProfilesDefaultResponse>(
+    '/settings/user-vpn-visibility-default',
+    {
+      method: 'PUT',
+      body: JSON.stringify({ policy }),
+    },
+  )
+}
+
 export async function getConfigProfileFiles(ids?: number[]) {
   const query = ids?.length ? `?ids=${ids.join(',')}` : ''
   return apiFetch<Record<string, import('../types').VpnConfig['profile_files']>>(

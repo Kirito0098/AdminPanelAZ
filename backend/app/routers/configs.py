@@ -11,7 +11,17 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_admin
 from app.database import get_db
 from app.models import AppSetting, User, UserRole, ViewerConfigAccess, VpnConfig, VpnType
-from app.schemas import ConfigTagResponse, MessageResponse, SelfServiceQuotaResponse, VpnConfigCreate, VpnConfigHaInfo, VpnConfigResponse, VpnConfigUpdate
+from app.schemas import (
+    ConfigTagResponse,
+    EffectiveVisibleVpnProfilesResponse,
+    MessageResponse,
+    SelfServiceQuotaResponse,
+    VisibleVpnProfilesPolicy,
+    VpnConfigCreate,
+    VpnConfigHaInfo,
+    VpnConfigResponse,
+    VpnConfigUpdate,
+)
 from app.services.self_service import build_quota_payload, enforce_user_can_create_config
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
@@ -45,7 +55,6 @@ from app.services.openvpn_cert import resolve_openvpn_cert_days_remaining
 from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
 from app.services.openvpn_group import (
     filter_openvpn_profile_files,
-    get_user_openvpn_group,
     list_openvpn_groups,
     set_user_openvpn_group,
 )
@@ -56,7 +65,17 @@ from app.services.panel_publish_info import resolve_public_base_url
 from app.services.qr_download import QrDownloadService
 from app.services.qr_generator import generate_qr_png
 from app.services.security import SecurityService
-
+from app.services.vpn_profile_visibility import (
+    POLICY_GROUP_TO_SETTING,
+    allowed_openvpn_group_options,
+    allowed_openvpn_groups,
+    enforce_can_create_vpn_type,
+    filter_profile_files,
+    parse_user_visible_vpn_profiles,
+    profile_file_allowed,
+    resolve_effective_visible_vpn_profiles,
+    resolve_openvpn_group_for_user,
+)
 router = APIRouter(prefix="/configs", tags=["configs"])
 
 PROFILE_FILES_MAX_WORKERS = 12
@@ -159,6 +178,7 @@ def _to_response(
     profile_files: list[dict[str, str]] | None = None,
     tags: list[ConfigTagResponse] | None = None,
     ha_replicate_warning: str | None = None,
+    visibility_policy: dict | None = None,
 ) -> VpnConfigResponse:
     owner = db.query(User).filter(User.id == config.owner_id).first()
     files: list[dict[str, str]] = []
@@ -170,6 +190,8 @@ def _to_response(
             files = node_adapter.get_profile_files(config.client_name, config.vpn_type)
         if config.vpn_type == VpnType.openvpn and openvpn_group:
             files = filter_openvpn_profile_files(files, openvpn_group)
+        if visibility_policy is not None:
+            files = filter_profile_files(files, visibility_policy)
         if files:
             files = enrich_profile_files(config.client_name, files)
     return VpnConfigResponse(
@@ -207,6 +229,7 @@ def _fetch_profile_files_map(
     configs: list[VpnConfig],
     *,
     openvpn_group: str | None = None,
+    visibility_policy: dict | None = None,
 ) -> dict[int, list[dict[str, str]]]:
     if not configs:
         return {}
@@ -243,8 +266,40 @@ def _fetch_profile_files_map(
         files = list(files_by_key.get(key, []))
         if config.vpn_type == VpnType.openvpn and openvpn_group:
             files = filter_openvpn_profile_files(files, openvpn_group)
+        if visibility_policy is not None:
+            files = filter_profile_files(files, visibility_policy)
         result[config.id] = enrich_profile_files(config.client_name, files)
     return result
+
+
+def _viewer_visibility_policy(db: Session, current_user: User) -> dict:
+    return resolve_effective_visible_vpn_profiles(db, current_user)
+
+
+def _require_profile_path_allowed(
+    db: Session,
+    current_user: User,
+    config: VpnConfig,
+    path: str,
+    *,
+    adapter: NodeAdapter | None = None,
+) -> None:
+    if current_user.role == UserRole.admin:
+        return
+    node_adapter = adapter or get_active_adapter(db)
+    files = node_adapter.get_profile_files(config.client_name, config.vpn_type)
+    match = next((item for item in files if item.get("path") == path), None)
+    if match is None:
+        # Path may still be readable; deny if policy would hide all matches by path suffix.
+        match = {"protocol": "", "variant": "", "path": path}
+    policy = _viewer_visibility_policy(db, current_user)
+    if not profile_file_allowed(
+        policy,
+        protocol=match.get("protocol", ""),
+        variant=match.get("variant", ""),
+        path=match.get("path", path),
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Файл профиля недоступен")
 
 
 @router.get("/quota", response_model=SelfServiceQuotaResponse)
@@ -255,6 +310,22 @@ def get_config_quota(
     return SelfServiceQuotaResponse(**build_quota_payload(db, current_user))
 
 
+@router.get("/visible-vpn-profiles", response_model=EffectiveVisibleVpnProfilesResponse)
+def get_visible_vpn_profiles(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    policy = resolve_effective_visible_vpn_profiles(db, current_user)
+    inherited = (
+        current_user.role == UserRole.admin
+        or parse_user_visible_vpn_profiles(getattr(current_user, "visible_vpn_profiles", None)) is None
+    )
+    return EffectiveVisibleVpnProfilesResponse(
+        policy=VisibleVpnProfilesPolicy(**policy),
+        inherited=inherited,
+    )
+
+
 @router.get("", response_model=list[VpnConfigResponse])
 def list_configs(
     include_files: bool = Query(False, description="Загружать список файлов профилей с узла"),
@@ -262,7 +333,8 @@ def list_configs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    openvpn_group = get_user_openvpn_group(db, current_user.id)
+    visibility_policy = _viewer_visibility_policy(db, current_user)
+    openvpn_group = resolve_openvpn_group_for_user(db, current_user)
     configs = _list_accessible_configs(db, current_user)
     if tag_ids:
         node_id = _active_node_id(db)
@@ -272,7 +344,12 @@ def list_configs(
     adapter = get_active_adapter(db) if include_files else None
     files_map: dict[int, list[dict[str, str]]] = {}
     if include_files and adapter is not None and configs:
-        files_map = _fetch_profile_files_map(adapter, configs, openvpn_group=openvpn_group)
+        files_map = _fetch_profile_files_map(
+            adapter,
+            configs,
+            openvpn_group=openvpn_group,
+            visibility_policy=visibility_policy,
+        )
     tags_map = get_tags_for_configs(db, [c.id for c in configs]) if configs else {}
     return [
         _to_response(
@@ -282,6 +359,7 @@ def list_configs(
             openvpn_group=openvpn_group,
             adapter=adapter,
             profile_files=files_map.get(c.id) if include_files else None,
+            visibility_policy=visibility_policy,
             tags=[
                 ConfigTagResponse(id=t.id, name=t.name, color=t.color)
                 for t in tags_map.get(c.id, [])
@@ -297,7 +375,8 @@ def list_profile_files(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    openvpn_group = get_user_openvpn_group(db, current_user.id)
+    visibility_policy = _viewer_visibility_policy(db, current_user)
+    openvpn_group = resolve_openvpn_group_for_user(db, current_user)
     configs = _list_accessible_configs(db, current_user)
     if ids.strip():
         try:
@@ -310,7 +389,12 @@ def list_profile_files(
         configs = [c for c in configs if c.id in id_set]
 
     adapter = get_active_adapter(db)
-    files_map = _fetch_profile_files_map(adapter, configs, openvpn_group=openvpn_group)
+    files_map = _fetch_profile_files_map(
+        adapter,
+        configs,
+        openvpn_group=openvpn_group,
+        visibility_policy=visibility_policy,
+    )
     return {str(config_id): files for config_id, files in files_map.items()}
 
 
@@ -320,9 +404,15 @@ class OpenVpnGroupUpdate(BaseModel):
 
 @router.get("/openvpn-group")
 def get_openvpn_group(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    policy = resolve_effective_visible_vpn_profiles(db, current_user)
+    group = resolve_openvpn_group_for_user(db, current_user)
+    if current_user.role == UserRole.admin:
+        options = list_openvpn_groups()
+    else:
+        options = [{"key": o["key"], "label": o["label"]} for o in allowed_openvpn_group_options(policy)]
     return {
-        "group": get_user_openvpn_group(db, current_user.id),
-        "options": list_openvpn_groups(),
+        "group": group,
+        "options": options,
     }
 
 
@@ -332,8 +422,20 @@ def put_openvpn_group(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    policy = resolve_effective_visible_vpn_profiles(db, current_user)
+    if current_user.role != UserRole.admin:
+        allowed = {POLICY_GROUP_TO_SETTING[k] for k in allowed_openvpn_groups(policy)}
+        if payload.group not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Выбранная группа OpenVPN недоступна по политике видимости",
+            )
     group = set_user_openvpn_group(db, current_user.id, payload.group)
-    return {"group": group, "options": list_openvpn_groups()}
+    if current_user.role == UserRole.admin:
+        options = list_openvpn_groups()
+    else:
+        options = [{"key": o["key"], "label": o["label"]} for o in allowed_openvpn_group_options(policy)]
+    return {"group": group, "options": options}
 
 
 @router.get("/export")
@@ -412,7 +514,7 @@ def create_config(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Конфигурация уже существует")
 
     require_vpn_type(payload.vpn_type.value, service=get_feature_service())
-
+    enforce_can_create_vpn_type(db, current_user, payload.vpn_type)
     adapter = get_active_adapter(db)
     if payload.vpn_type == VpnType.openvpn:
         adapter.add_openvpn_client(payload.client_name, payload.cert_expire_days or 3650)
@@ -457,6 +559,8 @@ def create_config(
         include_files=True,
         adapter=adapter,
         ha_replicate_warning=ha_replicate_warning,
+        visibility_policy=_viewer_visibility_policy(db, current_user),
+        openvpn_group=resolve_openvpn_group_for_user(db, current_user),
     )
 
 
@@ -472,7 +576,13 @@ def get_config(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     if not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
-    return _to_response(config, db, include_files=include_files)
+    return _to_response(
+        config,
+        db,
+        include_files=include_files,
+        visibility_policy=_viewer_visibility_policy(db, current_user),
+        openvpn_group=resolve_openvpn_group_for_user(db, current_user),
+    )
 
 
 @router.patch("/{config_id}", response_model=VpnConfigResponse)
@@ -530,7 +640,13 @@ def update_config(
     if metadata_changed:
         maybe_replicate_config_metadata(db, node_id=node.id, primary_config=config)
 
-    return _to_response(config, db, include_files=True)
+    return _to_response(
+        config,
+        db,
+        include_files=True,
+        visibility_policy=_viewer_visibility_policy(db, current_user),
+        openvpn_group=resolve_openvpn_group_for_user(db, current_user),
+    )
 
 
 @router.delete("/{config_id}", response_model=MessageResponse)
@@ -590,6 +706,7 @@ def download_profile(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
     adapter = get_active_adapter(db)
+    _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
     content = adapter.read_profile_file(path)
     filename = build_profile_download_filename(config.client_name, path=path)
     return PlainTextResponse(content, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
@@ -610,6 +727,7 @@ def generate_qr(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
     adapter = get_active_adapter(db)
+    _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
     content = adapter.read_profile_file(path)
     qr_mode = "profile"
     headers: dict[str, str] = {"X-Qr-Content": qr_mode}
@@ -643,6 +761,7 @@ def create_one_time_link(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     if not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+    _require_profile_path_allowed(db, current_user, config, path)
     return _qr_download_service(db, request).create_token(
         file_path=path,
         config_type=config.vpn_type.value,

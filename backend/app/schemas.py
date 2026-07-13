@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models import NodeStatus, SyncStatus, UserRole, VpnType
 
@@ -141,6 +141,7 @@ class UserUpdate(BaseModel):
     password: str | None = Field(default=None, min_length=4)
     telegram_id: str | None = None
     config_quota: int | None = Field(default=None, ge=0, le=1000)
+    visible_vpn_profiles: dict | None = None
 
 
 class UserResponse(UserBase):
@@ -149,10 +150,28 @@ class UserResponse(UserBase):
     totp_enabled: bool = False
     telegram_id: str | None = None
     config_quota: int | None = None
+    visible_vpn_profiles: dict | None = None
     timezone: str = ""
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("visible_vpn_profiles", mode="before")
+    @classmethod
+    def _parse_visible_vpn_profiles(cls, value):
+        if value is None or value == "":
+            return None
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            import json
+
+            try:
+                parsed = json.loads(value)
+            except (ValueError, TypeError):
+                return None
+            return parsed if isinstance(parsed, dict) else None
+        return None
 
 
 class SelfServiceQuotaResponse(BaseModel):
@@ -163,6 +182,25 @@ class SelfServiceQuotaResponse(BaseModel):
     can_create: bool = True
     create_rate_max: int | None = None
     create_rate_window_seconds: int | None = None
+
+
+class VisibleVpnProfilesPolicy(BaseModel):
+    routes: list[str] = Field(default_factory=list)
+    protocols: list[str] = Field(default_factory=list)
+    openvpn_groups: list[str] = Field(default_factory=list)
+
+
+class VisibleVpnProfilesDefaultResponse(BaseModel):
+    policy: VisibleVpnProfilesPolicy
+
+
+class VisibleVpnProfilesDefaultUpdate(BaseModel):
+    policy: VisibleVpnProfilesPolicy
+
+
+class EffectiveVisibleVpnProfilesResponse(BaseModel):
+    policy: VisibleVpnProfilesPolicy
+    inherited: bool = True
 
 
 class PasswordChangeRequest(BaseModel):

@@ -9,7 +9,18 @@ from app.auth import get_current_user, require_admin
 from app.config import get_settings as load_app_config
 from app.database import get_db
 from app.models import AppSetting, User
-from app.schemas import AppSettingsResponse, AppSettingsUpdate, MessageResponse, MonitorSettingsResponse, MonitorSettingsUpdate, RetentionSettingsResponse, RetentionSettingsUpdate
+from app.schemas import (
+    AppSettingsResponse,
+    AppSettingsUpdate,
+    MessageResponse,
+    MonitorSettingsResponse,
+    MonitorSettingsUpdate,
+    RetentionSettingsResponse,
+    RetentionSettingsUpdate,
+    VisibleVpnProfilesDefaultResponse,
+    VisibleVpnProfilesDefaultUpdate,
+    VisibleVpnProfilesPolicy,
+)
 from app.services.admin_notify import admin_notify_service
 from app.services.env_file import EnvFileService
 from app.services.file_editor import EDITABLE_FILES
@@ -17,7 +28,10 @@ from app.services.node_manager import get_active_adapter, get_active_node, get_n
 from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import require_ha_primary_for_config_ops
 from app.services.notify_time import _normalize_timezone_name, get_client_timezone_from_request
-
+from app.services.vpn_profile_visibility import (
+    get_default_visible_vpn_profiles,
+    set_default_visible_vpn_profiles,
+)
 router = APIRouter(prefix="/settings", tags=["settings"])
 settings = load_app_config()
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
@@ -313,3 +327,29 @@ def update_retention_settings(
         resource_metrics_retention_days=updated.resource_metrics_retention_days,
         panel_resource_metrics_retention_days=updated.panel_resource_metrics_retention_days,
     )
+
+
+@router.get("/user-vpn-visibility-default", response_model=VisibleVpnProfilesDefaultResponse)
+def get_user_vpn_visibility_default(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    policy = get_default_visible_vpn_profiles(db)
+    return VisibleVpnProfilesDefaultResponse(policy=VisibleVpnProfilesPolicy(**policy))
+
+
+@router.put("/user-vpn-visibility-default", response_model=VisibleVpnProfilesDefaultResponse)
+def put_user_vpn_visibility_default(
+    payload: VisibleVpnProfilesDefaultUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    policy = set_default_visible_vpn_profiles(db, payload.policy.model_dump())
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="user_visible_vpn_profiles_default",
+        client_timezone=get_client_timezone_from_request(request),
+    )
+    return VisibleVpnProfilesDefaultResponse(policy=VisibleVpnProfilesPolicy(**policy))

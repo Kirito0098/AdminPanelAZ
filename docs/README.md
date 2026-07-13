@@ -72,6 +72,7 @@
 | Тема | Папка |
 |------|-------|
 | NOC Ops (инциденты, SSE, rate, история, действия, фильтры, health, freshness, source badge, HA) | [plans/noc-ops/](plans/noc-ops/) |
+| Видимость VPN-профилей для пользователей (default + per-user, спека и промпты) | [plans/vpn-profile-visibility/](plans/vpn-profile-visibility/) |
 
 ---
 

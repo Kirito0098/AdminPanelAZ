@@ -33,9 +33,11 @@ from app.schemas import (
     AdminNotifyEventItem,
     AdminNotifySettingsResponse,
     AdminNotifySettingsUpdate,
+    EffectiveVisibleVpnProfilesResponse,
     MessageResponse,
     TelegramSettingsResponse,
     TelegramSettingsUpdate,
+    VisibleVpnProfilesPolicy,
 )
 from app.services.admin_notify import (
     PERSONAL_OWNER_NOTIFY_KEY_ORDER,
@@ -63,6 +65,12 @@ from app.services.qr_download import QrDownloadService
 from app.services.security import SecurityService
 from app.services.telegram import send_tg_message
 from app.services.tg_mini_status import build_cidr_status_payload, build_warper_status_payload
+from app.services.vpn_profile_visibility import (
+    EMPTY_CATALOG_MESSAGE,
+    filter_profile_files,
+    profile_file_allowed,
+    resolve_effective_visible_vpn_profiles,
+)
 from app.services.wireguard_status import wireguard_peer_is_online
 
 router = APIRouter(prefix="/tg-mini", tags=["tg-mini"])
@@ -430,8 +438,10 @@ def mini_config_files(
     config = _get_accessible_config(db, config_id, current_user)
     adapter = get_active_adapter(db)
     files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
+    policy = resolve_effective_visible_vpn_profiles(db, current_user)
+    files = filter_profile_files(files, policy)
     if not files:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файлы конфигурации не найдены")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=EMPTY_CATALOG_MESSAGE)
     return {"files": enrich_profile_files(config.client_name, files)}
 
 
@@ -443,6 +453,17 @@ def mini_send_config(
     db: Session = Depends(get_db),
 ):
     config = _get_accessible_config(db, config_id, current_user)
+    adapter = get_active_adapter(db)
+    files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
+    match = next((item for item in files if item.get("path") == payload.path), None)
+    policy = resolve_effective_visible_vpn_profiles(db, current_user)
+    if match is None or not profile_file_allowed(
+        policy,
+        protocol=match.get("protocol", ""),
+        variant=match.get("variant", ""),
+        path=match.get("path", ""),
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=EMPTY_CATALOG_MESSAGE)
     return _send_config_file(
         db,
         config,
@@ -464,7 +485,14 @@ def mini_qr_link(
     config = _get_accessible_config(db, config_id, current_user)
     adapter = get_active_adapter(db)
     files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
-    if not any(item.get("path") == path for item in files):
+    match = next((item for item in files if item.get("path") == path), None)
+    policy = resolve_effective_visible_vpn_profiles(db, current_user)
+    if match is None or not profile_file_allowed(
+        policy,
+        protocol=match.get("protocol", ""),
+        variant=match.get("variant", ""),
+        path=match.get("path", ""),
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
     return _qr_download_service(db, request).create_token(
         file_path=path,
@@ -481,6 +509,7 @@ def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(ge
     adapter = get_active_adapter(db)
     token = _get_bot_token(db)
     is_admin = current_user.role == UserRole.admin
+    policy = resolve_effective_visible_vpn_profiles(db, current_user)
     return {
         "server_ip": adapter.get_server_ip() if is_admin else "",
         "bot_configured": bool(token),
@@ -488,7 +517,20 @@ def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(ge
         "username": current_user.username,
         "role": current_user.role.value,
         "theme": current_user.theme,
+        "visible_vpn_profiles": policy,
     }
+
+
+@router.get("/visible-vpn-profiles", response_model=EffectiveVisibleVpnProfilesResponse)
+def mini_visible_vpn_profiles(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_tg_mini_user),
+):
+    policy = resolve_effective_visible_vpn_profiles(db, current_user)
+    return EffectiveVisibleVpnProfilesResponse(
+        policy=VisibleVpnProfilesPolicy(**policy),
+        inherited=True,
+    )
 
 
 def _mini_notify_settings_response(db: Session, user: User) -> AdminNotifySettingsResponse:

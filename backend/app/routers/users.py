@@ -26,6 +26,7 @@ from app.services.admin_bootstrap import (
     should_scrub_env_after_password_change,
 )
 from app.services.password_policy import validate_password
+from app.services.vpn_profile_visibility import normalize_policy, policy_to_json
 
 router = APIRouter(prefix="/users", tags=["users"])
 settings = get_settings()
@@ -161,6 +162,17 @@ def update_user(
         if not is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять квоту")
         user.config_quota = payload.config_quota
+    if "visible_vpn_profiles" in payload.model_fields_set:
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только администратор может менять видимость VPN-профилей",
+            )
+        if payload.visible_vpn_profiles is None:
+            user.visible_vpn_profiles = None
+        else:
+            normalized = normalize_policy(payload.visible_vpn_profiles, strict=True)
+            user.visible_vpn_profiles = policy_to_json(normalized)
 
     db.commit()
     db.refresh(user)

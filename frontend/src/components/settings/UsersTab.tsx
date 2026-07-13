@@ -11,10 +11,16 @@ import {
   User,
   UserPlus,
   Users,
+  EyeOff,
 } from 'lucide-react'
-import { ApiError, getConfigs, getViewerAccess, setViewerAccess, updateUser } from '@/api/client'
+import { ApiError, getConfigs, getUserVpnVisibilityDefault, getViewerAccess, setUserVpnVisibilityDefault, setViewerAccess, updateUser } from '@/api/client'
 import AppDialog from '@/components/shared/AppDialog'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
+import VpnVisibilityPolicyEditor, {
+  copyVisibleVpnPolicy,
+  FULL_VISIBLE_VPN_POLICY,
+  isVisibleVpnPolicyEmpty,
+} from '@/components/settings/VpnVisibilityPolicyEditor'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
@@ -39,7 +45,7 @@ import {
 import { useNotifications } from '@/context/NotificationContext'
 import { ROLE_HINTS, ROLE_LABELS } from '@/components/settings/settingsLabels'
 import { cn } from '@/lib/utils'
-import type { User as PanelUser, UserRole, VpnConfig } from '@/types'
+import type { User as PanelUser, UserRole, VisibleVpnProfilesPolicy, VpnConfig } from '@/types'
 
 interface UsersTabProps {
   users: PanelUser[]
@@ -228,10 +234,36 @@ export default function UsersTab({
   const [draftConfigQuota, setDraftConfigQuota] = useState('')
   const [savingUser, setSavingUser] = useState(false)
   const [usersList, setUsersList] = useState(users)
+  const [defaultPolicy, setDefaultPolicy] = useState<VisibleVpnProfilesPolicy>(FULL_VISIBLE_VPN_POLICY)
+  const [defaultPolicyLoading, setDefaultPolicyLoading] = useState(true)
+  const [savingDefaultPolicy, setSavingDefaultPolicy] = useState(false)
+  const [draftUseCustomVisibility, setDraftUseCustomVisibility] = useState(false)
+  const [draftVisibilityPolicy, setDraftVisibilityPolicy] =
+    useState<VisibleVpnProfilesPolicy>(FULL_VISIBLE_VPN_POLICY)
 
   useEffect(() => {
     setUsersList(users)
   }, [users])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      setDefaultPolicyLoading(true)
+      try {
+        const data = await getUserVpnVisibilityDefault()
+        if (!cancelled) setDefaultPolicy(copyVisibleVpnPolicy(data.policy))
+      } catch (err) {
+        if (!cancelled) {
+          notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить умолчание видимости профилей')
+        }
+      } finally {
+        if (!cancelled) setDefaultPolicyLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [notifyError])
 
   const viewerUsers = useMemo(() => users.filter((u) => u.role === 'viewer'), [users])
 
@@ -354,6 +386,24 @@ export default function UsersTab({
     setDraftConfigQuota(
       user.config_quota != null && user.config_quota > 0 ? String(user.config_quota) : '',
     )
+    const hasOverride = user.visible_vpn_profiles != null
+    setDraftUseCustomVisibility(hasOverride)
+    setDraftVisibilityPolicy(
+      copyVisibleVpnPolicy(hasOverride ? user.visible_vpn_profiles : defaultPolicy),
+    )
+  }
+
+  const saveDefaultVisibility = async () => {
+    setSavingDefaultPolicy(true)
+    try {
+      const data = await setUserVpnVisibilityDefault(defaultPolicy)
+      setDefaultPolicy(copyVisibleVpnPolicy(data.policy))
+      success('Умолчание видимости профилей сохранено')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения умолчания')
+    } finally {
+      setSavingDefaultPolicy(false)
+    }
   }
 
   const saveUserTelegramId = async () => {
@@ -368,10 +418,13 @@ export default function UsersTab({
           notifyError('Квота: целое число ≥ 0 (0 = без лимита по умолчанию)')
           return
         }
+        payload.visible_vpn_profiles = draftUseCustomVisibility
+          ? draftVisibilityPolicy
+          : null
       }
       const updated = await updateUser(activeEditor.id, payload)
       setUsersList((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
-      success(`Telegram ID для «${updated.username}» сохранён`)
+      success(`Данные «${updated.username}» сохранены`)
       setActiveEditor(null)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения пользователя')
@@ -476,6 +529,48 @@ export default function UsersTab({
                 <p className="text-xs leading-relaxed text-muted-foreground">{ROLE_HINTS[newRole]}</p>
               </div>
             </form>
+          </CardContent>
+        </Card>
+
+        <SectionHeading
+          title="Умолчание видимости профилей"
+          description="Какие варианты VPN видят обычные пользователи без персонального исключения"
+        />
+
+        <Card className="overflow-hidden shadow-sm md:col-span-2">
+          <div className="h-1 bg-gradient-to-r from-emerald-500/70 to-emerald-500/15" />
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <EyeOff size={18} />
+              Каталог профилей по умолчанию
+            </CardTitle>
+            <CardDescription>
+              Маршруты AZ/VPN, группы OpenVPN и протоколы для всех пользователей с ролью «Пользователь»
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {defaultPolicyLoading ? (
+              <Spinner label="Загрузка политики..." className="py-6" />
+            ) : (
+              <>
+                <VpnVisibilityPolicyEditor value={defaultPolicy} onChange={setDefaultPolicy} />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => void saveDefaultVisibility()}
+                    disabled={savingDefaultPolicy}
+                  >
+                    <Save size={16} />
+                    {savingDefaultPolicy ? 'Сохранение...' : 'Сохранить умолчание'}
+                  </Button>
+                  {isVisibleVpnPolicyEmpty(defaultPolicy) && (
+                    <span className="text-xs text-amber-700 dark:text-amber-300">
+                      Пустой каталог — пользователи не увидят профили
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -667,8 +762,10 @@ export default function UsersTab({
           if (!open && !savingUser) setActiveEditor(null)
         }}
         title={activeEditor ? `Пользователь: ${activeEditor.username}` : 'Пользователь'}
-        description="Привязка Telegram и лимит VPN-клиентов"
+        description="Привязка Telegram, квота и видимость VPN-профилей"
         icon={Users}
+        size="lg"
+        className="max-w-2xl"
         footer={
           <>
             <Button variant="outline" onClick={() => setActiveEditor(null)} disabled={savingUser}>
@@ -705,21 +802,71 @@ export default function UsersTab({
             </p>
           </div>
           {activeEditor?.role === 'user' && (
-            <div className="space-y-2 rounded-xl border bg-muted/20 p-4">
-              <Label htmlFor="editConfigQuota">Квота конфигов</Label>
-              <Input
-                id="editConfigQuota"
-                type="number"
-                min={0}
-                max={1000}
-                value={draftConfigQuota}
-                onChange={(e) => setDraftConfigQuota(e.target.value)}
-                placeholder="по умолчанию"
-              />
-              <p className="text-xs text-muted-foreground">
-                Максимум VPN-клиентов, которых может создать этот пользователь. Пусто — общий лимит панели.
-              </p>
-            </div>
+            <>
+              <div className="space-y-2 rounded-xl border bg-muted/20 p-4">
+                <Label htmlFor="editConfigQuota">Квота конфигов</Label>
+                <Input
+                  id="editConfigQuota"
+                  type="number"
+                  min={0}
+                  max={1000}
+                  value={draftConfigQuota}
+                  onChange={(e) => setDraftConfigQuota(e.target.value)}
+                  placeholder="по умолчанию"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Максимум VPN-клиентов, которых может создать этот пользователь. Пусто — общий лимит панели.
+                </p>
+              </div>
+              <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+                <div>
+                  <Label>Видимость VPN-профилей</Label>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Исключение заменяет глобальное умолчание целиком (не дополняет его).
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraftUseCustomVisibility(false)
+                      setDraftVisibilityPolicy(copyVisibleVpnPolicy(defaultPolicy))
+                    }}
+                    className={cn(
+                      'rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
+                      !draftUseCustomVisibility
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'hover:bg-muted/50',
+                    )}
+                  >
+                    Как умолчание
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraftUseCustomVisibility(true)
+                      if (!draftUseCustomVisibility) {
+                        setDraftVisibilityPolicy(copyVisibleVpnPolicy(defaultPolicy))
+                      }
+                    }}
+                    className={cn(
+                      'rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
+                      draftUseCustomVisibility
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'hover:bg-muted/50',
+                    )}
+                  >
+                    Своя политика
+                  </button>
+                </div>
+                {draftUseCustomVisibility && (
+                  <VpnVisibilityPolicyEditor
+                    value={draftVisibilityPolicy}
+                    onChange={setDraftVisibilityPolicy}
+                  />
+                )}
+              </div>
+            </>
           )}
         </div>
       </AppDialog>

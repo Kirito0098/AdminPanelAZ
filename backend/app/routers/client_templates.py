@@ -26,6 +26,7 @@ from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.groups import require_ha_primary_for_client_ops
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.self_service import enforce_user_can_create_config
+from app.services.vpn_profile_visibility import enforce_can_create_vpn_type
 
 router = APIRouter(prefix="/client-templates", tags=["client-templates"])
 
@@ -107,6 +108,7 @@ def apply_client_template(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Шаблон не найден")
 
     enforce_user_can_create_config(db, current_user)
+    enforce_can_create_vpn_type(db, current_user, row.vpn_type)
     require_ha_primary_for_client_ops(db)
     owner_id = payload.owner_id if current_user.role == UserRole.admin and payload.owner_id else current_user.id
     try:
@@ -132,6 +134,14 @@ def apply_client_template(
         client_timezone=get_client_timezone_from_request(request),
     )
 
-    from app.routers.configs import _to_response
+    from app.routers.configs import _to_response, _viewer_visibility_policy
+    from app.services.vpn_profile_visibility import resolve_openvpn_group_for_user
 
-    return _to_response(config, db, include_files=True, adapter=get_active_adapter(db))
+    return _to_response(
+        config,
+        db,
+        include_files=True,
+        adapter=get_active_adapter(db),
+        visibility_policy=_viewer_visibility_policy(db, current_user),
+        openvpn_group=resolve_openvpn_group_for_user(db, current_user),
+    )

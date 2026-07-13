@@ -64,6 +64,7 @@ class User(Base):
     telegram_id: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True, index=True)
     tg_notify_events: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     config_quota: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    visible_vpn_profiles: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     vpn_configs: Mapped[list["VpnConfig"]] = relationship(back_populates="owner")
