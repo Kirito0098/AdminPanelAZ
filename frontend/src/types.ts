@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'user' | 'viewer'
+export type UserRole = 'admin' | 'user'
 export type VpnType = 'openvpn' | 'wireguard'
 export type NodeStatus = 'online' | 'offline' | 'unknown'
 
@@ -141,6 +141,7 @@ export interface User {
   totp_enabled?: boolean
   telegram_id?: string | null
   config_quota?: number | null
+  can_create_configs?: boolean
   visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
   timezone?: string
   created_at: string

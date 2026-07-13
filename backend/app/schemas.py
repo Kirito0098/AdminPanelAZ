@@ -141,6 +141,7 @@ class UserUpdate(BaseModel):
     password: str | None = Field(default=None, min_length=4)
     telegram_id: str | None = None
     config_quota: int | None = Field(default=None, ge=0, le=1000)
+    can_create_configs: bool | None = None
     visible_vpn_profiles: dict | None = None
 
 
@@ -150,6 +151,7 @@ class UserResponse(UserBase):
     totp_enabled: bool = False
     telegram_id: str | None = None
     config_quota: int | None = None
+    can_create_configs: bool = True
     visible_vpn_profiles: dict | None = None
     timezone: str = ""
     created_at: datetime
@@ -172,6 +174,15 @@ class UserResponse(UserBase):
                 return None
             return parsed if isinstance(parsed, dict) else None
         return None
+
+
+class UserConfigAccessUpdate(BaseModel):
+    config_groups: list[str] = []
+
+
+class UserConfigAccessResponse(BaseModel):
+    user_id: int
+    config_groups: list[str] = []
 
 
 class SelfServiceQuotaResponse(BaseModel):

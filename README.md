@@ -170,7 +170,7 @@ sudo bash /tmp/install.sh
 
 ### 🔐 Безопасность и администрирование
 
-- Роли: администратор, пользователь, наблюдатель ([пользователи](docs/nastrojki/polzovateli.md))
+- Роли: администратор, пользователь ([пользователи](docs/nastrojki/polzovateli.md))
 - 2FA, белый список IP, защита от перебора паролей ([безопасность](docs/nastrojki/bezopasnost.md))
 - Вход через Telegram — Legacy Login Widget или OpenID Connect ([Telegram](docs/Telegram.md))
 - Бэкапы вручную и по расписанию, отправка в Telegram ([инструкция](docs/nastrojki/rezervnye-kopii.md))

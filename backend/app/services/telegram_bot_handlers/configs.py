@@ -283,6 +283,8 @@ def _after_send_keyboard(config_id: int, *, filter_key: str = "all") -> dict:
 
 
 async def _get_accessible_config(ctx: BotContext, config_id: int) -> VpnConfig | None:
+    from app.services.config_access import can_view_config
+
     node = get_active_node(ctx.db)
     config = (
         ctx.db.query(VpnConfig)
@@ -291,7 +293,7 @@ async def _get_accessible_config(ctx: BotContext, config_id: int) -> VpnConfig |
     )
     if not config:
         return None
-    if config.owner_id != ctx.user.id and ctx.user.role.value != "admin":
+    if not can_view_config(ctx.user, config, ctx.db):
         return None
     return config
 

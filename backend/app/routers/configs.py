@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
 from app.database import get_db
-from app.models import AppSetting, User, UserRole, ViewerConfigAccess, VpnConfig, VpnType
+from app.models import AppSetting, User, UserRole, VpnConfig, VpnType
 from app.schemas import (
     ConfigTagResponse,
     EffectiveVisibleVpnProfilesResponse,
@@ -23,6 +23,7 @@ from app.schemas import (
     VpnConfigUpdate,
 )
 from app.services.self_service import build_quota_payload, enforce_user_can_create_config
+from app.services.config_access import can_mutate_config, can_view_config, list_accessible_configs
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
 from app.services.config_csv_ops import (
@@ -141,17 +142,16 @@ def _ha_info_for_config(db: Session, config: VpnConfig) -> VpnConfigHaInfo | Non
 
 
 def _can_access_config(user: User, config: VpnConfig, db: Session | None = None) -> bool:
-    if user.role == UserRole.admin:
-        return True
-    if user.role == UserRole.viewer and db is not None:
-        grants = db.query(ViewerConfigAccess).filter_by(user_id=user.id).all()
-        if grants:
-            groups = {g.config_group.lower() for g in grants}
-            return config.client_name.lower() in groups or any(
-                config.client_name.lower().startswith(g) for g in groups
-            )
-        return False
-    return config.owner_id == user.id
+    """View access: owned ∪ whitelist (admin unrestricted)."""
+    if db is None:
+        if user.role == UserRole.admin:
+            return True
+        return config.owner_id == user.id
+    return can_view_config(user, config, db)
+
+
+def _can_mutate_config(user: User, config: VpnConfig) -> bool:
+    return can_mutate_config(user, config)
 
 
 def _fill_missing_cert_expire_days(configs: list[VpnConfig], db: Session, adapter: NodeAdapter | None = None) -> None:
@@ -213,15 +213,7 @@ def _to_response(
 
 def _list_accessible_configs(db: Session, current_user: User) -> list[VpnConfig]:
     query = _scoped_config_query(db)
-    if current_user.role == UserRole.viewer:
-        grants = db.query(ViewerConfigAccess).filter_by(user_id=current_user.id).all()
-        if not grants:
-            return []
-        configs = query.order_by(VpnConfig.created_at.desc()).all()
-        return [c for c in configs if _can_access_config(current_user, c, db)]
-    if current_user.role != UserRole.admin:
-        query = query.filter(VpnConfig.owner_id == current_user.id)
-    return query.order_by(VpnConfig.created_at.desc()).all()
+    return list_accessible_configs(db, current_user, query)
 
 
 def _fetch_profile_files_map(
@@ -595,7 +587,7 @@ def update_config(
     config = _get_config_for_active_node(db, config_id)
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config, db):
+    if not _can_mutate_config(current_user, config):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
     require_ha_primary_for_client_ops(db)
@@ -659,7 +651,7 @@ def delete_config(
     config = _get_config_for_active_node(db, config_id)
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config, db):
+    if not _can_mutate_config(current_user, config):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
     require_ha_primary_for_client_ops(db)

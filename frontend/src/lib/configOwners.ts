@@ -3,7 +3,6 @@ import type { User, UserRole } from '@/types'
 const roleLabels: Record<UserRole, string> = {
   admin: 'Администратор',
   user: 'Пользователь',
-  viewer: 'Просмотр',
 }
 
 export function configOwnerCandidates(users: User[]): User[] {

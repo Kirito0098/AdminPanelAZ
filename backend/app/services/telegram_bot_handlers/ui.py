@@ -14,7 +14,6 @@ INVISIBLE_TEXT = "\u200b"
 ROLE_LABELS: dict[str, str] = {
     "admin": "Администратор",
     "user": "Пользователь",
-    "viewer": "Наблюдатель",
 }
 
 

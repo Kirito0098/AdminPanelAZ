@@ -43,7 +43,17 @@
 
 ### ✨ Added
 
+- **Пользователь: доп. доступ к клиентам** — белый список чужих VPN-клиентов (просмотр/скачивание без владения), API `GET/PUT /users/{id}/config-access`, паритет web / Mini App / Telegram / traffic.
+- **Пользователь: флаг «Может создавать конфигурации»** (`can_create_configs`) — отдельный переключатель, не путать с квотой `0` (unlimited).
+
 ### 🔄 Changed
+
+- Роль **Только просмотр** (`viewer`) снята: существующие записи мигрируют в `user` с `can_create_configs=false`, grants сохраняются в `user_config_access`. После обновления — повторный вход.
+- Mutate (delete/patch) по whitelist запрещён (раньше viewer API мог мутировать при grant).
+
+### 🗑️ Removed
+
+- Роль `viewer` / «Наблюдатель» из enum, UI и `/system/viewer-access`.
 
 ### 🐛 Fixed
 

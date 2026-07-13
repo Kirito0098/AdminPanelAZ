@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import AppSetting, TrafficSessionState, User, UserRole
+from app.models import AppSetting, TrafficSessionState, User
 from app.schemas import (
     MessageResponse,
     TrafficClientRow,
@@ -21,7 +21,7 @@ from app.schemas import (
 )
 from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node
 from app.models import Node
-from app.services.self_service import get_owned_client_names
+from app.services.config_access import accessible_client_names
 from app.services.traffic.chart import fetch_traffic_chart
 from app.services.traffic.collector import TrafficCollectorService
 from app.services.traffic.ha_aggregate import resolve_traffic_scope
@@ -121,9 +121,7 @@ def _active_names_by_node(db: Session, node_ids: list[int], *, live: bool) -> di
 
 
 def _scoped_client_names(db: Session, user: User, node_id: int) -> set[str] | None:
-    if user.role == UserRole.admin:
-        return None
-    return get_owned_client_names(db, user, node_id=node_id)
+    return accessible_client_names(db, user, node_id=node_id)
 
 
 def _filter_client_names(names: set[str], allowed: set[str] | None) -> set[str]:

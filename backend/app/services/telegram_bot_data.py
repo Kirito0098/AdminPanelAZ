@@ -14,14 +14,14 @@ from app.services.wireguard_status import wireguard_peer_is_online
 
 
 def build_dashboard_summary(db: Session, user: User) -> dict:
+    from app.services.config_access import list_accessible_configs
+
     adapter = get_active_adapter(db)
     ovpn = adapter.parse_openvpn_status()
     wg = adapter.parse_wireguard_status()
     node = get_active_node(db)
     query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id)
-    if user.role.value != "admin":
-        query = query.filter(VpnConfig.owner_id == user.id)
-    total_configs = query.count()
+    total_configs = len(list_accessible_configs(db, user, query))
     return {
         "total_configs": total_configs,
         "connected_openvpn": len(ovpn),
@@ -92,11 +92,11 @@ def build_server_status_block(db: Session) -> str | None:
 
 
 def list_user_configs(db: Session, user: User) -> list[VpnConfig]:
+    from app.services.config_access import list_accessible_configs
+
     node = get_active_node(db)
     query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id)
-    if user.role.value != "admin":
-        query = query.filter(VpnConfig.owner_id == user.id)
-    return query.order_by(VpnConfig.client_name).all()
+    return sorted(list_accessible_configs(db, user, query), key=lambda c: c.client_name)
 
 
 def find_config_by_name(db: Session, user: User, name: str) -> VpnConfig | None:

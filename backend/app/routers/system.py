@@ -4,7 +4,6 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
@@ -26,11 +25,6 @@ def _repo_root() -> Path:
     from app.services.node_update import resolve_repo_root
 
     return resolve_repo_root(PROJECT_ROOT) or PROJECT_ROOT
-
-
-class ViewerAccessUpdate(BaseModel):
-    user_id: int
-    config_groups: list[str] = []
 
 
 def _git_update_status(repo_root: Path) -> dict:
@@ -171,20 +165,3 @@ def restart_panel(db: Session = Depends(get_db), user: User = Depends(require_ad
         details="scheduled",
     )
     return MessageResponse(message="Перезапуск панели запланирован через несколько секунд")
-
-
-@router.get("/viewer-access/{user_id}")
-def get_viewer_access(user_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    from app.models import ViewerConfigAccess
-    rows = db.query(ViewerConfigAccess).filter_by(user_id=user_id).all()
-    return {"user_id": user_id, "config_groups": [r.config_group for r in rows]}
-
-
-@router.put("/viewer-access", response_model=MessageResponse)
-def set_viewer_access(payload: ViewerAccessUpdate, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    from app.models import ViewerConfigAccess
-    db.query(ViewerConfigAccess).filter_by(user_id=payload.user_id).delete()
-    for group in payload.config_groups:
-        db.add(ViewerConfigAccess(user_id=payload.user_id, config_group=group.strip()))
-    db.commit()
-    return MessageResponse(message="Доступ viewer обновлён")

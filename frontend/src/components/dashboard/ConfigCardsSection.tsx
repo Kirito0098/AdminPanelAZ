@@ -67,6 +67,7 @@ interface ConfigCardsSectionProps {
   configs: VpnConfig[]
   policies: Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
   userRole: UserRole
+  currentUserId?: number
   ownerCandidates?: User[]
   connectionMap?: ClientConnectionMap | null
   filesLoading?: boolean
@@ -100,6 +101,7 @@ export default function ConfigCardsSection({
   configs,
   policies,
   userRole,
+  currentUserId,
   ownerCandidates = [],
   connectionMap = null,
   filesLoading = false,
@@ -723,7 +725,8 @@ export default function ConfigCardsSection({
                         onBlock={isAdmin && !haReplicaReadonly ? () => openConfirm('block', config) : undefined}
                         onUnblock={isAdmin && !haReplicaReadonly ? () => openConfirm('unblock', config) : undefined}
                         onDelete={
-                          !haReplicaReadonly && (isAdmin || userRole === 'user')
+                          !haReplicaReadonly &&
+                          (isAdmin || (userRole === 'user' && currentUserId != null && config.owner_id === currentUserId))
                             ? () => openConfirm('delete', config)
                             : undefined
                         }
@@ -746,6 +749,7 @@ export default function ConfigCardsSection({
         tab={selectedTab}
         policy={selectedConfig ? getPolicyForConfig(selectedConfig, policies) : undefined}
         userRole={userRole}
+        currentUserId={currentUserId}
         ownerCandidates={ownerCandidates}
         allTags={allTags}
         open={!!selectedConfig}

@@ -29,7 +29,6 @@ SETTINGS_CHANGE_LABELS: dict[str, str] = {
 _ROLE_LABELS_RU = {
     "admin": "администратор",
     "user": "пользователь",
-    "viewer": "наблюдатель",
 }
 
 

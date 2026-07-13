@@ -79,7 +79,7 @@ def build_quota_payload(db: Session, user: User) -> dict:
         "limit": limit,
         "remaining": remaining,
         "unlimited": limit is None,
-        "can_create": user.role != UserRole.viewer and (limit is None or used < limit),
+        "can_create": bool(getattr(user, "can_create_configs", True)) and (limit is None or used < limit),
         "create_rate_max": rate_max if user.role == UserRole.user else None,
         "create_rate_window_seconds": rate_window if user.role == UserRole.user else None,
     }
@@ -114,10 +114,10 @@ user_config_create_rate_limit_service = UserConfigCreateRateLimitService()
 
 
 def enforce_user_can_create_config(db: Session, user: User) -> None:
-    if user.role == UserRole.viewer:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     if user.role == UserRole.admin:
         return
+    if not bool(getattr(user, "can_create_configs", True)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Создание конфигураций отключено администратором")
     limit = get_user_config_quota_limit(db, user)
     if limit is not None:
         used = count_user_configs(db, user.id)

@@ -816,6 +816,7 @@ def run_db_migrations() -> None:
             ("telegram_id", "VARCHAR(32)"),
             ("tg_notify_events", "TEXT"),
             ("config_quota", "INTEGER"),
+            ("can_create_configs", "INTEGER DEFAULT 1"),
             ("visible_vpn_profiles", "TEXT"),
             ("timezone", "VARCHAR(64) DEFAULT ''"),
         ],
@@ -831,9 +832,44 @@ def run_db_migrations() -> None:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}"))
                 logger.info("DB migration: added %s.%s", table, name)
 
+    _migrate_user_config_access_table()
+    _migrate_viewer_role_to_user()
     _migrate_user_telegram_backfill()
     _migrate_nodes_mtls_enabled()
     _seed_client_templates_for_nodes()
+
+
+def _migrate_user_config_access_table() -> None:
+    """Rename viewer_config_access → user_config_access (preserve grants)."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "user_config_access" in tables:
+        return
+    if "viewer_config_access" not in tables:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE viewer_config_access RENAME TO user_config_access"))
+        logger.info("DB migration: renamed viewer_config_access → user_config_access")
+
+
+def _migrate_viewer_role_to_user() -> None:
+    """Convert legacy role=viewer rows to user with create disabled."""
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("users")}
+    with engine.begin() as conn:
+        if "can_create_configs" in cols:
+            result = conn.execute(
+                text(
+                    "UPDATE users SET role = 'user', can_create_configs = 0 "
+                    "WHERE role = 'viewer'"
+                )
+            )
+        else:
+            result = conn.execute(text("UPDATE users SET role = 'user' WHERE role = 'viewer'"))
+        if result.rowcount:
+            logger.info("DB migration: converted %s viewer user(s) to user", result.rowcount)
 
 
 def _migrate_nodes_mtls_enabled() -> None:

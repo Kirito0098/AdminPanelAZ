@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
-  Eye,
   MoreHorizontal,
   Pencil,
   Save,
@@ -13,7 +12,7 @@ import {
   Users,
   EyeOff,
 } from 'lucide-react'
-import { ApiError, getConfigs, getUserVpnVisibilityDefault, getViewerAccess, setUserVpnVisibilityDefault, setViewerAccess, updateUser } from '@/api/client'
+import { ApiError, getConfigs, getUserConfigAccess, getUserVpnVisibilityDefault, setUserConfigAccess, setUserVpnVisibilityDefault, updateUser } from '@/api/client'
 import AppDialog from '@/components/shared/AppDialog'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import VpnVisibilityPolicyEditor, {
@@ -25,6 +24,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   DropdownMenu,
@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableBody,
@@ -62,7 +63,6 @@ interface UsersTabProps {
 
 const ROLE_OPTIONS: { id: UserRole; icon: LucideIcon }[] = [
   { id: 'user', icon: User },
-  { id: 'viewer', icon: Eye },
   { id: 'admin', icon: Shield },
 ]
 
@@ -109,7 +109,7 @@ function MetricPill({
 function RoleBadge({ role }: { role: UserRole }) {
   return (
     <Badge
-      variant={role === 'admin' ? 'default' : role === 'viewer' ? 'outline' : 'secondary'}
+      variant={role === 'admin' ? 'default' : 'secondary'}
       className="shrink-0"
     >
       {ROLE_LABELS[role] ?? role}
@@ -134,6 +134,9 @@ function UserMetaLine({ user }: { user: PanelUser }) {
         <span className="font-mono">TG {user.telegram_id}</span>
       ) : (
         <span>Telegram не привязан</span>
+      )}
+      {user.role === 'user' && user.can_create_configs === false && (
+        <span>Создание выключено</span>
       )}
       {user.role === 'user' && user.config_quota != null && user.config_quota > 0 && (
         <span>Квота: {user.config_quota}</span>
@@ -223,15 +226,14 @@ export default function UsersTab({
   const { success, error: notifyError } = useNotifications()
   const [configs, setConfigs] = useState<VpnConfig[]>([])
   const [configsLoading, setConfigsLoading] = useState(true)
-  const [accessMap, setAccessMap] = useState<Record<number, string[]>>({})
-  const [activeViewer, setActiveViewer] = useState<PanelUser | null>(null)
   const [draftGroups, setDraftGroups] = useState<string[]>([])
   const [accessLoading, setAccessLoading] = useState(false)
-  const [savingAccess, setSavingAccess] = useState(false)
   const [search, setSearch] = useState('')
+  const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [activeEditor, setActiveEditor] = useState<PanelUser | null>(null)
   const [draftTelegramId, setDraftTelegramId] = useState('')
   const [draftConfigQuota, setDraftConfigQuota] = useState('')
+  const [draftCanCreate, setDraftCanCreate] = useState(true)
   const [savingUser, setSavingUser] = useState(false)
   const [usersList, setUsersList] = useState(users)
   const [defaultPolicy, setDefaultPolicy] = useState<VisibleVpnProfilesPolicy>(FULL_VISIBLE_VPN_POLICY)
@@ -265,31 +267,71 @@ export default function UsersTab({
     }
   }, [notifyError])
 
-  const viewerUsers = useMemo(() => users.filter((u) => u.role === 'viewer'), [users])
-
   const stats = useMemo(
     () => ({
       total: usersList.length,
       admins: usersList.filter((u) => u.role === 'admin').length,
-      viewers: usersList.filter((u) => u.role === 'viewer').length,
+      regular: usersList.filter((u) => u.role === 'user').length,
       active: usersList.filter((u) => u.is_active).length,
     }),
     [usersList],
   )
 
-  const clientGroups = useMemo(() => {
-    const names = new Set<string>()
+  const clientEntries = useMemo(() => {
+    const byName = new Map<
+      string,
+      { name: string; ownerIds: Set<number>; owners: Set<string>; types: Set<string> }
+    >()
     for (const cfg of configs) {
-      names.add(cfg.client_name)
+      const name = cfg.client_name
+      let entry = byName.get(name)
+      if (!entry) {
+        entry = { name, ownerIds: new Set(), owners: new Set(), types: new Set() }
+        byName.set(name, entry)
+      }
+      if (cfg.owner_id != null) entry.ownerIds.add(cfg.owner_id)
+      const ownerLabel = (cfg.owner_username || '').trim()
+      if (ownerLabel) entry.owners.add(ownerLabel)
+      entry.types.add(cfg.vpn_type)
     }
-    return Array.from(names).sort((a, b) => a.localeCompare(b, 'ru'))
+    return Array.from(byName.values())
+      .map((entry) => ({
+        name: entry.name,
+        ownerIds: Array.from(entry.ownerIds),
+        ownerLabel: Array.from(entry.owners).sort((a, b) => a.localeCompare(b, 'ru')).join(', ') || '—',
+        types: Array.from(entry.types),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+  }, [configs])
+
+  const ownerOptions = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const cfg of configs) {
+      if (cfg.owner_id == null) continue
+      const label = (cfg.owner_username || '').trim() || `ID ${cfg.owner_id}`
+      if (!map.has(cfg.owner_id)) map.set(cfg.owner_id, label)
+    }
+    return Array.from(map.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'ru'))
   }, [configs])
 
   const filteredGroups = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return clientGroups
-    return clientGroups.filter((name) => name.toLowerCase().includes(q))
-  }, [clientGroups, search])
+    return clientEntries.filter((entry) => {
+      if (ownerFilter === 'none') {
+        if (entry.ownerIds.length > 0) return false
+      } else if (ownerFilter !== 'all') {
+        const ownerId = Number.parseInt(ownerFilter, 10)
+        if (!Number.isFinite(ownerId) || !entry.ownerIds.includes(ownerId)) return false
+      }
+      if (!q) return true
+      return (
+        entry.name.toLowerCase().includes(q) ||
+        entry.ownerLabel.toLowerCase().includes(q)
+      )
+    })
+  }, [clientEntries, search, ownerFilter])
 
   useEffect(() => {
     let cancelled = false
@@ -312,47 +354,31 @@ export default function UsersTab({
     }
   }, [notifyError])
 
-  useEffect(() => {
-    if (viewerUsers.length === 0) {
-      setAccessMap({})
-      return
-    }
-    let cancelled = false
-    const loadAccess = async () => {
-      try {
-        const entries = await Promise.all(
-          viewerUsers.map(async (u) => {
-            const data = await getViewerAccess(u.id)
-            return [u.id, data.config_groups] as const
-          }),
-        )
-        if (!cancelled) {
-          setAccessMap(Object.fromEntries(entries))
-        }
-      } catch (err) {
-        if (!cancelled) {
-          notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить доступ viewer')
-        }
-      }
-    }
-    void loadAccess()
-    return () => {
-      cancelled = true
-    }
-  }, [viewerUsers, notifyError])
-
-  const openViewerDialog = async (user: PanelUser) => {
-    setActiveViewer(user)
+  const openUserEditor = async (user: PanelUser) => {
+    setActiveEditor(user)
+    setDraftTelegramId(user.telegram_id || '')
+    setDraftConfigQuota(
+      user.config_quota != null && user.config_quota > 0 ? String(user.config_quota) : '',
+    )
+    setDraftCanCreate(user.can_create_configs !== false)
+    const hasOverride = user.visible_vpn_profiles != null
+    setDraftUseCustomVisibility(hasOverride)
+    setDraftVisibilityPolicy(
+      copyVisibleVpnPolicy(hasOverride ? user.visible_vpn_profiles : defaultPolicy),
+    )
+    setDraftGroups([])
     setSearch('')
-    setAccessLoading(true)
-    try {
-      const data = await getViewerAccess(user.id)
-      setDraftGroups(data.config_groups)
-    } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить доступ')
-      setActiveViewer(null)
-    } finally {
-      setAccessLoading(false)
+    setOwnerFilter('all')
+    if (user.role === 'user') {
+      setAccessLoading(true)
+      try {
+        const data = await getUserConfigAccess(user.id)
+        setDraftGroups(data.config_groups)
+      } catch (err) {
+        notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить доп. доступ')
+      } finally {
+        setAccessLoading(false)
+      }
     }
   }
 
@@ -361,36 +387,6 @@ export default function UsersTab({
       if (checked) return prev.includes(name) ? prev : [...prev, name]
       return prev.filter((g) => g !== name)
     })
-  }
-
-  const saveViewerAccess = async () => {
-    if (!activeViewer) return
-    setSavingAccess(true)
-    try {
-      await setViewerAccess(activeViewer.id, draftGroups)
-      setAccessMap((prev) => ({ ...prev, [activeViewer.id]: draftGroups }))
-      success(`Доступ для «${activeViewer.username}» сохранён`)
-      setActiveViewer(null)
-    } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения доступа')
-    } finally {
-      setSavingAccess(false)
-    }
-  }
-
-  const countGranted = (userId: number) => accessMap[userId]?.length ?? 0
-
-  const openUserEditor = (user: PanelUser) => {
-    setActiveEditor(user)
-    setDraftTelegramId(user.telegram_id || '')
-    setDraftConfigQuota(
-      user.config_quota != null && user.config_quota > 0 ? String(user.config_quota) : '',
-    )
-    const hasOverride = user.visible_vpn_profiles != null
-    setDraftUseCustomVisibility(hasOverride)
-    setDraftVisibilityPolicy(
-      copyVisibleVpnPolicy(hasOverride ? user.visible_vpn_profiles : defaultPolicy),
-    )
   }
 
   const saveDefaultVisibility = async () => {
@@ -412,6 +408,7 @@ export default function UsersTab({
     try {
       const payload: Record<string, unknown> = { telegram_id: draftTelegramId.trim() }
       if (activeEditor.role === 'user') {
+        payload.can_create_configs = draftCanCreate
         const raw = draftConfigQuota.trim()
         payload.config_quota = raw === '' ? 0 : Number.parseInt(raw, 10)
         if (raw !== '' && (!Number.isFinite(payload.config_quota as number) || (payload.config_quota as number) < 0)) {
@@ -423,6 +420,9 @@ export default function UsersTab({
           : null
       }
       const updated = await updateUser(activeEditor.id, payload)
+      if (activeEditor.role === 'user') {
+        await setUserConfigAccess(activeEditor.id, draftGroups)
+      }
       setUsersList((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       success(`Данные «${updated.username}» сохранены`)
       setActiveEditor(null)
@@ -447,10 +447,10 @@ export default function UsersTab({
               tone={stats.admins > 0 ? 'success' : 'muted'}
             />
             <MetricPill
-              icon={Eye}
-              label="Только просмотр"
-              value={String(stats.viewers)}
-              tone={stats.viewers > 0 ? 'default' : 'muted'}
+              icon={User}
+              label="Пользователи"
+              value={String(stats.regular)}
+              tone={stats.regular > 0 ? 'default' : 'muted'}
             />
             <MetricPill
               icon={User}
@@ -614,7 +614,7 @@ export default function UsersTab({
                     key={u.id}
                     user={u}
                     currentUserId={currentUserId}
-                    onEdit={() => openUserEditor(u)}
+                    onEdit={() => void openUserEditor(u)}
                     onDelete={() => onDeleteUser(u.id, u.username)}
                   />
                 ))}
@@ -652,7 +652,7 @@ export default function UsersTab({
                                 variant="outline"
                                 size="sm"
                                 className="gap-1.5"
-                                onClick={() => openUserEditor(u)}
+                                onClick={() => void openUserEditor(u)}
                               >
                                 <Pencil size={14} />
                                 Изменить
@@ -681,79 +681,6 @@ export default function UsersTab({
             )}
           </CardContent>
         </Card>
-
-        {(viewerUsers.length > 0 || !configsLoading) && (
-          <SectionHeading
-            title="Доступ к конфигам"
-            description="Ограничение видимости VPN-клиентов для роли «Только просмотр»"
-          />
-        )}
-
-        <Card className="overflow-hidden shadow-sm md:col-span-2">
-          <div className="h-1 bg-gradient-to-r from-amber-500/70 to-amber-500/15" />
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Eye size={18} />
-              Права просмотра
-            </CardTitle>
-            <CardDescription>
-              Укажите, какие VPN-клиенты может видеть пользователь с ролью «Только просмотр»
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {configsLoading ? (
-              <Spinner label="Загрузка конфигов..." className="py-8" />
-            ) : viewerUsers.length === 0 ? (
-              <EmptyState
-                icon={Eye}
-                title="Нет пользователей с режимом «Только просмотр»"
-                description="Создайте пользователя с этой ролью, чтобы ограничить доступ только к выбранным конфигам"
-                className="py-8"
-              />
-            ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {viewerUsers.map((vu) => {
-                  const granted = countGranted(vu.id)
-                  const total = clientGroups.length
-                  const pct = total > 0 ? Math.round((granted / total) * 100) : 0
-                  return (
-                    <button
-                      key={vu.id}
-                      type="button"
-                      onClick={() => void openViewerDialog(vu)}
-                      className="group flex flex-col gap-3 rounded-xl border bg-card/50 p-4 text-left transition-all hover:border-primary/30 hover:bg-muted/30 hover:shadow-sm"
-                    >
-                      <div className="flex w-full items-center gap-3">
-                        <UserAvatar username={vu.username} />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium group-hover:text-primary">{vu.username}</p>
-                          <p className="text-xs text-muted-foreground">{ROLE_LABELS.viewer}</p>
-                        </div>
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-muted-foreground">Выдано групп</span>
-                          <span className="font-medium">
-                            {granted} / {total}
-                          </span>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className={cn(
-                              'h-full rounded-full transition-all',
-                              pct === 100 ? 'bg-primary' : pct > 0 ? 'bg-primary/70' : 'bg-muted-foreground/20',
-                            )}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
       </div>
 
       <AppDialog
@@ -762,10 +689,10 @@ export default function UsersTab({
           if (!open && !savingUser) setActiveEditor(null)
         }}
         title={activeEditor ? `Пользователь: ${activeEditor.username}` : 'Пользователь'}
-        description="Привязка Telegram, квота и видимость VPN-профилей"
+        description="Права доступа, квота и видимость VPN-профилей"
         icon={Users}
-        size="lg"
-        className="max-w-2xl"
+        size="xl"
+        bodyClassName="px-5 py-4"
         footer={
           <>
             <Button variant="outline" onClick={() => setActiveEditor(null)} disabled={savingUser}>
@@ -780,180 +707,215 @@ export default function UsersTab({
       >
         <div className="space-y-4">
           {activeEditor && (
-            <div className="flex items-center gap-3 rounded-xl border bg-muted/20 p-3">
+            <div className="flex items-center gap-3 rounded-xl border bg-muted/20 px-3 py-2.5">
               <UserAvatar username={activeEditor.username} />
-              <div>
-                <p className="font-medium">{activeEditor.username}</p>
-                <RoleBadge role={activeEditor.role} />
+              <div className="min-w-0">
+                <p className="font-medium leading-tight">{activeEditor.username}</p>
+                <div className="mt-1">
+                  <RoleBadge role={activeEditor.role} />
+                </div>
               </div>
             </div>
           )}
-          <div className="space-y-2 rounded-xl border bg-muted/20 p-4">
-            <Label htmlFor="editTelegramId">Telegram ID</Label>
-            <Input
-              id="editTelegramId"
-              value={draftTelegramId}
-              onChange={(e) => setDraftTelegramId(e.target.value)}
-              placeholder="123456789"
-              className="font-mono"
-            />
-            <p className="text-xs text-muted-foreground">
-              Оставьте пустым, чтобы снять привязку. Один ID нельзя назначить двум пользователям.
-            </p>
-          </div>
-          {activeEditor?.role === 'user' && (
-            <>
-              <div className="space-y-2 rounded-xl border bg-muted/20 p-4">
-                <Label htmlFor="editConfigQuota">Квота конфигов</Label>
-                <Input
-                  id="editConfigQuota"
-                  type="number"
-                  min={0}
-                  max={1000}
-                  value={draftConfigQuota}
-                  onChange={(e) => setDraftConfigQuota(e.target.value)}
-                  placeholder="по умолчанию"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Максимум VPN-клиентов, которых может создать этот пользователь. Пусто — общий лимит панели.
-                </p>
-              </div>
-              <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
-                <div>
-                  <Label>Видимость VPN-профилей</Label>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Исключение заменяет глобальное умолчание целиком (не дополняет его).
+
+          {activeEditor?.role === 'user' ? (
+            <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+              <div className="space-y-3">
+                <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">
+                  <Label htmlFor="editTelegramId">Telegram ID</Label>
+                  <Input
+                    id="editTelegramId"
+                    value={draftTelegramId}
+                    onChange={(e) => setDraftTelegramId(e.target.value)}
+                    placeholder="123456789"
+                    className="font-mono"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Пусто — снять привязку. Один ID нельзя назначить двум пользователям.
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDraftUseCustomVisibility(false)
-                      setDraftVisibilityPolicy(copyVisibleVpnPolicy(defaultPolicy))
-                    }}
-                    className={cn(
-                      'rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
-                      !draftUseCustomVisibility
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'hover:bg-muted/50',
-                    )}
-                  >
-                    Как умолчание
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDraftUseCustomVisibility(true)
-                      if (!draftUseCustomVisibility) {
-                        setDraftVisibilityPolicy(copyVisibleVpnPolicy(defaultPolicy))
-                      }
-                    }}
-                    className={cn(
-                      'rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
-                      draftUseCustomVisibility
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'hover:bg-muted/50',
-                    )}
-                  >
-                    Своя политика
-                  </button>
+                <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/20 p-3">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="editCanCreate">Может создавать конфигурации</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Выкл. — только просмотр и скачивание (свои и по белому списку).
+                    </p>
+                  </div>
+                  <Switch id="editCanCreate" checked={draftCanCreate} onCheckedChange={setDraftCanCreate} />
                 </div>
-                {draftUseCustomVisibility && (
-                  <VpnVisibilityPolicyEditor
-                    value={draftVisibilityPolicy}
-                    onChange={setDraftVisibilityPolicy}
+                <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">
+                  <Label htmlFor="editConfigQuota">Квота конфигов</Label>
+                  <Input
+                    id="editConfigQuota"
+                    type="number"
+                    min={0}
+                    max={1000}
+                    value={draftConfigQuota}
+                    onChange={(e) => setDraftConfigQuota(e.target.value)}
+                    placeholder="по умолчанию"
+                    disabled={!draftCanCreate}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    {draftCanCreate
+                      ? 'Максимум создаваемых VPN-клиентов. Пусто — общий лимит панели.'
+                      : 'Квота не применяется, пока создание выключено.'}
+                  </p>
+                </div>
+                <div className="space-y-2 rounded-xl border bg-muted/20 p-3">
+                  <div>
+                    <Label>Видимость VPN-профилей</Label>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Исключение полностью заменяет глобальное умолчание.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraftUseCustomVisibility(false)
+                        setDraftVisibilityPolicy(copyVisibleVpnPolicy(defaultPolicy))
+                      }}
+                      className={cn(
+                        'rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
+                        !draftUseCustomVisibility
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'hover:bg-muted/50',
+                      )}
+                    >
+                      Как умолчание
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraftUseCustomVisibility(true)
+                        if (!draftUseCustomVisibility) {
+                          setDraftVisibilityPolicy(copyVisibleVpnPolicy(defaultPolicy))
+                        }
+                      }}
+                      className={cn(
+                        'rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
+                        draftUseCustomVisibility
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'hover:bg-muted/50',
+                      )}
+                    >
+                      Своя политика
+                    </button>
+                  </div>
+                  {draftUseCustomVisibility && (
+                    <VpnVisibilityPolicyEditor
+                      value={draftVisibilityPolicy}
+                      onChange={setDraftVisibilityPolicy}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="flex min-h-[22rem] flex-col space-y-2 rounded-xl border bg-muted/20 p-3 lg:min-h-[28rem]">
+                <div>
+                  <Label>Доп. доступ к клиентам</Label>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Чужие VPN-клиенты для просмотра и скачивания без смены владельца. Удалять их нельзя.
+                  </p>
+                </div>
+                {accessLoading || configsLoading ? (
+                  <Spinner label="Загрузка клиентов..." className="flex-1 py-8" />
+                ) : (
+                  <>
+                    <div className="grid shrink-0 gap-2 sm:grid-cols-2">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                          placeholder="Поиск по имени или владельцу..."
+                          className="pl-9"
+                        />
+                      </div>
+                      <select
+                        value={ownerFilter}
+                        onChange={(e) => setOwnerFilter(e.target.value)}
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                        aria-label="Фильтр по владельцу"
+                      >
+                        <option value="all">Все владельцы</option>
+                        <option value="none">Без владельца</option>
+                        {ownerOptions.map((opt) => (
+                          <option key={opt.id} value={String(opt.id)}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {clientEntries.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Конфиги не найдены на активном узле</p>
+                    ) : filteredGroups.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Ничего не найдено</p>
+                    ) : (
+                      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto rounded-xl border bg-card/40 p-1.5">
+                        {filteredGroups.map((entry) => {
+                          const checked = draftGroups.includes(entry.name)
+                          return (
+                            <label
+                              key={entry.name}
+                              className={cn(
+                                'flex cursor-pointer items-center gap-3 rounded-lg border px-2.5 py-1.5 transition-colors',
+                                checked
+                                  ? 'border-primary/30 bg-primary/5'
+                                  : 'border-transparent hover:bg-muted/50',
+                              )}
+                            >
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(next) => toggleGroup(entry.name, next)}
+                                aria-label={`Доступ к ${entry.name}`}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-sm font-medium leading-tight">{entry.name}</span>
+                                <span className="block truncate text-[11px] text-muted-foreground">
+                                  {entry.ownerLabel}
+                                </span>
+                              </span>
+                              <span className="flex shrink-0 gap-1">
+                                {entry.types.map((t) => (
+                                  <Badge key={t} variant="outline" className="text-[10px]">
+                                    {t}
+                                  </Badge>
+                                ))}
+                              </span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    )}
+                    <p className="shrink-0 text-xs text-muted-foreground">
+                      Показано: {filteredGroups.length}
+                      {filteredGroups.length !== clientEntries.length ? ` из ${clientEntries.length}` : ''}
+                      {' · '}
+                      Выбрано: {draftGroups.length}
+                    </p>
+                  </>
                 )}
               </div>
-            </>
+            </div>
+          ) : (
+            <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">
+              <Label htmlFor="editTelegramId">Telegram ID</Label>
+              <Input
+                id="editTelegramId"
+                value={draftTelegramId}
+                onChange={(e) => setDraftTelegramId(e.target.value)}
+                placeholder="123456789"
+                className="font-mono"
+              />
+              <p className="text-xs text-muted-foreground">
+                Пусто — снять привязку. Один ID нельзя назначить двум пользователям.
+              </p>
+            </div>
           )}
         </div>
       </AppDialog>
 
-      <AppDialog
-        open={activeViewer !== null}
-        onOpenChange={(open) => {
-          if (!open && !savingAccess) setActiveViewer(null)
-        }}
-        title={activeViewer ? `Доступ: ${activeViewer.username}` : 'Доступ к конфигам'}
-        description="Отметьте клиентов, которых этот пользователь может просматривать и скачивать"
-        icon={Eye}
-        size="lg"
-        className="max-w-2xl"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setActiveViewer(null)} disabled={savingAccess}>
-              Отмена
-            </Button>
-            <Button onClick={() => void saveViewerAccess()} disabled={savingAccess || accessLoading}>
-              <Save size={16} />
-              {savingAccess ? 'Сохранение...' : 'Сохранить'}
-            </Button>
-          </>
-        }
-      >
-        {accessLoading ? (
-          <Spinner label="Загрузка доступа..." className="py-8" />
-        ) : (
-          <div className="space-y-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Поиск по имени клиента..."
-                className="pl-9"
-              />
-            </div>
-            {clientGroups.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Конфиги не найдены на активном узле</p>
-            ) : filteredGroups.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Ничего не найдено</p>
-            ) : (
-              <div className="max-h-80 space-y-1.5 overflow-y-auto rounded-xl border bg-muted/20 p-2">
-                {filteredGroups.map((name) => {
-                  const checked = draftGroups.includes(name)
-                  const types = configs
-                    .filter((c) => c.client_name === name)
-                    .map((c) => c.vpn_type)
-                    .filter((t, i, arr) => arr.indexOf(t) === i)
-                  return (
-                    <label
-                      key={name}
-                      className={cn(
-                        'flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors',
-                        checked ? 'border-primary/30 bg-primary/5' : 'border-transparent bg-card/50 hover:bg-muted/50',
-                      )}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => toggleGroup(name, e.target.checked)}
-                        className="h-4 w-4 rounded border-input"
-                      />
-                      <span className="min-w-0 flex-1 font-medium">{name}</span>
-                      <span className="flex shrink-0 gap-1">
-                        {types.map((t) => (
-                          <Badge key={t} variant="outline" className="text-[10px]">
-                            {t}
-                          </Badge>
-                        ))}
-                      </span>
-                    </label>
-                  )
-                })}
-              </div>
-            )}
-            <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              <span>Выбрано групп</span>
-              <span className="font-medium text-foreground">
-                {draftGroups.length} из {clientGroups.length}
-              </span>
-            </div>
-          </div>
-        )}
-      </AppDialog>
     </div>
   )
 }

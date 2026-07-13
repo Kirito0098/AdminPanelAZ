@@ -100,7 +100,7 @@
 - Per-node mTLS панель ↔ node agent (включение из UI «Узлы» → «Включить mTLS»)
 - Ротация `NODE_AGENT_API_KEY` (вручную на странице Узлы, автоматически по расписанию)
 - **Secrets rotation wizard** — Настройки → Безопасность: guided ротация `SECRET_KEY`, `NODE_AGENT_API_KEY`, Telegram bot token (preview → confirm → write)
-- JWT (bcrypt пароли, роли admin/user/viewer)
+- JWT (bcrypt пароли, роли admin/user; у user — `can_create_configs` и whitelist `user_config_access` для read-only доступа к чужим клиентам)
 - IP-ограничение и блокировка сканеров (настройки → Безопасность)
 - Капча после неудачных попыток входа
 - Аудит: вход, смена пароля, 2FA, пользователи, узлы, бэкапы, настройки безопасности

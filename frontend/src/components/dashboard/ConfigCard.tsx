@@ -411,7 +411,7 @@ export default function ConfigCard({
   const primaryFile = pickPrimaryFile(config, tab)
   const hasBothProfiles = Boolean(vpnFile && azFile)
   const isAdmin = userRole === 'admin'
-  const canDelete = isAdmin || userRole === 'user'
+  const canDelete = Boolean(onDelete)
   const isBlocked = policy?.is_blocked ?? false
   const { fields } = viewPrefs
   const unifiedButtonAccent = resolveButtonAccent(viewPrefs)

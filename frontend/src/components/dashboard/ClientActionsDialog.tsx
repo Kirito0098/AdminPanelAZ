@@ -68,6 +68,7 @@ interface ClientActionsDialogProps {
   tab: ProtocolTab
   policy?: ClientAccessPolicy
   userRole: UserRole
+  currentUserId?: number
   ownerCandidates?: User[]
   allTags?: ConfigTag[]
   open: boolean
@@ -148,6 +149,7 @@ export default function ClientActionsDialog({
   tab,
   policy,
   userRole,
+  currentUserId,
   ownerCandidates = [],
   allTags = [],
   open,
@@ -195,9 +197,9 @@ export default function ClientActionsDialog({
     }
   }
 
-  const isOwner = userRole === 'user' || isAdmin
+  const isOwner = isAdmin || (userRole === 'user' && currentUserId != null && config.owner_id === currentUserId)
   const canManage = isAdmin
-  const canDelete = isAdmin || userRole === 'user'
+  const canDelete = isOwner
   const vpnFile = pickVpnFile(config, tab)
   const azFile = pickAzFile(config, tab)
   const isOpenVpn = config.vpn_type === 'openvpn'

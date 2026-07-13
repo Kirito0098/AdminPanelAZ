@@ -12,7 +12,6 @@ from app.cidr_models import ProviderCidr  # noqa: F401 — re-export for backwar
 class UserRole(str, enum.Enum):
     admin = "admin"
     user = "user"
-    viewer = "viewer"
 
 
 class VpnType(str, enum.Enum):
@@ -64,6 +63,7 @@ class User(Base):
     telegram_id: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True, index=True)
     tg_notify_events: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     config_quota: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    can_create_configs: Mapped[bool] = mapped_column(Boolean, default=True)
     visible_vpn_profiles: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -358,9 +358,9 @@ class QrDownloadAuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-class ViewerConfigAccess(Base):
-    __tablename__ = "viewer_config_access"
-    __table_args__ = (UniqueConstraint("user_id", "config_group", name="uq_viewer_config_group"),)
+class UserConfigAccess(Base):
+    __tablename__ = "user_config_access"
+    __table_args__ = (UniqueConstraint("user_id", "config_group", name="uq_user_config_group"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)

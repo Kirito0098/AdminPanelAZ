@@ -321,8 +321,9 @@
 ## Роли пользователей
 
 - **admin** — полный доступ, узлы, warper, telegram
-- **user** — свои конфиги, ограниченные разделы
-- **viewer** — только просмотр конфигов (без NOC, журналов, маршрутизации)
+- **user** — свои конфиги + опционально whitelist (`user_config_access`) и флаг `can_create_configs`; без NOC/журналов/маршрутизации
+
+См. план [`plans/user-role-consolidation/`](plans/user-role-consolidation/).
 
 ---
 

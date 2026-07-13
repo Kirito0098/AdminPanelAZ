@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.config import get_settings
 from app.services.node_manager import get_active_node
-from app.services.self_service import get_owned_client_names
+from app.services.config_access import accessible_client_names
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext, is_admin, unlinked_message
 from app.services.telegram_bot_handlers.ui import nav_footer_keyboard, send_or_edit
@@ -78,7 +78,8 @@ async def handle_traffic(ctx: BotContext, *, page: int = 0, message_id: int | No
         title = i18n.TRAFFIC_FLEET_TITLE
         scope_hint = ""
     else:
-        owned_lower = {name.lower() for name in get_owned_client_names(ctx.db, ctx.user, node_id=node.id)}
+        allowed = accessible_client_names(ctx.db, ctx.user, node_id=node.id) or set()
+        owned_lower = {name.lower() for name in allowed}
         if not owned_lower:
             await send_message(ctx.bot_token, ctx.chat_id, i18n.TRAFFIC_NONE)
             return

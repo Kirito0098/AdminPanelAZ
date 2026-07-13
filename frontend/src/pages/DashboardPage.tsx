@@ -94,7 +94,6 @@ export default function DashboardPage() {
       visibilityPolicy == null ||
       visibilityPolicy.protocols.includes('wireguard') ||
       visibilityPolicy.protocols.includes('amneziawg'))
-  const canCreateClient = openvpnEnabled || wireguardEnabled
   const { activeNode } = useNode()
   const haReplicaReadonly = useHaReplicaReadonly()
   const { success, error: notifyError, warning: notifyWarning } = useNotifications()
@@ -130,7 +129,11 @@ export default function DashboardPage() {
   const [templates, setTemplates] = useState<ClientTemplate[]>([])
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
   const isAdmin = user?.role === 'admin'
-  const quotaReached = quota != null && !quota.unlimited && !quota.can_create
+  // Hide create when can_create is false (flag off or quota exhausted) — including unlimited quota.
+  const createBlocked = !isAdmin && quota != null && !quota.can_create
+  const canCreateClient = (openvpnEnabled || wireguardEnabled) && !createBlocked
+  const quotaReached = createBlocked && quota != null && !quota.unlimited
+  const createDisabledByAdmin = createBlocked && quota != null && quota.unlimited
 
   useEffect(() => {
     void getEffectiveVisibleVpnProfiles()
@@ -511,7 +514,7 @@ export default function DashboardPage() {
                 />
               </>
             )}
-            {user?.role !== 'viewer' && canCreateClient && (
+            {canCreateClient && (
               <ToolbarButton
                 size="lg"
                 variant="default"
@@ -535,6 +538,12 @@ export default function DashboardPage() {
         <SettingsAlert variant="info" title="Импорт CSV">
           {importTask?.progress_stage || importTask?.message || 'Импорт выполняется…'}
           {importTask?.progress_percent != null ? ` (${importTask.progress_percent}%)` : ''}
+        </SettingsAlert>
+      )}
+
+      {createDisabledByAdmin && (
+        <SettingsAlert variant="info" title="Создание отключено">
+          Администратор отключил создание конфигураций для вашей учётной записи. Доступны просмотр и скачивание.
         </SettingsAlert>
       )}
 
@@ -773,7 +782,7 @@ export default function DashboardPage() {
                       Синхронизировать
                     </Button>
                   )}
-                  {user?.role !== 'viewer' && canCreateClient && (
+                  {canCreateClient && (
                     <Button
                       onClick={() => {
                         setOwnerId(user?.id ?? null)
@@ -796,6 +805,7 @@ export default function DashboardPage() {
           configs={configs}
           policies={policies}
           userRole={user.role}
+          currentUserId={user.id}
           ownerCandidates={panelUsers}
           connectionMap={connectionMap}
           filesLoading={loadingFiles}

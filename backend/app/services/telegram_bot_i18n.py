@@ -124,7 +124,6 @@ START_LINKED = (
 START_ROLE_DISPLAY = {
     "admin": "🔑 Администратор",
     "user": "👤 Пользователь",
-    "viewer": "👁 Наблюдатель",
 }
 
 # --- /help ---

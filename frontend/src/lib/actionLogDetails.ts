@@ -1,7 +1,6 @@
 const ROLE_LABELS: Record<string, string> = {
   admin: 'администратор',
   user: 'пользователь',
-  viewer: 'наблюдатель',
 }
 
 const LOGIN_METHOD_LABELS: Record<string, string> = {

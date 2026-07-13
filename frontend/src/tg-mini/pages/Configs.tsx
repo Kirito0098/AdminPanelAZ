@@ -142,7 +142,6 @@ export default function Configs() {
   const hasActiveFilters = search.trim().length > 0 || protocol !== 'all'
   const isForeignConfig = Boolean(activeConfig && activeConfig.is_mine === false)
   const canCreate =
-    settings?.role !== 'viewer' &&
     (openvpnEnabled || wireguardEnabled) &&
     (quota?.can_create ?? true)
   const canManageConfig = (config: TgMiniConfig) => isAdmin || config.is_mine !== false

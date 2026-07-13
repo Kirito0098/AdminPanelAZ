@@ -166,15 +166,14 @@ def _complete_telegram_login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Этот Telegram аккаунт не привязан ни к одному пользователю панели",
         )
-    if user.role != UserRole.viewer:
-        admin_notify_service.send_login_success(
-            db,
-            actor_username=user.username,
-            remote_addr=client_ip,
-            client_timezone=get_client_timezone_from_request(request),
-            user_agent=user_agent_from_request(request),
-            login_via="Telegram",
-        )
+    admin_notify_service.send_login_success(
+        db,
+        actor_username=user.username,
+        remote_addr=client_ip,
+        client_timezone=get_client_timezone_from_request(request),
+        user_agent=user_agent_from_request(request),
+        login_via="Telegram",
+    )
     return user
 
 
@@ -246,14 +245,13 @@ def _complete_2fa_login(user: User, db: Session, request: Request, response: Res
             remote_addr=client_ip,
             details=details,
         )
-    if user.role != UserRole.viewer:
-        admin_notify_service.send_login_success(
-            db,
-            actor_username=user.username,
-            remote_addr=client_ip,
-            client_timezone=get_client_timezone_from_request(request),
-            user_agent=user_agent_from_request(request),
-        )
+    admin_notify_service.send_login_success(
+        db,
+        actor_username=user.username,
+        remote_addr=client_ip,
+        client_timezone=get_client_timezone_from_request(request),
+        user_agent=user_agent_from_request(request),
+    )
     db.commit()
     return _issue_token_pair(user, db, response, request)
 
@@ -345,14 +343,13 @@ def _login_with_checks(
             username=user.username,
             remote_addr=client_ip,
         )
-    if user.role != UserRole.viewer:
-        admin_notify_service.send_login_success(
-            db,
-            actor_username=user.username,
-            remote_addr=client_ip,
-            client_timezone=get_client_timezone_from_request(request),
-            user_agent=user_agent_from_request(request),
-        )
+    admin_notify_service.send_login_success(
+        db,
+        actor_username=user.username,
+        remote_addr=client_ip,
+        client_timezone=get_client_timezone_from_request(request),
+        user_agent=user_agent_from_request(request),
+    )
     return _issue_token_pair(user, db, response, request)
 
 

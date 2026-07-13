@@ -30,7 +30,6 @@ from app.services.webauthn_service import user_has_passkeys  # noqa: E402
 ROLE_LABELS = {
     UserRole.admin: "администратор",
     UserRole.user: "пользователь",
-    UserRole.viewer: "наблюдатель",
 }
 
 PASSWORD_ALPHABET = string.ascii_letters + string.digits

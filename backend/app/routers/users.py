@@ -10,15 +10,23 @@ from app.models import (
     RefreshToken,
     User,
     UserActionLog,
+    UserConfigAccess,
     UserReminderLog,
     UserRole,
-    ViewerConfigAccess,
     VpnConfig,
     WebAuthnCredential,
 )
-from app.schemas import MessageResponse, UserCreate, UserResponse, UserUpdate
+from app.schemas import (
+    MessageResponse,
+    UserConfigAccessResponse,
+    UserConfigAccessUpdate,
+    UserCreate,
+    UserResponse,
+    UserUpdate,
+)
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
+from app.services.config_access import get_user_config_grants, set_user_config_access
 from app.services.ip_restriction import ip_restriction_service
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.admin_bootstrap import (
@@ -34,7 +42,7 @@ settings = get_settings()
 
 def _purge_user_before_delete(db: Session, user: User, successor: User) -> None:
     db.query(RefreshToken).filter(RefreshToken.user_id == user.id).delete(synchronize_session=False)
-    db.query(ViewerConfigAccess).filter(ViewerConfigAccess.user_id == user.id).delete(synchronize_session=False)
+    db.query(UserConfigAccess).filter(UserConfigAccess.user_id == user.id).delete(synchronize_session=False)
     db.query(UserReminderLog).filter(UserReminderLog.user_id == user.id).delete(synchronize_session=False)
     db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete(synchronize_session=False)
     db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).update(
@@ -162,6 +170,13 @@ def update_user(
         if not is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять квоту")
         user.config_quota = payload.config_quota
+    if payload.can_create_configs is not None:
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только администратор может менять право создания конфигов",
+            )
+        user.can_create_configs = payload.can_create_configs
     if "visible_vpn_profiles" in payload.model_fields_set:
         if not is_admin:
             raise HTTPException(
@@ -188,6 +203,37 @@ def update_user(
             details=f"target={user.username}",
         )
     return user
+
+
+@router.get("/{user_id}/config-access", response_model=UserConfigAccessResponse)
+def get_user_config_access_endpoint(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    return UserConfigAccessResponse(user_id=user_id, config_groups=get_user_config_grants(db, user_id))
+
+
+@router.put("/{user_id}/config-access", response_model=MessageResponse)
+def put_user_config_access_endpoint(
+    user_id: int,
+    payload: UserConfigAccessUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    if user.role != UserRole.user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Доп. доступ к клиентам доступен только для роли «Пользователь»",
+        )
+    set_user_config_access(db, user_id, payload.config_groups)
+    return MessageResponse(message="Доступ к клиентам обновлён")
 
 
 @router.delete("/{user_id}", response_model=MessageResponse)

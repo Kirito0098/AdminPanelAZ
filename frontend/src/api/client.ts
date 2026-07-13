@@ -536,14 +536,14 @@ export async function deleteUser(id: number) {
   return apiFetch(`/users/${id}`, { method: 'DELETE' })
 }
 
-export async function getViewerAccess(userId: number) {
-  return apiFetch<{ user_id: number; config_groups: string[] }>(`/system/viewer-access/${userId}`)
+export async function getUserConfigAccess(userId: number) {
+  return apiFetch<{ user_id: number; config_groups: string[] }>(`/users/${userId}/config-access`)
 }
 
-export async function setViewerAccess(userId: number, configGroups: string[]) {
-  return apiFetch<{ message: string }>('/system/viewer-access', {
+export async function setUserConfigAccess(userId: number, configGroups: string[]) {
+  return apiFetch<{ message: string }>(`/users/${userId}/config-access`, {
     method: 'PUT',
-    body: JSON.stringify({ user_id: userId, config_groups: configGroups }),
+    body: JSON.stringify({ config_groups: configGroups }),
   })
 }
 

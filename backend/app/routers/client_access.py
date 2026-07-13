@@ -30,7 +30,7 @@ from app.services.node_sync.policy_sync import (
     maybe_replicate_policy_op,
 )
 from app.services.notify_time import get_client_timezone_from_request
-from app.services.self_service import get_owned_client_names
+from app.services.config_access import accessible_client_names
 from app.services.traffic_limit import (
     TrafficLimitExceededError,
     parse_traffic_limit_bytes,
@@ -154,7 +154,7 @@ def list_policies(
     if not names:
         return {}
     if current_user.role != UserRole.admin:
-        allowed = get_owned_client_names(db, current_user, node_id=get_active_node(db).id)
+        allowed = accessible_client_names(db, current_user, node_id=get_active_node(db).id) or set()
         allowed_lower = {name.lower() for name in allowed}
         names = [name for name in names if name.lower() in allowed_lower]
         if not names:

@@ -315,7 +315,7 @@ export default function EditFilesPage() {
   )
 
   useEffect(() => {
-    if (user?.role === 'viewer') return
+    if (user?.role !== 'admin') return
     loadFileList()
   }, [user?.role, loadFileList, activeNode?.id])
 

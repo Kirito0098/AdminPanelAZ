@@ -133,6 +133,8 @@ def _qr_download_service(db: Session, request: Request) -> QrDownloadService:
 
 
 def _get_accessible_config(db: Session, config_id: int, current_user: User) -> VpnConfig:
+    from app.services.config_access import can_view_config
+
     node = get_active_node(db)
     config = (
         db.query(VpnConfig)
@@ -141,7 +143,7 @@ def _get_accessible_config(db: Session, config_id: int, current_user: User) -> V
     )
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if config.owner_id != current_user.id and current_user.role.value != "admin":
+    if not can_view_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     return config
 
@@ -409,11 +411,11 @@ def mini_dashboard(current_user: User = Depends(require_tg_mini_admin), db: Sess
 
 @router.get("/configs")
 def mini_configs(current_user: User = Depends(get_tg_mini_user), db: Session = Depends(get_db)):
+    from app.services.config_access import list_accessible_configs
+
     node = get_active_node(db)
     query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id).options(joinedload(VpnConfig.owner))
-    if current_user.role.value != "admin":
-        query = query.filter(VpnConfig.owner_id == current_user.id)
-    rows = query.all()
+    rows = list_accessible_configs(db, current_user, query)
     return {
         "configs": [
             {

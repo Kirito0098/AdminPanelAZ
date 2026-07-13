@@ -41,7 +41,6 @@ type NavItemDef = {
   icon: LucideIcon
   end: boolean
   adminOnly: boolean
-  viewerOk: boolean
   featureKey: string | null
   featureAnyOf?: readonly string[]
 }
@@ -55,19 +54,19 @@ const NAV_GROUPS: NavGroupDef[] = [
   {
     label: 'Операции',
     items: [
-      { to: '/', label: 'Конфигурации', icon: LayoutDashboard, end: true, adminOnly: false, viewerOk: true, featureKey: null },
-      { to: '/monitoring', label: 'NOC Мониторинг', icon: Activity, end: false, adminOnly: true, viewerOk: false, featureKey: 'logs_dashboard' },
-      { to: '/traffic', label: 'Мониторинг трафика', icon: HardDrive, end: false, adminOnly: false, viewerOk: true, featureKey: 'traffic_sync' },
-      { to: '/routing', label: 'Маршрутизация / CIDR', icon: GitBranch, end: false, adminOnly: true, viewerOk: false, featureKey: 'routing' },
+      { to: '/', label: 'Конфигурации', icon: LayoutDashboard, end: true, adminOnly: false, featureKey: null },
+      { to: '/monitoring', label: 'NOC Мониторинг', icon: Activity, end: false, adminOnly: true, featureKey: 'logs_dashboard' },
+      { to: '/traffic', label: 'Мониторинг трафика', icon: HardDrive, end: false, adminOnly: false, featureKey: 'traffic_sync' },
+      { to: '/routing', label: 'Маршрутизация / CIDR', icon: GitBranch, end: false, adminOnly: true, featureKey: 'routing' },
     ],
   },
   {
     label: 'Конфигурация',
     items: [
-      { to: '/antizapret', label: 'Конфиг AntiZapret', icon: Settings2, end: false, adminOnly: true, viewerOk: false, featureKey: 'routing' },
-      { to: '/warper', label: 'AZ-WARP', icon: Globe, end: false, adminOnly: true, viewerOk: false, featureKey: 'warper' },
-      { to: '/telegram', label: 'Telegram', icon: Send, end: false, adminOnly: true, viewerOk: false, featureKey: 'telegram' },
-      { to: '/edit-files', label: 'Редактор файлов', icon: FileText, end: false, adminOnly: true, viewerOk: false, featureKey: 'edit_files' },
+      { to: '/antizapret', label: 'Конфиг AntiZapret', icon: Settings2, end: false, adminOnly: true, featureKey: 'routing' },
+      { to: '/warper', label: 'AZ-WARP', icon: Globe, end: false, adminOnly: true, featureKey: 'warper' },
+      { to: '/telegram', label: 'Telegram', icon: Send, end: false, adminOnly: true, featureKey: 'telegram' },
+      { to: '/edit-files', label: 'Редактор файлов', icon: FileText, end: false, adminOnly: true, featureKey: 'edit_files' },
     ],
   },
   {
@@ -79,12 +78,11 @@ const NAV_GROUPS: NavGroupDef[] = [
         icon: ClipboardList,
         end: false,
         adminOnly: true,
-        viewerOk: false,
         featureKey: null,
         featureAnyOf: ['logs_dashboard', 'action_logs'] as const,
       },
-      { to: '/server-monitor', label: 'Сервер', icon: Cpu, end: false, adminOnly: true, viewerOk: false, featureKey: 'server_monitor' },
-      { to: '/nodes', label: 'Узлы', icon: Server, end: false, adminOnly: true, viewerOk: false, featureKey: null },
+      { to: '/server-monitor', label: 'Сервер', icon: Cpu, end: false, adminOnly: true, featureKey: 'server_monitor' },
+      { to: '/nodes', label: 'Узлы', icon: Server, end: false, adminOnly: true, featureKey: null },
     ],
   },
 ]
@@ -99,7 +97,6 @@ function isNavItemVisible(
   } else if (item.featureKey && !isEnabled(item.featureKey)) {
     return false
   }
-  if (userRole === 'viewer') return item.viewerOk
   if (item.adminOnly) return userRole === 'admin'
   return true
 }
@@ -177,8 +174,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         icon: User,
         end: false,
         adminOnly: false,
-        viewerOk: true,
-        featureKey: null,
+                featureKey: null,
       })
     }
     return { ...group, items }

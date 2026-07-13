@@ -16,7 +16,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   users: {
     title: 'Пользователи',
     description: 'Кто может входить в панель и что ему разрешено делать',
-    hint: 'Администратор управляет всем. Пользователь работает с VPN. Режим «Только просмотр» — только смотреть выбранные конфиги.',
+    hint: 'Администратор управляет всем. Пользователь работает с VPN: свои конфиги, квота, доп. доступ к чужим клиентам и право создавать.',
   },
   security: {
     title: 'Защита входа',
@@ -77,13 +77,11 @@ export function getSectionMeta(section: SettingsSection): SectionMeta {
 export const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Администратор',
   user: 'Пользователь',
-  viewer: 'Только просмотр',
 }
 
 export const ROLE_HINTS: Record<UserRole, string> = {
   admin: 'Полный доступ ко всем настройкам и VPN',
-  user: 'Работа с VPN-клиентами в рамках своих прав',
-  viewer: 'Только просмотр и скачивание выбранных конфигов',
+  user: 'Свои конфиги, квота, доп. доступ и право создавать — по настройкам админа',
 }
 
 export const VPN_SERVICE_LABELS: Record<string, string> = {
