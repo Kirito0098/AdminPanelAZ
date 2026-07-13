@@ -147,8 +147,8 @@ export async function getTgQrLink(configId: number, path: string): Promise<TgMin
   return tgFetch<TgMiniQrLink>(`/qr-link?${params.toString()}`)
 }
 
-export async function getTgSettings(): Promise<TgMiniSettings> {
-  return tgFetch<TgMiniSettings>('/settings')
+export async function getTgSettings(opts?: { retry?: boolean }): Promise<TgMiniSettings> {
+  return tgFetch<TgMiniSettings>('/settings', {}, opts?.retry ?? true)
 }
 
 export async function getTgAdminNotify(): Promise<AdminNotifySettings> {

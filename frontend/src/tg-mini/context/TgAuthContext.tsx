@@ -29,8 +29,8 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [settings, setSettings] = useState<TgMiniSettings | null>(null)
 
-  const loadSettings = useCallback(async () => {
-    const data = await getTgSettings()
+  const loadSettings = useCallback(async (opts?: { retry?: boolean }) => {
+    const data = await getTgSettings({ retry: opts?.retry ?? true })
     setSettings(data)
     applyThemeClass(normalizeTheme(data.theme))
     return data
@@ -49,9 +49,11 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
     setError(null)
 
     try {
+      // Do not auto-refresh on 401 here: tgFetch retry would call /auth, then we
+      // would call /auth again below — duplicate "TG ID не привязан" notifies.
       if (getTgToken()) {
         try {
-          await loadSettings()
+          await loadSettings({ retry: false })
           setStatus('authenticated')
           return
         } catch (err) {
@@ -63,7 +65,7 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
       }
 
       await refreshTgSessionFromInitData(initData)
-      await loadSettings()
+      await loadSettings({ retry: false })
       setStatus('authenticated')
     } catch (err) {
       clearTgToken()

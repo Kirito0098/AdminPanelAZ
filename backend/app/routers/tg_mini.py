@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
-from app.auth import create_access_token, get_current_user, require_admin
+from app.auth import create_access_token, get_tg_mini_user, require_tg_mini_admin
 from app.config import get_settings
 from app.database import get_db
 from app.models import DEFAULT_TG_NOTIFY_EVENTS, AppSetting, User, UserRole, VpnConfig, VpnType
@@ -227,7 +227,7 @@ def _get_tg_node_or_404(node_id: int, db: Session):
 
 
 @router.get("/nodes")
-def mini_list_nodes(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def mini_list_nodes(db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
     sync_local_node(db)
     from app.models import Node
 
@@ -240,7 +240,7 @@ def mini_list_nodes(db: Session = Depends(get_db), _: User = Depends(require_adm
 
 
 @router.get("/nodes/{node_id}")
-def mini_get_node(node_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def mini_get_node(node_id: int, db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
     sync_local_node(db)
     node = _get_tg_node_or_404(node_id, db)
     active_id = get_active_node_id(db)
@@ -251,7 +251,7 @@ def mini_get_node(node_id: int, db: Session = Depends(get_db), _: User = Depends
 def mini_node_health(
     node_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_tg_mini_admin),
 ):
     node = _get_tg_node_or_404(node_id, db)
     health = check_node_health(node)
@@ -269,7 +269,7 @@ def mini_node_health(
 def mini_activate_node(
     node_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_tg_mini_admin),
 ):
     node = _get_tg_node_or_404(node_id, db)
     set_active_node_id(db, node.id)
@@ -295,14 +295,14 @@ def mini_activate_node(
 
 
 @router.get("/warper/status")
-def mini_warper_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def mini_warper_status(db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
     if not get_feature_service().is_enabled("warper"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Модуль WARPER отключён")
     return build_warper_status_payload(db)
 
 
 @router.get("/cidr/status")
-def mini_cidr_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def mini_cidr_status(db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
     return build_cidr_status_payload(db)
 
 
@@ -355,11 +355,6 @@ def tg_auth(payload: TelegramAuthRequest, request: Request, db: Session = Depend
     tg_id = str(tg_user.get("id", ""))
     user = db.query(User).filter(User.telegram_id == tg_id).first()
     if not user:
-        user = db.query(User).filter(User.username == f"tg_{tg_id}").first()
-        if user and not user.telegram_id:
-            user.telegram_id = tg_id
-            db.commit()
-    if not user:
         admin_notify_service.send_tg_login_unlinked(
             db,
             telegram_id=tg_id,
@@ -376,7 +371,7 @@ def tg_auth(payload: TelegramAuthRequest, request: Request, db: Session = Depend
 
 
 @router.get("/dashboard")
-def mini_dashboard(current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
+def mini_dashboard(current_user: User = Depends(require_tg_mini_admin), db: Session = Depends(get_db)):
     adapter = get_active_adapter(db)
     ovpn = adapter.parse_openvpn_status()
     wg = adapter.parse_wireguard_status()
@@ -405,7 +400,7 @@ def mini_dashboard(current_user: User = Depends(require_admin), db: Session = De
 
 
 @router.get("/configs")
-def mini_configs(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def mini_configs(current_user: User = Depends(get_tg_mini_user), db: Session = Depends(get_db)):
     node = get_active_node(db)
     query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id).options(joinedload(VpnConfig.owner))
     if current_user.role.value != "admin":
@@ -429,7 +424,7 @@ def mini_configs(current_user: User = Depends(get_current_user), db: Session = D
 @router.get("/configs/{config_id}/files")
 def mini_config_files(
     config_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_tg_mini_user),
     db: Session = Depends(get_db),
 ):
     config = _get_accessible_config(db, config_id, current_user)
@@ -444,7 +439,7 @@ def mini_config_files(
 def mini_send_config(
     config_id: int,
     payload: SendConfigV2Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_tg_mini_user),
     db: Session = Depends(get_db),
 ):
     config = _get_accessible_config(db, config_id, current_user)
@@ -463,7 +458,7 @@ def mini_qr_link(
     request: Request,
     config_id: int = Query(...),
     path: str = Query(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_tg_mini_user),
     db: Session = Depends(get_db),
 ):
     config = _get_accessible_config(db, config_id, current_user)
@@ -482,7 +477,7 @@ def mini_qr_link(
 
 
 @router.get("/settings")
-def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(get_tg_mini_user)):
     adapter = get_active_adapter(db)
     token = _get_bot_token(db)
     is_admin = current_user.role == UserRole.admin
@@ -522,7 +517,7 @@ def _mini_notify_settings_response(db: Session, user: User) -> AdminNotifySettin
 @router.get("/admin-notify", response_model=AdminNotifySettingsResponse)
 def mini_get_admin_notify(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_tg_mini_user),
 ):
     return _mini_notify_settings_response(db, current_user)
 
@@ -531,7 +526,7 @@ def mini_get_admin_notify(
 def mini_update_admin_notify(
     payload: AdminNotifySettingsUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_tg_mini_user),
 ):
     is_admin = current_user.role == UserRole.admin
     if payload.telegram_id is not None:
@@ -572,7 +567,7 @@ def mini_update_admin_notify(
 @router.post("/admin-notify/test", response_model=MessageResponse)
 def mini_test_admin_notify(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_tg_mini_user),
 ):
     bot_token = _get_bot_token(db)
     if not bot_token:
@@ -608,7 +603,7 @@ def mini_test_admin_notify(
 def mini_get_telegram_settings(
     request: Request,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_tg_mini_admin),
 ):
     return _telegram_settings_response(db, request)
 
@@ -618,13 +613,13 @@ def mini_update_telegram_settings(
     payload: TelegramSettingsUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_tg_mini_admin),
 ):
     return update_telegram_settings(payload, request, db, admin)
 
 
 @router.post("/telegram-settings/test", response_model=MessageResponse)
-def mini_test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def mini_test_telegram(db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
     from app.services.telegram_recipients import get_setting_chat_ids
 
     bot_token = _get_bot_token(db)
@@ -648,7 +643,7 @@ def mini_test_telegram(db: Session = Depends(get_db), _: User = Depends(require_
 @router.post("/send-config", response_model=MessageResponse, deprecated=True)
 def send_config(
     payload: SendConfigRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_tg_mini_user),
     db: Session = Depends(get_db),
 ):
     config = _get_accessible_config(db, payload.config_id, current_user)
@@ -656,7 +651,7 @@ def send_config(
 
 
 @router.post("/check-bot-delivery")
-def check_bot_delivery(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def check_bot_delivery(db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
     token = _get_bot_token(db)
     if not token:
         return {"success": False, "message": "Бот не настроен"}

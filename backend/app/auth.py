@@ -102,6 +102,23 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
+def get_tg_mini_user(current_user: User = Depends(get_current_user)) -> User:
+    """Mini App access requires a live Telegram binding (unlink must revoke access immediately)."""
+    if not (current_user.telegram_id or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Telegram не привязан к аккаунту",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return current_user
+
+
+def require_tg_mini_admin(current_user: User = Depends(get_tg_mini_user)) -> User:
+    if current_user.role != UserRole.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Требуются права администратора")
+    return current_user
+
+
 def require_not_viewer(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role == UserRole.viewer:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав для этой операции")

@@ -429,11 +429,42 @@ def _build_client_ban_message(
 
 
 class AdminNotifyService:
+    # Suppress duplicate unlinked-login alerts from double Mini App /auth calls.
+    _UNLINKED_NOTIFY_COOLDOWN = timedelta(seconds=60)
+
     def __init__(self, *, logger_instance: logging.Logger | None = None):
         self.logger = logger_instance or logger
         self._monitor_cooldowns: dict[str, datetime] = {}
         self._resource_alert_cooldowns: dict[tuple[str, int | None], datetime] = {}
+        self._unlinked_login_cooldowns: dict[str, datetime] = {}
         self._monitor_lock = threading.Lock()
+
+    def send_tg_login_unlinked(
+        self,
+        db: Session,
+        *,
+        telegram_id: str,
+        remote_addr: str | None = None,
+        mini: bool = False,
+        client_timezone: str | None = None,
+    ) -> None:
+        tg_id = (telegram_id or "").strip()
+        if not tg_id:
+            return
+        now = datetime.now(timezone.utc)
+        with self._monitor_lock:
+            last = self._unlinked_login_cooldowns.get(tg_id)
+            if last is not None and (now - last) < self._UNLINKED_NOTIFY_COOLDOWN:
+                return
+            self._unlinked_login_cooldowns[tg_id] = now
+        event_type = "tg_mini_login_unlinked" if mini else "tg_login_unlinked"
+        self.send(
+            db,
+            event_type,
+            target_name=tg_id,
+            remote_addr=remote_addr,
+            client_timezone=client_timezone,
+        )
 
     def send(
         self,
@@ -541,24 +572,6 @@ class AdminNotifyService:
             remote_addr=remote_addr,
             client_timezone=client_timezone,
             user_agent=user_agent,
-        )
-
-    def send_tg_login_unlinked(
-        self,
-        db: Session,
-        *,
-        telegram_id: str,
-        remote_addr: str | None = None,
-        mini: bool = False,
-        client_timezone: str | None = None,
-    ) -> None:
-        event_type = "tg_mini_login_unlinked" if mini else "tg_login_unlinked"
-        self.send(
-            db,
-            event_type,
-            target_name=telegram_id,
-            remote_addr=remote_addr,
-            client_timezone=client_timezone,
         )
 
     def send_config_create(
