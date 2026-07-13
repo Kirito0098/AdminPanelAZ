@@ -46,7 +46,13 @@ export default function PersonalTelegramCard() {
       const result = await getTelegramLinkCode()
       setLinkCode(result.code)
       setExpiresIn(result.expires_in_seconds)
-      success(`Код привязки создан (действует ${result.expires_in_seconds} сек)`)
+      const command = `/link ${result.code}`
+      try {
+        await navigator.clipboard.writeText(command)
+        success(`Код скопирован (действует ${result.expires_in_seconds} сек)`)
+      } catch {
+        success(`Код привязки создан (действует ${result.expires_in_seconds} сек)`)
+      }
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка получения кода')
     } finally {
