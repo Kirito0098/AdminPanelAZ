@@ -52,10 +52,11 @@
 
 ## [2.17.0] - 2026-07-15
 
-> **Кратко:** консолидация **Пользователь** (ACL чужих клиентов, `can_create_configs`, снятие `viewer`); **видимость VPN-профилей** (default + per-user); копирование `/link` в буфер; фикс Mini App после отвязки Telegram; docs совместной публикации со StatusOpenVPN.
+> **Кратко:** консолидация **Пользователь** (ACL чужих клиентов, `can_create_configs`, снятие `viewer`); **видимость VPN-профилей** (default + per-user); копирование `/link` в буфер; фикс Mini App после отвязки Telegram; docs совместной публикации со StatusOpenVPN; **обратная связь** на [Fider](https://claymore0098.fider.io/).
 
 ### ✨ Added
 
+- **Обратная связь** — доска [Fider](https://claymore0098.fider.io/) для пожеланий и багов; ссылки в [README.md](README.md) и [docs/README.md](docs/README.md).
 - **Пользователь: доп. доступ к клиентам** — белый список чужих VPN-клиентов (просмотр/скачивание без владения), API `GET/PUT /users/{id}/config-access`, паритет web / Mini App / Telegram / traffic; таблица `user_config_access` (бывш. `viewer_config_access`).
 - **Пользователь: флаг «Может создавать конфигурации»** (`can_create_configs`) — отдельный переключатель, не путать с квотой `0` (unlimited); квота `SelfServiceQuota.can_create` учитывает флаг.
 - **Видимость VPN-профилей** — глобальное умолчание (`GET/PUT /settings/user-vpn-visibility-default`, `AppSetting` `user_visible_vpn_profiles_default`) и per-user override (`User.visible_vpn_profiles`, `null` = наследовать): маршруты AZ/VPN, протоколы OVPN/WG/AWG, группы OpenVPN (`udp_tcp` / `udp` / `tcp`); каталог create/download/фильтры скрывают запрещённое в web / Mini App / Telegram; admin без ограничений; `GET /configs/visible-vpn-profiles` и `GET /tg-mini/visible-vpn-profiles` — эффективная политика для текущего пользователя (`vpn_profile_visibility.py`, `VpnVisibilityPolicyEditor.tsx`).

@@ -9,7 +9,7 @@
 [![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)](frontend/)
 
 [🚀 Быстрый старт](#-быстрый-старт) · [✨ Возможности](#-возможности) · [🖼️ Обзор](#-обзор-панели) ·
-[📖 Руководства](docs/README.md) · [🔐 Безопасность](SECURITY.md) · [📝 Changelog](CHANGELOG.md)
+[📖 Руководства](docs/README.md) · [💬 Пожелания и баги](https://claymore0098.fider.io/) · [🔐 Безопасность](SECURITY.md) · [📝 Changelog](CHANGELOG.md)
 
 <p align="center">
   <img src="docs/assets/telegram-promo/01-hero-banner.png" alt="AdminPanel AntiZapret" width="900">
@@ -318,6 +318,12 @@ sudo ./scripts/nginx-repair.sh      # восстановить nginx (напри
 Последний релиз — **NOC Ops** (federated SSE, Mbps, инциденты, health, фильтры, история подключений, HA physical node), **TG-алерт offline узла с grace** и **self-service для роли Пользователь** (Telegram в профиле, упрощённый Mini App, ops-разделы только admin).
 
 Полный список: **[CHANGELOG.md](CHANGELOG.md)** · runbook аудита HA: [reviews/HA-sync-remediation-plan.md](reviews/HA-sync-remediation-plan.md)
+
+## 💬 Обратная связь
+
+Пожелания, баги и идеи — на доске **[AdminPanelAZ на Fider](https://claymore0098.fider.io/)**.
+
+Перед новой записью **поищите похожие** — если тема уже есть, проголосуйте за неё, а не создавайте дубликат. GitHub не нужен.
 
 ## 💖 Поддержка проекта
 
