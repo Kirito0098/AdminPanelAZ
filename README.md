@@ -3,7 +3,7 @@
 Веб-панель для администрирования VPN-сервера [AntiZapret](https://github.com/GubernievS/AntiZapret-VPN)
 
 [![GitHub](https://img.shields.io/badge/GitHub-Kirito0098%2FAdminPanelAZ-181717?style=for-the-badge&logo=github)](https://github.com/Kirito0098/AdminPanelAZ)
-[![Version](https://img.shields.io/badge/Панель-2.16.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Панель-2.17.0-blue?style=for-the-badge)](CHANGELOG.md)
 [![Node agent](https://img.shields.io/badge/Node_agent-1.5.0-555?style=for-the-badge)](CHANGELOG.md)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](backend/)
 [![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)](frontend/)
@@ -313,7 +313,7 @@ sudo ./scripts/nginx-repair.sh      # восстановить nginx (напри
   <img src="docs/assets/telegram-promo/05-whats-new.png" alt="Последние обновления AdminPanel AntiZapret" width="900">
 </p>
 
-**Текущая версия: панель 2.16.0 · node agent 1.5.0** (2026-07-13)
+**Текущая версия: панель 2.17.0 · node agent 1.5.0** (2026-07-15)
 
 Последний релиз — **NOC Ops** (federated SSE, Mbps, инциденты, health, фильтры, история подключений, HA physical node), **TG-алерт offline узла с grace** и **self-service для роли Пользователь** (Telegram в профиле, упрощённый Mini App, ops-разделы только admin).
 

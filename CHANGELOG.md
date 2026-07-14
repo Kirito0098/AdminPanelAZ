@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.17.0](#2170---2026-07-15) — 2026-07-15
 - [2.16.0](#2160---2026-07-13) — 2026-07-13
 - [2.15.0](#2150---2026-07-12) — 2026-07-12
 - [2.14.0](#2140---2026-07-11) — 2026-07-11
@@ -41,25 +42,37 @@
 
 ## [Unreleased]
 
+### ✨ Added
+
+### 🔄 Changed
+
+### 🐛 Fixed
+
+---
+
+## [2.17.0] - 2026-07-15
+
 > **Кратко:** консолидация **Пользователь** (ACL чужих клиентов, `can_create_configs`, снятие `viewer`); **видимость VPN-профилей** (default + per-user); копирование `/link` в буфер; фикс Mini App после отвязки Telegram; docs совместной публикации со StatusOpenVPN.
 
 ### ✨ Added
 
 - **Пользователь: доп. доступ к клиентам** — белый список чужих VPN-клиентов (просмотр/скачивание без владения), API `GET/PUT /users/{id}/config-access`, паритет web / Mini App / Telegram / traffic; таблица `user_config_access` (бывш. `viewer_config_access`).
-- **Пользователь: флаг «Может создавать конфигурации»** (`can_create_configs`) — отдельный переключатель, не путать с квотой `0` (unlimited).
-- **Видимость VPN-профилей** — глобальное умолчание (`GET/PUT /settings/user-vpn-visibility-default`, `AppSetting` `user_visible_vpn_profiles_default`) и per-user override (`User.visible_vpn_profiles`, `null` = наследовать): маршруты AZ/VPN, протоколы OVPN/WG/AWG, группы OpenVPN (`udp_tcp` / `udp` / `tcp`); каталог create/download/фильтры скрывают запрещённое в web / Mini App / Telegram; admin без ограничений (`vpn_profile_visibility.py`, `VpnVisibilityPolicyEditor.tsx`).
+- **Пользователь: флаг «Может создавать конфигурации»** (`can_create_configs`) — отдельный переключатель, не путать с квотой `0` (unlimited); квота `SelfServiceQuota.can_create` учитывает флаг.
+- **Видимость VPN-профилей** — глобальное умолчание (`GET/PUT /settings/user-vpn-visibility-default`, `AppSetting` `user_visible_vpn_profiles_default`) и per-user override (`User.visible_vpn_profiles`, `null` = наследовать): маршруты AZ/VPN, протоколы OVPN/WG/AWG, группы OpenVPN (`udp_tcp` / `udp` / `tcp`); каталог create/download/фильтры скрывают запрещённое в web / Mini App / Telegram; admin без ограничений; `GET /configs/visible-vpn-profiles` и `GET /tg-mini/visible-vpn-profiles` — эффективная политика для текущего пользователя (`vpn_profile_visibility.py`, `VpnVisibilityPolicyEditor.tsx`).
 - **Копирование `/link` в буфер** — при генерации кода привязки Telegram в «Мой профиль» и в админском разделе Telegram (`PersonalTelegramCard.tsx`, `useTelegramSettings.ts`).
 
 ### 🔄 Changed
 
-- Роль **Только просмотр** (`viewer`) снята: существующие записи мигрируют в `user` с `can_create_configs=false`, grants сохраняются в `user_config_access`. После обновления — повторный вход.
-- Mutate (delete/patch) по whitelist запрещён (раньше viewer API мог мутировать при grant).
+- Роль **Только просмотр** (`viewer`) снята: существующие записи мигрируют в `user` с `can_create_configs=false`, grants сохраняются в `user_config_access`; startup-миграция `viewer_config_access` → `user_config_access`. После обновления — повторный вход.
+- Mutate (delete/patch) по whitelist запрещён (раньше viewer API мог мутировать при grant); общий сервис `config_access.py` (`can_view_config` / `can_mutate_config`).
 - **Редактор пользователя** — компактный диалог: квота, «Может создавать», whitelist клиентов и политика VPN-профилей в одной карточке (`UsersTab.tsx`, `AppDialog.tsx`).
-- **Документация** — пошаговая инструкция совместной публикации со StatusOpenVPN на одном домене и восстановление через `nginx-repair.sh` (`docs/nastrojki/set-i-publikaciya.md`, `diagnostika.md`); планы `docs/plans/user-role-consolidation/`, `docs/plans/vpn-profile-visibility/`.
+- **Дашборд** — кнопка «Создать» скрыта при `can_create_configs=false` (в т.ч. при unlimited quota); инфо-баннер «Создание отключено»; тип VPN в форме создания и карточки клиентов подстраиваются под политику видимости (`DashboardPage.tsx`, `ConfigCardsSection.tsx`).
+- **TG-уведомления о входе** — успешный login / 2FA / Telegram login уходит admin-notify для всех ролей (раньше `viewer` пропускался) (`auth.py`).
+- **Документация** — пошаговая инструкция совместной публикации со StatusOpenVPN на одном домене и восстановление через `nginx-repair.sh` (`docs/nastrojki/set-i-publikaciya.md`, `diagnostika.md`, `docs/konfiguracii.md`, `docs/nastrojki/polzovateli.md`); README — раздел «StatusOpenVPN на одном домене»; `SECURITY.md` — роли admin/user; планы `docs/plans/user-role-consolidation/`, `docs/plans/vpn-profile-visibility/`.
 
 ### 🗑️ Removed
 
-- Роль `viewer` / «Наблюдатель» из enum, UI и `/system/viewer-access`.
+- Роль `viewer` / «Наблюдатель» из enum, UI, навигации (`viewerOk`) и `/system/viewer-access` (`system.py`, `Layout.tsx`, `reset-password.py`).
 
 ### 🐛 Fixed
 
@@ -1961,7 +1974,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.16.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.17.0...HEAD
+[2.17.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.13.0...v2.14.0
