@@ -50,6 +50,7 @@
 
 - Роль **Только просмотр** (`viewer`) снята: существующие записи мигрируют в `user` с `can_create_configs=false`, grants сохраняются в `user_config_access`. После обновления — повторный вход.
 - Mutate (delete/patch) по whitelist запрещён (раньше viewer API мог мутировать при grant).
+- **Документация** — пошаговая инструкция совместной публикации со StatusOpenVPN на одном домене и восстановление через `nginx-repair.sh` (`docs/nastrojki/set-i-publikaciya.md`, `diagnostika.md`).
 
 ### 🗑️ Removed
 
