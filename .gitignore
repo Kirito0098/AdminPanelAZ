@@ -88,3 +88,6 @@ Thumbs.db
 
 # --- Local screenshot tooling (credentials / panel URL — not for repo) ---
 scripts/capture-readme-screenshots.mjs
+
+# --- Codebase memory graph (локальная индексация MCP, не для repo) ---
+.codebase-memory/
