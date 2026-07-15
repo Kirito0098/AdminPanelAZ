@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
@@ -281,9 +282,21 @@ def delete_node(
         )
 
     active_id = get_active_node_id(db)
-    purge_node_related(db, node.id)
-    db.delete(node)
-    db.commit()
+    node_name = node.name
+    try:
+        purge_node_related(db, node.id)
+        db.delete(node)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Не удалось удалить узел «{node_name}»: на него ссылаются связанные данные. "
+                f"Если узел входит в HA-группу — сначала расформируйте группу "
+                f"(Узлы → Группы синхронизации)."
+            ),
+        ) from exc
 
     if active_id == node_id:
         fallback = sync_local_node(db)
@@ -304,9 +317,9 @@ def delete_node(
             user_id=admin.id,
             username=admin.username,
             remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"name={node.name}, id={node_id}",
+            details=f"name={node_name}, id={node_id}",
         )
-    return MessageResponse(message=f"Узел '{node.name}' удалён")
+    return MessageResponse(message=f"Узел '{node_name}' удалён")
 
 
 @router.post("/{node_id}/health", response_model=NodeHealthResponse)
