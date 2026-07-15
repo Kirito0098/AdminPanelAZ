@@ -23,6 +23,7 @@ import {
   disableNodeMtls,
   enableNodeMtls,
   getNodeMtlsStatus,
+  getNodeSyncGroups,
   getNodes,
   rollingNodeUpdate,
   rotateNodeApiKey,
@@ -72,8 +73,9 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { formatDateTime } from '@/lib/datetime'
+import { findNodeHaMembership, nodeDeleteBlockedMessage, nodeHaDeleteBlockedHint } from '@/lib/nodeHa'
 import { cn } from '@/lib/utils'
-import type { Node, NodeMtlsStatus } from '@/types'
+import type { Node, NodeMtlsStatus, NodeSyncGroup } from '@/types'
 import { Navigate } from 'react-router-dom'
 
 type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | 'disable-mtls' | 'restart-agent' | null
@@ -617,14 +619,32 @@ export default function NodesPage() {
   const [rollingUpdating, setRollingUpdating] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkConfirmAction, setBulkConfirmAction] = useState<BulkConfirmAction>(null)
+  const [syncGroups, setSyncGroups] = useState<NodeSyncGroup[]>([])
+  const [haDeleteBlockedNodes, setHaDeleteBlockedNodes] = useState<Node[]>([])
   const { task: rollTask, polling: rollPolling, startPoll: startRollPoll } = useBackgroundTaskPoll()
+
+  const getNodeDeleteBlockedReason = (node: Node): string | null => {
+    const membership = findNodeHaMembership(node.id, syncGroups)
+    if (!membership) return null
+    return nodeDeleteBlockedMessage(node, membership)
+  }
+
+  const showHaDeleteBlockedDialog = (blockedNodes: Node[]) => {
+    if (blockedNodes.length === 0) return
+    setHaDeleteBlockedNodes(blockedNodes)
+  }
 
   const load = async () => {
     setLoading(true)
     try {
-      const [nodesList, status] = await Promise.all([getNodes(), getNodeMtlsStatus()])
+      const [nodesList, status, groups] = await Promise.all([
+        getNodes(),
+        getNodeMtlsStatus(),
+        getNodeSyncGroups(),
+      ])
       setNodes(nodesList)
       setMtlsStatus(status)
+      setSyncGroups(groups)
       await refreshNodes()
       await refresh()
     } catch (err) {
@@ -741,6 +761,10 @@ export default function NodesPage() {
   }
 
   const handleDelete = (node: Node) => {
+    if (getNodeDeleteBlockedReason(node)) {
+      showHaDeleteBlockedDialog([node])
+      return
+    }
     openConfirm('delete', node)
   }
 
@@ -978,6 +1002,16 @@ export default function NodesPage() {
         notifyError('Локальный узел нельзя удалить. Выберите удалённые узлы.')
         return
       }
+      const blocked = remoteSelected.filter((node) => getNodeDeleteBlockedReason(node))
+      if (blocked.length === remoteSelected.length) {
+        showHaDeleteBlockedDialog(blocked)
+        return
+      }
+      if (blocked.length > 0) {
+        warning(
+          `${blocked.length} из ${remoteSelected.length} узл(ов) в HA-группе — будут пропущены. Сначала расформируйте группу синхронизации.`,
+        )
+      }
     }
     if (action === 'enable-mtls') {
       const mtlsCandidates = selected.filter((node) => !node.is_local && !node.mtls_enabled)
@@ -1005,23 +1039,38 @@ export default function NodesPage() {
       if (action === 'delete') {
         const remoteSelected = selected.filter((node) => !node.is_local)
         const failed: string[] = []
+        const deletedIds: number[] = []
         for (const node of remoteSelected) {
+          const blockedReason = getNodeDeleteBlockedReason(node)
+          if (blockedReason) {
+            failed.push(blockedReason)
+            continue
+          }
           try {
             await deleteNode(node.id)
+            deletedIds.push(node.id)
           } catch (err) {
             failed.push(`${node.name}: ${err instanceof ApiError ? err.message : 'ошибка'}`)
           }
         }
         closeBulkConfirm()
-        setSelectedNodeIds((prev) =>
-          prev.filter((id) => !remoteSelected.some((node) => node.id === id)),
-        )
+        if (deletedIds.length > 0) {
+          setSelectedNodeIds((prev) => prev.filter((id) => !deletedIds.includes(id)))
+        }
         await load()
         await refresh()
+        const deletedCount = remoteSelected.length - failed.length
         if (failed.length === 0) {
           success(`Удалено узлов: ${remoteSelected.length}`)
+        } else if (deletedCount === 0) {
+          const haBlocked = remoteSelected.filter((node) => getNodeDeleteBlockedReason(node))
+          if (haBlocked.length > 0) {
+            showHaDeleteBlockedDialog(haBlocked)
+          } else {
+            notifyError(failed[0] ?? 'Не удалось удалить выбранные узлы')
+          }
         } else {
-          notifyError(`Удалено ${remoteSelected.length - failed.length} из ${remoteSelected.length}. ${failed[0]}`)
+          notifyError(`Удалено ${deletedCount} из ${remoteSelected.length}. ${failed[0]}`)
         }
       } else if (action === 'enable-mtls') {
         const mtlsCandidates = selected.filter((node) => !node.is_local && !node.mtls_enabled)
@@ -1106,7 +1155,7 @@ export default function NodesPage() {
 
       <NodeOfflineNotifyCard />
 
-      <NodeSyncGroupSection nodes={nodes} />
+      <NodeSyncGroupSection nodes={nodes} onGroupsChanged={setSyncGroups} />
 
       {(rollPolling || rollTask) && (
         <SettingsAlert variant="info" title="Rolling update">
@@ -1577,6 +1626,49 @@ export default function NodesPage() {
         destructive={bulkConfirmAction === 'delete'}
         loading={confirmLoading}
         onConfirm={handleBulkConfirm}
+      />
+
+      <ConfirmDialog
+        open={haDeleteBlockedNodes.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setHaDeleteBlockedNodes([])
+        }}
+        title={
+          haDeleteBlockedNodes.length === 1
+            ? 'Невозможно удалить узел'
+            : 'Невозможно удалить выбранные узлы'
+        }
+        description={
+          haDeleteBlockedNodes.length === 1 ? (
+            <>
+              Узел: <strong>{haDeleteBlockedNodes[0]?.name}</strong>
+            </>
+          ) : (
+            <>Узлов в HA-группе: {haDeleteBlockedNodes.length}</>
+          )
+        }
+        alert={{
+          variant: 'warning',
+          title: 'Узел в группе синхронизации',
+          children: (
+            <div className="space-y-3 text-sm leading-relaxed">
+              <ul className="list-disc space-y-1 pl-4">
+                {haDeleteBlockedNodes.map((node) => {
+                  const membership = findNodeHaMembership(node.id, syncGroups)
+                  return (
+                    <li key={node.id}>
+                      <strong>{node.name}</strong>
+                      {membership ? ` — группа «${membership.groupName}»` : null}
+                    </li>
+                  )
+                })}
+              </ul>
+              <p>{nodeHaDeleteBlockedHint()}</p>
+            </div>
+          ),
+        }}
+        confirmHidden
+        onConfirm={() => setHaDeleteBlockedNodes([])}
       />
 
       <NodeUpdateDialog

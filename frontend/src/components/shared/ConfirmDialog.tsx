@@ -32,6 +32,8 @@ export interface ConfirmDialogProps {
   confirmLabel?: string
   destructive?: boolean
   loading?: boolean
+  /** Only «Понятно» — for informational warnings without a confirm action. */
+  confirmHidden?: boolean
   onConfirm: () => void | Promise<void>
   children?: React.ReactNode
   className?: string
@@ -48,6 +50,7 @@ export default function ConfirmDialog({
   confirmLabel = 'Подтвердить',
   destructive = false,
   loading = false,
+  confirmHidden = false,
   onConfirm,
   children,
   className,
@@ -88,28 +91,36 @@ export default function ConfirmDialog({
           {children}
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => handleOpenChange(false)}
-              disabled={loading}
-            >
-              {cancelLabel}
-            </Button>
-            <Button
-              type="submit"
-              variant={destructive ? 'destructive' : 'default'}
-              disabled={loading}
-            >
-              {loading ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  Выполнение...
-                </>
-              ) : (
-                confirmLabel
-              )}
-            </Button>
+            {confirmHidden ? (
+              <Button type="button" onClick={() => handleOpenChange(false)}>
+                Понятно
+              </Button>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => handleOpenChange(false)}
+                  disabled={loading}
+                >
+                  {cancelLabel}
+                </Button>
+                <Button
+                  type="submit"
+                  variant={destructive ? 'destructive' : 'default'}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Выполнение...
+                    </>
+                  ) : (
+                    confirmLabel
+                  )}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>

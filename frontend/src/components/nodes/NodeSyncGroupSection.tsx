@@ -74,6 +74,7 @@ import type { BackgroundTask, Node, NodeSyncGroup, NodeSyncVerifyResult, SyncSta
 
 type NodeSyncGroupSectionProps = {
   nodes: Node[]
+  onGroupsChanged?: (groups: NodeSyncGroup[]) => void
 }
 
 const AUTO_SYNC_POLL_MS = 30_000
@@ -390,7 +391,7 @@ function AutoSyncModeDescription({ compact = false }: { compact?: boolean }) {
   )
 }
 
-export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProps) {
+export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyncGroupSectionProps) {
   const { success, error: notifyError, warning: notifyWarning } = useNotifications()
   const { task, polling, startPoll } = useBackgroundTaskPoll()
   const [groups, setGroups] = useState<NodeSyncGroup[]>([])
@@ -472,8 +473,9 @@ export default function NodeSyncGroupSection({ nodes }: NodeSyncGroupSectionProp
     (nextGroups: NodeSyncGroup[]) => {
       reportReplicationIssues(nextGroups)
       setGroups(nextGroups)
+      onGroupsChanged?.(nextGroups)
     },
-    [reportReplicationIssues],
+    [onGroupsChanged, reportReplicationIssues],
   )
 
   const load = useCallback(async () => {
