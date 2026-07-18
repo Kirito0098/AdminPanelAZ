@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError } from '@/lib/api'
+import { ApiError } from '@/api/client'
 import { guessPublishAccessUrl, isPublishStartTransientError } from '@/components/settings/publishWizardUi'
 
 describe('isPublishStartTransientError', () => {
@@ -21,7 +21,7 @@ describe('guessPublishAccessUrl', () => {
       '',
       '8000',
       '443',
-      null,
+      { server_primary_ip: '127.0.0.1' } as never,
       null,
       '/panel',
     )
@@ -39,5 +39,26 @@ describe('guessPublishAccessUrl', () => {
       '/panel',
     )
     expect(url).toBe('https://example.com/panel/')
+  })
+
+  it('uses uvicorn backend port even when LE cert exists', () => {
+    const url = guessPublishAccessUrl(
+      'uvicorn_le',
+      'example.com',
+      '5050',
+      '443',
+      {
+        ssl_cert_suggestions: [
+          {
+            source: 'letsencrypt',
+            cert: '/etc/letsencrypt/live/example.com/fullchain.pem',
+            key: '/etc/letsencrypt/live/example.com/privkey.pem',
+            label: 'LE',
+          },
+        ],
+      } as never,
+      true,
+    )
+    expect(url).toBe('https://example.com:5050/')
   })
 })

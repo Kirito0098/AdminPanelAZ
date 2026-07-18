@@ -42,9 +42,21 @@
 
 ## [Unreleased]
 
-### ✨ Added
+> **Кратко:** публикация без nginx — реальный stop/disable вместо редиректа 443→порт; IPv4-only в nginx и proxy-IP; блокировка порта панели доступна на uvicorn HTTPS; фиксы удаления узла и QR AZ.
 
 ### 🔄 Changed
+
+#### VPN / Сеть — публикация
+
+- **Переход на uvicorn / HTTP** — вместо convenience-редиректа `https://domain/` → `https://domain:порт/` nginx **останавливается и отключается** (`systemctl stop/disable`), если на сервере нет чужих сайтов; при чужих vhost’ах nginx остаётся, но vhost панели снимается (`nginx_disable_for_direct_publish`, `nginx-setup.sh`, `nginx-common.sh`).
+- **URL доступа** — для uvicorn всегда с портом панели (`https://domain:5050/`), без скрытого входа через 443; то же в preview мастера и `ACCESS_URL` (`panel_publish_info.py`, `publishWizardUi.ts`).
+- **IPv4-only** — из nginx-шаблонов убраны `listen [::]:…`; `TRUSTED_PROXY_IPS` / `FORWARDED_ALLOW_IPS` по умолчанию только `127.0.0.1` (без `::1`) — `.env.example`, `config.py`, `install.sh`, `start.sh`, `SECURITY.md`.
+
+#### Безопасность
+
+- **«Дополнительная блокировка на уровне сервера»** — тогл iptables-whitelist доступен и при HTTPS на uvicorn (`direct_https`), не только при прямом HTTP; подсказка в UI уточняет оба режима (`WHITELIST_PORT_FIREWALL_MODES`, `SecurityTab.tsx`).
+
+#### Прочее
 
 - **Удаление узла из HA-группы** — вместо сырого 409 в консоли: диалог с объяснением, что сначала нужно расформировать группу синхронизации; подсказка при удалении; массовое удаление пропускает узлы в HA (`nodeHa.ts`, `NodesPage.tsx`, `ConfirmDialog.tsx`, `NodeSyncGroupSection.tsx`).
 - **QR AntiZapret / OpenVPN** — для AZ WireGuard/AmneziaWG (длинный `AllowedIPs`) и всех `.ovpn` сразу QR со **ссылкой на скачивание**, без попытки вложить профиль; короткий VPN WG по-прежнему кодируется целиком для импорта в приложение (`qr_generator.py`, `configs.py`).
@@ -52,12 +64,20 @@
 
 ### 🐛 Fixed
 
+- **После «отключения nginx» процесс оставался на 443 (в т.ч. IPv6)** — мастер uvicorn ставил редирект-vhost и оставлял nginx слушать порт; заход по домену без порта уводил на `:5050`. Теперь nginx реально останавливается.
+- **Тогл блокировки порта недоступен на uvicorn HTTPS** — `is_whitelist_port_firewall_applicable` учитывал только `direct_http`, режим `direct_https` ошибочно показывал «Недоступно: панель работает через Nginx или только на localhost».
 - **`DELETE /api/nodes/{id}` → Internal Server Error** после удаления VPS у хостера (или для offline-узла): при удалении не чистилась таблица `connection_count_samples` → `FOREIGN KEY constraint failed` и голый 500. Теперь сэмплы истории подключений удаляются в `purge_node_related`; неожиданный FK даёт понятный **409**, а не 500 (`node_manager.py`, `nodes.py`). Удаление записи в панели по-прежнему локально в БД и не требует доступности агента на сервере. Если узел в HA — сначала «Группы синхронизации» → расформировать группу.
 - **QR AZ выглядел как профиль для сканирования** — бэкенд уже отдавал `download-link`, но UI не читал `X-Qr-Content` / `X-Qr-Download-Url` (не было CORS `expose_headers`) и показывал обычный «QR-код» без подсказки и кнопки «Скопировать ссылку» (`main.py`, `configs.py`).
+
+### 🗑️ Removed
+
+- **Редирект 443 → uvicorn** — удалены `deploy/nginx/adminpanelaz-redirect.conf.template`, `nginx_install_uvicorn_redirect`, `nginx_render_redirect_template`, `nginx_pick_redirect_cert_paths`.
 
 ### 🧪 Tests
 
 - **`test_qr_generator.py`** — лимит размера, принудительный download-link для AZ WG/AWG и `.ovpn`, без ложного срабатывания на пути `/root/antizapret/.../vpn/`.
+- **`test_panel_publish_info.py`** — URL uvicorn с нестандартным портом; `is_whitelist_port_firewall_applicable` для `direct_http` / `direct_https` / nginx / localhost.
+- **`publishWizardUi.test.ts`** — preview uvicorn всегда с портом панели, даже при наличии LE-сертификата.
 
 ---
 

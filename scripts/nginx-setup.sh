@@ -210,8 +210,6 @@ nginx_log_access_url() {
         fi
       elif [[ "$port" == "443" ]]; then
         nginx_log "ACCESS_URL=https://${domain}${path_suffix}"
-      elif nginx_pick_redirect_cert_paths "$domain" "" "" 2>/dev/null; then
-        nginx_log "ACCESS_URL=https://${domain}${path_suffix}"
       else
         nginx_log "ACCESS_URL=https://${domain}:${port}${path_suffix}"
       fi
@@ -231,10 +229,8 @@ nginx_finalize_uvicorn_mode() {
   local mode="$1"
   local domain="$2"
   local port="$3"
-  local cert="$4"
-  local key="$5"
   nginx_set_publish_mode "$mode"
-  nginx_install_uvicorn_redirect "$domain" "$port" "$cert" "$key"
+  nginx_disable_for_direct_publish "$domain"
   nginx_apply_publish_firewall_for_mode "$mode" "$port" "$port" "0"
   nginx_log_access_url "$mode" "$domain" "$port"
 }
@@ -243,7 +239,7 @@ setup_http_direct() {
   resolve_backend_port
   local domain="${DOMAIN:-$(nginx_env_get DOMAIN)}"
   nginx_apply_direct_http_env "$BACKEND_PORT"
-  nginx_remove_site "$(nginx_env_get DOMAIN)"
+  nginx_disable_for_direct_publish "$(nginx_env_get DOMAIN)"
   nginx_set_publish_mode "http_direct"
   nginx_apply_publish_firewall_for_mode "http_direct" "$BACKEND_PORT" "0" "0"
   nginx_log_access_url "http_direct" "$domain" "$BACKEND_PORT"
@@ -452,7 +448,7 @@ setup_uvicorn_letsencrypt() {
   else
     nginx_log "HTTPS на uvicorn + Let's Encrypt: https://${domain}:${BACKEND_PORT}/"
   fi
-  nginx_finalize_uvicorn_mode "uvicorn_le" "$domain" "$BACKEND_PORT" "$cert" "$key"
+  nginx_finalize_uvicorn_mode "uvicorn_le" "$domain" "$BACKEND_PORT"
   restart_panel_if_needed
 }
 
@@ -484,8 +480,7 @@ setup_uvicorn_selfsigned() {
   else
     nginx_log "HTTPS на uvicorn + самоподписанный SSL: https://${domain}:${BACKEND_PORT}/"
   fi
-  nginx_finalize_uvicorn_mode "uvicorn_selfsigned" "$domain" "$BACKEND_PORT" \
-    "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY"
+  nginx_finalize_uvicorn_mode "uvicorn_selfsigned" "$domain" "$BACKEND_PORT"
   restart_panel_if_needed
 }
 
@@ -527,7 +522,7 @@ setup_uvicorn_custom_certs() {
   else
     nginx_log "HTTPS на uvicorn + пользовательские сертификаты: https://${domain}:${BACKEND_PORT}/"
   fi
-  nginx_finalize_uvicorn_mode "uvicorn_custom" "$domain" "$BACKEND_PORT" "$cert_path" "$key_path"
+  nginx_finalize_uvicorn_mode "uvicorn_custom" "$domain" "$BACKEND_PORT"
   restart_panel_if_needed
 }
 

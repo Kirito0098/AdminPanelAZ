@@ -55,7 +55,7 @@
 | `CORS_ORIGINS` | localhost | Список origin через запятую |
 | `BEHIND_NGINX` | `false` | Доверять `X-Forwarded-For` от `TRUSTED_PROXY_IPS` |
 | `ACCESS_PATH` | *(пусто)* | Подпуть на домене, например `/panel` для публикации на общем домене (только с nginx reverse proxy) |
-| `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | IP reverse proxy |
+| `TRUSTED_PROXY_IPS` | `127.0.0.1` | IP reverse proxy |
 | `NODE_AGENT_MTLS_ENABLED` | `false` | **Deprecated** — режим mTLS задаётся per-node (`nodes.mtls_enabled` в БД). Глобальный флаг оставлен только для legacy backfill при миграции |
 | `NODE_AGENT_MTLS_CA_CERT` | `/etc/adminpanelaz/mtls/ca.crt` | CA для проверки сертификата агента (создаётся панелью при первом включении mTLS) |
 | `NODE_AGENT_MTLS_CLIENT_CERT` | `/etc/adminpanelaz/mtls/panel.crt` | Клиентский сертификат панели |

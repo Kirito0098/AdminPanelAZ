@@ -527,79 +527,43 @@ print(os.environ["RENDERED"].replace("__PANEL_LOCATION_BLOCKS__", os.environ["PA
 PY
 }
 
-nginx_render_redirect_template() {
-  local domain="$1"
-  local uvicorn_port="$2"
-  local ssl_cert="$3"
-  local ssl_key="$4"
-  sed \
-    -e "s|__DOMAIN__|${domain}|g" \
-    -e "s|__UVICORN_PORT__|${uvicorn_port}|g" \
-    -e "s|__SSL_CERT__|${ssl_cert}|g" \
-    -e "s|__SSL_KEY__|${ssl_key}|g" \
-    "$NGINX_TEMPLATE_DIR/adminpanelaz-redirect.conf.template"
-}
-
 nginx_count_other_enabled_sites() {
   local domain="$1"
   local count=0
-  local base
-  base="$(nginx_conf_basename "$domain")"
+  local base=""
+  [[ -n "$domain" ]] && base="$(nginx_conf_basename "$domain")"
   local path name
   for path in /etc/nginx/sites-enabled/*; do
     [[ -e "$path" ]] || continue
     name="$(basename "$path")"
-    [[ "$name" == "$base" ]] && continue
+    [[ -n "$base" && "$name" == "$base" ]] && continue
     [[ "$name" == "default" ]] && continue
     count=$((count + 1))
   done
   printf '%s' "$count"
 }
 
-nginx_pick_redirect_cert_paths() {
-  local domain="$1"
-  local fallback_cert="${2:-}"
-  local fallback_key="${3:-}"
-  local le_cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
-  local le_key="/etc/letsencrypt/live/${domain}/privkey.pem"
-  if [[ -f "$le_cert" && -f "$le_key" ]]; then
-    NGINX_REDIRECT_CERT="$le_cert"
-    NGINX_REDIRECT_KEY="$le_key"
-    return 0
-  fi
-  if [[ -f "$fallback_cert" && -f "$fallback_key" ]]; then
-    NGINX_REDIRECT_CERT="$fallback_cert"
-    NGINX_REDIRECT_KEY="$fallback_key"
-    return 0
-  fi
-  if [[ -f "$NGINX_SELF_SIGNED_CERT" && -f "$NGINX_SELF_SIGNED_KEY" ]]; then
-    NGINX_REDIRECT_CERT="$NGINX_SELF_SIGNED_CERT"
-    NGINX_REDIRECT_KEY="$NGINX_SELF_SIGNED_KEY"
-    return 0
-  fi
-  return 1
-}
+# Убрать vhost панели и остановить nginx, если других сайтов нет.
+# Редирект 443 → uvicorn больше не создаём — в режиме uvicorn панель слушает сама.
+nginx_disable_for_direct_publish() {
+  local domain="${1:-}"
 
-# Редирект 443 → uvicorn HTTPS (для multi-site: другие сайты на 443 не трогаем)
-nginx_install_uvicorn_redirect() {
-  local domain="$1"
-  local uvicorn_port="$2"
-  local ssl_cert="${3:-}"
-  local ssl_key="${4:-}"
+  if [[ -n "$domain" ]]; then
+    nginx_remove_site "$domain"
+  fi
 
-  [[ -n "$domain" ]] || return 0
-  [[ "$uvicorn_port" != "443" ]] || return 0
   command -v nginx >/dev/null 2>&1 || return 0
 
-  nginx_pick_redirect_cert_paths "$domain" "$ssl_cert" "$ssl_key" || {
-    nginx_warn "Не найден cert для редиректа 443 → :${uvicorn_port}; открывайте https://${domain}:${uvicorn_port}/"
+  local other
+  other="$(nginx_count_other_enabled_sites "$domain")"
+  if [[ "${other:-0}" -gt 0 ]]; then
+    nginx_warn "Nginx оставлен запущенным: на сервере есть другие сайты (${other}). Панель — напрямую на своём порту."
     return 0
-  }
+  fi
 
-  local conf
-  conf="$(nginx_render_redirect_template "$domain" "$uvicorn_port" "$NGINX_REDIRECT_CERT" "$NGINX_REDIRECT_KEY")"
-  nginx_install_site "$conf" "$domain" "true"
-  nginx_log "Nginx редирект: https://${domain}/ → https://${domain}:${uvicorn_port}/"
+  systemctl stop nginx 2>/dev/null || true
+  systemctl disable nginx 2>/dev/null || true
+  nginx_log "Nginx остановлен (публикация без reverse proxy)"
 }
 
 nginx_set_publish_mode() {
@@ -658,8 +622,8 @@ nginx_apply_behind_proxy_env() {
   nginx_env_set BEHIND_NGINX "true"
   nginx_env_set HTTPS_PUBLIC_PORT "$https_public_port"
   nginx_env_set HTTP_ACME_PORT "$http_acme_port"
-  nginx_env_set TRUSTED_PROXY_IPS "127.0.0.1,::1"
-  nginx_env_set FORWARDED_ALLOW_IPS "127.0.0.1,::1"
+  nginx_env_set TRUSTED_PROXY_IPS "127.0.0.1"
+  nginx_env_set FORWARDED_ALLOW_IPS "127.0.0.1"
   nginx_env_set REFRESH_TOKEN_COOKIE_SECURE "true"
   nginx_env_set ENFORCE_HTTPS "true"
   local normalized_access_path

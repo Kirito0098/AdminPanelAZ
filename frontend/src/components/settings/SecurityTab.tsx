@@ -437,7 +437,7 @@ export default function SecurityTab() {
                   id="whitelist-firewall"
                   label="Дополнительная блокировка на уровне сервера"
                   description={[
-                    'Закрывает доступ к панели для всех, кроме адресов из списка (только при прямом подключении без Nginx).',
+                    'Закрывает доступ к панели для всех, кроме адресов из списка (только при прямом подключении без Nginx — HTTP или HTTPS на uvicorn).',
                     settings.whitelist_firewall_active && 'Сейчас включено.',
                     !settings.whitelist_firewall_applicable &&
                       'Недоступно: панель работает через Nginx или только на localhost.',

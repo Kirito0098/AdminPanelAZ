@@ -28,7 +28,7 @@ LEGACY_PID_FILE="$ROOT_DIR/.start.sh.pids"
 BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
-FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-127.0.0.1,::1}"
+FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-127.0.0.1}"
 USE_HTTPS="${USE_HTTPS:-false}"
 SSL_CERT="${SSL_CERT:-}"
 SSL_KEY="${SSL_KEY:-}"
@@ -557,7 +557,7 @@ Environment:
   BACKEND_HOST            default: 127.0.0.1 (localhost; за Nginx — только 127.0.0.1)
   BACKEND_PORT            default: 8000
   UVICORN_WORKERS         prod workers (default: 1; >1 — см. AUTH_RATE_LIMIT_BACKEND=redis)
-  FORWARDED_ALLOW_IPS     trusted proxies for X-Forwarded-* (default: 127.0.0.1,::1)
+  FORWARDED_ALLOW_IPS     trusted proxies for X-Forwarded-* (default: 127.0.0.1)
   FRONTEND_HOST           default: 127.0.0.1 (dev daemon/foreground)
   FRONTEND_PORT           default: 5173 (dev only)
   WATCHDOG_INTERVAL       seconds between health checks (default: 5)

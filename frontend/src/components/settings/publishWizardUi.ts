@@ -103,9 +103,6 @@ export function guessPublishAccessUrl(
   if (mode.startsWith('uvicorn_')) {
     if (!host) return undefined
     const port = Number(backendPort)
-    if (port !== 443 && resolveDomainLetsEncrypt(settings, domain, domainLetsEncrypt)) {
-      return `https://${host}${pathSuffix}`
-    }
     return port === 443 ? `https://${host}${pathSuffix}` : `https://${host}:${port}${pathSuffix}`
   }
 

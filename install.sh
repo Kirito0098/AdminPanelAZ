@@ -922,8 +922,8 @@ apply_wiz_env_settings() {
   if [[ "$WIZARD_RAN" == true && "${WIZ_BEHIND_NGINX:-false}" == "true" ]] \
     || [[ -n "${WIZ_BEHIND_NGINX:-}" && "${WIZ_BEHIND_NGINX:-false}" == "true" ]]; then
     env_set BEHIND_NGINX "true"
-    env_set TRUSTED_PROXY_IPS "127.0.0.1,::1"
-    env_set FORWARDED_ALLOW_IPS "127.0.0.1,::1"
+    env_set TRUSTED_PROXY_IPS "127.0.0.1"
+    env_set FORWARDED_ALLOW_IPS "127.0.0.1"
   fi
   if [[ "$WIZARD_RAN" == true && "${WIZ_UVICORN_WORKERS:-1}" -gt 1 ]] \
     || [[ -n "${WIZ_UVICORN_WORKERS:-}" && "${WIZ_UVICORN_WORKERS:-1}" -gt 1 ]]; then

@@ -76,7 +76,7 @@ def validate_node_host(host: str) -> str:
                     detail="Внутренние IP-адреса запрещены (ALLOW_INTERNAL_NODES=true для разрешения)",
                 )
         except socket.gaierror:
-            if hostname in ("localhost", "127.0.0.1", "::1"):
+            if hostname in ("localhost", "127.0.0.1"):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="localhost запрещён для удалённых узлов",

@@ -122,8 +122,8 @@ class Settings(BaseSettings):
     access_path: str = ""
     https_public_port: int = 443
     behind_nginx: bool = False
-    trusted_proxy_ips: str = "127.0.0.1,::1"
-    forwarded_allow_ips: str = "127.0.0.1,::1"
+    trusted_proxy_ips: str = "127.0.0.1"
+    forwarded_allow_ips: str = "127.0.0.1"
     node_agent_allowed_ips: str = ""
     node_agent_mtls_enabled: bool = False
     node_agent_mtls_dir: Path = Path("/etc/adminpanelaz/mtls")

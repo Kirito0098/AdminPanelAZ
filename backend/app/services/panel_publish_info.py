@@ -31,7 +31,7 @@ def _resolve_env_string(
     value = gv(key, "")
     return value if value else settings_fallback
 
-WHITELIST_PORT_FIREWALL_MODES = frozenset({"direct_http"})
+WHITELIST_PORT_FIREWALL_MODES = frozenset({"direct_http", "direct_https"})
 
 SELF_SIGNED_CERT_PATH = Path("/etc/ssl/certs/adminpanelaz.crt")
 SELF_SIGNED_KEY_PATH = Path("/etc/ssl/private/adminpanelaz.key")
@@ -51,7 +51,7 @@ def _parse_bool(raw: str | None, *, default: bool = False) -> bool:
 
 
 def _is_loopback_bind(bind: str) -> bool:
-    return bind in {"127.0.0.1", "localhost", "::1"}
+    return bind in {"127.0.0.1", "localhost"}
 
 
 def resolve_panel_publish_mode(
@@ -72,7 +72,7 @@ def resolve_panel_publish_mode(
 
 
 def is_whitelist_port_firewall_applicable(*, get_env_value: GetEnvValue | None = None) -> bool:
-    """iptables whitelist on BACKEND_PORT: direct HTTP on 0.0.0.0, not behind Nginx."""
+    """iptables whitelist on BACKEND_PORT: direct bind on 0.0.0.0 (HTTP or HTTPS), not behind Nginx."""
 
     def gv(key: str, default: str = "") -> str:
         if get_env_value is not None:
@@ -699,7 +699,7 @@ def build_uvicorn_publish_warnings(
             )
         else:
             warnings.append(
-                f"{nginx_origin}/ идёт в Nginx, панель — {panel_origin}/"
+                f"{nginx_origin}/ обслуживает Nginx (другие сайты), панель — только {panel_origin}/"
             )
 
     return warnings
@@ -737,9 +737,6 @@ def build_publish_access_url(
         root = f"http://{domain_host}:{port}/" if domain_host else f"http://<сервер>:{port}/"
         return append_access_path_to_url_root(root, _PathSettings())
     if mode.startswith("uvicorn_"):
-        le_cert = Path(f"/etc/letsencrypt/live/{domain_host}/fullchain.pem")
-        if port != 443 and le_cert.is_file():
-            return append_access_path_to_url_root(f"https://{domain_host}/", _PathSettings())
         root = f"https://{domain_host}/" if port == 443 else f"https://{domain_host}:{port}/"
         return append_access_path_to_url_root(root, _PathSettings())
     return None
