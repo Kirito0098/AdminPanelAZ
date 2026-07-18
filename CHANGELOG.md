@@ -47,10 +47,17 @@
 ### 🔄 Changed
 
 - **Удаление узла из HA-группы** — вместо сырого 409 в консоли: диалог с объяснением, что сначала нужно расформировать группу синхронизации; подсказка при удалении; массовое удаление пропускает узлы в HA (`nodeHa.ts`, `NodesPage.tsx`, `ConfirmDialog.tsx`, `NodeSyncGroupSection.tsx`).
+- **QR AntiZapret / OpenVPN** — для AZ WireGuard/AmneziaWG (длинный `AllowedIPs`) и всех `.ovpn` сразу QR со **ссылкой на скачивание**, без попытки вложить профиль; короткий VPN WG по-прежнему кодируется целиком для импорта в приложение (`qr_generator.py`, `configs.py`).
+- **UI — диалог QR** — заголовок и подсказка различают «QR-код профиля» и «QR: ссылка для скачивания» (`DashboardPage.tsx`).
 
 ### 🐛 Fixed
 
 - **`DELETE /api/nodes/{id}` → Internal Server Error** после удаления VPS у хостера (или для offline-узла): при удалении не чистилась таблица `connection_count_samples` → `FOREIGN KEY constraint failed` и голый 500. Теперь сэмплы истории подключений удаляются в `purge_node_related`; неожиданный FK даёт понятный **409**, а не 500 (`node_manager.py`, `nodes.py`). Удаление записи в панели по-прежнему локально в БД и не требует доступности агента на сервере. Если узел в HA — сначала «Группы синхронизации» → расформировать группу.
+- **QR AZ выглядел как профиль для сканирования** — бэкенд уже отдавал `download-link`, но UI не читал `X-Qr-Content` / `X-Qr-Download-Url` (не было CORS `expose_headers`) и показывал обычный «QR-код» без подсказки и кнопки «Скопировать ссылку» (`main.py`, `configs.py`).
+
+### 🧪 Tests
+
+- **`test_qr_generator.py`** — лимит размера, принудительный download-link для AZ WG/AWG и `.ovpn`, без ложного срабатывания на пути `/root/antizapret/.../vpn/`.
 
 ---
 

@@ -193,6 +193,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Captcha-Id", "X-Web-Session-Id", "Accept"],
+    expose_headers=["X-Qr-Content", "X-Qr-Download-Url"],
 )
 app.add_middleware(ApiRateLimitMiddleware)
 
