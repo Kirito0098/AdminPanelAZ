@@ -22,7 +22,7 @@ class QrDownloadService:
     def __init__(self, db: Session, *, base_url: str = "", ttl_seconds: int = 600, max_downloads: int = 1, pin: str = ""):
         self.db = db
         self.base_url = base_url.rstrip("/")
-        self.ttl_seconds = max(60, min(ttl_seconds, 3600))
+        self.ttl_seconds = max(60, min(ttl_seconds, 86400))
         self.max_downloads = max_downloads if max_downloads in (1, 3, 5) else 1
         self.pin_hash = _hash_pin(pin) if pin else None
 

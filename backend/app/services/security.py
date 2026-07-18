@@ -134,7 +134,7 @@ class SecurityService:
                 str(max(30, min(3600, int(payload["ip_blocked_dwell_seconds"])))),
             )
         if "qr_download_ttl_seconds" in payload:
-            _set(db, "qr_download_ttl_seconds", str(max(60, min(3600, int(payload["qr_download_ttl_seconds"])))))
+            _set(db, "qr_download_ttl_seconds", str(max(60, min(86400, int(payload["qr_download_ttl_seconds"])))))
         if "qr_download_max_downloads" in payload:
             val = int(payload["qr_download_max_downloads"])
             _set(db, "qr_download_max_downloads", str(val if val in (1, 3, 5) else 1))
