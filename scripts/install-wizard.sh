@@ -69,6 +69,9 @@ if [[ "${UI_INITIALIZED:-false}" != true ]]; then
   ui_init
 fi
 
+# shellcheck source=scripts/install-port-check.sh
+source "$ROOT_DIR/scripts/install-port-check.sh"
+
 wiz_set_total_steps() {
   case "$WIZ_INSTALL_TYPE" in
     node)
@@ -190,16 +193,38 @@ wiz_prompt_yesno() {
   esac
 }
 
+# Опциональные 3–4 аргументы: role_label, bind_hint (any|127.0.0.1).
+# После выбора числа проверяет занятость порта в системе.
 wiz_prompt_port() {
   local prompt="$1"
   local default="$2"
+  local role="${3:-порт}"
+  local bind_hint="${4:-any}"
 
   while true; do
     wiz_prompt "$prompt" "$default"
-    if [[ "$REPLY" =~ ^[0-9]+$ ]] && (( REPLY >= 1 && REPLY <= 65535 )); then
+    if [[ ! "$REPLY" =~ ^[0-9]+$ ]] || (( REPLY < 1 || REPLY > 65535 )); then
+      echo "Введите число от 1 до 65535."
+      continue
+    fi
+    local port="$REPLY"
+    # quiet=1: сообщение покажем один раз в ui_warn_box ниже
+    if port_check_available "$port" "$role" "$bind_hint" 1; then
+      REPLY="$port"
       return 0
     fi
-    echo "Введите число от 1 до 65535."
+    if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
+      die "${role}: порт ${port} занят ($(port_listener_info "$port")). Укажите свободный порт или остановите конфликтующий сервис."
+    fi
+    if declare -F ui_warn_box >/dev/null 2>&1; then
+      ui_warn_box "Порт ${port} занят (${role})" \
+        "$(port_listener_info "$port")" \
+        "Выберите другой порт или остановите конфликтующий сервис."
+    else
+      print_warn "${role}: порт ${port} уже занят — $(port_listener_info "$port")"
+      echo "Выберите другой порт."
+    fi
+    default="$port"
   done
 }
 
@@ -207,10 +232,21 @@ wiz_prompt_port_no_conflict() {
   local prompt="$1"
   local default="$2"
   shift 2
+  local role="порт"
+  local bind_hint="any"
+  # Опционально: если первый из хвоста не число — это role, второй — bind_hint
+  if [[ $# -gt 0 && ! "${1:-}" =~ ^[0-9]+$ ]]; then
+    role="$1"
+    shift
+    if [[ $# -gt 0 && ! "${1:-}" =~ ^[0-9]+$ ]]; then
+      bind_hint="$1"
+      shift
+    fi
+  fi
   local -a forbidden=("$@")
 
   while true; do
-    wiz_prompt_port "$prompt" "$default"
+    wiz_prompt_port "$prompt" "$default" "$role" "$bind_hint"
     local port="$REPLY"
     local f
     for f in "${forbidden[@]}"; do
@@ -512,7 +548,7 @@ wizard_ask_install_type() {
 wizard_ask_network() {
   if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
     wiz_step "Порты node agent"
-    wiz_prompt_port "Порт node agent" "$WIZ_NODE_AGENT_PORT"
+    wiz_prompt_port "Порт node agent" "$WIZ_NODE_AGENT_PORT" "Node agent" "any"
     WIZ_NODE_AGENT_PORT="$REPLY"
     echo
     return 0
@@ -529,13 +565,14 @@ wizard_ask_network() {
   if [[ -z "$WIZ_SERVER_ADDRESS" ]]; then
     print_info "По умолчанию: только localhost (127.0.0.1). Домен — на шаге публикации через Nginx."
   fi
-  wiz_prompt_port "Внутренний порт backend (только localhost)" "$WIZ_BACKEND_PORT"
+  wiz_prompt_port "Внутренний порт backend (только localhost)" "$WIZ_BACKEND_PORT" "Backend (панель)" "127.0.0.1"
   WIZ_BACKEND_PORT="$REPLY"
   WIZ_BACKEND_HOST="127.0.0.1"
   wizard_derive_cors_origins "$WIZ_BACKEND_PORT"
 
   if [[ "$WIZ_INSTALL_TYPE" != "controller" ]]; then
-    wiz_prompt_port_no_conflict "Порт node agent" "$WIZ_NODE_AGENT_PORT" "$WIZ_BACKEND_PORT"
+    wiz_prompt_port_no_conflict "Порт node agent" "$WIZ_NODE_AGENT_PORT" \
+      "Node agent" "any" "$WIZ_BACKEND_PORT"
     WIZ_NODE_AGENT_PORT="$REPLY"
   fi
 
@@ -724,20 +761,20 @@ wizard_ask_https() {
       wiz_prompt "Email для Let's Encrypt (пусто — без email)" "$WIZ_NGINX_EMAIL"
       WIZ_NGINX_EMAIL="$REPLY"
       wiz_prompt_port_no_conflict "Публичный HTTPS-порт панели (nginx)" "$WIZ_HTTPS_PUBLIC_PORT" \
-        "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT"
+        "HTTPS (nginx)" "any" "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT"
       WIZ_HTTPS_PUBLIC_PORT="$REPLY"
       wiz_prompt_port_no_conflict "Публичный HTTP-порт для ACME" "$WIZ_HTTP_ACME_PORT" \
-        "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT" "$WIZ_HTTPS_PUBLIC_PORT"
+        "HTTP/ACME (nginx)" "any" "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT" "$WIZ_HTTPS_PUBLIC_PORT"
       WIZ_HTTP_ACME_PORT="$REPLY"
       if [[ "$WIZ_HTTP_ACME_PORT" != "80" ]]; then
         print_warn "Let's Encrypt проверяет домен на порту 80. Нестандартный порт может потребовать DNS-challenge."
       fi
     elif [[ "$WIZ_NGINX_MODE" == "nginx_custom" ]]; then
       wiz_prompt_port_no_conflict "Публичный HTTPS-порт панели (nginx)" "$WIZ_HTTPS_PUBLIC_PORT" \
-        "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT"
+        "HTTPS (nginx)" "any" "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT"
       WIZ_HTTPS_PUBLIC_PORT="$REPLY"
       wiz_prompt_port_no_conflict "Публичный HTTP-порт (редирект на HTTPS)" "$WIZ_HTTP_ACME_PORT" \
-        "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT" "$WIZ_HTTPS_PUBLIC_PORT"
+        "HTTP (nginx)" "any" "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT" "$WIZ_HTTPS_PUBLIC_PORT"
       WIZ_HTTP_ACME_PORT="$REPLY"
       while true; do
         wiz_prompt "Путь к сертификату (.crt/.pem)" "${WIZ_SSL_CERT:-}"
@@ -753,10 +790,10 @@ wizard_ask_https() {
       done
     else
       wiz_prompt_port_no_conflict "Публичный HTTPS-порт панели (nginx)" "$WIZ_HTTPS_PUBLIC_PORT" \
-        "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT"
+        "HTTPS (nginx)" "any" "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT"
       WIZ_HTTPS_PUBLIC_PORT="$REPLY"
       wiz_prompt_port_no_conflict "Публичный HTTP-порт (редирект на HTTPS)" "$WIZ_HTTP_ACME_PORT" \
-        "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT" "$WIZ_HTTPS_PUBLIC_PORT"
+        "HTTP (nginx)" "any" "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT" "$WIZ_HTTPS_PUBLIC_PORT"
       WIZ_HTTP_ACME_PORT="$REPLY"
     fi
     wizard_ask_access_path_and_status
@@ -771,7 +808,7 @@ wizard_ask_https() {
     wiz_prompt "Домен для HTTPS" "${default_domain:-panel.example.com}"
     WIZ_NGINX_DOMAIN="$REPLY"
     wiz_prompt_port_no_conflict "Порт HTTPS панели (uvicorn слушает этот порт)" "${WIZ_BACKEND_PORT:-8000}" \
-      "$WIZ_NODE_AGENT_PORT"
+      "Backend HTTPS (uvicorn)" "any" "$WIZ_NODE_AGENT_PORT"
     WIZ_BACKEND_PORT="$REPLY"
     WIZ_HTTPS_PUBLIC_PORT="$REPLY"
     if [[ "$WIZ_NGINX_MODE" == "uvicorn_le" ]]; then
@@ -1339,6 +1376,8 @@ run_install_wizard() {
   wizard_ask_paths
   wizard_ask_firewall
   wizard_show_summary
+  echo
+  install_preflight_ports
   wizard_confirm_apply
   wizard_apply_run_mode_flags
 }

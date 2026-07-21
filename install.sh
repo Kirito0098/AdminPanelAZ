@@ -95,6 +95,8 @@ ROOT_DIR="${_script_dir:-$(pwd)}"
 # shellcheck source=scripts/install-ui.sh
 source "$ROOT_DIR/scripts/install-ui.sh"
 ui_init
+# shellcheck source=scripts/install-port-check.sh
+source "$ROOT_DIR/scripts/install-port-check.sh"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 VENV_DIR="$BACKEND_DIR/.venv"
@@ -121,6 +123,8 @@ FULL_PURGE=false
 PURGE_REPO=false
 ENV_BACKUP_DIR=""
 RESTORE_ENV_AFTER_INSTALL=false
+INSTALL_CURRENT_STEP="инициализация"
+INSTALL_FATAL_HANDLED=false
 
 log() {
   if [[ "$NON_INTERACTIVE" == true ]] || [[ ! -t 1 ]]; then
@@ -138,14 +142,98 @@ warn() {
   fi
 }
 
-die() {
-  if [[ "$NON_INTERACTIVE" == true ]] || [[ ! -t 1 ]]; then
-    echo "[install] ОШИБКА: $*" >&2
+install_set_step() {
+  INSTALL_CURRENT_STEP="$1"
+}
+
+install_on_err() {
+  local lineno="${1:-?}"
+  local exit_code="${2:-1}"
+  if [[ "${INSTALL_FATAL_HANDLED:-false}" == true ]]; then
+    return 0
+  fi
+  INSTALL_FATAL_HANDLED=true
+
+  local cmd="${BASH_COMMAND:-неизвестно}"
+  local step="${INSTALL_CURRENT_STEP:-неизвестный шаг}"
+  local state_dir="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-/var/lib/adminpanelaz}}"
+
+  # Подсказки по логам — только для сервисов, которые реально ставились
+  local -a log_hints=()
+  if declare -F install_controller_selected >/dev/null 2>&1 && install_controller_selected 2>/dev/null; then
+    log_hints+=("  journalctl -u adminpanelaz -n 50")
+  fi
+  if declare -F install_node_selected >/dev/null 2>&1 && install_node_selected 2>/dev/null; then
+    log_hints+=("  journalctl -u adminpanelaz-node -n 50")
+  fi
+  if [[ ${#log_hints[@]} -eq 0 ]]; then
+    log_hints+=("  journalctl -u adminpanelaz -n 50")
+  fi
+
+  echo >&2
+  if declare -F ui_warn_box >/dev/null 2>&1 && [[ "$NON_INTERACTIVE" != true ]] && [[ -t 2 || -t 1 ]]; then
+    ui_warn_box "Установка прервана" \
+      "Шаг: ${step}" \
+      "Строка: ${lineno} (код ${exit_code})" \
+      "Команда: ${cmd}" \
+      "" \
+      "Что проверить:" \
+      "${log_hints[@]}" \
+      "  ${state_dir}/logs/backend.log" \
+      "  Повтор: sudo ./install.sh  (или sudo ./install-easy.sh)"
   else
-    print_error "$*"
+    echo "[install] ОШИБКА: установка прервана" >&2
+    echo "[install]   Шаг: ${step}" >&2
+    echo "[install]   Строка: ${lineno}, код: ${exit_code}" >&2
+    echo "[install]   Команда: ${cmd}" >&2
+    echo "[install]   Логи: journalctl -u adminpanelaz -n 50; ${state_dir}/logs/backend.log" >&2
+    echo "[install]   Повтор: sudo ./install.sh" >&2
+  fi
+  exit "${exit_code}"
+}
+
+install_on_interrupt() {
+  if [[ "${INSTALL_FATAL_HANDLED:-false}" == true ]]; then
+    exit 130
+  fi
+  INSTALL_FATAL_HANDLED=true
+  echo >&2
+  if declare -F print_warn >/dev/null 2>&1; then
+    print_warn "Установка прервана пользователем (Ctrl+C). Шаг: ${INSTALL_CURRENT_STEP:-?}."
+    print_info "Можно запустить снова: sudo ./install.sh"
+  else
+    echo "[install] Прервано пользователем (Ctrl+C). Шаг: ${INSTALL_CURRENT_STEP:-?}." >&2
+  fi
+  exit 130
+}
+
+die() {
+  INSTALL_FATAL_HANDLED=true
+  local msg="$*"
+  echo >&2
+  if [[ "$NON_INTERACTIVE" == true ]] || [[ ! -t 1 ]]; then
+    echo "[install] ОШИБКА: $msg" >&2
+    if [[ -n "${INSTALL_CURRENT_STEP:-}" ]]; then
+      echo "[install]   Шаг: ${INSTALL_CURRENT_STEP}" >&2
+    fi
+  else
+    if declare -F ui_warn_box >/dev/null 2>&1; then
+      ui_warn_box "Установка прервана" \
+        "$msg" \
+        "" \
+        "Шаг: ${INSTALL_CURRENT_STEP:-?}" \
+        "Повтор: sudo ./install.sh  (или sudo ./install-easy.sh)"
+    else
+      print_error "$msg"
+    fi
   fi
   exit 1
 }
+
+# ERR наследуется в функции; INT/TERM — понятное сообщение при Ctrl+C
+set -E
+trap 'install_on_err $LINENO $?' ERR
+trap 'install_on_interrupt' INT TERM
 
 usage() {
   ui_show_help
@@ -774,6 +862,7 @@ verify_controller_running() {
 }
 
 install_system_deps() {
+  install_set_step "Установка системных зависимостей"
   ui_progress_start "Установка системных зависимостей"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
@@ -1036,6 +1125,7 @@ apply_wiz_env_settings() {
 }
 
 setup_env() {
+  install_set_step "Настройка backend/.env"
   if ! install_controller_selected; then
     log "Режим node-only: пропуск backend/.env"
     return 0
@@ -1152,6 +1242,7 @@ setup_node_env() {
 }
 
 setup_backend() {
+  install_set_step "Настройка backend (Python venv)"
   ui_progress_start "Настройка backend (Python venv)"
   if [[ ! -d "$VENV_DIR" ]]; then
     python3 -m venv "$VENV_DIR"
@@ -1210,6 +1301,7 @@ setup_frontend() {
     return 0
   fi
 
+  install_set_step "Настройка frontend (npm install / build)"
   ui_progress_start "Настройка frontend (npm install)"
   if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
     (cd "$FRONTEND_DIR" && npm install)
@@ -1235,6 +1327,7 @@ setup_runtime_dirs() {
 }
 
 setup_systemd() {
+  install_set_step "Установка systemd-сервиса панели"
   if ! install_controller_selected; then
     return 0
   fi
@@ -1253,6 +1346,8 @@ setup_node_agent_systemd() {
   if ! install_node_selected; then
     return 0
   fi
+
+  install_set_step "Установка systemd-сервиса node agent"
 
   local api_key="${GENERATED_NODE_KEY:-${NODE_AGENT_API_KEY:-}}"
   if is_placeholder_secret "$api_key"; then
@@ -1342,6 +1437,8 @@ setup_ddns_if_selected() {
     return 0
   fi
 
+  install_set_step "Настройка DDNS ($provider)"
+
   log "Настройка DDNS ($provider)..."
   write_ddns_config
 
@@ -1377,6 +1474,7 @@ setup_nginx_if_selected() {
     return 0
   fi
 
+  install_set_step "Настройка публикации HTTPS ($mode)"
   log "Настройка публикации (HTTPS): $mode"
 
   # shellcheck source=scripts/nginx-common.sh
@@ -1585,6 +1683,7 @@ setup_firewall_if_selected() {
     return 0
   fi
 
+  install_set_step "Настройка firewall"
   log "Настройка firewall..."
   # shellcheck source=scripts/firewall-setup.sh
   source "$ROOT_DIR/scripts/firewall-setup.sh"
@@ -1885,10 +1984,14 @@ main() {
 }
 
 run_install_flow() {
+  install_set_step "Проверка ОС и каталога проекта"
   check_os
   resolve_project_dir
+  install_set_step "Мастер установки"
   run_wizard_if_needed
   check_antizapret
+  install_set_step "Проверка доступности портов"
+  install_preflight_ports
   install_system_deps
   ensure_executable_scripts
   setup_env
@@ -1909,6 +2012,7 @@ run_install_flow() {
       systemctl start adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz (проверьте: systemctl status adminpanelaz)"
     fi
   elif [[ "$WITH_DAEMON" == true ]]; then
+    install_set_step "Запуск daemon панели"
     start_daemon
   fi
 
@@ -1923,14 +2027,17 @@ run_install_flow() {
       setup_node_agent_systemd
       systemctl start adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
     elif [[ "$WITH_DAEMON" == true ]]; then
+      install_set_step "Запуск daemon node agent"
       start_node_agent_daemon "$GENERATED_NODE_KEY"
     fi
   fi
 
   if install_controller_selected && { [[ "$WITH_SYSTEMD" == true ]] || [[ "$WITH_DAEMON" == true ]]; }; then
+    install_set_step "Проверка запуска backend"
     verify_controller_running
   fi
 
+  install_set_step "завершение"
   print_post_install "$GENERATED_NODE_KEY"
 }
 

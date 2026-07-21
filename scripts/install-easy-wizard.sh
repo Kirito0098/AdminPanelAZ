@@ -163,6 +163,44 @@ easy_ask_access() {
     WIZ_ACCESS_PATH=""
     WIZ_NGINX_SUBPATH_INTEGRATE="false"
   fi
+
+  # Проверка занятости портов (backend / 80 / 443)
+  echo
+  if ! port_check_available "$WIZ_BACKEND_PORT" "Внутренний порт панели" "127.0.0.1" 1; then
+    ui_warn_box "Порт панели ${WIZ_BACKEND_PORT} занят" \
+      "$(port_listener_info "$WIZ_BACKEND_PORT")" \
+      "Можно выбрать другой внутренний порт."
+    wiz_prompt_port "Другой порт панели (только localhost)" "8001" "Внутренний порт панели" "127.0.0.1"
+    WIZ_BACKEND_PORT="$REPLY"
+    wizard_derive_cors_origins "$WIZ_BACKEND_PORT"
+    if [[ "$WIZ_NGINX_MODE" == "le" && -n "$WIZ_NGINX_DOMAIN" ]]; then
+      wizard_build_nginx_cors_origins "$WIZ_NGINX_DOMAIN" "$WIZ_HTTPS_PUBLIC_PORT" "$WIZ_BACKEND_PORT"
+    fi
+  fi
+  if [[ "$WIZ_NGINX_MODE" == "le" ]]; then
+    local _easy_port_ok=true
+    if ! port_check_available "80" "HTTP (Let's Encrypt)" "any" 1; then
+      _easy_port_ok=false
+      print_warn "Порт 80 занят — $(port_listener_info 80)"
+    fi
+    if ! port_check_available "443" "HTTPS" "any" 1; then
+      _easy_port_ok=false
+      print_warn "Порт 443 занят — $(port_listener_info 443)"
+    fi
+    if [[ "$_easy_port_ok" != true ]]; then
+      ui_warn_box "Порты 80 и/или 443 заняты" \
+        "Для HTTPS (Let's Encrypt) нужны свободные порты 80 и 443." \
+        "Остановите конфликтующий сервис (nginx, apache, OpenVPN на 443)" \
+        "или продолжите на свой риск — шаг nginx может завершиться ошибкой." \
+        "Проверка: ss -tlnp | grep -E ':80|:443'"
+      echo
+      if ! ui_confirm "Продолжить несмотря на занятые порты?" "n"; then
+        print_info "Установка отменена. Освободите порты 80/443 и запустите снова."
+        exit 0
+      fi
+      WIZ_ALLOW_BUSY_PUBLIC_PORTS=true
+    fi
+  fi
   echo
 }
 
@@ -217,6 +255,13 @@ easy_ask_node_panel() {
   wiz_prompt "IP-адрес сервера с панелью (например 203.0.113.10)" ""
   WIZ_NODE_AGENT_ALLOWED_IPS="$REPLY"
   WIZ_NODE_AGENT_PORT="9100"
+  if ! port_check_available "$WIZ_NODE_AGENT_PORT" "Связь с панелью" "any" 1; then
+    ui_warn_box "Порт ${WIZ_NODE_AGENT_PORT} занят (связь с панелью)" \
+      "$(port_listener_info "$WIZ_NODE_AGENT_PORT")" \
+      "Выберите другой порт."
+    wiz_prompt_port "Порт связи с панелью" "9101" "Связь с панелью" "any"
+    WIZ_NODE_AGENT_PORT="$REPLY"
+  fi
   WIZ_NODE_AGENT_API_KEY="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   echo
   print_info "Ключ связи с панелью будет показан в конце установки — сохраните его."
@@ -314,6 +359,7 @@ easy_apply_defaults() {
   WIZ_NODE_AGENT_MTLS_ENABLED="false"
   WIZ_TELEGRAM_ENABLED="false"
   WIZ_AUTO_BACKUP_ENABLED="false"
+  WIZ_ALLOW_BUSY_PUBLIC_PORTS="${WIZ_ALLOW_BUSY_PUBLIC_PORTS:-false}"
 }
 
 easy_show_simple_summary() {
@@ -418,6 +464,8 @@ run_install_easy_wizard() {
   easy_ask_autostart_and_firewall
   easy_apply_defaults
   easy_show_simple_summary
+  echo
+  install_preflight_ports
   easy_confirm
   wizard_apply_run_mode_flags
 }

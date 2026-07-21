@@ -42,9 +42,16 @@
 
 ## [Unreleased]
 
-> **Кратко:** подпуть `/panel` и StatusOpenVPN при установке; DuckDNS — только token без ложного «пароля»; предупреждение о конфликте OPENVPN_BACKUP_TCP с HTTPS на 443; публикация без nginx — stop/disable вместо редиректа 443→порт; IPv4-only; whitelist порта на uvicorn HTTPS; фиксы удаления узла и QR AZ.
+> **Кратко:** preflight портов в установщиках и понятный вывод при сбое; подпуть `/panel` и StatusOpenVPN при установке; DuckDNS — только token без ложного «пароля»; предупреждение о конфликте OPENVPN_BACKUP_TCP с HTTPS на 443; публикация без nginx — stop/disable вместо редиректа 443→порт; IPv4-only; whitelist порта на uvicorn HTTPS; фиксы удаления узла и QR AZ.
 
 ### ✨ Added
+
+#### Установщики — проверка портов и понятные ошибки
+
+- **Preflight портов** — до apt/npm установщик проверяет, свободны ли нужные порты (backend, HTTPS/HTTP nginx, node agent); при занятости показывает PID/процесс/unit (`ss -tlnp`) и останавливается с подсказкой (`scripts/install-port-check.sh`, `install.sh`, мастера).
+- **Проверка при вводе порта** — в полном мастере `wiz_prompt_port` не принимает порт, занятый чужим сервисом (предлагает другой); свой `adminpanelaz` / `adminpanelaz-node` / nginx панели считается OK (повторная установка).
+- **Easy-мастер** — при занятом 8000/9100 предлагает сменить порт; при занятых 80/443 для Let's Encrypt — предупреждение и подтверждение продолжения.
+- **Вывод при прерывании** — `trap ERR` / Ctrl+C: шаг установки, строка, команда и что проверить (`journalctl`, `backend.log`); `die()` печатает блок ошибки без дублирования с trap.
 
 #### Установка — подпуть панели (`ACCESS_PATH`) и StatusOpenVPN
 
