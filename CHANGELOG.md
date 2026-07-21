@@ -42,7 +42,18 @@
 
 ## [Unreleased]
 
-> **Кратко:** публикация без nginx — реальный stop/disable вместо редиректа 443→порт; IPv4-only в nginx и proxy-IP; блокировка порта панели доступна на uvicorn HTTPS; фиксы удаления узла и QR AZ.
+> **Кратко:** предупреждение о конфликте OPENVPN_BACKUP_TCP с HTTPS на 443 (UI + API + install); публикация без nginx — реальный stop/disable вместо редиректа 443→порт; IPv4-only в nginx и proxy-IP; блокировка порта панели доступна на uvicorn HTTPS; фиксы удаления узла и QR AZ.
+
+### ✨ Added
+
+#### Конфиг AntiZapret — конфликт `OPENVPN_BACKUP_TCP` с портом 443
+
+Флаг **OPENVPN_BACKUP_TCP** поднимает OpenVPN TCP на **80 / 443 / 504 / 508** и при `HTTPS_PUBLIC_PORT=443` (дефолт) после `doall.sh` перекрывает HTTPS панели.
+
+- **UI** — при включении тоггла, пока публичный HTTPS = 443: `ConfirmDialog` со ссылкой на «Настройки → Адрес сайта и HTTPS» (`/settings/vpn_network`); постоянный `SettingsAlert`, пока флаг включён; выключение без диалога; порт берётся из `getVpnNetworkSettings` (`AntizapretConfigTab.tsx`).
+- **API** — `PUT /routing/antizapret-settings` не блокирует сохранение, но возвращает `warnings: [...]` при конфликте; UI показывает toast (`antizapret_settings.py`, `routing.py`, `AntizapretSettingsUpdateResponse`).
+- **Install** — до `setup_nginx_if_selected`: если в `{ANTIZAPRET_PATH}/setup` уже `OPENVPN_BACKUP_TCP=y`, HTTPS панели 443 и режим nginx `le` / `selfsigned` / `nginx_custom` — флаг принудительно `n` + warn в консоль; при занятом 443 — доп. warn про `doall.sh` (`install.sh`).
+- **Docs** — секция в [docs/antizapret-config.md](docs/antizapret-config.md) у «Резервные порты».
 
 ### 🔄 Changed
 

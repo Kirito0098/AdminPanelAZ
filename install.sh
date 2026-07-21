@@ -586,6 +586,46 @@ check_antizapret() {
   fi
 }
 
+# OPENVPN_BACKUP_TCP=y поднимает OpenVPN TCP на 80/443/504/508 — конфликт с nginx панели на 443.
+disable_openvpn_backup_tcp_if_port_conflict() {
+  if ! wiz_config_active || ! install_controller_selected; then
+    return 0
+  fi
+
+  local https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
+  local mode="${WIZ_NGINX_MODE:-none}"
+  local az_path="${ANTIZAPRET_PATH:-${WIZ_ANTIZAPRET_PATH:-/root/antizapret}}"
+  local setup_file="${az_path}/setup"
+
+  [[ -z "$https_port" || "$https_port" == "443" ]] || return 0
+
+  case "$mode" in
+    le|selfsigned|nginx_custom) ;;
+    *) return 0 ;;
+  esac
+
+  [[ -f "$setup_file" ]] || return 0
+
+  local current
+  current="$(grep -E '^[[:space:]]*OPENVPN_BACKUP_TCP=' "$setup_file" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
+  current="${current%%#*}"
+  current="$(printf '%s' "$current" | tr '[:upper:]' '[:lower:]')"
+  [[ "$current" == "y" ]] || return 0
+
+  if grep -qE '^[[:space:]]*OPENVPN_BACKUP_TCP=' "$setup_file"; then
+    sed -i -E 's/^[[:space:]]*OPENVPN_BACKUP_TCP=.*/OPENVPN_BACKUP_TCP=n/' "$setup_file"
+  else
+    printf '\nOPENVPN_BACKUP_TCP=n\n' >>"$setup_file"
+  fi
+
+  warn "OPENVPN_BACKUP_TCP отключён: порт 443 нужен панели/nginx."
+  warn "Чтобы включить резервные TCP-порты — смените HTTPS_PUBLIC_PORT и верните флаг в UI."
+
+  if command -v ss >/dev/null 2>&1 && ss -tln 2>/dev/null | grep -Eq ':443[[:space:]]'; then
+    warn "Порт 443 уже занят. После смены флага примените конфиг AntiZapret (doall.sh) — install сам doall не запускает."
+  fi
+}
+
 random_hex() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 32
@@ -1819,6 +1859,7 @@ run_install_flow() {
   fi
 
   setup_ddns_if_selected
+  disable_openvpn_backup_tcp_if_port_conflict
   setup_nginx_if_selected
   restart_services_after_nginx
   setup_firewall_if_selected

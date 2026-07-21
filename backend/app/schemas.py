@@ -1329,6 +1329,7 @@ class AntizapretSettingsUpdateResponse(BaseModel):
     message: str
     changes: int
     needs_apply: bool
+    warnings: list[str] = Field(default_factory=list)
 
 
 class WarperHealthResponse(BaseModel):

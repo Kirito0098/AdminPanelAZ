@@ -1653,6 +1653,7 @@ export interface AntizapretSettingsUpdateResponse {
   message: string
   changes: number
   needs_apply: boolean
+  warnings?: string[]
 }
 
 export interface WarperHealthResponse {
