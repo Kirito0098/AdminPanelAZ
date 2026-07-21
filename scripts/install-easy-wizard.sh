@@ -13,7 +13,7 @@ fi
 source "$ROOT_DIR/scripts/install-wizard.sh"
 
 EASY_CURRENT_STEP=0
-EASY_TOTAL_STEPS=6
+EASY_TOTAL_STEPS=4
 
 easy_step() {
   local title="$1"
@@ -46,7 +46,9 @@ easy_show_welcome() {
 }
 
 easy_ask_what_to_install() {
-  easy_step "Что устанавливаем?"
+  ui_box_top "Что устанавливаем?"
+  ui_box_bottom
+  echo
   ui_info_box "Подсказка" \
     "«Панель» — сайт, где вы управляете VPN и клиентами." \
     "«VPN на этом же сервере» — если AntiZapret уже установлен в /root/antizapret." \
@@ -61,17 +63,17 @@ easy_ask_what_to_install() {
     1)
       WIZ_INSTALL_TYPE="controller"
       WIZ_REQUIRE_ANTIZAPRET=false
-      EASY_TOTAL_STEPS=6
+      EASY_TOTAL_STEPS=4
       ;;
     2)
       WIZ_INSTALL_TYPE="controller"
       WIZ_REQUIRE_ANTIZAPRET=true
-      EASY_TOTAL_STEPS=6
+      EASY_TOTAL_STEPS=4
       ;;
     3)
       WIZ_INSTALL_TYPE="node"
       WIZ_REQUIRE_ANTIZAPRET=true
-      EASY_TOTAL_STEPS=4
+      EASY_TOTAL_STEPS=2
       ;;
   esac
   echo

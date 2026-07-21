@@ -1802,8 +1802,9 @@ print_post_install() {
     ui_separator
     ui_bold "URL (prod / systemd)"
     echo
-    ui_summary_row "UI + API" "http://127.0.0.1:${backend_port}/"
-    ui_summary_row "API docs" "http://127.0.0.1:${backend_port}/docs"
+    ui_summary_row "UI + API (локально)" "http://127.0.0.1:${backend_port}/"
+    ui_summary_row "API docs (локально)" "http://127.0.0.1:${backend_port}/docs"
+    print_info "Это локальный адрес (только с этого сервера). Публичный адрес — ниже в блоке «Публикация»."
     ui_summary_row "Конфигурация" "$ENV_FILE"
   fi
 
@@ -1812,7 +1813,9 @@ print_post_install() {
   fi
 
   ui_summary_row "Логи (локально)" "${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-$ROOT_DIR/.runtime}}/logs/"
-  ui_summary_row "Логи (systemd)" "/var/lib/adminpanelaz/logs/"
+  if [[ "$WITH_SYSTEMD" == true ]]; then
+    ui_summary_row "Логи (systemd)" "/var/lib/adminpanelaz/logs/"
+  fi
 
   if install_controller_selected; then
     if [[ "${WIZ_DDNS_PROVIDER:-none}" != "none" ]]; then

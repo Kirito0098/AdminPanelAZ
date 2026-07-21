@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.18.0](#2180---2026-07-21) — 2026-07-21
 - [2.17.0](#2170---2026-07-15) — 2026-07-15
 - [2.16.0](#2160---2026-07-13) — 2026-07-13
 - [2.15.0](#2150---2026-07-12) — 2026-07-12
@@ -42,7 +43,17 @@
 
 ## [Unreleased]
 
-> **Кратко:** preflight портов в установщиках и понятный вывод при сбое; подпуть `/panel` и StatusOpenVPN при установке; DuckDNS — только token без ложного «пароля»; предупреждение о конфликте OPENVPN_BACKUP_TCP с HTTPS на 443; публикация без nginx — stop/disable вместо редиректа 443→порт; IPv4-only; whitelist порта на uvicorn HTTPS; фиксы удаления узла и QR AZ.
+### ✨ Added
+
+### 🔄 Changed
+
+### 🐛 Fixed
+
+---
+
+## [2.18.0] - 2026-07-21
+
+> **Кратко:** preflight портов в установщиках и понятный вывод при сбое; подпуть `/panel` и StatusOpenVPN при установке; DuckDNS — только token без ложного «пароля»; предупреждение о конфликте OPENVPN_BACKUP_TCP с HTTPS на 443; публикация без nginx — stop/disable вместо редиректа 443→порт; IPv4-only; whitelist порта на uvicorn HTTPS; фиксы удаления узла и QR AZ; правки текста установщиков (счётчик шагов easy-мастера, справка, сводка post-install).
 
 ### ✨ Added
 
@@ -90,8 +101,14 @@
 - **QR AntiZapret / OpenVPN** — для AZ WireGuard/AmneziaWG (длинный `AllowedIPs`) и всех `.ovpn` сразу QR со **ссылкой на скачивание**, без попытки вложить профиль; короткий VPN WG по-прежнему кодируется целиком для импорта в приложение (`qr_generator.py`, `configs.py`).
 - **UI — диалог QR** — заголовок и подсказка различают «QR-код профиля» и «QR: ссылка для скачивания» (`DashboardPage.tsx`).
 
+#### Установщики — текст для пользователя
+
+- **Справка `install-easy.sh`** — явно: запуск без аргументов открывает меню; пункт «5) Полный установщик» / `sudo ./install.sh`; единый стиль команд `sudo bash install-easy.sh` (`install-easy.sh`).
+- **Сводка post-install** — локальный URL помечен как «(локально)» + подсказка, что публичный адрес ниже в «Публикация»; строка «Логи (systemd)» только при `WITH_SYSTEMD=true` (`install.sh`).
+
 ### 🐛 Fixed
 
+- **Easy-мастер: счётчик «Шаг X из Y»** — экран «Что устанавливаем?» больше не нумеруется (ветвящий); после выбора: панель — 4 шага, VPN-сервер (node) — 2; раньше заявленное число шагов не совпадало с реально показанными (`install-easy-wizard.sh`).
 - **DuckDNS в мастере** — после ввода token больше не спрашивается «Подтвердите пароль» (ложное ощущение, что нужен пароль аккаунта); для token — один ввод, для No-IP пароль по-прежнему с подтверждением (`wiz_prompt_secret`, `install-wizard.sh`, `install-easy-wizard.sh`).
 - **После «отключения nginx» процесс оставался на 443 (в т.ч. IPv6)** — мастер uvicorn ставил редирект-vhost и оставлял nginx слушать порт; заход по домену без порта уводил на `:5050`. Теперь nginx реально останавливается.
 - **Тогл блокировки порта недоступен на uvicorn HTTPS** — `is_whitelist_port_firewall_applicable` учитывал только `direct_http`, режим `direct_https` ошибочно показывал «Недоступно: панель работает через Nginx или только на localhost».
@@ -2035,7 +2052,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.17.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.18.0...HEAD
+[2.18.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.14.0...v2.15.0

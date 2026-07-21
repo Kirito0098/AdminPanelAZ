@@ -141,20 +141,22 @@ show_easy_menu() {
 
   sudo bash install-easy.sh
 
+Запуск без аргументов открывает это меню. Мастер задаст несколько
+простых вопросов с пояснениями.
+
 Или скачайте с GitHub:
 
   wget -qO /tmp/install-easy.sh https://raw.githubusercontent.com/Kirito0098/AdminPanelAZ/refs/heads/main/install-easy.sh
   sudo bash /tmp/install-easy.sh
 
-Мастер задаст несколько простых вопросов с пояснениями.
-
-Удаление (те же сценарии, что в sudo ./install.sh):
+Удаление (те же сценарии, что в install.sh):
   sudo bash install-easy.sh --uninstall       # с вопросами
   sudo bash install-easy.sh --uninstall -y    # без вопросов (CI/скрипты)
   sudo bash install-easy.sh --purge-all       # всё без следов
   sudo bash install-easy.sh --purge-all -y    # полное удаление без вопросов
 
-Для расширенных настроек используйте: sudo ./install.sh
+Для опытных пользователей — полный установщик (пункт меню «5»)
+с расширенными настройками: sudo ./install.sh
 
 EOF
         read -r -p "Нажмите Enter..." _
