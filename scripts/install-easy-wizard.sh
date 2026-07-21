@@ -128,7 +128,7 @@ easy_ask_access() {
       wiz_prompt "Имя поддомена (только myvpn, без .duckdns.org)" ""
       WIZ_DDNS_SUBDOMAIN="${REPLY,,}"
       WIZ_DDNS_SUBDOMAIN="${WIZ_DDNS_SUBDOMAIN%.duckdns.org}"
-      wiz_prompt_secret "Token с сайта DuckDNS" ""
+      wiz_prompt_secret "Token с сайта DuckDNS" "" ""
       WIZ_DDNS_TOKEN="$REPLY"
       WIZ_NGINX_DOMAIN="${WIZ_DDNS_SUBDOMAIN}.duckdns.org"
       WIZ_SERVER_ADDRESS="$WIZ_NGINX_DOMAIN"
@@ -157,7 +157,11 @@ easy_ask_access() {
   WIZ_BACKEND_PORT="8000"
   wizard_derive_cors_origins "$WIZ_BACKEND_PORT"
   if [[ "$WIZ_NGINX_MODE" == "le" && -n "$WIZ_NGINX_DOMAIN" ]]; then
+    wizard_ask_access_path_and_status
     wizard_build_nginx_cors_origins "$WIZ_NGINX_DOMAIN" "$WIZ_HTTPS_PUBLIC_PORT" "$WIZ_BACKEND_PORT"
+  else
+    WIZ_ACCESS_PATH=""
+    WIZ_NGINX_SUBPATH_INTEGRATE="false"
   fi
   echo
 }
@@ -328,8 +332,19 @@ easy_show_simple_summary() {
       else
         ui_summary_row "Устанавливаем" "Только панель управления"
       fi
-      ui_summary_row "Адрес в браузере" \
-        "${WIZ_NGINX_DOMAIN:-http://127.0.0.1:${WIZ_BACKEND_PORT}/}"
+      if [[ "$WIZ_NGINX_MODE" == "le" && -n "${WIZ_NGINX_DOMAIN:-}" ]]; then
+        ui_summary_row "Адрес в браузере" \
+          "https://${WIZ_NGINX_DOMAIN}$(wizard_access_path_url_suffix)"
+        if [[ -n "$(wizard_normalized_access_path)" ]]; then
+          ui_summary_row "Подпуть" "$(wizard_normalized_access_path)"
+        fi
+        if [[ "${WIZ_NGINX_SUBPATH_INTEGRATE:-false}" == "true" ]]; then
+          ui_summary_row "Интеграция nginx" "да"
+        fi
+      else
+        ui_summary_row "Адрес в браузере" \
+          "http://127.0.0.1:${WIZ_BACKEND_PORT}/"
+      fi
       ui_summary_row "Логин" "$WIZ_ADMIN_USERNAME"
       ui_summary_row "Профиль ресурсов" "${WIZ_RESOURCE_PROFILE:-standard}"
       ui_summary_row "Автозапуск" "Да (после перезагрузки сервера)"

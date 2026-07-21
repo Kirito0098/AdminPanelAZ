@@ -42,9 +42,19 @@
 
 ## [Unreleased]
 
-> **Кратко:** предупреждение о конфликте OPENVPN_BACKUP_TCP с HTTPS на 443 (UI + API + install); публикация без nginx — реальный stop/disable вместо редиректа 443→порт; IPv4-only в nginx и proxy-IP; блокировка порта панели доступна на uvicorn HTTPS; фиксы удаления узла и QR AZ.
+> **Кратко:** подпуть `/panel` и StatusOpenVPN при установке; DuckDNS — только token без ложного «пароля»; предупреждение о конфликте OPENVPN_BACKUP_TCP с HTTPS на 443; публикация без nginx — stop/disable вместо редиректа 443→порт; IPv4-only; whitelist порта на uvicorn HTTPS; фиксы удаления узла и QR AZ.
 
 ### ✨ Added
+
+#### Установка — подпуть панели (`ACCESS_PATH`) и StatusOpenVPN
+
+При Nginx (Let's Encrypt / самоподписанный / свои сертификаты) мастер спрашивает, где открывать панель на домене.
+
+- **Выбор подпути** — **корень** (по умолчанию) / **`/panel`** (одним пунктом) / **свой** сегмент; summary и post-install URL с суффиксом (`https://домен/panel/`) (`wizard_ask_access_path_and_status`, `install-wizard.sh`, `install-easy-wizard.sh`).
+- **StatusOpenVPN** — если на домене найден vhost Status: предложение «установить рядом» → `ACCESS_PATH=/panel` + `NGINX_SUBPATH_INTEGRATE=true`; иначе при чужом vhost и непустом подпути — вопрос про auto-include.
+- **Применение** — `setup_nginx_if_selected` экспортирует `ACCESS_PATH` / integrate и вызывает `nginx_finalize_nginx_site` (snippet + include в чужой/Status vhost), как `nginx-setup.sh` (`install.sh`).
+- **Easy** — тот же опрос после «свой домен» / DuckDNS (`WIZ_NGINX_MODE=le`).
+- **Docs** — сценарий Status при установке и через UI ([set-i-publikaciya.md](docs/nastrojki/set-i-publikaciya.md), [README.md](README.md)).
 
 #### Конфиг AntiZapret — конфликт `OPENVPN_BACKUP_TCP` с портом 443
 
@@ -75,6 +85,7 @@
 
 ### 🐛 Fixed
 
+- **DuckDNS в мастере** — после ввода token больше не спрашивается «Подтвердите пароль» (ложное ощущение, что нужен пароль аккаунта); для token — один ввод, для No-IP пароль по-прежнему с подтверждением (`wiz_prompt_secret`, `install-wizard.sh`, `install-easy-wizard.sh`).
 - **После «отключения nginx» процесс оставался на 443 (в т.ч. IPv6)** — мастер uvicorn ставил редирект-vhost и оставлял nginx слушать порт; заход по домену без порта уводил на `:5050`. Теперь nginx реально останавливается.
 - **Тогл блокировки порта недоступен на uvicorn HTTPS** — `is_whitelist_port_firewall_applicable` учитывал только `direct_http`, режим `direct_https` ошибочно показывал «Недоступно: панель работает через Nginx или только на localhost».
 - **`DELETE /api/nodes/{id}` → Internal Server Error** после удаления VPS у хостера (или для offline-узла): при удалении не чистилась таблица `connection_count_samples` → `FOREIGN KEY constraint failed` и голый 500. Теперь сэмплы истории подключений удаляются в `purge_node_related`; неожиданный FK даёт понятный **409**, а не 500 (`node_manager.py`, `nodes.py`). Удаление записи в панели по-прежнему локально в БД и не требует доступности агента на сервере. Если узел в HA — сначала «Группы синхронизации» → расформировать группу.

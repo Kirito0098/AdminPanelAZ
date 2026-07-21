@@ -1388,17 +1388,50 @@ setup_nginx_if_selected() {
   local https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
   local http_port="${WIZ_HTTP_ACME_PORT:-80}"
   local enforce_https="true"
+  local path_sfx="/"
   if [[ "$WIZ_APP_ENV" != "production" ]]; then
     enforce_https="false"
   fi
 
+  ACCESS_PATH="$(nginx_normalize_access_path "${WIZ_ACCESS_PATH:-}")"
+  export ACCESS_PATH
+  export NGINX_SUBPATH_INTEGRATE="${WIZ_NGINX_SUBPATH_INTEGRATE:-false}"
+  if [[ -n "$ACCESS_PATH" ]]; then
+    path_sfx="${ACCESS_PATH}/"
+  fi
+
+  _install_nginx_panel_site() {
+    local site_domain="$1"
+    local site_backend="$2"
+    local site_cert="$3"
+    local site_key="$4"
+    local site_https="$5"
+    local site_http="$6"
+    local conf
+    if nginx_finalize_nginx_site "$site_domain" "$site_backend"; then
+      nginx_apply_behind_proxy_env "$site_domain" "$site_backend" "https" "$site_https" "$site_http"
+      return 0
+    fi
+    conf="$(nginx_render_template \
+      "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
+      "$site_domain" "$site_backend" "$site_cert" "$site_key" "$site_https" "$site_http")"
+    nginx_install_site "$conf" "$site_domain"
+    nginx_apply_behind_proxy_env "$site_domain" "$site_backend" "https" "$site_https" "$site_http"
+  }
+
   case "$mode" in
     http_direct)
+      ACCESS_PATH=""
+      NGINX_SUBPATH_INTEGRATE="false"
+      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
       nginx_apply_direct_http_env "$backend_port"
       nginx_remove_site "$(nginx_env_get DOMAIN)"
       log "HTTP без nginx: http://<сервер>:${backend_port}/ (не рекомендуется для интернета)"
       ;;
     uvicorn_le)
+      ACCESS_PATH=""
+      NGINX_SUBPATH_INTEGRATE="false"
+      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
       [[ -n "$domain" ]] || die "Для Let's Encrypt нужен домен"
       NGINX_FAIL_SOFT=true
       if ! nginx_obtain_letsencrypt_cert "$domain" "${WIZ_NGINX_EMAIL:-}"; then
@@ -1416,6 +1449,9 @@ setup_nginx_if_selected() {
       log "HTTPS на uvicorn + Let's Encrypt: https://${domain}:${backend_port}/"
       ;;
     uvicorn_custom)
+      ACCESS_PATH=""
+      NGINX_SUBPATH_INTEGRATE="false"
+      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
       [[ -n "$domain" ]] || die "Для HTTPS нужен домен"
       [[ -n "${WIZ_SSL_CERT:-}" && -n "${WIZ_SSL_KEY:-}" ]] || die "Укажите WIZ_SSL_CERT и WIZ_SSL_KEY"
       [[ -f "${WIZ_SSL_CERT}" && -f "${WIZ_SSL_KEY}" ]] || die "Файлы сертификата не найдены"
@@ -1424,6 +1460,9 @@ setup_nginx_if_selected() {
       log "HTTPS на uvicorn + собственные сертификаты: https://${domain}:${backend_port}/"
       ;;
     uvicorn_selfsigned)
+      ACCESS_PATH=""
+      NGINX_SUBPATH_INTEGRATE="false"
+      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
       domain="$(nginx_resolve_selfsigned_cn "$domain")"
       mkdir -p /etc/ssl/private
       if [[ ! -f "$NGINX_SELF_SIGNED_CERT" ]]; then
@@ -1449,18 +1488,17 @@ setup_nginx_if_selected() {
       unset NGINX_FAIL_SOFT
       local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
       local key="/etc/letsencrypt/live/${domain}/privkey.pem"
-      local conf
-      conf="$(nginx_render_template \
-        "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-        "$domain" "$backend_port" "$cert" "$key" "$https_port" "$http_port")"
-      nginx_install_site "$conf" "$domain"
-      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https" "$https_port" "$http_port"
+      _install_nginx_panel_site "$domain" "$backend_port" "$cert" "$key" "$https_port" "$http_port"
       if [[ "$WIZ_APP_ENV" == "production" ]]; then
         nginx_env_set ENFORCE_HTTPS "true"
       fi
       systemctl enable --now snap.certbot.renew.timer 2>/dev/null || \
         systemctl enable --now certbot.timer 2>/dev/null || true
-      log "Nginx + Let's Encrypt: https://${domain}:${https_port}/"
+      if [[ "$https_port" == "443" ]]; then
+        log "Nginx + Let's Encrypt: https://${domain}${path_sfx}"
+      else
+        log "Nginx + Let's Encrypt: https://${domain}:${https_port}${path_sfx}"
+      fi
       ;;
     selfsigned)
       domain="$(nginx_resolve_selfsigned_cn "$domain")"
@@ -1472,34 +1510,32 @@ setup_nginx_if_selected() {
           -out "$NGINX_SELF_SIGNED_CERT" \
           -subj "/CN=${domain}" >/dev/null 2>&1
       fi
-      local conf
-      conf="$(nginx_render_template \
-        "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-        "$domain" "$backend_port" "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" \
-        "$https_port" "$http_port")"
-      nginx_install_site "$conf" "$domain"
-      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https" "$https_port" "$http_port"
+      _install_nginx_panel_site "$domain" "$backend_port" \
+        "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" "$https_port" "$http_port"
       if [[ "$WIZ_APP_ENV" == "production" ]]; then
         nginx_env_set ENFORCE_HTTPS "true"
       fi
-      log "Nginx + самоподписанный SSL: https://${domain}:${https_port}/"
+      if [[ "$https_port" == "443" ]]; then
+        log "Nginx + самоподписанный SSL: https://${domain}${path_sfx}"
+      else
+        log "Nginx + самоподписанный SSL: https://${domain}:${https_port}${path_sfx}"
+      fi
       ;;
     nginx_custom)
       [[ -n "$domain" ]] || die "Для HTTPS нужен домен"
       [[ -n "${WIZ_SSL_CERT:-}" && -n "${WIZ_SSL_KEY:-}" ]] || die "Укажите пути к сертификату и ключу"
       [[ -f "${WIZ_SSL_CERT}" && -f "${WIZ_SSL_KEY}" ]] || die "Файлы сертификата не найдены"
       nginx_ensure_nginx || die "Не удалось установить nginx"
-      local conf
-      conf="$(nginx_render_template \
-        "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-        "$domain" "$backend_port" "${WIZ_SSL_CERT}" "${WIZ_SSL_KEY}" \
-        "$https_port" "$http_port")"
-      nginx_install_site "$conf" "$domain"
-      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https" "$https_port" "$http_port"
+      _install_nginx_panel_site "$domain" "$backend_port" \
+        "${WIZ_SSL_CERT}" "${WIZ_SSL_KEY}" "$https_port" "$http_port"
       if [[ "$WIZ_APP_ENV" == "production" ]]; then
         nginx_env_set ENFORCE_HTTPS "true"
       fi
-      log "Nginx + пользовательские сертификаты: https://${domain}:${https_port}/"
+      if [[ "$https_port" == "443" ]]; then
+        log "Nginx + пользовательские сертификаты: https://${domain}${path_sfx}"
+      else
+        log "Nginx + пользовательские сертификаты: https://${domain}:${https_port}${path_sfx}"
+      fi
       ;;
     *)
       warn "Неизвестный режим публикации: $mode — пропуск"
@@ -1707,10 +1743,28 @@ print_post_install() {
       if [[ "$pub_https" != "443" ]]; then
         url_suffix=":${pub_https}"
       fi
+      local path_sfx="/"
+      if is_nginx_https_mode; then
+        if declare -F wizard_access_path_url_suffix >/dev/null 2>&1; then
+          path_sfx="$(wizard_access_path_url_suffix)"
+        else
+          local ap
+          ap="${WIZ_ACCESS_PATH:-}"
+          ap="${ap#/}"
+          ap="${ap%/}"
+          [[ -n "$ap" ]] && path_sfx="/${ap}/"
+        fi
+      fi
       if is_uvicorn_https_mode; then
         ui_summary_row "HTTPS (uvicorn)" "https://${WIZ_NGINX_DOMAIN}${url_suffix}/"
       else
-        ui_summary_row "HTTPS" "https://${WIZ_NGINX_DOMAIN}${url_suffix}/"
+        ui_summary_row "HTTPS" "https://${WIZ_NGINX_DOMAIN}${url_suffix}${path_sfx}"
+        if [[ -n "${WIZ_ACCESS_PATH:-}" ]]; then
+          ui_summary_row "Подпуть" "/${WIZ_ACCESS_PATH#/}"
+        fi
+        if [[ "${WIZ_NGINX_SUBPATH_INTEGRATE:-false}" == "true" ]]; then
+          ui_summary_row "Интеграция vhost" "да"
+        fi
       fi
     elif [[ "${WIZ_NGINX_MODE:-none}" == "http_direct" ]]; then
       ui_summary_row "HTTP" "http://<сервер>:${WIZ_BACKEND_PORT:-8000}/"

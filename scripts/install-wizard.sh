@@ -30,6 +30,8 @@ WIZ_ENFORCE_PASSWORD_POLICY="${WIZ_ENFORCE_PASSWORD_POLICY:-true}"
 WIZ_NGINX_MODE="${WIZ_NGINX_MODE:-none}"
 WIZ_NGINX_DOMAIN="${WIZ_NGINX_DOMAIN:-}"
 WIZ_NGINX_EMAIL="${WIZ_NGINX_EMAIL:-}"
+WIZ_ACCESS_PATH="${WIZ_ACCESS_PATH:-}"
+WIZ_NGINX_SUBPATH_INTEGRATE="${WIZ_NGINX_SUBPATH_INTEGRATE:-false}"
 WIZ_ADMIN_USERNAME="${WIZ_ADMIN_USERNAME:-admin}"
 WIZ_ADMIN_PASSWORD="${WIZ_ADMIN_PASSWORD:-admin}"
 WIZ_ADMIN_MUST_CHANGE_PASSWORD="${WIZ_ADMIN_MUST_CHANGE_PASSWORD:-true}"
@@ -127,6 +129,9 @@ wiz_prompt() {
 wiz_prompt_secret() {
   local prompt="$1"
   local default="${2:-}"
+  # 3-й аргумент: текст подтверждения. Пустая строка "" — без повторного ввода (token).
+  # Не передан — «Подтвердите пароль» (No-IP и т.п.).
+  local confirm_label="${3-Подтвердите пароль}"
   local reply=""
   local reply2=""
 
@@ -143,13 +148,17 @@ wiz_prompt_secret() {
       REPLY="$default"
       return 0
     fi
-    read -r -s -p "Подтвердите пароль: " reply2
+    if [[ -z "$confirm_label" ]]; then
+      REPLY="$reply"
+      return 0
+    fi
+    read -r -s -p "${confirm_label}: " reply2
     echo
     if [[ "$reply" == "$reply2" ]]; then
       REPLY="$reply"
       return 0
     fi
-    echo "Пароли не совпадают, повторите."
+    echo "Значения не совпадают, повторите."
   done
 }
 
@@ -287,6 +296,156 @@ wizard_build_nginx_cors_origins() {
     public_host="${domain}:${https_port}"
   fi
   WIZ_CORS_ORIGINS="https://${public_host},http://${public_host},http://127.0.0.1:${backend_port},http://localhost:${backend_port}"
+}
+
+# Нормализованный ACCESS_PATH: '' или '/segment' (без хвостового /).
+wizard_normalized_access_path() {
+  local raw="${1:-${WIZ_ACCESS_PATH:-}}"
+  raw="${raw// /}"
+  raw="${raw#/}"
+  raw="${raw%/}"
+  if [[ -z "$raw" ]]; then
+    printf ''
+    return 0
+  fi
+  printf '/%s' "$raw"
+}
+
+# Суффикс для URL: '/' или '/panel/'.
+wizard_access_path_url_suffix() {
+  local p
+  p="$(wizard_normalized_access_path "${1:-${WIZ_ACCESS_PATH:-}}")"
+  if [[ -z "$p" ]]; then
+    printf '/'
+  else
+    printf '%s/' "$p"
+  fi
+}
+
+wizard_access_path_is_reserved() {
+  local normalized="$1"
+  local first
+  [[ -n "$normalized" ]] || return 1
+  first="${normalized#/}"
+  first="${first%%/*}"
+  first="${first,,}"
+  case "$first" in
+    status|api|assets|metrics) return 0 ;;
+  esac
+  case "$normalized" in
+    /.well-known|/.well-known/*|/robots.txt|/robots.txt/*) return 0 ;;
+  esac
+  return 1
+}
+
+wizard_prompt_custom_access_path() {
+  local reply normalized
+  while true; do
+    wiz_prompt "Подпуть панели (без слэша, например panel)" "panel"
+    reply="${REPLY// /}"
+    reply="${reply#/}"
+    reply="${reply%/}"
+    if [[ -z "$reply" ]]; then
+      print_warn "Пустой подпуть — выберите «Корень домена» в меню выше."
+      continue
+    fi
+    if [[ "$reply" == *".."* ]]; then
+      print_warn "Подпуть не должен содержать '..'"
+      continue
+    fi
+    if [[ ! "$reply" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*(/[a-zA-Z0-9][a-zA-Z0-9_-]*)*$ ]]; then
+      print_warn "Допустимы буквы, цифры, _ и - (сегменты через /)."
+      continue
+    fi
+    normalized="/${reply}"
+    if wizard_access_path_is_reserved "$normalized"; then
+      print_warn "Путь ${normalized} зарезервирован (нельзя: status, api, assets, …)."
+      continue
+    fi
+    WIZ_ACCESS_PATH="$reply"
+    return 0
+  done
+}
+
+wizard_ask_maybe_subpath_integrate() {
+  local domain="${1:-$WIZ_NGINX_DOMAIN}"
+  WIZ_NGINX_SUBPATH_INTEGRATE="false"
+  [[ -n "$(wizard_normalized_access_path)" ]] || return 0
+  [[ -n "$domain" ]] || return 0
+  if ! nginx_has_foreign_vhost_for_domain "$domain" 2>/dev/null; then
+    return 0
+  fi
+  echo
+  if nginx_has_status_openvpn_vhost_for_domain "$domain" 2>/dev/null; then
+    ui_info_box "Чужой nginx vhost" \
+      "На домене ${domain} найден StatusOpenVPN или другой сайт." \
+      "Можно автоматически добавить include сниппета панели в существующий vhost."
+  else
+    ui_info_box "Чужой nginx vhost" \
+      "На домене ${domain} уже есть nginx-сайт." \
+      "Можно автоматически добавить include сниппета панели в существующий vhost."
+  fi
+  echo
+  wiz_prompt_yesno "Автоматически добавить include в существующий vhost?" "y"
+  if [[ "$REPLY" == "y" ]]; then
+    WIZ_NGINX_SUBPATH_INTEGRATE="true"
+  fi
+}
+
+# Подпуть ACCESS_PATH и интеграция со StatusOpenVPN / чужим vhost (только nginx-режимы).
+wizard_ask_access_path_and_status() {
+  local domain="${WIZ_NGINX_DOMAIN:-}"
+
+  if [[ "${WIZ_ACCEPT_DEFAULTS}" == true ]]; then
+    WIZ_ACCESS_PATH="${WIZ_ACCESS_PATH:-}"
+    WIZ_NGINX_SUBPATH_INTEGRATE="${WIZ_NGINX_SUBPATH_INTEGRATE:-false}"
+    return 0
+  fi
+
+  WIZ_ACCESS_PATH=""
+  WIZ_NGINX_SUBPATH_INTEGRATE="false"
+
+  # shellcheck source=scripts/nginx-common.sh
+  source "$ROOT_DIR/scripts/nginx-common.sh"
+  nginx_common_init
+
+  echo
+  ui_info_box "Общий домен / подпуть" \
+    "Оставьте корень, если панель одна на домене." \
+    "/panel — если рядом другие сайты или StatusOpenVPN." \
+    "Подпуть — дополнительная мера, не замена 2FA."
+  echo
+
+  if [[ -n "$domain" ]] && nginx_has_status_openvpn_vhost_for_domain "$domain" 2>/dev/null; then
+    print_success "Обнаружен StatusOpenVPN на ${domain} (/status/)."
+    echo
+    wiz_prompt_yesno "Установить панель рядом со StatusOpenVPN (подпуть /panel)?" "y"
+    if [[ "$REPLY" == "y" ]]; then
+      WIZ_ACCESS_PATH="panel"
+      WIZ_NGINX_SUBPATH_INTEGRATE="true"
+      print_info "Панель: https://${domain}/panel/ · Status: https://${domain}/status/"
+      return 0
+    fi
+  fi
+
+  wiz_prompt_choice "Где открывать панель на домене?" 1 \
+    "Корень домена (https://${domain:-example.com}/)" \
+    "Подпуть /panel (https://${domain:-example.com}/panel/)" \
+    "Свой подпуть"
+
+  case "$REPLY" in
+    1)
+      WIZ_ACCESS_PATH=""
+      ;;
+    2)
+      WIZ_ACCESS_PATH="panel"
+      ;;
+    3)
+      wizard_prompt_custom_access_path
+      ;;
+  esac
+
+  wizard_ask_maybe_subpath_integrate "$domain"
 }
 
 wizard_check_antizapret() {
@@ -428,11 +587,11 @@ wizard_ask_ddns() {
   if [[ "$WIZ_DDNS_PROVIDER" == "duckdns" ]]; then
     echo
     echo "  Зарегистрируйтесь на https://www.duckdns.org и создайте поддомен."
-    echo "  Токен — на странице домена (token)."
+    echo "  Нужен только token со страницы домена."
     wiz_prompt "Поддомен DuckDNS (без .duckdns.org)" "$WIZ_DDNS_SUBDOMAIN"
     WIZ_DDNS_SUBDOMAIN="${REPLY,,}"
     WIZ_DDNS_SUBDOMAIN="${WIZ_DDNS_SUBDOMAIN%.duckdns.org}"
-    wiz_prompt_secret "DuckDNS token" "$WIZ_DDNS_TOKEN"
+    wiz_prompt_secret "DuckDNS token" "$WIZ_DDNS_TOKEN" ""
     WIZ_DDNS_TOKEN="$REPLY"
     local fqdn="${WIZ_DDNS_SUBDOMAIN}.duckdns.org"
     if [[ -z "$WIZ_SERVER_ADDRESS" ]]; then
@@ -600,10 +759,13 @@ wizard_ask_https() {
         "$WIZ_BACKEND_PORT" "$WIZ_NODE_AGENT_PORT" "$WIZ_HTTPS_PUBLIC_PORT"
       WIZ_HTTP_ACME_PORT="$REPLY"
     fi
+    wizard_ask_access_path_and_status
     if [[ "$WIZ_APP_ENV" == "production" ]]; then
       wizard_build_nginx_cors_origins "$WIZ_NGINX_DOMAIN" "$WIZ_HTTPS_PUBLIC_PORT" "$WIZ_BACKEND_PORT"
     fi
   elif [[ "$WIZ_NGINX_MODE" == uvicorn_* ]]; then
+    WIZ_ACCESS_PATH=""
+    WIZ_NGINX_SUBPATH_INTEGRATE="false"
     WIZ_BACKEND_HOST="0.0.0.0"
     WIZ_BEHIND_NGINX="false"
     wiz_prompt "Домен для HTTPS" "${default_domain:-panel.example.com}"
@@ -639,10 +801,14 @@ wizard_ask_https() {
     fi
     print_info "Uvicorn будет слушать https://0.0.0.0:${WIZ_BACKEND_PORT}/ (TLS на приложении, без nginx)"
   elif [[ "$WIZ_NGINX_MODE" == "none" ]]; then
+    WIZ_ACCESS_PATH=""
+    WIZ_NGINX_SUBPATH_INTEGRATE="false"
     WIZ_BACKEND_HOST="127.0.0.1"
     WIZ_BEHIND_NGINX="false"
     print_info "Backend будет доступен только на http://127.0.0.1:${WIZ_BACKEND_PORT}/"
   else
+    WIZ_ACCESS_PATH=""
+    WIZ_NGINX_SUBPATH_INTEGRATE="false"
     WIZ_BACKEND_HOST="0.0.0.0"
     WIZ_BEHIND_NGINX="false"
     print_warn "uvicorn будет слушать 0.0.0.0:${WIZ_BACKEND_PORT} — не используйте в интернете без firewall."
@@ -1045,7 +1211,14 @@ wizard_show_summary() {
         backend_summary="127.0.0.1:${WIZ_BACKEND_PORT} (только localhost)"
         ;;
       le | selfsigned | nginx_custom)
-        access_summary="${WIZ_SERVER_ADDRESS:-https://${WIZ_NGINX_DOMAIN}}"
+        local path_sfx pub_https
+        path_sfx="$(wizard_access_path_url_suffix)"
+        pub_https="${WIZ_HTTPS_PUBLIC_PORT:-443}"
+        if [[ "$pub_https" == "443" ]]; then
+          access_summary="https://${WIZ_NGINX_DOMAIN:-<домен>}${path_sfx}"
+        else
+          access_summary="https://${WIZ_NGINX_DOMAIN:-<домен>}:${pub_https}${path_sfx}"
+        fi
         backend_summary="127.0.0.1:${WIZ_BACKEND_PORT} (за Nginx)"
         ;;
       *)
@@ -1062,7 +1235,17 @@ wizard_show_summary() {
     ui_summary_row "Публикация" "$WIZ_NGINX_MODE"
     if [[ "$WIZ_NGINX_MODE" != "none" && -n "$WIZ_NGINX_DOMAIN" ]]; then
       ui_summary_row "Домен" "$WIZ_NGINX_DOMAIN"
-      if [[ "$WIZ_NGINX_MODE" == "le" || "$WIZ_NGINX_MODE" == "selfsigned" ]]; then
+      if [[ "$WIZ_NGINX_MODE" == "le" || "$WIZ_NGINX_MODE" == "selfsigned" || "$WIZ_NGINX_MODE" == "nginx_custom" ]]; then
+        local ap_disp
+        ap_disp="$(wizard_normalized_access_path)"
+        if [[ -n "$ap_disp" ]]; then
+          ui_summary_row "Подпуть" "$ap_disp"
+        else
+          ui_summary_row "Подпуть" "корень домена"
+        fi
+        if [[ "${WIZ_NGINX_SUBPATH_INTEGRATE:-false}" == "true" ]]; then
+          ui_summary_row "Интеграция vhost" "да (include)"
+        fi
         ui_summary_row "Публичные порты" "HTTPS ${WIZ_HTTPS_PUBLIC_PORT}, HTTP ${WIZ_HTTP_ACME_PORT}"
       fi
     fi
