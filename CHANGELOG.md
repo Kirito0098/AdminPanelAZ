@@ -47,6 +47,7 @@
 ### 🔄 Changed
 
 - **Удаление узла из HA-группы** — вместо сырого 409 в консоли: диалог с объяснением, что сначала нужно расформировать группу синхронизации; подсказка при удалении; массовое удаление пропускает узлы в HA (`nodeHa.ts`, `NodesPage.tsx`, `ConfirmDialog.tsx`, `NodeSyncGroupSection.tsx`).
+- **Python 3.12 при установке** — `install.sh` / `start.sh` / `start_node_agent.sh` создают `backend/.venv` только на Python 3.12 (не на системный `python3` 3.13/3.14); несовместимый venv пересоздаётся; apt ставит `python3.12{,-venv,-dev}` (`scripts/python-runtime.sh`).
 
 ### 🐛 Fixed
 

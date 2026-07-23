@@ -94,6 +94,8 @@ bootstrap_remote_install "$@"
 ROOT_DIR="${_script_dir:-$(pwd)}"
 # shellcheck source=scripts/install-ui.sh
 source "$ROOT_DIR/scripts/install-ui.sh"
+# shellcheck source=scripts/python-runtime.sh
+source "$ROOT_DIR/scripts/python-runtime.sh"
 ui_init
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
@@ -734,14 +736,17 @@ verify_controller_running() {
 }
 
 install_system_deps() {
+  local py_bin
   ui_progress_start "Установка системных зависимостей"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
+  # Backend жёстко на Python 3.12 (см. scripts/python-runtime.sh) — не брать «голый» python3
+  # с новых дистрибутивов (3.13/3.14), иначе SQLAlchemy/venv ломаются на установке.
   apt-get install -y \
-    python3 \
-    python3-venv \
+    "python${ADMINPANELAZ_PYTHON_VERSION}" \
+    "python${ADMINPANELAZ_PYTHON_VERSION}-venv" \
+    "python${ADMINPANELAZ_PYTHON_VERSION}-dev" \
     python3-pip \
-    python3-dev \
     git \
     curl \
     build-essential \
@@ -750,6 +755,11 @@ install_system_deps() {
     libffi-dev \
     libssl-dev \
     vnstat
+
+  if ! py_bin="$(ap_resolve_python)"; then
+    die "После apt не найден Python ${ADMINPANELAZ_PYTHON_VERSION}. Установите пакеты python${ADMINPANELAZ_PYTHON_VERSION}{,-venv,-dev} или задайте ADMINPANELAZ_PYTHON_BIN=/path/to/python${ADMINPANELAZ_PYTHON_VERSION}"
+  fi
+  log "Python для backend: ${py_bin} ($(ap_python_report_version "$py_bin"))"
 
   if [[ -x "$ROOT_DIR/scripts/setup-vnstat.sh" ]]; then
     chmod +x "$ROOT_DIR/scripts/setup-vnstat.sh"
@@ -892,7 +902,7 @@ apply_wiz_resource_profile() {
     die "Не найден $ENV_FILE для профиля ресурсов"
   fi
   log "Применение resource profile: $profile (scripts/apply-resource-profile.py)"
-  PYTHONPATH="$BACKEND_DIR" python3 "$script" "$profile" --env "$ENV_FILE"
+  PYTHONPATH="$BACKEND_DIR" "$(ap_require_python)" "$script" "$profile" --env "$ENV_FILE"
 }
 
 apply_wiz_env_settings() {
@@ -1112,20 +1122,15 @@ setup_node_env() {
 }
 
 setup_backend() {
-  ui_progress_start "Настройка backend (Python venv)"
-  if [[ ! -d "$VENV_DIR" ]]; then
-    python3 -m venv "$VENV_DIR"
-    log "Создано виртуальное окружение: $VENV_DIR"
-  else
-    log "Виртуальное окружение уже существует"
-  fi
+  ui_progress_start "Настройка backend (Python ${ADMINPANELAZ_PYTHON_VERSION} venv)"
+  ap_ensure_venv "$VENV_DIR"
 
   # shellcheck source=/dev/null
   source "$VENV_DIR/bin/activate"
   pip install -q --upgrade pip
   pip install -q -r "$BACKEND_DIR/requirements.txt"
   ensure_backend_data_dirs
-  ui_progress_done "Backend (Python venv)"
+  ui_progress_done "Backend (Python ${ADMINPANELAZ_PYTHON_VERSION} venv)"
 }
 
 seed_admin_user_from_env() {

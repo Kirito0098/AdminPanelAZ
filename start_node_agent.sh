@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 VENV_DIR="$BACKEND_DIR/.venv"
 NODE_ENV_FILE="${NODE_AGENT_ENV_FILE:-$BACKEND_DIR/node_agent.env}"
+# shellcheck source=scripts/python-runtime.sh
+source "$ROOT_DIR/scripts/python-runtime.sh"
 
 if [[ -f "$NODE_ENV_FILE" && -z "${NODE_AGENT_ENV_LOADED:-}" ]]; then
   set -a
@@ -146,10 +148,7 @@ stop_services() {
 }
 
 setup_backend() {
-  if [[ ! -d "$VENV_DIR" ]]; then
-    log "Создание Python virtual environment..."
-    python3 -m venv "$VENV_DIR"
-  fi
+  ap_ensure_venv "$VENV_DIR"
 
   # shellcheck source=/dev/null
   source "$VENV_DIR/bin/activate"
