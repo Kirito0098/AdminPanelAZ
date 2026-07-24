@@ -47,7 +47,8 @@
 ### 🔄 Changed
 
 - **Удаление узла из HA-группы** — вместо сырого 409 в консоли: диалог с объяснением, что сначала нужно расформировать группу синхронизации; подсказка при удалении; массовое удаление пропускает узлы в HA (`nodeHa.ts`, `NodesPage.tsx`, `ConfirmDialog.tsx`, `NodeSyncGroupSection.tsx`).
-- **Python 3.13 при установке** — предпочтение Debian 13 (`python3.13`); на Ubuntu 24.04, где 3.13 нет в apt, автоматический fallback на **3.12**. Несовместимый venv пересоздаётся (`scripts/python-runtime.sh`). SQLAlchemy поднят до 2.0.40 для поддержки 3.13. CI / pre-commit — Python 3.13.
+- **Python 3.13 при установке** — предпочтение Debian 13 (`python3.13`); на Ubuntu 24.04, где 3.13 нет в apt, автоматический fallback на **3.12**. Несовместимый venv пересоздаётся (`scripts/python-runtime.sh`). CI / pre-commit — Python 3.13.
+- **Backend-зависимости** — обновлены pins: FastAPI 0.140, uvicorn 0.51, SQLAlchemy 2.0.51, pydantic-settings 2.14, cryptography 49, redis 8, webauthn 3, geoip2 5, psutil 7 и др.; `passlib` заменён на прямой `bcrypt` 5.0 (хеши `$2b$` совместимы).
 
 ### 🐛 Fixed
 
