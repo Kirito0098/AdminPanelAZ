@@ -736,16 +736,12 @@ verify_controller_running() {
 }
 
 install_system_deps() {
-  local py_bin
+  local py_bin py_mm
   ui_progress_start "Установка системных зависимостей"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  # Backend жёстко на Python 3.12 (см. scripts/python-runtime.sh) — не брать «голый» python3
-  # с новых дистрибутивов (3.13/3.14), иначе SQLAlchemy/venv ломаются на установке.
+  # Backend: Python 3.13 (Debian 13), fallback 3.12 (Ubuntu 24.04) — см. scripts/python-runtime.sh
   apt-get install -y \
-    "python${ADMINPANELAZ_PYTHON_VERSION}" \
-    "python${ADMINPANELAZ_PYTHON_VERSION}-venv" \
-    "python${ADMINPANELAZ_PYTHON_VERSION}-dev" \
     python3-pip \
     git \
     curl \
@@ -755,6 +751,11 @@ install_system_deps() {
     libffi-dev \
     libssl-dev \
     vnstat
+
+  if ! py_mm="$(ap_apt_install_python)"; then
+    die "Не удалось установить Python 3.13 или 3.12 (venv/dev). На Debian 13: apt install python3.13{,-venv,-dev}; на Ubuntu 24.04: python3.12{,-venv,-dev}. Либо задайте ADMINPANELAZ_PYTHON_BIN"
+  fi
+  log "Установлен Python ${py_mm} (пакеты apt)"
 
   if ! py_bin="$(ap_resolve_python)"; then
     die "После apt не найден Python ${ADMINPANELAZ_PYTHON_VERSION}. Установите пакеты python${ADMINPANELAZ_PYTHON_VERSION}{,-venv,-dev} или задайте ADMINPANELAZ_PYTHON_BIN=/path/to/python${ADMINPANELAZ_PYTHON_VERSION}"

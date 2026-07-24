@@ -47,7 +47,7 @@
 ### 🔄 Changed
 
 - **Удаление узла из HA-группы** — вместо сырого 409 в консоли: диалог с объяснением, что сначала нужно расформировать группу синхронизации; подсказка при удалении; массовое удаление пропускает узлы в HA (`nodeHa.ts`, `NodesPage.tsx`, `ConfirmDialog.tsx`, `NodeSyncGroupSection.tsx`).
-- **Python 3.12 при установке** — `install.sh` / `start.sh` / `start_node_agent.sh` создают `backend/.venv` только на Python 3.12 (не на системный `python3` 3.13/3.14); несовместимый venv пересоздаётся; apt ставит `python3.12{,-venv,-dev}` (`scripts/python-runtime.sh`).
+- **Python 3.13 при установке** — предпочтение Debian 13 (`python3.13`); на Ubuntu 24.04, где 3.13 нет в apt, автоматический fallback на **3.12**. Несовместимый venv пересоздаётся (`scripts/python-runtime.sh`). SQLAlchemy поднят до 2.0.40 для поддержки 3.13. CI / pre-commit — Python 3.13.
 
 ### 🐛 Fixed
 
