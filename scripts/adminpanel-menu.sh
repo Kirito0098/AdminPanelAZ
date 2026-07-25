@@ -157,6 +157,16 @@ panel_update() {
     fi
   fi
 
+  # 2.19+: старые unit’ы с start.sh ломаются после удаления скриптов — переписать из репо
+  if [[ -x "$INSTALL_DIR/scripts/refresh-systemd-units.sh" ]]; then
+    ui_info "Обновление systemd units…"
+    if bash "$INSTALL_DIR/scripts/refresh-systemd-units.sh"; then
+      ui_ok "systemd units обновлены"
+    else
+      ui_warn "refresh-systemd-units завершился с ошибкой — проверьте unit вручную"
+    fi
+  fi
+
   ui_info "Перезапустите панель: $0 --restart"
   return 0
 }

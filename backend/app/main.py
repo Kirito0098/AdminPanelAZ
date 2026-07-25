@@ -161,6 +161,13 @@ async def lifespan(_: FastAPI):
     except Exception:
         logger.debug("Legacy CIDR list migration skipped", exc_info=True)
     try:
+        from app.services.node_update import resolve_repo_root
+        from app.services.systemd_refresh import migrate_stale_systemd_units_on_startup
+
+        migrate_stale_systemd_units_on_startup(resolve_repo_root(), panel=True, node=True)
+    except Exception:
+        logger.debug("Systemd unit migration skipped", exc_info=True)
+    try:
         ip_restriction_service.sync_firewall()
     except Exception:
         pass

@@ -29,6 +29,7 @@ if [[ ! -f "$UNIT_SRC" ]]; then
 fi
 
 chmod +x "$ROOT_DIR/scripts/systemd-exec-panel.sh" 2>/dev/null || true
+chmod +x "$ROOT_DIR/start.sh" 2>/dev/null || true
 
 STATE_DIR="${ADMINPANELAZ_STATE_DIR:-/var/lib/adminpanelaz}"
 mkdir -p "$STATE_DIR/logs" "$STATE_DIR/run"

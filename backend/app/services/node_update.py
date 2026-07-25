@@ -249,6 +249,7 @@ def apply_node_update(
     repo_root: Path | None = None,
 ) -> dict[str, Any]:
     from app.services.node_health import NODE_AGENT_VERSION
+    from app.services.systemd_refresh import refresh_installed_systemd_units
 
     agent_version = agent_version or NODE_AGENT_VERSION
     repo_root = repo_root or resolve_repo_root()
@@ -266,9 +267,15 @@ def apply_node_update(
         detail["agent_pull"] = pull
         if pull["success"]:
             detail["pip"] = _pip_install(repo_root)
-            messages.append("Node agent обновлён, перезапуск через несколько секунд")
-            schedule_agent_restart(repo_root)
-            restarting = True
+            # 2.19+: rewrite unit before restart — old ExecStart=…/start_node_agent.sh breaks after pull
+            systemd_refresh = refresh_installed_systemd_units(repo_root, panel=False, node=True)
+            detail["systemd_refresh"] = systemd_refresh
+            if not systemd_refresh.get("success"):
+                errors.append(systemd_refresh.get("error") or "Ошибка обновления systemd unit node")
+            else:
+                messages.append("Node agent обновлён, перезапуск через несколько секунд")
+                schedule_agent_restart(repo_root)
+                restarting = True
         else:
             errors.append(pull.get("error") or "Ошибка git pull node agent")
 

@@ -5,6 +5,7 @@ import io
 import json
 import os
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -58,7 +59,24 @@ validate_node_agent_key(NODE_AGENT_API_KEY, production=NODE_AGENT_MODE == "prod"
 service = AntiZapretService(base_path=ANTIZAPRET_PATH)
 cidr_service = CidrRoutingService(ANTIZAPRET_PATH, get_cidr_list_dir())
 monitor = ServerMonitorService()
-app = FastAPI(title="AntiZapret Node Agent", version=NODE_AGENT_VERSION)
+
+
+@asynccontextmanager
+async def _node_agent_lifespan(_: FastAPI):
+    try:
+        from app.services.systemd_refresh import migrate_stale_systemd_units_on_startup
+
+        migrate_stale_systemd_units_on_startup(resolve_repo_root(), panel=False, node=True)
+    except Exception:
+        pass
+    yield
+
+
+app = FastAPI(
+    title="AntiZapret Node Agent",
+    version=NODE_AGENT_VERSION,
+    lifespan=_node_agent_lifespan,
+)
 
 
 class NodeAgentIpAllowlistMiddleware(BaseHTTPMiddleware):

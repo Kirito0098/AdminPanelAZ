@@ -316,7 +316,7 @@ sudo ./scripts/nginx-repair.sh      # восстановить nginx (напри
 
 **Текущая версия: панель 2.19.0 · node agent 1.5.0** (2026-07-26)
 
-Последний релиз — **HTTP по умолчанию** (`http://IP:порт` сразу после install), **один `install.sh`** без easy и без выбора HTTPS, домен/TLS в **Настройки → Адрес сайта и HTTPS**, **systemd напрямую** без `start.sh`, Python **3.12 (Ubuntu) / 3.13 (Debian)** автоматически.
+Последний релиз — **HTTP по умолчанию** (`http://IP:порт` сразу после install), **один `install.sh`** без easy и без выбора HTTPS, домен/TLS в **Настройки → Адрес сайта и HTTPS**, **systemd → `scripts/systemd-exec-*.sh`** (тонкие compat-shim `start.sh` только для старых unit’ов), Python **3.12 (Ubuntu) / 3.13 (Debian)** автоматически.
 
 Полный список: **[CHANGELOG.md](CHANGELOG.md)** · runbook аудита HA: [reviews/HA-sync-remediation-plan.md](reviews/HA-sync-remediation-plan.md)
 

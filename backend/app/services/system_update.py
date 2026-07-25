@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.services.node_update import git_pull, resolve_repo_root
+from app.services.systemd_refresh import refresh_installed_systemd_units
 
 SYSTEMD_UNIT = "adminpanelaz"
 ProgressCallback = Callable[[int, str], None] | None
@@ -271,6 +272,23 @@ def apply_controller_update(
     npm_build = build_frontend(repo_root)
     detail["npm_build"] = npm_build
     if not _require_step(label="npm run build:all", result=npm_build, output_parts=output_parts, errors=errors):
+        return {
+            "success": False,
+            "message": "Обновление не выполнено",
+            "errors": errors,
+            "output": "\n\n".join(output_parts).strip(),
+            "restarting": False,
+            "detail": detail,
+        }
+
+    # 2.19+: rewrite units before restart — old ExecStart=…/start.sh fails after pull removes start.sh
+    report(85, "Обновление: systemd units…")
+    systemd_refresh = refresh_installed_systemd_units(repo_root, panel=True, node=True)
+    detail["systemd_refresh"] = systemd_refresh
+    if systemd_refresh.get("output"):
+        output_parts.append(f"[systemd]\n{systemd_refresh['output']}")
+    if not systemd_refresh.get("success"):
+        errors.append(systemd_refresh.get("error") or "Ошибка обновления systemd units")
         return {
             "success": False,
             "message": "Обновление не выполнено",

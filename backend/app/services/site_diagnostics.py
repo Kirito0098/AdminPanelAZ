@@ -335,6 +335,29 @@ def _check_systemd(
         )
         report.recommended_commands.append(f"systemctl restart {ctx.service_name}")
 
+    unit_cat = run_cmd(["systemctl", "cat", ctx.service_name], 5.0)
+    unit_text = (unit_cat.stdout or "") + (unit_cat.stderr or "")
+    if "start.sh" in unit_text or "start_node_agent.sh" in unit_text:
+        if "systemd-exec-panel.sh" not in unit_text and "systemd-exec-node.sh" not in unit_text:
+            _append_result(
+                report,
+                CheckResult(
+                    "warn",
+                    "Unit всё ещё ссылается на legacy start.sh",
+                    detail="После 2.19 ExecStart должен быть scripts/systemd-exec-*.sh",
+                    hint_ru="sudo bash scripts/refresh-systemd-units.sh && systemctl restart "
+                    + ctx.service_name,
+                ),
+            )
+            report.recommended_commands.append(
+                f"bash {ctx.install_dir}/scripts/refresh-systemd-units.sh"
+            )
+    elif "systemd-exec-panel.sh" in unit_text or "systemd-exec-node.sh" in unit_text:
+        _append_result(
+            report,
+            CheckResult("ok", "ExecStart указывает на systemd-exec-*.sh"),
+        )
+
     journal = run_cmd(
         ["journalctl", "-u", ctx.service_name, "-n", "30", "--no-pager", "-o", "cat"],
         10.0,
