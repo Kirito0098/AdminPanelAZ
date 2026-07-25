@@ -45,11 +45,11 @@
 
 ## Чеклист
 
-- [ ] Нет ссылок на easy в пользовательских docs (кроме истории CHANGELOG)
-- [ ] FEATURE_TELEGRAM_ENABLED=true в defaults
-- [ ] Инструкции: workers, mTLS, firewall/ports, Telegram UI, Python 3.12/3.13
-- [ ] CHANGELOG **Unreleased** заполнен (версия ещё не вырезана)
-- [ ] Статус плана → «в работе»
+- [x] Нет ссылок на easy в пользовательских docs (кроме истории CHANGELOG)
+- [x] FEATURE_TELEGRAM_ENABLED=true в defaults
+- [x] Инструкции: workers, mTLS, firewall/ports, Telegram UI, Python 3.12/3.13
+- [x] CHANGELOG **Unreleased** заполнен (версия ещё не вырезана)
+- [x] Статус плана → «в работе»
 
 ---
 

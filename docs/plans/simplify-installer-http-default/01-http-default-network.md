@@ -55,15 +55,26 @@
 
 ## Чеклист
 
-- [ ] Нет шага HTTPS / 8 вариантов публикации
-- [ ] Нет «Внешний IP или домен» / internal nodes
-- [ ] Дефолт `http_direct` + `0.0.0.0`
-- [ ] Summary показывает `http://<IP>:<port>/`
-- [ ] `bash -n` OK
-- [ ] python-runtime не сломан
+- [x] Нет шага HTTPS / 8 вариантов публикации
+- [x] Нет «Внешний IP или домен» / internal nodes
+- [x] Дефолт `http_direct` + `0.0.0.0`
+- [x] Summary показывает `http://<IP>:<port>/`
+- [x] `bash -n` OK
+- [x] python-runtime не сломан
 
 ---
 
+## Отчёт (2026-07-26)
+
+1. `wizard_apply_default_publish_http_direct` вместо вызова `wizard_ask_https` в `run_install_wizard` (`WIZ_ACCEPT_DEFAULTS` → `http_direct`, не `none`).
+2. `wizard_ask_network` — только порты; без SERVER_ADDRESS / ALLOW_INTERNAL_NODES / форса `127.0.0.1`.
+3. CORS/summary — `wizard_detect_primary_ip` (`nginx_server_primary_ip`) + localhost + DDNS FQDN.
+4. Preflight default mode `http_direct` — 80/443 не требуются без HTTPS-override.
+5. Env `WIZ_NGINX_MODE=le|…` уважается (`_WIZ_NGINX_MODE_PRESET`); интерактивно не спрашиваем.
+
+Проверки: `bash -n` OK; `ap_python_candidate_versions` → `3.12` (Ubuntu).
+
+---
 ## Проверки
 
 ```bash

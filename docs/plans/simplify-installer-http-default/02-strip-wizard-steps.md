@@ -45,12 +45,12 @@
 
 ## Чеклист
 
-- [ ] Нет выбора production/development
-- [ ] Нет вручную/daemon/systemd и workers
-- [ ] Нет mTLS / ротации / optional Telegram-CIDR / firewall
-- [ ] Всегда full profile
-- [ ] DDNS / admin / тип установки на месте
-- [ ] `bash -n` OK
+- [x] Нет выбора production/development
+- [x] Нет вручную/daemon/systemd и workers
+- [x] Нет mTLS / ротации / optional Telegram-CIDR / firewall
+- [x] Всегда full profile
+- [x] DDNS / admin / тип установки на месте
+- [x] `bash -n` OK
 
 ---
 

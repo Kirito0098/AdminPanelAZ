@@ -8,20 +8,17 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/opt/AdminPanelAZ
+WorkingDirectory=/opt/AdminPanelAZ/backend
 EnvironmentFile=-/opt/AdminPanelAZ/backend/.env
-Environment=ADMINPANELAZ_MODE=prod
+Environment=SERVE_FRONTEND=true
+Environment=FRONTEND_DIST_PATH=/opt/AdminPanelAZ/frontend/dist
 Environment=ADMINPANELAZ_STATE_DIR=/var/lib/adminpanelaz
-Environment=BACKEND_HOST=127.0.0.1
-Environment=BACKEND_PORT=8000
-Environment=UVICORN_WORKERS=1
-ExecStart=/opt/AdminPanelAZ/start.sh watchdog prod
-ExecStop=/opt/AdminPanelAZ/start.sh stop
+# Хост/порт/workers — из EnvironmentFile (.env). Дефолты http_direct в systemd-exec-panel.sh.
+ExecStart=/opt/AdminPanelAZ/scripts/systemd-exec-panel.sh
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
 
-# File logs also written to $ADMINPANELAZ_STATE_DIR/logs/ by start.sh
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=adminpanelaz

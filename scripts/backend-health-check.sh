@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Общие проверки /api/health для install.sh, start.sh и smoke-тестов.
+# Общие проверки /api/health для install.sh и smoke-тестов.
 # Поддерживает HTTP и HTTPS (uvicorn TLS, в т.ч. самоподписанный cert).
 
 bhc_env_get() {

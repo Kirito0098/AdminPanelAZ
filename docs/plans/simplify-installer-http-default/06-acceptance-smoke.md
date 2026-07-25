@@ -34,16 +34,18 @@
 
 ## Чеклист (приёмка)
 
-- [ ] Нет `install-easy*` / `--easy`
-- [ ] Нет шагов: HTTPS-выбор, SERVER_ADDRESS, internal nodes, APP_ENV, run mode, workers, mTLS, profile, optional, firewall
-- [ ] Дефолт http_direct / 0.0.0.0 / production / systemd / workers=1 / full / Telegram feature on
-- [ ] Нет `start.sh` / `start_node_agent.sh`; unit’ы прямые
-- [ ] Docs-черновик OK (HTTPS UI, workers, Telegram, firewall, Python 3.12/3.13); Unreleased есть
-- [ ] `bash -n` + релевантные тесты зелёные
+- [x] Нет `install-easy*` / `--easy`
+- [x] Нет шагов: HTTPS-выбор, SERVER_ADDRESS, internal nodes, APP_ENV, run mode, workers, mTLS, profile, optional, firewall
+- [x] Дефолт http_direct / 0.0.0.0 / production / systemd / workers=1 / full / Telegram feature on
+- [x] Нет `start.sh` / `start_node_agent.sh`; unit’ы прямые
+- [x] Docs-черновик OK (HTTPS UI, workers, Telegram, firewall, Python 3.12/3.13); Unreleased есть
+- [x] `bash -n` + релевантные тесты зелёные
 
 ---
 
 ## Ручной smoke (VPS)
+
+Тот же сценарий продублирован в [README плана](README.md) (§ Ручная проверка).
 
 ```text
 1. Ubuntu 24.04: sudo ./install.sh → в venv python 3.12; панель http://IP:8000/; systemctl status adminpanelaz

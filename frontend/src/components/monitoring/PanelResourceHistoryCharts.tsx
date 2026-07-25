@@ -167,7 +167,7 @@ export default function PanelResourceHistoryCharts({
     <div className="space-y-4">
       <SettingsAlert variant="info" title="Что измеряется">
         На машине контроллера (где запущена панель):{' '}
-        <strong>процессы AdminPanelAZ</strong> — Backend, Nginx, watchdog <code>start.sh</code>, при разработке также Vite (
+        <strong>процессы AdminPanelAZ</strong> — Backend (uvicorn), Nginx, при разработке также Vite (
         <code>npm run dev</code>). <strong>Итого</strong> — сумма этих процессов, не RAM всего сервера.{' '}
         <strong>Ресурсы хоста</strong> — CPU/RAM/диск всей машины. Снимки ~60 с, хранение 30 дней.
       </SettingsAlert>

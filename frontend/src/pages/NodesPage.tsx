@@ -1404,8 +1404,8 @@ export default function NodesPage() {
             <div className="space-y-4">
               {!editing && (
                 <SettingsAlert variant="info">
-                  Сначала на VPN-сервере запустите <strong>node agent</strong> (
-                  <code className="text-xs">./start_node_agent.sh daemon</code>), затем укажите его{' '}
+                  Сначала на VPN-сервере установите и запустите <strong>node agent</strong> (
+                  <code className="text-xs">systemctl start adminpanelaz-node</code>), затем укажите его{' '}
                   <strong>публичный IP или домен</strong> (не 127.0.0.1) и тот же API-ключ. Порт —{' '}
                   <strong>9100</strong>.
                 </SettingsAlert>

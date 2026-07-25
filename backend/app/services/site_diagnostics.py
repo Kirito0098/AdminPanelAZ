@@ -130,7 +130,7 @@ ERROR_HINTS: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(r"status=203/EXEC", re.I),
-        "Исполняемый файл не найден (часто start.sh или backend/.venv/bin/uvicorn). Пересоздайте venv.",
+        "Исполняемый файл не найден (часто scripts/systemd-exec-panel.sh или backend/.venv/bin/uvicorn). Пересоздайте venv.",
     ),
     (
         re.compile(r"(OOM|Out of memory|Killed process|killed)", re.I),
@@ -369,7 +369,8 @@ def _check_project_files(ctx: DiagnosticsContext, report: DiagnosticsReport) -> 
     env_path = os.path.join(backend, ".env")
     db_path = os.path.join(backend, "data", "adminpanel.db")
     uvicorn_bin = os.path.join(ctx.resolved_venv(), "bin", "uvicorn")
-    start_sh = os.path.join(install, "start.sh")
+    panel_unit = os.path.join(install, "systemd", "adminpanelaz.service")
+    panel_exec = os.path.join(install, "scripts", "systemd-exec-panel.sh")
     main_py = os.path.join(backend, "app", "main.py")
     env: dict[str, str] = {}
 
@@ -424,15 +425,16 @@ def _check_project_files(ctx: DiagnosticsContext, report: DiagnosticsReport) -> 
             ),
         )
 
-    if os.path.isfile(start_sh) and os.access(start_sh, os.X_OK):
-        _append_result(report, CheckResult("ok", "start.sh найден"))
+    if os.path.isfile(panel_unit) and os.path.isfile(panel_exec) and os.access(panel_exec, os.X_OK):
+        _append_result(report, CheckResult("ok", "systemd unit и systemd-exec-panel.sh найдены"))
     else:
         _append_result(
             report,
             CheckResult(
                 "fail",
-                "start.sh не найден или не исполняемый",
-                detail=start_sh,
+                "systemd unit или systemd-exec-panel.sh не найдены",
+                detail=f"{panel_unit}; {panel_exec}",
+                hint_ru="Проверьте целостность репозитория (systemd/*.service, scripts/systemd-exec-*.sh).",
             ),
         )
 

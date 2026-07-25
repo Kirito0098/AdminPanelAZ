@@ -33,9 +33,21 @@
 
 ## Чеклист
 
-- [ ] Список шагов мастера актуален
-- [ ] Список зависимостей start.sh полный
-- [ ] Python-runtime порядок ОС зафиксирован в отчёте
+- [x] Список шагов мастера актуален
+- [x] Список зависимостей start.sh полный
+- [x] Python-runtime порядок ОС зафиксирован в отчёте
+
+## Отчёт (2026-07-26)
+
+Собрал [Installer inventory](2ceeb7d2-faab-47f0-b714-73cf9fc18a4a). Кратко:
+
+1. **Мастер:** 14 `wizard_ask_*` в `run_install_wizard` (+ вложенные access_path/subpath из HTTPS).
+2. **`.env`:** `ALLOW_INTERNAL_NODES`/`APP_ENV`/`FEATURE_*` через `apply_wiz_env_settings`; `SERVER_ADDRESS` → только CORS; `RUN_MODE` → флаги systemd/daemon; firewall не в `.env`; Telegram token → БД; `FEATURE_TELEGRAM_ENABLED` сейчас `false` в `env_defaults.sh`.
+3. **easy:** `install-easy.sh`, `install-easy-wizard.sh`, `--easy` в install/ui, README/docs, CI shellcheck.
+4. **start.sh:** systemd units, install bootstrap/daemon/next_steps, nginx-*, menu, `panel_restart_command`, diagnostics, CI, update/backup/uninstall/UI.
+5. **Python:** Ubuntu 24.04 → 3.12 first; Debian/прочие → 3.13 first (`_ap_python_auto_minor_order`).
+
+Риски: HTTP+admin в интернет; удаление start.sh без unit/restart; `http_direct` без `PUBLISH_MODE` в install; смена `WIZ_ACCEPT_DEFAULTS` с `none` на `http_direct`.
 
 ---
 

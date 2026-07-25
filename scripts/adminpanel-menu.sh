@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ops console menu — обёртка над start.sh, systemd и существующими scripts.
+# Ops console menu — обёртка над systemd и существующими scripts.
 # Не дублирует install.sh wizard; установка: sudo ./install.sh
 
 set -euo pipefail
@@ -13,7 +13,6 @@ SERVICE_NAME="${SERVICE_NAME:-adminpanelaz}"
 VENV_PATH="${VENV_PATH:-$ROOT_DIR/backend/.venv}"
 BACKUP_CLI="$ROOT_DIR/scripts/backup-cli.py"
 SITE_DIAGNOSTICS="$ROOT_DIR/scripts/site-diagnostics.sh"
-START_SH="$ROOT_DIR/start.sh"
 
 GREEN=$(printf '\033[0;32m')
 YELLOW=$(printf '\033[1;33m')
@@ -81,11 +80,8 @@ panel_restart() {
   if panel_uses_systemd; then
     systemctl restart "$SERVICE_NAME"
     ui_ok "systemctl restart $SERVICE_NAME"
-  elif [[ -x "$START_SH" ]]; then
-    "$START_SH" restart
-    ui_ok "./start.sh restart"
   else
-    ui_fail "Не найден systemd unit и $START_SH"
+    ui_fail "Не найден systemd unit $SERVICE_NAME"
     return 1
   fi
 }
@@ -94,10 +90,8 @@ panel_status() {
   printf "\n"
   if panel_uses_systemd; then
     systemctl status "$SERVICE_NAME" --no-pager -l || true
-  elif [[ -x "$START_SH" ]]; then
-    "$START_SH" status || true
   else
-    ui_fail "Панель не установлена через systemd и start.sh недоступен"
+    ui_fail "Панель не установлена через systemd ($SERVICE_NAME)"
     return 1
   fi
 }
@@ -328,7 +322,7 @@ usage() {
   restart, update, backup, site diagnostics.
 
 Опции (как adminpanel.sh в AA):
-  --restart     Перезапустить панель (systemd или start.sh)
+  --restart     Перезапустить панель (systemctl restart adminpanelaz)
   --update      git fetch + pull + pip (если есть обновления)
   --backup      Создать резервную копию (scripts/backup-cli.py)
   --diagnose    Диагностика запуска (scripts/site-diagnostics.sh)

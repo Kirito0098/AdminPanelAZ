@@ -28,9 +28,7 @@ if [[ ! -f "$UNIT_SRC" ]]; then
   exit 1
 fi
 
-if [[ ! -x "$ROOT_DIR/start.sh" ]]; then
-  chmod +x "$ROOT_DIR/start.sh"
-fi
+chmod +x "$ROOT_DIR/scripts/systemd-exec-panel.sh" 2>/dev/null || true
 
 STATE_DIR="${ADMINPANELAZ_STATE_DIR:-/var/lib/adminpanelaz}"
 mkdir -p "$STATE_DIR/logs" "$STATE_DIR/run"
@@ -42,9 +40,6 @@ sed \
   -e "s|/var/lib/adminpanelaz|$STATE_DIR|g" \
   -e "s|^User=root|User=$INSTALL_USER|" \
   -e "s|^Group=root|Group=$INSTALL_GROUP|" \
-  -e "s|Environment=BACKEND_HOST=127.0.0.1|Environment=BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}|" \
-  -e "s|Environment=BACKEND_PORT=8000|Environment=BACKEND_PORT=${BACKEND_PORT:-8000}|" \
-  -e "s|Environment=UVICORN_WORKERS=1|Environment=UVICORN_WORKERS=${UVICORN_WORKERS:-1}|" \
   -e "s|EnvironmentFile=-/opt/AdminPanelAZ/backend/.env|EnvironmentFile=-$ROOT_DIR/backend/.env|" \
   "$UNIT_SRC" >"$UNIT_DST"
 

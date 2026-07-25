@@ -743,19 +743,7 @@ def build_publish_access_url(
 
 
 def panel_restart_command() -> str:
-    try:
-        result = subprocess.run(
-            ["systemctl", "is-enabled", PANEL_SYSTEMD_UNIT],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        if result.returncode == 0:
-            return f"sudo systemctl restart {PANEL_SYSTEMD_UNIT}"
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return "sudo ./start.sh restart"
+    return f"sudo systemctl restart {PANEL_SYSTEMD_UNIT}"
 
 
 def _parse_ss_listeners(ss_output: str, port: int) -> list[str]:

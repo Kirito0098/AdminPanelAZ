@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Проверка занятости портов для install.sh / install-wizard / install-easy-wizard.
+# Проверка занятости портов для install.sh / install-wizard.
 # Не запускать напрямую — source из установщика.
 #
 # Ожидает (опционально): ROOT_DIR, print_warn/print_error/print_info/print_success,
@@ -162,7 +162,7 @@ port_is_ours() {
     case "$cmdline" in
       *"${root}"*)
         case "$cmdline" in
-          *uvicorn*|*node_agent*|*start.sh*|*start_node_agent*)
+          *uvicorn*|*node_agent*|*systemd-exec-panel*|*systemd-exec-node*)
             return 0
             ;;
         esac
@@ -303,9 +303,10 @@ port_prompt_until_available() {
 install_collect_required_ports() {
   INSTALL_REQUIRED_PORTS=()
   local install_type="${WIZ_INSTALL_TYPE:-controller}"
-  local mode="${WIZ_NGINX_MODE:-none}"
+  # По умолчанию http_direct — не требуем свободные 80/443 без HTTPS-override
+  local mode="${WIZ_NGINX_MODE:-http_direct}"
   local backend_port="${WIZ_BACKEND_PORT:-${BACKEND_PORT:-8000}}"
-  local backend_host="${WIZ_BACKEND_HOST:-${BACKEND_HOST:-127.0.0.1}}"
+  local backend_host="${WIZ_BACKEND_HOST:-${BACKEND_HOST:-0.0.0.0}}"
   local node_port="${WIZ_NODE_AGENT_PORT:-${NODE_AGENT_PORT:-9100}}"
   local https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
   local http_port="${WIZ_HTTP_ACME_PORT:-80}"

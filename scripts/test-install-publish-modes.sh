@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Проверка, что все режимы публикации install.sh имеют обработчик и согласованы с health-check.
+# Проверка режимов публикации: install.sh handlers, default wizard http_direct, nginx-setup, health-check.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,8 +18,21 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1" needle="$2" label="$3"
+  if grep -qF -- "$needle" <<<"$haystack"; then
+    fail=$((fail + 1))
+    echo "  FAIL $label (unexpected: $needle)" >&2
+  else
+    pass=$((pass + 1))
+    echo "  OK  $label"
+  fi
+}
+
 install_body="$(sed -n '/setup_nginx_if_selected/,/^}/p' "$ROOT_DIR/install.sh")"
-wizard_body="$(sed -n '/wizard_ask_https/,/^}/p' "$ROOT_DIR/scripts/install-wizard.sh")"
+wizard_all="$(cat "$ROOT_DIR/scripts/install-wizard.sh")"
+publish_fn="$(sed -n '/wizard_apply_default_publish_http_direct/,/^}/p' "$ROOT_DIR/scripts/install-wizard.sh")"
+run_wizard_fn="$(sed -n '/^run_install_wizard()/,/^}/p' "$ROOT_DIR/scripts/install-wizard.sh")"
 nginx_setup_body="$(cat "$ROOT_DIR/scripts/nginx-setup.sh")"
 
 modes=(
@@ -36,7 +49,7 @@ modes=(
 echo "[test] install.sh setup_nginx_if_selected — case для каждого режима"
 for mode in "${modes[@]}"; do
   if [[ "$mode" == "none" ]]; then
-  if grep -q 'if \[\[ "\$mode" == "none" \]\]' <<<"$install_body"; then
+    if grep -q 'if \[\[ "\$mode" == "none" \]\]' <<<"$install_body"; then
       pass=$((pass + 1))
       echo "  OK  none -> early return"
     else
@@ -48,12 +61,12 @@ for mode in "${modes[@]}"; do
   assert_contains "$install_body" "${mode})" "install case: $mode"
 done
 
-echo "[test] install-wizard — пункты меню 1-8"
-for i in "${!modes[@]}"; do
-  n=$((i + 1))
-  mode="${modes[$i]}"
-  assert_contains "$wizard_body" "${n}) WIZ_NGINX_MODE=\"${mode}\"" "wizard maps [$n] -> $mode"
-done
+echo "[test] install-wizard — дефолт публикации http_direct (без интерактивного HTTPS)"
+assert_contains "$publish_fn" 'WIZ_NGINX_MODE="http_direct"' "default sets http_direct"
+assert_contains "$publish_fn" 'WIZ_BACKEND_HOST="0.0.0.0"' "default sets BACKEND_HOST 0.0.0.0"
+assert_contains "$run_wizard_fn" "wizard_apply_default_publish_http_direct" "run_install_wizard calls default publish"
+assert_not_contains "$run_wizard_fn" "wizard_ask_https" "run_install_wizard does not call wizard_ask_https"
+assert_contains "$wizard_all" 'WIZ_NGINX_MODE="${WIZ_NGINX_MODE:-http_direct}"' "WIZ_NGINX_MODE default http_direct"
 
 echo "[test] nginx-setup.sh — CLI флаги для режимов"
 flags=(
@@ -82,6 +95,22 @@ install_all="$(cat "$ROOT_DIR/install.sh")"
 for helper in "${helpers[@]}"; do
   assert_contains "$install_all" "$helper" "install defines/uses $helper"
 done
+
+# Needles built at runtime so this file stays free of the retired installer name.
+_easy_script="$(printf 'install-%s' 'easy')"
+_easy_wizard="$(printf 'install-%s-wizard' 'easy')"
+_easy_flag="$(printf -- '--%s)' 'easy')"
+_easy_blob="$install_all$wizard_all"
+if grep -qF -- "$_easy_script" <<<"$_easy_blob" \
+  || grep -qF -- "$_easy_wizard" <<<"$_easy_blob" \
+  || grep -qF -- "$_easy_flag" <<<"$_easy_blob" \
+  || grep -qF -- 'EASY_MODE' <<<"$_easy_blob"; then
+  fail=$((fail + 1))
+  echo "  FAIL leftover easy-installer refs in install/wizard" >&2
+else
+  pass=$((pass + 1))
+  echo "  OK  no easy-installer refs in install/wizard"
+fi
 
 echo "[test] backend-health-check — все режимы wizard"
 # shellcheck source=scripts/backend-health-check.sh

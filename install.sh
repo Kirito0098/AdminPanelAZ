@@ -5,7 +5,6 @@
 #
 # Быстрый старт:
 #   sudo ./install.sh           # интерактивное меню с подсказками
-#   sudo ./install-easy.sh      # простой мастер для новичков
 #   sudo ./install.sh --help    # полный список опций и примеры
 #
 # Основные режимы:
@@ -29,7 +28,7 @@ else
 fi
 
 bootstrap_remote_install() {
-  if [[ -n "$_script_dir" && -f "$_script_dir/scripts/install-ui.sh" && -f "$_script_dir/scripts/install-wizard.sh" && -f "$_script_dir/scripts/uninstall.sh" && -f "$_script_dir/start.sh" && -f "$_script_dir/backend/requirements.txt" && -f "$_script_dir/backend/.env.example" ]]; then
+  if [[ -n "$_script_dir" && -f "$_script_dir/scripts/install-ui.sh" && -f "$_script_dir/scripts/install-wizard.sh" && -f "$_script_dir/scripts/uninstall.sh" && -f "$_script_dir/backend/requirements.txt" && -f "$_script_dir/systemd/adminpanelaz.service" && -f "$_script_dir/backend/.env.example" ]]; then
     return 0
   fi
 
@@ -114,7 +113,6 @@ NODE_ONLY=false
 FORCE=false
 NON_INTERACTIVE=false
 ACCEPT_DEFAULTS=false
-EASY_MODE=false
 INSTALL_FROM_GIT="${INSTALL_FROM_GIT:-}"
 # Стандартный каталог — /opt/AdminPanelAZ; при запуске из клона resolve_project_dir подставит ROOT_DIR
 INSTALL_TARGET="${INSTALL_TARGET:-$DEFAULT_INSTALL_TARGET}"
@@ -182,7 +180,7 @@ install_on_err() {
       "Что проверить:" \
       "${log_hints[@]}" \
       "  ${state_dir}/logs/backend.log" \
-      "  Повтор: sudo ./install.sh  (или sudo ./install-easy.sh)"
+      "  Повтор: sudo ./install.sh"
   else
     echo "[install] ОШИБКА: установка прервана" >&2
     echo "[install]   Шаг: ${step}" >&2
@@ -224,7 +222,7 @@ die() {
         "$msg" \
         "" \
         "Шаг: ${INSTALL_CURRENT_STEP:-?}" \
-        "Повтор: sudo ./install.sh  (или sudo ./install-easy.sh)"
+        "Повтор: sudo ./install.sh"
     else
       print_error "$msg"
     fi
@@ -243,7 +241,6 @@ usage() {
 
 has_explicit_install_intent() {
   [[ "$NON_INTERACTIVE" == true ]] && return 0
-  [[ "$EASY_MODE" == true ]] && return 0
   [[ "$WITH_SYSTEMD" == true ]] && return 0
   [[ "$WITH_DAEMON" == true ]] && return 0
   [[ "$WITH_NODE_AGENT" == true ]] && return 0
@@ -327,9 +324,6 @@ parse_args() {
         ;;
       --reinstall)
         ACTION="reinstall"
-        ;;
-      --easy)
-        EASY_MODE=true
         ;;
       --help|-h)
         usage
@@ -583,18 +577,6 @@ should_run_wizard() {
 }
 
 run_wizard_if_needed() {
-  if [[ "$EASY_MODE" == true ]]; then
-    # shellcheck source=scripts/install-easy-wizard.sh
-    source "$ROOT_DIR/scripts/install-easy-wizard.sh"
-    run_install_easy_wizard
-    if [[ "${WIZ_APPLY_CONFIRMED:-false}" != true ]]; then
-      exit 0
-    fi
-    WIZARD_RAN=true
-    FORCE=true
-    return 0
-  fi
-
   if ! should_run_wizard; then
     return 0
   fi
@@ -901,7 +883,7 @@ install_system_deps() {
 }
 
 resolve_project_dir() {
-  if [[ -f "$ROOT_DIR/start.sh" && -f "$ROOT_DIR/backend/requirements.txt" ]]; then
+  if [[ -f "$ROOT_DIR/backend/requirements.txt" && -f "$ROOT_DIR/systemd/adminpanelaz.service" ]]; then
     INSTALL_TARGET="$ROOT_DIR"
     return
   fi
@@ -931,7 +913,7 @@ resolve_project_dir() {
 }
 
 ensure_executable_scripts() {
-  chmod +x "$ROOT_DIR/start.sh" "$ROOT_DIR/start_node_agent.sh" 2>/dev/null || true
+  chmod +x "$ROOT_DIR/scripts/systemd-exec-panel.sh" "$ROOT_DIR/scripts/systemd-exec-node.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/test-backend-health-check.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/test-install-publish-modes.sh" 2>/dev/null || true
@@ -1064,6 +1046,8 @@ apply_wiz_env_settings() {
     env_set BEHIND_NGINX "true"
     env_set TRUSTED_PROXY_IPS "127.0.0.1"
     env_set FORWARDED_ALLOW_IPS "127.0.0.1"
+  elif [[ "$WIZARD_RAN" == true && "${WIZ_BEHIND_NGINX:-false}" == "false" ]]; then
+    env_set BEHIND_NGINX "false"
   fi
   if [[ "$WIZARD_RAN" == true && "${WIZ_UVICORN_WORKERS:-1}" -gt 1 ]] \
     || [[ -n "${WIZ_UVICORN_WORKERS:-}" && "${WIZ_UVICORN_WORKERS:-1}" -gt 1 ]]; then
@@ -1285,7 +1269,7 @@ seed_wizard_db_settings() {
   if ! wiz_config_active || ! install_controller_selected; then
     return 0
   fi
-  if [[ "${WIZ_TELEGRAM_ENABLED:-false}" != true && "${WIZ_AUTO_BACKUP_ENABLED:-false}" != true ]]; then
+  if [[ "${WIZ_TELEGRAM_ENABLED:-false}" != true && "${WIZ_AUTO_BACKUP_ENABLED:-true}" != true ]]; then
     return 0
   fi
 
@@ -1295,7 +1279,7 @@ seed_wizard_db_settings() {
     WIZ_TELEGRAM_ENABLED="${WIZ_TELEGRAM_ENABLED:-false}" \
     WIZ_TELEGRAM_BOT_TOKEN="${WIZ_TELEGRAM_BOT_TOKEN:-}" \
     WIZ_TELEGRAM_CHAT_ID="${WIZ_TELEGRAM_CHAT_ID:-}" \
-    WIZ_AUTO_BACKUP_ENABLED="${WIZ_AUTO_BACKUP_ENABLED:-false}" \
+    WIZ_AUTO_BACKUP_ENABLED="${WIZ_AUTO_BACKUP_ENABLED:-true}" \
     WIZ_AUTO_BACKUP_DAYS="${WIZ_AUTO_BACKUP_DAYS:-7}" \
       "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/seed-wizard-db.py"
   ) || warn "Не удалось записать настройки в БД"
@@ -1374,16 +1358,13 @@ setup_node_agent_systemd() {
 }
 
 start_daemon() {
+  # --with-daemon → тот же путь, что --with-systemd
   if ! install_controller_selected; then
     return 0
   fi
-
-  log "Запуск prod daemon..."
-  BACKEND_HOST="${BACKEND_HOST:-${WIZ_BACKEND_HOST:-127.0.0.1}}" \
-  BACKEND_PORT="${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}" \
-  UVICORN_WORKERS="${UVICORN_WORKERS:-${WIZ_UVICORN_WORKERS:-1}}" \
-  ADMINPANELAZ_STATE_DIR="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-$ROOT_DIR/.runtime}}" \
-    ADMINPANELAZ_MODE=prod "$ROOT_DIR/start.sh" daemon
+  warn "--with-daemon устарел: используйте --with-systemd (systemctl start adminpanelaz)"
+  setup_systemd
+  systemctl start adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz"
 }
 
 ddns_config_quote() {
@@ -1530,7 +1511,7 @@ setup_nginx_if_selected() {
       export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
       nginx_apply_direct_http_env "$backend_port"
       nginx_remove_site "$(nginx_env_get DOMAIN)"
-      log "HTTP без nginx: http://<сервер>:${backend_port}/ (не рекомендуется для интернета)"
+      log "HTTP без nginx: http://<IP>:${backend_port}/ (HTTPS — в панели)"
       ;;
     uvicorn_le)
       ACCESS_PATH=""
@@ -1676,11 +1657,9 @@ restart_services_after_nginx() {
   if ! install_controller_selected; then
     return 0
   fi
-  if [[ "$WITH_SYSTEMD" == true ]]; then
+  if [[ "$WITH_SYSTEMD" == true ]] || [[ "$WITH_DAEMON" == true ]]; then
     setup_systemd
     systemctl restart adminpanelaz 2>/dev/null || true
-  elif [[ "$WITH_DAEMON" == true ]]; then
-    "$ROOT_DIR/start.sh" restart 2>/dev/null || true
   fi
 }
 
@@ -1761,23 +1740,18 @@ setup_firewall_if_selected() {
   fi
 }
 
-start_node_agent_daemon() {
+start_node_via_systemd() {
+  # --with-daemon → тот же путь, что --with-systemd
   if ! install_node_selected; then
     return 0
   fi
-
   local api_key="${1:-${GENERATED_NODE_KEY:-}}"
-  if [[ -f "$NODE_ENV_FILE" ]]; then
-    # shellcheck source=/dev/null
-    set -a
-    source "$NODE_ENV_FILE"
-    set +a
-  fi
   if [[ -n "$api_key" ]]; then
-    export NODE_AGENT_API_KEY="$api_key"
+    GENERATED_NODE_KEY="$api_key"
   fi
-  log "Запуск node agent daemon..."
-  NODE_AGENT_MODE=prod "$ROOT_DIR/start_node_agent.sh" daemon
+  warn "--with-daemon устарел: используйте --with-systemd (systemctl start adminpanelaz-node)"
+  setup_node_agent_systemd
+  systemctl start adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
 }
 
 print_post_install() {
@@ -1875,7 +1849,17 @@ print_post_install() {
         fi
       fi
     elif [[ "${WIZ_NGINX_MODE:-none}" == "http_direct" ]]; then
-      ui_summary_row "HTTP" "http://<сервер>:${WIZ_BACKEND_PORT:-8000}/"
+      local pub_ip=""
+      if declare -F wizard_public_access_host >/dev/null 2>&1; then
+        pub_ip="$(wizard_public_access_host)"
+      elif declare -F nginx_server_primary_ip >/dev/null 2>&1; then
+        pub_ip="$(nginx_server_primary_ip 2>/dev/null || true)"
+      else
+        pub_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+      fi
+      pub_ip="${pub_ip:-<IP>}"
+      ui_summary_row "HTTP" "http://${pub_ip}:${WIZ_BACKEND_PORT:-8000}/"
+      print_info "HTTPS и домен — в панели: Настройки → Адрес сайта и HTTPS"
     else
       print_info "Для интернета: sudo ./scripts/nginx-setup.sh или повторно sudo ./install.sh"
     fi
@@ -1884,11 +1868,10 @@ print_post_install() {
     ui_bold "Управление controller"
     echo
     ui_info_box "" \
-      "./start.sh              # dev, foreground" \
-      "./start.sh daemon       # prod daemon + watchdog" \
-      "./start.sh stop         # остановка" \
-      "./start.sh status       # статус" \
-      "systemctl start adminpanelaz    # если установлен systemd"
+      "systemctl start adminpanelaz" \
+      "systemctl status adminpanelaz" \
+      "systemctl restart adminpanelaz" \
+      "journalctl -u adminpanelaz -f"
   fi
 
   if install_node_selected; then
@@ -1897,8 +1880,9 @@ print_post_install() {
     ui_bold "Node agent"
     echo
     ui_info_box "" \
-      "./start_node_agent.sh daemon   # читает backend/node_agent.env" \
-      "systemctl start adminpanelaz-node   # если установлен systemd" \
+      "systemctl start adminpanelaz-node" \
+      "systemctl status adminpanelaz-node" \
+      "journalctl -u adminpanelaz-node -f" \
       "Порт: ${node_port}"
   fi
 
@@ -1937,25 +1921,22 @@ print_post_install() {
   ui_separator
   ui_bold "Следующий шаг"
   echo
-  if [[ "$WITH_SYSTEMD" == true ]]; then
+  if [[ "$WITH_SYSTEMD" == true ]] || [[ "$WITH_DAEMON" == true ]]; then
     if install_controller_selected; then
       print_info "systemctl start adminpanelaz"
     fi
     if install_node_selected; then
       print_info "systemctl start adminpanelaz-node"
     fi
-  elif [[ "$WITH_DAEMON" == true ]]; then
-    print_info "Daemon запущен. Проверка: $ROOT_DIR/start.sh status"
   else
     local -a next_steps=("cd $ROOT_DIR")
     if install_controller_selected; then
-      next_steps+=("sudo ./start.sh daemon          # prod controller")
+      next_steps+=("sudo ./install.sh --with-systemd   # установить и запустить unit")
     fi
     if install_node_selected; then
-      next_steps+=("sudo ./start_node_agent.sh daemon")
+      next_steps+=("sudo systemctl start adminpanelaz-node")
     fi
-    next_steps+=("# или: sudo ./install.sh --with-systemd")
-    ui_info_box "Запуск вручную" "${next_steps[@]}"
+    ui_info_box "Запуск через systemd" "${next_steps[@]}"
   fi
   echo
 }
@@ -1985,7 +1966,7 @@ main() {
     require_tty_or_explicit_intent
   fi
 
-  if [[ "$original_argc" -eq 0 && -t 0 && "$NON_INTERACTIVE" != true && "$EASY_MODE" != true ]]; then
+  if [[ "$original_argc" -eq 0 && -t 0 && "$NON_INTERACTIVE" != true ]]; then
     show_main_menu
   fi
 
@@ -2037,7 +2018,7 @@ run_install_flow() {
       systemctl start adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
     elif [[ "$WITH_DAEMON" == true ]]; then
       install_set_step "Запуск daemon node agent"
-      start_node_agent_daemon "$GENERATED_NODE_KEY"
+      start_node_via_systemd "$GENERATED_NODE_KEY"
     fi
   fi
 

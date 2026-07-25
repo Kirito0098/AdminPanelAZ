@@ -57,12 +57,12 @@
 
 ## Чеклист
 
-- [ ] Unit’ы не ссылаются на start.sh
-- [ ] `start.sh` / `start_node_agent.sh` удалены
-- [ ] Restart/status через systemctl везде в коде продукта
-- [ ] panel_restart_command → systemctl
-- [ ] CI обновлён
-- [ ] python-runtime сохранён
+- [x] Unit’ы не ссылаются на start.sh
+- [x] `start.sh` / `start_node_agent.sh` удалены
+- [x] Restart/status через systemctl везде в коде продукта
+- [x] panel_restart_command → systemctl
+- [x] CI обновлён
+- [x] python-runtime сохранён
 
 ---
 

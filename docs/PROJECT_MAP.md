@@ -45,7 +45,7 @@
 | Frontend | React 18, TypeScript, Vite, Tailwind, shadcn/ui | `frontend/src/main.tsx` |
 | TG Mini App | Отдельная сборка Vite (`mode=tg-mini`) | `frontend/src/tg-mini/main.tsx` |
 | БД | SQLite (основная + отдельная CIDR) | `backend/app/database.py`, `cidr_database.py` |
-| Деплой | `install.sh`, `start.sh`, systemd | `/opt/AdminPanelAZ` |
+| Деплой | `install.sh`, systemd | `/opt/AdminPanelAZ` |
 
 ---
 
@@ -95,8 +95,9 @@
 │   ├── GeoIP.md                 # локальная GeoIP (MaxMind)
 │   ├── NodeSync.md              # HA / sync groups (разработчик)
 │   └── PROJECT_MAP.md           # этот файл
-├── install.sh / start.sh
-└── .runtime/                    # логи, PID (dev)
+├── install.sh
+├── systemd/                     # adminpanelaz*.service
+└── .runtime/                    # локальный runtime (опционально)
 ```
 
 ---
@@ -288,8 +289,8 @@
 |------|------|
 | `backend/.env` | Секреты, БД, feature flags, порты |
 | `backend/app/config.py` | Pydantic Settings (defaults) |
-| `start.sh` | Dev: backend (uvicorn) + frontend (vite) + watchdog |
-| `install.sh` | Production: nginx, systemd, certbot, wizard |
+| `systemd/*.service` | Production: uvicorn через venv (`scripts/systemd-exec-*.sh`) |
+| `install.sh` | Production: HTTP-default (`http_direct`), systemd, wizard; HTTPS/nginx — в UI |
 
 **Типичные пути:**
 - AntiZapret: `/root/antizapret` (`antizapret_path`)
@@ -297,7 +298,7 @@
 - БД: `backend/data/adminpanel.db`
 - CIDR: `backend/data/cidr/cidr.db`
 
-**Dev-порты:** backend `:8000`, frontend `:5173` (`start.sh`).
+**Порты:** backend `:8000` (prod systemd); frontend Vite `:5173` (только локальная разработка).
 
 ---
 

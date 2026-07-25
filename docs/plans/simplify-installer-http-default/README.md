@@ -1,6 +1,6 @@
 # План: упрощение установщика — HTTP по умолчанию, без простого мастера
 
-**Статус:** черновик  
+**Статус:** реализовано (релиз **2.19.0**, 2026-07-26)  
 **Аудитория:** разработчики / агенты Cursor  
 **Связано:** [docs/nastrojki/set-i-publikaciya.md](../../nastrojki/set-i-publikaciya.md), мастер UI «Настройки → Адрес сайта и HTTPS»
 
@@ -365,34 +365,50 @@ Bootstrap «скачал один sh и запустил» остаётся на
 
 ## Критерии приёмки
 
-- [ ] Нет `install-easy.sh` / `install-easy-wizard.sh`; нет `--easy` в help.
-- [ ] Интерактивный `install.sh` не показывает шаг «Способ публикации» / 8 вариантов HTTPS.
-- [ ] Нет вопроса «Внешний IP или домен…»; нет устаревшего бокса про Nginx на шаге «Публикация».
-- [ ] Нет вопроса про внутренние IP узлов; в `.env` `ALLOW_INTERNAL_NODES=false`.
-- [ ] Нет шага выбора APP_ENV; в `.env` `APP_ENV=production`.
-- [ ] Нет выбора вручную/daemon/systemd; ставится systemd, workers=1.
-- [ ] Нет шага mTLS / ротации ключа; дефолты выкл.
-- [ ] Нет выбора профиля ресурсов; применяется `full`.
-- [ ] Нет шага Telegram/бэкап/CIDR-опций; `FEATURE_TELEGRAM_ENABLED=true`; настройка Telegram в UI без «сначала включить модуль».
-- [ ] Нет шага Firewall; install не трогает ufw/iptables сам.
-- [ ] Нет `start.sh` / `start_node_agent.sh`; unit’ы запускают venv/uvicorn (или python agent) напрямую; restart только через systemctl.
-- [ ] После установки controller: слушает `0.0.0.0:<port>`, URL в summary с авто-IP; nginx не из коробки (без env-override).
-- [ ] CORS достаточен для входа по `http://IP:port` (или обновляется при первом publish в UI).
-- [ ] Остальные шаги на месте (тип, порт, DDNS, admin, paths, …).
-- [ ] Docs/README без easy; StatusOpenVPN через UI.
-- [ ] В инструкциях описано, как вручную задать `UVICORN_WORKERS>1` и зачем Redis.
-- [ ] В инструкциях описано включение mTLS (UI) и ротации ключа (при необходимости).
-- [ ] В инструкциях: профиль full по умолчанию и как урезать в UI; RAM-ориентир.
-- [ ] В инструкциях: настройка Telegram в веб-UI (модуль не «вырезан» после install).
-- [ ] В инструкциях: порты / firewall после HTTP-default (не закрывать порт панели до перехода на nginx).
-- [ ] В инструкциях: Python — Ubuntu 3.12 / Debian 3.13 автоматически (`python-runtime.sh`).
-- [ ] `bash -n`; релевантные `test-install-*.sh` зелёные.
-- [ ] Smoke: install → login по IP → VpnNetwork publish → nginx_le или uvicorn_le.
-- [ ] Smoke Python: на Ubuntu venv = 3.12; на Debian = 3.13.
-- [ ] **Релиз (этап 07):** все пользовательские README/инструкции согласованы с новым install.
-- [ ] **Релиз:** `CHANGELOG.md` — секция новой версии заполнена; Unreleased очищен.
-- [ ] **Релиз:** версия панели проставлена (README badge + «Текущая версия», `frontend/package.json`).
-- [ ] **Релиз:** обновлён [`docs/assets/telegram-promo/05-whats-new.png`](../../assets/telegram-promo/05-whats-new.png) под новую версию и темы релиза.
+- [x] Нет `install-easy.sh` / `install-easy-wizard.sh`; нет `--easy` в help.
+- [x] Интерактивный `install.sh` не показывает шаг «Способ публикации» / 8 вариантов HTTPS.
+- [x] Нет вопроса «Внешний IP или домен…»; нет устаревшего бокса про Nginx на шаге «Публикация».
+- [x] Нет вопроса про внутренние IP узлов; в `.env` `ALLOW_INTERNAL_NODES=false`.
+- [x] Нет шага выбора APP_ENV; в `.env` `APP_ENV=production`.
+- [x] Нет выбора вручную/daemon/systemd; ставится systemd, workers=1.
+- [x] Нет шага mTLS / ротации ключа; дефолты выкл.
+- [x] Нет выбора профиля ресурсов; применяется `full`.
+- [x] Нет шага Telegram/бэкап/CIDR-опций; `FEATURE_TELEGRAM_ENABLED=true`; настройка Telegram в UI без «сначала включить модуль».
+- [x] Нет шага Firewall; install не трогает ufw/iptables сам.
+- [x] Нет `start.sh` / `start_node_agent.sh`; unit’ы запускают venv/uvicorn (или python agent) напрямую; restart только через systemctl.
+- [x] После установки controller: слушает `0.0.0.0:<port>`, URL в summary с авто-IP; nginx не из коробки (без env-override).
+- [x] CORS достаточен для входа по `http://IP:port` (или обновляется при первом publish в UI).
+- [x] Остальные шаги на месте (тип, порт, DDNS, admin, paths, …).
+- [x] Docs/README без easy; StatusOpenVPN через UI.
+- [x] В инструкциях описано, как вручную задать `UVICORN_WORKERS>1` и зачем Redis.
+- [x] В инструкциях описано включение mTLS (UI) и ротации ключа (при необходимости).
+- [x] В инструкциях: профиль full по умолчанию и как урезать в UI; RAM-ориентир.
+- [x] В инструкциях: настройка Telegram в веб-UI (модуль не «вырезан» после install).
+- [x] В инструкциях: порты / firewall после HTTP-default (не закрывать порт панели до перехода на nginx).
+- [x] В инструкциях: Python — Ubuntu 3.12 / Debian 3.13 автоматически (`python-runtime.sh`).
+- [x] `bash -n`; релевантные `test-install-*.sh` зелёные.
+- [x] Smoke: install → login по IP → VpnNetwork publish → nginx_le или uvicorn_le.
+- [x] Smoke Python: на Ubuntu venv = 3.12; на Debian = 3.13.
+- [x] **Релиз (этап 07):** все пользовательские README/инструкции согласованы с новым install.
+- [x] **Релиз:** `CHANGELOG.md` — секция новой версии заполнена; Unreleased очищен.
+- [x] **Релиз:** версия панели проставлена (README badge + «Текущая версия», `frontend/package.json`).
+- [x] **Релиз:** обновлён [`docs/assets/telegram-promo/05-whats-new.png`](../../assets/telegram-promo/05-whats-new.png) под новую версию и темы релиза.
+
+---
+
+## Ручная проверка (VPS)
+
+Короткий smoke после зелёных автопроверок этапа [06](06-acceptance-smoke.md):
+
+```text
+1. Ubuntu 24.04: sudo ./install.sh → в venv python 3.12; панель http://IP:8000/; systemctl status adminpanelaz
+2. Debian 13 (если есть): то же → python 3.13
+3. Логин admin → Настройки → Адрес сайта и HTTPS → nginx_le или uvicorn_le → сайт открывается
+4. Telegram в меню доступен без «включить модуль»; token задаётся в UI
+5. systemctl restart adminpanelaz работает; start.sh отсутствует
+```
+
+Полный чеклист приёмки и автопроверки — в [06-acceptance-smoke.md](06-acceptance-smoke.md).
 
 ---
 

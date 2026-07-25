@@ -81,12 +81,12 @@
 
 ## Чеклист
 
-- [ ] Все инструкции и README согласованы с HTTP-default / одним `install.sh` / HTTPS в UI
-- [ ] `CHANGELOG.md`: секция `[X.Y.Z]` заполнена; Unreleased очищен; compare-ссылки OK
-- [ ] Версия панели проставлена (README badge + «Текущая версия», `frontend/package.json`)
-- [ ] `docs/assets/telegram-promo/05-whats-new.png` обновлён под X.Y.Z и темы релиза
-- [ ] Статус плана → реализовано
-- [ ] Node agent версию не трогали без необходимости
+- [x] Все инструкции и README согласованы с HTTP-default / одним `install.sh` / HTTPS в UI
+- [x] `CHANGELOG.md`: секция `[X.Y.Z]` заполнена; Unreleased очищен; compare-ссылки OK
+- [x] Версия панели проставлена (README badge + «Текущая версия», `frontend/package.json`)
+- [x] `docs/assets/telegram-promo/05-whats-new.png` обновлён под X.Y.Z и темы релиза
+- [x] Статус плана → реализовано
+- [x] Node agent версию не трогали без необходимости
 
 ---
 

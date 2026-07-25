@@ -138,63 +138,6 @@ die_confirm() {
   exit 1
 }
 
-env_file_value() {
-  local file="$1"
-  local key="$2"
-  if [[ ! -f "$file" ]]; then
-    return 0
-  fi
-  grep -E "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ' || true
-}
-
-collect_controller_state_dirs() {
-  local -n _out_dirs=$1
-  local custom=""
-  custom="$(env_file_value "$ROOT_DIR/backend/.env" "ADMINPANELAZ_STATE_DIR")"
-  _out_dirs=()
-  if [[ -n "$custom" ]]; then
-    _out_dirs+=("$custom")
-  fi
-  _out_dirs+=("/var/lib/adminpanelaz" "$ROOT_DIR/.runtime")
-}
-
-collect_node_state_dirs() {
-  local -n _out_dirs=$1
-  local custom=""
-  custom="$(env_file_value "$ROOT_DIR/backend/node_agent.env" "NODE_AGENT_STATE_DIR")"
-  if [[ -z "$custom" && -f /etc/adminpanelaz/node_agent.env ]]; then
-    custom="$(env_file_value /etc/adminpanelaz/node_agent.env "NODE_AGENT_STATE_DIR")"
-  fi
-  _out_dirs=()
-  if [[ -n "$custom" ]]; then
-    _out_dirs+=("$custom")
-  fi
-  _out_dirs+=("/var/lib/adminpanelaz-node" "$ROOT_DIR/.runtime/node")
-}
-
-stop_local_daemons() {
-  local -a controller_dirs=()
-  local -a node_dirs=()
-  local state_dir=""
-
-  collect_controller_state_dirs controller_dirs
-  collect_node_state_dirs node_dirs
-
-  if [[ -x "$ROOT_DIR/start.sh" ]]; then
-    for state_dir in "${controller_dirs[@]}"; do
-      log "Остановка controller (start.sh stop, state=$state_dir)..."
-      ADMINPANELAZ_STATE_DIR="$state_dir" "$ROOT_DIR/start.sh" stop 2>/dev/null || true
-    done
-  fi
-
-  if [[ -x "$ROOT_DIR/start_node_agent.sh" ]]; then
-    for state_dir in "${node_dirs[@]}"; do
-      log "Остановка node agent (start_node_agent.sh stop, state=$state_dir)..."
-      NODE_AGENT_STATE_DIR="$state_dir" "$ROOT_DIR/start_node_agent.sh" stop 2>/dev/null || true
-    done
-  fi
-}
-
 systemd_unit_exists() {
   local name="$1"
   systemctl cat "$name" >/dev/null 2>&1 \
@@ -254,7 +197,6 @@ remove_ddns_timer() {
 
 stop_all_services() {
   log "Остановка всех сервисов AdminPanelAZ..."
-  stop_local_daemons
   stop_systemd_unit_if_loaded "adminpanelaz-ddns.timer"
   stop_systemd_unit_if_loaded "adminpanelaz-ddns.service"
   stop_systemd_unit_if_loaded "adminpanelaz"

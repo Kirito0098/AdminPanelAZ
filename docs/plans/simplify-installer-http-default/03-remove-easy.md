@@ -37,11 +37,11 @@
 
 ## Чеклист
 
-- [ ] Файлы easy удалены
-- [ ] Нет `--easy` в help
-- [ ] README быстрый старт → только `install.sh`
-- [ ] CI/shellcheck обновлён
-- [ ] `rg install-easy` только в архивных записях CHANGELOG (допустимо)
+- [x] Файлы easy удалены
+- [x] Нет `--easy` в help
+- [x] README быстрый старт → только `install.sh`
+- [x] CI/shellcheck обновлён
+- [x] `rg install-easy` только в архивных записях CHANGELOG (допустимо)
 
 ---
 

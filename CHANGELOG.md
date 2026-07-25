@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.19.0](#2190---2026-07-26) — 2026-07-26
 - [2.18.0](#2180---2026-07-21) — 2026-07-21
 - [2.17.0](#2170---2026-07-15) — 2026-07-15
 - [2.16.0](#2160---2026-07-13) — 2026-07-13
@@ -47,10 +48,29 @@
 
 ### 🔄 Changed
 
-- **Python 3.13 при установке** — предпочтение Debian 13 (`python3.13`); на Ubuntu 24.04, где 3.13 нет в официальном apt, **автоматически 3.12** (пользователю ничего настраивать не нужно). Повторный `source` больше не «запинивает» только 3.13; существующий venv на 3.12/3.13 сохраняется (`scripts/python-runtime.sh`). CI — Python 3.13.
-- **Backend-зависимости** — обновлены pins: FastAPI 0.140, uvicorn 0.51, SQLAlchemy 2.0.51, pydantic-settings 2.14, cryptography 49, redis 8, webauthn 3, geoip2 5, psutil 7 и др.; `passlib` заменён на прямой `bcrypt` 5.0 (хеши `$2b$` совместимы).
+### 🗑️ Removed
 
 ### 🐛 Fixed
+
+---
+
+## [2.19.0] - 2026-07-26
+
+> **Кратко:** установщик упрощён — HTTP по умолчанию (`http://IP:порт`), один `install.sh` без easy и без выбора HTTPS; домен/TLS только в UI; systemd без `start.sh`; Python Ubuntu 3.12 / Debian 3.13 автоматически; модуль Telegram доступен сразу.
+
+### 🔄 Changed
+
+- **Установщик — HTTP по умолчанию** — интерактивный `install.sh` всегда ставит `http_direct` (`BACKEND_HOST=0.0.0.0`, без nginx/certbot). HTTPS и домен — только в UI: **Настройки → Адрес сайта и HTTPS**. Убраны вопросы: способ публикации, внешний IP/домен, внутренние IP узлов, APP_ENV, systemd/daemon/workers, mTLS/ротация, профиль ресурсов, опциональные функции (Telegram/бэкап/CIDR), firewall.
+- **Дефолты install** — `APP_ENV=production`, systemd, `UVICORN_WORKERS=1`, профиль **full**, `ALLOW_INTERNAL_NODES=false`, `FEATURE_TELEGRAM_ENABLED=true`, авто-бэкап **вкл.** каждые **7** дней (без вопроса), mTLS/ротация выкл. Telegram token — только в UI.
+- **Systemd** — unit’ы запускают uvicorn / node agent напрямую (`scripts/systemd-exec-panel.sh`, `systemd-exec-node.sh`); перезапуск — `systemctl restart adminpanelaz` (+ node).
+- **Python 3.13 при установке** — предпочтение Debian 13 (`python3.13`); на Ubuntu 24.04, где 3.13 нет в официальном apt, **автоматически 3.12** (пользователю ничего настраивать не нужно). Повторный `source` больше не «запинивает» только 3.13; существующий venv на 3.12/3.13 сохраняется (`scripts/python-runtime.sh`). CI — Python 3.13.
+- **Backend-зависимости** — обновлены pins: FastAPI 0.140, uvicorn 0.51, SQLAlchemy 2.0.51, pydantic-settings 2.14, cryptography 49, redis 8, webauthn 3, geoip2 5, psutil 7 и др.; `passlib` заменён на прямой `bcrypt` 5.0 (хеши `$2b$` совместимы).
+- **Документация** — быстрый старт только через `install.sh`; порты/firewall под HTTP-default; StatusOpenVPN только через UI; инструкции по workers+Redis, LAN-нодам, mTLS, профилю, Telegram UI.
+
+### 🗑️ Removed
+
+- **Простой установщик** — удалены `install-easy.sh` и `scripts/install-easy-wizard.sh`; флаг `--easy` убран.
+- **`start.sh` / `start_node_agent.sh`** — удалены вместе с bash-watchdog; запуск только через systemd.
 
 ---
 
@@ -2055,7 +2075,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.18.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.19.0...HEAD
+[2.19.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.15.0...v2.16.0
