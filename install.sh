@@ -740,7 +740,7 @@ install_system_deps() {
   ui_progress_start "Установка системных зависимостей"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  # Backend: Python 3.13 (Debian 13), fallback 3.12 (Ubuntu 24.04) — см. scripts/python-runtime.sh
+  # Backend: Ubuntu 24.04 → python3.12; Debian 13 → python3.13 (см. scripts/python-runtime.sh)
   apt-get install -y \
     python3-pip \
     git \
@@ -753,12 +753,12 @@ install_system_deps() {
     vnstat
 
   if ! py_mm="$(ap_apt_install_python)"; then
-    die "Не удалось установить Python 3.13 или 3.12 (venv/dev). На Debian 13: apt install python3.13{,-venv,-dev}; на Ubuntu 24.04: python3.12{,-venv,-dev}. Либо задайте ADMINPANELAZ_PYTHON_BIN"
+    die "Не удалось установить Python из apt (нужен 3.12 на Ubuntu 24.04 или 3.13 на Debian 13: python3.XX{,-venv,-dev}). Либо задайте ADMINPANELAZ_PYTHON_BIN"
   fi
   log "Установлен Python ${py_mm} (пакеты apt)"
 
   if ! py_bin="$(ap_resolve_python)"; then
-    die "После apt не найден Python ${ADMINPANELAZ_PYTHON_VERSION}. Установите пакеты python${ADMINPANELAZ_PYTHON_VERSION}{,-venv,-dev} или задайте ADMINPANELAZ_PYTHON_BIN=/path/to/python${ADMINPANELAZ_PYTHON_VERSION}"
+    die "После apt не найден подходящий Python (3.12/3.13). Ubuntu 24.04: python3.12{,-venv,-dev}; Debian 13: python3.13{,-venv,-dev}"
   fi
   log "Python для backend: ${py_bin} ($(ap_python_report_version "$py_bin"))"
 

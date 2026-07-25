@@ -2,24 +2,50 @@
 # Общий выбор Python для backend/.venv (install.sh, start.sh, start_node_agent.sh).
 # Не запускать напрямую — только source.
 #
-# Предпочтение: Python 3.13 (Debian 13 / CI). Запасной вариант: 3.12 (Ubuntu 24.04,
-# где python3.13 нет в apt). Системный python3 3.14+ не подставляется без проверки.
+# Авто (пользователю ничего настраивать не нужно):
+#   Ubuntu 24.04 → сначала 3.12 (есть в официальном apt), затем 3.13
+#   Debian 13 / прочие → сначала 3.13, затем 3.12
 #
-# Переопределение:
-#   ADMINPANELAZ_PYTHON_MINOR=13|12   — только эта ветка (без fallback)
-#   ADMINPANELAZ_PYTHON_BIN=/path     — явный интерпретатор
+# Опционально (только для отладки / особых сборок):
+#   ADMINPANELAZ_PYTHON_PIN=1 ADMINPANELAZ_PYTHON_MINOR=12  — только эта ветка
+#   ADMINPANELAZ_PYTHON_BIN=/path/to/python                 — явный интерпретатор
 
 ADMINPANELAZ_PYTHON_MAJOR="${ADMINPANELAZ_PYTHON_MAJOR:-3}"
-# Пустой MINOR = авто: сначала 3.13, затем 3.12. Явный MINOR отключает fallback.
-_AP_PYTHON_MINOR_PINNED=0
-if [[ -n "${ADMINPANELAZ_PYTHON_MINOR+x}" && -n "${ADMINPANELAZ_PYTHON_MINOR}" ]]; then
-  _AP_PYTHON_MINOR_PINNED=1
-else
-  ADMINPANELAZ_PYTHON_MINOR="${ADMINPANELAZ_PYTHON_MINOR:-13}"
-fi
-ADMINPANELAZ_PYTHON_VERSION="${ADMINPANELAZ_PYTHON_MAJOR}.${ADMINPANELAZ_PYTHON_MINOR}"
-# Кандидаты major.minor по приоритету (для apt и поиска бинарника).
-ADMINPANELAZ_PYTHON_FALLBACK_MINOR="${ADMINPANELAZ_PYTHON_FALLBACK_MINOR:-12}"
+
+# Порядок minor: "12 13" или "13 12". Не путать с PIN — список всегда полный, пока PIN!=1.
+_ap_python_auto_minor_order() {
+  local id="" version_id=""
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    id="$(. /etc/os-release && printf '%s' "${ID:-}")"
+    # shellcheck disable=SC1091
+    version_id="$(. /etc/os-release && printf '%s' "${VERSION_ID:-}")"
+  fi
+  # Ubuntu 24.04: python3.13 нет в официальном репозитории
+  if [[ "$id" == "ubuntu" && "$version_id" == "24.04" ]]; then
+    printf '%s\n' 12 13
+    return
+  fi
+  printf '%s\n' 13 12
+}
+
+# Список "3.12" / "3.13" по приоритету. Устойчив к повторному source.
+ap_python_candidate_versions() {
+  local major="${ADMINPANELAZ_PYTHON_MAJOR:-3}"
+  local m
+  if [[ "${ADMINPANELAZ_PYTHON_PIN:-0}" == "1" && -n "${ADMINPANELAZ_PYTHON_MINOR:-}" ]]; then
+    printf '%s\n' "${major}.${ADMINPANELAZ_PYTHON_MINOR}"
+    return 0
+  fi
+  while IFS= read -r m; do
+    [[ -n "$m" ]] || continue
+    printf '%s\n' "${major}.${m}"
+  done < <(_ap_python_auto_minor_order)
+}
+
+# Текущая «активная» ветка для логов (после resolve/apt). Дефолт — первый кандидат.
+ADMINPANELAZ_PYTHON_VERSION="$(ap_python_candidate_versions | head -n1)"
+ADMINPANELAZ_PYTHON_MINOR="${ADMINPANELAZ_PYTHON_VERSION#*.}"
 
 _ap_python_die() {
   if declare -F die >/dev/null 2>&1; then
@@ -45,16 +71,10 @@ _ap_python_warn() {
   echo "[python] ВНИМАНИЕ: $*" >&2
 }
 
-# Список веток "3.13" "3.12" …
-ap_python_candidate_versions() {
-  local versions=()
-  versions+=("${ADMINPANELAZ_PYTHON_MAJOR}.${ADMINPANELAZ_PYTHON_MINOR}")
-  if [[ "$_AP_PYTHON_MINOR_PINNED" -eq 0 \
-    && -n "${ADMINPANELAZ_PYTHON_FALLBACK_MINOR}" \
-    && "${ADMINPANELAZ_PYTHON_FALLBACK_MINOR}" != "${ADMINPANELAZ_PYTHON_MINOR}" ]]; then
-    versions+=("${ADMINPANELAZ_PYTHON_MAJOR}.${ADMINPANELAZ_PYTHON_FALLBACK_MINOR}")
-  fi
-  printf '%s\n' "${versions[@]}"
+_ap_python_install_hint() {
+  local want
+  want="$(ap_python_candidate_versions | paste -sd '/' -)"
+  printf 'Нужен Python %s.x. Ubuntu 24.04: apt-get install -y python3.12 python3.12-venv python3.12-dev; Debian 13: apt-get install -y python3.13 python3.13-venv python3.13-dev' "$want"
 }
 
 # Версия интерпретатора: "3.13.5" или пусто при ошибке.
@@ -77,7 +97,7 @@ ap_python_version_matches() {
   [[ "$ver" == "${want}."* ]] || [[ "$ver" == "$want" ]]
 }
 
-# true, если версия входит в список кандидатов (3.13 или 3.12).
+# true, если версия входит в список кандидатов (3.12 или 3.13).
 ap_python_version_allowed() {
   local ver="${1:-}"
   local mm cand
@@ -89,7 +109,8 @@ ap_python_version_allowed() {
   return 1
 }
 
-# Зафиксировать выбранную ветку (после resolve / apt).
+# Зафиксировать выбранную ветку (после resolve / apt) — только для логов/сообщений.
+# Не влияет на список кандидатов (повторный source не «запинит» ветку).
 ap_python_set_active_version() {
   local mm="${1:-}"
   [[ -n "$mm" ]] || return 1
@@ -98,7 +119,7 @@ ap_python_set_active_version() {
   ADMINPANELAZ_PYTHON_MINOR="${mm#*.}"
 }
 
-# Путь к python3.13 / python3.12 (или совместимому python3). Печатает путь в stdout.
+# Путь к python3.12 / python3.13 (или совместимому python3). Печатает путь в stdout.
 ap_resolve_python() {
   local candidates=()
   local override="${ADMINPANELAZ_PYTHON_BIN:-}"
@@ -145,15 +166,13 @@ ap_resolve_python() {
 }
 
 ap_require_python() {
-  local bin ver want
-  want="$(ap_python_candidate_versions | paste -sd '/' -)"
+  local bin ver
   if ! bin="$(ap_resolve_python)"; then
-    _ap_python_die \
-      "Нужен Python ${want}.x. Установите: apt-get install -y python${ADMINPANELAZ_PYTHON_MAJOR}.${ADMINPANELAZ_PYTHON_MINOR}{,-venv,-dev} (на Ubuntu 24.04 — python3.12) или задайте ADMINPANELAZ_PYTHON_BIN"
+    _ap_python_die "$(_ap_python_install_hint)"
   fi
   ver="$(ap_python_report_version "$bin")"
   if ! ap_python_version_allowed "$ver"; then
-    _ap_python_die "Python ${want}.x обязателен, сейчас: $bin ($ver)"
+    _ap_python_die "$(_ap_python_install_hint) (сейчас: $bin ($ver))"
   fi
   printf '%s\n' "$bin"
 }
@@ -165,13 +184,13 @@ ap_venv_report_version() {
   ap_python_report_version "$py"
 }
 
-# Пакеты apt для одной ветки: python3.13 python3.13-venv python3.13-dev
+# Пакеты apt для одной ветки: python3.12 python3.12-venv python3.12-dev
 ap_python_apt_packages_for() {
   local mm="${1:-}"
   printf 'python%s python%s-venv python%s-dev\n' "$mm" "$mm" "$mm"
 }
 
-# Установить python через apt: сначала 3.13, при отсутствии пакетов — 3.12.
+# Установить python через apt по порядку кандидатов (Ubuntu: 3.12 первым).
 # Возвращает 0 и печатает выбранный mm в stdout при успехе.
 ap_apt_install_python() {
   local cand pkgs
@@ -192,27 +211,29 @@ ap_apt_install_python() {
   return 1
 }
 
-# Создать venv на выбранном Python; пересоздать, если версия не из кандидатов
-# или не совпадает с фактически выбранным интерпретатором.
+# Создать/проверить venv. Существующий venv на любой разрешённой ветке (3.12 или 3.13)
+# сохраняется — не гоняем Ubuntu на несуществующий 3.13.
 ap_ensure_venv() {
   local venv_dir="${1:-}"
   local py bin ver mm
   [[ -n "$venv_dir" ]] || _ap_python_die "ap_ensure_venv: не указан каталог venv"
 
-  bin="$(ap_require_python)"
-  mm="$ADMINPANELAZ_PYTHON_VERSION"
-
   if [[ -x "${venv_dir}/bin/python" ]]; then
     ver="$(ap_venv_report_version "$venv_dir" || true)"
-    if ap_python_version_matches "$ver" "$mm"; then
+    if ap_python_version_allowed "$ver"; then
+      mm="$(ap_python_mm "$ver")"
+      ap_python_set_active_version "$mm"
       _ap_python_log "venv OK: ${venv_dir} (Python ${ver})"
       return 0
     fi
-    _ap_python_warn "venv на Python ${ver:-unknown} — пересоздаём под ${mm} (${venv_dir})"
+    _ap_python_warn "venv на Python ${ver:-unknown} не подходит — пересоздаём (${venv_dir})"
     rm -rf "$venv_dir"
   fi
 
-  _ap_python_log "Создание venv: $venv_dir (интерпретатор $bin)"
+  bin="$(ap_require_python)"
+  mm="$ADMINPANELAZ_PYTHON_VERSION"
+
+  _ap_python_log "Создание venv: $venv_dir (интерпретатор $bin, Python ${mm})"
   "$bin" -m venv "$venv_dir"
   py="${venv_dir}/bin/python"
   ver="$(ap_python_report_version "$py" || true)"
