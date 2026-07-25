@@ -879,6 +879,30 @@ export async function publishVpnNetwork(data: import('../types').VpnNetworkPubli
   })
 }
 
+export async function getDdnsSettings() {
+  return apiFetch<import('../types').DdnsSettings>('/settings/vpn-network/ddns')
+}
+
+export async function updateDdnsSettings(data: import('../types').DdnsSettingsUpdatePayload) {
+  return apiFetch<import('../types').DdnsActionResponse>('/settings/vpn-network/ddns', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function runDdnsUpdate() {
+  return apiFetch<import('../types').DdnsActionResponse>('/settings/vpn-network/ddns/update', {
+    method: 'POST',
+  })
+}
+
+export async function setDdnsTimer(enabled: boolean) {
+  return apiFetch<import('../types').DdnsActionResponse>('/settings/vpn-network/ddns/timer', {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  })
+}
+
 export async function getTelegramSettings() {
   return apiFetch<import('../types').TelegramSettings>('/settings/telegram')
 }

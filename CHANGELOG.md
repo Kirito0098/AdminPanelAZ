@@ -46,11 +46,22 @@
 
 ### ✨ Added
 
+- **DDNS в UI** — DuckDNS / No-IP в **Настройки → Адрес сайта и HTTPS** (блок «Динамический DNS»): сохранение `/etc/adminpanelaz/ddns.env`, обновление IP, systemd timer каждые 5 мин (`ddns_settings.py`, API `/settings/vpn-network/ddns`).
+
 ### 🔄 Changed
+
+- **Мастер установки** — вопрос порта: «Порт панели (доступ по IP:порт)» вместо «Порт backend (панель)», чтобы было ясно, что это порт открытия панели.
+- **Документация** — DDNS настраивается в панели, не в мастере установки; CLI `ddns-update.sh` — fallback.
 
 ### 🗑️ Removed
 
+- **Мастер установки — шаг DDNS** — интерактивный вопрос провайдера убран (остаётся env-override `WIZ_DDNS_*` для CI/автоустановки).
+
 ### 🐛 Fixed
+
+### 🧪 Tests
+
+- **`test_ddns_settings.py`** — parse/write `ddns.env`, маскирование секретов.
 
 ---
 

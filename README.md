@@ -70,13 +70,13 @@ wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanel
 sudo bash /tmp/install.sh
 ```
 
-Мастер спросит: тип установки, порты (backend; node agent — если ставите узел), DDNS (по желанию), логин/пароль администратора, ключ node agent (если нужен) и пути (бэкапы).
+Мастер спросит: тип установки, порты (панель; node agent — если ставите узел), логин/пароль администратора, ключ node agent (если нужен) и пути (бэкапы).
 
-**Не спрашивает:** HTTPS/домен/публикацию, `APP_ENV`, firewall, workers/Redis, mTLS, профиль ресурсов, Telegram — дефолты: HTTP по IP:порт, `production`, systemd, workers=1, профиль Full.
+**Не спрашивает:** HTTPS/домен/публикацию, DDNS, `APP_ENV`, firewall, workers/Redis, mTLS, профиль ресурсов, Telegram — дефолты: HTTP по IP:порт, `production`, systemd, workers=1, профиль Full.
 
 После установки откройте `http://IP:порт/` из вывода мастера. Рекомендуется в панели:
 
-- **Настройки → Адрес сайта и HTTPS** — домен, Let's Encrypt, nginx/uvicorn
+- **Настройки → Адрес сайта и HTTPS** — DDNS (DuckDNS/No-IP), домен, Let's Encrypt, nginx/uvicorn
 - **Telegram** — bot token / chat (модуль уже в меню)
 - LAN-ноды — при необходимости `ALLOW_INTERNAL_NODES=true` в `backend/.env`
 - workers/Redis, mTLS — вручную / UI, см. [Production](#️-production-vds-redis-и-профили)
@@ -217,13 +217,17 @@ AntiZapret и VPN-конфиги при удалении панели **не т�
 
 ## 🌐 Бесплатный адрес для панели (DDNS)
 
-Если нет своего домена, в мастере установки можно выбрать:
+Если нет своего домена, в панели: **Настройки → Адрес сайта и HTTPS** → блок **Динамический DNS**:
 
 - [DuckDNS](https://www.duckdns.org) — `myvpn.duckdns.org`
 - [No-IP](https://www.noip.com) — `myvpn.ddns.net`
 
+Можно включить автообновление IP (systemd timer каждые 5 мин) и затем указать этот адрес в мастере HTTPS.
+
+CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|status`.
+
 > [!TIP]
-> Для HTTPS нужны открытые порты **80** и **443** на сервере. Свой домен тоже подойдёт — укажите его в панели: **Настройки → Адрес сайта и HTTPS**.
+> Для HTTPS нужны открытые порты **80** и **443** на сервере. Свой домен тоже подойдёт — укажите его в том же разделе настроек.
 
 ## 🔗 StatusOpenVPN на одном домене
 

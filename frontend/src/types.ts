@@ -871,6 +871,42 @@ export interface VpnNetworkPublishPayload {
   nginx_subpath_integrate?: boolean
 }
 
+export type DdnsProvider = 'none' | 'duckdns' | 'noip'
+
+export interface DdnsSettings {
+  provider: DdnsProvider
+  domain: string
+  subdomain: string
+  hostname: string
+  username: string
+  token_configured: boolean
+  password_configured: boolean
+  token_masked: string
+  password_masked: string
+  timer_enabled: boolean
+  timer_active: boolean
+  timer_detail: string
+  config_path: string
+  configured: boolean
+}
+
+export interface DdnsSettingsUpdatePayload {
+  provider: DdnsProvider
+  subdomain?: string | null
+  token?: string | null
+  hostname?: string | null
+  username?: string | null
+  password?: string | null
+  enable_timer?: boolean
+  run_update?: boolean
+}
+
+export interface DdnsActionResponse {
+  message: string
+  output?: string | null
+  settings: DdnsSettings
+}
+
 export interface CidrProviderInfo {
   filename: string
   name: string

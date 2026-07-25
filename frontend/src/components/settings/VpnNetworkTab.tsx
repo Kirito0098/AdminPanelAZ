@@ -13,6 +13,7 @@ import { ApiError, getBackgroundTask, getBackgroundTaskForApiBase, getVpnNetwork
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import PublishAccessWizard from '@/components/settings/PublishAccessWizard'
 import PublishAwaitDialog, { type PublishAwaitDialogState } from '@/components/settings/PublishAwaitDialog'
+import DdnsSettingsCard from '@/components/settings/DdnsSettingsCard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
@@ -744,6 +745,17 @@ export default function VpnNetworkTab() {
             </dl>
           </CardContent>
         </Card>
+
+        <SectionHeading
+          title="Динамический DNS"
+          description="Бесплатный адрес DuckDNS / No-IP, если нет своего домена"
+        />
+
+        <DdnsSettingsCard
+          onSuggestDomain={(fqdn) => {
+            setDomain((current) => (current.trim() ? current : fqdn))
+          }}
+        />
 
         <SectionHeading
           title="Мастер настройки"

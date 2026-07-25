@@ -1080,6 +1080,44 @@ class VpnNetworkPortStatusResponse(BaseModel):
     listener: str | None = None
 
 
+class DdnsSettingsResponse(BaseModel):
+    provider: str = "none"
+    domain: str = ""
+    subdomain: str = ""
+    hostname: str = ""
+    username: str = ""
+    token_configured: bool = False
+    password_configured: bool = False
+    token_masked: str = ""
+    password_masked: str = ""
+    timer_enabled: bool = False
+    timer_active: bool = False
+    timer_detail: str = ""
+    config_path: str = "/etc/adminpanelaz/ddns.env"
+    configured: bool = False
+
+
+class DdnsSettingsUpdateRequest(BaseModel):
+    provider: str = Field(pattern=r"^(none|duckdns|noip)$")
+    subdomain: str | None = Field(default=None, max_length=128)
+    token: str | None = Field(default=None, max_length=256)
+    hostname: str | None = Field(default=None, max_length=255)
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=256)
+    enable_timer: bool = True
+    run_update: bool = True
+
+
+class DdnsTimerRequest(BaseModel):
+    enabled: bool
+
+
+class DdnsActionResponse(BaseModel):
+    message: str
+    output: str | None = None
+    settings: DdnsSettingsResponse
+
+
 class ServiceRestartRequest(BaseModel):
     service_name: str
 

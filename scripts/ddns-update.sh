@@ -31,7 +31,9 @@ usage() {
   status          Показать конфигурацию и статус timer
   --help          Справка
 
-Конфигурация: /etc/adminpanelaz/ddns.env (создаётся при install.sh)
+Конфигурация: /etc/adminpanelaz/ddns.env
+  Создаётся в панели (Настройки → Адрес сайта и HTTPS → Динамический DNS)
+  или через env-override установщика (WIZ_DDNS_PROVIDER=…).
 
 Переменные в ddns.env:
   DDNS_PROVIDER=duckdns|noip
@@ -46,7 +48,7 @@ EOF
 
 load_config() {
   if [[ ! -f "$CONFIG_FILE" ]]; then
-    die "Файл конфигурации не найден: $CONFIG_FILE (настройте через install.sh)"
+    die "Файл конфигурации не найден: $CONFIG_FILE (настройте в панели или через WIZ_DDNS_*)"
   fi
   # shellcheck source=/dev/null
   source "$CONFIG_FILE"

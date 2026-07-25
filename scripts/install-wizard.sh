@@ -82,10 +82,11 @@ wiz_set_total_steps() {
       WIZ_TOTAL_STEPS=3
       ;;
     controller)
-      # тип → сеть → DDNS → admin → paths
-      WIZ_TOTAL_STEPS=5
+      # тип → сеть → admin → paths (DDNS — в панели)
+      WIZ_TOTAL_STEPS=4
       ;;
     *)
+      # тип → сеть → admin → node agent → paths
       WIZ_TOTAL_STEPS=5
       ;;
   esac
@@ -639,7 +640,7 @@ wizard_ask_network() {
   if [[ "$WIZ_ALLOW_INTERNAL_NODES" != "true" ]]; then
     WIZ_ALLOW_INTERNAL_NODES="false"
   fi
-  wiz_prompt_port "Порт backend (панель)" "$WIZ_BACKEND_PORT" "Backend (панель)" "any"
+  wiz_prompt_port "Порт панели (доступ по IP:порт)" "$WIZ_BACKEND_PORT" "Панель" "any"
   WIZ_BACKEND_PORT="$REPLY"
   # HOST задаёт wizard_apply_default_publish_http_direct (не форсируем 127.0.0.1)
 
@@ -666,64 +667,23 @@ wizard_ddns_fqdn() {
   esac
 }
 
+# DDNS интерактивно не спрашиваем — настройка в UI: Настройки → Адрес сайта и HTTPS.
+# Env-override (CI): WIZ_DDNS_PROVIDER=duckdns|noip + credentials → setup_ddns_if_selected в install.sh.
 wizard_ask_ddns() {
   if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
     return 0
   fi
-
-  wiz_step "Динамический DNS"
-  print_info "Если нет своего домена — бесплатный DDNS (подробнее в README.md, раздел «Бесплатные домены»)."
-  echo
-  wiz_prompt_choice "Провайдер DDNS" \
-    "Не использую DDNS (свой домен или IP)" \
-    "DuckDNS (*.duckdns.org) — рекомендуется для homelab" \
-    "No-IP (*.ddns.net и др.)"
-
-  case "$REPLY" in
-    1) WIZ_DDNS_PROVIDER="none" ;;
-    2) WIZ_DDNS_PROVIDER="duckdns" ;;
-    3) WIZ_DDNS_PROVIDER="noip" ;;
+  # Интерактивно оставляем none, если провайдер не задан извне.
+  case "${WIZ_DDNS_PROVIDER:-none}" in
+    duckdns|noip)
+      if [[ -z "$WIZ_SERVER_ADDRESS" ]]; then
+        WIZ_SERVER_ADDRESS="$(wizard_ddns_fqdn)"
+      fi
+      ;;
+    *)
+      WIZ_DDNS_PROVIDER="none"
+      ;;
   esac
-
-  if [[ "$WIZ_DDNS_PROVIDER" == "duckdns" ]]; then
-    echo
-    echo "  Зарегистрируйтесь на https://www.duckdns.org и создайте поддомен."
-    echo "  Нужен только token со страницы домена."
-    wiz_prompt "Поддомен DuckDNS (без .duckdns.org)" "$WIZ_DDNS_SUBDOMAIN"
-    WIZ_DDNS_SUBDOMAIN="${REPLY,,}"
-    WIZ_DDNS_SUBDOMAIN="${WIZ_DDNS_SUBDOMAIN%.duckdns.org}"
-    wiz_prompt_secret "DuckDNS token" "$WIZ_DDNS_TOKEN" ""
-    WIZ_DDNS_TOKEN="$REPLY"
-    local fqdn="${WIZ_DDNS_SUBDOMAIN}.duckdns.org"
-    if [[ -z "$WIZ_SERVER_ADDRESS" ]]; then
-      WIZ_SERVER_ADDRESS="$fqdn"
-    fi
-    echo "  Полное имя: $fqdn"
-  elif [[ "$WIZ_DDNS_PROVIDER" == "noip" ]]; then
-    echo
-    echo "  Зарегистрируйтесь на https://www.noip.com и создайте hostname."
-    wiz_prompt "Полное имя хоста No-IP (например, myvpn.ddns.net)" "$WIZ_DDNS_HOSTNAME"
-    WIZ_DDNS_HOSTNAME="$REPLY"
-    wiz_prompt "Логин No-IP" "$WIZ_DDNS_USERNAME"
-    WIZ_DDNS_USERNAME="$REPLY"
-    wiz_prompt_secret "Пароль No-IP" "$WIZ_DDNS_PASSWORD"
-    WIZ_DDNS_PASSWORD="$REPLY"
-    if [[ -z "$WIZ_SERVER_ADDRESS" ]]; then
-      WIZ_SERVER_ADDRESS="$WIZ_DDNS_HOSTNAME"
-    fi
-  fi
-
-  if [[ "$WIZ_DDNS_PROVIDER" != "none" ]]; then
-    wiz_prompt_yesno "Настроить автоматическое обновление IP (systemd timer, каждые 5 мин)?" "y"
-    if [[ "$REPLY" == "y" ]]; then
-      WIZ_DDNS_CONFIGURE_UPDATE="true"
-    else
-      WIZ_DDNS_CONFIGURE_UPDATE="false"
-      echo "  Обновляйте IP вручную: sudo ./scripts/ddns-update.sh update"
-    fi
-    echo "  Перед HTTPS в панели IP должен указывать на этот сервер."
-  fi
-  echo
 }
 
 # APP_ENV всегда production при install (без интерактивного выбора).
@@ -1103,7 +1063,7 @@ run_install_wizard() {
     "Ничего не устанавливается и не меняется, пока вы не подтвердите." \
     "Enter — принять значение по умолчанию (показано в [скобках])." \
     "Если сомневаетесь — оставляйте значения по умолчанию, они безопасны." \
-    "Почти всё можно изменить позже в backend/.env и скриптах в scripts/."
+    "Почти всё можно изменить позже в панели (Настройки) и в backend/.env."
   echo
   print_info "Подсказка: ответы 'y' (да) / 'n' (нет); выбор из списка — номер варианта."
   echo
@@ -1111,7 +1071,7 @@ run_install_wizard() {
   wizard_ask_install_type
   wizard_configure_antizapret
   wizard_ask_network
-  wizard_ask_ddns
+  wizard_ask_ddns  # только env-override; интерактивно — none (DDNS в UI)
   wizard_ask_app_env
   wizard_apply_default_publish_http_direct
   wizard_ask_admin

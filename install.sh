@@ -1394,7 +1394,7 @@ write_ddns_config() {
   esac
 
   {
-    echo "# AdminPanelAZ DDNS (создан install.sh)"
+    echo "# AdminPanelAZ DDNS (создан install.sh / env-override)"
     echo "DDNS_PROVIDER=$(ddns_config_quote "$provider")"
     echo "DDNS_DOMAIN=$(ddns_config_quote "$domain")"
     case "$provider" in
@@ -1811,6 +1811,12 @@ print_post_install() {
       ui_summary_row "Домен" "$ddns_domain"
       ui_summary_row "Обновление IP" "sudo ./scripts/ddns-update.sh update"
       ui_summary_row "Статус" "sudo ./scripts/ddns-update.sh status"
+    else
+      echo
+      ui_separator
+      ui_bold "DDNS"
+      echo
+      ui_summary_row "Настройка" "в панели: Настройки → Адрес сайта и HTTPS → Динамический DNS"
     fi
     echo
     ui_separator
