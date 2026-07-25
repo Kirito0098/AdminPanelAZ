@@ -47,6 +47,9 @@
 
 ### 🔄 Changed
 
+- **Python 3.13 при установке** — предпочтение Debian 13 (`python3.13`); на Ubuntu 24.04, где 3.13 нет в официальном apt, **автоматически 3.12** (пользователю ничего настраивать не нужно). Повторный `source` больше не «запинивает» только 3.13; существующий venv на 3.12/3.13 сохраняется (`scripts/python-runtime.sh`). CI — Python 3.13.
+- **Backend-зависимости** — обновлены pins: FastAPI 0.140, uvicorn 0.51, SQLAlchemy 2.0.51, pydantic-settings 2.14, cryptography 49, redis 8, webauthn 3, geoip2 5, psutil 7 и др.; `passlib` заменён на прямой `bcrypt` 5.0 (хеши `$2b$` совместимы).
+
 ### 🐛 Fixed
 
 ---

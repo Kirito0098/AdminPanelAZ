@@ -41,7 +41,7 @@
 
 | Слой | Стек | Точка входа |
 |------|------|-------------|
-| Backend | Python 3.12, FastAPI, SQLAlchemy, Pydantic | `backend/app/main.py` |
+| Backend | Python 3.12 (Ubuntu 24.04) / 3.13 (Debian 13), FastAPI, SQLAlchemy, Pydantic | `backend/app/main.py` |
 | Frontend | React 18, TypeScript, Vite, Tailwind, shadcn/ui | `frontend/src/main.tsx` |
 | TG Mini App | Отдельная сборка Vite (`mode=tg-mini`) | `frontend/src/tg-mini/main.tsx` |
 | БД | SQLite (основная + отдельная CIDR) | `backend/app/database.py`, `cidr_database.py` |

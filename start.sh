@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 VENV_DIR="$BACKEND_DIR/.venv"
+# shellcheck source=scripts/python-runtime.sh
+source "$ROOT_DIR/scripts/python-runtime.sh"
 
 # Каталог состояния: логи и PID-файлы вне корня проекта (по умолчанию скрытый .runtime/)
 resolve_state_dir() {
@@ -236,10 +238,7 @@ stop_services() {
 }
 
 setup_backend() {
-  if [[ ! -d "$VENV_DIR" ]]; then
-    log "Creating Python virtual environment..."
-    python3 -m venv "$VENV_DIR"
-  fi
+  ap_ensure_venv "$VENV_DIR"
 
   # shellcheck source=/dev/null
   source "$VENV_DIR/bin/activate"
