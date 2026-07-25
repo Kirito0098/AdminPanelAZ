@@ -56,16 +56,16 @@
 
 ## [2.19.0] - 2026-07-26
 
-> **Кратко:** установщик упрощён — HTTP по умолчанию (`http://IP:порт`), один `install.sh` без easy и без выбора HTTPS; домен/TLS только в UI; systemd без `start.sh`; Python Ubuntu 3.12 / Debian 3.13 автоматически; модуль Telegram доступен сразу.
+> **Кратко:** установщик упрощён — HTTP по умолчанию (`http://IP:порт`), один `install.sh` без easy и без выбора HTTPS; домен/TLS только в UI; systemd без watchdog-`start.sh` (compat-shim + refresh unit’ов при update); модуль Telegram доступен сразу. Плюс Python 3.12/3.13 auto и обновление backend-зависимостей.
 
 ### 🔄 Changed
 
 - **Установщик — HTTP по умолчанию** — интерактивный `install.sh` всегда ставит `http_direct` (`BACKEND_HOST=0.0.0.0`, без nginx/certbot). HTTPS и домен — только в UI: **Настройки → Адрес сайта и HTTPS**. Убраны вопросы: способ публикации, внешний IP/домен, внутренние IP узлов, APP_ENV, systemd/daemon/workers, mTLS/ротация, профиль ресурсов, опциональные функции (Telegram/бэкап/CIDR), firewall.
 - **Дефолты install** — `APP_ENV=production`, systemd, `UVICORN_WORKERS=1`, профиль **full**, `ALLOW_INTERNAL_NODES=false`, `FEATURE_TELEGRAM_ENABLED=true`, авто-бэкап **вкл.** каждые **7** дней (без вопроса), mTLS/ротация выкл. Telegram token — только в UI.
 - **Systemd** — unit’ы запускают uvicorn / node agent напрямую (`scripts/systemd-exec-panel.sh`, `systemd-exec-node.sh`); перезапуск — `systemctl restart adminpanelaz` (+ node). UI/CLI update и startup переписывают установленные unit’ы из репо (`scripts/refresh-systemd-units.sh`), чтобы старый `ExecStart=…/start.sh` не ломал панель после pull.
-- **Python 3.13 при установке** — предпочтение Debian 13 (`python3.13`); на Ubuntu 24.04, где 3.13 нет в официальном apt, **автоматически 3.12** (пользователю ничего настраивать не нужно). Повторный `source` больше не «запинивает» только 3.13; существующий venv на 3.12/3.13 сохраняется (`scripts/python-runtime.sh`). CI — Python 3.13.
-- **Backend-зависимости** — обновлены pins: FastAPI 0.140, uvicorn 0.51, SQLAlchemy 2.0.51, pydantic-settings 2.14, cryptography 49, redis 8, webauthn 3, geoip2 5, psutil 7 и др.; `passlib` заменён на прямой `bcrypt` 5.0 (хеши `$2b$` совместимы).
 - **Документация** — быстрый старт только через `install.sh`; порты/firewall под HTTP-default; StatusOpenVPN только через UI; инструкции по workers+Redis, LAN-нодам, mTLS, профилю, Telegram UI.
+- **Python 3.13 при установке** — предпочтение Debian 13 (`python3.13`); на Ubuntu 24.04 **автоматически 3.12**. Повторный `source` не «запинивает» только 3.13; существующий venv сохраняется (`scripts/python-runtime.sh`). CI — Python 3.13.
+- **Backend-зависимости** — pins: FastAPI 0.140, uvicorn 0.51, SQLAlchemy 2.0.51, pydantic-settings 2.14, cryptography 49, redis 8, webauthn 3, geoip2 5, psutil 7 и др.; `passlib` → `bcrypt` 5.0.
 
 ### 🐛 Fixed
 
@@ -80,77 +80,59 @@
 
 ## [2.18.0] - 2026-07-21
 
-> **Кратко:** preflight портов в установщиках и понятный вывод при сбое; подпуть `/panel` и StatusOpenVPN при установке; DuckDNS — только token без ложного «пароля»; предупреждение о конфликте OPENVPN_BACKUP_TCP с HTTPS на 443; публикация без nginx — stop/disable вместо редиректа 443→порт; IPv4-only; whitelist порта на uvicorn HTTPS; фиксы удаления узла и QR AZ; правки текста установщиков (счётчик шагов easy-мастера, справка, сводка post-install).
+> **Кратко:** preflight портов и понятный вывод при сбое install; DuckDNS — только token; предупреждение о конфликте OPENVPN_BACKUP_TCP с HTTPS на 443; публикация без nginx — stop/disable вместо редиректа 443→порт; IPv4-only; whitelist порта на uvicorn HTTPS; фиксы удаления узла и QR AZ.
+>
+> *(HTTPS / подпуть / StatusOpenVPN в install и easy-мастер в 2.19.0 убраны — настройка только в UI; ниже не дублируем.)*
 
 ### ✨ Added
 
-#### Установщики — проверка портов и понятные ошибки
+#### Установщик — проверка портов и понятные ошибки
 
-- **Preflight портов** — до apt/npm установщик проверяет, свободны ли нужные порты (backend, HTTPS/HTTP nginx, node agent); при занятости показывает PID/процесс/unit (`ss -tlnp`) и останавливается с подсказкой (`scripts/install-port-check.sh`, `install.sh`, мастера).
-- **Проверка при вводе порта** — в полном мастере `wiz_prompt_port` не принимает порт, занятый чужим сервисом (предлагает другой); свой `adminpanelaz` / `adminpanelaz-node` / nginx панели считается OK (повторная установка).
-- **Easy-мастер** — при занятом 8000/9100 предлагает сменить порт; при занятых 80/443 для Let's Encrypt — предупреждение и подтверждение продолжения.
-- **Вывод при прерывании** — `trap ERR` / Ctrl+C: шаг установки, строка, команда и что проверить (`journalctl`, `backend.log`); `die()` печатает блок ошибки без дублирования с trap.
-
-#### Установка — подпуть панели (`ACCESS_PATH`) и StatusOpenVPN
-
-При Nginx (Let's Encrypt / самоподписанный / свои сертификаты) мастер спрашивает, где открывать панель на домене.
-
-- **Выбор подпути** — **корень** (по умолчанию) / **`/panel`** (одним пунктом) / **свой** сегмент; summary и post-install URL с суффиксом (`https://домен/panel/`) (`wizard_ask_access_path_and_status`, `install-wizard.sh`, `install-easy-wizard.sh`).
-- **StatusOpenVPN** — если на домене найден vhost Status: предложение «установить рядом» → `ACCESS_PATH=/panel` + `NGINX_SUBPATH_INTEGRATE=true`; иначе при чужом vhost и непустом подпути — вопрос про auto-include.
-- **Применение** — `setup_nginx_if_selected` экспортирует `ACCESS_PATH` / integrate и вызывает `nginx_finalize_nginx_site` (snippet + include в чужой/Status vhost), как `nginx-setup.sh` (`install.sh`).
-- **Easy** — тот же опрос после «свой домен» / DuckDNS (`WIZ_NGINX_MODE=le`).
-- **Docs** — сценарий Status при установке и через UI ([set-i-publikaciya.md](docs/nastrojki/set-i-publikaciya.md), [README.md](README.md)).
+- **Preflight портов** — до apt/npm установщик проверяет свободные порты (backend, node agent; при HTTPS-override — 80/443); при занятости показывает PID/процесс/unit и останавливается (`scripts/install-port-check.sh`, `install.sh`).
+- **Проверка при вводе порта** — `wiz_prompt_port` не принимает порт, занятый чужим сервисом; свой `adminpanelaz` / `adminpanelaz-node` / nginx панели — OK.
+- **Вывод при прерывании** — `trap ERR` / Ctrl+C: шаг, строка, команда и что проверить; `die()` без дубля с trap.
 
 #### Конфиг AntiZapret — конфликт `OPENVPN_BACKUP_TCP` с портом 443
 
-Флаг **OPENVPN_BACKUP_TCP** поднимает OpenVPN TCP на **80 / 443 / 504 / 508** и при `HTTPS_PUBLIC_PORT=443` (дефолт) после `doall.sh` перекрывает HTTPS панели.
+Флаг **OPENVPN_BACKUP_TCP** поднимает OpenVPN TCP на **80 / 443 / 504 / 508** и при `HTTPS_PUBLIC_PORT=443` после `doall.sh` перекрывает HTTPS панели.
 
-- **UI** — при включении тоггла, пока публичный HTTPS = 443: `ConfirmDialog` со ссылкой на «Настройки → Адрес сайта и HTTPS» (`/settings/vpn_network`); постоянный `SettingsAlert`, пока флаг включён; выключение без диалога; порт берётся из `getVpnNetworkSettings` (`AntizapretConfigTab.tsx`).
-- **API** — `PUT /routing/antizapret-settings` не блокирует сохранение, но возвращает `warnings: [...]` при конфликте; UI показывает toast (`antizapret_settings.py`, `routing.py`, `AntizapretSettingsUpdateResponse`).
-- **Install** — до `setup_nginx_if_selected`: если в `{ANTIZAPRET_PATH}/setup` уже `OPENVPN_BACKUP_TCP=y`, HTTPS панели 443 и режим nginx `le` / `selfsigned` / `nginx_custom` — флаг принудительно `n` + warn в консоль; при занятом 443 — доп. warn про `doall.sh` (`install.sh`).
-- **Docs** — секция в [docs/antizapret-config.md](docs/antizapret-config.md) у «Резервные порты».
+- **UI** — ConfirmDialog + `SettingsAlert` при конфликте с HTTPS 443; ссылка на «Адрес сайта и HTTPS» (`AntizapretConfigTab.tsx`).
+- **API** — `PUT /routing/antizapret-settings` возвращает `warnings: [...]` (`antizapret_settings.py`, `routing.py`).
+- **Docs** — [docs/antizapret-config.md](docs/antizapret-config.md) у «Резервные порты».
 
 ### 🔄 Changed
 
 #### VPN / Сеть — публикация
 
-- **Переход на uvicorn / HTTP** — вместо convenience-редиректа `https://domain/` → `https://domain:порт/` nginx **останавливается и отключается** (`systemctl stop/disable`), если на сервере нет чужих сайтов; при чужих vhost’ах nginx остаётся, но vhost панели снимается (`nginx_disable_for_direct_publish`, `nginx-setup.sh`, `nginx-common.sh`).
-- **URL доступа** — для uvicorn всегда с портом панели (`https://domain:5050/`), без скрытого входа через 443; то же в preview мастера и `ACCESS_URL` (`panel_publish_info.py`, `publishWizardUi.ts`).
-- **IPv4-only** — из nginx-шаблонов убраны `listen [::]:…`; `TRUSTED_PROXY_IPS` / `FORWARDED_ALLOW_IPS` по умолчанию только `127.0.0.1` (без `::1`) — `.env.example`, `config.py`, `install.sh`, `start.sh`, `SECURITY.md`.
+- **Переход на uvicorn / HTTP** — вместо редиректа 443→порт nginx **stop/disable**, если нет чужих сайтов; иначе снимается только vhost панели (`nginx_disable_for_direct_publish`).
+- **URL доступа** — для uvicorn всегда с портом панели (`https://domain:5050/`) (`panel_publish_info.py`, `publishWizardUi.ts`).
+- **IPv4-only** — без `listen [::]:…`; `TRUSTED_PROXY_IPS` / `FORWARDED_ALLOW_IPS` по умолчанию `127.0.0.1`.
 
 #### Безопасность
 
-- **«Дополнительная блокировка на уровне сервера»** — тогл iptables-whitelist доступен и при HTTPS на uvicorn (`direct_https`), не только при прямом HTTP; подсказка в UI уточняет оба режима (`WHITELIST_PORT_FIREWALL_MODES`, `SecurityTab.tsx`).
+- **Whitelist порта** — тогл доступен и при `direct_https`, не только `direct_http` (`SecurityTab.tsx`).
 
 #### Прочее
 
-- **Удаление узла из HA-группы** — вместо сырого 409 в консоли: диалог с объяснением, что сначала нужно расформировать группу синхронизации; подсказка при удалении; массовое удаление пропускает узлы в HA (`nodeHa.ts`, `NodesPage.tsx`, `ConfirmDialog.tsx`, `NodeSyncGroupSection.tsx`).
-- **QR AntiZapret / OpenVPN** — для AZ WireGuard/AmneziaWG (длинный `AllowedIPs`) и всех `.ovpn` сразу QR со **ссылкой на скачивание**, без попытки вложить профиль; короткий VPN WG по-прежнему кодируется целиком для импорта в приложение (`qr_generator.py`, `configs.py`).
-- **UI — диалог QR** — заголовок и подсказка различают «QR-код профиля» и «QR: ссылка для скачивания» (`DashboardPage.tsx`).
-
-#### Установщики — текст для пользователя
-
-- **Справка `install-easy.sh`** — явно: запуск без аргументов открывает меню; пункт «5) Полный установщик» / `sudo ./install.sh`; единый стиль команд `sudo bash install-easy.sh` (`install-easy.sh`).
-- **Сводка post-install** — локальный URL помечен как «(локально)» + подсказка, что публичный адрес ниже в «Публикация»; строка «Логи (systemd)» только при `WITH_SYSTEMD=true` (`install.sh`).
+- **Удаление узла из HA-группы** — понятный диалог вместо сырого 409; массовое удаление пропускает узлы в HA.
+- **QR AntiZapret / OpenVPN** — для AZ WG/AWG и `.ovpn` — QR со ссылкой на скачивание; короткий VPN WG по-прежнему целиком (`qr_generator.py`).
+- **UI — диалог QR** — «QR-код профиля» vs «QR: ссылка для скачивания».
 
 ### 🐛 Fixed
 
-- **Easy-мастер: счётчик «Шаг X из Y»** — экран «Что устанавливаем?» больше не нумеруется (ветвящий); после выбора: панель — 4 шага, VPN-сервер (node) — 2; раньше заявленное число шагов не совпадало с реально показанными (`install-easy-wizard.sh`).
-- **DuckDNS в мастере** — после ввода token больше не спрашивается «Подтвердите пароль» (ложное ощущение, что нужен пароль аккаунта); для token — один ввод, для No-IP пароль по-прежнему с подтверждением (`wiz_prompt_secret`, `install-wizard.sh`, `install-easy-wizard.sh`).
-- **После «отключения nginx» процесс оставался на 443 (в т.ч. IPv6)** — мастер uvicorn ставил редирект-vhost и оставлял nginx слушать порт; заход по домену без порта уводил на `:5050`. Теперь nginx реально останавливается.
-- **Тогл блокировки порта недоступен на uvicorn HTTPS** — `is_whitelist_port_firewall_applicable` учитывал только `direct_http`, режим `direct_https` ошибочно показывал «Недоступно: панель работает через Nginx или только на localhost».
-- **`DELETE /api/nodes/{id}` → Internal Server Error** после удаления VPS у хостера (или для offline-узла): при удалении не чистилась таблица `connection_count_samples` → `FOREIGN KEY constraint failed` и голый 500. Теперь сэмплы истории подключений удаляются в `purge_node_related`; неожиданный FK даёт понятный **409**, а не 500 (`node_manager.py`, `nodes.py`). Удаление записи в панели по-прежнему локально в БД и не требует доступности агента на сервере. Если узел в HA — сначала «Группы синхронизации» → расформировать группу.
-- **QR AZ выглядел как профиль для сканирования** — бэкенд уже отдавал `download-link`, но UI не читал `X-Qr-Content` / `X-Qr-Download-Url` (не было CORS `expose_headers`) и показывал обычный «QR-код» без подсказки и кнопки «Скопировать ссылку» (`main.py`, `configs.py`).
+- **DuckDNS в мастере** — после token больше нет ложного «Подтвердите пароль»; No-IP — пароль с подтверждением (`wiz_prompt_secret`).
+- **После отключения nginx процесс оставался на 443** — теперь nginx реально останавливается.
+- **Тогл блокировки порта на uvicorn HTTPS** — учитывается `direct_https`.
+- **`DELETE /api/nodes/{id}` → 500** — чистка `connection_count_samples`; неожиданный FK → **409** (`node_manager.py`).
+- **QR AZ** — UI читает `X-Qr-Content` / `X-Qr-Download-Url` (CORS `expose_headers`).
 
 ### 🗑️ Removed
 
-- **Редирект 443 → uvicorn** — удалены `deploy/nginx/adminpanelaz-redirect.conf.template`, `nginx_install_uvicorn_redirect`, `nginx_render_redirect_template`, `nginx_pick_redirect_cert_paths`.
+- **Редирект 443 → uvicorn** — шаблон и хелперы redirect-vhost удалены.
 
 ### 🧪 Tests
 
-- **`test_qr_generator.py`** — лимит размера, принудительный download-link для AZ WG/AWG и `.ovpn`, без ложного срабатывания на пути `/root/antizapret/.../vpn/`.
-- **`test_panel_publish_info.py`** — URL uvicorn с нестандартным портом; `is_whitelist_port_firewall_applicable` для `direct_http` / `direct_https` / nginx / localhost.
-- **`publishWizardUi.test.ts`** — preview uvicorn всегда с портом панели, даже при наличии LE-сертификата.
+- **`test_qr_generator.py`**, **`test_panel_publish_info.py`**, **`publishWizardUi.test.ts`** — download-link QR, whitelist modes, preview uvicorn с портом.
 
 ---
 
