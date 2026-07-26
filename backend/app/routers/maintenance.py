@@ -791,9 +791,11 @@ def put_vpn_network_ddns(
                 # Prefer surfacing the original update/timer error to the admin.
                 pass
 
+        update_applied = False
         if payload.run_update:
             try:
                 output_parts.append(ddns_settings_service.run_ddns_update())
+                update_applied = True
             except RuntimeError as exc:
                 _rollback_ddns_config()
                 raise HTTPException(
@@ -804,7 +806,10 @@ def put_vpn_network_ddns(
         try:
             output_parts.append(ddns_settings_service.set_ddns_timer(bool(payload.enable_timer)))
         except RuntimeError as exc:
-            _rollback_ddns_config()
+            # Keep new ddns.env if provider update already succeeded — rolling back would
+            # desync panel config from the provider. Only roll back when update was skipped.
+            if not update_applied:
+                _rollback_ddns_config()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=str(exc),

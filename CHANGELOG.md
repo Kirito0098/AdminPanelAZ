@@ -122,7 +122,7 @@
 - **QR AZ** — UI читает `X-Qr-Content` / `X-Qr-Download-Url` (CORS `expose_headers`).
 - **UI «Обновить» / node update — soft-fail systemd refresh** — если `refresh-systemd-units.sh` падает (например «Run as root»), pull/build уже применены: перезапуск всё равно планируется; в output — предупреждение. Compat `start.sh` / `start_node_agent.sh` поднимают новый код; миграция unit — при старте (`system_update.py`, `node_update.py`).
 - **`validate_node_host` — IPv6 loopback** — при `ALLOW_INTERNAL_NODES=false` отклоняются `::1` / `[::1]` (и literal private/loopback IP); разбор hostname без поломки `urlparse("//::1")` (`node_manager.py`).
-- **DDNS UI save — rollback `ddns.env`** — при ошибке `run_ddns_update` / `set_ddns_timer` после записи конфиг откатывается к предыдущему содержимому (`snapshot_ddns_config` / `restore_ddns_config_snapshot`, `maintenance.py`).
+- **DDNS UI save — rollback `ddns.env`** — при ошибке `run_ddns_update` конфиг откатывается к предыдущему; при ошибке только `set_ddns_timer` после успешного update — файл оставляем (без рассинхрона с провайдером) (`snapshot_ddns_config` / `restore_ddns_config_snapshot`, `maintenance.py`).
 
 ### 🗑️ Removed
 
