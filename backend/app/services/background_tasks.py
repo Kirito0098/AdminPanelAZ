@@ -630,7 +630,7 @@ class BackgroundTaskService:
         if progress_updater:
             progress_updater(90, "Перезапуск панели…")
 
-        if _systemd_unit_installed() or (PROJECT_ROOT / "start.sh").is_file():
+        if _systemd_unit_installed():
             schedule_controller_restart(PROJECT_ROOT)
             panel_restarted = True
             requires_manual_restart = False

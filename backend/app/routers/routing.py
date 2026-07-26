@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,13 +17,20 @@ from app.schemas import (
     MessageResponse,
     RoutingOverview,
 )
-from app.services.antizapret_settings import build_schema, filter_known_keys
+from app.services.antizapret_settings import (
+    build_schema,
+    filter_known_keys,
+    openvpn_backup_tcp_conflict_warnings,
+)
 from app.services.background_tasks import background_task_service
+from app.services.env_file import EnvFileService
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.antizapret_sync import enqueue_ha_routing_apply_replicas, replicate_antizapret_settings
 from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import find_sync_group_for_primary, is_auto_sync_enabled, require_ha_primary_for_config_ops
 from app.services.node_sync.provider_sync import deploy_compiled_providers_to_replicas, replicate_provider_content
+
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 router = APIRouter(prefix="/routing", tags=["routing"])
 
@@ -189,6 +197,13 @@ def put_antizapret_settings(
         result = get_active_adapter(db).update_antizapret_settings(filtered)
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав на запись") from exc
+
+    https_public_port = EnvFileService(_ENV_FILE).get_env_value("HTTPS_PUBLIC_PORT", "443") or "443"
+    warnings = list(result.get("warnings") or [])
+    for warning in openvpn_backup_tcp_conflict_warnings(filtered, https_public_port=https_public_port):
+        if warning not in warnings:
+            warnings.append(warning)
+    result["warnings"] = warnings
 
     active_node = get_active_node(db)
     group = find_sync_group_for_primary(db, active_node.id)

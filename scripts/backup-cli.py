@@ -59,20 +59,16 @@ def _uses_systemd(service_name: str) -> bool:
 
 
 def _service_control(action: str, *, install_dir: str, allow_failure: bool = False) -> None:
+    del install_dir  # reserved for callers; control is systemd-only
     service_name = _service_name()
-    if _uses_systemd(service_name):
-        cmd = ["systemctl", action, service_name]
-    else:
-        start_sh = Path(install_dir) / "start.sh"
-        if action == "stop":
-            cmd = [str(start_sh), "stop"]
-        elif action == "start":
-            cmd = [str(start_sh), "daemon"]
-        elif action == "restart":
-            cmd = [str(start_sh), "restart"]
-        else:
+    if not _uses_systemd(service_name):
+        if allow_failure:
             return
+        raise RuntimeError(f"systemd unit {service_name} не найден")
+    if action not in {"stop", "start", "restart"}:
+        return
 
+    cmd = ["systemctl", action, service_name]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0 and not allow_failure:
         detail = (result.stderr or result.stdout or f"код {result.returncode}").strip()

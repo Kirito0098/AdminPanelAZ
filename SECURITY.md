@@ -55,7 +55,7 @@
 | `CORS_ORIGINS` | localhost | Список origin через запятую |
 | `BEHIND_NGINX` | `false` | Доверять `X-Forwarded-For` от `TRUSTED_PROXY_IPS` |
 | `ACCESS_PATH` | *(пусто)* | Подпуть на домене, например `/panel` для публикации на общем домене (только с nginx reverse proxy) |
-| `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | IP reverse proxy |
+| `TRUSTED_PROXY_IPS` | `127.0.0.1` | IP reverse proxy |
 | `NODE_AGENT_MTLS_ENABLED` | `false` | **Deprecated** — режим mTLS задаётся per-node (`nodes.mtls_enabled` в БД). Глобальный флаг оставлен только для legacy backfill при миграции |
 | `NODE_AGENT_MTLS_CA_CERT` | `/etc/adminpanelaz/mtls/ca.crt` | CA для проверки сертификата агента (создаётся панелью при первом включении mTLS) |
 | `NODE_AGENT_MTLS_CLIENT_CERT` | `/etc/adminpanelaz/mtls/panel.crt` | Клиентский сертификат панели |
@@ -166,7 +166,7 @@ API_RATE_LIMIT_BACKEND=redis
 REDIS_URL=redis://127.0.0.1:6379/0
 ```
 
-Мастер `install.sh` подскажет это при выборе workers > 1.
+Мастер `install.sh` всегда ставит `UVICORN_WORKERS=1`. Увеличение workers — только вручную в `.env` + `systemctl restart adminpanelaz` (см. выше).
 
 ## Ротация секретов (UI wizard)
 
@@ -184,10 +184,35 @@ REDIS_URL=redis://127.0.0.1:6379/0
 
 API-ключи **удалённых узлов** (per-node) ротируются отдельно на странице **Узлы** — см. раздел выше.
 
+## Порты и firewall после установки (HTTP-default)
+
+По умолчанию install ставит **`http_direct`**: панель слушает `0.0.0.0:<BACKEND_PORT>` (обычно **8000**), без Nginx.
+
+| Порт | После install | После Nginx+HTTPS в UI |
+|------|---------------|------------------------|
+| Backend (`BACKEND_PORT`, часто 8000) | **Нужен** для входа в панель — **не закрывайте**, пока панель на нём | Можно закрыть снаружи, оставить localhost |
+| 80 / 443 (или `HTTPS_PUBLIC_PORT`) | Не используются | Открыть для ACME и HTTPS |
+| Node agent (9100) | Только IP панели / localhost | То же |
+
+Install **не** настраивает ufw/iptables. Откройте порт панели у хостера или вручную. При публикации через UI (`Настройки → Адрес сайта и HTTPS`) панель может применить правила для режима публикации сама.
+
+**Неверно** при HTTP-default: «сразу закрыть 8000, снаружи только Nginx» — так вы потеряете доступ к панели до настройки Nginx.
+
+## LAN-ноды (`ALLOW_INTERNAL_NODES`)
+
+По умолчанию install пишет `ALLOW_INTERNAL_NODES=false` — нельзя добавить узел с приватным IP (`10.x`, `192.168.x`, …). Для нескольких машин в одной LAN:
+
+```env
+ALLOW_INTERNAL_NODES=true
+```
+
+в `backend/.env`, затем `sudo systemctl restart adminpanelaz`.
+
 ## Рекомендации по развёртыванию
 
-1. Панель слушает только `127.0.0.1:8000`, наружу — **только Nginx** (HTTPS-порт по выбору, по умолчанию 443).
-2. Firewall: закрыть порты backend и node agent с интернета; открыть HTTPS и HTTP для ACME (порты задаются в мастере установки).
-3. Регулярные бэкапы БД (`/var/backups/adminpanelaz`).
+1. Сразу после install панель доступна по `http://IP:порт/` — смените пароль, включите 2FA; для интернета настройте HTTPS в UI.
+2. Firewall: **не** закрывайте порт панели, пока работаете в `http_direct`; порт node agent — только с IP панели; 80/443 — после перехода на Nginx.
+3. Регулярные бэкапы БД (`/var/backups/adminpanelaz`); после install авто-бэкап уже включён (каждые 7 дней).
 4. Включите IP allowlist в настройках безопасности для админ-доступа.
-5. При `UVICORN_WORKERS > 1` используйте `AUTH_RATE_LIMIT_BACKEND=redis` и `API_RATE_LIMIT_BACKEND=redis` (см. раздел выше).
+5. При `UVICORN_WORKERS > 1` используйте Redis для rate limit (см. раздел выше).
+6. mTLS и `NODE_API_KEY_ROTATION_DAYS` — после установки (UI «Узлы» / `.env`), не в мастере install.

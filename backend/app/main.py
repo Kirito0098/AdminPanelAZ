@@ -161,6 +161,13 @@ async def lifespan(_: FastAPI):
     except Exception:
         logger.debug("Legacy CIDR list migration skipped", exc_info=True)
     try:
+        from app.services.node_update import resolve_repo_root
+        from app.services.systemd_refresh import migrate_stale_systemd_units_on_startup
+
+        migrate_stale_systemd_units_on_startup(resolve_repo_root(), panel=True, node=True)
+    except Exception:
+        logger.debug("Systemd unit migration skipped", exc_info=True)
+    try:
         ip_restriction_service.sync_firewall()
     except Exception:
         pass
@@ -193,6 +200,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Captcha-Id", "X-Web-Session-Id", "Accept"],
+    expose_headers=["X-Qr-Content", "X-Qr-Download-Url"],
 )
 app.add_middleware(ApiRateLimitMiddleware)
 

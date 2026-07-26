@@ -2,11 +2,12 @@ import {
   ApiError,
   applyRouting,
   getAntizapretSettings,
+  getVpnNetworkSettings,
   updateAntizapretSettings,
 } from '@/api/client'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import SettingsAlert from '@/components/settings/SettingsAlert'
-import ConfirmDialog from '@/components/shared/ConfirmDialog'
+import ConfirmDialog, { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -19,9 +20,10 @@ import { Switch } from '@/components/ui/switch'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import { cn } from '@/lib/utils'
-import type { AntizapretSettingField } from '@/types'
+import type { AntizapretSettingField, VpnNetworkSettings } from '@/types'
 import type { LucideIcon } from 'lucide-react'
 import {
   ArrowRight,
@@ -143,6 +145,16 @@ function fieldDisplay(field: AntizapretSettingField) {
 
 function isFlagOn(value: string | undefined): boolean {
   return value?.toLowerCase() === 'y'
+}
+
+function envRowValue(rows: VpnNetworkSettings['env_rows'], labelPrefix: string): string {
+  const row = rows.find((r) => r.label.startsWith(labelPrefix))
+  return row && row.value !== '—' ? row.value : ''
+}
+
+function panelHttpsPortIs443(port: string | undefined): boolean {
+  const normalized = (port || '').trim() || '443'
+  return normalized === '443'
 }
 
 function groupSchema(schema: AntizapretSettingField[]) {
@@ -411,14 +423,16 @@ function WorkflowStep({
 
 export default function AntizapretConfigTab() {
   const { activeNode } = useNode()
-  const { success, error: notifyError } = useNotifications()
+  const { success, error: notifyError, warning: notifyWarning } = useNotifications()
   const { trackBackgroundTask } = useProgress()
   const haReplicaReadonly = useHaReplicaReadonly()
+  const { confirm, dialogProps } = useConfirmDialog()
 
   const [schema, setSchema] = useState<AntizapretSettingField[]>([])
   const [saved, setSaved] = useState<Record<string, string>>({})
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [nodeName, setNodeName] = useState<string | null>(null)
+  const [httpsPublicPort, setHttpsPublicPort] = useState('443')
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -428,17 +442,27 @@ export default function AntizapretConfigTab() {
   const [applyOpen, setApplyOpen] = useState(false)
 
   const controlsDisabled = saving || applying || haReplicaReadonly
+  const httpsIs443 = panelHttpsPortIs443(httpsPublicPort)
+  const backupTcpPortConflict = httpsIs443 && isFlagOn(draft.OPENVPN_BACKUP_TCP)
 
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError(null)
     try {
-      const data = await getAntizapretSettings()
+      const [data, vpn] = await Promise.all([
+        getAntizapretSettings(),
+        getVpnNetworkSettings().catch(() => null),
+      ])
       setSchema(data.schema)
       setSaved(data.settings)
       setDraft(data.settings)
       setNodeName(data.node_name ?? activeNode?.name ?? null)
       setNeedsApply(false)
+      if (vpn) {
+        setHttpsPublicPort(envRowValue(vpn.env_rows, 'HTTPS_PUBLIC_PORT') || '443')
+      } else {
+        setHttpsPublicPort('443')
+      }
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Не удалось загрузить настройки AntiZapret'
       setLoadError(message)
@@ -466,6 +490,40 @@ export default function AntizapretConfigTab() {
   const dirty = dirtyKeys.length > 0
   const dirtySet = useMemo(() => new Set(dirtyKeys), [dirtyKeys])
 
+  const handleDraftChange = useCallback(
+    (key: string, value: string) => {
+      if (key === 'OPENVPN_BACKUP_TCP' && value === 'y' && httpsIs443) {
+        confirm({
+          title: 'Конфликт с портом 443',
+          description: (
+            <>
+              Резервные TCP-порты OpenVPN включают <strong>443</strong>, который уже занят HTTPS панели
+              (nginx). Сначала смените «Публичный порт HTTPS» в{' '}
+              <Link
+                to="/settings/vpn_network"
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Настройки → Адрес сайта и HTTPS
+              </Link>
+              , иначе после «Применить» (doall.sh) панель станет недоступна.
+            </>
+          ),
+          confirmLabel: 'Всё равно включить',
+          alert: {
+            variant: 'warning',
+            title: 'Панель на 443',
+            children:
+              'Можно включить флаг, но доступ к панели по HTTPS на 443 пропадёт, пока OpenVPN слушает этот порт.',
+          },
+          onConfirm: () => setDraft((prev) => ({ ...prev, OPENVPN_BACKUP_TCP: 'y' })),
+        })
+        return
+      }
+      setDraft((prev) => ({ ...prev, [key]: value }))
+    },
+    [confirm, httpsIs443],
+  )
+
   const renderSection = (title: string) => {
     const section = sectionsByTitle.get(title)
     if (!section) return null
@@ -476,7 +534,7 @@ export default function AntizapretConfigTab() {
         draft={draft}
         dirtySet={dirtySet}
         disabled={controlsDisabled}
-        onDraftChange={(key, value) => setDraft((prev) => ({ ...prev, [key]: value }))}
+        onDraftChange={handleDraftChange}
       />
     )
   }
@@ -497,6 +555,9 @@ export default function AntizapretConfigTab() {
       setDraft(refreshed.settings)
       setNeedsApply(result.needs_apply)
       success(result.message)
+      for (const w of result.warnings ?? []) {
+        notifyWarning(w)
+      }
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения настроек')
     } finally {
@@ -731,6 +792,20 @@ export default function AntizapretConfigTab() {
         </SettingsAlert>
       )}
 
+      {backupTcpPortConflict && (
+        <SettingsAlert variant="warning" title="Конфликт OPENVPN_BACKUP_TCP с портом 443">
+          Резервные TCP-порты OpenVPN включают <strong>443</strong>, а панель публикует HTTPS на этом
+          же порту. Смените «Публичный порт HTTPS» в{' '}
+          <Link
+            to="/settings/vpn_network"
+            className="font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Настройки → Адрес сайта и HTTPS
+          </Link>{' '}
+          перед применением doall.sh, иначе панель станет недоступна.
+        </SettingsAlert>
+      )}
+
       <div className="grid gap-5 lg:grid-cols-2 lg:items-stretch">
         {LAYOUT_ROWS.map((row, index) => (
           <Fragment key={`layout-row-${index}`}>
@@ -753,11 +828,12 @@ export default function AntizapretConfigTab() {
             draft={draft}
             dirtySet={dirtySet}
             disabled={controlsDisabled}
-            onDraftChange={(key, value) => setDraft((prev) => ({ ...prev, [key]: value }))}
+            onDraftChange={handleDraftChange}
           />
         ))}
       </div>
 
+      <ConfirmDialogHost dialogProps={dialogProps} />
       <ConfirmDialog
         open={applyOpen}
         onOpenChange={setApplyOpen}

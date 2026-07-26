@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.18.0](#2180---2026-07-26) — 2026-07-26
 - [2.17.0](#2170---2026-07-15) — 2026-07-15
 - [2.16.0](#2160---2026-07-13) — 2026-07-13
 - [2.15.0](#2150---2026-07-12) — 2026-07-12
@@ -46,13 +47,96 @@
 
 ### 🔄 Changed
 
-- **Удаление узла из HA-группы** — вместо сырого 409 в консоли: диалог с объяснением, что сначала нужно расформировать группу синхронизации; подсказка при удалении; массовое удаление пропускает узлы в HA (`nodeHa.ts`, `NodesPage.tsx`, `ConfirmDialog.tsx`, `NodeSyncGroupSection.tsx`).
-- **Python 3.13 при установке** — предпочтение Debian 13 (`python3.13`); на Ubuntu 24.04, где 3.13 нет в официальном apt, **автоматически 3.12** (пользователю ничего настраивать не нужно). Повторный `source` больше не «запинивает» только 3.13; существующий venv на 3.12/3.13 сохраняется (`scripts/python-runtime.sh`). CI — Python 3.13.
-- **Backend-зависимости** — обновлены pins: FastAPI 0.140, uvicorn 0.51, SQLAlchemy 2.0.51, pydantic-settings 2.14, cryptography 49, redis 8, webauthn 3, geoip2 5, psutil 7 и др.; `passlib` заменён на прямой `bcrypt` 5.0 (хеши `$2b$` совместимы).
+### 🗑️ Removed
 
 ### 🐛 Fixed
 
-- **`DELETE /api/nodes/{id}` → Internal Server Error** после удаления VPS у хостера (или для offline-узла): при удалении не чистилась таблица `connection_count_samples` → `FOREIGN KEY constraint failed` и голый 500. Теперь сэмплы истории подключений удаляются в `purge_node_related`; неожиданный FK даёт понятный **409**, а не 500 (`node_manager.py`, `nodes.py`). Удаление записи в панели по-прежнему локально в БД и не требует доступности агента на сервере. Если узел в HA — сначала «Группы синхронизации» → расформировать группу.
+---
+
+## [2.18.0] - 2026-07-26
+
+> **Кратко:** установщик упрощён — HTTP по умолчанию (`http://IP:порт`), один `install.sh` без easy и без выбора HTTPS; домен/TLS и DDNS в UI; systemd без watchdog-`start.sh`; свой список CIDR; упрощены экраны сети/провайдеров; preflight портов; Python 3.12/3.13 auto и обновление backend-зависимостей. Плюс фиксы QR AZ, whitelist HTTPS, удаления узла; soft-fail systemd refresh; запрет `::1` для узлов; rollback DDNS при ошибке save.
+
+### ✨ Added
+
+#### Установщик — проверка портов и понятные ошибки
+
+- **Preflight портов** — до apt/npm установщик проверяет свободные порты (backend, node agent; при HTTPS-override — 80/443); при занятости показывает PID/процесс/unit и останавливается (`scripts/install-port-check.sh`, `install.sh`).
+- **Проверка при вводе порта** — `wiz_prompt_port` не принимает порт, занятый чужим сервисом; свой `adminpanelaz` / `adminpanelaz-node` / nginx панели — OK.
+- **Вывод при прерывании** — `trap ERR` / Ctrl+C: шаг, строка, команда и что проверить; `die()` без дубля с trap.
+
+#### Конфиг AntiZapret — конфликт `OPENVPN_BACKUP_TCP` с портом 443
+
+Флаг **OPENVPN_BACKUP_TCP** поднимает OpenVPN TCP на **80 / 443 / 504 / 508** и при `HTTPS_PUBLIC_PORT=443` после `doall.sh` перекрывает HTTPS панели.
+
+- **UI** — ConfirmDialog + `SettingsAlert` при конфликте с HTTPS 443; ссылка на «Адрес сайта и HTTPS» (`AntizapretConfigTab.tsx`).
+- **API** — `PUT /routing/antizapret-settings` возвращает `warnings: [...]` (`antizapret_settings.py`, `routing.py`).
+- **Docs** — [docs/antizapret-config.md](docs/antizapret-config.md) у «Резервные порты».
+
+#### Сеть / публикация / маршрутизация
+
+- **DDNS в UI** — DuckDNS / No-IP в **Настройки → Адрес сайта и HTTPS** (блок «Динамический DNS»): сохранение `/etc/adminpanelaz/ddns.env`, обновление IP сейчас, systemd timer каждые 5 мин (`ddns_settings.py`, API `GET/PUT /settings/vpn-network/ddns`, `…/update`, `…/timer`).
+- **Свой список CIDR** — провайдер `custom-ips.txt` («Свой список») в каталоге `IP_FILES`; мастер **Свои ASN/CIDR** по умолчанию наполняет его, опционально — дописать CIDR/ASN к существующему провайдеру (`CustomProviderWizardDialog.tsx`, [docs/routing-cidr.md](docs/routing-cidr.md)).
+
+### 🔄 Changed
+
+#### Установщик и runtime
+
+- **Установщик — HTTP по умолчанию** — интерактивный `install.sh` всегда ставит `http_direct` (`BACKEND_HOST=0.0.0.0`, без nginx/certbot). HTTPS и домен — только в UI: **Настройки → Адрес сайта и HTTPS**. Убраны вопросы: способ публикации, внешний IP/домен, внутренние IP узлов, APP_ENV, systemd/daemon/workers, mTLS/ротация, профиль ресурсов, опциональные функции (Telegram/бэкап/CIDR), firewall; DDNS в интерактиве не спрашивается (env-override `WIZ_DDNS_*` сохранён).
+- **Дефолты install** — `APP_ENV=production`, systemd, `UVICORN_WORKERS=1`, профиль **full**, `ALLOW_INTERNAL_NODES=false`, `FEATURE_TELEGRAM_ENABLED=true`, авто-бэкап **вкл.** каждые **7** дней (без вопроса), mTLS/ротация выкл. Telegram token — только в UI.
+- **Мастер установки** — вопрос порта: «Порт панели (доступ по IP:порт)» вместо «Порт backend (панель)».
+- **Systemd** — unit’ы запускают uvicorn / node agent напрямую (`scripts/systemd-exec-panel.sh`, `systemd-exec-node.sh`); перезапуск — `systemctl restart adminpanelaz` (+ node). UI/CLI update и startup переписывают установленные unit’ы из репо (`scripts/refresh-systemd-units.sh`), чтобы старый `ExecStart=…/start.sh` не ломал панель после pull.
+- **Python 3.13 при установке** — предпочтение Debian 13 (`python3.13`); на Ubuntu 24.04 **автоматически 3.12**. Повторный `source` не «запинивает» только 3.13; существующий venv сохраняется (`scripts/python-runtime.sh`). CI — Python 3.13.
+- **Backend-зависимости** — pins: FastAPI 0.140, uvicorn 0.51, SQLAlchemy 2.0.51, pydantic-settings 2.14, cryptography 49, redis 8, webauthn 3, geoip2 5, psutil 7 и др.; `passlib` → `bcrypt` 5.0.
+
+#### VPN / Сеть — публикация
+
+- **Переход на uvicorn / HTTP** — вместо редиректа 443→порт nginx **stop/disable**, если нет чужих сайтов; иначе снимается только vhost панели (`nginx_disable_for_direct_publish`).
+- **URL доступа** — для uvicorn всегда с портом панели (`https://domain:5050/`) (`panel_publish_info.py`, `publishWizardUi.ts`).
+- **IPv4-only** — без `listen [::]:…`; `TRUSTED_PROXY_IPS` / `FORWARDED_ALLOW_IPS` по умолчанию `127.0.0.1`.
+- **UI «Адрес сайта и HTTPS»** — убраны дублирующие шапка-метрики и сетка «Параметры сервера»; статус только в блоке «Текущий доступ».
+- **CIDR-провайдеры** — сетка до 3 колонок; вкл/выкл через switch; счётчики БД / Контр. / Узел в таблице; включённые с зелёным фоном, выключенные приглушены.
+
+#### Безопасность
+
+- **Whitelist порта** — тогл доступен и при `direct_https`, не только `direct_http` (`SecurityTab.tsx`).
+
+#### Документация
+
+- **Документация** — быстрый старт только через `install.sh`; порты/firewall под HTTP-default; StatusOpenVPN только через UI; DDNS/HTTPS в панели; инструкции по workers+Redis, LAN-нодам, mTLS, профилю, Telegram UI; README / `set-i-publikaciya` / help `ddns-update.sh`.
+
+#### Прочее
+
+- **Удаление узла из HA-группы** — понятный диалог вместо сырого 409; массовое удаление пропускает узлы в HA.
+- **QR AntiZapret / OpenVPN** — для AZ WG/AWG и `.ovpn` — QR со ссылкой на скачивание; короткий VPN WG по-прежнему целиком (`qr_generator.py`).
+- **UI — диалог QR** — «QR-код профиля» vs «QR: ссылка для скачивания».
+
+### 🐛 Fixed
+
+- **UI «Обновить» → systemd** — после git pull unit’ы переписываются из репо (`refresh-systemd-units.sh`) до `systemctl restart`; при старте мигрируются legacy `ExecStart=…/start.sh`. Иначе панель со старым unit’ом не поднялась бы после удаления полного watchdog-`start.sh`.
+- **Вложенный скролл на страницах** — снят кап высоты у мастера доступа, changelog обновлений и списка CIDR-провайдеров; колесо крутит страницу (`PublishAccessWizard`, `UpdatesTab`, `ProvidersTab`).
+- **DuckDNS в мастере** — после token больше нет ложного «Подтвердите пароль»; No-IP — пароль с подтверждением (`wiz_prompt_secret`). *(Позже шаг DDNS убран из мастера — см. Removed / DDNS в UI.)*
+- **После отключения nginx процесс оставался на 443** — теперь nginx реально останавливается.
+- **Тогл блокировки порта на uvicorn HTTPS** — учитывается `direct_https`.
+- **`DELETE /api/nodes/{id}` → 500** — чистка `connection_count_samples`; неожиданный FK → **409** (`node_manager.py`).
+- **QR AZ** — UI читает `X-Qr-Content` / `X-Qr-Download-Url` (CORS `expose_headers`).
+- **UI «Обновить» / node update — soft-fail systemd refresh** — если `refresh-systemd-units.sh` падает (например «Run as root»), pull/build уже применены: перезапуск всё равно планируется; в output — предупреждение. Compat `start.sh` / `start_node_agent.sh` поднимают новый код; миграция unit — при старте (`system_update.py`, `node_update.py`).
+- **`validate_node_host` — IPv6 loopback** — при `ALLOW_INTERNAL_NODES=false` отклоняются `::1` / `[::1]` (и literal private/loopback IP); разбор hostname без поломки `urlparse("//::1")` (`node_manager.py`).
+- **DDNS UI save — rollback `ddns.env`** — при ошибке `run_ddns_update` конфиг откатывается к предыдущему; при ошибке только `set_ddns_timer` после успешного update — файл оставляем (без рассинхрона с провайдером) (`snapshot_ddns_config` / `restore_ddns_config_snapshot`, `maintenance.py`).
+
+### 🗑️ Removed
+
+- **Простой установщик** — удалены `install-easy.sh` и `scripts/install-easy-wizard.sh`; флаг `--easy` убран.
+- **`start.sh` / `start_node_agent.sh` (полный watchdog)** — bash-watchdog удалён; запуск через systemd-exec. Оставлены тонкие **compat-shim** с теми же именами (exec → `systemd-exec-*.sh`), чтобы UI «Обновить» на серверах со старым unit’ом не ронял сервис до миграции unit.
+- **Мастер установки — шаг DDNS** — интерактивный выбор DuckDNS/No-IP убран; настройка в UI или через `WIZ_DDNS_*` при автоустановке.
+- **Редирект 443 → uvicorn** — шаблон и хелперы redirect-vhost удалены.
+
+### 🧪 Tests
+
+- **`test_qr_generator.py`**, **`test_panel_publish_info.py`**, **`publishWizardUi.test.ts`** — download-link QR, whitelist modes, preview uvicorn с портом.
+- **`test_ddns_settings.py`** — parse/write `ddns.env`, маскирование секретов; snapshot/restore при откате.
+- **`test_system_update_systemd_soft_fail.py`** — апдейт панели продолжает restart при ошибке systemd refresh.
+- **`test_validate_node_host.py`** — запрет `::1` / `[::1]` / `127.0.0.1` / private DNS; разрешение при `ALLOW_INTERNAL_NODES=true`.
 
 ---
 
@@ -1981,7 +2065,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.17.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.18.0...HEAD
+[2.18.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.14.0...v2.15.0

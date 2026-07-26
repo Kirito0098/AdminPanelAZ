@@ -59,28 +59,46 @@ def validate_node_host(host: str) -> str:
     if host.lower().startswith(forbidden_schemes):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите хост без схемы URL")
 
+    # Bare IPv6 ("::1") breaks urlparse("//::1"); bracket form "[::1]" / "[::1]:port" is fine.
+    if host.startswith("[") and "]" in host:
+        literal_or_name = host[1 : host.index("]")]
+    else:
+        literal_or_name = host
+
     try:
-        parsed = urlparse(f"//{host}" if "://" not in host else host)
-        if parsed.scheme and parsed.scheme not in ("http", "https"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимая схема URL")
-        hostname = parsed.hostname or host.split(":")[0]
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный хост") from exc
+        hostname = str(ipaddress.ip_address(literal_or_name))
+    except ValueError:
+        try:
+            parsed = urlparse(f"//{host}" if "://" not in host else host)
+            if parsed.scheme and parsed.scheme not in ("http", "https"):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимая схема URL")
+            hostname = parsed.hostname or host.split(":")[0]
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный хост") from exc
+
+    if not hostname:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный хост")
 
     if not settings.allow_internal_nodes:
-        try:
-            addr = ipaddress.ip_address(socket.gethostbyname(hostname))
+        blocked = "Внутренние IP-адреса запрещены (ALLOW_INTERNAL_NODES=true для разрешения)"
+
+        def _reject_if_internal(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> None:
             if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Внутренние IP-адреса запрещены (ALLOW_INTERNAL_NODES=true для разрешения)",
-                )
-        except socket.gaierror:
-            if hostname in ("localhost", "127.0.0.1", "::1"):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="localhost запрещён для удалённых узлов",
-                )
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=blocked)
+
+        # Literal IP first — gethostbyname is IPv4-only and fails on ::1
+        try:
+            _reject_if_internal(ipaddress.ip_address(hostname))
+        except ValueError:
+            try:
+                for info in socket.getaddrinfo(hostname, None):
+                    _reject_if_internal(ipaddress.ip_address(info[4][0]))
+            except socket.gaierror:
+                if hostname.lower() in ("localhost", "127.0.0.1", "::1"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="localhost запрещён для удалённых узлов",
+                    )
     return hostname
 
 

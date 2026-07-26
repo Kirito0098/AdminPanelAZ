@@ -23,7 +23,7 @@ export default function PanelRestartCard({ className, compact = false, onRestart
   const handleRestart = () => {
     confirm({
       title: 'Перезапустить панель?',
-      description: 'Сервис adminpanelaz будет перезапущен через systemd или start.sh.',
+      description: 'Сервис adminpanelaz будет перезапущен через systemd.',
       alert: {
         variant: 'warning',
         title: 'Сессия прервётся',

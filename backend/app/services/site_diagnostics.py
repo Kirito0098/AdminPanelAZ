@@ -130,7 +130,7 @@ ERROR_HINTS: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(r"status=203/EXEC", re.I),
-        "Исполняемый файл не найден (часто start.sh или backend/.venv/bin/uvicorn). Пересоздайте venv.",
+        "Исполняемый файл не найден (часто scripts/systemd-exec-panel.sh или backend/.venv/bin/uvicorn). Пересоздайте venv.",
     ),
     (
         re.compile(r"(OOM|Out of memory|Killed process|killed)", re.I),
@@ -335,6 +335,29 @@ def _check_systemd(
         )
         report.recommended_commands.append(f"systemctl restart {ctx.service_name}")
 
+    unit_cat = run_cmd(["systemctl", "cat", ctx.service_name], 5.0)
+    unit_text = (unit_cat.stdout or "") + (unit_cat.stderr or "")
+    if "start.sh" in unit_text or "start_node_agent.sh" in unit_text:
+        if "systemd-exec-panel.sh" not in unit_text and "systemd-exec-node.sh" not in unit_text:
+            _append_result(
+                report,
+                CheckResult(
+                    "warn",
+                    "Unit всё ещё ссылается на legacy start.sh",
+                    detail="После 2.19 ExecStart должен быть scripts/systemd-exec-*.sh",
+                    hint_ru="sudo bash scripts/refresh-systemd-units.sh && systemctl restart "
+                    + ctx.service_name,
+                ),
+            )
+            report.recommended_commands.append(
+                f"bash {ctx.install_dir}/scripts/refresh-systemd-units.sh"
+            )
+    elif "systemd-exec-panel.sh" in unit_text or "systemd-exec-node.sh" in unit_text:
+        _append_result(
+            report,
+            CheckResult("ok", "ExecStart указывает на systemd-exec-*.sh"),
+        )
+
     journal = run_cmd(
         ["journalctl", "-u", ctx.service_name, "-n", "30", "--no-pager", "-o", "cat"],
         10.0,
@@ -369,7 +392,8 @@ def _check_project_files(ctx: DiagnosticsContext, report: DiagnosticsReport) -> 
     env_path = os.path.join(backend, ".env")
     db_path = os.path.join(backend, "data", "adminpanel.db")
     uvicorn_bin = os.path.join(ctx.resolved_venv(), "bin", "uvicorn")
-    start_sh = os.path.join(install, "start.sh")
+    panel_unit = os.path.join(install, "systemd", "adminpanelaz.service")
+    panel_exec = os.path.join(install, "scripts", "systemd-exec-panel.sh")
     main_py = os.path.join(backend, "app", "main.py")
     env: dict[str, str] = {}
 
@@ -424,15 +448,16 @@ def _check_project_files(ctx: DiagnosticsContext, report: DiagnosticsReport) -> 
             ),
         )
 
-    if os.path.isfile(start_sh) and os.access(start_sh, os.X_OK):
-        _append_result(report, CheckResult("ok", "start.sh найден"))
+    if os.path.isfile(panel_unit) and os.path.isfile(panel_exec) and os.access(panel_exec, os.X_OK):
+        _append_result(report, CheckResult("ok", "systemd unit и systemd-exec-panel.sh найдены"))
     else:
         _append_result(
             report,
             CheckResult(
                 "fail",
-                "start.sh не найден или не исполняемый",
-                detail=start_sh,
+                "systemd unit или systemd-exec-panel.sh не найдены",
+                detail=f"{panel_unit}; {panel_exec}",
+                hint_ru="Проверьте целостность репозитория (systemd/*.service, scripts/systemd-exec-*.sh).",
             ),
         )
 

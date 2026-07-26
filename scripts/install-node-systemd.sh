@@ -29,9 +29,8 @@ if [[ ! -f "$UNIT_SRC" ]]; then
   exit 1
 fi
 
-if [[ ! -x "$ROOT_DIR/start_node_agent.sh" ]]; then
-  chmod +x "$ROOT_DIR/start_node_agent.sh"
-fi
+chmod +x "$ROOT_DIR/scripts/systemd-exec-node.sh" 2>/dev/null || true
+chmod +x "$ROOT_DIR/start_node_agent.sh" 2>/dev/null || true
 
 mkdir -p "$STATE_DIR/logs" "$STATE_DIR/run"
 chown -R "$INSTALL_USER:$INSTALL_GROUP" "$STATE_DIR"

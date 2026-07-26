@@ -193,45 +193,17 @@ def _systemd_unit_installed(unit: str = SYSTEMD_UNIT) -> bool:
 
 
 def restart_node_agent(repo_root: Path) -> dict[str, Any]:
-    """Restart node agent after git pull. Prefer systemd when the unit is installed."""
+    """Restart node agent after git pull via systemd."""
     log_path = _restart_log_path(repo_root)
-    script = repo_root / "start_node_agent.sh"
 
-    if _systemd_unit_installed():
-        try:
-            result = subprocess.run(
-                ["systemctl", "restart", SYSTEMD_UNIT],
-                capture_output=True,
-                text=True,
-                timeout=180.0,
-                check=False,
-            )
-            output = ((result.stdout or "") + (result.stderr or "")).strip()
-            success = result.returncode == 0
-            _append_restart_log(
-                log_path,
-                f"systemctl restart {SYSTEMD_UNIT}: rc={result.returncode}"
-                + (f" — {output}" if output else ""),
-            )
-            return {
-                "method": "systemd",
-                "success": success,
-                "output": output,
-                "error": None if success else output or f"systemctl restart {SYSTEMD_UNIT} failed",
-            }
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            _append_restart_log(log_path, f"systemctl restart {SYSTEMD_UNIT}: {exc}")
-            return {"method": "systemd", "success": False, "output": "", "error": str(exc)}
-
-    if not script.is_file():
-        message = f"Не найден {script} и unit {SYSTEMD_UNIT}"
+    if not _systemd_unit_installed():
+        message = f"Unit {SYSTEMD_UNIT} не установлен — systemctl restart недоступен"
         _append_restart_log(log_path, message)
         return {"method": "none", "success": False, "output": "", "error": message}
 
     try:
         result = subprocess.run(
-            [str(script), "restart"],
-            cwd=repo_root,
+            ["systemctl", "restart", SYSTEMD_UNIT],
             capture_output=True,
             text=True,
             timeout=180.0,
@@ -241,17 +213,18 @@ def restart_node_agent(repo_root: Path) -> dict[str, Any]:
         success = result.returncode == 0
         _append_restart_log(
             log_path,
-            f"{script} restart: rc={result.returncode}" + (f" — {output}" if output else ""),
+            f"systemctl restart {SYSTEMD_UNIT}: rc={result.returncode}"
+            + (f" — {output}" if output else ""),
         )
         return {
-            "method": "script",
+            "method": "systemd",
             "success": success,
             "output": output,
-            "error": None if success else output or "start_node_agent.sh restart failed",
+            "error": None if success else output or f"systemctl restart {SYSTEMD_UNIT} failed",
         }
     except (subprocess.TimeoutExpired, OSError) as exc:
-        _append_restart_log(log_path, f"{script} restart: {exc}")
-        return {"method": "script", "success": False, "output": "", "error": str(exc)}
+        _append_restart_log(log_path, f"systemctl restart {SYSTEMD_UNIT}: {exc}")
+        return {"method": "systemd", "success": False, "output": "", "error": str(exc)}
 
 
 def schedule_agent_restart(repo_root: Path, *, delay_seconds: float = 1.5) -> None:
@@ -276,6 +249,7 @@ def apply_node_update(
     repo_root: Path | None = None,
 ) -> dict[str, Any]:
     from app.services.node_health import NODE_AGENT_VERSION
+    from app.services.systemd_refresh import refresh_installed_systemd_units
 
     agent_version = agent_version or NODE_AGENT_VERSION
     repo_root = repo_root or resolve_repo_root()
@@ -293,6 +267,15 @@ def apply_node_update(
         detail["agent_pull"] = pull
         if pull["success"]:
             detail["pip"] = _pip_install(repo_root)
+            # 2.19+: rewrite unit before restart — old ExecStart=…/start_node_agent.sh breaks after pull.
+            # Soft-fail on refresh: compat start_node_agent.sh shim still boots; migrate on startup.
+            systemd_refresh = refresh_installed_systemd_units(repo_root, panel=False, node=True)
+            detail["systemd_refresh"] = systemd_refresh
+            if not systemd_refresh.get("success"):
+                messages.append(
+                    "Предупреждение systemd: "
+                    + (systemd_refresh.get("error") or "не удалось обновить unit node")
+                )
             messages.append("Node agent обновлён, перезапуск через несколько секунд")
             schedule_agent_restart(repo_root)
             restarting = True

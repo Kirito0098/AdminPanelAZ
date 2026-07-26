@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Общий выбор Python для backend/.venv (install.sh, start.sh, start_node_agent.sh).
+# Общий выбор Python для backend/.venv (install.sh, systemd-exec-*.sh, апдейты).
 # Не запускать напрямую — только source.
 #
 # Авто (пользователю ничего настраивать не нужно):

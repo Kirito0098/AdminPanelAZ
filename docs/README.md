@@ -85,12 +85,16 @@ GitHub для этого не нужен.
 | NOC Ops (инциденты, SSE, rate, история, действия, фильтры, health, freshness, source badge, HA) | [plans/noc-ops/](plans/noc-ops/) |
 | Видимость VPN-профилей для пользователей (default + per-user, спека и промпты) | [plans/vpn-profile-visibility/](plans/vpn-profile-visibility/) |
 | Консолидация роли Пользователь / удаление viewer (ACL, can_create) | [plans/user-role-consolidation/](plans/user-role-consolidation/) |
+| Упрощение установщика: HTTP по умолчанию, удаление easy | [plans/simplify-installer-http-default/](plans/simplify-installer-http-default/) — **реализовано в 2.18.0** |
 
 ---
 
 ## С чего начать после установки
 
+После `install.sh` панель открывается по `http://IP:порт/` (HTTPS — позже в UI). Авто-бэкап уже включён (каждые 7 дней).
+
 1. Смените пароль и включите двухфакторную защиту — [profil.md](nastrojki/profil.md)
-2. Если VPN на другом сервере — добавьте узел — [uzly.md](uzly.md)
-3. На **Конфигурации** нажмите **Синхронизировать** — [konfiguracii.md](konfiguracii.md)
-4. Настройте HTTPS и резервные копии — [set-i-publikaciya.md](nastrojki/set-i-publikaciya.md), [rezervnye-kopii.md](nastrojki/rezervnye-kopii.md)
+2. Настройте домен и HTTPS — [set-i-publikaciya.md](nastrojki/set-i-publikaciya.md)
+3. Если VPN на другом сервере — добавьте узел — [uzly.md](uzly.md)
+4. На **Конфигурации** нажмите **Синхронизировать** — [konfiguracii.md](konfiguracii.md)
+5. Telegram (token в UI) и бэкапы — [Telegram.md](Telegram.md), [rezervnye-kopii.md](nastrojki/rezervnye-kopii.md)

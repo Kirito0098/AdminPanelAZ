@@ -168,7 +168,7 @@ function ChangelogPanel({
         {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
       </div>
 
-      <div className="min-h-[28rem] max-h-[min(75vh,52rem)] overflow-y-auto px-5 py-5 sm:px-6">
+      <div className="px-5 py-5 sm:px-6">
         <div className="space-y-8">
           {sections.map((section) => (
             <section key={section.title} className="border-b border-border/50 pb-8 last:border-b-0 last:pb-0">

@@ -73,6 +73,12 @@ IP_FILES: dict[str, dict[str, str | list[str]]] = {
         "category": "hosting",
         "tags": ["hosting"],
     },
+    "custom-ips.txt": {
+        "name": "Свой список",
+        "description": "Ручные ASN/CIDR, добавленные через панель (Свои ASN/CIDR).",
+        "category": "custom",
+        "tags": ["custom", "manual"],
+    },
 }
 
 ROUTE_CONFIG_FILES = {

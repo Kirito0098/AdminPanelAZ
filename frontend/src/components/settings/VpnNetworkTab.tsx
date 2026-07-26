@@ -1,18 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { LucideIcon } from 'lucide-react'
 import {
   ExternalLink,
-  Globe,
-  Lock,
-  Server,
-  Shield,
   Terminal,
-  Wifi,
 } from 'lucide-react'
 import { ApiError, getBackgroundTask, getBackgroundTaskForApiBase, getVpnNetworkDomainSsl, getVpnNetworkPortStatus, getVpnNetworkSettings, publishVpnNetwork } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import PublishAccessWizard from '@/components/settings/PublishAccessWizard'
 import PublishAwaitDialog, { type PublishAwaitDialogState } from '@/components/settings/PublishAwaitDialog'
+import DdnsSettingsCard from '@/components/settings/DdnsSettingsCard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
@@ -50,20 +45,6 @@ const MODE_LABELS: Record<string, string> = {
   local_http: 'Только с этого компьютера',
 }
 
-const MODE_ICONS: Record<string, LucideIcon> = {
-  reverse_proxy: Lock,
-  direct_https: Shield,
-  direct_http: Wifi,
-  local_http: Server,
-  http_direct: Wifi,
-  nginx_le: Shield,
-  nginx_selfsigned: Lock,
-  nginx_custom: Lock,
-  uvicorn_le: Shield,
-  uvicorn_custom: Shield,
-  uvicorn_selfsigned: Lock,
-}
-
 function envRowValue(rows: VpnNetworkSettings['env_rows'], labelPrefix: string): string {
   const row = rows.find((r) => r.label.startsWith(labelPrefix))
   return row && row.value !== '—' ? row.value : ''
@@ -95,42 +76,6 @@ function SectionHeading({ title, description }: { title: string; description: st
       <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
     </div>
   )
-}
-
-function MetricPill({
-  icon: Icon,
-  label,
-  value,
-  tone = 'default',
-}: {
-  icon: LucideIcon
-  label: string
-  value: string
-  tone?: 'default' | 'success' | 'warning' | 'muted'
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 shadow-sm backdrop-blur-sm">
-      <div
-        className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-          tone === 'success' && 'bg-primary/15 text-primary',
-          tone === 'warning' && 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-          tone === 'muted' && 'bg-muted text-muted-foreground',
-          tone === 'default' && 'bg-muted/80 text-foreground',
-        )}
-      >
-        <Icon size={18} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="truncate text-sm font-semibold">{value}</p>
-      </div>
-    </div>
-  )
-}
-
-function publishModeIcon(key: string): LucideIcon {
-  return MODE_ICONS[key] ?? Globe
 }
 
 const PUBLISH_MODE_GROUPS: Array<{ id: string; title: string; keys: string[] }> = [
@@ -608,9 +553,6 @@ export default function VpnNetworkTab() {
       selectedMode === 'nginx_selfsigned')
   const selfsignedDomainHint =
     selectedMode === 'uvicorn_selfsigned' || selectedMode === 'nginx_selfsigned'
-  const domainRow = settings.env_rows.find((r) => r.label.includes('DOMAIN'))
-  const domainDisplay =
-    domainRow && domainRow.value !== '—' ? domainRow.value : domain.trim() || 'не задан'
 
   return (
     <div className="space-y-4">
@@ -618,26 +560,6 @@ export default function VpnNetworkTab() {
       <ConfirmDialogHost dialogProps={dialogProps} />
 
       <div className="grid gap-4 md:grid-cols-2 md:items-start">
-        <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card p-4 md:col-span-2">
-          <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/10 blur-2xl" />
-          <div className="relative grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricPill
-              icon={publishModeIcon(settings.mode_key)}
-              label="Режим"
-              value={modeLabel}
-              tone={isSecurePublishTone(settings) ? 'success' : 'default'}
-            />
-            <MetricPill icon={Globe} label="Домен" value={domainDisplay} />
-            <MetricPill icon={Server} label="Порт приложения" value={settings.backend_port || backendPort} />
-            <MetricPill
-              icon={ExternalLink}
-              label="Адресов"
-              value={settings.primary_urls.length > 0 ? String(settings.primary_urls.length) : '—'}
-              tone={settings.primary_urls.length > 0 ? 'success' : 'muted'}
-            />
-          </div>
-        </div>
-
         <SectionHeading
           title="Текущий доступ"
           description="Как панель открывается сейчас и по каким адресам"
@@ -708,42 +630,15 @@ export default function VpnNetworkTab() {
         </Card>
 
         <SectionHeading
-          title="Параметры сервера"
-          description="Справочно: значения из файла настроек на сервере"
+          title="Динамический DNS"
+          description="Бесплатный адрес DuckDNS / No-IP, если нет своего домена"
         />
 
-        <Card className="overflow-hidden shadow-sm md:col-span-2">
-          <div className="h-1 bg-gradient-to-r from-violet-500/70 to-violet-500/15" />
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Globe size={18} />
-              Текущие параметры
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl className="grid gap-2 sm:grid-cols-2">
-              {settings.env_rows.map((row) => (
-                <div
-                  key={row.label}
-                  className="rounded-xl border bg-card/50 px-3 py-2.5"
-                >
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    {row.label}
-                  </dt>
-                  <dd className="mt-1 text-sm">
-                    {row.mono ? (
-                      <code className="break-all rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-xs">
-                        {row.value}
-                      </code>
-                    ) : (
-                      row.value
-                    )}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </CardContent>
-        </Card>
+        <DdnsSettingsCard
+          onSuggestDomain={(fqdn) => {
+            setDomain((current) => (current.trim() ? current : fqdn))
+          }}
+        />
 
         <SectionHeading
           title="Мастер настройки"

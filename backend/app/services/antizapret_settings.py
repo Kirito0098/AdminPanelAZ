@@ -83,6 +83,7 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
             "message": "Нечего обновлять",
             "changes": 0,
             "needs_apply": False,
+            "warnings": [],
         }
 
     try:
@@ -124,8 +125,36 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
         "message": "Настройки сохранены" if changes > 0 else "Нечего обновлять",
         "changes": changes,
         "needs_apply": changes > 0,
+        "warnings": [],
     }
 
 
 def filter_known_keys(updates: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in updates.items() if k in KNOWN_SETTING_KEYS}
+
+
+OPENVPN_BACKUP_TCP_PORT443_WARNING = (
+    "OPENVPN_BACKUP_TCP=y поднимает OpenVPN TCP на 80/443/504/508 и конфликтует с HTTPS панели на 443. "
+    "Смените «Публичный порт HTTPS» в Настройки → Адрес сайта и HTTPS (HTTPS_PUBLIC_PORT), "
+    "иначе после doall.sh панель может стать недоступна."
+)
+
+
+def panel_https_port_is_443(https_public_port: str | None) -> bool:
+    port = (https_public_port or "").strip() or "443"
+    return port == "443"
+
+
+def openvpn_backup_tcp_conflict_warnings(
+    new_settings: dict[str, Any],
+    *,
+    https_public_port: str | None,
+) -> list[str]:
+    """Soft warnings when enabling OPENVPN_BACKUP_TCP while panel HTTPS is on 443."""
+    if "OPENVPN_BACKUP_TCP" not in new_settings:
+        return []
+    if normalize_flag(new_settings["OPENVPN_BACKUP_TCP"]) != "y":
+        return []
+    if not panel_https_port_is_443(https_public_port):
+        return []
+    return [OPENVPN_BACKUP_TCP_PORT443_WARNING]

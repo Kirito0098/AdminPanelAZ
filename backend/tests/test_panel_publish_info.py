@@ -7,7 +7,9 @@ from app.config import Settings
 from app.middleware.http_security import get_panel_branding
 from app.services.panel_publish_info import (
     build_panel_publish_context,
+    build_publish_access_url,
     infer_nginx_publish_mode_from_cert,
+    is_whitelist_port_firewall_applicable,
     nginx_listens_on_https_port,
     public_https_origin_host,
     public_https_origin_url,
@@ -23,6 +25,32 @@ def test_public_https_origin_host_standard_port():
 def test_public_https_origin_host_custom_port():
     assert public_https_origin_host("example.com", 5050) == "example.com:5050"
     assert public_https_origin_url("example.com", 5050) == "https://example.com:5050"
+
+
+def test_build_publish_access_url_uvicorn_includes_nonstandard_port():
+    url = build_publish_access_url(
+        publish_mode="uvicorn_le",
+        domain="example.com",
+        backend_port=5050,
+    )
+    assert url == "https://example.com:5050/"
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ({"BEHIND_NGINX": "false", "BACKEND_HOST": "0.0.0.0", "USE_HTTPS": "false"}, True),
+        ({"BEHIND_NGINX": "false", "BACKEND_HOST": "0.0.0.0", "USE_HTTPS": "true"}, True),
+        ({"BEHIND_NGINX": "true", "BACKEND_HOST": "127.0.0.1", "USE_HTTPS": "false"}, False),
+        ({"BEHIND_NGINX": "false", "BACKEND_HOST": "127.0.0.1", "USE_HTTPS": "false"}, False),
+        ({"BEHIND_NGINX": "false", "BACKEND_HOST": "127.0.0.1", "USE_HTTPS": "true"}, False),
+    ],
+)
+def test_is_whitelist_port_firewall_applicable(env, expected):
+    assert (
+        is_whitelist_port_firewall_applicable(get_env_value=lambda key, default="": env.get(key, default))
+        is expected
+    )
 
 
 def test_public_https_origin_host_strips_domain_port_suffix():

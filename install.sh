@@ -5,7 +5,6 @@
 #
 # Быстрый старт:
 #   sudo ./install.sh           # интерактивное меню с подсказками
-#   sudo ./install-easy.sh      # простой мастер для новичков
 #   sudo ./install.sh --help    # полный список опций и примеры
 #
 # Основные режимы:
@@ -29,7 +28,7 @@ else
 fi
 
 bootstrap_remote_install() {
-  if [[ -n "$_script_dir" && -f "$_script_dir/scripts/install-ui.sh" && -f "$_script_dir/scripts/install-wizard.sh" && -f "$_script_dir/scripts/uninstall.sh" && -f "$_script_dir/start.sh" && -f "$_script_dir/backend/requirements.txt" && -f "$_script_dir/backend/.env.example" ]]; then
+  if [[ -n "$_script_dir" && -f "$_script_dir/scripts/install-ui.sh" && -f "$_script_dir/scripts/install-wizard.sh" && -f "$_script_dir/scripts/uninstall.sh" && -f "$_script_dir/backend/requirements.txt" && -f "$_script_dir/systemd/adminpanelaz.service" && -f "$_script_dir/backend/.env.example" ]]; then
     return 0
   fi
 
@@ -97,6 +96,8 @@ source "$ROOT_DIR/scripts/install-ui.sh"
 # shellcheck source=scripts/python-runtime.sh
 source "$ROOT_DIR/scripts/python-runtime.sh"
 ui_init
+# shellcheck source=scripts/install-port-check.sh
+source "$ROOT_DIR/scripts/install-port-check.sh"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 VENV_DIR="$BACKEND_DIR/.venv"
@@ -112,7 +113,6 @@ NODE_ONLY=false
 FORCE=false
 NON_INTERACTIVE=false
 ACCEPT_DEFAULTS=false
-EASY_MODE=false
 INSTALL_FROM_GIT="${INSTALL_FROM_GIT:-}"
 # Стандартный каталог — /opt/AdminPanelAZ; при запуске из клона resolve_project_dir подставит ROOT_DIR
 INSTALL_TARGET="${INSTALL_TARGET:-$DEFAULT_INSTALL_TARGET}"
@@ -123,6 +123,8 @@ FULL_PURGE=false
 PURGE_REPO=false
 ENV_BACKUP_DIR=""
 RESTORE_ENV_AFTER_INSTALL=false
+INSTALL_CURRENT_STEP="инициализация"
+INSTALL_FATAL_HANDLED=false
 
 log() {
   if [[ "$NON_INTERACTIVE" == true ]] || [[ ! -t 1 ]]; then
@@ -140,14 +142,98 @@ warn() {
   fi
 }
 
-die() {
-  if [[ "$NON_INTERACTIVE" == true ]] || [[ ! -t 1 ]]; then
-    echo "[install] ОШИБКА: $*" >&2
+install_set_step() {
+  INSTALL_CURRENT_STEP="$1"
+}
+
+install_on_err() {
+  local lineno="${1:-?}"
+  local exit_code="${2:-1}"
+  if [[ "${INSTALL_FATAL_HANDLED:-false}" == true ]]; then
+    return 0
+  fi
+  INSTALL_FATAL_HANDLED=true
+
+  local cmd="${BASH_COMMAND:-неизвестно}"
+  local step="${INSTALL_CURRENT_STEP:-неизвестный шаг}"
+  local state_dir="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-/var/lib/adminpanelaz}}"
+
+  # Подсказки по логам — только для сервисов, которые реально ставились
+  local -a log_hints=()
+  if declare -F install_controller_selected >/dev/null 2>&1 && install_controller_selected 2>/dev/null; then
+    log_hints+=("  journalctl -u adminpanelaz -n 50")
+  fi
+  if declare -F install_node_selected >/dev/null 2>&1 && install_node_selected 2>/dev/null; then
+    log_hints+=("  journalctl -u adminpanelaz-node -n 50")
+  fi
+  if [[ ${#log_hints[@]} -eq 0 ]]; then
+    log_hints+=("  journalctl -u adminpanelaz -n 50")
+  fi
+
+  echo >&2
+  if declare -F ui_warn_box >/dev/null 2>&1 && [[ "$NON_INTERACTIVE" != true ]] && [[ -t 2 || -t 1 ]]; then
+    ui_warn_box "Установка прервана" \
+      "Шаг: ${step}" \
+      "Строка: ${lineno} (код ${exit_code})" \
+      "Команда: ${cmd}" \
+      "" \
+      "Что проверить:" \
+      "${log_hints[@]}" \
+      "  ${state_dir}/logs/backend.log" \
+      "  Повтор: sudo ./install.sh"
   else
-    print_error "$*"
+    echo "[install] ОШИБКА: установка прервана" >&2
+    echo "[install]   Шаг: ${step}" >&2
+    echo "[install]   Строка: ${lineno}, код: ${exit_code}" >&2
+    echo "[install]   Команда: ${cmd}" >&2
+    echo "[install]   Логи: journalctl -u adminpanelaz -n 50; ${state_dir}/logs/backend.log" >&2
+    echo "[install]   Повтор: sudo ./install.sh" >&2
+  fi
+  exit "${exit_code}"
+}
+
+install_on_interrupt() {
+  if [[ "${INSTALL_FATAL_HANDLED:-false}" == true ]]; then
+    exit 130
+  fi
+  INSTALL_FATAL_HANDLED=true
+  echo >&2
+  if declare -F print_warn >/dev/null 2>&1; then
+    print_warn "Установка прервана пользователем (Ctrl+C). Шаг: ${INSTALL_CURRENT_STEP:-?}."
+    print_info "Можно запустить снова: sudo ./install.sh"
+  else
+    echo "[install] Прервано пользователем (Ctrl+C). Шаг: ${INSTALL_CURRENT_STEP:-?}." >&2
+  fi
+  exit 130
+}
+
+die() {
+  INSTALL_FATAL_HANDLED=true
+  local msg="$*"
+  echo >&2
+  if [[ "$NON_INTERACTIVE" == true ]] || [[ ! -t 1 ]]; then
+    echo "[install] ОШИБКА: $msg" >&2
+    if [[ -n "${INSTALL_CURRENT_STEP:-}" ]]; then
+      echo "[install]   Шаг: ${INSTALL_CURRENT_STEP}" >&2
+    fi
+  else
+    if declare -F ui_warn_box >/dev/null 2>&1; then
+      ui_warn_box "Установка прервана" \
+        "$msg" \
+        "" \
+        "Шаг: ${INSTALL_CURRENT_STEP:-?}" \
+        "Повтор: sudo ./install.sh"
+    else
+      print_error "$msg"
+    fi
   fi
   exit 1
 }
+
+# ERR наследуется в функции; INT/TERM — понятное сообщение при Ctrl+C
+set -E
+trap 'install_on_err $LINENO $?' ERR
+trap 'install_on_interrupt' INT TERM
 
 usage() {
   ui_show_help
@@ -155,7 +241,6 @@ usage() {
 
 has_explicit_install_intent() {
   [[ "$NON_INTERACTIVE" == true ]] && return 0
-  [[ "$EASY_MODE" == true ]] && return 0
   [[ "$WITH_SYSTEMD" == true ]] && return 0
   [[ "$WITH_DAEMON" == true ]] && return 0
   [[ "$WITH_NODE_AGENT" == true ]] && return 0
@@ -239,9 +324,6 @@ parse_args() {
         ;;
       --reinstall)
         ACTION="reinstall"
-        ;;
-      --easy)
-        EASY_MODE=true
         ;;
       --help|-h)
         usage
@@ -495,18 +577,6 @@ should_run_wizard() {
 }
 
 run_wizard_if_needed() {
-  if [[ "$EASY_MODE" == true ]]; then
-    # shellcheck source=scripts/install-easy-wizard.sh
-    source "$ROOT_DIR/scripts/install-easy-wizard.sh"
-    run_install_easy_wizard
-    if [[ "${WIZ_APPLY_CONFIRMED:-false}" != true ]]; then
-      exit 0
-    fi
-    WIZARD_RAN=true
-    FORCE=true
-    return 0
-  fi
-
   if ! should_run_wizard; then
     return 0
   fi
@@ -585,6 +655,46 @@ check_antizapret() {
   else
     warn "Каталог AntiZapret не найден ($az_path). Панель запустится, но VPN-функции будут ограничены."
     warn "Установите AntiZapret: https://github.com/GubernievS/AntiZapret-VPN"
+  fi
+}
+
+# OPENVPN_BACKUP_TCP=y поднимает OpenVPN TCP на 80/443/504/508 — конфликт с nginx панели на 443.
+disable_openvpn_backup_tcp_if_port_conflict() {
+  if ! wiz_config_active || ! install_controller_selected; then
+    return 0
+  fi
+
+  local https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
+  local mode="${WIZ_NGINX_MODE:-none}"
+  local az_path="${ANTIZAPRET_PATH:-${WIZ_ANTIZAPRET_PATH:-/root/antizapret}}"
+  local setup_file="${az_path}/setup"
+
+  [[ -z "$https_port" || "$https_port" == "443" ]] || return 0
+
+  case "$mode" in
+    le|selfsigned|nginx_custom) ;;
+    *) return 0 ;;
+  esac
+
+  [[ -f "$setup_file" ]] || return 0
+
+  local current
+  current="$(grep -E '^[[:space:]]*OPENVPN_BACKUP_TCP=' "$setup_file" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
+  current="${current%%#*}"
+  current="$(printf '%s' "$current" | tr '[:upper:]' '[:lower:]')"
+  [[ "$current" == "y" ]] || return 0
+
+  if grep -qE '^[[:space:]]*OPENVPN_BACKUP_TCP=' "$setup_file"; then
+    sed -i -E 's/^[[:space:]]*OPENVPN_BACKUP_TCP=.*/OPENVPN_BACKUP_TCP=n/' "$setup_file"
+  else
+    printf '\nOPENVPN_BACKUP_TCP=n\n' >>"$setup_file"
+  fi
+
+  warn "OPENVPN_BACKUP_TCP отключён: порт 443 нужен панели/nginx."
+  warn "Чтобы включить резервные TCP-порты — смените HTTPS_PUBLIC_PORT и верните флаг в UI."
+
+  if command -v ss >/dev/null 2>&1 && ss -tln 2>/dev/null | grep -Eq ':443[[:space:]]'; then
+    warn "Порт 443 уже занят. После смены флага примените конфиг AntiZapret (doall.sh) — install сам doall не запускает."
   fi
 }
 
@@ -736,6 +846,7 @@ verify_controller_running() {
 }
 
 install_system_deps() {
+  install_set_step "Установка системных зависимостей"
   local py_bin py_mm
   ui_progress_start "Установка системных зависимостей"
   export DEBIAN_FRONTEND=noninteractive
@@ -772,7 +883,7 @@ install_system_deps() {
 }
 
 resolve_project_dir() {
-  if [[ -f "$ROOT_DIR/start.sh" && -f "$ROOT_DIR/backend/requirements.txt" ]]; then
+  if [[ -f "$ROOT_DIR/backend/requirements.txt" && -f "$ROOT_DIR/systemd/adminpanelaz.service" ]]; then
     INSTALL_TARGET="$ROOT_DIR"
     return
   fi
@@ -802,7 +913,7 @@ resolve_project_dir() {
 }
 
 ensure_executable_scripts() {
-  chmod +x "$ROOT_DIR/start.sh" "$ROOT_DIR/start_node_agent.sh" 2>/dev/null || true
+  chmod +x "$ROOT_DIR/scripts/systemd-exec-panel.sh" "$ROOT_DIR/scripts/systemd-exec-node.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/test-backend-health-check.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/test-install-publish-modes.sh" 2>/dev/null || true
@@ -933,8 +1044,10 @@ apply_wiz_env_settings() {
   if [[ "$WIZARD_RAN" == true && "${WIZ_BEHIND_NGINX:-false}" == "true" ]] \
     || [[ -n "${WIZ_BEHIND_NGINX:-}" && "${WIZ_BEHIND_NGINX:-false}" == "true" ]]; then
     env_set BEHIND_NGINX "true"
-    env_set TRUSTED_PROXY_IPS "127.0.0.1,::1"
-    env_set FORWARDED_ALLOW_IPS "127.0.0.1,::1"
+    env_set TRUSTED_PROXY_IPS "127.0.0.1"
+    env_set FORWARDED_ALLOW_IPS "127.0.0.1"
+  elif [[ "$WIZARD_RAN" == true && "${WIZ_BEHIND_NGINX:-false}" == "false" ]]; then
+    env_set BEHIND_NGINX "false"
   fi
   if [[ "$WIZARD_RAN" == true && "${WIZ_UVICORN_WORKERS:-1}" -gt 1 ]] \
     || [[ -n "${WIZ_UVICORN_WORKERS:-}" && "${WIZ_UVICORN_WORKERS:-1}" -gt 1 ]]; then
@@ -1007,6 +1120,7 @@ apply_wiz_env_settings() {
 }
 
 setup_env() {
+  install_set_step "Настройка backend/.env"
   if ! install_controller_selected; then
     log "Режим node-only: пропуск backend/.env"
     return 0
@@ -1123,6 +1237,7 @@ setup_node_env() {
 }
 
 setup_backend() {
+  install_set_step "Настройка backend (Python ${ADMINPANELAZ_PYTHON_VERSION} venv)"
   ui_progress_start "Настройка backend (Python ${ADMINPANELAZ_PYTHON_VERSION} venv)"
   ap_ensure_venv "$VENV_DIR"
 
@@ -1154,7 +1269,7 @@ seed_wizard_db_settings() {
   if ! wiz_config_active || ! install_controller_selected; then
     return 0
   fi
-  if [[ "${WIZ_TELEGRAM_ENABLED:-false}" != true && "${WIZ_AUTO_BACKUP_ENABLED:-false}" != true ]]; then
+  if [[ "${WIZ_TELEGRAM_ENABLED:-false}" != true && "${WIZ_AUTO_BACKUP_ENABLED:-true}" != true ]]; then
     return 0
   fi
 
@@ -1164,7 +1279,7 @@ seed_wizard_db_settings() {
     WIZ_TELEGRAM_ENABLED="${WIZ_TELEGRAM_ENABLED:-false}" \
     WIZ_TELEGRAM_BOT_TOKEN="${WIZ_TELEGRAM_BOT_TOKEN:-}" \
     WIZ_TELEGRAM_CHAT_ID="${WIZ_TELEGRAM_CHAT_ID:-}" \
-    WIZ_AUTO_BACKUP_ENABLED="${WIZ_AUTO_BACKUP_ENABLED:-false}" \
+    WIZ_AUTO_BACKUP_ENABLED="${WIZ_AUTO_BACKUP_ENABLED:-true}" \
     WIZ_AUTO_BACKUP_DAYS="${WIZ_AUTO_BACKUP_DAYS:-7}" \
       "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/seed-wizard-db.py"
   ) || warn "Не удалось записать настройки в БД"
@@ -1176,6 +1291,7 @@ setup_frontend() {
     return 0
   fi
 
+  install_set_step "Настройка frontend (npm install / build)"
   ui_progress_start "Настройка frontend (npm install)"
   if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
     (cd "$FRONTEND_DIR" && npm install)
@@ -1201,6 +1317,7 @@ setup_runtime_dirs() {
 }
 
 setup_systemd() {
+  install_set_step "Установка systemd-сервиса панели"
   if ! install_controller_selected; then
     return 0
   fi
@@ -1219,6 +1336,8 @@ setup_node_agent_systemd() {
   if ! install_node_selected; then
     return 0
   fi
+
+  install_set_step "Установка systemd-сервиса node agent"
 
   local api_key="${GENERATED_NODE_KEY:-${NODE_AGENT_API_KEY:-}}"
   if is_placeholder_secret "$api_key"; then
@@ -1239,16 +1358,13 @@ setup_node_agent_systemd() {
 }
 
 start_daemon() {
+  # --with-daemon → тот же путь, что --with-systemd
   if ! install_controller_selected; then
     return 0
   fi
-
-  log "Запуск prod daemon..."
-  BACKEND_HOST="${BACKEND_HOST:-${WIZ_BACKEND_HOST:-127.0.0.1}}" \
-  BACKEND_PORT="${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}" \
-  UVICORN_WORKERS="${UVICORN_WORKERS:-${WIZ_UVICORN_WORKERS:-1}}" \
-  ADMINPANELAZ_STATE_DIR="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-$ROOT_DIR/.runtime}}" \
-    ADMINPANELAZ_MODE=prod "$ROOT_DIR/start.sh" daemon
+  warn "--with-daemon устарел: используйте --with-systemd (systemctl start adminpanelaz)"
+  setup_systemd
+  systemctl start adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz"
 }
 
 ddns_config_quote() {
@@ -1278,7 +1394,7 @@ write_ddns_config() {
   esac
 
   {
-    echo "# AdminPanelAZ DDNS (создан install.sh)"
+    echo "# AdminPanelAZ DDNS (создан install.sh / env-override)"
     echo "DDNS_PROVIDER=$(ddns_config_quote "$provider")"
     echo "DDNS_DOMAIN=$(ddns_config_quote "$domain")"
     case "$provider" in
@@ -1307,6 +1423,8 @@ setup_ddns_if_selected() {
   if [[ "$provider" == "none" || -z "$provider" ]]; then
     return 0
   fi
+
+  install_set_step "Настройка DDNS ($provider)"
 
   log "Настройка DDNS ($provider)..."
   write_ddns_config
@@ -1343,6 +1461,7 @@ setup_nginx_if_selected() {
     return 0
   fi
 
+  install_set_step "Настройка публикации HTTPS ($mode)"
   log "Настройка публикации (HTTPS): $mode"
 
   # shellcheck source=scripts/nginx-common.sh
@@ -1354,17 +1473,50 @@ setup_nginx_if_selected() {
   local https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
   local http_port="${WIZ_HTTP_ACME_PORT:-80}"
   local enforce_https="true"
+  local path_sfx="/"
   if [[ "$WIZ_APP_ENV" != "production" ]]; then
     enforce_https="false"
   fi
 
+  ACCESS_PATH="$(nginx_normalize_access_path "${WIZ_ACCESS_PATH:-}")"
+  export ACCESS_PATH
+  export NGINX_SUBPATH_INTEGRATE="${WIZ_NGINX_SUBPATH_INTEGRATE:-false}"
+  if [[ -n "$ACCESS_PATH" ]]; then
+    path_sfx="${ACCESS_PATH}/"
+  fi
+
+  _install_nginx_panel_site() {
+    local site_domain="$1"
+    local site_backend="$2"
+    local site_cert="$3"
+    local site_key="$4"
+    local site_https="$5"
+    local site_http="$6"
+    local conf
+    if nginx_finalize_nginx_site "$site_domain" "$site_backend"; then
+      nginx_apply_behind_proxy_env "$site_domain" "$site_backend" "https" "$site_https" "$site_http"
+      return 0
+    fi
+    conf="$(nginx_render_template \
+      "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
+      "$site_domain" "$site_backend" "$site_cert" "$site_key" "$site_https" "$site_http")"
+    nginx_install_site "$conf" "$site_domain"
+    nginx_apply_behind_proxy_env "$site_domain" "$site_backend" "https" "$site_https" "$site_http"
+  }
+
   case "$mode" in
     http_direct)
+      ACCESS_PATH=""
+      NGINX_SUBPATH_INTEGRATE="false"
+      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
       nginx_apply_direct_http_env "$backend_port"
       nginx_remove_site "$(nginx_env_get DOMAIN)"
-      log "HTTP без nginx: http://<сервер>:${backend_port}/ (не рекомендуется для интернета)"
+      log "HTTP без nginx: http://<IP>:${backend_port}/ (HTTPS — в панели)"
       ;;
     uvicorn_le)
+      ACCESS_PATH=""
+      NGINX_SUBPATH_INTEGRATE="false"
+      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
       [[ -n "$domain" ]] || die "Для Let's Encrypt нужен домен"
       NGINX_FAIL_SOFT=true
       if ! nginx_obtain_letsencrypt_cert "$domain" "${WIZ_NGINX_EMAIL:-}"; then
@@ -1382,6 +1534,9 @@ setup_nginx_if_selected() {
       log "HTTPS на uvicorn + Let's Encrypt: https://${domain}:${backend_port}/"
       ;;
     uvicorn_custom)
+      ACCESS_PATH=""
+      NGINX_SUBPATH_INTEGRATE="false"
+      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
       [[ -n "$domain" ]] || die "Для HTTPS нужен домен"
       [[ -n "${WIZ_SSL_CERT:-}" && -n "${WIZ_SSL_KEY:-}" ]] || die "Укажите WIZ_SSL_CERT и WIZ_SSL_KEY"
       [[ -f "${WIZ_SSL_CERT}" && -f "${WIZ_SSL_KEY}" ]] || die "Файлы сертификата не найдены"
@@ -1390,6 +1545,9 @@ setup_nginx_if_selected() {
       log "HTTPS на uvicorn + собственные сертификаты: https://${domain}:${backend_port}/"
       ;;
     uvicorn_selfsigned)
+      ACCESS_PATH=""
+      NGINX_SUBPATH_INTEGRATE="false"
+      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
       domain="$(nginx_resolve_selfsigned_cn "$domain")"
       mkdir -p /etc/ssl/private
       if [[ ! -f "$NGINX_SELF_SIGNED_CERT" ]]; then
@@ -1415,18 +1573,17 @@ setup_nginx_if_selected() {
       unset NGINX_FAIL_SOFT
       local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
       local key="/etc/letsencrypt/live/${domain}/privkey.pem"
-      local conf
-      conf="$(nginx_render_template \
-        "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-        "$domain" "$backend_port" "$cert" "$key" "$https_port" "$http_port")"
-      nginx_install_site "$conf" "$domain"
-      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https" "$https_port" "$http_port"
+      _install_nginx_panel_site "$domain" "$backend_port" "$cert" "$key" "$https_port" "$http_port"
       if [[ "$WIZ_APP_ENV" == "production" ]]; then
         nginx_env_set ENFORCE_HTTPS "true"
       fi
       systemctl enable --now snap.certbot.renew.timer 2>/dev/null || \
         systemctl enable --now certbot.timer 2>/dev/null || true
-      log "Nginx + Let's Encrypt: https://${domain}:${https_port}/"
+      if [[ "$https_port" == "443" ]]; then
+        log "Nginx + Let's Encrypt: https://${domain}${path_sfx}"
+      else
+        log "Nginx + Let's Encrypt: https://${domain}:${https_port}${path_sfx}"
+      fi
       ;;
     selfsigned)
       domain="$(nginx_resolve_selfsigned_cn "$domain")"
@@ -1438,34 +1595,32 @@ setup_nginx_if_selected() {
           -out "$NGINX_SELF_SIGNED_CERT" \
           -subj "/CN=${domain}" >/dev/null 2>&1
       fi
-      local conf
-      conf="$(nginx_render_template \
-        "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-        "$domain" "$backend_port" "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" \
-        "$https_port" "$http_port")"
-      nginx_install_site "$conf" "$domain"
-      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https" "$https_port" "$http_port"
+      _install_nginx_panel_site "$domain" "$backend_port" \
+        "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" "$https_port" "$http_port"
       if [[ "$WIZ_APP_ENV" == "production" ]]; then
         nginx_env_set ENFORCE_HTTPS "true"
       fi
-      log "Nginx + самоподписанный SSL: https://${domain}:${https_port}/"
+      if [[ "$https_port" == "443" ]]; then
+        log "Nginx + самоподписанный SSL: https://${domain}${path_sfx}"
+      else
+        log "Nginx + самоподписанный SSL: https://${domain}:${https_port}${path_sfx}"
+      fi
       ;;
     nginx_custom)
       [[ -n "$domain" ]] || die "Для HTTPS нужен домен"
       [[ -n "${WIZ_SSL_CERT:-}" && -n "${WIZ_SSL_KEY:-}" ]] || die "Укажите пути к сертификату и ключу"
       [[ -f "${WIZ_SSL_CERT}" && -f "${WIZ_SSL_KEY}" ]] || die "Файлы сертификата не найдены"
       nginx_ensure_nginx || die "Не удалось установить nginx"
-      local conf
-      conf="$(nginx_render_template \
-        "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-        "$domain" "$backend_port" "${WIZ_SSL_CERT}" "${WIZ_SSL_KEY}" \
-        "$https_port" "$http_port")"
-      nginx_install_site "$conf" "$domain"
-      nginx_apply_behind_proxy_env "$domain" "$backend_port" "https" "$https_port" "$http_port"
+      _install_nginx_panel_site "$domain" "$backend_port" \
+        "${WIZ_SSL_CERT}" "${WIZ_SSL_KEY}" "$https_port" "$http_port"
       if [[ "$WIZ_APP_ENV" == "production" ]]; then
         nginx_env_set ENFORCE_HTTPS "true"
       fi
-      log "Nginx + пользовательские сертификаты: https://${domain}:${https_port}/"
+      if [[ "$https_port" == "443" ]]; then
+        log "Nginx + пользовательские сертификаты: https://${domain}${path_sfx}"
+      else
+        log "Nginx + пользовательские сертификаты: https://${domain}:${https_port}${path_sfx}"
+      fi
       ;;
     *)
       warn "Неизвестный режим публикации: $mode — пропуск"
@@ -1502,11 +1657,9 @@ restart_services_after_nginx() {
   if ! install_controller_selected; then
     return 0
   fi
-  if [[ "$WITH_SYSTEMD" == true ]]; then
+  if [[ "$WITH_SYSTEMD" == true ]] || [[ "$WITH_DAEMON" == true ]]; then
     setup_systemd
     systemctl restart adminpanelaz 2>/dev/null || true
-  elif [[ "$WITH_DAEMON" == true ]]; then
-    "$ROOT_DIR/start.sh" restart 2>/dev/null || true
   fi
 }
 
@@ -1515,6 +1668,7 @@ setup_firewall_if_selected() {
     return 0
   fi
 
+  install_set_step "Настройка firewall"
   log "Настройка firewall..."
   # shellcheck source=scripts/firewall-setup.sh
   source "$ROOT_DIR/scripts/firewall-setup.sh"
@@ -1586,23 +1740,18 @@ setup_firewall_if_selected() {
   fi
 }
 
-start_node_agent_daemon() {
+start_node_via_systemd() {
+  # --with-daemon → тот же путь, что --with-systemd
   if ! install_node_selected; then
     return 0
   fi
-
   local api_key="${1:-${GENERATED_NODE_KEY:-}}"
-  if [[ -f "$NODE_ENV_FILE" ]]; then
-    # shellcheck source=/dev/null
-    set -a
-    source "$NODE_ENV_FILE"
-    set +a
-  fi
   if [[ -n "$api_key" ]]; then
-    export NODE_AGENT_API_KEY="$api_key"
+    GENERATED_NODE_KEY="$api_key"
   fi
-  log "Запуск node agent daemon..."
-  NODE_AGENT_MODE=prod "$ROOT_DIR/start_node_agent.sh" daemon
+  warn "--with-daemon устарел: используйте --with-systemd (systemctl start adminpanelaz-node)"
+  setup_node_agent_systemd
+  systemctl start adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
 }
 
 print_post_install() {
@@ -1633,8 +1782,9 @@ print_post_install() {
     ui_separator
     ui_bold "URL (prod / systemd)"
     echo
-    ui_summary_row "UI + API" "http://127.0.0.1:${backend_port}/"
-    ui_summary_row "API docs" "http://127.0.0.1:${backend_port}/docs"
+    ui_summary_row "UI + API (локально)" "http://127.0.0.1:${backend_port}/"
+    ui_summary_row "API docs (локально)" "http://127.0.0.1:${backend_port}/docs"
+    print_info "Это локальный адрес (только с этого сервера). Публичный адрес — ниже в блоке «Публикация»."
     ui_summary_row "Конфигурация" "$ENV_FILE"
   fi
 
@@ -1643,7 +1793,9 @@ print_post_install() {
   fi
 
   ui_summary_row "Логи (локально)" "${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-$ROOT_DIR/.runtime}}/logs/"
-  ui_summary_row "Логи (systemd)" "/var/lib/adminpanelaz/logs/"
+  if [[ "$WITH_SYSTEMD" == true ]]; then
+    ui_summary_row "Логи (systemd)" "/var/lib/adminpanelaz/logs/"
+  fi
 
   if install_controller_selected; then
     if [[ "${WIZ_DDNS_PROVIDER:-none}" != "none" ]]; then
@@ -1659,6 +1811,12 @@ print_post_install() {
       ui_summary_row "Домен" "$ddns_domain"
       ui_summary_row "Обновление IP" "sudo ./scripts/ddns-update.sh update"
       ui_summary_row "Статус" "sudo ./scripts/ddns-update.sh status"
+    else
+      echo
+      ui_separator
+      ui_bold "DDNS"
+      echo
+      ui_summary_row "Настройка" "в панели: Настройки → Адрес сайта и HTTPS → Динамический DNS"
     fi
     echo
     ui_separator
@@ -1673,13 +1831,41 @@ print_post_install() {
       if [[ "$pub_https" != "443" ]]; then
         url_suffix=":${pub_https}"
       fi
+      local path_sfx="/"
+      if is_nginx_https_mode; then
+        if declare -F wizard_access_path_url_suffix >/dev/null 2>&1; then
+          path_sfx="$(wizard_access_path_url_suffix)"
+        else
+          local ap
+          ap="${WIZ_ACCESS_PATH:-}"
+          ap="${ap#/}"
+          ap="${ap%/}"
+          [[ -n "$ap" ]] && path_sfx="/${ap}/"
+        fi
+      fi
       if is_uvicorn_https_mode; then
         ui_summary_row "HTTPS (uvicorn)" "https://${WIZ_NGINX_DOMAIN}${url_suffix}/"
       else
-        ui_summary_row "HTTPS" "https://${WIZ_NGINX_DOMAIN}${url_suffix}/"
+        ui_summary_row "HTTPS" "https://${WIZ_NGINX_DOMAIN}${url_suffix}${path_sfx}"
+        if [[ -n "${WIZ_ACCESS_PATH:-}" ]]; then
+          ui_summary_row "Подпуть" "/${WIZ_ACCESS_PATH#/}"
+        fi
+        if [[ "${WIZ_NGINX_SUBPATH_INTEGRATE:-false}" == "true" ]]; then
+          ui_summary_row "Интеграция vhost" "да"
+        fi
       fi
     elif [[ "${WIZ_NGINX_MODE:-none}" == "http_direct" ]]; then
-      ui_summary_row "HTTP" "http://<сервер>:${WIZ_BACKEND_PORT:-8000}/"
+      local pub_ip=""
+      if declare -F wizard_public_access_host >/dev/null 2>&1; then
+        pub_ip="$(wizard_public_access_host)"
+      elif declare -F nginx_server_primary_ip >/dev/null 2>&1; then
+        pub_ip="$(nginx_server_primary_ip 2>/dev/null || true)"
+      else
+        pub_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+      fi
+      pub_ip="${pub_ip:-<IP>}"
+      ui_summary_row "HTTP" "http://${pub_ip}:${WIZ_BACKEND_PORT:-8000}/"
+      print_info "HTTPS и домен — в панели: Настройки → Адрес сайта и HTTPS"
     else
       print_info "Для интернета: sudo ./scripts/nginx-setup.sh или повторно sudo ./install.sh"
     fi
@@ -1688,11 +1874,10 @@ print_post_install() {
     ui_bold "Управление controller"
     echo
     ui_info_box "" \
-      "./start.sh              # dev, foreground" \
-      "./start.sh daemon       # prod daemon + watchdog" \
-      "./start.sh stop         # остановка" \
-      "./start.sh status       # статус" \
-      "systemctl start adminpanelaz    # если установлен systemd"
+      "systemctl start adminpanelaz" \
+      "systemctl status adminpanelaz" \
+      "systemctl restart adminpanelaz" \
+      "journalctl -u adminpanelaz -f"
   fi
 
   if install_node_selected; then
@@ -1701,8 +1886,9 @@ print_post_install() {
     ui_bold "Node agent"
     echo
     ui_info_box "" \
-      "./start_node_agent.sh daemon   # читает backend/node_agent.env" \
-      "systemctl start adminpanelaz-node   # если установлен systemd" \
+      "systemctl start adminpanelaz-node" \
+      "systemctl status adminpanelaz-node" \
+      "journalctl -u adminpanelaz-node -f" \
       "Порт: ${node_port}"
   fi
 
@@ -1741,25 +1927,22 @@ print_post_install() {
   ui_separator
   ui_bold "Следующий шаг"
   echo
-  if [[ "$WITH_SYSTEMD" == true ]]; then
+  if [[ "$WITH_SYSTEMD" == true ]] || [[ "$WITH_DAEMON" == true ]]; then
     if install_controller_selected; then
       print_info "systemctl start adminpanelaz"
     fi
     if install_node_selected; then
       print_info "systemctl start adminpanelaz-node"
     fi
-  elif [[ "$WITH_DAEMON" == true ]]; then
-    print_info "Daemon запущен. Проверка: $ROOT_DIR/start.sh status"
   else
     local -a next_steps=("cd $ROOT_DIR")
     if install_controller_selected; then
-      next_steps+=("sudo ./start.sh daemon          # prod controller")
+      next_steps+=("sudo ./install.sh --with-systemd   # установить и запустить unit")
     fi
     if install_node_selected; then
-      next_steps+=("sudo ./start_node_agent.sh daemon")
+      next_steps+=("sudo systemctl start adminpanelaz-node")
     fi
-    next_steps+=("# или: sudo ./install.sh --with-systemd")
-    ui_info_box "Запуск вручную" "${next_steps[@]}"
+    ui_info_box "Запуск через systemd" "${next_steps[@]}"
   fi
   echo
 }
@@ -1789,7 +1972,7 @@ main() {
     require_tty_or_explicit_intent
   fi
 
-  if [[ "$original_argc" -eq 0 && -t 0 && "$NON_INTERACTIVE" != true && "$EASY_MODE" != true ]]; then
+  if [[ "$original_argc" -eq 0 && -t 0 && "$NON_INTERACTIVE" != true ]]; then
     show_main_menu
   fi
 
@@ -1797,10 +1980,14 @@ main() {
 }
 
 run_install_flow() {
+  install_set_step "Проверка ОС и каталога проекта"
   check_os
   resolve_project_dir
+  install_set_step "Мастер установки"
   run_wizard_if_needed
   check_antizapret
+  install_set_step "Проверка доступности портов"
+  install_preflight_ports
   install_system_deps
   ensure_executable_scripts
   setup_env
@@ -1821,10 +2008,12 @@ run_install_flow() {
       systemctl start adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz (проверьте: systemctl status adminpanelaz)"
     fi
   elif [[ "$WITH_DAEMON" == true ]]; then
+    install_set_step "Запуск daemon панели"
     start_daemon
   fi
 
   setup_ddns_if_selected
+  disable_openvpn_backup_tcp_if_port_conflict
   setup_nginx_if_selected
   restart_services_after_nginx
   setup_firewall_if_selected
@@ -1834,14 +2023,17 @@ run_install_flow() {
       setup_node_agent_systemd
       systemctl start adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
     elif [[ "$WITH_DAEMON" == true ]]; then
-      start_node_agent_daemon "$GENERATED_NODE_KEY"
+      install_set_step "Запуск daemon node agent"
+      start_node_via_systemd "$GENERATED_NODE_KEY"
     fi
   fi
 
   if install_controller_selected && { [[ "$WITH_SYSTEMD" == true ]] || [[ "$WITH_DAEMON" == true ]]; }; then
+    install_set_step "Проверка запуска backend"
     verify_controller_running
   fi
 
+  install_set_step "завершение"
   print_post_install "$GENERATED_NODE_KEY"
 }
 

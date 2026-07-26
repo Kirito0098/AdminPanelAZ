@@ -735,13 +735,18 @@ export default function DashboardPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileKey size={18} />
-              QR-код
+              {qrPreview?.contentMode === 'download-link' ? 'QR: ссылка для скачивания' : 'QR-код профиля'}
             </DialogTitle>
             <DialogDescription>
               {qrPreview?.filename}
-              {qrPreview?.contentMode === 'download-link' && (
+              {qrPreview?.contentMode === 'download-link' ? (
                 <span className="mt-1 block text-xs text-muted-foreground">
-                  Конфигурация слишком большая для прямого QR — отсканируйте ссылку для скачивания.
+                  Профиль не помещается в один QR (типично для AntiZapret WG/AWG и OpenVPN). Отсканируйте
+                  камерой телефона — откроется ссылка для скачивания файла, не импорт в VPN-приложение.
+                </span>
+              ) : (
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  Отсканируйте VPN-приложением для импорта профиля.
                 </span>
               )}
             </DialogDescription>

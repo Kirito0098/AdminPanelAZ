@@ -61,10 +61,11 @@ restart_panel_if_needed() {
     nginx_log "Перезапуск панели пропущен (SKIP_PANEL_RESTART)"
     return 0
   fi
-  if systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1; then
+  if systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1 \
+    || systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
     systemctl restart "$SERVICE_NAME" 2>/dev/null || nginx_warn "Не удалось перезапустить $SERVICE_NAME"
-  elif [[ -x "$ROOT_DIR/start.sh" ]]; then
-    "$ROOT_DIR/start.sh" restart 2>/dev/null || nginx_warn "Перезапустите панель вручную: ./start.sh restart"
+  else
+    nginx_warn "Перезапустите панель вручную: systemctl restart $SERVICE_NAME"
   fi
 }
 

@@ -120,7 +120,7 @@ def _classify_stack_process(name: str, blob: str, cwd: str) -> StackRole | None:
     repo_hints = _repo_root_hints()
     az_hints = _antizapret_path_hints()
 
-    if "start_node_agent" in blob or "node_agent/main" in blob or "node_agent.main" in blob:
+    if "node_agent/main" in blob or "node_agent.main" in blob:
         return "node_agent"
     if "node_agent" in blob and _path_contains_any(blob, repo_hints):
         return "node_agent"
@@ -130,9 +130,7 @@ def _classify_stack_process(name: str, blob: str, cwd: str) -> StackRole | None:
     if _path_contains_any(blob, repo_hints):
         if "uvicorn" in blob and "app.main" in blob:
             return "panel"
-        if "start.sh" in blob and "start_node_agent" not in blob:
-            return "panel"
-        if "watchdog" in blob and "adminpanelaz" in blob:
+        if "systemd-exec-panel" in blob:
             return "panel"
         if "vite" in blob or "npm run dev" in blob:
             return "panel"
@@ -253,7 +251,9 @@ def _match_backend(cmd: str) -> bool:
 
 
 def _match_watchdog(cmd: str) -> bool:
-    return bool(cmd) and "start.sh" in cmd and "start_node_agent" not in cmd
+    # Bash-watchdog больше нет; systemd Type=simple — основной процесс uvicorn.
+    del cmd
+    return False
 
 
 def _match_nginx(cmd: str) -> bool:

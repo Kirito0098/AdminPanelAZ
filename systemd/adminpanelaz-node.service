@@ -8,16 +8,14 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/opt/AdminPanelAZ
+WorkingDirectory=/opt/AdminPanelAZ/backend
 EnvironmentFile=-/opt/AdminPanelAZ/backend/node_agent.env
-Environment=NODE_AGENT_MODE=prod
 Environment=NODE_AGENT_STATE_DIR=/var/lib/adminpanelaz-node
 Environment=NODE_AGENT_HOST=0.0.0.0
 Environment=NODE_AGENT_PORT=9100
 Environment=NODE_AGENT_API_KEY=change-me-node-agent-key
 Environment=ANTIZAPRET_PATH=/root/antizapret
-ExecStart=/opt/AdminPanelAZ/start_node_agent.sh watchdog prod
-ExecStop=/opt/AdminPanelAZ/start_node_agent.sh stop
+ExecStart=/opt/AdminPanelAZ/scripts/systemd-exec-node.sh
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30

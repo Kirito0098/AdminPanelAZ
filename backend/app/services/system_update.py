@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.services.node_update import git_pull, resolve_repo_root
+from app.services.systemd_refresh import refresh_installed_systemd_units
 
 SYSTEMD_UNIT = "adminpanelaz"
 ProgressCallback = Callable[[int, str], None] | None
@@ -136,45 +137,17 @@ def _systemd_unit_installed(unit: str = SYSTEMD_UNIT) -> bool:
 
 
 def restart_controller(repo_root: Path) -> dict[str, Any]:
-    """Restart controller after update. Prefer systemd when the unit is installed."""
+    """Restart controller after update via systemd."""
     log_path = _restart_log_path(repo_root)
-    script = repo_root / "start.sh"
 
-    if _systemd_unit_installed():
-        try:
-            result = subprocess.run(
-                ["systemctl", "restart", SYSTEMD_UNIT],
-                capture_output=True,
-                text=True,
-                timeout=180.0,
-                check=False,
-            )
-            output = ((result.stdout or "") + (result.stderr or "")).strip()
-            success = result.returncode == 0
-            _append_restart_log(
-                log_path,
-                f"systemctl restart {SYSTEMD_UNIT}: rc={result.returncode}"
-                + (f" — {output}" if output else ""),
-            )
-            return {
-                "method": "systemd",
-                "success": success,
-                "output": output,
-                "error": None if success else output or f"systemctl restart {SYSTEMD_UNIT} failed",
-            }
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            _append_restart_log(log_path, f"systemctl restart {SYSTEMD_UNIT}: {exc}")
-            return {"method": "systemd", "success": False, "output": "", "error": str(exc)}
-
-    if not script.is_file():
-        message = f"Не найден {script} и unit {SYSTEMD_UNIT}"
+    if not _systemd_unit_installed():
+        message = f"Unit {SYSTEMD_UNIT} не установлен — systemctl restart недоступен"
         _append_restart_log(log_path, message)
         return {"method": "none", "success": False, "output": "", "error": message}
 
     try:
         result = subprocess.run(
-            [str(script), "restart"],
-            cwd=repo_root,
+            ["systemctl", "restart", SYSTEMD_UNIT],
             capture_output=True,
             text=True,
             timeout=180.0,
@@ -184,17 +157,18 @@ def restart_controller(repo_root: Path) -> dict[str, Any]:
         success = result.returncode == 0
         _append_restart_log(
             log_path,
-            f"{script} restart: rc={result.returncode}" + (f" — {output}" if output else ""),
+            f"systemctl restart {SYSTEMD_UNIT}: rc={result.returncode}"
+            + (f" — {output}" if output else ""),
         )
         return {
-            "method": "script",
+            "method": "systemd",
             "success": success,
             "output": output,
-            "error": None if success else output or "start.sh restart failed",
+            "error": None if success else output or f"systemctl restart {SYSTEMD_UNIT} failed",
         }
     except (subprocess.TimeoutExpired, OSError) as exc:
-        _append_restart_log(log_path, f"{script} restart: {exc}")
-        return {"method": "script", "success": False, "output": "", "error": str(exc)}
+        _append_restart_log(log_path, f"systemctl restart {SYSTEMD_UNIT}: {exc}")
+        return {"method": "systemd", "success": False, "output": "", "error": str(exc)}
 
 
 def schedule_controller_restart(repo_root: Path, *, delay_seconds: float = RESTART_DELAY_SECONDS) -> None:
@@ -306,6 +280,21 @@ def apply_controller_update(
             "restarting": False,
             "detail": detail,
         }
+
+    # 2.19+: rewrite units before restart — old ExecStart=…/start.sh fails after pull removes start.sh.
+    # Soft-fail: pull/build already succeeded; compat start.sh shims still boot via systemctl restart,
+    # and migrate_stale_systemd_units_on_startup rewrites units on next boot if refresh lacked root.
+    report(85, "Обновление: systemd units…")
+    systemd_refresh = refresh_installed_systemd_units(repo_root, panel=True, node=True)
+    detail["systemd_refresh"] = systemd_refresh
+    if systemd_refresh.get("output"):
+        output_parts.append(f"[systemd]\n{systemd_refresh['output']}")
+    if not systemd_refresh.get("success"):
+        warn = systemd_refresh.get("error") or "Ошибка обновления systemd units"
+        output_parts.append(
+            f"[systemd] Предупреждение: {warn}. "
+            "Перезапуск всё равно запланирован (compat start.sh / миграция unit при старте)."
+        )
 
     report(90, "Обновление: перезапуск панели…")
     schedule_controller_restart(repo_root)

@@ -64,7 +64,7 @@ from app.services.profile_download_name import build_profile_download_filename, 
 from app.services.profile_files import profile_files_batch_key
 from app.services.panel_publish_info import resolve_public_base_url
 from app.services.qr_download import QrDownloadService
-from app.services.qr_generator import generate_qr_png
+from app.services.qr_generator import generate_qr_png, prefers_download_link_qr
 from app.services.security import SecurityService
 from app.services.vpn_profile_visibility import (
     POLICY_GROUP_TO_SETTING,
@@ -721,11 +721,7 @@ def generate_qr(
     adapter = get_active_adapter(db)
     _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
     content = adapter.read_profile_file(path)
-    qr_mode = "profile"
-    headers: dict[str, str] = {"X-Qr-Content": qr_mode}
-    try:
-        png = generate_qr_png(content)
-    except ValueError:
+    if prefers_download_link_qr(path=path, content=content):
         link = _qr_download_service(db, request).create_token(
             file_path=path,
             config_type=config.vpn_type.value,
@@ -735,8 +731,18 @@ def generate_qr(
             remote_addr=request.client.host if request.client else None,
         )
         png = generate_qr_png(link["url"])
-        qr_mode = "download-link"
-        headers = {"X-Qr-Content": qr_mode, "X-Qr-Download-Url": link["url"]}
+        headers = {
+            "X-Qr-Content": "download-link",
+            "X-Qr-Download-Url": link["url"],
+            "Access-Control-Expose-Headers": "X-Qr-Content, X-Qr-Download-Url",
+        }
+        return Response(content=png, media_type="image/png", headers=headers)
+
+    png = generate_qr_png(content)
+    headers = {
+        "X-Qr-Content": "profile",
+        "Access-Control-Expose-Headers": "X-Qr-Content, X-Qr-Download-Url",
+    }
     return Response(content=png, media_type="image/png", headers=headers)
 
 

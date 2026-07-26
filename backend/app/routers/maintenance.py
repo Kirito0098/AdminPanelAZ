@@ -17,6 +17,10 @@ from app.schemas import (
     AdminNotifySettingsResponse,
     AdminNotifySettingsUpdate,
     BackgroundTaskResponse,
+    DdnsActionResponse,
+    DdnsSettingsResponse,
+    DdnsSettingsUpdateRequest,
+    DdnsTimerRequest,
     GeoIpStatusResponse,
     MessageResponse,
     NocReportPreviewRequest,
@@ -63,6 +67,7 @@ from app.services.panel_publish_info import (
     resolve_publish_ssl_paths,
     resolve_vpn_network_request_url,
 )
+from app.services import ddns_settings as ddns_settings_service
 from app.services.telegram import send_tg_message
 from app.services.telegram_recipients import (
     filter_notify_recipients,
@@ -711,6 +716,189 @@ def get_vpn_network_port_status(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректная роль порта")
     result = inspect_tcp_port(port, role=role)
     return VpnNetworkPortStatusResponse(**result)
+
+
+def _require_vpn_network_feature() -> None:
+    if not get_feature_service().is_enabled("vpn_network"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("vpn_network"),
+        )
+
+
+def _ddns_settings_response() -> DdnsSettingsResponse:
+    return DdnsSettingsResponse(**ddns_settings_service.public_ddns_status())
+
+
+@router.get("/settings/vpn-network/ddns", response_model=DdnsSettingsResponse)
+def get_vpn_network_ddns(_: User = Depends(require_admin)):
+    _require_vpn_network_feature()
+    return _ddns_settings_response()
+
+
+@router.put("/settings/vpn-network/ddns", response_model=DdnsActionResponse)
+def put_vpn_network_ddns(
+    payload: DdnsSettingsUpdateRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    _require_vpn_network_feature()
+    provider = payload.provider
+    output_parts: list[str] = []
+
+    try:
+        if provider == "none":
+            try:
+                ddns_settings_service.set_ddns_timer(False)
+            except RuntimeError as exc:
+                # Timer may already be absent
+                output_parts.append(str(exc))
+            ddns_settings_service.clear_ddns_config()
+            log_action(
+                db,
+                action="ddns_settings",
+                user_id=admin.id,
+                username=admin.username,
+                details="provider=none",
+            )
+            return DdnsActionResponse(
+                message="DDNS отключён",
+                output="\n".join(output_parts) or None,
+                settings=_ddns_settings_response(),
+            )
+
+        existing = ddns_settings_service.load_ddns_config()
+        previous_config = ddns_settings_service.snapshot_ddns_config()
+        token, password = ddns_settings_service.merge_secret_fields(
+            provider,
+            existing,
+            token=payload.token,
+            password=payload.password,
+        )
+        ddns_settings_service.write_ddns_config(
+            provider,
+            subdomain=(payload.subdomain or "").strip(),
+            token=token,
+            hostname=(payload.hostname or "").strip(),
+            username=(payload.username or "").strip(),
+            password=password,
+        )
+
+        def _rollback_ddns_config() -> None:
+            try:
+                ddns_settings_service.restore_ddns_config_snapshot(previous_config)
+            except (OSError, RuntimeError):
+                # Prefer surfacing the original update/timer error to the admin.
+                pass
+
+        update_applied = False
+        if payload.run_update:
+            try:
+                output_parts.append(ddns_settings_service.run_ddns_update())
+                update_applied = True
+            except RuntimeError as exc:
+                _rollback_ddns_config()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
+
+        try:
+            output_parts.append(ddns_settings_service.set_ddns_timer(bool(payload.enable_timer)))
+        except RuntimeError as exc:
+            # Keep new ddns.env if provider update already succeeded — rolling back would
+            # desync panel config from the provider. Only roll back when update was skipped.
+            if not update_applied:
+                _rollback_ddns_config()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(exc),
+            ) from exc
+
+        log_action(
+            db,
+            action="ddns_settings",
+            user_id=admin.id,
+            username=admin.username,
+            details=f"provider={provider} timer={payload.enable_timer}",
+        )
+        settings = _ddns_settings_response()
+        return DdnsActionResponse(
+            message=f"DDNS сохранён ({settings.domain or provider})",
+            output="\n".join(p for p in output_parts if p) or None,
+            settings=settings,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Не удалось записать конфигурацию DDNS: {exc}",
+        ) from exc
+
+
+@router.post("/settings/vpn-network/ddns/update", response_model=DdnsActionResponse)
+def post_vpn_network_ddns_update(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    _require_vpn_network_feature()
+    cfg = ddns_settings_service.load_ddns_config()
+    if not cfg.configured:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="DDNS не настроен — сначала сохраните провайдера",
+        )
+    try:
+        output = ddns_settings_service.run_ddns_update()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    log_action(
+        db,
+        action="ddns_update",
+        user_id=admin.id,
+        username=admin.username,
+        details=cfg.domain or cfg.provider,
+    )
+    return DdnsActionResponse(
+        message="IP обновлён у провайдера DDNS",
+        output=output or None,
+        settings=_ddns_settings_response(),
+    )
+
+
+@router.post("/settings/vpn-network/ddns/timer", response_model=DdnsActionResponse)
+def post_vpn_network_ddns_timer(
+    payload: DdnsTimerRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    _require_vpn_network_feature()
+    cfg = ddns_settings_service.load_ddns_config()
+    if payload.enabled and not cfg.configured:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Сначала сохраните конфигурацию DDNS",
+        )
+    try:
+        output = ddns_settings_service.set_ddns_timer(payload.enabled)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+    log_action(
+        db,
+        action="ddns_timer",
+        user_id=admin.id,
+        username=admin.username,
+        details=f"enabled={payload.enabled}",
+    )
+    return DdnsActionResponse(
+        message="Автообновление IP включено" if payload.enabled else "Автообновление IP отключено",
+        output=output or None,
+        settings=_ddns_settings_response(),
+    )
 
 
 @router.post("/settings/vpn-network/publish", status_code=status.HTTP_202_ACCEPTED, response_model=BackgroundTaskResponse)

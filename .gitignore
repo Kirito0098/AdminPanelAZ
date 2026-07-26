@@ -72,8 +72,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# --- Runtime logs, PIDs, local state (start.sh → .runtime/ или ADMINPANELAZ_STATE_DIR) ---
-.start.sh.pids
+# --- Runtime logs, PIDs, local state (.runtime/ или ADMINPANELAZ_STATE_DIR) ---
 .runtime/
 *.log
 
