@@ -123,6 +123,7 @@
 - **UI «Обновить» / node update — soft-fail systemd refresh** — если `refresh-systemd-units.sh` падает (например «Run as root»), pull/build уже применены: перезапуск всё равно планируется; в output — предупреждение. Compat `start.sh` / `start_node_agent.sh` поднимают новый код; миграция unit — при старте (`system_update.py`, `node_update.py`).
 - **`validate_node_host` — IPv6 loopback** — при `ALLOW_INTERNAL_NODES=false` отклоняются `::1` / `[::1]` (и literal private/loopback IP); разбор hostname без поломки `urlparse("//::1")` (`node_manager.py`).
 - **DDNS UI save — rollback `ddns.env`** — при ошибке `run_ddns_update` конфиг откатывается к предыдущему; при ошибке только `set_ddns_timer` после успешного update — файл оставляем (без рассинхрона с провайдером) (`snapshot_ddns_config` / `restore_ddns_config_snapshot`, `maintenance.py`).
+- **CI audits** — `npm audit` (high): overrides `minimatch`/`brace-expansion`; `pip-audit`: ignore CVE-2024-23342 на `ecdsa` (нет фикса upstream; JWT панели — HS256).
 
 ### 🗑️ Removed
 

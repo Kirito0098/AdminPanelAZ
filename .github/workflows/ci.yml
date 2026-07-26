@@ -50,7 +50,9 @@ jobs:
           PYTHONPATH=. python -c "from node_agent.main import app as agent_app; print('node agent import ok')"
 
       - name: pip-audit (dependency vulnerabilities)
-        run: pip-audit -r backend/requirements.txt
+        # ecdsa (via python-jose): CVE-2024-23342 / PYSEC-2026-1325 — Minerva timing on P-256.
+        # No upstream fix (side-channels out of scope). Panel JWT is HS256; OIDC path only verifies.
+        run: pip-audit -r backend/requirements.txt --ignore-vuln PYSEC-2026-1325 --ignore-vuln GHSA-wj6h-64fc-37mp
 
       - name: Bandit (security scan)
         run: bandit -c backend/bandit.yaml -r backend/app backend/node_agent -ll
