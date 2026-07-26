@@ -267,15 +267,18 @@ def apply_node_update(
         detail["agent_pull"] = pull
         if pull["success"]:
             detail["pip"] = _pip_install(repo_root)
-            # 2.19+: rewrite unit before restart — old ExecStart=…/start_node_agent.sh breaks after pull
+            # 2.19+: rewrite unit before restart — old ExecStart=…/start_node_agent.sh breaks after pull.
+            # Soft-fail on refresh: compat start_node_agent.sh shim still boots; migrate on startup.
             systemd_refresh = refresh_installed_systemd_units(repo_root, panel=False, node=True)
             detail["systemd_refresh"] = systemd_refresh
             if not systemd_refresh.get("success"):
-                errors.append(systemd_refresh.get("error") or "Ошибка обновления systemd unit node")
-            else:
-                messages.append("Node agent обновлён, перезапуск через несколько секунд")
-                schedule_agent_restart(repo_root)
-                restarting = True
+                messages.append(
+                    "Предупреждение systemd: "
+                    + (systemd_refresh.get("error") or "не удалось обновить unit node")
+                )
+            messages.append("Node agent обновлён, перезапуск через несколько секунд")
+            schedule_agent_restart(repo_root)
+            restarting = True
         else:
             errors.append(pull.get("error") or "Ошибка git pull node agent")
 
