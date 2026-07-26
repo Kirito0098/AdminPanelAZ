@@ -9,6 +9,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -16,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import type { CidrDbStatus, CidrProviderInfo, Node } from '@/types'
 import { formatDt, formatCompactCount, pluralProviders, providerCategoryLabel, providerSlug, statusBadgeVariant, statusLabel } from './utils'
@@ -65,11 +67,11 @@ function CidrCountsGrid({
   ]
 
   return (
-    <div className="grid grid-cols-1 divide-y divide-border rounded-md border bg-muted/20 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+    <div className="grid grid-cols-3 divide-x divide-border rounded-md border bg-muted/20">
       {items.map(({ label, value }) => (
         <div key={label} className="px-2 py-1.5 text-center">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-          <div className="font-mono text-xs tabular-nums">
+          <div className="font-mono text-xs tabular-nums text-foreground">
             {value != null ? formatCompactCount(value) : '—'}
           </div>
         </div>
@@ -100,6 +102,8 @@ function ProviderListItem({
   const dbMeta = cidrDb?.providers?.[p.filename]
   const onController = hasControllerArtifact(cidrDb, p.filename)
   const enableBlocked = !p.has_source && !p.enabled
+  const toggleDisabled = !isAdmin || actionLoading || enableBlocked
+  const switchId = `provider-enabled-${providerSlug(p.filename)}`
   const rowHint = !p.has_source
     ? onController
       ? 'нет на узле — нужно развёртывание'
@@ -107,68 +111,79 @@ function ProviderListItem({
         ? 'нет файла — сборка'
         : 'нет источника'
     : null
+  const toggleTitle =
+    enableBlocked && onController
+      ? `Сначала выполните ${STAGE_DEPLOY.toLowerCase()} на активный узел`
+      : enableBlocked
+        ? 'Сначала соберите списки на контроллере (этап 2)'
+        : p.enabled
+          ? 'Выключить провайдера'
+          : 'Включить провайдера'
 
   return (
     <article
-      className="flex flex-col gap-2 px-3 py-2.5"
+      className={cn(
+        'flex flex-col gap-2 rounded-lg border px-3 py-2.5 transition-colors',
+        p.enabled
+          ? 'border-emerald-500/35 bg-emerald-500/[0.06]'
+          : 'border-border/70 bg-muted/15 opacity-85',
+      )}
       title={`ID: ${providerSlug(p.filename)} · ${p.filename}`}
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <h3 className="truncate text-sm font-medium">{p.name}</h3>
-          <Badge variant="outline" className="shrink-0 text-[10px]">
-            {providerCategoryLabel(p.category)}
-          </Badge>
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <h3
+              className={cn(
+                'truncate text-sm font-medium',
+                !p.enabled && 'text-muted-foreground',
+              )}
+            >
+              {p.name}
+            </h3>
+            <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px] font-normal">
+              {providerCategoryLabel(p.category)}
+            </Badge>
+          </div>
         </div>
-        <Badge variant={p.enabled ? 'default' : 'secondary'} className="shrink-0 text-[10px]">
+        <Label htmlFor={switchId} className="sr-only">
           {p.enabled ? 'Включён' : 'Выключен'}
-        </Badge>
+        </Label>
+        <Switch
+          id={switchId}
+          checked={p.enabled}
+          disabled={toggleDisabled}
+          title={toggleTitle}
+          aria-label={`${p.name}: ${p.enabled ? 'включён' : 'выключен'}`}
+          className={p.enabled ? 'bg-emerald-600' : undefined}
+          onCheckedChange={(next) => {
+            if (!isAdmin || next === p.enabled) return
+            onToggle(p.filename, next, p.name)
+          }}
+        />
+        {isAdmin && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+            disabled={actionLoading || pipelineBusy}
+            title="Редактировать файл на узле"
+            aria-label={`Редактировать ${p.name}`}
+            onClick={() => onEdit(p.filename, p.name)}
+          >
+            <Pencil size={13} />
+          </Button>
+        )}
       </div>
 
       <CidrCountsGrid cidrDb={cidrDb} provider={p} />
 
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
-          <Badge variant={statusBadgeVariant(dbMeta?.refresh_status)} className="text-[10px]">
-            {statusLabel(dbMeta?.refresh_status)}
-          </Badge>
-          <span className="text-muted-foreground">{formatDt(dbMeta?.last_refreshed_at)}</span>
-          {rowHint && (
-            <span className="text-amber-600 dark:text-amber-400">{rowHint}</span>
-          )}
-        </div>
-
-        {isAdmin && (
-          <div className="flex flex-wrap shrink-0 gap-1.5">
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-2 text-xs"
-              disabled={actionLoading || pipelineBusy}
-              title="Редактировать файл списка провайдера на узле"
-              onClick={() => onEdit(p.filename, p.name)}
-            >
-              <Pencil size={12} className="mr-1" />
-              Редактировать
-            </Button>
-            <Button
-              size="sm"
-              variant={p.enabled ? 'outline' : 'default'}
-              className="h-7 px-2 text-xs"
-              disabled={actionLoading || enableBlocked}
-              title={
-                enableBlocked && onController
-                  ? `Сначала выполните ${STAGE_DEPLOY.toLowerCase()} на активный узел`
-                  : enableBlocked
-                    ? 'Сначала соберите списки на контроллере (этап 2)'
-                    : undefined
-              }
-              onClick={() => onToggle(p.filename, !p.enabled, p.name)}
-            >
-              {p.enabled ? 'Отключить' : 'Включить'}
-            </Button>
-          </div>
-        )}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+        <Badge variant={statusBadgeVariant(dbMeta?.refresh_status)} className="text-[10px]">
+          {statusLabel(dbMeta?.refresh_status)}
+        </Badge>
+        <span>{formatDt(dbMeta?.last_refreshed_at)}</span>
+        {rowHint && <span className="text-amber-600 dark:text-amber-400">{rowHint}</span>}
       </div>
     </article>
   )
@@ -243,11 +258,6 @@ export default function ProvidersTab({
       )
     })
   }, [providers, cidrDb, search, statusFilter, categoryFilter, quickFilter])
-
-  const providerColumns = useMemo(() => {
-    const mid = Math.ceil(filtered.length / 2)
-    return [filtered.slice(0, mid), filtered.slice(mid)]
-  }, [filtered])
 
   if (providers.length === 0) {
     return (
@@ -467,28 +477,22 @@ export default function ProvidersTab({
               Нет провайдеров по выбранным фильтрам
             </div>
           ) : (
-            <div className="grid gap-3 lg:grid-cols-2">
-              {providerColumns.map((column, colIdx) =>
-                column.length > 0 ? (
-                  <div key={colIdx} className="divide-y rounded-md border bg-card">
-                    {column.map((p) => (
-                      <ProviderListItem
-                        key={p.filename}
-                        provider={p}
-                        cidrDb={cidrDb}
-                        isAdmin={isAdmin}
-                        actionLoading={actionLoading}
-                        pipelineBusy={pipelineBusy}
-                        onToggle={onToggle}
-                        onEdit={(filename, name) => {
-                          setEditorFilename(filename)
-                          setEditorName(name)
-                        }}
-                      />
-                    ))}
-                  </div>
-                ) : null,
-              )}
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {filtered.map((p) => (
+                <ProviderListItem
+                  key={p.filename}
+                  provider={p}
+                  cidrDb={cidrDb}
+                  isAdmin={isAdmin}
+                  actionLoading={actionLoading}
+                  pipelineBusy={pipelineBusy}
+                  onToggle={onToggle}
+                  onEdit={(filename, name) => {
+                    setEditorFilename(filename)
+                    setEditorName(name)
+                  }}
+                />
+              ))}
             </div>
           )}
         </div>
