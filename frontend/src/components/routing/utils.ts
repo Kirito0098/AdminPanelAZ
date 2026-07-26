@@ -118,6 +118,7 @@ export function providerCategoryLabel(category: string): string {
     cdn: 'CDN',
     cloud: 'Облако',
     hosting: 'Хостинг',
+    custom: 'Свой',
   }
   return map[category] ?? category
 }
