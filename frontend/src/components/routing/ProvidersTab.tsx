@@ -462,37 +462,35 @@ export default function ProvidersTab({
             файл · <strong>Узел</strong> — файл на VPN-сервере
           </p>
 
-          <div className="max-h-[min(75vh,720px)] overflow-auto">
-            {filtered.length === 0 ? (
-              <div className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-                Нет провайдеров по выбранным фильтрам
-              </div>
-            ) : (
-              <div className="grid gap-3 lg:grid-cols-2">
-                {providerColumns.map((column, colIdx) =>
-                  column.length > 0 ? (
-                    <div key={colIdx} className="divide-y rounded-md border bg-card">
-                      {column.map((p) => (
-                        <ProviderListItem
-                          key={p.filename}
-                          provider={p}
-                          cidrDb={cidrDb}
-                          isAdmin={isAdmin}
-                          actionLoading={actionLoading}
-                          pipelineBusy={pipelineBusy}
-                          onToggle={onToggle}
-                          onEdit={(filename, name) => {
-                            setEditorFilename(filename)
-                            setEditorName(name)
-                          }}
-                        />
-                      ))}
-                    </div>
-                  ) : null,
-                )}
-              </div>
-            )}
-          </div>
+          {filtered.length === 0 ? (
+            <div className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
+              Нет провайдеров по выбранным фильтрам
+            </div>
+          ) : (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {providerColumns.map((column, colIdx) =>
+                column.length > 0 ? (
+                  <div key={colIdx} className="divide-y rounded-md border bg-card">
+                    {column.map((p) => (
+                      <ProviderListItem
+                        key={p.filename}
+                        provider={p}
+                        cidrDb={cidrDb}
+                        isAdmin={isAdmin}
+                        actionLoading={actionLoading}
+                        pipelineBusy={pipelineBusy}
+                        onToggle={onToggle}
+                        onEdit={(filename, name) => {
+                          setEditorFilename(filename)
+                          setEditorName(name)
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : null,
+              )}
+            </div>
+          )}
         </div>
       </StatusPanel>
 
