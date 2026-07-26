@@ -200,6 +200,35 @@ def clear_ddns_config(path: Path | None = None) -> None:
         raise RuntimeError(f"Не удалось удалить {config_path}: {exc}") from exc
 
 
+def snapshot_ddns_config(path: Path | None = None) -> bytes | None:
+    """Return previous ddns.env bytes, or None if the file did not exist."""
+    config_path = path or ddns_config_path()
+    if not config_path.is_file():
+        return None
+    try:
+        return config_path.read_bytes()
+    except OSError as exc:
+        raise RuntimeError(f"Не удалось прочитать {config_path}: {exc}") from exc
+
+
+def restore_ddns_config_snapshot(snapshot: bytes | None, path: Path | None = None) -> None:
+    """Restore ddns.env from snapshot_ddns_config(); None means delete the file."""
+    config_path = path or ddns_config_path()
+    if snapshot is None:
+        clear_ddns_config(config_path)
+        return
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(config_path.parent, 0o700)
+    except OSError:
+        pass
+    config_path.write_bytes(snapshot)
+    try:
+        os.chmod(config_path, 0o600)
+    except OSError:
+        pass
+
+
 def merge_secret_fields(
     provider: str,
     existing: DdnsConfig,
@@ -331,8 +360,10 @@ __all__ = [
     "parse_ddns_env_text",
     "public_ddns_status",
     "resolve_ddns_domain",
+    "restore_ddns_config_snapshot",
     "run_ddns_update",
     "set_ddns_timer",
+    "snapshot_ddns_config",
     "timer_status",
     "write_ddns_config",
 ]

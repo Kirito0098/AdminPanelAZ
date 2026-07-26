@@ -90,6 +90,33 @@ def test_clear_ddns_config(tmp_path: Path):
     assert load_ddns_config(path).provider == "none"
 
 
+def test_snapshot_restore_preserves_previous_config(tmp_path: Path):
+    from app.services.ddns_settings import restore_ddns_config_snapshot, snapshot_ddns_config
+
+    path = tmp_path / "ddns.env"
+    write_ddns_config("duckdns", subdomain="good", token="good-token", path=path)
+    snap = snapshot_ddns_config(path)
+    assert snap is not None
+
+    write_ddns_config("duckdns", subdomain="bad", token="bad-token", path=path)
+    assert load_ddns_config(path).token == "bad-token"
+
+    restore_ddns_config_snapshot(snap, path)
+    restored = load_ddns_config(path)
+    assert restored.subdomain == "good"
+    assert restored.token == "good-token"
+
+
+def test_snapshot_restore_none_deletes_file(tmp_path: Path):
+    from app.services.ddns_settings import restore_ddns_config_snapshot, snapshot_ddns_config
+
+    path = tmp_path / "ddns.env"
+    assert snapshot_ddns_config(path) is None
+    write_ddns_config("duckdns", subdomain="x", token="t", path=path)
+    restore_ddns_config_snapshot(None, path)
+    assert not path.exists()
+
+
 def test_merge_secret_fields_keeps_existing():
     existing = DdnsConfig(provider="duckdns", subdomain="a", token="kept-token")
     token, _ = merge_secret_fields("duckdns", existing, token="****")

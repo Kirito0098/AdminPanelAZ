@@ -768,6 +768,7 @@ def put_vpn_network_ddns(
             )
 
         existing = ddns_settings_service.load_ddns_config()
+        previous_config = ddns_settings_service.snapshot_ddns_config()
         token, password = ddns_settings_service.merge_secret_fields(
             provider,
             existing,
@@ -783,10 +784,18 @@ def put_vpn_network_ddns(
             password=password,
         )
 
+        def _rollback_ddns_config() -> None:
+            try:
+                ddns_settings_service.restore_ddns_config_snapshot(previous_config)
+            except (OSError, RuntimeError):
+                # Prefer surfacing the original update/timer error to the admin.
+                pass
+
         if payload.run_update:
             try:
                 output_parts.append(ddns_settings_service.run_ddns_update())
             except RuntimeError as exc:
+                _rollback_ddns_config()
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=str(exc),
@@ -795,6 +804,7 @@ def put_vpn_network_ddns(
         try:
             output_parts.append(ddns_settings_service.set_ddns_timer(bool(payload.enable_timer)))
         except RuntimeError as exc:
+            _rollback_ddns_config()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=str(exc),

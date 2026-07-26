@@ -55,7 +55,7 @@
 
 ## [2.18.0] - 2026-07-26
 
-> **Кратко:** установщик упрощён — HTTP по умолчанию (`http://IP:порт`), один `install.sh` без easy и без выбора HTTPS; домен/TLS и DDNS в UI; systemd без watchdog-`start.sh`; свой список CIDR; упрощены экраны сети/провайдеров; preflight портов; Python 3.12/3.13 auto и обновление backend-зависимостей. Плюс фиксы QR AZ, whitelist HTTPS, удаления узла; soft-fail systemd refresh при обновлении; запрет `::1` для узлов.
+> **Кратко:** установщик упрощён — HTTP по умолчанию (`http://IP:порт`), один `install.sh` без easy и без выбора HTTPS; домен/TLS и DDNS в UI; systemd без watchdog-`start.sh`; свой список CIDR; упрощены экраны сети/провайдеров; preflight портов; Python 3.12/3.13 auto и обновление backend-зависимостей. Плюс фиксы QR AZ, whitelist HTTPS, удаления узла; soft-fail systemd refresh; запрет `::1` для узлов; rollback DDNS при ошибке save.
 
 ### ✨ Added
 
@@ -122,6 +122,7 @@
 - **QR AZ** — UI читает `X-Qr-Content` / `X-Qr-Download-Url` (CORS `expose_headers`).
 - **UI «Обновить» / node update — soft-fail systemd refresh** — если `refresh-systemd-units.sh` падает (например «Run as root»), pull/build уже применены: перезапуск всё равно планируется; в output — предупреждение. Compat `start.sh` / `start_node_agent.sh` поднимают новый код; миграция unit — при старте (`system_update.py`, `node_update.py`).
 - **`validate_node_host` — IPv6 loopback** — при `ALLOW_INTERNAL_NODES=false` отклоняются `::1` / `[::1]` (и literal private/loopback IP); разбор hostname без поломки `urlparse("//::1")` (`node_manager.py`).
+- **DDNS UI save — rollback `ddns.env`** — при ошибке `run_ddns_update` / `set_ddns_timer` после записи конфиг откатывается к предыдущему содержимому (`snapshot_ddns_config` / `restore_ddns_config_snapshot`, `maintenance.py`).
 
 ### 🗑️ Removed
 
@@ -133,7 +134,7 @@
 ### 🧪 Tests
 
 - **`test_qr_generator.py`**, **`test_panel_publish_info.py`**, **`publishWizardUi.test.ts`** — download-link QR, whitelist modes, preview uvicorn с портом.
-- **`test_ddns_settings.py`** — parse/write `ddns.env`, маскирование секретов.
+- **`test_ddns_settings.py`** — parse/write `ddns.env`, маскирование секретов; snapshot/restore при откате.
 - **`test_system_update_systemd_soft_fail.py`** — апдейт панели продолжает restart при ошибке systemd refresh.
 - **`test_validate_node_host.py`** — запрет `::1` / `[::1]` / `127.0.0.1` / private DNS; разрешение при `ALLOW_INTERNAL_NODES=true`.
 
