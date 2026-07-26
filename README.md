@@ -31,28 +31,24 @@
 **Требования:** Ubuntu 24.04+ или Debian 13+, root / sudo, доступ в интернет.
 AntiZapret ставится **отдельно** на VPN-сервер — см. [AntiZapret-VPN](https://github.com/GubernievS/AntiZapret-VPN).
 
-**Python:** установщик сам выбирает runtime через `scripts/python-runtime.sh` — на **Ubuntu 24.04** это **3.12**, на **Debian 13** — **3.13**. Вручную указывать версию не нужно.
+**Python:** установщик сам выбирает runtime через `scripts/python-runtime.sh` — на **Ubuntu 24.04** это **3.12**, на **Debian 13** — **3.13**.
 
 ### Порты
 
-После `install.sh` панель слушает **HTTP напрямую** (`0.0.0.0:<порт>`, обычно **8000**). Nginx и HTTPS **не** ставятся из установщика.
+После `install.sh` панель сразу доступна по **HTTP** (`http://IP:порт/`, обычно **8000**). HTTPS и Nginx настраиваются позже в UI.
 
 | Порт | Назначение | Куда открывать |
 | --- | --- | --- |
-| **8000** (или выбранный) | Панель (uvicorn, `http_direct`) | LAN / интернет — **пока** панель на этом порту; **не закрывайте** его до перехода на Nginx |
+| **8000** (или выбранный) | Панель | LAN / интернет — пока панель на этом порту |
 | **9100** | Node agent | localhost или между панелью и VPN-узлом |
-| **80** / **443** | HTTP ACME / HTTPS (Nginx) | в интернет — **после** настройки в UI |
-| **6379** | Redis | localhost — только если `UVICORN_WORKERS > 1` |
+| **80** / **443** | HTTP ACME / HTTPS | после публикации в **Настройки → Адрес сайта и HTTPS** |
 
-Порты **OpenVPN / WireGuard / AmneziaWG** задаёт **AntiZapret** на VPN-сервере, не панель.
-Firewall из мастера **не** настраивается — откройте порт панели у хостера или вручную (`ufw` / security group). После публикации через Nginx UI может открыть **80**/**443** сам. Подробнее: [SECURITY.md](SECURITY.md).
-
-> HTTPS и домен — только в панели: **Настройки → Адрес сайта и HTTPS**.
-> Нестандартный HTTPS-порт: `HTTPS_PUBLIC_PORT` в `backend/.env` или через UI публикации.
+Порты **OpenVPN / WireGuard / AmneziaWG** задаёт **AntiZapret**, не панель.
+Откройте порт панели у хостера или вручную (`ufw` / security group). Подробнее: [SECURITY.md](SECURITY.md).
 
 ### Варианты установки
 
-Первый вопрос мастера — **что ставим на этот сервер**. Три сценария:
+Первый вопрос мастера — **что ставим на этот сервер**:
 
 | Вариант | Что ставится | Когда выбирать |
 | --- | --- | --- |
@@ -62,7 +58,7 @@ Firewall из мастера **не** настраивается — откро�
 
 #### Установка
 
-Один путь — `install.sh` (systemd, профиль **full**, HTTP по IP:порт):
+Один скрипт — `install.sh`:
 
 ```bash
 sudo apt update && sudo apt install -y git wget curl
@@ -70,16 +66,12 @@ wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanel
 sudo bash /tmp/install.sh
 ```
 
-Мастер спросит: тип установки, порты (панель; node agent — если ставите узел), логин/пароль администратора, ключ node agent (если нужен) и пути (бэкапы).
+Мастер спросит: тип установки, порты, логин/пароль администратора, ключ node agent (если ставите узел) и каталог бэкапов.
 
-**Не спрашивает:** HTTPS/домен/публикацию, DDNS, `APP_ENV`, firewall, workers/Redis, mTLS, профиль ресурсов, Telegram — дефолты: HTTP по IP:порт, `production`, systemd, workers=1, профиль Full.
+После установки откройте `http://IP:порт/` из вывода мастера. Дальше в панели:
 
-После установки откройте `http://IP:порт/` из вывода мастера. Рекомендуется в панели:
-
-- **Настройки → Адрес сайта и HTTPS** — DDNS (DuckDNS/No-IP), домен, Let's Encrypt, nginx/uvicorn
-- **Telegram** — bot token / chat (модуль уже в меню)
-- LAN-ноды — при необходимости `ALLOW_INTERNAL_NODES=true` в `backend/.env`
-- workers/Redis, mTLS — вручную / UI, см. [Production](#️-production-vds-redis-и-профили)
+- **Настройки → Адрес сайта и HTTPS** — DDNS, домен, Let's Encrypt. **Рекомендуем сразу перейти на HTTPS** — так доступ к панели защищён (шифрование трафика, безопасный вход).
+- **Telegram** — bot token / chat (раздел уже в меню)
 
 Подробнее: [после установки](#-после-установки) · [DDNS](#-бесплатный-адрес-для-панели-ddns) · [Production](#️-production-vds-redis-и-профили)
 
@@ -185,7 +177,7 @@ sudo bash /tmp/install.sh
 1. Откройте URL из вывода установщика (`http://IP:порт/`)
 2. Войдите под созданным администратором
 3. **Смените пароль** и включите **2FA** — [Настройки → Профиль](docs/nastrojki/profil.md)
-4. Для домена/HTTPS — **Настройки → Адрес сайта и HTTPS** — [инструкция](docs/nastrojki/set-i-publikaciya.md)
+4. **Переключите панель на HTTPS** — **Настройки → Адрес сайта и HTTPS** (домен или DDNS + Let's Encrypt). HTTP удобен для первого входа, но для постоянной работы HTTPS надёжнее и безопаснее — [инструкция](docs/nastrojki/set-i-publikaciya.md)
 5. Если VPN на другом сервере — добавьте узел — [Узлы](docs/uzly.md)
 6. На **Конфигурации** нажмите **Синхронизировать** — [инструкция](docs/konfiguracii.md)
 7. **Telegram** — раздел уже в меню; укажите bot token в UI — [инструкция](docs/Telegram.md)
@@ -222,7 +214,7 @@ AntiZapret и VPN-конфиги при удалении панели **не т�
 - [DuckDNS](https://www.duckdns.org) — `myvpn.duckdns.org`
 - [No-IP](https://www.noip.com) — `myvpn.ddns.net`
 
-Можно включить автообновление IP (systemd timer каждые 5 мин) и затем указать этот адрес в мастере HTTPS.
+Можно включить автообновление IP (systemd timer каждые 5 мин) и затем указать этот адрес в **Настройки → Адрес сайта и HTTPS**.
 
 CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|status`.
 
@@ -243,51 +235,17 @@ CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|
 
 ## ⚙️ Production: VDS, Redis и профили
 
-После `install.sh` всегда профиль **Full** и `UVICORN_WORKERS=1`. Урезать нагрузку или включить лишнее — в UI, не в установщике.
+После установки: профиль **Full**, `UVICORN_WORKERS=1`. Профиль и модули меняются в **Настройки → Модули** ([инструкция](docs/nastrojki/moduli.md)), затем `sudo systemctl restart adminpanelaz`.
 
-Профили (**Minimal / Standard / Full**) меняют **фоновые задачи панели** (collectors, CIDR scheduler).
-В UI на вкладке **Модули** показывается замер **только стека AdminPanelAZ**: панель + локальная нода и её
-VPN-сервисы (`ANTIZAPRET_PATH`). Сторонние проекты на том же VDS не входят в цифру.
+**Ориентир по RAM** (Full, панель + локальная нода): ~**411 MB** стек (ср. ~148 MB за 7 дней). Для одного VDS с VPN — **1–2 GB**; только панель на Minimal — **1 GB** + swap.
 
-**Замер на реальном сервере (профиль Full, панель + локальная нода):**
+**Workers > 1:** в `backend/.env` задайте `UVICORN_WORKERS=N` и Redis (`AUTH_RATE_LIMIT_BACKEND=redis`, `API_RATE_LIMIT_BACKEND=redis`, `REDIS_URL=redis://127.0.0.1:6379/0`), затем перезапустите панель. См. [SECURITY.md](SECURITY.md).
 
-- **Текущий стек** — AdminPanelAZ **358 MB** + нода **53 MB** ≈ **411 MB**
-- **Средний стек за 7 дней** — ~**148 MB**
-- **Minimal / Standard** — меньше нагрузка на панель (без части collectors); VPN на хосте тот же
+**LAN-ноды / mTLS:** приватные IP узлов — `ALLOW_INTERNAL_NODES=true` в `.env`; mTLS — per-node в UI **Узлы**. Подробнее: [docs/uzly.md](docs/uzly.md).
 
-| Сценарий | Стек (замер / ориентир) | VDS RAM |
-| --- | --- | --- |
-| Только панель, профиль Minimal (VPN на других узлах) | без локальной ноды в замере | **1 GB** + swap |
-| Панель + node agent + VPN на одном VDS, профиль Full | **~411 MB** (358 + 53); ср. ~148 MB | **1 GB+** (лучше **2 GB** с запасом под ОС и VPN) |
-| Профиль Standard | между Minimal и Full | **1 GB+** |
-
-Профиль и модули: **Настройки → Модули**. После смены профиля:
-
-```bash
-sudo systemctl restart adminpanelaz
-```
-
-Подробнее: [docs/nastrojki/moduli.md](docs/nastrojki/moduli.md).
-
-### Несколько uvicorn workers
-
-По умолчанию один worker. Чтобы увеличить:
-
-1. В `backend/.env`: `UVICORN_WORKERS=N` (N > 1)
-2. Обязательно Redis для rate limit: `AUTH_RATE_LIMIT_BACKEND=redis`, `API_RATE_LIMIT_BACKEND=redis`, `REDIS_URL=redis://127.0.0.1:6379/0`
-3. `sudo systemctl restart adminpanelaz`
-
-См. [SECURITY.md](SECURITY.md).
-
-### LAN-ноды, mTLS, ротация ключа
-
-- Узлы с приватными IP (`192.168…`, `10…`): в `backend/.env` `ALLOW_INTERNAL_NODES=true`, затем `systemctl restart adminpanelaz` — [Узлы](docs/uzly.md)
-- mTLS панель ↔ agent — per-node в UI **Узлы → Включить mTLS** (не из install)
-- Авторотация API-ключа: `NODE_API_KEY_ROTATION_DAYS` в `backend/.env` (`0` = выкл.)
-
-- **Health** — `GET /api/health` (лёгкий), `GET /api/health/deep` (БД, CIDR, traffic lag)
-- **Метрики** — `GET /metrics` — Prometheus (`traffic_collector_lag_seconds`, `node_health_*`)
-- **Node agent** — версия **1.5.0** (минимум **≥ 1.3.0** для HA crypto-sync и verify; **≥ 1.5.0** для byte-copy `.ovpn` при Push full); отображается в **Узлы** → health узла
+- **Health** — `GET /api/health`, `GET /api/health/deep`
+- **Метрики** — `GET /metrics` (Prometheus)
+- **Node agent** — **1.5.0** (для HA: ≥ 1.3.0; byte-copy `.ovpn` при Push full: ≥ 1.5.0)
 
 ## 🔐 Безопасность
 
@@ -307,7 +265,7 @@ sudo systemctl restart adminpanelaz
 ```bash
 cd /opt/AdminPanelAZ
 sudo ./scripts/adminpanel-menu.sh   # меню: перезапуск, бэкап, обновление
-sudo systemctl restart adminpanelaz # перезапуск панели (если установлен systemd)
+sudo systemctl restart adminpanelaz # перезапуск панели
 sudo ./scripts/nginx-setup.sh       # сменить HTTPS после установки
 sudo ./scripts/nginx-repair.sh      # восстановить nginx (например после uninstall StatusOpenVPN)
 ```
@@ -320,7 +278,7 @@ sudo ./scripts/nginx-repair.sh      # восстановить nginx (напри
 
 **Текущая версия: панель 2.18.0 · node agent 1.5.0** (2026-07-26)
 
-Последний релиз — **HTTP по умолчанию** (`http://IP:порт` сразу после install), **один `install.sh`** без easy и без выбора HTTPS, домен/TLS в **Настройки → Адрес сайта и HTTPS**, **systemd → `scripts/systemd-exec-*.sh`** (тонкие compat-shim `start.sh` только для старых unit’ов), Python **3.12 (Ubuntu) / 3.13 (Debian)** автоматически.
+После установки панель сразу открывается по `http://IP:порт/`; домен и HTTPS — в **Настройки → Адрес сайта и HTTPS**. Python **3.12** (Ubuntu) / **3.13** (Debian) выбирается автоматически.
 
 Полный список: **[CHANGELOG.md](CHANGELOG.md)** · runbook аудита HA: [reviews/HA-sync-remediation-plan.md](reviews/HA-sync-remediation-plan.md)
 
