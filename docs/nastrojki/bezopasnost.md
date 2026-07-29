@@ -47,7 +47,21 @@
 ## Частые вопросы
 
 **Включил whitelist и не могу войти**  
-Заходите с IP, который добавили в список. Если заблокировали себя — правьте настройки через SSH на сервере или временно отключите whitelist там же.
+Заходите с IP, который добавили в список. Если заблокировали себя — по SSH на сервере:
+
+```bash
+cd /opt/AdminPanelAZ
+sudo ./scripts/disable-ip-whitelist.sh disable
+```
+
+Или добавьте свой текущий IP, не выключая whitelist:
+
+```bash
+sudo ./scripts/disable-ip-whitelist.sh add-ip ВАШ.IP.АДРЕС
+```
+
+Проверка: `sudo ./scripts/disable-ip-whitelist.sh status`.  
+То же из меню: `sudo ./scripts/adminpanel-menu.sh` → **Диагностика** → **Отключить IP-whitelist**.
 
 **Откуда берутся баны?**  
 Панель автоматически блокирует IP после множества неудачных попыток входа или сканирования.

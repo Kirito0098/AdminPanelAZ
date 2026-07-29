@@ -262,6 +262,16 @@ menu_backups_updates() {
   done
 }
 
+panel_disable_ip_whitelist() {
+  require_root
+  local script="$ROOT_DIR/scripts/disable-ip-whitelist.sh"
+  if [[ ! -f "$script" ]]; then
+    ui_fail "Не найден $script"
+    return 1
+  fi
+  bash "$script" disable
+}
+
 menu_diagnostics() {
   while true; do
     clear || true
@@ -270,12 +280,13 @@ menu_diagnostics() {
     _m_sep
     _m_item "1. Диагностика запуска сайта"
     _m_item "2. Восстановить nginx для панели"
+    _m_item "3. Отключить IP-whitelist (аварийно)"
     _m_sep
     _m_item "0. Назад"
     _m_bot
     printf "\n"
 
-    read -r -p "  Выберите действие [0-2]: " choice
+    read -r -p "  Выберите действие [0-3]: " choice
     case "$choice" in
       1) panel_diagnose; press_any_key ;;
       2)
@@ -283,6 +294,7 @@ menu_diagnostics() {
         bash "$ROOT_DIR/scripts/nginx-repair.sh"
         press_any_key
         ;;
+      3) panel_disable_ip_whitelist; press_any_key ;;
       0) break ;;
       *)
         ui_warn "Неверный выбор"
@@ -329,14 +341,15 @@ usage() {
 Использование: sudo ./scripts/adminpanel-menu.sh [опция]
 
 Интерактивное ops-меню (без мастера install.sh):
-  restart, update, backup, site diagnostics.
+  restart, update, backup, site diagnostics, disable IP whitelist.
 
 Опции (как adminpanel.sh в AA):
-  --restart     Перезапустить панель (systemctl restart adminpanelaz)
-  --update      git fetch + pull + pip (если есть обновления)
-  --backup      Создать резервную копию (scripts/backup-cli.py)
-  --diagnose    Диагностика запуска (scripts/site-diagnostics.sh)
-  --help        Эта справка
+  --restart              Перезапустить панель (systemctl restart adminpanelaz)
+  --update               git fetch + pull + pip (если есть обновления)
+  --backup               Создать резервную копию (scripts/backup-cli.py)
+  --diagnose             Диагностика запуска (scripts/site-diagnostics.sh)
+  --disable-ip-whitelist Аварийно выключить IP-whitelist панели
+  --help                 Эта справка
 
 Без опций — интерактивное меню.
 Установка / переустановка: sudo ./install.sh
@@ -356,6 +369,10 @@ main() {
       ;;
     --diagnose)
       panel_diagnose
+      exit $?
+      ;;
+    --disable-ip-whitelist)
+      panel_disable_ip_whitelist
       exit $?
       ;;
     --help|-h)
