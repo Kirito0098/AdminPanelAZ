@@ -12,6 +12,7 @@ from app.services.node_sync.client_sync import maybe_replicate_create
 from app.services.node_sync.policy_sync import maybe_replicate_policy_op
 from app.services.openvpn_cert import refresh_config_cert_expiry
 from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
+from app.services.traffic.maintenance import purge_traffic_history_for_reused_name
 from app.services.traffic_limit import parse_traffic_limit_bytes, parse_traffic_limit_period_days
 
 
@@ -129,6 +130,7 @@ def apply_template(
         description=template.description_template,
     )
     refresh_config_cert_expiry(config, adapter)
+    purge_traffic_history_for_reused_name(db, node_id=node.id, client_name=client_name)
     db.add(config)
     db.commit()
     db.refresh(config)
