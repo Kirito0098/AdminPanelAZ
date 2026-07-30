@@ -248,6 +248,8 @@ class VpnConfigResponse(BaseModel):
     owner_id: int
     owner_username: str | None = None
     cert_expire_days: int | None
+    cert_expires_at: datetime | None = None
+    cert_days_left: int | None = None
     description: str | None
     created_at: datetime
     updated_at: datetime

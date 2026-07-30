@@ -10,6 +10,7 @@ from app.services.feature_guards import FeatureToggleService, require_vpn_type
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 from app.services.node_sync.client_sync import maybe_replicate_create
 from app.services.node_sync.policy_sync import maybe_replicate_policy_op
+from app.services.openvpn_cert import refresh_config_cert_expiry
 from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
 from app.services.traffic_limit import parse_traffic_limit_bytes, parse_traffic_limit_period_days
 
@@ -127,6 +128,7 @@ def apply_template(
         cert_expire_days=cert_days if template.vpn_type == VpnType.openvpn else None,
         description=template.description_template,
     )
+    refresh_config_cert_expiry(config, adapter)
     db.add(config)
     db.commit()
     db.refresh(config)

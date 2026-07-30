@@ -809,6 +809,9 @@ def run_db_migrations() -> None:
             ("node_agent_memory_mb", "INTEGER DEFAULT 0"),
             ("managed_vpn_memory_mb", "INTEGER DEFAULT 0"),
         ],
+        "vpn_configs": [
+            ("cert_expires_at", "DATETIME"),
+        ],
         "users": [
             ("totp_secret_encrypted", "VARCHAR(512)"),
             ("totp_enabled", "INTEGER DEFAULT 0"),

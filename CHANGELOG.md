@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.19.0](#2190---2026-07-30) — 2026-07-30
 - [2.18.0](#2180---2026-07-26) — 2026-07-26
 - [2.17.0](#2170---2026-07-15) — 2026-07-15
 - [2.16.0](#2160---2026-07-13) — 2026-07-13
@@ -50,6 +51,32 @@
 ### 🗑️ Removed
 
 ### 🐛 Fixed
+
+---
+
+## [2.19.0] - 2026-07-30
+
+> **Кратко:** реальный срок действия OpenVPN-сертификатов (`notAfter`) в БД и UI — остаток дней на карточке клиента, корректные напоминания об истечении, batch API на node agent и синхронизация раз в 12 ч по всем узлам; HA shadow копирует `cert_expires_at`.
+
+### ✨ Added
+
+- **Реальный срок действия сертификата** — новая колонка `vpn_configs.cert_expires_at` (наивный UTC, `notAfter` из самого сертификата) и поля `cert_expires_at` / `cert_days_left` в ответе `/configs` (`models.py`, `schemas.py`, `configs.py`).
+- **Массовое чтение сроков из EasyRSA** — `cert_expiry_map_by_cn` / `load_cert_expiry_map` берут дату истечения всех клиентов за одно чтение `index.txt`, с fallback на разбор `.ovpn` (`openvpn_pki.py`, `openvpn_cert.py`).
+- **Batch API сроков на node agent** — `GET /openvpn/certs/expiry` отдаёт карту CN → `notAfter` одним запросом; `RemoteNodeAdapter` использует его, а для старых агентов падает обратно на `GET /openvpn/easyrsa3/index` (`node_agent/main.py`, `node_adapter.py`).
+
+#### Node agent
+
+- **Версия node agent `1.6.0`** — `GET /openvpn/certs/expiry` для массового чтения сроков сертификатов (`NODE_AGENT_VERSION`, `node_agent/main.py`). После обновления панели перезапустите агент на VPN-узлах.
+
+### 🔄 Changed
+
+- **`cert_sync_worker` обновляет все узлы раз в 12 ч** — вместо разовой подстановки пропущенных значений только на активном узле воркер освежает `cert_expires_at` для всех OpenVPN-конфигураций (`cert_sync_interval_seconds=43200`); первый проход через 15 с после старта. При создании/продлении сертификата дата пишется сразу, без ожидания цикла. Локальные и удалённые узлы опрашиваются через `get_adapter_for_node` (`cert_sync_worker.py`).
+- **HA shadow копирует `cert_expires_at`** — при `already_linked`, auto/manual renew и создании shadow (`shadow_link.py`, `client_sync.py`, `replicate.py`).
+
+### 🐛 Fixed
+
+- **«Сертификат: 3650 дн.» не уменьшался** — карточка клиента показывала `cert_expire_days` (срок, на который сертификат выпускали) как остаток, поэтому значение навсегда застывало на 3650. Остаток считается из реального `notAfter`; при истечении карточка помечается как просроченная (`configCardUtils.ts`, `ConfigCard.tsx`, `ConfigManagePanel.tsx`).
+- **Напоминания об истечении сертификата не срабатывали** — порог сравнивался с выпускным сроком, поэтому клиент на 3650 дней не получал предупреждение никогда, а клиент на 5 дней получал его сразу и постоянно (`user_reminder_service.py`).
 
 ---
 
@@ -2066,7 +2093,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.18.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.19.0...HEAD
+[2.19.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.15.0...v2.16.0

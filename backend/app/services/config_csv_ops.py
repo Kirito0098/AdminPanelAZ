@@ -22,6 +22,7 @@ from app.services.node_sync.groups import find_sync_group_for_primary, get_repli
 from app.services.node_sync.client_sync import maybe_replicate_create
 from app.services.node_sync.policy_sync import maybe_replicate_policy_op
 from app.services.node_sync.vpn_state_sync import copy_openvpn_profiles_from_primary
+from app.services.openvpn_cert import refresh_config_cert_expiry
 from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
 from app.services.traffic_limit import parse_traffic_limit_period_days
 
@@ -362,6 +363,7 @@ def _import_single_row(
         cert_expire_days=cert_expire_days,
         description=row.get("description") or None,
     )
+    refresh_config_cert_expiry(config, adapter)
     db.add(config)
     db.commit()
     db.refresh(config)

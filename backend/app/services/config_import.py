@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session
 from app.models import Node, VpnConfig, VpnType
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.client_sync import purge_ha_shadow_configs
-from app.services.openvpn_cert import resolve_openvpn_cert_days_remaining
+from app.services.openvpn_cert import (
+    days_remaining_until,
+    resolve_openvpn_cert_not_after,
+    to_naive_utc,
+)
 
 
 @dataclass(frozen=True)
@@ -67,7 +71,8 @@ def import_clients_from_disk(db: Session, node: Node, owner_id: int) -> ConfigDi
             )
             .first()
         )
-        cert_days = resolve_openvpn_cert_days_remaining(adapter, client_name)
+        not_after = resolve_openvpn_cert_not_after(adapter, client_name)
+        cert_days = days_remaining_until(not_after)
         if not exists:
             db.add(
                 VpnConfig(
@@ -76,11 +81,15 @@ def import_clients_from_disk(db: Session, node: Node, owner_id: int) -> ConfigDi
                     vpn_type=VpnType.openvpn,
                     owner_id=owner_id,
                     cert_expire_days=cert_days,
+                    cert_expires_at=to_naive_utc(not_after),
                 )
             )
             imported += 1
-        elif exists.cert_expire_days is None and cert_days is not None:
-            exists.cert_expire_days = cert_days
+        else:
+            if exists.cert_expire_days is None and cert_days is not None:
+                exists.cert_expire_days = cert_days
+            if not_after is not None:
+                exists.cert_expires_at = to_naive_utc(not_after)
 
     for client_name in wg_on_disk:
         exists = (

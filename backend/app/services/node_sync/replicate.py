@@ -104,6 +104,7 @@ def upsert_shadow_config(
     if existing is not None:
         existing.sync_group_id = group.id
         existing.ha_primary_config_id = primary_config.id
+        existing.cert_expires_at = primary_config.cert_expires_at
         return existing
 
     shadow = VpnConfig(
@@ -112,6 +113,7 @@ def upsert_shadow_config(
         vpn_type=primary_config.vpn_type,
         owner_id=primary_config.owner_id,
         cert_expire_days=primary_config.cert_expire_days,
+        cert_expires_at=primary_config.cert_expires_at,
         description=primary_config.description,
         sync_group_id=group.id,
         ha_primary_config_id=primary_config.id,
@@ -232,6 +234,7 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
         try:
             sync_openvpn_pki_from_primary(primary_adapter, adapter)
             shadow.cert_expire_days = cert_expire_days
+            shadow.cert_expires_at = primary_config.cert_expires_at
             db.flush()
         except Exception as exc:
             logger.warning(

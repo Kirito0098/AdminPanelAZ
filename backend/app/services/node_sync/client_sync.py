@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session
 from app.models import VpnConfig
 from app.services.node_sync.groups import find_sync_group_for_primary, is_auto_sync_enabled
 from app.services.node_sync.manual_link import link_primary_config_to_group
-from app.services.node_sync.replicate import ReplicateOperation, replicate_to_replicas
+from app.services.node_sync.replicate import (
+    ReplicateOperation,
+    get_shadow_configs,
+    replicate_to_replicas,
+)
 from app.services.node_sync.vpn_state_sync import replicate_primary_crypto_to_replicas
 
 
@@ -129,6 +133,11 @@ def maybe_replicate_cert_renew(
     if primary_config.vpn_type.value != "openvpn":
         return None
     crypto = replicate_primary_crypto_to_replicas(db, group, primary_config)
+    # Manual mode still copies PKI; keep shadow expiry in sync with primary.
+    for shadow in get_shadow_configs(db, group, primary_config):
+        shadow.cert_expire_days = cert_expire_days
+        shadow.cert_expires_at = primary_config.cert_expires_at
+    db.flush()
     return {"successes": crypto.get("successes") or [], "errors": crypto.get("errors") or [], "crypto": crypto}
 
 

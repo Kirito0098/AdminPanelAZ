@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import Literal
 
 from app.models import VpnType
-from app.services.openvpn_cert import cert_not_after_utc, extract_pem_from_ovpn
+from app.services.openvpn_cert import (
+    cert_not_after_utc,
+    extract_pem_from_ovpn,
+    parse_easyrsa_expiry,
+)
 
 EASYRSA_INDEX_PATH = Path("/etc/openvpn/easyrsa3/pki/index.txt")
 
@@ -159,11 +163,32 @@ def read_easyrsa_index_from_path(path: Path | None = None) -> str:
 
 
 def load_easyrsa_index(adapter) -> list[EasyRsaIndexEntry]:
-    if hasattr(adapter, "read_easyrsa_index"):
-        index_txt = adapter.read_easyrsa_index()
-    else:
-        index_txt = read_easyrsa_index_from_path()
-    return parse_easyrsa_index(index_txt)
+    """Always read through the adapter — never the panel-local disk for remote nodes."""
+    if not hasattr(adapter, "read_easyrsa_index"):
+        raise AttributeError("adapter does not support read_easyrsa_index")
+    return parse_easyrsa_index(adapter.read_easyrsa_index())
+
+
+def cert_expiry_map_by_cn(entries: list[EasyRsaIndexEntry]) -> dict[str, datetime]:
+    """CN → expiry of its latest still-valid certificate (revoked/expired entries ignored)."""
+    result: dict[str, datetime] = {}
+    for entry in entries:
+        if entry.status != "V":
+            continue
+        expiry = parse_easyrsa_expiry(entry.expiry)
+        if expiry is None:
+            continue
+        current = result.get(entry.common_name)
+        if current is None or expiry > current:
+            result[entry.common_name] = expiry
+    return result
+
+
+def load_cert_expiry_map(adapter) -> dict[str, datetime]:
+    """Read expiry for every OpenVPN client via the node adapter (local or remote)."""
+    if hasattr(adapter, "get_openvpn_cert_expiry_map"):
+        return adapter.get_openvpn_cert_expiry_map()
+    return cert_expiry_map_by_cn(load_easyrsa_index(adapter))
 
 
 def _issue_for_profile(

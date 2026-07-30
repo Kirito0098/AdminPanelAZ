@@ -24,6 +24,7 @@ import type { LucideIcon } from 'lucide-react'
 import type { ClientAccessPolicy, UserRole, VpnConfig } from '@/types'
 import {
   buildAccessMeta,
+  formatCertExpiry,
   formatCreatedAt,
   formatBlockStatus,
   getConfigStatus,
@@ -193,13 +194,13 @@ function buildCompactMeta(
     metaRow('created', Calendar, 'Создан', formatCreatedAt(config.created_at)),
   ]
 
-  if (config.vpn_type === 'openvpn' && config.cert_expire_days != null) {
+  if (config.vpn_type === 'openvpn') {
     rows.push(
       metaRow(
         'cert',
         KeyRound,
         'Сертификат',
-        `${config.cert_expire_days} дн.`,
+        formatCertExpiry(config),
         tone === 'expired' ? 'danger' : tone === 'expiring' ? 'warning' : 'default',
       ),
     )

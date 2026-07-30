@@ -16,6 +16,7 @@ from app.services.access_policy import AccessPolicyService
 from app.services.admin_notify import admin_notify_service
 from app.services.feature_guards import get_feature_service
 from app.services.node_manager import get_adapter_for_node, node_metadata_dict
+from app.services.openvpn_cert import days_remaining_until
 from app.services.self_service import record_reminder_sent, reminder_recently_sent, self_service_reminder_enabled
 from app.services.telegram import send_tg_message
 from app.services.traffic_limit import human_bytes
@@ -158,10 +159,11 @@ def process_user_reminders(db: Session) -> int:
 
             policy = _policy_for_config(svc, config)
 
-            if config.vpn_type == VpnType.openvpn and config.cert_expire_days is not None:
-                if config.cert_expire_days <= threshold:
+            if config.vpn_type == VpnType.openvpn:
+                days_left = days_remaining_until(config.cert_expires_at)
+                if days_left is not None and days_left <= threshold:
                     dedup_key = f"config:{config.id}"
-                    details = f"Осталось <b>{config.cert_expire_days}</b> дн."
+                    details = f"Осталось <b>{days_left}</b> дн."
                     if _send_owner_reminder(db, owner, REMINDER_CERT, config, details, dedup_key):
                         sent += 1
 

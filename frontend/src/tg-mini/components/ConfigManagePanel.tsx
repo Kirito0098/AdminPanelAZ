@@ -12,7 +12,7 @@ import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { formatBlockStatus } from '@/lib/configCardUtils'
+import { formatBlockStatus, formatCertExpiry } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
 import {
   deleteTgPanelConfig,
@@ -109,6 +109,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
   const [loading, setLoading] = useState(true)
   const [description, setDescription] = useState('')
   const [certDays, setCertDays] = useState('3650')
+  const [certExpiry, setCertExpiry] = useState<string | null>(null)
   const [ownerId, setOwnerId] = useState<number | null>(null)
   const [ownerUsername, setOwnerUsername] = useState<string | undefined>()
   const [users, setUsers] = useState<User[]>([])
@@ -144,6 +145,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
       .then(([details, policyData, panelUsers]) => {
         setDescription(details.description ?? '')
         setCertDays(String(details.cert_expire_days ?? 3650))
+        setCertExpiry(formatCertExpiry(details))
         setOwnerId(details.owner_id)
         setOwnerUsername(details.owner_username)
         setPolicy(policyData)
@@ -199,7 +201,8 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
     setBusy('renew')
     setFeedback(null)
     try {
-      await updateTgPanelConfig(config.id, { cert_expire_days: days })
+      const updated = await updateTgPanelConfig(config.id, { cert_expire_days: days })
+      setCertExpiry(formatCertExpiry(updated))
       setFeedback({ tone: 'success', text: 'Сертификат обновлён' })
       onUpdated()
     } catch (err) {
@@ -355,7 +358,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
       )}
 
       {config.vpn_type === 'openvpn' && (
-        <ManageSection title="Сертификат" summary={`${certDays} дн.`} defaultOpen={false}>
+        <ManageSection title="Сертификат" summary={certExpiry ?? '—'} defaultOpen={false}>
           <div className="space-y-3">
             <div className="space-y-2">
               <Label htmlFor="tg-mini-renew-cert">Новый срок (дней)</Label>

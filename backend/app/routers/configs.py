@@ -52,7 +52,7 @@ from app.services.node_sync.groups import (
     find_sync_group_for_primary,
     require_ha_primary_for_client_ops,
 )
-from app.services.openvpn_cert import resolve_openvpn_cert_days_remaining
+from app.services.openvpn_cert import days_remaining_until, refresh_config_cert_expiry
 from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
 from app.services.openvpn_group import (
     filter_openvpn_profile_files,
@@ -154,20 +154,6 @@ def _can_mutate_config(user: User, config: VpnConfig) -> bool:
     return can_mutate_config(user, config)
 
 
-def _fill_missing_cert_expire_days(configs: list[VpnConfig], db: Session, adapter: NodeAdapter | None = None) -> None:
-    node_adapter = adapter or get_active_adapter(db)
-    dirty = False
-    for config in configs:
-        if config.vpn_type != VpnType.openvpn or config.cert_expire_days is not None:
-            continue
-        days = resolve_openvpn_cert_days_remaining(node_adapter, config.client_name)
-        if days is not None:
-            config.cert_expire_days = days
-            dirty = True
-    if dirty:
-        db.commit()
-
-
 def _to_response(
     config: VpnConfig,
     db: Session,
@@ -201,6 +187,8 @@ def _to_response(
         owner_id=config.owner_id,
         owner_username=owner.username if owner else None,
         cert_expire_days=config.cert_expire_days,
+        cert_expires_at=config.cert_expires_at,
+        cert_days_left=days_remaining_until(config.cert_expires_at),
         description=config.description,
         created_at=config.created_at,
         updated_at=config.updated_at,
@@ -525,6 +513,7 @@ def create_config(
         cert_expire_days=payload.cert_expire_days,
         description=payload.description,
     )
+    refresh_config_cert_expiry(config, adapter)
     db.add(config)
     db.commit()
     db.refresh(config)
@@ -615,6 +604,7 @@ def update_config(
             client_names=[config.client_name],
         )
         config.cert_expire_days = payload.cert_expire_days
+        refresh_config_cert_expiry(config, adapter)
         cert_renewed = True
         renewed_days = payload.cert_expire_days
 

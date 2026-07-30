@@ -91,6 +91,8 @@ def link_shadow_configs_for_group(db: Session, group: NodeSyncGroup) -> dict[str
 
             if existing is not None and existing.ha_primary_config_id == primary_config.id:
                 existing.sync_group_id = group.id
+                existing.cert_expire_days = primary_config.cert_expire_days
+                existing.cert_expires_at = primary_config.cert_expires_at
                 result["already_linked"].append(
                     _shadow_entry(
                         primary_config=primary_config,

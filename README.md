@@ -3,8 +3,8 @@
 Веб-панель для администрирования VPN-сервера [AntiZapret](https://github.com/GubernievS/AntiZapret-VPN)
 
 [![GitHub](https://img.shields.io/badge/GitHub-Kirito0098%2FAdminPanelAZ-181717?style=for-the-badge&logo=github)](https://github.com/Kirito0098/AdminPanelAZ)
-[![Version](https://img.shields.io/badge/Панель-2.18.0-blue?style=for-the-badge)](CHANGELOG.md)
-[![Node agent](https://img.shields.io/badge/Node_agent-1.5.0-555?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Панель-2.19.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![Node agent](https://img.shields.io/badge/Node_agent-1.6.0-555?style=for-the-badge)](CHANGELOG.md)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](backend/)
 [![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)](frontend/)
 
@@ -181,7 +181,7 @@ sudo bash /tmp/install.sh
 5. Если VPN на другом сервере — добавьте узел — [Узлы](docs/uzly.md)
 6. На **Конфигурации** нажмите **Синхронизировать** — [инструкция](docs/konfiguracii.md)
 7. **Telegram** — раздел уже в меню; укажите bot token в UI — [инструкция](docs/Telegram.md)
-8. Для **HA** (два сервера на один домен): создайте группу синхронизации на **Узлах**, выполните **Настройку** (домен → Push full → verify) — [Node Sync](docs/NodeSync.md). После обновления панели перезапустите **node agent** на VPN-узлах (`systemctl restart adminpanelaz-node`), чтобы в «Узлах» отображалась версия **1.5.0**
+8. Для **HA** (два сервера на один домен): создайте группу синхронизации на **Узлах**, выполните **Настройку** (домен → Push full → verify) — [Node Sync](docs/NodeSync.md). После обновления панели перезапустите **node agent** на VPN-узлах (`systemctl restart adminpanelaz-node`), чтобы в «Узлах» отображалась версия **1.6.0**
 
 > [!NOTE]
 > **Вход по умолчанию** (если не задавали в мастере): `admin` / `admin` — смените сразу.
@@ -245,7 +245,7 @@ CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|
 
 - **Health** — `GET /api/health`, `GET /api/health/deep`
 - **Метрики** — `GET /metrics` (Prometheus)
-- **Node agent** — **1.5.0** (для HA: ≥ 1.3.0; byte-copy `.ovpn` при Push full: ≥ 1.5.0)
+- **Node agent** — **1.6.0** (для HA: ≥ 1.3.0; byte-copy `.ovpn` при Push full: ≥ 1.5.0; сроки сертификатов: ≥ 1.6.0)
 
 ## 🔐 Безопасность
 
@@ -276,7 +276,7 @@ sudo ./scripts/nginx-repair.sh      # восстановить nginx (напри
   <img src="docs/assets/telegram-promo/05-whats-new.png" alt="Последние обновления AdminPanel AntiZapret" width="900">
 </p>
 
-**Текущая версия: панель 2.18.0 · node agent 1.5.0** (2026-07-26)
+**Текущая версия: панель 2.19.0 · node agent 1.6.0** (2026-07-30)
 
 После установки панель сразу открывается по `http://IP:порт/`; домен и HTTPS — в **Настройки → Адрес сайта и HTTPS**. Python **3.12** (Ubuntu) / **3.13** (Debian) выбирается автоматически.
 

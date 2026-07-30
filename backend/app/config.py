@@ -97,7 +97,8 @@ class Settings(BaseSettings):
     # SSE push cadence for /monitoring/stream (fresh fetch each tick; keep ≤ cache TTL for rates).
     monitoring_stream_interval_seconds: int = 10
     cert_sync_enabled: bool = True
-    cert_sync_interval_seconds: int = 300
+    # Full PKI scan for all nodes; keep rare — renew/create refresh the row immediately.
+    cert_sync_interval_seconds: int = 43200
     self_service_reminder_enabled: bool = True
     self_service_reminder_interval_seconds: int = 3600
     self_service_reminder_cert_days_threshold: int = 7

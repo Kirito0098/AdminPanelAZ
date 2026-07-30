@@ -119,6 +119,15 @@ class AntiZapretService:
             return ""
         return EASYRSA_INDEX_PATH.read_text(encoding="utf-8", errors="replace")
 
+    def get_openvpn_cert_expiry_map(self) -> dict[str, str]:
+        """CN → ISO-8601 UTC notAfter for every still-valid OpenVPN client certificate."""
+        from app.services.openvpn_pki import cert_expiry_map_by_cn, parse_easyrsa_index
+
+        result: dict[str, str] = {}
+        for cn, not_after in cert_expiry_map_by_cn(parse_easyrsa_index(self.read_easyrsa_index())).items():
+            result[cn] = not_after.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return result
+
     def _wireguard_server_config_path(self, interface: str) -> Path:
         normalized = (interface or "").strip().lower()
         if normalized not in WIREGUARD_SERVER_INTERFACES:

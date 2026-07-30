@@ -495,6 +495,12 @@ def read_easyrsa_index(_: None = Depends(verify_api_key)):
     return {"content": service.read_easyrsa_index()}
 
 
+@app.get("/openvpn/certs/expiry")
+def openvpn_cert_expiry(_: None = Depends(verify_api_key)):
+    """Batch CN → notAfter map from EasyRSA index.txt (one round-trip for the panel)."""
+    return {"expires_by_cn": service.get_openvpn_cert_expiry_map()}
+
+
 @app.get("/profiles/openvpn/export")
 def export_openvpn_profiles(_: None = Depends(verify_api_key)):
     data = service.export_openvpn_client_profiles_archive()

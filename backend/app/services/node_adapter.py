@@ -70,6 +70,10 @@ class NodeAdapter(ABC):
             for name, vpn_type in clients
         }
 
+    def get_openvpn_cert_expiry_map(self) -> dict[str, datetime]:
+        """CN → aware UTC notAfter for still-valid OpenVPN client certificates on this node."""
+        raise NotImplementedError
+
     @abstractmethod
     def read_profile_file(self, path: str) -> str: ...
 
@@ -422,6 +426,11 @@ class LocalNodeAdapter(NodeAdapter):
 
     def read_easyrsa_index(self) -> str:
         return self._service.read_easyrsa_index()
+
+    def get_openvpn_cert_expiry_map(self) -> dict[str, datetime]:
+        from app.services.openvpn_cert import expiry_map_from_iso_dict
+
+        return expiry_map_from_iso_dict(self._service.get_openvpn_cert_expiry_map())
 
     def export_openvpn_client_profiles_archive(self) -> bytes:
         return self._service.export_openvpn_client_profiles_archive()
@@ -1044,6 +1053,20 @@ class RemoteNodeAdapter(NodeAdapter):
     def read_easyrsa_index(self) -> str:
         data = self._request("GET", "/openvpn/easyrsa3/index")
         return data.get("content", "")
+
+    def get_openvpn_cert_expiry_map(self) -> dict[str, datetime]:
+        """Prefer the batch agent endpoint; fall back to parsing index.txt for older agents."""
+        from app.services.openvpn_cert import expiry_map_from_iso_dict
+        from app.services.openvpn_pki import cert_expiry_map_by_cn, parse_easyrsa_index
+
+        try:
+            data = self._request("GET", "/openvpn/certs/expiry", timeout=30.0)
+            return expiry_map_from_iso_dict(data.get("expires_by_cn") or {})
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_404_NOT_FOUND:
+                raise
+        index_txt = self.read_easyrsa_index()
+        return cert_expiry_map_by_cn(parse_easyrsa_index(index_txt))
 
     def export_openvpn_client_profiles_archive(self) -> bytes:
         return self._request_bytes("GET", "/profiles/openvpn/export", timeout=120.0)

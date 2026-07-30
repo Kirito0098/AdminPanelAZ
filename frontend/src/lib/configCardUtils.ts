@@ -114,6 +114,35 @@ export function formatDateShort(value?: string | null): string {
   return formatDate(d, undefined, value.split(' ')[0] || value)
 }
 
+/** Backend sends naive UTC timestamps; without a zone suffix Date.parse would read them as local. */
+export function parseCertExpiresAt(value?: string | null): Date | null {
+  if (!value) return null
+  const raw = value.trim()
+  if (!raw) return null
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw)
+  const parsed = Date.parse(`${raw.replace(' ', 'T')}${hasZone ? '' : 'Z'}`)
+  return Number.isNaN(parsed) ? null : new Date(parsed)
+}
+
+/** Days left on the real certificate, or null while the node has not been read yet. */
+export function certDaysLeft(config: VpnConfig): number | null {
+  const expiresAt = parseCertExpiresAt(config.cert_expires_at)
+  if (!expiresAt) return config.cert_days_left ?? null
+  const ms = expiresAt.getTime() - Date.now()
+  return ms <= 0 ? 0 : Math.floor(ms / 86400000)
+}
+
+export function formatCertExpiry(config: VpnConfig): string {
+  const daysLeft = certDaysLeft(config)
+  if (daysLeft == null) {
+    return config.cert_expire_days != null ? `выпущен на ${config.cert_expire_days} дн.` : '—'
+  }
+  const expiresAt = parseCertExpiresAt(config.cert_expires_at)
+  const until = expiresAt ? formatDate(expiresAt, undefined, '') : ''
+  if (daysLeft <= 0) return until ? `истёк ${until}` : 'истёк'
+  return until ? `${daysLeft} дн. (до ${until})` : `${daysLeft} дн.`
+}
+
 export interface AccessMetaLine {
   text: string
 }
@@ -129,7 +158,7 @@ export function buildAccessMeta(
   let tone: 'active' | 'expiring' | 'expired' = 'active'
 
   if (config.vpn_type === 'openvpn') {
-    lines.push({ text: `Сертификат: ${config.cert_expire_days ?? '—'} дн.` })
+    lines.push({ text: `Сертификат: ${formatCertExpiry(config)}` })
   } else if (policy?.expires_at) {
     lines.push({ text: `Отключение: ${formatDateShort(policy.expires_at)}` })
     const remaining = formatAccessRemaining(policy.expires_at)
@@ -180,17 +209,17 @@ export function buildAccessMeta(
     lines.push({ text: 'Блокировка: нет' })
   }
 
+  const daysLeft = config.vpn_type === 'openvpn' ? certDaysLeft(config) : null
+
   if (blockMode === 'temp' || blockMode === 'permanent' || blockMode === 'expired' || blockMode === 'traffic_limit' || isBlocked) {
     tone = 'expired'
-  } else if (config.vpn_type === 'openvpn' && config.cert_expire_days != null && config.cert_expire_days <= 30) {
+  } else if (daysLeft != null && daysLeft <= 0) {
+    tone = 'expired'
+  } else if (daysLeft != null && daysLeft <= 30) {
     tone = 'expiring'
   } else if (policy?.access_days_left != null && policy.access_days_left <= 30) {
     tone = 'expiring'
   } else if (policy?.expires_at && formatAccessRemaining(policy.expires_at) === 'срок истёк') {
-    tone = 'expired'
-  }
-
-  if (tab === 'openvpn' && config.cert_expire_days != null && config.cert_expire_days < 0) {
     tone = 'expired'
   }
 

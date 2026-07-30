@@ -1,4 +1,4 @@
-"""Background sync of OpenVPN certificate expiry days from remote nodes into the DB."""
+"""Background sync of real OpenVPN certificate expiry dates from nodes into the DB."""
 
 from __future__ import annotations
 
@@ -7,41 +7,84 @@ import logging
 
 from app.config import get_settings
 from app.database import SessionLocal
-from app.models import VpnConfig, VpnType
-from app.services.node_manager import get_active_node, get_adapter_for_node
-from app.services.openvpn_cert import resolve_openvpn_cert_days_remaining
+from app.models import Node, VpnConfig, VpnType
+from app.services.node_manager import get_adapter_for_node
+from app.services.openvpn_cert import resolve_openvpn_cert_not_after, to_naive_utc
+from app.services.openvpn_pki import load_cert_expiry_map
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+# Give the app and node agents time to come up before the first pass.
+INITIAL_DELAY_SECONDS = 15
 
-def sync_missing_cert_expire_days(db) -> int:
-    """Fill cert_expire_days for OpenVPN configs missing it on the active node. Returns update count."""
-    try:
-        node = get_active_node(db)
-    except Exception:
-        return 0
 
-    adapter = get_adapter_for_node(node)
+def _sync_node(db, node: Node) -> int:
     configs = (
         db.query(VpnConfig)
         .filter(
             VpnConfig.node_id == node.id,
             VpnConfig.vpn_type == VpnType.openvpn,
-            VpnConfig.cert_expire_days.is_(None),
         )
         .all()
     )
     if not configs:
         return 0
 
+    adapter = get_adapter_for_node(node)
+    # One remote round-trip (GET /openvpn/certs/expiry or index.txt) covers every client.
+    try:
+        expiry_by_cn = load_cert_expiry_map(adapter)
+    except Exception:
+        logger.exception(
+            "cert_sync: failed to load expiry map from node id=%s name=%s local=%s",
+            node.id,
+            node.name,
+            bool(node.is_local),
+        )
+        expiry_by_cn = {}
+
     updated = 0
+    missing_fallback = 0
     for config in configs:
-        days = resolve_openvpn_cert_days_remaining(adapter, config.client_name)
-        if days is not None:
-            config.cert_expire_days = days
+        not_after = expiry_by_cn.get(config.client_name)
+        if not_after is None:
+            # Rare: CN not in index (or map fetch failed) — read that client's .ovpn once.
+            not_after = resolve_openvpn_cert_not_after(adapter, config.client_name)
+            if not_after is not None:
+                missing_fallback += 1
+        if not_after is None:
+            continue
+        naive = to_naive_utc(not_after)
+        if config.cert_expires_at != naive:
+            config.cert_expires_at = naive
             updated += 1
 
+    if missing_fallback:
+        logger.info(
+            "cert_sync: node %s used .ovpn fallback for %s client(s)",
+            node.name,
+            missing_fallback,
+        )
+    return updated
+
+
+def sync_cert_expiry(db) -> int:
+    """Refresh cert_expires_at for OpenVPN configs on every node (local + remote). Returns update count."""
+    updated = 0
+    for node in db.query(Node).all():
+        try:
+            count = _sync_node(db, node)
+            updated += count
+            if count:
+                logger.info(
+                    "cert_sync: node %s refreshed %s config(s) (local=%s)",
+                    node.name,
+                    count,
+                    bool(node.is_local),
+                )
+        except Exception:
+            logger.exception("cert_sync: skip node id=%s name=%s", node.id, node.name)
     if updated:
         db.commit()
     return updated
@@ -49,14 +92,15 @@ def sync_missing_cert_expire_days(db) -> int:
 
 async def run_cert_sync_loop() -> None:
     interval = max(60, int(settings.cert_sync_interval_seconds))
+    await asyncio.sleep(INITIAL_DELAY_SECONDS)
     while True:
-        await asyncio.sleep(interval)
         db = SessionLocal()
         try:
-            count = sync_missing_cert_expire_days(db)
+            count = sync_cert_expiry(db)
             if count:
-                logger.info("cert_sync: updated cert_expire_days for %s configs", count)
+                logger.info("cert_sync: refreshed cert_expires_at for %s configs total", count)
         except Exception:
             logger.exception("cert_sync failed")
         finally:
             db.close()
+        await asyncio.sleep(interval)

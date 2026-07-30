@@ -216,7 +216,10 @@ export interface VpnConfig {
   vpn_type: VpnType
   owner_id: number
   owner_username?: string
+  /** Validity the certificate was issued for — not the remaining time. */
   cert_expire_days?: number | null
+  cert_expires_at?: string | null
+  cert_days_left?: number | null
   description?: string | null
   created_at: string
   updated_at: string
