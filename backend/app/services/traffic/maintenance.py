@@ -541,48 +541,94 @@ class TrafficMaintenanceService:
 
         normalized_names = sorted({name.lower() for name in names_to_delete if name})
 
-        def _name_in_target_set(column):
-            return func.lower(func.trim(column)).in_(normalized_names)
-
         try:
-            deleted_samples = (
-                self.db.query(UserTrafficSample)
-                .filter(
-                    UserTrafficSample.node_id == self.node_id,
-                    _name_in_target_set(UserTrafficSample.common_name),
-                )
-                .delete(synchronize_session=False)
-            )
-            deleted_sessions = (
-                self.db.query(TrafficSessionState)
-                .filter(
-                    TrafficSessionState.node_id == self.node_id,
-                    _name_in_target_set(TrafficSessionState.common_name),
-                )
-                .delete(synchronize_session=False)
-            )
-            deleted_protocol_stats = (
-                self.db.query(UserTrafficStatProtocol)
-                .filter(
-                    UserTrafficStatProtocol.node_id == self.node_id,
-                    _name_in_target_set(UserTrafficStatProtocol.common_name),
-                )
-                .delete(synchronize_session=False)
+            deleted_samples, deleted_sessions, deleted_protocol_stats = _delete_traffic_rows_for_names(
+                self.db,
+                self.node_id,
+                normalized_names,
             )
             self.db.commit()
 
-            deleted_total = int(deleted_samples or 0) + int(deleted_sessions or 0) + int(deleted_protocol_stats or 0)
+            deleted_total = deleted_samples + deleted_sessions + deleted_protocol_stats
             if deleted_total == 0:
                 return False, f"Для клиента '{target_name}' статистика не найдена."
 
             return True, (
                 f"Статистика клиента '{target_name}' удалена "
-                f"(stat_protocol={int(deleted_protocol_stats or 0)}, "
-                f"sessions={int(deleted_sessions or 0)}, samples={int(deleted_samples or 0)})."
+                f"(stat_protocol={deleted_protocol_stats}, "
+                f"sessions={deleted_sessions}, samples={deleted_samples})."
             )
         except Exception as exc:
             self.db.rollback()
             return False, f"Ошибка удаления статистики: {exc}"
+
+
+def _delete_traffic_rows_for_names(
+    db: Session,
+    node_id: int,
+    normalized_names: list[str],
+) -> tuple[int, int, int]:
+    """Delete samples, sessions and protocol stats for the given names. Does not commit."""
+
+    def _name_in_target_set(column):
+        return func.lower(func.trim(column)).in_(normalized_names)
+
+    deleted_samples = (
+        db.query(UserTrafficSample)
+        .filter(
+            UserTrafficSample.node_id == node_id,
+            _name_in_target_set(UserTrafficSample.common_name),
+        )
+        .delete(synchronize_session=False)
+    )
+    deleted_sessions = (
+        db.query(TrafficSessionState)
+        .filter(
+            TrafficSessionState.node_id == node_id,
+            _name_in_target_set(TrafficSessionState.common_name),
+        )
+        .delete(synchronize_session=False)
+    )
+    deleted_protocol_stats = (
+        db.query(UserTrafficStatProtocol)
+        .filter(
+            UserTrafficStatProtocol.node_id == node_id,
+            _name_in_target_set(UserTrafficStatProtocol.common_name),
+        )
+        .delete(synchronize_session=False)
+    )
+    return int(deleted_samples or 0), int(deleted_sessions or 0), int(deleted_protocol_stats or 0)
+
+
+def purge_traffic_history_for_reused_name(db: Session, *, node_id: int, client_name: str) -> int:
+    """Drop traffic left behind by a deleted client before a new one takes over its name.
+
+    Consumed traffic is matched by ``common_name``, so without this the new client
+    inherits the old totals and can hit its traffic limit right after creation.
+    Call before the new ``VpnConfig`` row is added — a name still held by another
+    config (e.g. the same person on a second protocol) is left untouched.
+    """
+    identity = normalize_traffic_client_identity(client_name)
+    if not identity:
+        return 0
+
+    name_still_in_use = (
+        db.query(VpnConfig.id)
+        .filter(
+            VpnConfig.node_id == node_id,
+            func.lower(func.trim(VpnConfig.client_name)) == identity,
+        )
+        .first()
+    )
+    if name_still_in_use:
+        return 0
+
+    deleted_samples, deleted_sessions, deleted_protocol_stats = _delete_traffic_rows_for_names(
+        db,
+        node_id,
+        [identity],
+    )
+    return deleted_samples + deleted_sessions + deleted_protocol_stats
 
 
 def cleanup_openvpn_status_logs_now(logs_dir: str = "/etc/openvpn/server/logs") -> tuple[bool, str]:

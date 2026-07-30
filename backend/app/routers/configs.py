@@ -53,6 +53,7 @@ from app.services.node_sync.groups import (
     require_ha_primary_for_client_ops,
 )
 from app.services.openvpn_cert import days_remaining_until, refresh_config_cert_expiry
+from app.services.traffic.maintenance import purge_traffic_history_for_reused_name
 from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
 from app.services.openvpn_group import (
     filter_openvpn_profile_files,
@@ -514,6 +515,7 @@ def create_config(
         description=payload.description,
     )
     refresh_config_cert_expiry(config, adapter)
+    purge_traffic_history_for_reused_name(db, node_id=node_id, client_name=payload.client_name)
     db.add(config)
     db.commit()
     db.refresh(config)
