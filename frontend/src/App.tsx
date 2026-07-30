@@ -50,7 +50,7 @@ export default function App() {
                   <Route path="monitoring" element={<FeatureGuardRoute feature="logs_dashboard"><MonitoringPage /></FeatureGuardRoute>} />
                   <Route path="traffic" element={<FeatureGuardRoute feature="traffic_sync"><TrafficPage /></FeatureGuardRoute>} />
                   <Route path="routing" element={<FeatureGuardRoute feature="routing"><RoutingPage /></FeatureGuardRoute>} />
-                  <Route path="antizapret" element={<FeatureGuardRoute feature="routing"><AntizapretConfigPage /></FeatureGuardRoute>} />
+                  <Route path="antizapret" element={<FeatureGuardRoute feature="antizapret_config"><AntizapretConfigPage /></FeatureGuardRoute>} />
                   <Route path="warper" element={<FeatureGuardRoute feature="warper"><WarperPage /></FeatureGuardRoute>} />
                   <Route path="telegram" element={<FeatureGuardRoute feature="telegram"><TelegramPage /></FeatureGuardRoute>} />
                   <Route path="edit-files" element={<FeatureGuardRoute feature="edit_files"><EditFilesPage /></FeatureGuardRoute>} />

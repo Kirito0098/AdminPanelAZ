@@ -155,7 +155,7 @@
 | `/monitoring` | `MonitoringPage` | `logs_dashboard` | [noc-monitoring](noc-monitoring.md) | NOC: подключения, графики, службы |
 | `/traffic` | `TrafficPage` | `traffic_sync` | [traffic-monitoring](traffic-monitoring.md) | Трафик по клиентам, лимиты |
 | `/routing` | `RoutingPage` | `routing` | [routing-cidr](routing-cidr.md) | CIDR-провайдеры, pipeline |
-| `/antizapret` | `AntizapretConfigPage` | `routing` | [antizapret-config](antizapret-config.md) | Конфиг AntiZapret (admin) |
+| `/antizapret` | `AntizapretConfigPage` | `antizapret_config` | [antizapret-config](antizapret-config.md) | Конфиг AntiZapret (admin) |
 | `/warper` | `WarperPage` | `warper` | [warper](warper.md) | AZ-WARP / Cloudflare WARP |
 | `/telegram` | `TelegramPage` | `telegram` | [Telegram](Telegram.md) | Настройки бота и Mini App |
 | `/edit-files` | `EditFilesPage` | `edit_files` | [edit-files](edit-files.md) | Редактор файлов AntiZapret |
