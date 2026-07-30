@@ -1,4 +1,3 @@
-import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -40,7 +39,6 @@ from app.services.node_manager import (
     get_active_node,
     get_active_node_id,
     get_adapter_for_node,
-    get_api_key_plain,
     node_metadata_dict,
     purge_node_related,
     set_active_node_id,

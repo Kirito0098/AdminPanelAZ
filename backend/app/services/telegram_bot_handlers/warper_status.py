@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from app.services.feature_guards import get_feature_service
-from app.services.node_manager import get_active_adapter, get_active_node
-from app.services.tg_mini_status import build_cidr_status_payload, build_warper_status_payload
+from app.services.tg_mini_status import build_warper_status_payload
 from app.services.telegram_bot_handlers.base import BotContext, is_admin, unlinked_message
 from app.services.telegram_bot_handlers.ui import nav_footer_keyboard, send_or_edit
 from app.services import telegram_bot_i18n as i18n

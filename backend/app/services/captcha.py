@@ -8,7 +8,6 @@ import secrets
 import string
 import threading
 import time
-from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 

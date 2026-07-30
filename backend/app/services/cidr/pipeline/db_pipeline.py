@@ -3,8 +3,6 @@ import os
 
 from app.services.cidr.constants import IP_FILES
 from app.services.cidr.pipeline.antifilter import (
-    _build_antifilter_overlap_index,
-    _cidr_contained_in_index,
     _cidr_overlaps_index,
     _load_antifilter_index,
 )
@@ -49,7 +47,6 @@ def update_cidr_files_from_db(
     """
     from app.cidr_database import CidrSessionLocal
     from app.database import SessionLocal
-    from app.models import ProviderCidr, ProviderMeta
 
     db = SessionLocal()
     cidr_db = CidrSessionLocal()
@@ -373,7 +370,6 @@ def estimate_cidr_matches_from_db(
     """Preview how many CIDRs would be written from DB, without modifying any files."""
     from app.cidr_database import CidrSessionLocal
     from app.database import SessionLocal
-    from app.models import ProviderCidr, ProviderMeta
 
     db = SessionLocal()
     cidr_db = CidrSessionLocal()

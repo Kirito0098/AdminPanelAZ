@@ -10,7 +10,6 @@ from app.services.config_tags import (
     create_tag,
     delete_tag,
     get_tag,
-    get_tags_for_configs,
     list_tags,
     update_tag,
 )

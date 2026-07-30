@@ -6,7 +6,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
-from app.config import get_settings
 from app.cidr_database import get_cidr_db
 from app.database import get_db
 from app.schemas import RouteBudgetInfo

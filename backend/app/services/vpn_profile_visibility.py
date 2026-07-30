@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from app.constants.public_routes import (
     DEFAULT_OPENVPN_GROUP,
     OPENVPN_GROUP_LABELS,
-    OPENVPN_GROUP_VARIANTS,
 )
 from app.models import AppSetting, User, UserRole, VpnType
 from app.services.telegram_profile_ui import is_az_profile

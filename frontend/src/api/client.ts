@@ -426,35 +426,9 @@ export async function getConnectionHistory(
   )
 }
 
-export async function getGlobalDashboardSummary() {
-  return apiFetch<import('../types').GlobalDashboardSummary>('/monitoring/global-summary')
-}
-
-export async function getNodesCompare() {
-  return apiFetch<import('../types').GlobalDashboardSummary>('/monitoring/nodes-compare')
-}
-
 export async function getGeoRoutingHint(clientIp?: string) {
   const query = clientIp ? `?client_ip=${encodeURIComponent(clientIp)}` : ''
   return apiFetch<import('../types').GeoRoutingHint>(`/nodes/geo-routing-hint${query}`)
-}
-
-export async function getNodePolicySummary() {
-  return apiFetch<import('../types').NodePolicySummary[]>('/client-access/policy-summary-by-node')
-}
-
-export async function getNodeDefaultPolicy(nodeId: number) {
-  return apiFetch<import('../types').NodeDefaultPolicy>(`/client-access/node-defaults/${nodeId}`)
-}
-
-export async function updateNodeDefaultPolicy(
-  nodeId: number,
-  payload: import('../types').NodeDefaultPolicyUpdate,
-) {
-  return apiFetch<import('../types').NodeDefaultPolicy>(`/client-access/node-defaults/${nodeId}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  })
 }
 
 export function openMonitoringStream(
@@ -744,20 +718,6 @@ export async function deleteNodeSyncGroup(id: number) {
   return apiFetch<{ message: string }>(`/nodes/sync-groups/${id}`, { method: 'DELETE' })
 }
 
-export async function getNodeSyncGroupStatus(id: number) {
-  return apiFetch<import('../types').NodeSyncGroupStatus>(`/nodes/sync-groups/${id}/status`)
-}
-
-export async function pushNodeSyncGroupFull(id: number) {
-  return apiFetch<{
-    task_id: string
-    group_id: number
-    message: string
-    queued?: boolean
-    status_url?: string | null
-  }>(`/nodes/sync-groups/${id}/push-full`, { method: 'POST' })
-}
-
 export async function setupNodeSyncGroup(id: number) {
   return apiFetch<{
     task_id: string
@@ -896,13 +856,6 @@ export async function runDdnsUpdate() {
   })
 }
 
-export async function setDdnsTimer(enabled: boolean) {
-  return apiFetch<import('../types').DdnsActionResponse>('/settings/vpn-network/ddns/timer', {
-    method: 'POST',
-    body: JSON.stringify({ enabled }),
-  })
-}
-
 export async function getTelegramSettings() {
   return apiFetch<import('../types').TelegramSettings>('/settings/telegram')
 }
@@ -990,17 +943,6 @@ export async function testNocWeeklyImagePreview() {
   return apiFetch<{ message: string }>('/settings/admin-notify/test-noc-image', {
     method: 'POST',
   })
-}
-
-/** @deprecated use testNocWeeklyImagePreview */
-export async function testNocWeeklyPdfPreview() {
-  return testNocWeeklyImagePreview()
-}
-
-export function getQrUrl(configId: number, path: string) {
-  const token = getToken()
-  const params = new URLSearchParams({ path })
-  return `${API_BASE}/configs/${configId}/qr?${params}${token ? '' : ''}`
 }
 
 export async function getRoutingOverview() {
@@ -1151,12 +1093,6 @@ export async function previewCidrDeploy(options?: {
       selected_files: options?.selected_files ?? null,
     }),
   })
-}
-
-export async function getCidrRollbackBackups() {
-  return apiFetch<{ success: boolean; backups: import('../types').CidrRuntimeBackup[] }>(
-    '/routing/cidr-db/rollback/backups',
-  )
 }
 
 export async function rollbackCidrFromBackup(options: {
@@ -1335,16 +1271,6 @@ export async function deleteAlertRule(ruleId: number) {
 
 export async function getLatestChangelog() {
   return apiFetch<import('../types').LatestChangelog>('/system/latest-changelog')
-}
-
-export async function testBackupTelegram(includeConfigs = false, includeAntizapretBackup = false) {
-  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/backups/test-telegram', {
-    method: 'POST',
-    body: JSON.stringify({
-      include_configs: includeConfigs,
-      include_antizapret_backup: includeAntizapretBackup,
-    }),
-  })
 }
 
 export async function createOneTimeLink(configId: number, path: string) {
@@ -1618,40 +1544,11 @@ export async function getWarperDomains() {
   return apiFetch<import('../types').WarperDomainsResponse>('/warper/domains')
 }
 
-export async function addWarperDomain(domain: string) {
-  return apiFetch<import('../types').WarperActionResponse>('/warper/domains', {
-    method: 'POST',
-    body: JSON.stringify({ domain }),
-  })
-}
-
-export async function removeWarperDomain(domain: string) {
-  return apiFetch<import('../types').WarperActionResponse>(
-    `/warper/domains/${encodeURIComponent(domain)}`,
-    { method: 'DELETE' },
-  )
-}
-
-export async function syncWarperDomains() {
-  return apiFetch<import('../types').WarperActionResponse>('/warper/domains/sync', { method: 'POST' })
-}
-
-export async function addWarperDomainsBulk(domains: string[]) {
-  return apiFetch<import('../types').WarperDomainsBulkResponse>('/warper/domains/bulk', {
-    method: 'POST',
-    body: JSON.stringify({ domains }),
-  })
-}
-
 export async function setWarperDomainList(name: string, enable: boolean) {
   return apiFetch<import('../types').WarperActionResponse>(`/warper/domains/lists/${encodeURIComponent(name)}`, {
     method: 'POST',
     body: JSON.stringify({ enable }),
   })
-}
-
-export async function getWarperUserDomainsText() {
-  return apiFetch<import('../types').WarperTextContentResponse>('/warper/domains/text')
 }
 
 export async function saveWarperUserDomainsText(text: string) {
@@ -1663,24 +1560,6 @@ export async function saveWarperUserDomainsText(text: string) {
 
 export async function getWarperIpRanges() {
   return apiFetch<import('../types').WarperIpRangesResponse>('/warper/ip-ranges')
-}
-
-export async function addWarperIpRange(cidr: string) {
-  return apiFetch<import('../types').WarperActionResponse>('/warper/ip-ranges', {
-    method: 'POST',
-    body: JSON.stringify({ cidr }),
-  })
-}
-
-export async function removeWarperIpRange(cidr: string) {
-  return apiFetch<import('../types').WarperActionResponse>(
-    `/warper/ip-ranges/${encodeURIComponent(cidr)}`,
-    { method: 'DELETE' },
-  )
-}
-
-export async function syncWarperIpRanges() {
-  return apiFetch<import('../types').WarperActionResponse>('/warper/ip-ranges/sync', { method: 'POST' })
 }
 
 export async function setWarperIpRouteMode(mode: string) {
@@ -1695,10 +1574,6 @@ export async function setWarperIpExport(enable: boolean) {
     method: 'POST',
     body: JSON.stringify({ enable }),
   })
-}
-
-export async function getWarperIpRangesText() {
-  return apiFetch<import('../types').WarperTextContentResponse>('/warper/ip-ranges/text')
 }
 
 export async function saveWarperIpRangesText(text: string) {
@@ -1818,12 +1693,6 @@ export async function checkWarperUpdates(force = false) {
   return apiFetch<import('../types').WarperUpdatesCheckResponse>(`/warper/updates/check${params}`)
 }
 
-export async function applyWarperUpdate(timeout = 600) {
-  return apiFetch<import('../types').WarperActionResponse>(`/warper/updates/apply?timeout=${timeout}`, {
-    method: 'POST',
-  })
-}
-
 export function openWarperUpdateStream(
   onEvent: (event: import('../types').WarperUpdateStreamEvent) => void,
   onError?: (message: string) => void,
@@ -1897,13 +1766,6 @@ export async function removeTempWhitelist(ip: string) {
 
 export async function getClientIp() {
   return apiFetch<{ client_ip: string; allowed: boolean }>('/security/check-ip')
-}
-
-export async function togglePublicDownload(enabled?: boolean) {
-  return apiFetch<{ enabled: boolean; message: string }>('/security/public-download', {
-    method: 'POST',
-    body: JSON.stringify(enabled === undefined ? {} : { enabled }),
-  })
 }
 
 export async function getOpenVpnGroup() {

@@ -12,7 +12,6 @@ from app.services.telegram_api import answer_callback_query
 from app.services.telegram_bot_handlers.base import BotContext, resolve_user
 from app.services.telegram_bot_handlers.configs import (
     handle_config,
-    handle_config_callback,
     handle_configs,
 )
 from app.services.telegram_bot_handlers.cidr_status import handle_cidr_status

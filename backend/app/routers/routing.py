@@ -14,7 +14,6 @@ from app.schemas import (
     AntizapretSettingFieldSchema,
     AntizapretSettingsResponse,
     AntizapretSettingsUpdateResponse,
-    MessageResponse,
     RoutingOverview,
 )
 from app.services.antizapret_settings import (

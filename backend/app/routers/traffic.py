@@ -10,14 +10,12 @@ from app.database import get_db
 from app.models import AppSetting, TrafficSessionState, User
 from app.schemas import (
     MessageResponse,
-    TrafficClientRow,
     TrafficClientSessionsResponse,
     TrafficHaContext,
     TrafficNeverConnectedResponse,
     TrafficNeverConnectedRow,
     TrafficNeverConnectedSummary,
     TrafficOverview,
-    TrafficSummary,
 )
 from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node
 from app.models import Node

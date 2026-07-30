@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -13,7 +12,7 @@ from app.middleware.http_security import HttpSecurityMiddleware, build_robots_tx
 from app.middleware.active_session import ActiveSessionMiddleware
 from app.services.security_bootstrap import validate_panel_settings
 from app.database import Base, SessionLocal, engine, run_db_migrations
-from app.cidr_database import CidrBase, cidr_engine, run_cidr_db_migrations
+from app.cidr_database import run_cidr_db_migrations
 from app.models import User, UserRole, VpnConfig, VpnType
 from app.routers import (
     alert_rules,

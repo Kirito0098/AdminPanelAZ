@@ -6,7 +6,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.models import User, VpnConfig, VpnType
+from app.models import User, VpnConfig
 from app.services.feature_guards import get_feature_service
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.traffic_limit import human_bytes

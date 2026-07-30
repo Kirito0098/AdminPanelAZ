@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 
 from app.services.rate_limit.backends import MemoryRateLimitBackend
-from app.services.rate_limit.sliding_window import RateLimitExceeded, SlidingWindowLimiter
+from app.services.rate_limit.sliding_window import SlidingWindowLimiter
 
 # https://core.telegram.org/bots/webhooks#the-short-version
 _TELEGRAM_CIDRS = (

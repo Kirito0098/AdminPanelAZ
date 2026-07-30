@@ -25,7 +25,6 @@ from app.schemas import (
     MessageResponse,
     NocReportPreviewRequest,
     ServiceRestartRequest,
-    TelegramLinkCodeResponse,
     TelegramSettingsResponse,
     TelegramSettingsUpdate,
     VpnNetworkDomainSslStatusResponse,
@@ -70,17 +69,14 @@ from app.services.panel_publish_info import (
 from app.services import ddns_settings as ddns_settings_service
 from app.services.telegram import send_tg_message
 from app.services.telegram_recipients import (
-    filter_notify_recipients,
     get_notify_recipient_user_ids,
     get_setting_chat_ids,
     join_chat_ids,
     join_user_ids,
     parse_chat_ids,
-    parse_user_ids,
     resolve_notify_recipient_users,
 )
 from app.services.telegram_api import delete_webhook_sync, set_webhook_sync
-from app.services.telegram_link import create_link_code
 
 router = APIRouter(tags=["maintenance"])
 

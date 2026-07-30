@@ -1251,15 +1251,9 @@ class AdminNotifyService:
                     time.sleep(60)
                     continue
 
-                cpu_thr = settings.monitor_cpu_threshold
-                ram_thr = settings.monitor_ram_threshold
-                cooldown_min = settings.monitor_cooldown_minutes
-                interval_sec = settings.monitor_check_interval_seconds
-
                 cpu = psutil.cpu_percent(interval=1)
                 ram = psutil.virtual_memory().percent
-                now = datetime.now(timezone.utc)
-                cooldown = timedelta(minutes=cooldown_min)
+                interval_sec = settings.monitor_check_interval_seconds
 
                 db = SessionLocal()
                 try:

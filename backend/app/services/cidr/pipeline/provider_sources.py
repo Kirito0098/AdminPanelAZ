@@ -1,5 +1,4 @@
 """Provider URLs, region scopes, and DPI maps."""
-import os
 import re
 
 PROVIDER_SOURCES = {
