@@ -82,10 +82,6 @@ GitHub для этого не нужен.
 
 | Тема | Папка |
 |------|-------|
-| NOC Ops (инциденты, SSE, rate, история, действия, фильтры, health, freshness, source badge, HA) | [plans/noc-ops/](plans/noc-ops/) |
-| Видимость VPN-профилей для пользователей (default + per-user, спека и промпты) | [plans/vpn-profile-visibility/](plans/vpn-profile-visibility/) |
-| Консолидация роли Пользователь / удаление viewer (ACL, can_create) | [plans/user-role-consolidation/](plans/user-role-consolidation/) |
-| Упрощение установщика: HTTP по умолчанию, удаление easy | [plans/simplify-installer-http-default/](plans/simplify-installer-http-default/) — **реализовано в 2.18.0** |
 | Несколько адресов подключения OpenVPN (multi-remote, RU-прокси + N серверов) | [plans/multi-remote-hosts/](plans/multi-remote-hosts/) — **план** |
 
 ---
