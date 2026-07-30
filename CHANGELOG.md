@@ -44,15 +44,55 @@
 
 ## [Unreleased]
 
+> **Черновик ветки `wip/cleanup-unused-ui`:** крупная чистка мёртвого кода (~80 файлов, ≈ −2.7k строк) — orphan UI/API без потребителей в текущей панели. Поведение экранов не менялось: убрано то, что уже не вызывалось из UI или было заменено (HA «Синхронизировать», PNG вместо PDF для NOC и т.п.).
+
 ### ✨ Added
 
 ### 🔄 Changed
 
+- **Сужение публичного API модулей frontend** — десятки хелперов переведены с `export` на module-private (monitoring geo/ISP, publish-wizard notices, settings nav groups, warper utils, config card prefs/utils, HA helpers и др.): оставляем только то, что реально импортируется страницами.
+- **Feature toggles / кэш** — из модуля мониторинга убраны пути `global-summary` / `nodes-compare`; удалены ключи `GLOBAL_DASHBOARD_CACHE_KEY` / `NODES_COMPARE_CACHE_KEY` (`feature_toggles.py`, `node_remote_cache.py`).
+- **Backend-импорты** — вычищены неиспользуемые импорты по роутерам и сервисам (`auth`, `main`, CIDR pipeline, telegram/*, traffic, reminders и др.).
+- **`POST /backups/test-telegram`** — HTTP-маршрут снят (orphan FE); функция `test_backup_telegram` оставлена для Telegram-бот handlers (`backups.py`).
+- **Resource monitor** — в `_monitor_loop` убраны неиспользуемые локальные `cpu_thr` / `ram_thr` / `cooldown` (алерты по-прежнему через `maybe_send_resource_alert`) (`admin_notify.py`).
+
 ### 🗑️ Removed
+
+#### Frontend — orphan-компоненты и зависимости
+
+- **Dashboard** — `GlobalDashboardSection`, `NodesCompareSection` (сравнение узлов / global summary в UI не подключены).
+- **Nodes / политики по умолчанию** — `NodeDefaultPolicyWizard`, `NodePolicySummarySection`.
+- **Telegram settings** — `TelegramLinkedAdminPicker`, `TelegramLinkedAdminMultiPicker`.
+- **UI kit** — `components/ui/separator.tsx`.
+- **Monitoring** — `ConnectionAddressCell` (таблица-ячейка без потребителей).
+- **npm** — `@radix-ui/react-progress`, `@radix-ui/react-separator`.
+
+#### Frontend — API client и типы
+
+- **`client.ts`** — обёртки без UI: `getGlobalDashboardSummary`, `getNodesCompare`, `getNodePolicySummary`, `getNodeDefaultPolicy` / `updateNodeDefaultPolicy`, `getNodeSyncGroupStatus`, `pushNodeSyncGroupFull`, `setDdnsTimer`, `testNocWeeklyPdfPreview`, `getCidrRollbackBackups`, `testBackupTelegram`, Warper domain/IP add-remove/sync/bulk/`applyWarperUpdate` / `togglePublicDownload` и связанные.
+- **`types.ts`** — `GlobalDashboardSummary`, `NodePolicySummary` / `NodeDefaultPolicy*`, `NodeClientPolicyHint`, `WarperDomainsBulkResponse`.
+- **Хелперы без импортов** — `formatHaSyncTaskSummary` / `Details`, `shouldRedirectToAccessUrl` / `redirectToAccessUrl` / `withAccessPath`, `mergeViewPrefs`, `buttonAccentClasses` / `badgeAccentClasses`, `parseBulkLines`, `domainTypeLabel`, `buildPublish*Notice`, `getVisibleNavItems` и др.
+
+#### Backend — orphan HTTP API
+
+- **Monitoring** — `GET /monitoring/global-summary`, `GET /monitoring/nodes-compare`.
+- **Client access** — `GET /client-access/policy-summary-by-node`, `GET/PUT /client-access/node-defaults/{node_id}`.
+- **HA sync** — `POST /nodes/sync-groups/{id}/push-full` (UI уже на одной кнопке «Синхронизировать» → setup).
+- **Settings** — `POST /settings/vpn-network/ddns/timer`, legacy `POST /settings/admin-notify/test-noc-pdf` (отчёт — PNG).
+- **Backups** — `POST /backups/test-telegram` (см. Changed — функция для бота сохранена).
+- **Telegram Mini** — deprecated `POST /tg-mini/send-config`.
+- **Warper** — `POST /warper/domains/bulk`, `POST /warper/domains/sync`, `POST /warper/ip-ranges/sync`, `POST /warper/updates/apply`.
+
+#### Backend — сервисы и схемы
+
+- **Файлы** — `access_remaining.py`, пример `notify_backend_example.py`.
+- **CIDR file-pipeline** — мёртвые `update_cidr_files` / `estimate_cidr_matches` / `rollback_to_baseline` / `_pool_collect_cidrs` (~370 строк) (`file_pipeline.py`).
+- **Схемы** — `NodeDefaultLimits` / `NodeDefaultPolicy*` / `NodePolicySummary` / `NodeClientPolicyHint`, `DdnsTimerRequest`, `WarperDomainsBulkCreate` / `WarperDomainsBulkResponse` (`schemas.py`).
 
 ### 🐛 Fixed
 
 ---
+
 
 ## [2.19.0] - 2026-07-30
 
