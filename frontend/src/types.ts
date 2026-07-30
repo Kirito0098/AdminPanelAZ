@@ -336,66 +336,6 @@ export interface GeoRoutingHint {
   nodes: GeoRoutingNodeHint[]
 }
 
-export interface NodeClientPolicyHint {
-  client_name: string
-  protocol: string
-  is_blocked?: boolean
-  limit_human?: string | null
-}
-
-export interface NodePolicySummary {
-  node_id: number
-  node_name: string
-  openvpn_policies: number
-  wireguard_policies: number
-  blocked_clients: number
-  traffic_limited_clients: number
-  default_openvpn_limit_human?: string | null
-  default_wireguard_limit_human?: string | null
-  default_route_mode?: string | null
-  client_hints?: NodeClientPolicyHint[]
-}
-
-export interface NodeDefaultLimits {
-  limit_value?: number | null
-  limit_unit?: string | null
-  limit_period_days?: number | null
-  limit_human?: string | null
-  limit_period_label?: string | null
-}
-
-export interface NodeDefaultPolicy {
-  node_id: number
-  node_name: string
-  route_mode?: string | null
-  openvpn: NodeDefaultLimits
-  wireguard: NodeDefaultLimits
-  updated_at?: string | null
-  updated_by?: string | null
-}
-
-export interface NodeDefaultPolicyUpdate {
-  route_mode?: string | null
-  route_clear?: boolean
-  openvpn_limit_value?: number | null
-  openvpn_limit_unit?: string | null
-  openvpn_limit_period_days?: number | null
-  openvpn_clear_limit?: boolean
-  wireguard_limit_value?: number | null
-  wireguard_limit_unit?: string | null
-  wireguard_limit_period_days?: number | null
-  wireguard_clear_limit?: boolean
-}
-
-export interface GlobalDashboardSummary {
-  timestamp: string
-  nodes_summary: MonitoringNodeSummary[]
-  nodes_online?: number
-  nodes_total?: number
-  total_connected_openvpn?: number
-  total_connected_wireguard?: number
-}
-
 export interface MonitoringOverview {
   services: MonitoringService[]
   openvpn_clients: OpenVpnClient[]
@@ -1778,14 +1718,6 @@ export type WarperUpdateStreamEvent =
   | { event: 'log'; line: string }
   | { event: 'done'; return_code?: number; success?: boolean }
   | { event: 'error'; detail?: string }
-
-export interface WarperDomainsBulkResponse {
-  added: string[]
-  added_count: number
-  errors: Array<{ domain: string; error: string }>
-  node_id?: number | null
-  node_name?: string | null
-}
 
 export interface WarperIpRangesResponse {
   ranges: Array<string | Record<string, unknown>>

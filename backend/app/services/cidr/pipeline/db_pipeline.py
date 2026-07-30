@@ -42,7 +42,7 @@ def update_cidr_files_from_db(
 ):
     """Generate CIDR route files by reading provider data from the local DB.
 
-    Unlike update_cidr_files(), this function does NOT download anything —
+    Unlike the legacy file-download pipeline, this function does NOT download anything —
     it relies on data previously loaded by CidrDbUpdaterService.refresh_all_providers().
     """
     from app.cidr_database import CidrSessionLocal

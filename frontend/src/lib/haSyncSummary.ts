@@ -458,17 +458,3 @@ export function parseHaSyncTaskResult(
   }
 }
 
-export function formatHaSyncTaskSummary(task: BackgroundTask | null | undefined): string | null {
-  return parseHaSyncTaskResult(task)?.title ?? task?.message?.trim() ?? null
-}
-
-export function formatHaSyncTaskDetails(task: BackgroundTask | null | undefined): string[] {
-  const result = parseHaSyncTaskResult(task)
-  if (!result) return []
-  return result.sections.flatMap((section) =>
-    section.items.map((item) => {
-      const details = item.details?.length ? ` — ${item.details.join('; ')}` : ''
-      return `${item.nodeName}: ${item.text}${details}`
-    }),
-  )
-}

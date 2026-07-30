@@ -158,7 +158,7 @@ export function pluralFiles(count: number): string {
 
 const BACKUP_STAMP_RE = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/
 
-export function parseBackupDate(stamp: string, mtime?: number): Date | null {
+function parseBackupDate(stamp: string, mtime?: number): Date | null {
   if (mtime != null && mtime > 0) {
     return new Date(mtime * 1000)
   }

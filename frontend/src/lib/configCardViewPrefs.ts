@@ -179,7 +179,7 @@ const accentBadgeClasses: Record<Exclude<CardButtonAccent, 'default'>, string> =
   red: 'border-destructive/35 bg-destructive/10 text-destructive',
 }
 
-export const CUSTOM_ACCENT_HOVER_CLASS = 'hover:[background-color:var(--card-accent-bg)]'
+const CUSTOM_ACCENT_HOVER_CLASS = 'hover:[background-color:var(--card-accent-bg)]'
 
 export interface AccentPresentation {
   className?: string
@@ -237,16 +237,6 @@ export function resolveBadgeAccent(prefs: ConfigCardViewPrefs): AccentPresentati
   return { className: accentBadgeClasses[prefs.buttonAccent] }
 }
 
-export function buttonAccentClasses(accent: CardButtonAccent): string | undefined {
-  if (accent === 'default' || accent === 'custom') return undefined
-  return accentButtonClasses[accent]
-}
-
-export function badgeAccentClasses(accent: CardButtonAccent): string | undefined {
-  if (accent === 'default' || accent === 'custom') return undefined
-  return accentBadgeClasses[accent]
-}
-
 export const FIELD_LABELS: Record<keyof ConfigCardFieldVisibility, string> = {
   description: 'Описание',
   tags: 'Теги и HA',
@@ -278,21 +268,6 @@ export const GRID_COLS_OPTIONS: { value: CardGridCols; label: string }[] = [
   { value: '3', label: '3' },
   { value: '4', label: '4' },
 ]
-
-export function mergeViewPrefs(partial: Partial<ConfigCardViewPrefs>): ConfigCardViewPrefs {
-  return {
-    ...DEFAULT_CONFIG_CARD_VIEW_PREFS,
-    ...partial,
-    fields: {
-      ...DEFAULT_CONFIG_CARD_VIEW_PREFS.fields,
-      ...partial.fields,
-    },
-    customButtonColor:
-      partial.customButtonColor && isValidHexColor(partial.customButtonColor)
-        ? normalizeHexColor(partial.customButtonColor)!
-        : partial.customButtonColor ?? DEFAULT_CONFIG_CARD_VIEW_PREFS.customButtonColor,
-  }
-}
 
 export function isMetaKeyVisible(
   key: string,

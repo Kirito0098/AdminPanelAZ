@@ -1,6 +1,4 @@
-import { MapPin } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { TableCell } from '@/components/ui/table'
 import type { OpenVpnClient, WireGuardPeer } from '@/types'
 
 export function getConnectionDisplayAddress(
@@ -24,7 +22,7 @@ export function getConnectionGeoLabel(
 
 type GeoConnection = Pick<OpenVpnClient, 'city' | 'location_label' | 'isp' | 'country'>
 
-export function getConnectionCity(item: GeoConnection): string | null {
+function getConnectionCity(item: GeoConnection): string | null {
   if (item.city?.trim()) return item.city.trim()
   if (item.location_label?.trim()) {
     const [first] = item.location_label.split(',')
@@ -33,7 +31,7 @@ export function getConnectionCity(item: GeoConnection): string | null {
   return null
 }
 
-export function getConnectionIsp(item: GeoConnection): string | null {
+function getConnectionIsp(item: GeoConnection): string | null {
   const raw = item.isp?.trim()
   return raw ? normalizeIspName(raw) : null
 }
@@ -50,7 +48,7 @@ const ISP_CANONICAL_RULES: Array<[RegExp, string]> = [
 ]
 
 /** Collapse ip-api ISP variants (T2/Tele2, MTS PJSC, …) for chart grouping. */
-export function normalizeIspName(isp: string): string {
+function normalizeIspName(isp: string): string {
   const trimmed = isp.trim()
   if (!trimmed) return trimmed
 
@@ -131,26 +129,6 @@ export function collectMonitoringGeoConnections(
   }
 
   return items
-}
-
-type ConnectionAddressCellProps = {
-  displayAddress?: string | null
-  fallback?: string | null
-  geoLabel?: string | null
-}
-
-export function ConnectionAddressCell({ displayAddress, fallback, geoLabel }: ConnectionAddressCellProps) {
-  return (
-    <TableCell>
-      <div className="font-mono text-xs">{displayAddress || fallback || '—'}</div>
-      {geoLabel && (
-        <div className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-          <MapPin size={11} className="shrink-0" />
-          {geoLabel}
-        </div>
-      )}
-    </TableCell>
-  )
 }
 
 export function NodeScopeBadge({ nodeName }: { nodeName?: string | null }) {

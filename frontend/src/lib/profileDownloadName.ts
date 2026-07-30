@@ -31,7 +31,7 @@ function openvpnSuffix(variant: string, path: string): string {
   return ''
 }
 
-export function buildProfileDownloadFilename(
+function buildProfileDownloadFilename(
   clientName: string,
   file: Pick<ProfileFile, 'protocol' | 'variant' | 'path'>,
 ): string {

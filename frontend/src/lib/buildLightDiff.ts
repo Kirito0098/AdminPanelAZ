@@ -160,9 +160,3 @@ export function countDiffOps(ops: DiffOp[]): DiffCounts {
   return { added, removed }
 }
 
-export function formatDiffSummary(counts: DiffCounts): string {
-  if (!counts.added && !counts.removed) {
-    return 'Нет отличий от сохранённой версии'
-  }
-  return `Добавлено: ${counts.added}, удалено: ${counts.removed}`
-}

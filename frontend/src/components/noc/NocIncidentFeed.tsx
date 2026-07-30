@@ -10,12 +10,6 @@ type NocIncidentFeedProps = {
   items: NocIncidentItem[]
 }
 
-function severityVariant(severity: NocIncidentItem['severity']): 'danger' | 'warning' | 'info' {
-  if (severity === 'danger') return 'danger'
-  if (severity === 'warning') return 'warning'
-  return 'info'
-}
-
 export default function NocIncidentFeed({ items }: NocIncidentFeedProps) {
   if (!items.length) return null
 
@@ -63,4 +57,3 @@ export default function NocIncidentFeed({ items }: NocIncidentFeedProps) {
   )
 }
 
-export { severityVariant }

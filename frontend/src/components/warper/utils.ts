@@ -28,13 +28,6 @@ export function formatBytes(value: number): string {
   return `${size < 10 && unit > 0 ? size.toFixed(1) : Math.round(size)}\u00A0${units[unit]}`
 }
 
-export function parseBulkLines(text: string): string[] {
-  return text
-    .split(/[\n,;]+/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-}
-
 export function countActiveTextLines(text: string): number {
   return text
     .split('\n')
@@ -67,7 +60,7 @@ export function buildIpRangesTextFromItems(ranges: Array<string | Record<string,
   return lines.length ? `${lines.join('\n')}\n` : ''
 }
 
-export function cidrLabel(item: string | Record<string, unknown>): string {
+function cidrLabel(item: string | Record<string, unknown>): string {
   if (typeof item === 'string') return item
   const cidr = item.cidr ?? item.range ?? item.network
   return typeof cidr === 'string' ? cidr : ''
@@ -83,19 +76,6 @@ export function formatOutboundMode(mode: string | null | undefined): string {
       return 'WireGuard'
     default:
       return mode ?? '—'
-  }
-}
-
-export function domainTypeLabel(type: string | undefined): string {
-  switch (type) {
-    case 'gemini':
-      return 'Gemini'
-    case 'chatgpt':
-      return 'ChatGPT'
-    case 'user':
-      return 'Свой'
-    default:
-      return type ?? '—'
   }
 }
 

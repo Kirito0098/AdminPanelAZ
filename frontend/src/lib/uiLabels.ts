@@ -34,7 +34,6 @@ export const COL_CONNECTED_SINCE = 'Подключён с'
 export const HA_PRIMARY = 'Основной'
 export const HA_REPLICA = 'Реплика'
 export const HA_PUSH_FULL = 'Полная синхронизация'
-export const HA_AUTO_SYNC_TITLE = 'Авто-синхронизация HA'
 
 /** Telegram / уведомления. */
 export const LABEL_TELEGRAM_ID = 'ID Telegram'

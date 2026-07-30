@@ -467,57 +467,6 @@ class GeoRoutingHintResponse(BaseModel):
     nodes: list[GeoRoutingNodeHint] = Field(default_factory=list)
 
 
-class NodeDefaultLimits(BaseModel):
-    limit_value: float | None = None
-    limit_unit: str | None = None
-    limit_period_days: int | None = None
-    limit_human: str | None = None
-    limit_period_label: str | None = None
-
-
-class NodeDefaultPolicyResponse(BaseModel):
-    node_id: int
-    node_name: str
-    route_mode: str | None = None
-    openvpn: NodeDefaultLimits = Field(default_factory=NodeDefaultLimits)
-    wireguard: NodeDefaultLimits = Field(default_factory=NodeDefaultLimits)
-    updated_at: datetime | None = None
-    updated_by: str | None = None
-
-
-class NodeDefaultPolicyUpdate(BaseModel):
-    route_mode: str | None = None
-    route_clear: bool = False
-    openvpn_limit_value: float | None = Field(default=None, gt=0)
-    openvpn_limit_unit: str | None = "GB"
-    openvpn_limit_period_days: int | None = None
-    openvpn_clear_limit: bool = False
-    wireguard_limit_value: float | None = Field(default=None, gt=0)
-    wireguard_limit_unit: str | None = "GB"
-    wireguard_limit_period_days: int | None = None
-    wireguard_clear_limit: bool = False
-
-
-class NodeClientPolicyHint(BaseModel):
-    client_name: str
-    protocol: str
-    is_blocked: bool = False
-    limit_human: str | None = None
-
-
-class NodePolicySummary(BaseModel):
-    node_id: int
-    node_name: str
-    openvpn_policies: int = 0
-    wireguard_policies: int = 0
-    blocked_clients: int = 0
-    traffic_limited_clients: int = 0
-    default_openvpn_limit_human: str | None = None
-    default_wireguard_limit_human: str | None = None
-    default_route_mode: str | None = None
-    client_hints: list[NodeClientPolicyHint] = Field(default_factory=list)
-
-
 class GlobalDashboardSummary(BaseModel):
     timestamp: datetime
     nodes_summary: list[MonitoringNodeSummary] = Field(default_factory=list)
@@ -1110,10 +1059,6 @@ class DdnsSettingsUpdateRequest(BaseModel):
     run_update: bool = True
 
 
-class DdnsTimerRequest(BaseModel):
-    enabled: bool
-
-
 class DdnsActionResponse(BaseModel):
     message: str
     output: str | None = None
@@ -1432,18 +1377,6 @@ class WarperActionResponse(BaseModel):
 
     message: str | None = None
     success: bool | None = None
-    node_id: int | None = None
-    node_name: str | None = None
-
-
-class WarperDomainsBulkCreate(BaseModel):
-    domains: list[str] = Field(default_factory=list)
-
-
-class WarperDomainsBulkResponse(BaseModel):
-    added: list[str] = Field(default_factory=list)
-    added_count: int = 0
-    errors: list[dict[str, str]] = Field(default_factory=list)
     node_id: int | None = None
     node_name: str | None = None
 

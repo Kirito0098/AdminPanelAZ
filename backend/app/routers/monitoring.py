@@ -15,7 +15,6 @@ from app.schemas import (
     ConnectionHistoryPoint,
     ConnectionHistoryResponse,
     DashboardSummary,
-    GlobalDashboardSummary,
     MonitoringOverview,
     NocIncidentsResponse,
     PanelResourceCurrentResponse,
@@ -28,7 +27,6 @@ from app.services.connection_history import VALID_PERIODS as CONNECTION_VALID_PE
 from app.services.connection_history import query_connection_history
 from app.services.monitoring_overview import (
     build_federated_monitoring_overview,
-    build_global_dashboard_summary,
     build_monitoring_overview,
 )
 from app.services.noc_incidents import build_noc_incidents
@@ -36,8 +34,6 @@ from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.wireguard_status import wireguard_peer_is_online
 from app.services.node_remote_cache import (
     FEDERATED_OVERVIEW_CACHE_KEY,
-    GLOBAL_DASHBOARD_CACHE_KEY,
-    NODES_COMPARE_CACHE_KEY,
     get_cached_monitoring_overview,
 )
 from app.services.panel_resource_collector import collect_panel_metrics
@@ -81,47 +77,6 @@ def _build_monitoring_overview(
         )
         return _mark_cache_hit(overview, from_cache and not bypass_cache)
     return build_monitoring_overview(db)
-
-
-@router.get("/global-summary", response_model=GlobalDashboardSummary)
-def global_dashboard_summary(
-    _: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    try:
-        ttl = _monitoring_cache_ttl()
-        overview, _from_cache = get_cached_monitoring_overview(
-            GLOBAL_DASHBOARD_CACHE_KEY,
-            ttl,
-            lambda: build_global_dashboard_summary(db),
-        )
-        return overview
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка сборки global dashboard: {exc}",
-        ) from exc
-
-
-@router.get("/nodes-compare", response_model=GlobalDashboardSummary)
-def nodes_compare(
-    _: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Side-by-side compare metrics for all nodes (same payload as global-summary)."""
-    try:
-        ttl = _monitoring_cache_ttl()
-        overview, _from_cache = get_cached_monitoring_overview(
-            NODES_COMPARE_CACHE_KEY,
-            ttl,
-            lambda: build_global_dashboard_summary(db),
-        )
-        return overview
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка сборки сравнения узлов: {exc}",
-        ) from exc
 
 
 @router.get("/overview", response_model=MonitoringOverview)

@@ -71,7 +71,7 @@ function navItem(
   }
 }
 
-export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
+const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
   {
     label: 'Личное',
     description: 'Только ваш аккаунт',
@@ -144,14 +144,6 @@ export function getVisibleNavGroups(
       isNavItemVisible(item, group, isAdmin, isTabEnabled, isModuleEnabled),
     ),
   })).filter((group) => group.items.length > 0)
-}
-
-export function getVisibleNavItems(
-  isAdmin: boolean,
-  isTabEnabled: (tab: string) => boolean,
-  isModuleEnabled: (key: string) => boolean = () => true,
-): SettingsNavItem[] {
-  return getVisibleNavGroups(isAdmin, isTabEnabled, isModuleEnabled).flatMap((group) => group.items)
 }
 
 export function getDefaultSection(_isAdmin: boolean): SettingsSection {

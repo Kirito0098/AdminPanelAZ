@@ -1,6 +1,6 @@
 import type { Node, NodeHaContext, NodeSyncGroup } from '@/types'
 
-export const HA_GROUP_SCOPE_PREFIXES = [
+const HA_GROUP_SCOPE_PREFIXES = [
   '/traffic',
   '/routing',
   '/antizapret',
@@ -8,7 +8,7 @@ export const HA_GROUP_SCOPE_PREFIXES = [
   '/settings',
 ] as const
 
-export function normalizePathname(pathname: string): string {
+function normalizePathname(pathname: string): string {
   if (!pathname || pathname === '/') return '/'
   return pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
 }

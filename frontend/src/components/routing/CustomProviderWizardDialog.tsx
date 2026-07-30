@@ -5,7 +5,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import type { CidrProviderInfo } from '@/types'
 
-export const CUSTOM_PROVIDER_FILENAME = 'custom-ips.txt'
+const CUSTOM_PROVIDER_FILENAME = 'custom-ips.txt'
 
 type WizardMode = 'custom' | 'existing'
 

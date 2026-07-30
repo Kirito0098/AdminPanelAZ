@@ -6,7 +6,7 @@ export const MONITORING_PROTOCOL_COLORS = {
   total: 'hsl(217, 33%, 55%)',
 } as const
 
-export const MONITORING_SLICE_COLORS = [
+const MONITORING_SLICE_COLORS = [
   MONITORING_PROTOCOL_COLORS.openvpn,
   MONITORING_PROTOCOL_COLORS.wireguard,
   MONITORING_PROTOCOL_COLORS.total,

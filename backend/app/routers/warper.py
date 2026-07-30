@@ -21,8 +21,6 @@ from app.schemas import (
     WarperDomainCreate,
     WarperDomainListsStatus,
     WarperDomainListToggle,
-    WarperDomainsBulkCreate,
-    WarperDomainsBulkResponse,
     WarperDomainsResponse,
     WarperFullVpnUpdate,
     WarperHealthResponse,
@@ -127,18 +125,6 @@ def warper_domains_add(
     return _action_response(adapter.add_warper_domain(payload.domain), node)
 
 
-@router.post("/domains/bulk", response_model=WarperDomainsBulkResponse)
-def warper_domains_bulk(
-    payload: WarperDomainsBulkCreate,
-    _: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    adapter = get_active_adapter(db)
-    node = get_active_node(db)
-    result = adapter.add_warper_domains_bulk(payload.domains)
-    return WarperDomainsBulkResponse(**result, **_node_meta(node))
-
-
 @router.post("/domains/lists/{name}", response_model=WarperActionResponse)
 def warper_domains_list_toggle(
     name: str,
@@ -178,13 +164,6 @@ def warper_domains_remove(
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     return _action_response(adapter.remove_warper_domain(domain), node)
-
-
-@router.post("/domains/sync", response_model=WarperActionResponse)
-def warper_domains_sync(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    adapter = get_active_adapter(db)
-    node = get_active_node(db)
-    return _action_response(adapter.sync_warper_domains(), node)
 
 
 @router.get("/ip-ranges", response_model=WarperIpRangesResponse)
@@ -236,13 +215,6 @@ def warper_ip_ranges_remove(
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     return _action_response(adapter.remove_warper_ip_range(cidr), node)
-
-
-@router.post("/ip-ranges/sync", response_model=WarperActionResponse)
-def warper_ip_ranges_sync(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    adapter = get_active_adapter(db)
-    node = get_active_node(db)
-    return _action_response(adapter.sync_warper_ip_ranges(), node)
 
 
 @router.post("/ip-ranges/mode", response_model=WarperActionResponse)
@@ -487,17 +459,6 @@ def warper_updates_check(
     node = get_active_node(db)
     data = adapter.warper_check_for_updates(force=force)
     return WarperUpdatesCheckResponse(**data, **_node_meta(node))
-
-
-@router.post("/updates/apply", response_model=WarperActionResponse)
-def warper_updates_apply(
-    timeout: int = Query(600, ge=60, le=900),
-    _: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    adapter = get_active_adapter(db)
-    node = get_active_node(db)
-    return _action_response(adapter.warper_apply_update(timeout=timeout), node)
 
 
 def _admin_from_stream_token(token: str, db: Session) -> User:
