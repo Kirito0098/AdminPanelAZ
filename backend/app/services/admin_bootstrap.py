@@ -29,7 +29,6 @@ def scrub_admin_bootstrap_secret_from_env(
     settings: Settings | None = None,
 ) -> bool:
     """Remove plaintext bootstrap password from .env once it lives in the database."""
-    cfg = settings or get_settings()
     path = env_path or resolve_backend_env_path()
     svc = EnvFileService(path)
     current = svc.get_env_value(_ENV_ADMIN_PASSWORD_KEY, "__missing__")

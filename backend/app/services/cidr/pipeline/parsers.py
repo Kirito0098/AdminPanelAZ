@@ -1,7 +1,6 @@
 """CIDR parsing and normalization."""
 import ipaddress
 import json
-import re
 from datetime import datetime, timezone
 
 from app.services.cidr.pipeline.constants import (

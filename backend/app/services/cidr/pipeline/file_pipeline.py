@@ -124,8 +124,6 @@ def update_cidr_files(
     failed = []
     skipped = []
 
-    total_files = len(normalized)
-
     # Phase 1: resolve which files to download and their effective scopes
     download_jobs = []  # [(file_name, sources, effective_scopes)]
     for file_name in normalized:

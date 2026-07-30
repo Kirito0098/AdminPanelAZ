@@ -16,7 +16,7 @@ from typing import Any
 from app.cidr_database import resolve_cidr_db_path
 from app.database import apply_sqlite_connection_pragmas
 from app.config import get_settings
-from app.paths import BACKEND_ROOT, resolve_backend_path
+from app.paths import resolve_backend_path
 
 logger = logging.getLogger(__name__)
 

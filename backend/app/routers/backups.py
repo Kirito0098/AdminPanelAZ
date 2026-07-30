@@ -31,7 +31,7 @@ from app.services.node_manager import get_active_adapter
 from app.services.node_update import resolve_repo_root
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.system_update import RESTART_DELAY_SECONDS, restart_controller
-from app.services.telegram import send_tg_document, send_tg_message
+from app.services.telegram import send_tg_document
 from app.services.telegram_recipients import get_setting_chat_ids
 
 router = APIRouter(prefix="/backups", tags=["backups"])

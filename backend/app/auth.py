@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import User, UserRole
-from app.schemas import Token
 
 # bcrypt accepts at most 72 bytes; passlib historically truncated — keep that behaviour
 # so existing hashes and long passwords remain verifiable under bcrypt 5.x.

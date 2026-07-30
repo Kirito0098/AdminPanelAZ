@@ -1,7 +1,7 @@
 """Traffic time-series chart data (ported from AdminAntizapret)."""
 
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 

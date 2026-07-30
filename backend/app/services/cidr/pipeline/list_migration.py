@@ -2,7 +2,6 @@
 
 import logging
 import shutil
-from pathlib import Path
 
 from app.paths import BACKEND_ROOT, get_cidr_list_dir
 

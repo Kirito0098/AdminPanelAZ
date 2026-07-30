@@ -287,7 +287,6 @@ def update_retention_settings(
     admin: User = Depends(require_admin),
 ):
     env_service = EnvFileService(ENV_FILE)
-    cfg = load_app_config()
 
     if payload.enabled is not None:
         env_service.set_env_value("RETENTION_ENABLED", "true" if payload.enabled else "false")

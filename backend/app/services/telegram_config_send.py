@@ -6,7 +6,7 @@ import os
 import tempfile
 from typing import Literal
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.models import User, VpnConfig, VpnType
 from app.services.node_manager import get_active_adapter

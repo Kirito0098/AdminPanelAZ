@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus
+from app.models import Node, NodeStatus, NodeSyncGroup
 from app.services.node_adapter import NodeAdapter
 from app.services.node_manager import check_node_health, get_adapter_for_node, update_node_from_health
 from app.services.node_sync.fingerprints import CONFIG_FP_PREFIX

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -19,7 +18,6 @@ from app.services.node_manager import get_adapter_for_node, node_metadata_dict
 from app.services.openvpn_cert import days_remaining_until
 from app.services.self_service import record_reminder_sent, reminder_recently_sent, self_service_reminder_enabled
 from app.services.telegram import send_tg_message
-from app.services.traffic_limit import human_bytes
 
 logger = logging.getLogger(__name__)
 

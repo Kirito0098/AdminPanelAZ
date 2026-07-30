@@ -7,15 +7,12 @@ Web UI then reads from DB when generating the final CIDR .txt files.
 import json
 import logging
 import os
-import re
 import threading
 import time
 from copy import deepcopy
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from urllib import request
-from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -32,20 +29,16 @@ def _get_models():
 
 
 from app.services.cidr.pipeline.download import _download_text as _download_cidr_text
-from app.services.cidr.pipeline.parsers import _extract_bgp_tools_ipv4, _normalize_single_cidr
 
 # Парсинг CIDR/ASN вынесен в db_extract.py; имена реэкспортируются для совместимости
 # (db_service.ASN_TOKEN_PATTERN, db_service._extract_cidrs_with_meta и т.д.).
 from app.services.cidr.pipeline.db_extract import (  # noqa: E402
-    ASN_TOKEN_PATTERN,
-    SOURCE_NAME_ASN_PATTERN,
     _extract_asns_from_source_name,
     _extract_asns_from_sources,
     _extract_asns_from_text,
     _extract_asns_from_url,
     _extract_cidrs_with_meta,
     _normalize_asn,
-    _normalize_country_code,
 )
 
 RIPE_ANNOUNCED_PREFIXES_URL = "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS{asn}"
@@ -1671,7 +1664,6 @@ class CidrDbUpdaterService:
             }
 
         m = _get_models()
-        now = datetime.now(timezone.utc)
         cidrs_added = 0
 
         if deduped_cidrs:
