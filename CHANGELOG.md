@@ -48,10 +48,14 @@
 
 ### ✨ Added
 
+- **Отдельный feature toggle «Конфиг AntiZapret»** — модуль `antizapret_config` (`FEATURE_ANTIZAPRET_CONFIG_ENABLED`): меню `/antizapret`, guard роута и API `GET/PUT /routing/antizapret-settings` независимы от «Маршрутизация / CIDR». По умолчанию включён; профили ресурсов minimal/standard/full учитывают новый ключ. Apply (`POST /routing/apply`) доступен, если включён любой из модулей `routing` или `antizapret_config` (`feature_toggles.py`, `Layout.tsx`, `App.tsx`, `PROJECT_MAP.md`).
+  - По запросу [«Разделение блоков»](https://claymore0098.fider.io/posts/4/razdelenie-blokov) (Fider), **Tiger144**.
+
 ### 🔄 Changed
 
 - **Сужение публичного API модулей frontend** — десятки хелперов переведены с `export` на module-private (monitoring geo/ISP, publish-wizard notices, settings nav groups, warper utils, config card prefs/utils, HA helpers и др.): оставляем только то, что реально импортируется страницами.
 - **Feature toggles / кэш** — из модуля мониторинга убраны пути `global-summary` / `nodes-compare`; удалены ключи `GLOBAL_DASHBOARD_CACHE_KEY` / `NODES_COMPARE_CACHE_KEY` (`feature_toggles.py`, `node_remote_cache.py`).
+- **«Маршрутизация» больше не включает «Конфиг AntiZapret»** — `FEATURE_ROUTING_ENABLED` управляет только `/routing` и CIDR API; описание и `disable_hint` обновлены (`feature_toggles.py`).
 - **Backend-импорты** — вычищены неиспользуемые импорты по роутерам и сервисам (`auth`, `main`, CIDR pipeline, telegram/*, traffic, reminders и др.).
 - **`POST /backups/test-telegram`** — HTTP-маршрут снят (orphan FE); функция `test_backup_telegram` оставлена для Telegram-бот handlers (`backups.py`).
 - **Resource monitor** — в `_monitor_loop` убраны неиспользуемые локальные `cpu_thr` / `ram_thr` / `cooldown` (алерты по-прежнему через `maybe_send_resource_alert`) (`admin_notify.py`).
@@ -91,10 +95,12 @@
 
 ### 🐛 Fixed
 
+- **Отключение маршрутизации больше не скрывает «Конфиг AntiZapret»** — раньше один toggle `routing` закрывал оба раздела UI и связанные API; теперь их можно включать/выключать по отдельности (см. Added / Changed; запрос [Fider #4](https://claymore0098.fider.io/posts/4/razdelenie-blokov) от **Tiger144**).
 - **Новый клиент наследовал трафик удалённого тёзки** — расход считается по `common_name`, поэтому клиент, созданный под именем ранее удалённого, сразу получал его накопленные байты и мог упереться в лимит трафика в момент создания. При создании клиента остаточная статистика по этому имени на узле удаляется (`purge_traffic_history_for_reused_name`); имя, занятое другой конфигурацией того же клиента (например, второй протокол), не затрагивается (`traffic/maintenance.py`, `configs.py`, `client_templates.py`, `config_csv_ops.py`).
 
 ### 🧪 Tests
 
+- **Разделение `routing` / `antizapret_config`** — `test_feature_toggles_routing_split.py`: реестр путей, независимое отключение модулей, guard API settings/apply/overview.
 - **Повторное использование имени клиента** — `test_traffic_history_reuse.py`: очистка остаточной статистики, нулевой расход у нового клиента, сохранение истории при занятом имени, регистронезависимое сопоставление, изоляция по узлам.
 
 ---
