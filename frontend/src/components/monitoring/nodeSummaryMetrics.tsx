@@ -3,14 +3,14 @@ import { Progress } from '@/components/ui/progress'
 import { metricBarClass } from '@/lib/metricColors'
 import { cn } from '@/lib/utils'
 
-export function healthBadgeVariant(level?: string): 'success' | 'warning' | 'destructive' | 'outline' {
+function healthBadgeVariant(level?: string): 'success' | 'warning' | 'destructive' | 'outline' {
   if (level === 'critical') return 'destructive'
   if (level === 'warn') return 'warning'
   if (level === 'ok') return 'success'
   return 'outline'
 }
 
-export function formatMetricPercent(value?: number | null) {
+function formatMetricPercent(value?: number | null) {
   if (value == null || Number.isNaN(value)) return '—'
   return `${value.toFixed(1)}%`
 }

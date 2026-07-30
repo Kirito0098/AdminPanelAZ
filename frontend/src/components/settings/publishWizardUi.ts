@@ -15,7 +15,7 @@ function domainHost(domain: string): string {
   return domain.trim().split(':')[0]
 }
 
-export function formatPublicHttpsHost(host: string, httpsPublicPort: string | number): string {
+function formatPublicHttpsHost(host: string, httpsPublicPort: string | number): string {
   const trimmed = host.trim().split(':')[0]
   if (!trimmed) return ''
   const port = Number(httpsPublicPort)
@@ -115,7 +115,7 @@ export function guessPublishAccessUrl(
   return undefined
 }
 
-export function filterPublishWarningsForMode(mode: string, warnings: string[]): string[] {
+function filterPublishWarningsForMode(mode: string, warnings: string[]): string[] {
   if (mode.startsWith('nginx_') || mode === 'http_direct') {
     return []
   }
@@ -400,17 +400,9 @@ export function publishAddressHint(
 export const PUBLISH_RESTART_WAIT_NOTICE =
   'Если страница не откроется сразу, подождите до 5 минут — сервис, скорее всего, перезапускается.'
 
-export function buildPublishCompleteNotice(accessUrl?: string | null): string {
-  const url = accessUrl?.trim()
-  if (url) {
-    return `Перейдите по адресу: ${url}. ${PUBLISH_RESTART_WAIT_NOTICE}`
-  }
-  return PUBLISH_RESTART_WAIT_NOTICE
-}
+const PUBLISH_PATH_MOVED_TOAST = `Панель переезжает на новый адрес. ${PUBLISH_RESTART_WAIT_NOTICE}`
 
-export const PUBLISH_PATH_MOVED_TOAST = `Панель переезжает на новый адрес. ${PUBLISH_RESTART_WAIT_NOTICE}`
-
-export function isLikelyPublishPathMovedPollError(
+function isLikelyPublishPathMovedPollError(
   message: string,
   expectedAccessUrl?: string | null,
 ): boolean {
@@ -440,14 +432,6 @@ export function isPublishPathMovedPollMessage(
   if (message === PUBLISH_PATH_MOVED_TOAST) return !!expectedAccessUrl?.trim()
   if (message.includes(PUBLISH_RESTART_WAIT_NOTICE)) return !!expectedAccessUrl?.trim()
   return isLikelyPublishPathMovedPollError(message, expectedAccessUrl)
-}
-
-export function buildPublishPollBusyNotice(accessUrl?: string | null): string {
-  const url = accessUrl?.trim()
-  if (url) {
-    return `Панель доступна по адресу: ${url}. ${PUBLISH_RESTART_WAIT_NOTICE}`
-  }
-  return PUBLISH_PATH_MOVED_TOAST
 }
 
 export const PUBLISH_START_LOST_CONNECTION_NOTICE =
@@ -483,14 +467,6 @@ export function publishConflictTaskId(err: unknown): string | null {
   }
   const taskId = (err.payload as { active_task_id?: unknown }).active_task_id
   return typeof taskId === 'string' && taskId.trim() ? taskId.trim() : null
-}
-
-export function buildPublishStartedNotice(accessUrl?: string | null): string {
-  const url = accessUrl?.trim()
-  if (url) {
-    return `Публикация запущена. Перейдите по адресу: ${url}. ${PUBLISH_RESTART_WAIT_NOTICE}`
-  }
-  return `Публикация запущена. ${PUBLISH_RESTART_WAIT_NOTICE}`
 }
 
 export function isPublishTransientRestartError(err: unknown, message: string): boolean {

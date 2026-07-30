@@ -24,13 +24,13 @@ export function isVpnProfile(file: ProfileFile): boolean {
   return VPN_PROFILE_DIR.test(file.path)
 }
 
-export function profileProtocolForTab(tab: ProtocolTab): ProfileFile['protocol'] {
+function profileProtocolForTab(tab: ProtocolTab): ProfileFile['protocol'] {
   if (tab === 'openvpn') return 'openvpn'
   if (tab === 'amneziawg') return 'amneziawg'
   return 'wireguard'
 }
 
-export function profileFilesForTab(config: VpnConfig, tab: ProtocolTab): ProfileFile[] {
+function profileFilesForTab(config: VpnConfig, tab: ProtocolTab): ProfileFile[] {
   if (tab === 'openvpn') {
     return config.profile_files.filter((file) => file.protocol === 'openvpn')
   }
@@ -64,7 +64,7 @@ export function protocolLabel(tab: ProtocolTab): string {
   return 'WireGuard'
 }
 
-export function hasProtocolProfiles(config: VpnConfig, protocol: 'amneziawg' | 'wireguard' | 'openvpn'): boolean {
+function hasProtocolProfiles(config: VpnConfig, protocol: 'amneziawg' | 'wireguard' | 'openvpn'): boolean {
   if (!config.profile_files?.length) return false
   return config.profile_files.some((file) => file.protocol === protocol)
 }
@@ -76,7 +76,7 @@ export function configMatchesTab(config: VpnConfig, tab: ProtocolTab): boolean {
   return hasProtocolProfiles(config, 'wireguard')
 }
 
-export function parseAccessExpiresAt(value?: string | null): Date | null {
+function parseAccessExpiresAt(value?: string | null): Date | null {
   if (!value) return null
   const raw = value.trim()
   if (!raw) return null
@@ -89,7 +89,7 @@ export function parseAccessExpiresAt(value?: string | null): Date | null {
   return Number.isNaN(parsed) ? null : new Date(parsed)
 }
 
-export function formatAccessRemaining(accessExpiresAt?: string | null): string | null {
+function formatAccessRemaining(accessExpiresAt?: string | null): string | null {
   const expiresAt = parseAccessExpiresAt(accessExpiresAt)
   if (!expiresAt) return null
 
@@ -107,7 +107,7 @@ export function formatAccessRemaining(accessExpiresAt?: string | null): string |
   return 'менее минуты'
 }
 
-export function formatDateShort(value?: string | null): string {
+function formatDateShort(value?: string | null): string {
   if (!value) return 'не ограничено'
   const d = parseAccessExpiresAt(value)
   if (!d) return value.split(' ')[0] || value
@@ -246,7 +246,7 @@ export function matchesFilter(
   return true
 }
 
-export function isConfigBlocked(policy?: ClientAccessPolicy): boolean {
+function isConfigBlocked(policy?: ClientAccessPolicy): boolean {
   if (!policy) return false
   if (policy.is_blocked) return true
   const blockMode = (policy.block_mode || 'none').toLowerCase()

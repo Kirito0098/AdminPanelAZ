@@ -6,7 +6,3 @@ export function metricBarClass(value?: number | null): string {
   return 'fill-emerald-500'
 }
 
-/** Whether a node should be considered overloaded for alerting. */
-export function isResourceCritical(value?: number | null): boolean {
-  return value != null && !Number.isNaN(value) && value >= 90
-}

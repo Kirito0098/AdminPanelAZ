@@ -348,12 +348,12 @@ def download_backup(file_name: str, _: User = Depends(require_admin)):
     return FileResponse(path, filename=file_name, media_type="application/gzip")
 
 
-@router.post("/test-telegram", status_code=status.HTTP_202_ACCEPTED)
 def test_backup_telegram(
     payload: BackupTestTelegramRequest = BackupTestTelegramRequest(),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    """Used by Telegram bot handlers; HTTP route removed (orphaned FE)."""
     bot_token = _get_setting(db, "telegram_bot_token")
     chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
     if not bot_token or not chat_ids:

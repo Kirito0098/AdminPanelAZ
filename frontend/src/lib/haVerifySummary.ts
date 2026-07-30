@@ -159,7 +159,7 @@ function shortHash(value?: string | null): string {
   return `${value.slice(0, 8)}…${value.slice(-4)}`
 }
 
-export function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismatchView {
+function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismatchView {
   if (mismatch.kind === 'node_status') {
     return {
       title: 'Узел недоступен',

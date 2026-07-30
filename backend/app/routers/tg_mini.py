@@ -81,11 +81,6 @@ class TelegramAuthRequest(BaseModel):
     init_data: str
 
 
-class SendConfigRequest(BaseModel):
-    config_id: int
-    path: str | None = None
-
-
 class SendConfigV2Request(BaseModel):
     path: str | None = None
     destination: Literal["self", "owner"] = "self"
@@ -681,16 +676,6 @@ def mini_test_telegram(db: Session = Depends(get_db), _: User = Depends(require_
     if sent == 0:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
     return MessageResponse(message=f"Тестовое сообщение отправлено ({sent} из {len(chat_ids)})")
-
-
-@router.post("/send-config", response_model=MessageResponse, deprecated=True)
-def send_config(
-    payload: SendConfigRequest,
-    current_user: User = Depends(get_tg_mini_user),
-    db: Session = Depends(get_db),
-):
-    config = _get_accessible_config(db, payload.config_id, current_user)
-    return _send_config_file(db, config, current_user, path=payload.path, destination="self")
 
 
 @router.post("/check-bot-delivery")

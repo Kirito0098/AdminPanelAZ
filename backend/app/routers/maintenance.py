@@ -20,7 +20,6 @@ from app.schemas import (
     DdnsActionResponse,
     DdnsSettingsResponse,
     DdnsSettingsUpdateRequest,
-    DdnsTimerRequest,
     GeoIpStatusResponse,
     MessageResponse,
     NocReportPreviewRequest,
@@ -503,12 +502,6 @@ def test_noc_weekly_image_preview(db: Session = Depends(get_db), admin: User = D
     return MessageResponse(message=f"NOC weekly изображение отправлено ({sent} из {len(recipients)})")
 
 
-@router.post("/settings/admin-notify/test-noc-pdf", response_model=MessageResponse)
-def test_noc_weekly_pdf_preview_legacy(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
-    """Legacy alias — weekly report is now sent as PNG."""
-    return test_noc_weekly_image_preview(db=db, admin=admin)
-
-
 @router.post("/settings/telegram/test", response_model=MessageResponse)
 def test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     bot_token = _get_setting(db, "telegram_bot_token")
@@ -858,40 +851,6 @@ def post_vpn_network_ddns_update(
     )
     return DdnsActionResponse(
         message="IP обновлён у провайдера DDNS",
-        output=output or None,
-        settings=_ddns_settings_response(),
-    )
-
-
-@router.post("/settings/vpn-network/ddns/timer", response_model=DdnsActionResponse)
-def post_vpn_network_ddns_timer(
-    payload: DdnsTimerRequest,
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
-):
-    _require_vpn_network_feature()
-    cfg = ddns_settings_service.load_ddns_config()
-    if payload.enabled and not cfg.configured:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Сначала сохраните конфигурацию DDNS",
-        )
-    try:
-        output = ddns_settings_service.set_ddns_timer(payload.enabled)
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
-        ) from exc
-    log_action(
-        db,
-        action="ddns_timer",
-        user_id=admin.id,
-        username=admin.username,
-        details=f"enabled={payload.enabled}",
-    )
-    return DdnsActionResponse(
-        message="Автообновление IP включено" if payload.enabled else "Автообновление IP отключено",
         output=output or None,
         settings=_ddns_settings_response(),
     )

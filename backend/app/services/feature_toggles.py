@@ -135,8 +135,6 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
             "/api/logs/openvpn-events",
             "/api/logs/openvpn-sockets",
             "/api/monitoring/overview",
-            "/api/monitoring/global-summary",
-            "/api/monitoring/nodes-compare",
         ),
         frontend_paths=("/monitoring",),
     ),

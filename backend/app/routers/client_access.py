@@ -9,24 +9,19 @@ from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
 from app.models import User, UserRole, VpnType
-from app.schemas import NodeDefaultPolicyResponse, NodeDefaultPolicyUpdate, NodePolicySummary
 from app.services.access_policy import (
     AccessPolicyService,
-    build_policy_summary_by_node,
-    get_node_default_policy,
-    set_node_default_policy,
 )
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
-from app.services.node_sync.groups import require_ha_primary_for_client_ops, require_ha_primary_node
+from app.services.node_sync.groups import require_ha_primary_for_client_ops
 from app.services.node_sync.client_ops_sync import (
     apply_openvpn_disconnect_on_node,
     maybe_replicate_openvpn_disconnect,
 )
 from app.services.node_sync.policy_sync import (
     PolicyOp,
-    maybe_replicate_node_default_policy,
     maybe_replicate_policy_op,
 )
 from app.services.notify_time import get_client_timezone_from_request
@@ -161,66 +156,6 @@ def list_policies(
             return {}
     svc = _service(db)
     return svc.get_all_policies(names)
-
-
-@router.get("/policy-summary-by-node", response_model=list[NodePolicySummary])
-def policy_summary_by_node(
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    return build_policy_summary_by_node(db)
-
-
-@router.get("/node-defaults/{node_id}", response_model=NodeDefaultPolicyResponse)
-def get_node_defaults(
-    node_id: int,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    try:
-        return get_node_default_policy(db, node_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@router.put("/node-defaults/{node_id}", response_model=NodeDefaultPolicyResponse)
-def update_node_defaults(
-    node_id: int,
-    payload: NodeDefaultPolicyUpdate,
-    request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_admin),
-):
-    require_ha_primary_node(db, node_id)
-    try:
-        result = set_node_default_policy(
-            db,
-            node_id,
-            route_mode=payload.route_mode,
-            route_clear=payload.route_clear,
-            openvpn_limit_value=payload.openvpn_limit_value,
-            openvpn_limit_unit=payload.openvpn_limit_unit,
-            openvpn_limit_period_days=payload.openvpn_limit_period_days,
-            openvpn_clear_limit=payload.openvpn_clear_limit,
-            wireguard_limit_value=payload.wireguard_limit_value,
-            wireguard_limit_unit=payload.wireguard_limit_unit,
-            wireguard_limit_period_days=payload.wireguard_limit_period_days,
-            wireguard_clear_limit=payload.wireguard_clear_limit,
-            actor=user.username,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-    log_action(
-        db,
-        action="node_default_policy_update",
-        user_id=user.id,
-        username=user.username,
-        details=f"node_id={node_id}",
-        remote_addr=request.client.host,
-    )
-    maybe_replicate_node_default_policy(db, node_id=node_id)
-    return result
 
 
 @router.get("/openvpn/{client_name}")

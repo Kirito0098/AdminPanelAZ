@@ -25,11 +25,6 @@ export function setActiveTimeZone(tz: string | null | undefined): void {
   activeTimeZone = value || undefined
 }
 
-/** The timezone explicitly chosen by the user ('' when following the browser). */
-export function getConfiguredTimeZone(): string {
-  return activeTimeZone ?? ''
-}
-
 /** The timezone actually used for formatting (resolves to browser when unset). */
 export function getActiveTimeZone(): string {
   return activeTimeZone || getBrowserTimeZone()

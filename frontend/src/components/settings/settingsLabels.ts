@@ -84,7 +84,7 @@ export const ROLE_HINTS: Record<UserRole, string> = {
   user: 'Свои конфиги, квота, доп. доступ и право создавать — по настройкам админа',
 }
 
-export const VPN_SERVICE_LABELS: Record<string, string> = {
+const VPN_SERVICE_LABELS: Record<string, string> = {
   'openvpn-server@antizapret-udp': 'OpenVPN AntiZapret (UDP)',
   'openvpn-server@antizapret-tcp': 'OpenVPN AntiZapret (TCP)',
   'openvpn-server@vpn-udp': 'OpenVPN VPN (UDP)',
