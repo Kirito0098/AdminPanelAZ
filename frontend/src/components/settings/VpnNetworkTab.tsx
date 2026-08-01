@@ -26,12 +26,14 @@ import type {
 import {
   buildPublishConfirmPlan,
   domainFromSslSuggestion,
+  formatAzVpnHostConflictMessage,
   guessPublishAccessUrl,
   inlinePublishWarnings,
   isPublishPathMovedPollMessage,
   isPublishStartTransientError,
   isPublishTransientRestartError,
   formatPublishStartError,
+  panelDomainConflictsAzHosts,
   publishConflictTaskId,
   PUBLISH_START_LOST_CONNECTION_NOTICE,
   resolvePublishTaskErrorMessage,
@@ -303,6 +305,25 @@ export default function VpnNetworkTab() {
     }
     if (selectedModeInfo.requires_domain && !domain.trim()) {
       notifyError('Укажите адрес сайта (домен)')
+      return
+    }
+    const reservedAzHosts = [
+      ...new Set([
+        ...(settings?.az_vpn_hosts || []),
+        ...(domainSslStatus?.az_vpn_hosts || []),
+      ]),
+    ]
+    if (
+      domainSslStatus?.az_vpn_host_conflict ||
+      panelDomainConflictsAzHosts(domain, reservedAzHosts)
+    ) {
+      notifyError(
+        formatAzVpnHostConflictMessage(
+          domain,
+          reservedAzHosts,
+          domainSslStatus?.az_vpn_conflict_message,
+        ),
+      )
       return
     }
     if (selectedModeInfo.requires_ssl_cert) {

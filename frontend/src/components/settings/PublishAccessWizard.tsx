@@ -19,8 +19,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import {
+  formatAzVpnHostConflictMessage,
   getLetsEncryptPathsForDomain,
   hasLetsEncryptHint,
+  panelDomainConflictsAzHosts,
   parsePublishModeWarning,
   publishAddressHint,
   publishModeWarningTitle,
@@ -200,6 +202,20 @@ export default function PublishAccessWizard({
   const showServerUvicornHints =
     uvicornWarnings.length > 0 && (selectedMode === 'uvicorn_le' || selectedMode === 'uvicorn_custom')
   const foundLetsEncryptPaths = getLetsEncryptPathsForDomain(settings, domain, domainSslStatus)
+  const reservedAzHosts = [
+    ...new Set([
+      ...(settings.az_vpn_hosts || []),
+      ...(domainSslStatus?.az_vpn_hosts || []),
+    ]),
+  ]
+  const azVpnHostConflict =
+    Boolean(domainSslStatus?.az_vpn_host_conflict) ||
+    panelDomainConflictsAzHosts(domain, reservedAzHosts)
+  const azVpnConflictMessage = formatAzVpnHostConflictMessage(
+    domain,
+    reservedAzHosts,
+    domainSslStatus?.az_vpn_conflict_message,
+  )
 
   useEffect(() => {
     setActiveStack(stackForMode(selectedMode))
@@ -383,8 +399,15 @@ export default function PublishAccessWizard({
                   placeholder={
                     selfsignedDomainHint ? '192.168.1.10' : 'panel.example.com'
                   }
-                  className="font-mono"
+                  className={cn('font-mono', azVpnHostConflict && 'border-destructive focus-visible:ring-destructive')}
+                  aria-invalid={azVpnHostConflict || undefined}
                 />
+                {reservedAzHosts.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Занято AntiZapret (нельзя для панели):{' '}
+                    <code className="font-mono">{reservedAzHosts.join(', ')}</code>
+                  </p>
+                ) : null}
                 {!selectedModeInfo?.requires_domain ? (
                   <p className="text-xs text-muted-foreground">
                     {selfsignedDomainHint
@@ -392,6 +415,68 @@ export default function PublishAccessWizard({
                       : 'Для подсказок URL и CORS; если уже в .env — можно оставить пустым'}
                   </p>
                 ) : null}
+                {azVpnHostConflict ? (
+                  <SettingsAlert variant="danger" title="Домен занят AntiZapret">
+                    <p className="text-sm leading-relaxed">{azVpnConflictMessage}</p>
+                    <p className="mt-2 text-sm leading-relaxed">
+                      Свой DNS: заведите отдельный hostname для панели; на VPN-домен можно
+                      повесить несколько A-записей (так и рекомендуется при двух серверах).
+                      DuckDNS:{' '}
+                      <a
+                        href="https://www.duckdns.org/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline underline-offset-2"
+                      >
+                        duckdns.org
+                      </a>
+                      {' '}— создайте второе имя (например mypanel), не используйте VPN-имя для панели.
+                    </p>
+                  </SettingsAlert>
+                ) : settings.az_vpn_conflict_hint ? (
+                  <SettingsAlert variant="info" title="Отдельный домен для панели">
+                    <p className="text-sm leading-relaxed">{settings.az_vpn_conflict_hint}</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-4 text-sm leading-relaxed">
+                      <li>
+                        На один домен можно (и рекомендуется) указать несколько A-записей на разные
+                        IP — удобно для VPN при двух узлах.
+                      </li>
+                      <li>
+                        DuckDNS:{' '}
+                        <a
+                          href="https://www.duckdns.org/"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline underline-offset-2"
+                        >
+                          www.duckdns.org
+                        </a>
+                        {' '}— сделайте два имени (VPN и панель), до 5 бесплатно.
+                      </li>
+                    </ul>
+                  </SettingsAlert>
+                ) : (
+                  <SettingsAlert variant="info" title="DNS: несколько A-записей и DuckDNS">
+                    <ul className="list-disc space-y-1 pl-4 text-sm leading-relaxed">
+                      <li>
+                        У своего домена на один hostname можно указать несколько A-записей (разные
+                        IP серверов) — так и рекомендуется для VPN при HA.
+                      </li>
+                      <li>
+                        Панель и AntiZapret — разные имена. DuckDNS:{' '}
+                        <a
+                          href="https://www.duckdns.org/"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline underline-offset-2"
+                        >
+                          www.duckdns.org
+                        </a>
+                        {' '}— создайте отдельно имя для панели.
+                      </li>
+                    </ul>
+                  </SettingsAlert>
+                )}
               </div>
             )}
 
@@ -566,7 +651,12 @@ export default function PublishAccessWizard({
               <p className="text-xs text-muted-foreground">Укажите домен или параметры для preview URL</p>
             )}
           </div>
-          <Button onClick={onPublish} disabled={publishing} className="shrink-0 gap-1.5" size="lg">
+          <Button
+            onClick={onPublish}
+            disabled={publishing || azVpnHostConflict}
+            className="shrink-0 gap-1.5"
+            size="lg"
+          >
             <Rocket size={18} className={publishing ? 'animate-pulse' : ''} />
             {publishing ? 'Применение…' : 'Применить настройки'}
           </Button>

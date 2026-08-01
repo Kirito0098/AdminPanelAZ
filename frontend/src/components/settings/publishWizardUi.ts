@@ -15,6 +15,47 @@ function domainHost(domain: string): string {
   return domain.trim().split(':')[0]
 }
 
+/** Normalize hostname for AZ ↔ panel domain equality checks. */
+export function normalizePublishHostname(value: string): string {
+  let host = value.trim().toLowerCase()
+  if (!host) return ''
+  if (host.includes('://')) {
+    host = host.split('://', 2)[1] ?? host
+  }
+  host = host.split('/', 1)[0] ?? host
+  if (host.startsWith('[') && host.includes(']')) {
+    host = host.slice(1, host.indexOf(']'))
+  } else {
+    host = host.split(':', 1)[0] ?? host
+  }
+  return host.replace(/\.$/, '')
+}
+
+export function panelDomainConflictsAzHosts(domain: string, azHosts: string[] | null | undefined): boolean {
+  const panel = normalizePublishHostname(domain)
+  if (!panel || !azHosts?.length) return false
+  return azHosts.some((host) => normalizePublishHostname(host) === panel)
+}
+
+export function formatAzVpnHostConflictMessage(
+  domain: string,
+  azHosts: string[] | null | undefined,
+  apiMessage?: string | null,
+): string {
+  const trimmedApi = apiMessage?.trim()
+  if (trimmedApi) return trimmedApi
+  const panel = normalizePublishHostname(domain)
+  const matched = (azHosts || [])
+    .map((host) => normalizePublishHostname(host))
+    .filter((host) => host && host === panel)
+  const unique = [...new Set(matched)]
+  const hostList = unique.join(', ') || panel
+  return (
+    `Домен панели «${panel}» совпадает с OPENVPN_HOST / WIREGUARD_HOST AntiZapret (${hostList}). ` +
+    'Через конфиг AZ этот адрес уходит в туннель — укажите отдельный домен для панели (например panel.example.com).'
+  )
+}
+
 function formatPublicHttpsHost(host: string, httpsPublicPort: string | number): string {
   const trimmed = host.trim().split(':')[0]
   if (!trimmed) return ''

@@ -17,6 +17,7 @@ from app.schemas import (
     RoutingOverview,
 )
 from app.services.antizapret_settings import (
+    az_host_updates_conflict_with_panel_domain,
     build_schema,
     filter_known_keys,
     openvpn_backup_tcp_conflict_warnings,
@@ -192,12 +193,19 @@ def put_antizapret_settings(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ожидается JSON-объект")
     filtered = filter_known_keys(payload)
+    env = EnvFileService(_ENV_FILE)
+    host_conflict = az_host_updates_conflict_with_panel_domain(
+        filtered,
+        env.get_env_value("DOMAIN", ""),
+    )
+    if host_conflict:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=host_conflict)
     try:
         result = get_active_adapter(db).update_antizapret_settings(filtered)
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав на запись") from exc
 
-    https_public_port = EnvFileService(_ENV_FILE).get_env_value("HTTPS_PUBLIC_PORT", "443") or "443"
+    https_public_port = env.get_env_value("HTTPS_PUBLIC_PORT", "443") or "443"
     warnings = list(result.get("warnings") or [])
     for warning in openvpn_backup_tcp_conflict_warnings(filtered, https_public_port=https_public_port):
         if warning not in warnings:

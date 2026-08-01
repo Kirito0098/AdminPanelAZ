@@ -211,10 +211,18 @@ AntiZapret и VPN-конфиги при удалении панели **не т�
 
 Если нет своего домена, в панели: **Настройки → Адрес сайта и HTTPS** → блок **Динамический DNS**:
 
-- [DuckDNS](https://www.duckdns.org) — `myvpn.duckdns.org`
-- [No-IP](https://www.noip.com) — `myvpn.ddns.net`
+### DuckDNS
 
-Можно включить автообновление IP (systemd timer каждые 5 мин) и затем указать этот адрес в **Настройки → Адрес сайта и HTTPS**.
+1. [www.duckdns.org](https://www.duckdns.org/) — войдите и создайте **два** имени (обычно до 5 бесплатно): одно для VPN AntiZapret, другое для панели.
+2. В DDNS панели укажите **панельный** поддомен + token.
+3. Не используйте VPN-имя DuckDNS как домен панели — [подробнее](docs/nastrojki/set-i-publikaciya.md#duckdns-duckdnsorg).
+
+### No-IP и свой домен
+
+- [No-IP](https://www.noip.com) — `myvpn.ddns.net`
+- Свой домен: на один hostname можно (и рекомендуется) повесить несколько A-записей на разные IP — удобно для VPN при двух серверах; для панели заведите отдельное имя.
+
+Можно включить автообновление IP (systemd timer каждые 5 мин) и затем указать адрес панели в мастере HTTPS.
 
 CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|status`.
 

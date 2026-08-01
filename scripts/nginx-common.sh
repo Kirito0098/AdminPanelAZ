@@ -22,6 +22,65 @@ nginx_die() {
   exit 1
 }
 
+# Путь к setup AntiZapret (OPENVPN_HOST / WIREGUARD_HOST).
+nginx_az_setup_path() {
+  echo "${ANTIZAPRET_PATH:-/root/antizapret}/setup"
+}
+
+# Прочитать значение KEY= из setup AZ (пусто, если файла/ключа нет).
+nginx_read_az_setup_value() {
+  local key="$1"
+  local setup
+  setup="$(nginx_az_setup_path)"
+  [[ -f "$setup" ]] || return 0
+  grep -E "^${key}=" "$setup" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r' || true
+}
+
+# Нормализация host для сравнения с доменом панели.
+nginx_normalize_host() {
+  local host="${1:-}"
+  host="${host%%:*}"
+  host="${host%%/*}"
+  host="${host,,}"
+  host="${host%.}"
+  echo "$host"
+}
+
+# Сообщение о конфликте DOMAIN с AZ hosts; 0 = ок, 1 = конфликт (текст в stdout).
+nginx_az_vpn_host_conflict_message() {
+  local domain
+  domain="$(nginx_normalize_host "${1:-}")"
+  [[ -n "$domain" ]] || return 0
+
+  local ovpn wg
+  ovpn="$(nginx_normalize_host "$(nginx_read_az_setup_value OPENVPN_HOST)")"
+  wg="$(nginx_normalize_host "$(nginx_read_az_setup_value WIREGUARD_HOST)")"
+
+  local matched=""
+  if [[ -n "$ovpn" && "$domain" == "$ovpn" ]]; then
+    matched="OPENVPN_HOST=${ovpn}"
+  fi
+  if [[ -n "$wg" && "$domain" == "$wg" ]]; then
+    if [[ -n "$matched" ]]; then
+      matched="${matched}, WIREGUARD_HOST=${wg}"
+    else
+      matched="WIREGUARD_HOST=${wg}"
+    fi
+  fi
+  [[ -z "$matched" ]] && return 0
+
+  echo "Домен панели «${domain}» совпадает с ${matched} в $(nginx_az_setup_path). Через конфиг AntiZapret этот адрес уходит в туннель — локальная панель станет недоступна. Укажите отдельный домен для панели (например panel.example.com)."
+  return 1
+}
+
+# Запрет: DOMAIN панели = OPENVPN_HOST или WIREGUARD_HOST (иначе панель недоступна через AZ).
+nginx_assert_domain_not_az_vpn_host() {
+  local msg=""
+  if ! msg="$(nginx_az_vpn_host_conflict_message "${1:-}")"; then
+    nginx_die "$msg"
+  fi
+}
+
 nginx_env_get() {
   local key="$1"
   grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true

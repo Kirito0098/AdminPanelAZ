@@ -218,29 +218,60 @@ export default function DdnsSettingsCard({ onSuggestDomain }: Props) {
           </div>
 
           {provider === 'duckdns' && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="ddns-subdomain">Поддомен (без .duckdns.org)</Label>
-                <Input
-                  id="ddns-subdomain"
-                  value={subdomain}
-                  onChange={(e) => setSubdomain(e.target.value)}
-                  placeholder="myvpn"
-                  autoComplete="off"
-                />
+            <>
+              <SettingsAlert variant="info" title="DuckDNS — два имени">
+                <ol className="list-decimal space-y-1.5 pl-4 text-sm leading-relaxed">
+                  <li>
+                    Откройте{' '}
+                    <a
+                      href="https://www.duckdns.org/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium underline underline-offset-2"
+                    >
+                      www.duckdns.org
+                    </a>{' '}
+                    и войдите в аккаунт.
+                  </li>
+                  <li>
+                    Создайте <strong>два</strong> домена (бесплатно обычно до 5): одно для VPN
+                    AntiZapret, другое для панели (например <code className="font-mono">myvpn</code> и{' '}
+                    <code className="font-mono">mypanel</code>).
+                  </li>
+                  <li>
+                    Сюда впишите <strong>панельный</strong> поддомен и token со страницы DuckDNS —
+                    не то же имя, что в OPENVPN_HOST / WIREGUARD_HOST.
+                  </li>
+                </ol>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  У DuckDNS у каждого имени один IP. Несколько A-записей на одно имя — это для
+                  обычного DNS (свой домен); там так и рекомендуется при двух серверах.
+                </p>
+              </SettingsAlert>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="ddns-subdomain">Поддомен панели (без .duckdns.org)</Label>
+                  <Input
+                    id="ddns-subdomain"
+                    value={subdomain}
+                    onChange={(e) => setSubdomain(e.target.value)}
+                    placeholder="mypanel"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ddns-token">Token</Label>
+                  <Input
+                    id="ddns-token"
+                    type="password"
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    placeholder={settings?.token_configured ? '••••••••' : 'token с duckdns.org'}
+                    autoComplete="off"
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="ddns-token">Token</Label>
-                <Input
-                  id="ddns-token"
-                  type="password"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  placeholder={settings?.token_configured ? '••••••••' : 'token с duckdns.org'}
-                  autoComplete="off"
-                />
-              </div>
-            </div>
+            </>
           )}
 
           {provider === 'noip' && (
