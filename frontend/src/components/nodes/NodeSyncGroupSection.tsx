@@ -1152,10 +1152,12 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
                 </div>
               ))}
             </div>
-            <SettingsAlert variant="info">
-              Пример: A-записи <code>{dnsTarget?.shared_domain}</code> на каждый IP выше. Для
-              автоматического переключения используйте DNS с проверкой доступности (режим failover), а не
-              простой round-robin. IP узла — это его адрес подключения в панели (host).
+            <SettingsAlert variant="info" title="Несколько A-записей — так и нужно">
+              На один домен <code>{dnsTarget?.shared_domain}</code> создайте A-запись на{' '}
+              <strong>каждый</strong> IP выше — это нормально и рекомендуется для HA. Для
+              автоматического переключения используйте DNS с проверкой доступности (failover), а не
+              простой round-robin. IP узла — адрес подключения в панели (host). DuckDNS на одно имя
+              обычно держит только один IP; для HA удобнее свой домен или DNS с health-check.
             </SettingsAlert>
           </div>
           <DialogFooter>

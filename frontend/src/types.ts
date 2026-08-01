@@ -764,6 +764,9 @@ export interface VpnNetworkDomainSslStatus {
   key?: string | null
   shared_domain_foreign_vhost?: boolean
   shared_domain_status_openvpn?: boolean
+  az_vpn_host_conflict?: boolean
+  az_vpn_hosts?: string[]
+  az_vpn_conflict_message?: string | null
 }
 
 export type VpnNetworkPortRole = 'backend' | 'nginx_https' | 'nginx_http'
@@ -796,6 +799,8 @@ export interface VpnNetworkSettings {
   shared_domain_foreign_vhost?: boolean
   shared_domain_status_openvpn?: boolean
   server_primary_ip?: string | null
+  az_vpn_hosts?: string[]
+  az_vpn_conflict_hint?: string | null
 }
 
 export type VpnNetworkPublishModeKey =

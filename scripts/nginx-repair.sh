@@ -50,6 +50,13 @@ validate_domain() {
   [[ "$value" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] || nginx_die "Неверный формат домена: $value"
 }
 
+warn_if_domain_is_az_vpn_host() {
+  local msg=""
+  if ! msg="$(nginx_az_vpn_host_conflict_message "${1:-}")"; then
+    nginx_warn "$msg"
+  fi
+}
+
 validate_port() {
   local value="$1"
   local label="$2"
@@ -93,17 +100,26 @@ load_panel_publish_settings() {
 
 prompt_domain_if_needed() {
   if [[ -n "$DOMAIN" ]]; then
+    validate_domain "$DOMAIN"
+    # Уже сохранённый DOMAIN: только предупреждение — иначе repair не сможет починить доступ.
+    warn_if_domain_is_az_vpn_host "$DOMAIN"
     return 0
   fi
   if is_non_interactive; then
     nginx_die "DOMAIN не задан в ${ENV_FILE}. Укажите домен или запустите без --non-interactive."
   fi
   while true; do
+    local conflict_msg=""
     read -r -p "Домен панели (например, panel.example.com): " DOMAIN
-    if [[ "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
-      return 0
+    if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+      echo "Неверный формат домена."
+      continue
     fi
-    echo "Неверный формат домена."
+    if ! conflict_msg="$(nginx_az_vpn_host_conflict_message "$DOMAIN")"; then
+      echo "$conflict_msg"
+      continue
+    fi
+    return 0
   done
 }
 

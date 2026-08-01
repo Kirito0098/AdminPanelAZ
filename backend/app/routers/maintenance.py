@@ -43,6 +43,11 @@ from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.notify_time import get_client_timezone_from_request
 from app.config import get_settings
 from app.services.active_web_session import active_web_session_service
+from app.services.antizapret_settings import (
+    az_hosts_matching_domain,
+    format_az_panel_domain_conflict_message,
+    read_az_vpn_hosts,
+)
 from app.services.env_file import EnvFileService
 from app.services.feature_guards import get_feature_service, module_disabled_message
 from app.services.noc_report import send_noc_report_preview, send_weekly_image_preview
@@ -642,6 +647,7 @@ def get_vpn_network_settings(
         publish_mode=ctx.get("active_publish_mode") or "",
     )
     uvicorn_warnings = [*subpath_warnings, *uvicorn_warnings]
+    az_hosts = sorted(read_az_vpn_hosts())
     return VpnNetworkSettingsResponse(
         mode_key=ctx["mode_key"],
         mode_title=ctx["mode_title"],
@@ -661,6 +667,15 @@ def get_vpn_network_settings(
         shared_domain_foreign_vhost=bool(ctx.get("shared_domain_foreign_vhost")),
         shared_domain_status_openvpn=bool(ctx.get("shared_domain_status_openvpn")),
         server_primary_ip=server_primary_ip(),
+        az_vpn_hosts=az_hosts,
+        az_vpn_conflict_hint=(
+            "Нельзя использовать домен AntiZapret (OPENVPN_HOST / WIREGUARD_HOST) "
+            f"для панели: {', '.join(az_hosts)}. Через конфиг AZ он уходит в туннель. "
+            "Свой DNS: отдельное имя для панели; на VPN-домен можно несколько A-записей. "
+            "DuckDNS (https://www.duckdns.org/): создайте второе имя для панели."
+            if az_hosts
+            else None
+        ),
     )
 
 
@@ -679,6 +694,7 @@ def get_vpn_network_domain_ssl(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите домен")
     cert, key = letsencrypt_cert_paths(domain_host)
     has_le = letsencrypt_exists_for_domain(domain_host)
+    az_conflict_hosts = az_hosts_matching_domain(domain_host)
     return VpnNetworkDomainSslStatusResponse(
         domain=domain_host,
         has_letsencrypt=has_le,
@@ -686,6 +702,11 @@ def get_vpn_network_domain_ssl(
         key=key if has_le else None,
         shared_domain_foreign_vhost=nginx_is_foreign_vhost_for_domain(domain_host),
         shared_domain_status_openvpn=nginx_is_status_openvpn_on_domain(domain_host),
+        az_vpn_host_conflict=bool(az_conflict_hosts),
+        az_vpn_hosts=az_conflict_hosts,
+        az_vpn_conflict_message=format_az_panel_domain_conflict_message(
+            domain_host, az_conflict_hosts
+        ),
     )
 
 
@@ -871,6 +892,11 @@ def publish_vpn_network(
 
     if payload.mode in {"nginx_le", "uvicorn_le"} and not (payload.domain or "").strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="DOMAIN обязателен для Let's Encrypt")
+
+    domain_for_az_check = ((payload.domain or "").strip().split(":")[0] or None)
+    az_conflict = format_az_panel_domain_conflict_message(domain_for_az_check)
+    if az_conflict:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=az_conflict)
 
     from app.services.panel_paths import AccessPathError, normalize_access_path
 

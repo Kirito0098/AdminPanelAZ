@@ -59,6 +59,7 @@ validate_port() {
 validate_domain() {
   local value="$1"
   [[ "$value" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] || nginx_die "Неверный формат домена: $value"
+  nginx_assert_domain_not_az_vpn_host "$value"
 }
 
 require_root() {
@@ -156,11 +157,17 @@ resolve_domain() {
 
 prompt_domain() {
   while true; do
+    local conflict_msg=""
     read -r -p "Доменное имя (например, panel.example.com): " DOMAIN
-    if [[ "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
-      return 0
+    if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+      echo "Неверный формат домена."
+      continue
     fi
-    echo "Неверный формат домена."
+    if ! conflict_msg="$(nginx_az_vpn_host_conflict_message "$DOMAIN")"; then
+      echo "$conflict_msg"
+      continue
+    fi
+    return 0
   done
 }
 

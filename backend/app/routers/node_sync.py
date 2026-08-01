@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
@@ -20,7 +21,9 @@ from app.schemas import (
     NodeSyncPushFullResponse,
     NodeSyncVerifyResponse,
 )
+from app.services.antizapret_settings import shared_domain_conflicts_with_panel_domain
 from app.services.background_tasks import background_task_service
+from app.services.env_file import EnvFileService
 from app.services.node_sync.groups import (
     apply_group_fields,
     group_to_dict,
@@ -36,11 +39,20 @@ from app.services.node_sync.shadow_link import link_shadow_configs_for_group
 from app.services.node_sync.shared_domain import make_shared_domain_callable
 from app.services.node_sync.verify import verify_sync_group
 
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
 router = APIRouter(prefix="/nodes/sync-groups", tags=["node-sync"])
 
 
 def _to_response(group: NodeSyncGroup, db: Session) -> NodeSyncGroupResponse:
     return NodeSyncGroupResponse(**group_to_dict(group, db))
+
+
+def _reject_shared_domain_panel_conflict(shared_domain: str | None) -> None:
+    panel_domain = EnvFileService(_ENV_FILE).get_env_value("DOMAIN", "")
+    conflict = shared_domain_conflicts_with_panel_domain(shared_domain, panel_domain)
+    if conflict:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=conflict)
 
 
 @router.get("", response_model=list[NodeSyncGroupResponse])
@@ -61,6 +73,7 @@ def create_sync_group(
         replica_node_ids=payload.replica_node_ids,
     )
     raise_if_preflight_errors(errors)
+    _reject_shared_domain_panel_conflict(payload.shared_domain)
     group = NodeSyncGroup(
         name=payload.name.strip(),
         shared_domain=payload.shared_domain.strip(),
@@ -115,6 +128,8 @@ def update_sync_group(
         exclude_group_id=group.id,
     )
     raise_if_preflight_errors(errors)
+    if payload.shared_domain is not None:
+        _reject_shared_domain_panel_conflict(payload.shared_domain)
 
     previous_sync_mode = group.sync_mode
     apply_group_fields(
@@ -271,6 +286,7 @@ def apply_shared_domain_endpoint(
         exclude_group_id=group.id,
     )
     raise_if_preflight_errors(errors)
+    _reject_shared_domain_panel_conflict(group.shared_domain)
 
     group.sync_status = SyncStatus.pending
     group.last_sync_error = None

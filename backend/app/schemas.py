@@ -1021,6 +1021,8 @@ class VpnNetworkSettingsResponse(BaseModel):
     shared_domain_foreign_vhost: bool = False
     shared_domain_status_openvpn: bool = False
     server_primary_ip: str | None = None
+    az_vpn_hosts: list[str] = []
+    az_vpn_conflict_hint: str | None = None
 
 
 class VpnNetworkDomainSslStatusResponse(BaseModel):
@@ -1030,6 +1032,9 @@ class VpnNetworkDomainSslStatusResponse(BaseModel):
     key: str | None = None
     shared_domain_foreign_vhost: bool = False
     shared_domain_status_openvpn: bool = False
+    az_vpn_host_conflict: bool = False
+    az_vpn_hosts: list[str] = []
+    az_vpn_conflict_message: str | None = None
 
 
 class VpnNetworkPortStatusResponse(BaseModel):

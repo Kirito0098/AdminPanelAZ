@@ -62,11 +62,13 @@ const PLACED_SECTIONS = new Set<string>([
 const FIELD_DISPLAY: Partial<Record<string, { title: string; description: string }>> = {
   openvpn_host: {
     title: 'OpenVPN',
-    description: 'Домен или IP-адрес для клиентских конфигов OpenVPN',
+    description:
+      'Домен или IP для клиентских конфигов OpenVPN. Не используйте домен панели (DOMAIN) — иначе панель станет недоступна через AZ.',
   },
   wireguard_host: {
     title: 'WireGuard / AmneziaWG',
-    description: 'Домен или IP-адрес для клиентских конфигов WireGuard и AmneziaWG',
+    description:
+      'Домен или IP для клиентских конфигов WireGuard и AmneziaWG. Не используйте домен панели (DOMAIN).',
   },
 }
 
@@ -122,7 +124,8 @@ const FIELD_SECTIONS: {
   },
   {
     title: 'Адреса подключения',
-    description: 'Домены, которые попадают в клиентские конфиги VPN',
+    description:
+      'Домены в клиентских конфигах VPN (OPENVPN_HOST / WIREGUARD_HOST). Нельзя совпадать с доменом панели.',
     icon: Cable,
     fieldLayout: 'grid',
     keys: ['openvpn_host', 'wireguard_host'],
