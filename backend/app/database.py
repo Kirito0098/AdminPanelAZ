@@ -822,6 +822,10 @@ def run_db_migrations() -> None:
             ("can_create_configs", "INTEGER DEFAULT 1"),
             ("visible_vpn_profiles", "TEXT"),
             ("timezone", "VARCHAR(64) DEFAULT ''"),
+            ("last_client_timezone", "VARCHAR(64) DEFAULT ''"),
+            ("noc_daily_time", "VARCHAR(5) DEFAULT ''"),
+            ("noc_weekly_dow", "VARCHAR(1) DEFAULT ''"),
+            ("noc_weekly_time", "VARCHAR(5) DEFAULT ''"),
         ],
     }
     with engine.begin() as conn:

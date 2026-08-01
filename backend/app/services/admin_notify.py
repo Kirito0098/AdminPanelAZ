@@ -17,7 +17,7 @@ from app.services.admin_notify_settings_text import (
     user_action_tg_action_line,
 )
 from app.services.feature_guards import get_feature_service
-from app.services.notify_time import format_notify_when
+from app.services.notify_time import format_notify_when, resolve_notify_timezone
 from app.services.notify_backends import dispatch_admin_notify, register_notify_backend
 from app.services.telegram import send_tg_message
 from app.services.telegram_recipients import filter_notify_recipients
@@ -509,6 +509,19 @@ class AdminNotifyService:
             if not notify_users:
                 return
 
+            actor_user = None
+            if actor_username:
+                actor_user = (
+                    db.query(User)
+                    .filter(User.username == actor_username)
+                    .first()
+                )
+            resolved_timezone = resolve_notify_timezone(
+                client_timezone,
+                user=actor_user,
+                users=notify_users,
+            )
+
             text = self._build_text(
                 event_type,
                 actor_username,
@@ -517,7 +530,7 @@ class AdminNotifyService:
                 remote_addr,
                 details,
                 subject_name,
-                client_timezone=client_timezone,
+                client_timezone=resolved_timezone,
                 user_agent=user_agent,
                 login_via=login_via,
                 node_id=node_id,

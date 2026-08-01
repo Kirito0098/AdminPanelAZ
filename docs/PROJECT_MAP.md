@@ -134,7 +134,7 @@
 
 | `SettingsSection` | Компонент | User doc |
 |-------------------|-----------|----------|
-| `personal` | `PersonalTab`, `TwoFactorTab`, `PasskeysTab` | [`nastrojki/profil.md`](nastrojki/profil.md) |
+| `personal` | `PersonalTab`, `TwoFactorTab`, `PasskeysTab`, `NocScheduleCard` (admin) | [`nastrojki/profil.md`](nastrojki/profil.md), [Telegram — расписание NOC](Telegram.md#расписание-noc-сводок) |
 | `users` | `UsersTab` | [`nastrojki/polzovateli.md`](nastrojki/polzovateli.md) |
 | `security` | `SecurityTab`, `SecretsRotationWizard` | [`nastrojki/bezopasnost.md`](nastrojki/bezopasnost.md) |
 | `config_delivery` | `ConfigDeliveryTab` | [`nastrojki/razdacha-konfigov.md`](nastrojki/razdacha-konfigov.md) |
@@ -212,6 +212,7 @@
 
 ### Мониторинг и трафик
 - `monitoring_overview.py`, `ip_geo.py`, `geoip_local.py` — NOC-сводка, GeoIP ([`GeoIP.md`](GeoIP.md))
+- `noc_schedule.py`, `noc_report.py`, `noc_report_scheduler.py` — персональное расписание и доставка NOC-сводок в Telegram
 - `traffic/` — collector, sessions, chart, worker
 - `traffic_limit.py`, `traffic_limit_reconcile.py` — лимиты
 - `resource_metrics*.py`, `panel_resource_metrics*.py` — CPU/RAM узлов и панели
@@ -243,7 +244,7 @@
 
 | Модель | Назначение |
 |--------|------------|
-| `User`, `RefreshToken`, `ActiveWebSession` | Пользователи, сессии |
+| `User`, `RefreshToken`, `ActiveWebSession` | Пользователи, сессии; у `User` личные NOC-поля: `noc_daily_time`, `noc_weekly_dow`, `noc_weekly_time` (+ `timezone` / `last_client_timezone`) |
 | `VpnConfig` | Привязка клиента к узлу и владельцу |
 | `Node` | VPN-узел (local/remote, API key, mTLS) |
 | `WgAccessPolicy`, `OpenVpnAccessPolicy` | Блокировки, лимиты трафика |

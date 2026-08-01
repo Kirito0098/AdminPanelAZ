@@ -26,7 +26,7 @@ from app.models import (
 )
 from app.services.feature_guards import get_feature_service
 from app.services.node_compare_metrics import get_traffic_totals_by_node
-from app.services.notify_time import format_notify_when
+from app.services.notify_time import format_notify_when, resolve_notify_timezone
 from app.services.resource_metrics import get_latest_samples_by_node, get_resource_stats_by_node
 from app.services.telegram import send_tg_message, send_tg_photo
 from app.services.traffic_limit import human_bytes
@@ -540,7 +540,11 @@ def _format_incident_line(incident: dict) -> str:
     return f"• {name} · {when}"
 
 
-def format_noc_report_message(report_data: dict) -> str:
+def format_noc_report_message(
+    report_data: dict,
+    *,
+    client_timezone: str | None = None,
+) -> str:
     period = str(report_data.get("period") or "daily")
     summary = report_data.get("summary") or report_data
     since = report_data.get("period_start")
@@ -550,7 +554,7 @@ def format_noc_report_message(report_data: dict) -> str:
     traffic_window = "7 дн." if period == "weekly" else "24 ч"
     average_label = _period_average_label(period)
     peak_label = _period_peak_label(period)
-    when = format_notify_when(None)
+    when = format_notify_when(client_timezone)
 
     lines = [
         f"📊 <b>NOC сводка ({period_label})</b>",
@@ -827,7 +831,13 @@ def generate_weekly_image_file(
     return path
 
 
-def send_weekly_image_report(db: Session, *, since: datetime | None = None, until: datetime | None = None) -> dict:
+def send_weekly_image_report(
+    db: Session,
+    *,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    recipients: list[User] | None = None,
+) -> dict:
     """Generate weekly NOC PNG and optionally deliver it to TG admins."""
     settings = get_settings()
     if not settings.noc_report_weekly_image_enabled:
@@ -866,18 +876,18 @@ def send_weekly_image_report(db: Session, *, since: datetime | None = None, unti
             result["reason"] = "no_bot_token"
             return result
 
-        recipients = _notify_recipients(db)
-        result["recipients"] = len(recipients)
-        if not recipients:
+        target_users = recipients if recipients is not None else _notify_recipients(db)
+        result["recipients"] = len(target_users)
+        if not target_users:
             result["status"] = "generated_no_tg"
             result["reason"] = "no_recipients"
             return result
 
-        when = format_notify_when(None)
+        when = format_notify_when(resolve_notify_timezone(users=target_users))
         caption = f"📊 <b>NOC weekly</b>\n🕐 {when}"
         filename = f"noc-weekly-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.png"
         sent = 0
-        for user in recipients:
+        for user in target_users:
             try:
                 if send_tg_photo(
                     bot_token,
@@ -925,7 +935,7 @@ def _notify_recipients(db: Session) -> list[User]:
     )
 
 
-def send_noc_report(db: Session, *, period: str) -> dict:
+def send_noc_report(db: Session, *, period: str, recipients: list[User] | None = None) -> dict:
     """Build summary and deliver to admins with noc_report TG preference enabled."""
     if not get_feature_service().is_enabled("telegram"):
         return {"status": "skipped", "reason": "telegram_disabled"}
@@ -936,21 +946,24 @@ def send_noc_report(db: Session, *, period: str) -> dict:
     if not bot_token:
         return {"status": "skipped", "reason": "no_bot_token"}
 
-    recipients = _notify_recipients(db)
-    if not recipients:
+    target_users = recipients if recipients is not None else _notify_recipients(db)
+    if not target_users:
         return {"status": "skipped", "reason": "no_recipients"}
 
     report_data = build_noc_report_data(db, period=period)
-    text = format_noc_report_message(report_data)
+    text = format_noc_report_message(
+        report_data,
+        client_timezone=resolve_notify_timezone(users=target_users),
+    )
     sent = 0
-    for user in recipients:
+    for user in target_users:
         try:
             if send_tg_message(bot_token, user.telegram_id, text):
                 sent += 1
         except Exception as exc:
             logger.warning("NOC report TG send failed for user %s: %s", user.id, exc)
 
-    return {"status": "sent", "period": period, "recipients": len(recipients), "sent": sent}
+    return {"status": "sent", "period": period, "recipients": len(target_users), "sent": sent}
 
 
 def send_noc_report_preview(
@@ -962,7 +975,15 @@ def send_noc_report_preview(
 ) -> bool:
     """Send a single NOC report message to one Telegram ID (manual preview)."""
     report_data = build_noc_report_data(db, period=period)
-    text = format_noc_report_message(report_data)
+    recipient = (
+        db.query(User)
+        .filter(User.telegram_id == str(telegram_id).strip())
+        .first()
+    )
+    text = format_noc_report_message(
+        report_data,
+        client_timezone=resolve_notify_timezone(user=recipient),
+    )
     return send_tg_message(bot_token, telegram_id, text, run_async=False)
 
 
@@ -978,7 +999,12 @@ def send_weekly_image_preview(
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             tmp.write(generate_weekly_image_bytes(db))
             image_path = Path(tmp.name)
-        when = format_notify_when(None)
+        recipient = (
+            db.query(User)
+            .filter(User.telegram_id == str(telegram_id).strip())
+            .first()
+        )
+        when = format_notify_when(resolve_notify_timezone(user=recipient))
         caption = f"📊 <b>NOC weekly (предпросмотр)</b>\n🕐 {when}"
         filename = f"noc-weekly-preview-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.png"
         return send_tg_photo(

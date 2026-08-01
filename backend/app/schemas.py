@@ -154,6 +154,9 @@ class UserResponse(UserBase):
     can_create_configs: bool = True
     visible_vpn_profiles: dict | None = None
     timezone: str = ""
+    noc_daily_time: str = ""
+    noc_weekly_dow: str = ""
+    noc_weekly_time: str = ""
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -606,6 +609,9 @@ class PanelResourceCurrentResponse(BaseModel):
 class AppSettingsResponse(BaseModel):
     theme: str
     timezone: str = ""
+    noc_daily_time: str = ""
+    noc_weekly_dow: str = ""
+    noc_weekly_time: str = ""
     app_name: str
     antizapret_path: str
     include_hosts: str = ""
@@ -620,6 +626,9 @@ class AppSettingsResponse(BaseModel):
 class AppSettingsUpdate(BaseModel):
     theme: str | None = None
     timezone: str | None = None
+    noc_daily_time: str | None = None
+    noc_weekly_dow: str | None = None
+    noc_weekly_time: str | None = None
     include_hosts: str | None = None
     exclude_hosts: str | None = None
     include_ips: str | None = None

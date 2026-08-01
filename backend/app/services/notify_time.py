@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any, Iterable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from starlette.requests import Request
@@ -31,6 +32,63 @@ def get_client_timezone_from_request(request: Request | None = None) -> str | No
     if request is not None:
         return _normalize_timezone_name(request.headers.get("X-Client-Timezone"))
     return _request_timezone
+
+
+def effective_user_timezone(user: Any | None) -> str | None:
+    """Profile timezone, or last browser timezone when profile is 'follow browser'."""
+    if user is None:
+        return None
+    profile = _normalize_timezone_name(getattr(user, "timezone", None))
+    if profile:
+        return profile
+    return _normalize_timezone_name(getattr(user, "last_client_timezone", None))
+
+
+def resolve_notify_timezone(
+    explicit: str | None = None,
+    *,
+    user: Any | None = None,
+    users: Iterable[Any] | None = None,
+) -> str | None:
+    """Pick timezone for a Telegram footer: request override → user profile → recipients."""
+    resolved = _normalize_timezone_name(explicit)
+    if resolved:
+        return resolved
+    from_user = effective_user_timezone(user)
+    if from_user:
+        return from_user
+    for candidate in users or ():
+        from_candidate = effective_user_timezone(candidate)
+        if from_candidate:
+            return from_candidate
+    return None
+
+
+def remember_client_timezone(
+    db: Any,
+    user: Any | None,
+    tz_name: str | None,
+    *,
+    commit: bool = True,
+) -> bool:
+    """Persist last-seen browser timezone for background Telegram notifications."""
+    if user is None:
+        return False
+    resolved = _normalize_timezone_name(tz_name)
+    if not resolved:
+        return False
+    current = str(getattr(user, "last_client_timezone", "") or "").strip()
+    if current == resolved:
+        return False
+    user.last_client_timezone = resolved
+    db.add(user)
+    if commit:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+    return True
 
 
 def _timezone_suffix(tz: ZoneInfo, dt: datetime) -> str:

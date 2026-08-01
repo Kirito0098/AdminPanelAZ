@@ -1,25 +1,29 @@
-"""Scheduled daily/weekly NOC summary reports to admin Telegram."""
+"""Scheduled daily/weekly NOC summary reports to admin Telegram (per-user)."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import AppSetting
-from app.services.cron_schedule import cron_matches_now
 from app.services.noc_report import send_noc_report, send_weekly_image_report
+from app.services.noc_schedule import (
+    local_now_for_user,
+    should_run_daily,
+    should_run_weekly,
+)
 
 logger = logging.getLogger(__name__)
 
-_LAST_RUN_KEYS = {
-    "daily": "noc_report_daily_last_run",
-    "weekly": "noc_report_weekly_last_run",
-}
+
+def _last_run_key(period: str, user_id: int) -> str:
+    return f"noc_report_{period}_last_run:{user_id}"
 
 
 def _get_setting(db: Session, key: str, default: str = "") -> str:
@@ -36,77 +40,102 @@ def _set_setting(db: Session, key: str, value: str) -> None:
     db.commit()
 
 
-def _already_ran_this_minute(db: Session, last_run_key: str, now: datetime) -> bool:
-    last_raw = _get_setting(db, last_run_key, "")
+def _already_ran_local_minute(db: Session, key: str, local_now: datetime) -> bool:
+    last_raw = _get_setting(db, key, "")
     if not last_raw:
         return False
     try:
         last = datetime.fromisoformat(last_raw.replace("Z", "+00:00"))
         if last.tzinfo is None:
             last = last.replace(tzinfo=timezone.utc)
+        last_local = last.astimezone(local_now.tzinfo)
         return (
-            last.year == now.year
-            and last.month == now.month
-            and last.day == now.day
-            and last.hour == now.hour
-            and last.minute == now.minute
+            last_local.year == local_now.year
+            and last_local.month == local_now.month
+            and last_local.day == local_now.day
+            and last_local.hour == local_now.hour
+            and last_local.minute == local_now.minute
         )
     except ValueError:
         return False
 
 
-def run_noc_report_once(*, period: str, cron_expr: str, now: datetime | None = None) -> dict:
-    settings = get_settings()
-    if not settings.noc_report_enabled:
-        return {"status": "disabled", "period": period}
-
-    now = now or datetime.now(timezone.utc)
-    if not cron_matches_now(cron_expr, now):
-        return {"status": "skipped", "reason": "cron_mismatch", "period": period}
-
-    last_run_key = _LAST_RUN_KEYS[period]
-    db = SessionLocal()
+def _actually_delivered(result: dict | None) -> bool:
+    """True only when at least one Telegram delivery succeeded."""
+    if not result:
+        return False
     try:
-        if _already_ran_this_minute(db, last_run_key, now):
-            return {"status": "skipped", "reason": "already_ran", "period": period}
+        return int(result.get("sent") or 0) > 0
+    except (TypeError, ValueError):
+        return False
 
-        result = send_noc_report(db, period=period)
-        if period == "weekly" and settings.noc_report_weekly_image_enabled:
-            image_result = send_weekly_image_report(db)
-            result["image"] = image_result
-            if image_result.get("status") == "sent":
-                logger.info(
-                    "NOC weekly image sent to %d/%d admin(s)",
-                    image_result.get("sent", 0),
-                    image_result.get("recipients", 0),
-                )
-        if result.get("status") == "sent":
-            _set_setting(db, last_run_key, now.isoformat())
-            logger.info(
-                "NOC %s report sent to %d/%d admin(s)",
-                period,
-                result.get("sent", 0),
-                result.get("recipients", 0),
-            )
-        elif result.get("status") == "skipped":
-            _set_setting(db, last_run_key, now.isoformat())
-        return result
-    except Exception as exc:
-        logger.exception("NOC %s report failed: %s", period, exc)
-        return {"status": "error", "period": period, "error": str(exc)}
-    finally:
-        db.close()
+
+def process_user_noc_tick(
+    db: Session,
+    user: Any,
+    *,
+    now: datetime,
+    settings: Any,
+) -> list[dict]:
+    results: list[dict] = []
+    local = local_now_for_user(user, now)
+
+    if should_run_daily(user, now_utc=now, env_daily_cron=settings.noc_report_daily_cron):
+        key = _last_run_key("daily", user.id)
+        if not _already_ran_local_minute(db, key, local):
+            result = send_noc_report(db, period="daily", recipients=[user])
+            # Only stamp dedup on real delivery — skipped/zero-sent remain retryable.
+            if _actually_delivered(result):
+                _set_setting(db, key, now.isoformat())
+            results.append({"user_id": user.id, "period": "daily", **result})
+
+    if should_run_weekly(user, now_utc=now, env_weekly_cron=settings.noc_report_weekly_cron):
+        key = _last_run_key("weekly", user.id)
+        if not _already_ran_local_minute(db, key, local):
+            result = send_noc_report(db, period="weekly", recipients=[user])
+            if settings.noc_report_weekly_image_enabled:
+                img = send_weekly_image_report(db, recipients=[user])
+                result["image"] = img
+            # Stamp if text OR weekly image was actually sent.
+            if _actually_delivered(result) or _actually_delivered(result.get("image")):
+                _set_setting(db, key, now.isoformat())
+            results.append({"user_id": user.id, "period": "weekly", **result})
+
+    return results
 
 
 def run_noc_report_scheduler_tick(now: datetime | None = None) -> list[dict]:
     settings = get_settings()
-    results: list[dict] = []
-    for period, cron_expr in (
-        ("daily", settings.noc_report_daily_cron),
-        ("weekly", settings.noc_report_weekly_cron),
-    ):
-        results.append(run_noc_report_once(period=period, cron_expr=cron_expr, now=now))
-    return results
+    if not settings.noc_report_enabled:
+        return [{"status": "disabled"}]
+
+    now = now or datetime.now(timezone.utc)
+    db = SessionLocal()
+    try:
+        from app.services.noc_report import _notify_recipients
+
+        results: list[dict] = []
+        for user in _notify_recipients(db):
+            try:
+                results.extend(process_user_noc_tick(db, user, now=now, settings=settings))
+            except Exception as exc:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                user_id = getattr(user, "id", None)
+                logger.exception(
+                    "NOC report scheduler tick failed for user %s: %s",
+                    user_id,
+                    exc,
+                )
+                results.append({"status": "error", "user_id": user_id, "error": str(exc)})
+        return results
+    except Exception as exc:
+        logger.exception("NOC report scheduler tick failed: %s", exc)
+        return [{"status": "error", "error": str(exc)}]
+    finally:
+        db.close()
 
 
 async def run_noc_report_scheduler_loop() -> None:
