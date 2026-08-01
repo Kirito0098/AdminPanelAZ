@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.20.0](#2200---2026-08-02) — 2026-08-02
 - [2.19.0](#2190---2026-07-30) — 2026-07-30
 - [2.18.0](#2180---2026-07-26) — 2026-07-26
 - [2.17.0](#2170---2026-07-15) — 2026-07-15
@@ -44,12 +45,17 @@
 
 ## [Unreleased]
 
-> **Черновик ветки `wip/cleanup-unused-ui`:** крупная чистка мёртвого кода (~80 файлов, ≈ −2.7k строк) — orphan UI/API без потребителей в текущей панели. Поведение экранов не менялось: убрано то, что уже не вызывалось из UI или было заменено (HA «Синхронизировать», PNG вместо PDF для NOC и т.п.).
+---
+
+## [2.20.0] - 2026-08-02
+
+> **Кратко:** персональное расписание NOC-сводок и Telegram-времена по поясу профиля; запрет совпадения домена панели с хостами AntiZapret; раздельные feature toggles «Маршрутизация» и «Конфиг AntiZapret»; чистка orphan UI/API (~−2.7k строк); фикс наследования трафика при повторном имени клиента; CI с pytest.
 
 ### ✨ Added
 
-- **Запрет одинакового домена панели и AntiZapret** — нельзя задать `DOMAIN` панели равным `OPENVPN_HOST` / `WIREGUARD_HOST` из `/root/antizapret/setup` (и наоборот): API публикации, сохранение хостов AZ, HA shared domain, `nginx-setup.sh` / `nginx-repair.sh`, предупреждение в мастере «Адрес сайта и HTTPS». Через конфиг AZ такой домен уходит в туннель — панель становится недоступна. В UI/docs: несколько A-записей на один домен рекомендованы; отдельно — [DuckDNS](https://www.duckdns.org/) (два имени: VPN и панель).
+- **Запрет одинакового домена панели и AntiZapret** — нельзя задать `DOMAIN` панели равным `OPENVPN_HOST` / `WIREGUARD_HOST` из `/root/antizapret/setup` (и наоборот): API публикации, сохранение хостов AZ, HA shared domain, `nginx-setup.sh` / `nginx-repair.sh`, предупреждение в мастере «Адрес сайта и HTTPS». Через конфиг AZ такой домен уходит в туннель — панель становится недоступна. В UI/docs: несколько A-записей на один домен рекомендованы (в т.ч. подсказка в HA); отдельно — [DuckDNS](https://www.duckdns.org/) (два имени: VPN и панель) в карточке DDNS.
 - **Персональное расписание NOC-сводок** — каждый администратор задаёт своё время ежедневной и еженедельной Telegram-сводки в **Настройки → Личные → NOC сводка — расписание** (`noc_daily_time`, `noc_weekly_dow`, `noc_weekly_time`). Время по поясу профиля (`timezone` / `last_client_timezone`); пустые поля — fallback на системный UTC-cron. Scheduler шлёт сводку (и weekly PNG) только этому админу; дедуп по локальной минуте (`noc_schedule.py`, `noc_report_scheduler.py`, `NocScheduleCard.tsx`).
+- **Пояс профиля для фоновых Telegram-сообщений** — колонка `users.last_client_timezone` (последний `X-Client-Timezone` из браузера при пустом «следовать за браузером»); middleware `active_session` сохраняет его через `remember_client_timezone`; резолв `effective_user_timezone` / `resolve_notify_timezone` (`notify_time.py`, `models.py`, `database.py`).
 - **Отдельный feature toggle «Конфиг AntiZapret»** — модуль `antizapret_config` (`FEATURE_ANTIZAPRET_CONFIG_ENABLED`): меню `/antizapret`, guard роута и API `GET/PUT /routing/antizapret-settings` независимы от «Маршрутизация / CIDR». По умолчанию включён; профили ресурсов minimal/standard/full учитывают новый ключ. Apply (`POST /routing/apply`) доступен, если включён любой из модулей `routing` или `antizapret_config` (`feature_toggles.py`, `Layout.tsx`, `App.tsx`, `PROJECT_MAP.md`).
   - По запросу [«Разделение блоков»](https://claymore0098.fider.io/posts/4/razdelenie-blokov) (Fider), **Tiger144**.
 
@@ -59,7 +65,7 @@
 - **Feature toggles / кэш** — из модуля мониторинга убраны пути `global-summary` / `nodes-compare`; удалены ключи `GLOBAL_DASHBOARD_CACHE_KEY` / `NODES_COMPARE_CACHE_KEY` (`feature_toggles.py`, `node_remote_cache.py`).
 - **«Маршрутизация» больше не включает «Конфиг AntiZapret»** — `FEATURE_ROUTING_ENABLED` управляет только `/routing` и CIDR API; описание и `disable_hint` обновлены (`feature_toggles.py`).
 - **Backend-импорты** — вычищены неиспользуемые импорты по роутерам и сервисам (`auth`, `main`, CIDR pipeline, telegram/*, traffic, reminders и др.).
-- **CI** — `actions/checkout@v7`, `setup-python@v7`, `setup-node@v7`; в backend job добавлен `pytest` (`ci.yml`).
+- **CI** — `actions/checkout@v7`, `setup-python@v7`, `setup-node@v7` (с `persist-credentials: false`); в backend job добавлен `pytest`; markdownlint: отключён MD060, в ignore добавлены `.cursor` и `docs/plans` (`ci.yml`, `.markdownlint*.json*`).
 - **`POST /backups/test-telegram`** — HTTP-маршрут снят (orphan FE); функция `test_backup_telegram` оставлена для Telegram-бот handlers (`backups.py`).
 - **Resource monitor** — в `_monitor_loop` убраны неиспользуемые локальные `cpu_thr` / `ram_thr` / `cooldown` (алерты по-прежнему через `maybe_send_resource_alert`) (`admin_notify.py`).
 
@@ -99,17 +105,19 @@
 ### 🐛 Fixed
 
 - **NOC-сводка больше не привязана только к 08:00 UTC для всех админов** — при заданном личном времени доставка идёт в локальный `HH:MM` профиля (например 11:00 Europe/Moscow), а не по общему env-cron; разные админы получают сводку в своё время (`noc_report_scheduler.py`, `should_run_daily` / `should_run_weekly`).
+- **Время в Telegram не только UTC** — футеры admin-notify и напоминаний владельцу VPN (сертификат / лимит / временная блокировка) форматируются по поясу профиля или `last_client_timezone`, а не всегда в UTC (`admin_notify.py`, `user_reminder_service.py`, `noc_report.py`, `notify_time.py`).
 - **Отключение маршрутизации больше не скрывает «Конфиг AntiZapret»** — раньше один toggle `routing` закрывал оба раздела UI и связанные API; теперь их можно включать/выключать по отдельности (см. Added / Changed; запрос [Fider #4](https://claymore0098.fider.io/posts/4/razdelenie-blokov) от **Tiger144**).
 - **Новый клиент наследовал трафик удалённого тёзки** — расход считается по `common_name`, поэтому клиент, созданный под именем ранее удалённого, сразу получал его накопленные байты и мог упереться в лимит трафика в момент создания. При создании клиента остаточная статистика по этому имени на узле удаляется (`purge_traffic_history_for_reused_name`); имя, занятое другой конфигурацией того же клиента (например, второй протокол), не затрагивается (`traffic/maintenance.py`, `configs.py`, `client_templates.py`, `config_csv_ops.py`).
 
 ### 🧪 Tests
 
 - **CI pytest** — шаг `PYTHONPATH=. pytest tests/` в backend job; `pytest` добавлен в `requirements-dev.txt`.
+- **Пояс и NOC-расписание** — `test_notify_time.py`, `test_admin_notify_timezone.py`, `test_noc_schedule.py`, `test_noc_report_recipients.py`, `test_noc_settings_schema.py`.
+- **Конфликт домена панели и AZ** — `test_az_panel_domain_conflict.py`.
 - **Разделение `routing` / `antizapret_config`** — `test_feature_toggles_routing_split.py`: реестр путей, независимое отключение модулей, guard API settings/apply/overview.
 - **Повторное использование имени клиента** — `test_traffic_history_reuse.py`: очистка остаточной статистики, нулевой расход у нового клиента, сохранение истории при занятом имени, регистронезависимое сопоставление, изоляция по узлам.
 
 ---
-
 
 ## [2.19.0] - 2026-07-30
 
