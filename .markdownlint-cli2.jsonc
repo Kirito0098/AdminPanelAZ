@@ -12,8 +12,17 @@
     },
     "MD033": {
       "allowed_elements": ["a", "details", "summary", "strong"]
-    }
+    },
+    "MD060": false
   },
+  "ignores": [
+    ".cursor/**",
+    ".superpowers/**",
+    "docs/plans/**",
+    "frontend/node_modules/**",
+    "frontend/dist/**",
+    "backend/.venv/**"
+  ],
   "overrides": [
     {
       "files": ["CHANGELOG.md"],

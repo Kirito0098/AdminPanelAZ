@@ -6,6 +6,9 @@
 # Linter (matches CI and pre-commit).
 ruff>=0.11,<1.0
 
+# Unit tests (CI + local).
+pytest>=8.0,<10.0
+
 # Security static analysis (CI/pre-commit: advisory).
 bandit>=1.7,<2.0
 

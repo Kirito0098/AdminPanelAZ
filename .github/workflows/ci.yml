@@ -51,6 +51,12 @@ jobs:
           PYTHONPATH=. python -c "from app.main import app; print('panel app import ok')"
           PYTHONPATH=. python -c "from node_agent.main import app as agent_app; print('node agent import ok')"
 
+      - name: Pytest
+        working-directory: backend
+        env:
+          NODE_AGENT_MODE: dev
+        run: PYTHONPATH=. pytest tests/ -q --tb=short
+
       - name: pip-audit (dependency vulnerabilities)
         # ecdsa (via python-jose): CVE-2024-23342 / PYSEC-2026-1325 — Minerva timing on P-256.
         # No upstream fix (side-channels out of scope). Panel JWT is HS256; OIDC path only verifies.

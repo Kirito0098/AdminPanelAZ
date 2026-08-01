@@ -58,6 +58,7 @@
 - **Feature toggles / кэш** — из модуля мониторинга убраны пути `global-summary` / `nodes-compare`; удалены ключи `GLOBAL_DASHBOARD_CACHE_KEY` / `NODES_COMPARE_CACHE_KEY` (`feature_toggles.py`, `node_remote_cache.py`).
 - **«Маршрутизация» больше не включает «Конфиг AntiZapret»** — `FEATURE_ROUTING_ENABLED` управляет только `/routing` и CIDR API; описание и `disable_hint` обновлены (`feature_toggles.py`).
 - **Backend-импорты** — вычищены неиспользуемые импорты по роутерам и сервисам (`auth`, `main`, CIDR pipeline, telegram/*, traffic, reminders и др.).
+- **CI** — `actions/checkout@v7`, `setup-python@v7`, `setup-node@v7`; в backend job добавлен `pytest` (`ci.yml`).
 - **`POST /backups/test-telegram`** — HTTP-маршрут снят (orphan FE); функция `test_backup_telegram` оставлена для Telegram-бот handlers (`backups.py`).
 - **Resource monitor** — в `_monitor_loop` убраны неиспользуемые локальные `cpu_thr` / `ram_thr` / `cooldown` (алерты по-прежнему через `maybe_send_resource_alert`) (`admin_notify.py`).
 
@@ -102,6 +103,7 @@
 
 ### 🧪 Tests
 
+- **CI pytest** — шаг `PYTHONPATH=. pytest tests/` в backend job; `pytest` добавлен в `requirements-dev.txt`.
 - **Разделение `routing` / `antizapret_config`** — `test_feature_toggles_routing_split.py`: реестр путей, независимое отключение модулей, guard API settings/apply/overview.
 - **Повторное использование имени клиента** — `test_traffic_history_reuse.py`: очистка остаточной статистики, нулевой расход у нового клиента, сохранение истории при занятом имени, регистронезависимое сопоставление, изоляция по узлам.
 
