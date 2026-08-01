@@ -24,7 +24,7 @@
 **Панель помогает администрировать VPN: клиенты, маршрутизация, мониторинг, бэкапы и Telegram.**
 
 - **Пользователи и администраторы** — **[docs/README.md](docs/README.md)** — простые инструкции по каждому разделу
-- **Разработчики** — [SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md) · [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md) · [HA / Node Sync](docs/NodeSync.md)
+- **Разработчики** — [CONTRIBUTING.md](CONTRIBUTING.md) (MCP, skills, договорённости) · [SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md) · [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md) · [HA / Node Sync](docs/NodeSync.md)
 
 ## 🚀 Быстрый старт
 
