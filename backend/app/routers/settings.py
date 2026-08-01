@@ -27,7 +27,12 @@ from app.services.file_editor import EDITABLE_FILES
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import require_ha_primary_for_config_ops
-from app.services.notify_time import _normalize_timezone_name, get_client_timezone_from_request
+from app.services.noc_schedule import parse_cron_dow, parse_hhmm
+from app.services.notify_time import (
+    _normalize_timezone_name,
+    get_client_timezone_from_request,
+    remember_client_timezone,
+)
 from app.services.vpn_profile_visibility import (
     get_default_visible_vpn_profiles,
     set_default_visible_vpn_profiles,
@@ -94,6 +99,9 @@ def get_settings(current_user: User = Depends(get_current_user), db: Session = D
     return AppSettingsResponse(
         theme=current_user.theme,
         timezone=current_user.timezone or "",
+        noc_daily_time=current_user.noc_daily_time or "",
+        noc_weekly_dow=current_user.noc_weekly_dow or "",
+        noc_weekly_time=current_user.noc_weekly_time or "",
         app_name=_get_setting(db, "app_name", settings.app_name),
         antizapret_path=str(get_node_antizapret_path(db)),
         include_hosts=include_hosts,
@@ -131,6 +139,49 @@ def update_settings(
                     detail=f"Неизвестный часовой пояс: {tz_raw}",
                 )
             current_user.timezone = normalized
+        db.add(current_user)
+        # Keep last-seen browser TZ for Telegram when profile is "follow browser".
+        remember_client_timezone(
+            db,
+            current_user,
+            get_client_timezone_from_request(request),
+            commit=False,
+        )
+
+    noc_fields_present = any(
+        v is not None
+        for v in [payload.noc_daily_time, payload.noc_weekly_dow, payload.noc_weekly_time]
+    )
+    if noc_fields_present:
+        if current_user.role.value != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только администратор может менять расписание NOC-сводок",
+            )
+        if payload.noc_daily_time is not None:
+            raw = payload.noc_daily_time.strip()
+            if raw and parse_hhmm(raw) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Некорректное время ежедневной NOC-сводки",
+                )
+            current_user.noc_daily_time = raw
+        if payload.noc_weekly_time is not None:
+            raw = payload.noc_weekly_time.strip()
+            if raw and parse_hhmm(raw) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Некорректное время еженедельной NOC-сводки",
+                )
+            current_user.noc_weekly_time = raw
+        if payload.noc_weekly_dow is not None:
+            raw = payload.noc_weekly_dow.strip()
+            if raw and parse_cron_dow(raw) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Некорректный день недели для NOC-сводки",
+                )
+            current_user.noc_weekly_dow = raw
         db.add(current_user)
 
     if current_user.role.value == "admin":

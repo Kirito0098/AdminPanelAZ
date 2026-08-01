@@ -55,6 +55,11 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.user)
     theme: Mapped[str] = mapped_column(String(16), default="dark")
     timezone: Mapped[str] = mapped_column(String(64), default="")
+    # Last X-Client-Timezone from the browser; used for TG when timezone is empty ("follow browser").
+    last_client_timezone: Mapped[str] = mapped_column(String(64), default="")
+    noc_daily_time: Mapped[str] = mapped_column(String(5), default="")
+    noc_weekly_dow: Mapped[str] = mapped_column(String(1), default="")
+    noc_weekly_time: Mapped[str] = mapped_column(String(5), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     totp_secret_encrypted: Mapped[str | None] = mapped_column(String(512), nullable=True)

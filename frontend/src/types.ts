@@ -144,6 +144,9 @@ export interface User {
   can_create_configs?: boolean
   visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
   timezone?: string
+  noc_daily_time?: string
+  noc_weekly_dow?: string
+  noc_weekly_time?: string
   created_at: string
 }
 
@@ -404,6 +407,9 @@ export interface ConnectionLogsSnapshot {
 export interface AppSettings {
   theme: string
   timezone?: string
+  noc_daily_time?: string
+  noc_weekly_dow?: string
+  noc_weekly_time?: string
   app_name: string
   antizapret_path: string
   include_hosts: string

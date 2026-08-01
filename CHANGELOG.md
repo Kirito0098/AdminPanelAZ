@@ -48,6 +48,7 @@
 
 ### ✨ Added
 
+- **Персональное расписание NOC-сводок** — каждый администратор задаёт своё время ежедневной и еженедельной Telegram-сводки в **Настройки → Личные → NOC сводка — расписание** (`noc_daily_time`, `noc_weekly_dow`, `noc_weekly_time`). Время по поясу профиля (`timezone` / `last_client_timezone`); пустые поля — fallback на системный UTC-cron. Scheduler шлёт сводку (и weekly PNG) только этому админу; дедуп по локальной минуте (`noc_schedule.py`, `noc_report_scheduler.py`, `NocScheduleCard.tsx`).
 - **Отдельный feature toggle «Конфиг AntiZapret»** — модуль `antizapret_config` (`FEATURE_ANTIZAPRET_CONFIG_ENABLED`): меню `/antizapret`, guard роута и API `GET/PUT /routing/antizapret-settings` независимы от «Маршрутизация / CIDR». По умолчанию включён; профили ресурсов minimal/standard/full учитывают новый ключ. Apply (`POST /routing/apply`) доступен, если включён любой из модулей `routing` или `antizapret_config` (`feature_toggles.py`, `Layout.tsx`, `App.tsx`, `PROJECT_MAP.md`).
   - По запросу [«Разделение блоков»](https://claymore0098.fider.io/posts/4/razdelenie-blokov) (Fider), **Tiger144**.
 
@@ -95,6 +96,7 @@
 
 ### 🐛 Fixed
 
+- **NOC-сводка больше не привязана только к 08:00 UTC для всех админов** — при заданном личном времени доставка идёт в локальный `HH:MM` профиля (например 11:00 Europe/Moscow), а не по общему env-cron; разные админы получают сводку в своё время (`noc_report_scheduler.py`, `should_run_daily` / `should_run_weekly`).
 - **Отключение маршрутизации больше не скрывает «Конфиг AntiZapret»** — раньше один toggle `routing` закрывал оба раздела UI и связанные API; теперь их можно включать/выключать по отдельности (см. Added / Changed; запрос [Fider #4](https://claymore0098.fider.io/posts/4/razdelenie-blokov) от **Tiger144**).
 - **Новый клиент наследовал трафик удалённого тёзки** — расход считается по `common_name`, поэтому клиент, созданный под именем ранее удалённого, сразу получал его накопленные байты и мог упереться в лимит трафика в момент создания. При создании клиента остаточная статистика по этому имени на узле удаляется (`purge_traffic_history_for_reused_name`); имя, занятое другой конфигурацией того же клиента (например, второй протокол), не затрагивается (`traffic/maintenance.py`, `configs.py`, `client_templates.py`, `config_csv_ops.py`).
 

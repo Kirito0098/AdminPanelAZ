@@ -4,6 +4,7 @@ import { Clock, Globe, KeyRound, Moon, Palette, Save, Sun } from 'lucide-react'
 import TwoFactorTab from '@/components/settings/TwoFactorTab'
 import PasskeysTab from '@/components/settings/PasskeysTab'
 import PersonalTelegramCard from '@/components/settings/PersonalTelegramCard'
+import NocScheduleCard from '@/components/settings/NocScheduleCard'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -185,7 +186,9 @@ export default function PersonalTab({
               <Clock size={18} />
               Часовой пояс
             </CardTitle>
-            <CardDescription>Дата и время во всей панели</CardDescription>
+            <CardDescription>
+              Дата и время в панели и в Telegram-оповещениях
+            </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col justify-between gap-4">
             <div className="rounded-xl border bg-muted/20 p-4 text-center">
@@ -222,6 +225,8 @@ export default function PersonalTab({
         </div>
 
         <PersonalTelegramCard />
+
+        <NocScheduleCard />
 
         <SectionHeading
           title="Безопасность"

@@ -53,7 +53,13 @@ def _traffic_warning(limit_bytes: int | None, consumed_bytes: int | None) -> boo
     return consumed >= int(limit_bytes * _traffic_warning_percent() / 100)
 
 
-def _build_owner_message(reminder_type: str, config: VpnConfig, details: str) -> str:
+def _build_owner_message(
+    reminder_type: str,
+    config: VpnConfig,
+    details: str,
+    *,
+    client_timezone: str | None = None,
+) -> str:
     from app.services.admin_notify import (
         _format_notify_card,
         _fmt_when,
@@ -62,7 +68,7 @@ def _build_owner_message(reminder_type: str, config: VpnConfig, details: str) ->
     )
     from app.services.notify_time import format_notify_when
 
-    when = _fmt_when(format_notify_when(None))
+    when = _fmt_when(format_notify_when(client_timezone))
     titles = {
         REMINDER_CERT: "⚠️ <b>Сертификат скоро истечёт</b>",
         REMINDER_TRAFFIC: "📊 <b>Лимит трафика</b>",
@@ -89,11 +95,19 @@ def _send_owner_reminder(
     if reminder_recently_sent(db, owner.id, reminder_type, dedup_key):
         return False
 
+    from app.services.notify_time import effective_user_timezone
+
+    owner_tz = effective_user_timezone(owner)
     owner_event = OWNER_EVENT_MAP[reminder_type]
     if owner.telegram_id and owner.has_tg_notify_event(owner_event):
         bot_token = _get_setting(db, "telegram_bot_token", "").strip()
         if bot_token and get_feature_service().is_enabled("telegram"):
-            text = _build_owner_message(reminder_type, config, details)
+            text = _build_owner_message(
+                reminder_type,
+                config,
+                details,
+                client_timezone=owner_tz,
+            )
             send_tg_message(bot_token, owner.telegram_id, text)
 
     admin_event = ADMIN_EVENT_MAP[reminder_type]
@@ -106,6 +120,7 @@ def _send_owner_reminder(
         details=details,
         subject_name=owner.username,
         node_id=config.node_id,
+        client_timezone=owner_tz,
     )
 
     record_reminder_sent(db, owner.id, reminder_type, dedup_key)
