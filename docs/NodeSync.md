@@ -15,7 +15,7 @@
 - Один `.ovpn` и один сертификат должны работать на **обоих** IP за общим доменом. HA копирует **PKI** (`easyrsa3`, включая `crl.pem`) и **байт-идентичные файлы `.ovpn`** с primary на replica — без перевыпуска сертификатов.
 - **Push full** и **HA crypto sync** не вызывают `client.sh 1`. На replica при Push full / crypto sync **не** выполняется `client.sh 7` — только wipe + import PKI + copy `.ovpn` с primary. **HA crypto sync** перед import `easyrsa3` делает `rmtree` каталога PKI; WireGuard server `.conf` — mirror-sync (лишние `.conf` на replica удаляются).
 - **Create** и **renew** на primary (явное действие админа) вызывают `client.sh 1` на primary, затем `client.sh 7` и crypto sync на replica.
-- **Download / QR / Telegram** отдают файл с диска as-is, без repair.
+- **Download / QR / Telegram** читают `.ovpn` с диска без repair; при выдаче панель может подставить multi-remote из списка узла в БД (диск и HA-копия остаются стоковыми). Список remote **не** реплицируется Push full — задаётся на каждом узле отдельно ([antizapret-config.md](antizapret-config.md#несколько-адресов-подключения)).
 - **Verify** сравнивает fingerprint `openvpn/client_profiles` и блок `openvpn_profile_certs` (read-only). При расхождении — **Push full**, не автоматический renew.
 
 ## API

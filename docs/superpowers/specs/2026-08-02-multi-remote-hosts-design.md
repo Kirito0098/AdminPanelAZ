@@ -1,7 +1,7 @@
 # Multi-remote hosts (OpenVPN): несколько адресов в профиле
 
 **Дата:** 2026-08-02  
-**Статус:** approved (design)  
+**Статус:** implemented  
 **Ветка:** `feature/multi-remote-hosts`  
 **Контекст:** при скачивании `.ovpn` нужен упорядоченный список `remote` (прокси / основной / запасной), который **не стирается** обновлением AntiZapret (`setup.sh`). Подробный продуктовый план: [`docs/plans/multi-remote-hosts/`](../../plans/multi-remote-hosts/README.md).
 

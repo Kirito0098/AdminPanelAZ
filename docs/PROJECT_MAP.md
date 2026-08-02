@@ -156,7 +156,7 @@
 | `/monitoring` | `MonitoringPage` | `logs_dashboard` | [noc-monitoring](noc-monitoring.md) | NOC: подключения, графики, службы |
 | `/traffic` | `TrafficPage` | `traffic_sync` | [traffic-monitoring](traffic-monitoring.md) | Трафик по клиентам, лимиты |
 | `/routing` | `RoutingPage` | `routing` | [routing-cidr](routing-cidr.md) | CIDR-провайдеры, pipeline |
-| `/antizapret` | `AntizapretConfigPage` | `antizapret_config` | [antizapret-config](antizapret-config.md) | Конфиг AntiZapret (admin) |
+| `/antizapret` | `AntizapretConfigPage` (`AntizapretConfigTab`: секция «Адреса подключения» / список remote OpenVPN) | `antizapret_config` | [antizapret-config](antizapret-config.md) | Конфиг AntiZapret (admin); multi-remote OpenVPN per-node |
 | `/warper` | `WarperPage` | `warper` | [warper](warper.md) | AZ-WARP / Cloudflare WARP |
 | `/telegram` | `TelegramPage` | `telegram` | [Telegram](Telegram.md) | Настройки бота и Mini App |
 | `/edit-files` | `EditFilesPage` | `edit_files` | [edit-files](edit-files.md) | Редактор файлов AntiZapret |
@@ -180,7 +180,7 @@
 |--------|-------|
 | `auth`, `session`, `users` | Аутентификация, 2FA, пользователи, роли |
 | `configs`, `client_access` | VPN-клиенты, блокировки, лимиты |
-| `nodes` | Управление узлами, health, обновления |
+| `nodes` | Управление узлами, health, обновления; **admin** `GET/PUT /nodes/{id}/remote-hosts` → `{ hosts, warnings }` (список OpenVPN remote в БД; непустой PUT best-effort пишет `hosts[0]` в `OPENVPN_HOST`) |
 | `monitoring` | NOC: подключения, гео, службы |
 | `traffic` | Сбор и отображение трафика |
 | `routing`, `cidr_db` | CIDR-провайдеры, pipeline, deploy |
@@ -208,6 +208,8 @@
 - `node_adapter.py` — абстракция **LocalAdapter** / **RemoteAdapter** (HTTP к agent :9100)
 - sync groups / HA — UI: `NodeSyncGroupSection.tsx`, API: `nodes` router; см. [`NodeSync.md`](NodeSync.md), user: [`uzly.md`](uzly.md)
 - `antizapret.py`, `openvpn_management.py`, `wg_runtime.py` — работа с VPN на узле
+- `openvpn_remote_hosts.py` — validate / normalize / `apply_openvpn_remote_hosts` (патч multi-remote в `.ovpn`)
+- `profile_delivery.py` — `read_profile_file_for_delivery` (патч на download / QR / Telegram / public redeem; public — hosts активного узла)
 - `profile_files.py`, `qr_generator.py` — конфиги и QR
 
 ### Мониторинг и трафик
@@ -246,7 +248,7 @@
 |--------|------------|
 | `User`, `RefreshToken`, `ActiveWebSession` | Пользователи, сессии; у `User` личные NOC-поля: `noc_daily_time`, `noc_weekly_dow`, `noc_weekly_time` (+ `timezone` / `last_client_timezone`) |
 | `VpnConfig` | Привязка клиента к узлу и владельцу |
-| `Node` | VPN-узел (local/remote, API key, mTLS) |
+| `Node` | VPN-узел (local/remote, API key, mTLS); `openvpn_remote_hosts` — JSON-список remote OpenVPN (nullable) |
 | `WgAccessPolicy`, `OpenVpnAccessPolicy` | Блокировки, лимиты трафика |
 | `TrafficSessionState`, `UserTrafficStatProtocol`, `UserTrafficSample` | Трафик |
 | `NodeResourceSample`, `PanelResourceSample` | Метрики ресурсов |
