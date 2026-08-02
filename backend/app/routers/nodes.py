@@ -424,9 +424,7 @@ def put_remote_hosts(
     db.add(node)
     db.commit()
     db.refresh(node)
-    warnings: list[str] = []
-    if hosts:
-        warnings = sync_openvpn_host_from_remotes(get_adapter_for_node(node), hosts)
+    warnings = sync_openvpn_host_from_remotes(lambda: get_adapter_for_node(node), hosts)
     if settings.audit_log_enabled:
         log_action(
             db,

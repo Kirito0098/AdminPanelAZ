@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 from app.services.openvpn_remote_hosts import (
     RemoteHostsError,
@@ -29,19 +30,31 @@ def test_put_rejects_dup():
 
 
 def test_sync_skips_when_empty():
-    adapter = MagicMock()
-    assert sync_openvpn_host_from_remotes(adapter, []) == []
-    adapter.update_antizapret_settings.assert_not_called()
+    factory = MagicMock()
+    assert sync_openvpn_host_from_remotes(factory, []) == []
+    factory.assert_not_called()
 
 
 def test_sync_best_effort_warning():
     adapter = MagicMock()
     adapter.update_antizapret_settings.side_effect = RuntimeError("down")
-    warnings = sync_openvpn_host_from_remotes(adapter, ["1.2.3.4"])
+    warnings = sync_openvpn_host_from_remotes(lambda: adapter, ["1.2.3.4"])
     assert warnings and "OPENVPN_HOST" in warnings[0]
 
 
 def test_sync_sets_first_host():
     adapter = MagicMock()
-    assert sync_openvpn_host_from_remotes(adapter, ["1.2.3.4", "vpn.example.com"]) == []
+    assert sync_openvpn_host_from_remotes(lambda: adapter, ["1.2.3.4", "vpn.example.com"]) == []
     adapter.update_antizapret_settings.assert_called_once_with({"openvpn_host": "1.2.3.4"})
+
+
+def test_sync_adapter_resolve_failure_yields_warning():
+    """Missing remote API key (HTTP 503 from get_adapter_for_node) must not escape as 503."""
+
+    def boom():
+        raise HTTPException(status_code=503, detail="API-ключ узла 'x' недоступен")
+
+    warnings = sync_openvpn_host_from_remotes(boom, ["1.2.3.4"])
+    assert len(warnings) == 1
+    assert "OPENVPN_HOST" in warnings[0]
+    assert "недоступен" in warnings[0]

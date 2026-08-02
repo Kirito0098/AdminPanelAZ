@@ -75,15 +75,22 @@ def hosts_to_json(hosts: list[str]) -> str:
     return json.dumps(list(hosts), ensure_ascii=False)
 
 
-def sync_openvpn_host_from_remotes(adapter, hosts: list[str]) -> list[str]:
-    """Best-effort OPENVPN_HOST=hosts[0]. Empty list must not touch settings."""
+def sync_openvpn_host_from_remotes(adapter_factory, hosts: list[str]) -> list[str]:
+    """Best-effort OPENVPN_HOST=hosts[0].
+
+    ``adapter_factory`` is a zero-arg callable that returns a node adapter.
+    Empty list must not call the factory or touch settings. Adapter resolve
+    and settings update failures become warnings (list already saved).
+    """
     if not hosts:
         return []
     try:
+        adapter = adapter_factory()
         adapter.update_antizapret_settings({"openvpn_host": hosts[0]})
         return []
     except Exception as exc:  # noqa: BLE001 — best-effort; list already saved
-        return [f"Не удалось обновить OPENVPN_HOST: {exc}"]
+        detail = getattr(exc, "detail", None) or str(exc)
+        return [f"Не удалось обновить OPENVPN_HOST: {detail}"]
 
 
 def apply_openvpn_remote_hosts(content: str, hosts: list[str]) -> str:
