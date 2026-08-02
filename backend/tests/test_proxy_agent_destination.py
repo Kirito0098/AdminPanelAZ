@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import pytest
 
+from types import SimpleNamespace
+
 from proxy_agent.iptables_dest import (
     AZ_PROXY_DPORTS,
+    IptablesApplyError,
+    apply_iptables_plan,
     detect_proxy_destination,
+    invert_iptables_argv,
     is_proxy_installed,
     plan_destination_rewrite,
     rewrite_destination_rules,
@@ -115,6 +120,25 @@ def test_rewrite_destination_rules_noop_when_missing():
     assert same == FIXTURE_NAT_SAVE
 
 
+def test_rewrite_does_not_corrupt_prefix_neighbor_ip():
+    """Replacing 10.0.0.1 must leave 10.0.0.10 untouched (IP end-boundary)."""
+    rules = """\
+*nat
+-A PREROUTING -p tcp -m tcp --dport 80 -j DNAT --to-destination 10.0.0.1:50080
+-A PREROUTING -p tcp -m tcp --dport 443 -j DNAT --to-destination 10.0.0.10:50443
+-A POSTROUTING -d 10.0.0.1/32 -j SNAT --to-source 198.51.100.1
+-A POSTROUTING -d 10.0.0.10/32 -j SNAT --to-source 198.51.100.1
+COMMIT
+"""
+    rewritten = rewrite_destination_rules(rules, "10.0.0.1", "10.0.0.2")
+    assert "--to-destination 10.0.0.2:50080" in rewritten
+    assert "--to-destination 10.0.0.10:50443" in rewritten
+    assert "-d 10.0.0.2/32" in rewritten
+    assert "-d 10.0.0.10/32" in rewritten
+    assert "10.0.0.20" not in rewritten
+    assert "10.0.0.210" not in rewritten
+
+
 def test_plan_destination_rewrite_builds_iptables_argv():
     plan = plan_destination_rewrite(FIXTURE_NAT_SAVE, "203.0.113.10", "203.0.113.99")
     assert plan, "expected at least one replace command pair"
@@ -153,3 +177,44 @@ def test_parse_conntrack_mappings_shape():
     assert m["dest_ip"] == "203.0.113.10"
     assert m["dest_port"] == 50443
     assert parse_conntrack_mappings("") == []
+
+
+def test_invert_iptables_argv_flips_d_and_a():
+    assert invert_iptables_argv(["iptables", "-w", "-t", "nat", "-D", "PREROUTING", "x"]) == [
+        "iptables",
+        "-w",
+        "-t",
+        "nat",
+        "-A",
+        "PREROUTING",
+        "x",
+    ]
+    assert invert_iptables_argv(["iptables", "-A", "POSTROUTING", "y"])[1] == "-D"
+
+
+def test_apply_iptables_plan_rollbacks_on_mid_failure():
+    """On failure of step N, invert and re-run steps 0..N-1 in reverse."""
+    plan = [
+        ["iptables", "-w", "-t", "nat", "-D", "PREROUTING", "old1"],
+        ["iptables", "-w", "-t", "nat", "-A", "PREROUTING", "new1"],
+        ["iptables", "-w", "-t", "nat", "-D", "PREROUTING", "old2"],  # fails
+        ["iptables", "-w", "-t", "nat", "-A", "PREROUTING", "new2"],
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(list(argv))
+        # Fail the third forward step (index 2)
+        if argv == plan[2]:
+            return SimpleNamespace(returncode=1, stderr="boom", stdout="")
+        return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    with pytest.raises(IptablesApplyError) as ei:
+        apply_iptables_plan(plan, runner=fake_run)
+
+    assert "boom" in str(ei.value)
+    # Forward: step0, step1, step2(fail) → rollback invert(step1), invert(step0)
+    assert calls[:3] == plan[:3]
+    assert calls[3] == invert_iptables_argv(plan[1])  # -A new1 → -D new1
+    assert calls[4] == invert_iptables_argv(plan[0])  # -D old1 → -A old1
+    assert len(calls) == 5

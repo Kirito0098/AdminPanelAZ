@@ -18,6 +18,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from proxy_agent import PROXY_AGENT_VERSION
 from proxy_agent.conntrack_maps import parse_conntrack_mappings
 from proxy_agent.iptables_dest import (
+    IptablesApplyError,
+    apply_iptables_plan,
     detect_proxy_destination,
     is_proxy_installed,
     plan_destination_rewrite,
@@ -122,20 +124,18 @@ def _run_iptables_save_nat() -> str:
 
 
 def _apply_iptables_plan(plan: list[list[str]]) -> None:
-    for argv in plan:
-        try:
-            proc = subprocess.run(argv, check=False, capture_output=True, text=True, timeout=30)
-        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"iptables недоступен: {exc}",
-            ) from exc
-        if proc.returncode != 0:
-            err = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Не удалось применить iptables ({' '.join(argv)}): {err}",
-            )
+    try:
+        apply_iptables_plan(plan)
+    except IptablesApplyError as exc:
+        detail = str(exc)
+        if exc.rollback_errors:
+            detail = f"{detail}; rollback: {'; '.join(exc.rollback_errors)}"
+        code = (
+            status.HTTP_503_SERVICE_UNAVAILABLE
+            if "недоступен" in detail
+            else status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+        raise HTTPException(status_code=code, detail=detail) from exc
 
 
 def _status_from_rules(rules_text: str) -> dict:

@@ -108,6 +108,11 @@ def is_proxy_installed(rules_text: str) -> bool:
     return False
 
 
+def _ipv4_in_line(line: str, ip: str) -> bool:
+    """True if ``ip`` appears as a full IPv4 token (not a prefix of another IP)."""
+    return bool(re.search(rf"(?<!\d){re.escape(ip)}(?!\d)", line))
+
+
 def rewrite_destination_rules(rules_text: str, old_ip: str, new_ip: str) -> str:
     """Return iptables-save-like text with old DESTINATION replaced by new_ip."""
     old = _parse_ipv4(old_ip)
@@ -115,18 +120,18 @@ def rewrite_destination_rules(rules_text: str, old_ip: str, new_ip: str) -> str:
     if old == new:
         return rules_text
 
+    # (?!\d) end-boundary: replacing 10.0.0.1 must not touch 10.0.0.10
     out: list[str] = []
     for raw in rules_text.splitlines():
         line = raw
-        if line.strip().startswith("-A ") and old in line:
-            # Replace IP in DNAT --to-destination and SNAT -d carefully
+        if line.strip().startswith("-A ") and _ipv4_in_line(line, old):
             line = re.sub(
-                rf"(--to-destination\s+){re.escape(old)}(:\d+)?",
+                rf"(--to-destination\s+){re.escape(old)}(?!\d)(:\d+)?",
                 rf"\g<1>{new}\2",
                 line,
             )
             line = re.sub(
-                rf"(-d\s+){re.escape(old)}(/\d+)?",
+                rf"(-d\s+){re.escape(old)}(?!\d)(/\d+)?",
                 rf"\g<1>{new}\2",
                 line,
             )
@@ -155,8 +160,12 @@ def plan_destination_rewrite(rules_text: str, old_ip: str, new_ip: str) -> list[
 
     rewritten = rewrite_destination_rules(rules_text, old, new)
     plan: list[list[str]] = []
-    old_lines = [ln for ln in _iter_rule_lines(rules_text) if old in ln]
-    new_by_idx = [ln for ln in _iter_rule_lines(rewritten) if new in ln and old not in ln]
+    old_lines = [ln for ln in _iter_rule_lines(rules_text) if _ipv4_in_line(ln, old)]
+    new_by_idx = [
+        ln
+        for ln in _iter_rule_lines(rewritten)
+        if _ipv4_in_line(ln, new) and not _ipv4_in_line(ln, old)
+    ]
 
     # Pair by position among rewritten peers; fall back to string replace per line
     if len(old_lines) != len(new_by_idx):
@@ -175,3 +184,86 @@ def plan_destination_rewrite(rules_text: str, old_ip: str, new_ip: str) -> list[
         # -A CHAIN ...
         plan.append(["iptables", "-w", "-t", "nat", "-A", *new_args[1:]])
     return plan
+
+
+def invert_iptables_argv(argv: list[str]) -> list[str]:
+    """Flip ``-D`` ↔ ``-A`` for rollback of a successful step."""
+    out = list(argv)
+    for i, tok in enumerate(out):
+        if tok == "-D":
+            out[i] = "-A"
+            return out
+        if tok == "-A":
+            out[i] = "-D"
+            return out
+    raise ValueError(f"Нет -A/-D в команде: {argv}")
+
+
+class IptablesApplyError(RuntimeError):
+    """Raised when a plan step fails (after best-effort rollback of prior steps)."""
+
+    def __init__(self, message: str, *, rollback_errors: list[str] | None = None):
+        super().__init__(message)
+        self.rollback_errors = rollback_errors or []
+
+
+def apply_iptables_plan(
+    plan: list[list[str]],
+    *,
+    runner=None,
+    timeout: float = 30,
+) -> None:
+    """Execute ``-D``/``-A`` plan; on mid-plan failure, best-effort rollback of applied steps.
+
+    Rollback runs inverted argv in reverse order (``-A``→``-D``, ``-D``→``-A``).
+    ``runner`` defaults to ``subprocess.run`` (injectable for tests).
+    """
+    import subprocess as _subprocess
+
+    run = runner or _subprocess.run
+    applied: list[list[str]] = []
+
+    for argv in plan:
+        try:
+            proc = run(argv, check=False, capture_output=True, text=True, timeout=timeout)
+        except (FileNotFoundError, _subprocess.TimeoutExpired) as exc:
+            _rollback_applied(applied, run=run, timeout=timeout)
+            raise IptablesApplyError(f"iptables недоступен: {exc}") from exc
+
+        rc = getattr(proc, "returncode", 0)
+        if rc != 0:
+            err = (getattr(proc, "stderr", None) or getattr(proc, "stdout", None) or "").strip()
+            err = err or f"exit {rc}"
+            rollback_errors = _rollback_applied(applied, run=run, timeout=timeout)
+            raise IptablesApplyError(
+                f"Не удалось применить iptables ({' '.join(argv)}): {err}",
+                rollback_errors=rollback_errors,
+            )
+        applied.append(argv)
+
+
+def _rollback_applied(
+    applied: list[list[str]],
+    *,
+    run,
+    timeout: float,
+) -> list[str]:
+    """Best-effort reverse of successful steps. Returns non-fatal rollback error strings."""
+    import subprocess as _subprocess
+
+    errors: list[str] = []
+    for argv in reversed(applied):
+        try:
+            inv = invert_iptables_argv(argv)
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
+        try:
+            proc = run(inv, check=False, capture_output=True, text=True, timeout=timeout)
+        except (FileNotFoundError, _subprocess.TimeoutExpired) as exc:
+            errors.append(f"{' '.join(inv)}: {exc}")
+            continue
+        if getattr(proc, "returncode", 0) != 0:
+            err = (getattr(proc, "stderr", None) or getattr(proc, "stdout", None) or "").strip()
+            errors.append(f"{' '.join(inv)}: {err or proc.returncode}")
+    return errors
