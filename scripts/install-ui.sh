@@ -271,6 +271,7 @@ AdminPanelAZ — веб-панель управления AntiZapret VPN.
   (по умолчанию)      Панель управления — веб-интерфейс и API (controller)
   --with-node-agent   Панель + локальный агент узла на этом же сервере
   --node-only         Только агент узла для VPN-сервера (без панели)
+  --proxy-only        Только proxy_agent для RU-прокси (без панели; proxy.sh не ставится)
 
 ================================================================
   3. КАК ЗАПУСКАТЬ ПОСЛЕ УСТАНОВКИ (автозапуск)
@@ -329,12 +330,16 @@ AdminPanelAZ — веб-панель управления AntiZapret VPN.
   # Тихая установка только агента узла на VPN-сервере
   sudo ./install.sh --node-only --with-systemd -y
 
+  # Тихая установка только proxy_agent на RU-прокси
+  sudo ./install.sh --proxy-only --with-systemd -y
+
   # Удаление / переустановка
   sudo ./install.sh --uninstall -y           # удалить сервисы
   sudo ./install.sh --uninstall --purge -y   # + удалить каталог проекта
   sudo ./install.sh --reinstall              # переустановить с сохранением .env
 
 Примечание: AntiZapret устанавливается отдельно в /root/antizapret (см. README).
+proxy.sh на RU — отдельно; install.sh --proxy-only ставит только proxy_agent.
 EOF
 }
 

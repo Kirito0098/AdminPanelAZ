@@ -1,49 +1,37 @@
 # Установка proxy_agent (прокси-узел)
 
-Короткая инструкция для **RU VPS**, где уже работает AntiZapret `proxy.sh`. Агент панели слушает порт **9101** и даёт health / статус / смену DESTINATION / mappings. Это **не** `node_agent` VPN-узла (`:9100`).
+Агент панели на **RU VPS** слушает порт **9101** (health / статус / DESTINATION / mappings). Это **не** `node_agent` VPN-узла (`:9100`).
 
 Панель **никогда** не устанавливает и не запускает `proxy.sh`. Сначала прокси по [инструкции AntiZapret](https://github.com/GubernievS/AntiZapret-VPN#настроить-прокси-сервер), потом агент.
 
-## Что нужно
+Полная схема: [proxy-nodes.md](proxy-nodes.md).
 
-- Root на RU-хосте
-- Копия репозитория AdminPanelAZ на этом хосте (или хотя бы `backend/proxy_agent`, `scripts/`, `systemd/`)
-- Открытый порт **9101** с IP панели (firewall)
-- Модуль **Прокси-узлы** в панели (по умолчанию выключен)
+## Рекомендуемый способ: install.sh
 
-## Шаги
-
-1. Сгенерируйте ключ (минимум 24 символа):
+На RU-хосте (нужен root и копия репозитория, обычно `/opt/AdminPanelAZ`):
 
 ```bash
-openssl rand -hex 32
+cd /opt/AdminPanelAZ   # или путь к репо
+sudo ./install.sh --proxy-only --with-systemd -y
 ```
 
-2. Создайте `backend/proxy_agent.env` на RU-хосте (образец: `backend/proxy_agent.env.example`):
+Или интерактивно: `sudo ./install.sh` → пункт **«Только proxy_agent (RU-прокси)»**.
 
-```env
-PROXY_AGENT_API_KEY=<ваш_ключ>
-PROXY_AGENT_HOST=0.0.0.0
-PROXY_AGENT_PORT=9101
-PROXY_AGENT_MODE=prod
-# PROXY_AGENT_ALLOWED_IPS=<IP_панели>/32
-```
+Установщик сам:
 
-3. Установите systemd unit:
+1. Создаст `backend/proxy_agent.env` и сгенерирует `PROXY_AGENT_API_KEY`
+2. Поставит и запустит systemd-сервис `adminpanelaz-proxy`
+3. Покажет ключ и порт — их нужно указать в панели (**Узлы → тип Прокси**)
 
-```bash
-cd /opt/AdminPanelAZ   # или ваш путь к репозиторию
-sudo PROXY_AGENT_API_KEY='<ваш_ключ>' ./scripts/install-proxy-systemd.sh
-sudo systemctl start adminpanelaz-proxy
-sudo systemctl status adminpanelaz-proxy
-```
+Откройте порт **9101** с IP панели (firewall). Модуль **Прокси-узлы** в панели по умолчанию выключен — включите в **Настройки → Модули**.
 
-4. В панели: **Настройки → Модули** → **Прокси-узлы** → включить.  
-   **Узлы** → добавить узел типа **Прокси** с тем же ключом и портом **9101** → **Проверить**.
+DESTINATION меняется через iptables (nat), без повторного запуска `proxy.sh`.
 
-DESTINATION меняется через iptables (nat), без повторного запуска `proxy.sh`. Подробнее для пользователей: [uzly.md](uzly.md).
+## Ручная установка (если нужно)
 
-Mappings с агента панель использует в **NOC Мониторинг**, чтобы восстановить домашний IP клиента за прокси — см. [noc-monitoring.md](noc-monitoring.md#подключения-через-прокси-узел).
+1. Ключ: `openssl rand -hex 32`
+2. `backend/proxy_agent.env` из `backend/proxy_agent.env.example`
+3. `sudo PROXY_AGENT_API_KEY='…' ./scripts/install-proxy-systemd.sh && sudo systemctl start adminpanelaz-proxy`
 
 ## mTLS (опционально)
 
@@ -56,13 +44,14 @@ PROXY_AGENT_MTLS_SERVER_KEY=/etc/adminpanelaz/mtls/agent.key
 PROXY_AGENT_MTLS_CA_CERT=/etc/adminpanelaz/mtls/ca.crt
 ```
 
-Сертификаты — как для VPN node agent (`scripts/generate-mtls-certs.sh`). Затем перезапуск: `sudo systemctl restart adminpanelaz-proxy`.
+Сертификаты — как для VPN node agent (`scripts/generate-mtls-certs.sh`). Затем: `sudo systemctl restart adminpanelaz-proxy`.
 
 ## Полезные команды
 
 ```bash
 journalctl -u adminpanelaz-proxy -f
 sudo systemctl restart adminpanelaz-proxy
+sudo systemctl status adminpanelaz-proxy
 ```
 
-[← Узлы](uzly.md) · [Все руководства](README.md)
+[← Прокси (полная схема)](proxy-nodes.md) · [Узлы](uzly.md) · [Все руководства](README.md)

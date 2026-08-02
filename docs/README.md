@@ -30,7 +30,8 @@
 | Журналы | [logs.md](logs.md) | Только админ |
 | Сервер | [server-monitor.md](server-monitor.md) | Только админ |
 | Узлы | [uzly.md](uzly.md) | Только админ |
-| proxy_agent (прокси-узел) | [proxy-agent.md](proxy-agent.md) | Только админ |
+| Прокси AntiZapret (полная схема) | [proxy-nodes.md](proxy-nodes.md) | Только админ |
+| proxy_agent (установка на RU) | [proxy-agent.md](proxy-agent.md) | Только админ |
 | Настройки | [nastrojki/README.md](nastrojki/README.md) | Все (часть — только админ) |
 
 ---

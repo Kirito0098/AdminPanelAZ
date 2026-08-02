@@ -28,18 +28,18 @@ usage() {
 Использование: sudo ./scripts/uninstall.sh [опции]
 
 Опции:
-  --purge-state         Удалить каталоги состояния (/var/lib/adminpanelaz, /var/lib/adminpanelaz-node, .runtime)
+  --purge-state         Удалить каталоги состояния (/var/lib/adminpanelaz*, .runtime)
   --purge               Удалить каталог проекта ($ROOT_DIR) — необратимо
   --remove-nginx        Удалить конфигурацию nginx сайта (по DOMAIN из backend/.env)
   --remove-firewall     Удалить правила firewall AdminPanelAZ (ufw и iptables)
-  --remove-env          Удалить backend/.env и backend/node_agent.env
+  --remove-env          Удалить backend/.env, node_agent.env и proxy_agent.env
   --remove-backups      Удалить каталог бэкапов (BACKUP_ROOT из backend/.env)
   --remove-system-config  Удалить /etc/adminpanelaz (ddns.env, mtls, node_agent.env)
   -y, --yes             Без интерактивных подтверждений
   --skip-confirm        Не спрашивать подтверждение (вызывается из install.sh после своего диалога)
   --help                Показать справку
 
-По умолчанию останавливает сервисы и удаляет systemd units (adminpanelaz, adminpanelaz-node, DDNS timer).
+По умолчанию останавливает сервисы и удаляет systemd units (adminpanelaz, adminpanelaz-node, adminpanelaz-proxy, DDNS timer).
 Каталог проекта, backend/.env и данные AntiZapret не удаляются без явных флагов.
 
 Примеры:
@@ -108,10 +108,10 @@ confirm_destructive() {
     warn "Будут удалены правила firewall с меткой AdminPanelAZ."
   fi
   if [[ "$PURGE_STATE" == true ]]; then
-    warn "Будут удалены каталоги состояния (/var/lib/adminpanelaz, /var/lib/adminpanelaz-node, .runtime)."
+    warn "Будут удалены каталоги состояния (/var/lib/adminpanelaz, /var/lib/adminpanelaz-node, /var/lib/adminpanelaz-proxy, .runtime)."
   fi
   if [[ "$REMOVE_ENV" == true ]]; then
-    warn "Будут удалены backend/.env и backend/node_agent.env."
+    warn "Будут удалены backend/.env, node_agent.env и proxy_agent.env."
   fi
   if [[ "$REMOVE_SYSTEM_CONFIG" == true ]]; then
     warn "Будет удалён /etc/adminpanelaz (ddns.env, mtls, node_agent.env)."
@@ -201,6 +201,7 @@ stop_all_services() {
   stop_systemd_unit_if_loaded "adminpanelaz-ddns.service"
   stop_systemd_unit_if_loaded "adminpanelaz"
   stop_systemd_unit_if_loaded "adminpanelaz-node"
+  stop_systemd_unit_if_loaded "adminpanelaz-proxy"
 }
 
 remove_nginx_site_if_present() {
@@ -313,6 +314,7 @@ remove_env_files() {
 
   local env_file="$ROOT_DIR/backend/.env"
   local node_env="$ROOT_DIR/backend/node_agent.env"
+  local proxy_env="$ROOT_DIR/backend/proxy_agent.env"
   if [[ -f "$env_file" ]]; then
     rm -f "$env_file"
     log "Удалён $env_file"
@@ -321,12 +323,17 @@ remove_env_files() {
     rm -f "$node_env"
     log "Удалён $node_env"
   fi
+  if [[ -f "$proxy_env" ]]; then
+    rm -f "$proxy_env"
+    log "Удалён $proxy_env"
+  fi
 }
 
 purge_state_dirs() {
   local dirs=(
     /var/lib/adminpanelaz
     /var/lib/adminpanelaz-node
+    /var/lib/adminpanelaz-proxy
     "$ROOT_DIR/.runtime"
   )
   for dir in "${dirs[@]}"; do
@@ -363,7 +370,7 @@ print_summary() {
     warn "Каталоги состояния сохранены. Для удаления: sudo $0 --purge-state"
   fi
   if [[ "$REMOVE_ENV" != true ]]; then
-    log "backend/.env и node_agent.env сохранены в $ROOT_DIR/backend/"
+    log "backend/.env, node_agent.env и proxy_agent.env сохранены в $ROOT_DIR/backend/"
   fi
   log "Каталог проекта ($ROOT_DIR) сохранён."
   log "Данные AntiZapret не затронуты."
@@ -384,6 +391,7 @@ main() {
   remove_ddns_timer
   remove_systemd_unit "adminpanelaz"
   remove_systemd_unit "adminpanelaz-node"
+  remove_systemd_unit "adminpanelaz-proxy"
   systemctl daemon-reload 2>/dev/null || true
   remove_firewall_rules
   remove_system_config

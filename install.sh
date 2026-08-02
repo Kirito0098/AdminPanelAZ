@@ -10,6 +10,7 @@
 # Основные режимы:
 #   (по умолчанию)      установка панели управления (controller)
 #   --node-only         только агент узла для VPN-сервера
+#   --proxy-only        только proxy_agent для RU-прокси (без панели и без proxy.sh)
 #   --with-systemd      автозапуск как системный сервис
 #   --reinstall         переустановка с сохранением backend/.env
 #   --uninstall         удаление сервисов (каталог проекта остаётся)
@@ -105,11 +106,14 @@ ENV_FILE="$BACKEND_DIR/.env"
 ENV_EXAMPLE="$BACKEND_DIR/.env.example"
 NODE_ENV_FILE="$BACKEND_DIR/node_agent.env"
 NODE_ENV_EXAMPLE="$BACKEND_DIR/node_agent.env.example"
+PROXY_ENV_FILE="$BACKEND_DIR/proxy_agent.env"
+PROXY_ENV_EXAMPLE="$BACKEND_DIR/proxy_agent.env.example"
 
 WITH_DAEMON=false
 WITH_SYSTEMD=false
 WITH_NODE_AGENT=false
 NODE_ONLY=false
+PROXY_ONLY=false
 FORCE=false
 NON_INTERACTIVE=false
 ACCEPT_DEFAULTS=false
@@ -117,6 +121,7 @@ INSTALL_FROM_GIT="${INSTALL_FROM_GIT:-}"
 # Стандартный каталог — /opt/AdminPanelAZ; при запуске из клона resolve_project_dir подставит ROOT_DIR
 INSTALL_TARGET="${INSTALL_TARGET:-$DEFAULT_INSTALL_TARGET}"
 GENERATED_NODE_KEY=""
+GENERATED_PROXY_KEY=""
 WIZARD_RAN=false
 ACTION="install"
 FULL_PURGE=false
@@ -165,6 +170,9 @@ install_on_err() {
   fi
   if declare -F install_node_selected >/dev/null 2>&1 && install_node_selected 2>/dev/null; then
     log_hints+=("  journalctl -u adminpanelaz-node -n 50")
+  fi
+  if declare -F install_proxy_selected >/dev/null 2>&1 && install_proxy_selected 2>/dev/null; then
+    log_hints+=("  journalctl -u adminpanelaz-proxy -n 50")
   fi
   if [[ ${#log_hints[@]} -eq 0 ]]; then
     log_hints+=("  journalctl -u adminpanelaz -n 50")
@@ -245,7 +253,9 @@ has_explicit_install_intent() {
   [[ "$WITH_DAEMON" == true ]] && return 0
   [[ "$WITH_NODE_AGENT" == true ]] && return 0
   [[ "$NODE_ONLY" == true ]] && return 0
+  [[ "$PROXY_ONLY" == true ]] && return 0
   [[ "${WIZ_INSTALL_TYPE:-}" == "node" ]] && return 0
+  [[ "${WIZ_INSTALL_TYPE:-}" == "proxy" ]] && return 0
   return 1
 }
 
@@ -270,10 +280,11 @@ require_tty_or_explicit_intent() {
 Без TTY (CI / automation) — передайте явные флаги, например:
   sudo bash install.sh --non-interactive --with-systemd -y
   sudo bash install.sh --node-only --with-systemd -y
+  sudo bash install.sh --proxy-only --with-systemd -y
 
 ERROR: no TTY — interactive wizard unavailable.
 Do not use wget|curl | sudo bash without flags. Download and run: sudo bash /tmp/install.sh
-Or pass explicit flags: --non-interactive --with-systemd or --node-only --with-systemd
+Or pass explicit flags: --non-interactive --with-systemd, --node-only, or --proxy-only
 EOF
   exit 1
 }
@@ -281,6 +292,12 @@ EOF
 validate_install_flags() {
   if [[ "$NODE_ONLY" == true && "$WITH_NODE_AGENT" == true ]]; then
     die "--node-only и --with-node-agent несовместимы: --node-only — только node agent без панели; --with-node-agent добавляет агент к панели"
+  fi
+  if [[ "$PROXY_ONLY" == true && "$NODE_ONLY" == true ]]; then
+    die "--proxy-only и --node-only несовместимы: выберите один режим агента"
+  fi
+  if [[ "$PROXY_ONLY" == true && "$WITH_NODE_AGENT" == true ]]; then
+    die "--proxy-only и --with-node-agent несовместимы"
   fi
 }
 
@@ -299,6 +316,10 @@ parse_args() {
       --node-only)
         NODE_ONLY=true
         export WIZ_INSTALL_TYPE=node
+        ;;
+      --proxy-only)
+        PROXY_ONLY=true
+        export WIZ_INSTALL_TYPE=proxy
         ;;
       --force)
         FORCE=true
@@ -426,7 +447,7 @@ collect_uninstall_options() {
   if ui_confirm "Удалить правила firewall AdminPanelAZ (ufw/iptables)?" "y"; then
     _out_args+=(--remove-firewall)
   fi
-  if ui_confirm "Удалить backend/.env и node_agent.env?" "n" "true"; then
+  if ui_confirm "Удалить backend/.env, node_agent.env и proxy_agent.env?" "n" "true"; then
     _out_args+=(--remove-env)
   fi
   if [[ "$PURGE_REPO" == true ]] || ui_confirm "Удалить каталог проекта $ROOT_DIR (--purge)?" "n" "true"; then
@@ -501,6 +522,10 @@ backup_env_for_reinstall() {
     cp -a "$NODE_ENV_FILE" "$ENV_BACKUP_DIR/node_agent.env"
     log "Резервная копия: $ENV_BACKUP_DIR/node_agent.env"
   fi
+  if [[ -f "$PROXY_ENV_FILE" ]]; then
+    cp -a "$PROXY_ENV_FILE" "$ENV_BACKUP_DIR/proxy_agent.env"
+    log "Резервная копия: $ENV_BACKUP_DIR/proxy_agent.env"
+  fi
 }
 
 offer_restore_env_backup() {
@@ -529,6 +554,10 @@ restore_env_backup() {
   if [[ -f "$ENV_BACKUP_DIR/node_agent.env" ]]; then
     cp -a "$ENV_BACKUP_DIR/node_agent.env" "$NODE_ENV_FILE"
     log "Восстановлен backend/node_agent.env из $ENV_BACKUP_DIR"
+  fi
+  if [[ -f "$ENV_BACKUP_DIR/proxy_agent.env" ]]; then
+    cp -a "$ENV_BACKUP_DIR/proxy_agent.env" "$PROXY_ENV_FILE"
+    log "Восстановлен backend/proxy_agent.env из $ENV_BACKUP_DIR"
   fi
 }
 
@@ -913,7 +942,7 @@ resolve_project_dir() {
 }
 
 ensure_executable_scripts() {
-  chmod +x "$ROOT_DIR/scripts/systemd-exec-panel.sh" "$ROOT_DIR/scripts/systemd-exec-node.sh" 2>/dev/null || true
+  chmod +x "$ROOT_DIR/scripts/systemd-exec-panel.sh" "$ROOT_DIR/scripts/systemd-exec-node.sh" "$ROOT_DIR/scripts/systemd-exec-proxy.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/test-backend-health-check.sh" 2>/dev/null || true
   chmod +x "$ROOT_DIR/scripts/test-install-publish-modes.sh" 2>/dev/null || true
@@ -958,6 +987,18 @@ node_env_set() {
   fi
 }
 
+proxy_env_set() {
+  local key="$1"
+  local value="$2"
+  local escaped
+  escaped="$(env_escape_for_sed "$value")"
+  if grep -qE "^${key}=" "$PROXY_ENV_FILE" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${escaped}|" "$PROXY_ENV_FILE"
+  else
+    printf '%s=%s\n' "$key" "$value" >>"$PROXY_ENV_FILE"
+  fi
+}
+
 is_placeholder_secret() {
   local value="$1"
   [[ -z "$value" ]] && return 0
@@ -970,7 +1011,8 @@ is_placeholder_secret() {
 }
 
 install_controller_selected() {
-  if [[ "$NODE_ONLY" == true ]] || [[ "${WIZ_INSTALL_TYPE:-controller}" == "node" ]]; then
+  if [[ "$NODE_ONLY" == true || "$PROXY_ONLY" == true ]] \
+    || [[ "${WIZ_INSTALL_TYPE:-controller}" == "node" || "${WIZ_INSTALL_TYPE:-}" == "proxy" ]]; then
     if [[ "$WIZARD_RAN" == true ]]; then
       wizard_install_controller
       return $?
@@ -985,6 +1027,9 @@ install_controller_selected() {
 }
 
 install_node_selected() {
+  if [[ "$PROXY_ONLY" == true ]] || [[ "${WIZ_INSTALL_TYPE:-}" == "proxy" ]]; then
+    return 1
+  fi
   if [[ "$NODE_ONLY" == true ]] || [[ "${WIZ_INSTALL_TYPE:-}" == "node" ]]; then
     if [[ "$WIZARD_RAN" == true ]]; then
       wizard_install_node
@@ -997,6 +1042,21 @@ install_node_selected() {
     return $?
   fi
   [[ "$WITH_NODE_AGENT" == true ]]
+}
+
+install_proxy_selected() {
+  if [[ "$PROXY_ONLY" == true ]] || [[ "${WIZ_INSTALL_TYPE:-}" == "proxy" ]]; then
+    if [[ "$WIZARD_RAN" == true ]]; then
+      wizard_install_proxy
+      return $?
+    fi
+    return 0
+  fi
+  if [[ "$WIZARD_RAN" == true ]]; then
+    wizard_install_proxy
+    return $?
+  fi
+  return 1
 }
 
 _wiz_should_apply() {
@@ -1122,7 +1182,7 @@ apply_wiz_env_settings() {
 setup_env() {
   install_set_step "Настройка backend/.env"
   if ! install_controller_selected; then
-    log "Режим node-only: пропуск backend/.env"
+    log "Режим без панели (node/proxy agent): пропуск backend/.env"
     return 0
   fi
 
@@ -1236,6 +1296,46 @@ setup_node_env() {
   export NODE_AGENT_API_KEY="$api_key"
 }
 
+setup_proxy_env() {
+  if ! install_proxy_selected; then
+    return 0
+  fi
+
+  log "Создание $PROXY_ENV_FILE"
+  if [[ -f "$PROXY_ENV_EXAMPLE" ]]; then
+    cp "$PROXY_ENV_EXAMPLE" "$PROXY_ENV_FILE"
+  else
+    : >"$PROXY_ENV_FILE"
+  fi
+  chmod 600 "$PROXY_ENV_FILE"
+
+  local api_key="${WIZ_PROXY_AGENT_API_KEY:-${PROXY_AGENT_API_KEY:-}}"
+  if [[ -z "$api_key" ]] || is_placeholder_secret "$api_key"; then
+    api_key="$(random_hex)"
+    log "Сгенерирован PROXY_AGENT_API_KEY"
+  fi
+
+  local proxy_port="${WIZ_PROXY_AGENT_PORT:-${PROXY_AGENT_PORT:-9101}}"
+  local proxy_state="${WIZ_PROXY_STATE_DIR:-${PROXY_AGENT_STATE_DIR:-$ROOT_DIR/.runtime/proxy}}"
+
+  proxy_env_set PROXY_AGENT_API_KEY "$api_key"
+  proxy_env_set PROXY_AGENT_PORT "$proxy_port"
+  proxy_env_set PROXY_AGENT_STATE_DIR "$proxy_state"
+  proxy_env_set PROXY_AGENT_HOST "0.0.0.0"
+  proxy_env_set PROXY_AGENT_MODE "prod"
+
+  local allowed_ips="${WIZ_PROXY_AGENT_ALLOWED_IPS:-}"
+  if [[ -n "$allowed_ips" ]]; then
+    proxy_env_set PROXY_AGENT_ALLOWED_IPS "$allowed_ips"
+  fi
+  if [[ "${WIZ_PROXY_AGENT_MTLS_ENABLED:-false}" == "true" ]]; then
+    proxy_env_set PROXY_AGENT_MTLS_ENABLED "true"
+  fi
+
+  GENERATED_PROXY_KEY="$api_key"
+  export PROXY_AGENT_API_KEY="$api_key"
+}
+
 setup_backend() {
   install_set_step "Настройка backend (Python ${ADMINPANELAZ_PYTHON_VERSION} venv)"
   ui_progress_start "Настройка backend (Python ${ADMINPANELAZ_PYTHON_VERSION} venv)"
@@ -1287,7 +1387,7 @@ seed_wizard_db_settings() {
 
 setup_frontend() {
   if ! install_controller_selected; then
-    log "Режим node-only: пропуск сборки frontend"
+    log "Режим без панели (node/proxy agent): пропуск сборки frontend"
     return 0
   fi
 
@@ -1313,6 +1413,10 @@ setup_runtime_dirs() {
   if install_node_selected; then
     local node_state="${NODE_AGENT_STATE_DIR:-${WIZ_NODE_STATE_DIR:-$ROOT_DIR/.runtime/node}}"
     mkdir -p "$node_state/logs" "$node_state/run"
+  fi
+  if install_proxy_selected; then
+    local proxy_state="${PROXY_AGENT_STATE_DIR:-${WIZ_PROXY_STATE_DIR:-$ROOT_DIR/.runtime/proxy}}"
+    mkdir -p "$proxy_state/logs" "$proxy_state/run"
   fi
 }
 
@@ -1355,6 +1459,31 @@ setup_node_agent_systemd() {
     "$ROOT_DIR/scripts/install-node-systemd.sh"
 
   GENERATED_NODE_KEY="$api_key"
+}
+
+setup_proxy_agent_systemd() {
+  if ! install_proxy_selected; then
+    return 0
+  fi
+
+  install_set_step "Установка systemd-сервиса proxy_agent"
+
+  local api_key="${GENERATED_PROXY_KEY:-${PROXY_AGENT_API_KEY:-}}"
+  if is_placeholder_secret "$api_key"; then
+    api_key="$(random_hex)"
+    log "Сгенерирован PROXY_AGENT_API_KEY для proxy_agent"
+    proxy_env_set PROXY_AGENT_API_KEY "$api_key"
+  fi
+
+  log "Установка systemd unit для proxy_agent..."
+  INSTALL_FROM_INSTALL_SH=1 \
+    INSTALL_USER="${INSTALL_USER:-root}" \
+    PROXY_AGENT_STATE_DIR="${PROXY_AGENT_STATE_DIR:-${WIZ_PROXY_STATE_DIR:-/var/lib/adminpanelaz-proxy}}" \
+    PROXY_AGENT_PORT="${PROXY_AGENT_PORT:-${WIZ_PROXY_AGENT_PORT:-9101}}" \
+    PROXY_AGENT_API_KEY="$api_key" \
+    "$ROOT_DIR/scripts/install-proxy-systemd.sh"
+
+  GENERATED_PROXY_KEY="$api_key"
 }
 
 start_daemon() {
@@ -1675,6 +1804,7 @@ setup_firewall_if_selected() {
 
   local has_nginx=false
   local has_node=false
+  local has_proxy=false
   local has_controller=false
   local fw_backend_port="${WIZ_BACKEND_PORT:-8000}"
   local fw_https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
@@ -1685,6 +1815,9 @@ setup_firewall_if_selected() {
   fi
   if install_node_selected; then
     has_node=true
+  fi
+  if install_proxy_selected; then
+    has_proxy=true
   fi
   if is_nginx_https_mode; then
     has_nginx=true
@@ -1700,7 +1833,7 @@ setup_firewall_if_selected() {
     fw_backend_port="0"
   fi
 
-  local panel_ip="${WIZ_NODE_AGENT_ALLOWED_IPS:-}"
+  local panel_ip="${WIZ_NODE_AGENT_ALLOWED_IPS:-${WIZ_PROXY_AGENT_ALLOWED_IPS:-}}"
   if [[ -z "$panel_ip" ]]; then
     panel_ip="${WIZ_SERVER_ADDRESS:-}"
     panel_ip="${panel_ip#http://}"
@@ -1721,21 +1854,29 @@ setup_firewall_if_selected() {
     backend_port="0"
   fi
 
+  local node_port="${WIZ_NODE_AGENT_PORT:-9100}"
+  local proxy_port="${WIZ_PROXY_AGENT_PORT:-9101}"
+
   if [[ "$has_controller" == true ]]; then
-    firewall_show_rules_summary "$backend_port" "${WIZ_NODE_AGENT_PORT:-9100}" \
+    firewall_show_rules_summary "$backend_port" "$node_port" \
       "$fw_https_port" "$fw_http_port" \
-      "$has_node" "$has_nginx" "$panel_ip" || true
+      "$has_node" "$has_nginx" "$panel_ip" "$has_proxy" "$proxy_port" || true
   fi
 
   if [[ "$has_controller" == true ]]; then
-    firewall_apply_rules "$backend_port" "${WIZ_NODE_AGENT_PORT:-9100}" \
+    firewall_apply_rules "$backend_port" "$node_port" \
       "$fw_https_port" "$fw_http_port" \
-      "$has_node" "$has_nginx" "$panel_ip" || \
+      "$has_node" "$has_nginx" "$panel_ip" "$has_proxy" "$proxy_port" || \
       warn "Не удалось применить правила firewall — см. SECURITY.md"
   elif [[ "$has_node" == true ]]; then
-    firewall_apply_rules "0" "${WIZ_NODE_AGENT_PORT:-9100}" \
+    firewall_apply_rules "0" "$node_port" \
       "$fw_https_port" "$fw_http_port" \
-      true false "$panel_ip" || \
+      true false "$panel_ip" false "$proxy_port" || \
+      warn "Не удалось применить правила firewall — см. SECURITY.md"
+  elif [[ "$has_proxy" == true ]]; then
+    firewall_apply_rules "0" "0" \
+      "$fw_https_port" "$fw_http_port" \
+      false false "$panel_ip" true "$proxy_port" || \
       warn "Не удалось применить правила firewall — см. SECURITY.md"
   fi
 }
@@ -1757,7 +1898,9 @@ start_node_via_systemd() {
 print_post_install() {
   local backend_port="${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}"
   local node_port="${NODE_AGENT_PORT:-${WIZ_NODE_AGENT_PORT:-9100}}"
-  local node_key="${1:-}"
+  local proxy_port="${PROXY_AGENT_PORT:-${WIZ_PROXY_AGENT_PORT:-9101}}"
+  local node_key="${1:-${GENERATED_NODE_KEY:-}}"
+  local proxy_key="${GENERATED_PROXY_KEY:-}"
   local admin_user="${WIZ_ADMIN_USERNAME:-admin}"
   local admin_pass="${WIZ_ADMIN_PASSWORD:-admin}"
 
@@ -1791,10 +1934,17 @@ print_post_install() {
   if install_node_selected; then
     ui_summary_row "Node agent env" "$NODE_ENV_FILE"
   fi
+  if install_proxy_selected; then
+    ui_summary_row "Proxy agent env" "$PROXY_ENV_FILE"
+  fi
 
   ui_summary_row "Логи (локально)" "${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-$ROOT_DIR/.runtime}}/logs/"
   if [[ "$WITH_SYSTEMD" == true ]]; then
-    ui_summary_row "Логи (systemd)" "/var/lib/adminpanelaz/logs/"
+    if install_proxy_selected && ! install_controller_selected; then
+      ui_summary_row "Логи (systemd)" "/var/lib/adminpanelaz-proxy/logs/"
+    else
+      ui_summary_row "Логи (systemd)" "/var/lib/adminpanelaz/logs/"
+    fi
   fi
 
   if install_controller_selected; then
@@ -1892,6 +2042,20 @@ print_post_install() {
       "Порт: ${node_port}"
   fi
 
+  if install_proxy_selected; then
+    echo
+    ui_separator
+    ui_bold "Proxy agent (RU)"
+    echo
+    ui_info_box "" \
+      "systemctl start adminpanelaz-proxy" \
+      "systemctl status adminpanelaz-proxy" \
+      "journalctl -u adminpanelaz-proxy -f" \
+      "Порт: ${proxy_port}" \
+      "proxy.sh панель не ставит — AntiZapret на этом хосте вручную" \
+      "В панели: Модули → Прокси-узлы → Узлы → тип Прокси"
+  fi
+
   if [[ -n "$node_key" ]]; then
     echo
     ui_separator
@@ -1902,6 +2066,19 @@ print_post_install() {
     else
       echo "  $node_key"
     fi
+  fi
+
+  if [[ -n "$proxy_key" ]]; then
+    echo
+    ui_separator
+    ui_bold "PROXY_AGENT_API_KEY (сохраните!)"
+    echo
+    if [[ "$UI_USE_COLOR" == true ]]; then
+      echo "  $(ui_yellow "$proxy_key")"
+    else
+      echo "  $proxy_key"
+    fi
+    print_info "Укажите этот ключ и порт ${proxy_port} при добавлении прокси-узла в панели"
   fi
 
   if [[ "$WIZARD_RAN" == true ]]; then
@@ -1918,6 +2095,7 @@ print_post_install() {
       ui_info_box "Рекомендации" \
         "Backend ${backend_port}/tcp — только localhost (127.0.0.1)" \
         "Node agent ${node_port}/tcp — только IP панели" \
+        "Proxy agent ${proxy_port}/tcp — только IP панели (если proxy_agent)" \
         "Наружу — HTTPS ${WIZ_HTTPS_PUBLIC_PORT:-443} (и HTTP ${WIZ_HTTP_ACME_PORT:-80} для ACME)" \
         "Подробнее: SECURITY.md"
     fi
@@ -1934,6 +2112,9 @@ print_post_install() {
     if install_node_selected; then
       print_info "systemctl start adminpanelaz-node"
     fi
+    if install_proxy_selected; then
+      print_info "systemctl start adminpanelaz-proxy"
+    fi
   else
     local -a next_steps=("cd $ROOT_DIR")
     if install_controller_selected; then
@@ -1941,6 +2122,9 @@ print_post_install() {
     fi
     if install_node_selected; then
       next_steps+=("sudo systemctl start adminpanelaz-node")
+    fi
+    if install_proxy_selected; then
+      next_steps+=("sudo systemctl start adminpanelaz-proxy")
     fi
     ui_info_box "Запуск через systemd" "${next_steps[@]}"
   fi
@@ -1992,6 +2176,7 @@ run_install_flow() {
   ensure_executable_scripts
   setup_env
   setup_node_env
+  setup_proxy_env
   setup_backend
   seed_admin_user_from_env
   seed_wizard_db_settings
@@ -2025,6 +2210,16 @@ run_install_flow() {
     elif [[ "$WITH_DAEMON" == true ]]; then
       install_set_step "Запуск daemon node agent"
       start_node_via_systemd "$GENERATED_NODE_KEY"
+    fi
+  fi
+
+  if install_proxy_selected; then
+    if [[ "$WITH_SYSTEMD" == true ]] || [[ "$WITH_DAEMON" == true ]]; then
+      setup_proxy_agent_systemd
+      systemctl start adminpanelaz-proxy 2>/dev/null || warn "Не удалось запустить adminpanelaz-proxy"
+    else
+      setup_proxy_agent_systemd
+      warn "Unit установлен, но не запущен: sudo systemctl start adminpanelaz-proxy"
     fi
   fi
 

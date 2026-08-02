@@ -89,6 +89,7 @@
 │   ├── logs.md
 │   ├── server-monitor.md
 │   ├── uzly.md
+│   ├── proxy-nodes.md           # полная схема прокси (UI + allow-ips + NOC)
 │   ├── proxy-agent.md           # systemd install proxy_agent на RU
 │   ├── nastrojki/               # инструкции по подразделам Настроек
 │   │   ├── README.md
@@ -164,7 +165,7 @@
 | `/edit-files` | `EditFilesPage` | `edit_files` | [edit-files](edit-files.md) | Редактор файлов AntiZapret |
 | `/logs` | `LogsPage` | `logs_dashboard` / `action_logs` | [logs](logs.md) | Журналы |
 | `/server-monitor` | `ServerMonitorPage` | `server_monitor` | [server-monitor](server-monitor.md) | vnStat, нагрузка сервера |
-| `/nodes` | `NodesPage` | — (admin); UI прокси при `proxy_nodes` | [uzly](uzly.md), [proxy-agent](proxy-agent.md) | VPN-узлы, sync groups (HA); при toggle — прокси-узлы (`node_kind=proxy`) |
+| `/nodes` | `NodesPage` | — (admin); UI прокси при `proxy_nodes` | [proxy-nodes](proxy-nodes.md), [uzly](uzly.md), [proxy-agent](proxy-agent.md) | VPN-узлы, sync groups (HA); при toggle — прокси-узлы (`node_kind=proxy`) |
 | `/settings` | `SettingsPage` | — | [nastrojki](nastrojki/README.md) | Пользователи, бэкапы, безопасность… |
 | `/login` | `LoginPage` | — | [profil](nastrojki/profil.md) | JWT + 2FA + passkey |
 

@@ -162,7 +162,7 @@ port_is_ours() {
     case "$cmdline" in
       *"${root}"*)
         case "$cmdline" in
-          *uvicorn*|*node_agent*|*systemd-exec-panel*|*systemd-exec-node*)
+          *uvicorn*|*node_agent*|*proxy_agent*|*systemd-exec-panel*|*systemd-exec-node*|*systemd-exec-proxy*)
             return 0
             ;;
         esac
@@ -315,6 +315,11 @@ install_collect_required_ports() {
   case "$install_type" in
     node)
       INSTALL_REQUIRED_PORTS+=("${node_port}|Связь с панелью (node agent)|any")
+      return 0
+      ;;
+    proxy)
+      local proxy_port="${WIZ_PROXY_AGENT_PORT:-${PROXY_AGENT_PORT:-9101}}"
+      INSTALL_REQUIRED_PORTS+=("${proxy_port}|Связь с панелью (proxy_agent)|any")
       return 0
       ;;
   esac

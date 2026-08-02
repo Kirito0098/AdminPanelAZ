@@ -76,7 +76,7 @@ sudo systemctl restart adminpanelaz
 | edit_files | Редактор файлов |
 | server_monitor | Страница «Сервер» |
 | action_logs | Журнал действий администраторов |
-| proxy_nodes | Прокси-узлы на странице **Узлы** (**default off**); см. [uzly](../uzly.md), [proxy-agent](../proxy-agent.md) |
+| proxy_nodes | Прокси-узлы на странице **Узлы** (**default off**); см. [proxy-nodes](../proxy-nodes.md), [uzly](../uzly.md), [proxy-agent](../proxy-agent.md) |
 
 ---
 
