@@ -136,16 +136,23 @@ def get_active_node_id(db: Session) -> int | None:
         return None
 
 
+def _is_vpn_node(node: Node) -> bool:
+    return (getattr(node, "node_kind", None) or "vpn") == "vpn"
+
+
 def set_active_node_id(db: Session, node_id: int) -> None:
+    """Set active VPN node. Rejects ``node_kind=proxy`` for all callers (HTTP, TG, mini)."""
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if node is not None and not _is_vpn_node(node):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Прокси-узел нельзя сделать активным для VPN",
+        )
     _set_setting(db, ACTIVE_NODE_KEY, str(node_id))
 
 
 def clear_active_node_id(db: Session) -> None:
     _set_setting(db, ACTIVE_NODE_KEY, "")
-
-
-def _is_vpn_node(node: Node) -> bool:
-    return (getattr(node, "node_kind", None) or "vpn") == "vpn"
 
 
 def get_active_node(db: Session) -> Node:

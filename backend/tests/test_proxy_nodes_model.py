@@ -15,7 +15,8 @@ from app.database import Base
 from app.models import AppSetting, Node, NodeStatus
 from app.schemas import NodeCreate
 from app.services.feature_toggles import FEATURE_TOGGLE_BY_KEY, FeatureToggleService, is_proxy_nodes_enabled
-from app.services.node_manager import get_active_node, set_active_node_id
+from app.services.node_manager import ACTIVE_NODE_KEY, get_active_node, set_active_node_id
+from app.services import node_manager as node_manager_mod
 
 
 @pytest.fixture
@@ -167,13 +168,35 @@ def test_activate_vpn_ok(db, monkeypatch):
     assert get_active_node(db).id == vpn.id
 
 
+def test_set_active_node_id_rejects_proxy(db):
+    proxy = _add_node(db, name="proxy-guard", kind="proxy", port=9101)
+    with pytest.raises(HTTPException) as exc:
+        set_active_node_id(db, proxy.id)
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Прокси-узел нельзя сделать активным для VPN"
+    assert get_active_node_id_raw(db) in (None, "")
+
+
+def test_set_active_node_id_allows_vpn(db):
+    vpn = _add_node(db, name="vpn-guard", kind="vpn")
+    set_active_node_id(db, vpn.id)
+    db.commit()
+    assert get_active_node(db).id == vpn.id
+
+
 def test_get_active_node_skips_proxy(db, monkeypatch):
     proxy = _add_node(db, name="proxy-only", kind="proxy", port=9101)
     vpn = _add_node(db, name="vpn-b", kind="vpn")
-    set_active_node_id(db, proxy.id)
+    # Plant legacy/corrupt active_node_id (bypass guard) to verify recovery.
+    node_manager_mod._set_setting(db, ACTIVE_NODE_KEY, str(proxy.id))
     db.commit()
 
     monkeypatch.setattr("app.services.node_manager.settings.local_antizapret_enabled", False)
     active = get_active_node(db)
     assert active.id == vpn.id
     assert active.node_kind == "vpn"
+
+
+def get_active_node_id_raw(db) -> str | None:
+    row = db.query(AppSetting).filter(AppSetting.key == ACTIVE_NODE_KEY).first()
+    return None if row is None else row.value
