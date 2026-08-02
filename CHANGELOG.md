@@ -47,6 +47,7 @@
 
 ### ✨ Added
 
+- **Прокси-узлы (волна 1)** — feature toggle `proxy_nodes` / `FEATURE_PROXY_NODES_ENABLED` (**default off**): узлы `node_kind=proxy`, отдельный `proxy_agent` на RU (`:9101`, systemd `adminpanelaz-proxy`), панель через `ProxyNodeAdapter` — health/status, смена DESTINATION в iptables, mappings. Панель **не** ставит `proxy.sh`. Прокси нельзя активировать как VPN. NOC real IP — волна 2. Docs: [uzly.md](docs/uzly.md), [proxy-agent.md](docs/proxy-agent.md).
 - **Несколько адресов OpenVPN на узле** — в **Конфиг AntiZapret → Адреса подключения** админ задаёт упорядоченный список IP/доменов (до 8) на активном узле; при скачивании `.ovpn` (сайт, QR, Telegram, публичная ссылка) панель подставляет несколько `remote` в этом порядке. Список в БД панели переживает `setup.sh`; непустой список пишет первый адрес в `OPENVPN_HOST`, пустой патч выключает и `OPENVPN_HOST` не трогает. API: `GET/PUT /nodes/{id}/remote-hosts`. Docs: [antizapret-config.md](docs/antizapret-config.md#несколько-адресов-подключения).
 - **Multi-remote этап 06** — после пересборки профилей из панели `.ovpn` на диске получают multi-`remote`; при скачивании WG/Amnezia `Endpoint` = первый адрес списка (порт сохраняется, на диск не пишется); кнопка «Добавить первый адрес в allow-ips» / `POST /nodes/{id}/remote-hosts/allow-first` идемпотентно дописывает `hosts[0]` в `allow-ips.txt`. После `setup.sh` диск снова сток до следующей пересборки из панели; выдача всегда патчит из БД.
 

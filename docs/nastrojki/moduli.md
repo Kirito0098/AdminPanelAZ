@@ -69,12 +69,14 @@ sudo systemctl restart adminpanelaz
 |--------|----------|
 | NOC / logs_dashboard | NOC Мониторинг |
 | traffic_sync | Мониторинг трафика |
-| routing | Маршрутизация, CIDR, AntiZapret |
+| routing | Маршрутизация, CIDR |
+| antizapret_config | Конфиг AntiZapret |
 | warper | AZ-WARP |
 | telegram | Раздел Telegram |
 | edit_files | Редактор файлов |
 | server_monitor | Страница «Сервер» |
 | action_logs | Журнал действий администраторов |
+| proxy_nodes | Прокси-узлы на странице **Узлы** (**default off**); см. [uzly](../uzly.md), [proxy-agent](../proxy-agent.md) |
 
 ---
 

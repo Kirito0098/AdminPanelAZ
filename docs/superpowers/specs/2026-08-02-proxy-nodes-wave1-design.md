@@ -1,7 +1,7 @@
 # Proxy nodes — волна 1 (toggle, модель, proxy_agent)
 
 **Дата:** 2026-08-02  
-**Статус:** approved (design)  
+**Статус:** implemented  
 **Ветка:** `feature/multi-remote-hosts`  
 **Продуктовый черновик:** `docs/plans/multi-remote-hosts/07-proxy-node.md`  
 **Зависит от:** multi-remote MVP (+ stage 06 опционально)  
