@@ -47,7 +47,7 @@ import {
   Shield,
   X,
 } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 type FieldLayout = 'list' | 'grid'
@@ -68,6 +68,10 @@ const PLACED_SECTIONS = new Set<string>([
 const MAX_REMOTE_HOSTS = 8
 const PROXY_SH_DOCS_URL =
   'https://github.com/GubernievS/AntiZapret-VPN#настроить-прокси-сервер'
+
+function firstNonEmptyRemoteHost(hosts: string[]): string | undefined {
+  return hosts.find((host) => host.trim().length > 0)
+}
 
 const FIELD_DISPLAY: Partial<Record<string, { title: string; description: string }>> = {
   openvpn_host: {
@@ -407,8 +411,11 @@ function ConnectionAddressesCard({
   onDraftChange,
   activeNodeId,
   remoteHosts,
+  savedRemoteHosts,
   remoteHostsDirty,
   remoteHostsSaving,
+  remoteHostsLoadError,
+  onRetryRemoteHosts,
   onRemoteHostsChange,
   onSaveRemoteHosts,
 }: {
@@ -419,16 +426,21 @@ function ConnectionAddressesCard({
   onDraftChange: (key: string, value: string) => void
   activeNodeId: number | null
   remoteHosts: string[]
+  savedRemoteHosts: string[]
   remoteHostsDirty: boolean
   remoteHostsSaving: boolean
+  remoteHostsLoadError: string | null
+  onRetryRemoteHosts: () => void
   onRemoteHostsChange: (hosts: string[]) => void
   onSaveRemoteHosts: () => void
 }) {
   const SectionIcon = section.icon
   const openvpnField = section.fields.find((field) => field.key === 'openvpn_host')
   const wireguardField = section.fields.find((field) => field.key === 'wireguard_host')
-  const listSynced = remoteHosts.length > 0
-  const listDisabled = disabled || remoteHostsSaving || activeNodeId == null
+  const syncedOpenvpnHost = firstNonEmptyRemoteHost(savedRemoteHosts)
+  const listSynced = Boolean(syncedOpenvpnHost)
+  const listDisabled =
+    disabled || remoteHostsSaving || activeNodeId == null || remoteHostsLoadError != null
   const canAdd = remoteHosts.length < MAX_REMOTE_HOSTS
 
   const moveHost = (index: number, delta: number) => {
@@ -504,7 +516,7 @@ function ConnectionAddressesCard({
               </div>
               <Input
                 id={openvpnField.html_id || openvpnField.key}
-                value={listSynced ? remoteHosts[0] : (draft.openvpn_host ?? '')}
+                value={listSynced ? (syncedOpenvpnHost ?? '') : (draft.openvpn_host ?? '')}
                 disabled={disabled || listSynced}
                 readOnly={listSynced}
                 placeholder={openvpnField.env}
@@ -567,6 +579,22 @@ function ConnectionAddressesCard({
             <SettingsAlert variant="warning" title="Нет активного узла">
               Выберите активный узел, чтобы редактировать список адресов подключения.
             </SettingsAlert>
+          ) : remoteHostsLoadError != null ? (
+            <div className="space-y-3">
+              <SettingsAlert variant="danger" title="Не удалось загрузить адреса">
+                {remoteHostsLoadError}
+              </SettingsAlert>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={disabled || remoteHostsSaving}
+                onClick={onRetryRemoteHosts}
+              >
+                <RefreshCw className="mr-1.5 h-4 w-4" />
+                Повторить загрузку адресов
+              </Button>
+            </div>
           ) : (
             <>
               <ul className="list-disc space-y-1.5 pl-5 text-xs leading-relaxed text-muted-foreground">
@@ -735,6 +763,8 @@ export default function AntizapretConfigTab() {
   const [remoteHosts, setRemoteHosts] = useState<string[]>([])
   const [savedRemoteHosts, setSavedRemoteHosts] = useState<string[]>([])
   const [remoteHostsSaving, setRemoteHostsSaving] = useState(false)
+  const [remoteHostsLoadError, setRemoteHostsLoadError] = useState<string | null>(null)
+  const remoteHostsLoadedNodeIdRef = useRef<number | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -746,9 +776,41 @@ export default function AntizapretConfigTab() {
   const controlsDisabled = saving || applying || haReplicaReadonly
   const httpsIs443 = panelHttpsPortIs443(httpsPublicPort)
   const backupTcpPortConflict = httpsIs443 && isFlagOn(draft.OPENVPN_BACKUP_TCP)
+  const openvpnHostLockedByList = Boolean(firstNonEmptyRemoteHost(savedRemoteHosts))
   const remoteHostsDirty = useMemo(
-    () => JSON.stringify(remoteHosts) !== JSON.stringify(savedRemoteHosts),
-    [remoteHosts, savedRemoteHosts],
+    () =>
+      remoteHostsLoadError == null &&
+      JSON.stringify(remoteHosts) !== JSON.stringify(savedRemoteHosts),
+    [remoteHosts, savedRemoteHosts, remoteHostsLoadError],
+  )
+
+  const loadRemoteHosts = useCallback(
+    async (nodeId: number) => {
+      if (remoteHostsLoadedNodeIdRef.current !== nodeId) {
+        setRemoteHosts([])
+        setSavedRemoteHosts([])
+        remoteHostsLoadedNodeIdRef.current = null
+      }
+      try {
+        const hostsResp = await getNodeRemoteHosts(nodeId)
+        setRemoteHosts(hostsResp.hosts)
+        setSavedRemoteHosts(hostsResp.hosts)
+        remoteHostsLoadedNodeIdRef.current = nodeId
+        setRemoteHostsLoadError(null)
+        return true
+      } catch (err) {
+        const message =
+          err instanceof ApiError ? err.message : 'Не удалось загрузить адреса подключения'
+        setRemoteHostsLoadError(message)
+        notifyError(message)
+        if (remoteHostsLoadedNodeIdRef.current !== nodeId) {
+          setRemoteHosts([])
+          setSavedRemoteHosts([])
+        }
+        return false
+      }
+    },
+    [notifyError],
   )
 
   const load = useCallback(async () => {
@@ -756,17 +818,9 @@ export default function AntizapretConfigTab() {
     setLoadError(null)
     try {
       const nodeId = activeNode?.id ?? null
-      const [data, vpn, hostsResp] = await Promise.all([
+      const [data, vpn] = await Promise.all([
         getAntizapretSettings(),
         getVpnNetworkSettings().catch(() => null),
-        nodeId != null
-          ? getNodeRemoteHosts(nodeId).catch((err) => {
-              notifyError(
-                err instanceof ApiError ? err.message : 'Не удалось загрузить адреса подключения',
-              )
-              return null
-            })
-          : Promise.resolve(null),
       ])
       setSchema(data.schema)
       setSaved(data.settings)
@@ -778,9 +832,14 @@ export default function AntizapretConfigTab() {
       } else {
         setHttpsPublicPort('443')
       }
-      const hosts = hostsResp?.hosts ?? []
-      setRemoteHosts(hosts)
-      setSavedRemoteHosts(hosts)
+      if (nodeId == null) {
+        setRemoteHosts([])
+        setSavedRemoteHosts([])
+        remoteHostsLoadedNodeIdRef.current = null
+        setRemoteHostsLoadError(null)
+      } else {
+        await loadRemoteHosts(nodeId)
+      }
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Не удалось загрузить настройки AntiZapret'
       setLoadError(message)
@@ -788,7 +847,7 @@ export default function AntizapretConfigTab() {
     } finally {
       setLoading(false)
     }
-  }, [activeNode?.id, activeNode?.name, notifyError])
+  }, [activeNode?.id, activeNode?.name, loadRemoteHosts, notifyError])
 
   useEffect(() => {
     void load()
@@ -805,11 +864,11 @@ export default function AntizapretConfigTab() {
     () =>
       schema
         .filter((field) => {
-          if (field.key === 'openvpn_host' && remoteHosts.length > 0) return false
+          if (field.key === 'openvpn_host' && openvpnHostLockedByList) return false
           return draft[field.key] !== saved[field.key]
         })
         .map((field) => field.key),
-    [schema, draft, saved, remoteHosts.length],
+    [schema, draft, saved, openvpnHostLockedByList],
   )
   const dirty = dirtyKeys.length > 0
   const dirtySet = useMemo(() => new Set(dirtyKeys), [dirtyKeys])
@@ -853,13 +912,19 @@ export default function AntizapretConfigTab() {
       notifyError('Нет активного узла для сохранения адресов')
       return
     }
+    if (remoteHostsLoadError != null) {
+      notifyError('Сначала загрузите список адресов')
+      return
+    }
     setRemoteHostsSaving(true)
     try {
       const result = await putNodeRemoteHosts(activeNode.id, remoteHosts)
       setRemoteHosts(result.hosts)
       setSavedRemoteHosts(result.hosts)
-      if (result.hosts.length > 0) {
-        const first = result.hosts[0]
+      remoteHostsLoadedNodeIdRef.current = activeNode.id
+      setRemoteHostsLoadError(null)
+      const first = firstNonEmptyRemoteHost(result.hosts)
+      if (first != null) {
         setDraft((prev) => ({ ...prev, openvpn_host: first }))
         setSaved((prev) => ({ ...prev, openvpn_host: first }))
       }
@@ -872,7 +937,7 @@ export default function AntizapretConfigTab() {
     } finally {
       setRemoteHostsSaving(false)
     }
-  }, [activeNode?.id, remoteHosts, notifyError, notifyWarning, success])
+  }, [activeNode?.id, remoteHosts, remoteHostsLoadError, notifyError, notifyWarning, success])
 
   const renderSection = (title: string) => {
     const section = sectionsByTitle.get(title)
@@ -888,8 +953,13 @@ export default function AntizapretConfigTab() {
           onDraftChange={handleDraftChange}
           activeNodeId={activeNode?.id ?? null}
           remoteHosts={remoteHosts}
+          savedRemoteHosts={savedRemoteHosts}
           remoteHostsDirty={remoteHostsDirty}
           remoteHostsSaving={remoteHostsSaving}
+          remoteHostsLoadError={remoteHostsLoadError}
+          onRetryRemoteHosts={() => {
+            if (activeNode?.id != null) void loadRemoteHosts(activeNode.id)
+          }}
           onRemoteHostsChange={setRemoteHosts}
           onSaveRemoteHosts={() => void saveRemoteHosts()}
         />
