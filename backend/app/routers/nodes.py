@@ -17,6 +17,8 @@ from app.schemas import (
     NodeMtlsDisableResponse,
     NodeMtlsEnableResponse,
     NodeMtlsStatusResponse,
+    NodeRemoteHostsBody,
+    NodeRemoteHostsResponse,
     NodeResponse,
     NodeRotateKeyResponse,
     NodeUpdate,
@@ -52,6 +54,13 @@ from app.services.node_update_roll import enqueue_node_update_roll
 from app.services.background_tasks import background_task_service
 from app.services.geo_routing_hint import build_geo_routing_hint
 from app.services.node_sync.groups import build_ha_node_context, find_group_for_node
+from app.services.openvpn_remote_hosts import (
+    RemoteHostsError,
+    hosts_to_json,
+    normalize_hosts,
+    parse_hosts_json,
+    sync_openvpn_host_from_remotes,
+)
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 settings = get_settings()
@@ -385,6 +394,49 @@ def disable_node_mtls(
             "или переустановите node agent без mTLS."
         ),
     )
+
+
+@router.get("/{node_id}/remote-hosts", response_model=NodeRemoteHostsResponse)
+def get_remote_hosts(node_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    return NodeRemoteHostsResponse(hosts=parse_hosts_json(node.openvpn_remote_hosts))
+
+
+@router.put("/{node_id}/remote-hosts", response_model=NodeRemoteHostsResponse)
+def put_remote_hosts(
+    node_id: int,
+    payload: NodeRemoteHostsBody,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    try:
+        hosts = normalize_hosts(payload.hosts)
+    except RemoteHostsError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    node.openvpn_remote_hosts = hosts_to_json(hosts) if hosts else None
+    node.updated_at = datetime.utcnow()
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+    warnings: list[str] = []
+    if hosts:
+        warnings = sync_openvpn_host_from_remotes(get_adapter_for_node(node), hosts)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_remote_hosts_update",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"node_id={node_id} hosts={hosts}",
+        )
+    return NodeRemoteHostsResponse(hosts=hosts, warnings=warnings)
 
 
 @router.post("/{node_id}/rotate-key", response_model=NodeRotateKeyResponse)

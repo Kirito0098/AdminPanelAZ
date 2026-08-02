@@ -246,6 +246,7 @@ class Node(Base):
     is_local: Mapped[bool] = mapped_column(Boolean, default=False)
     mtls_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     node_metadata: Mapped[str] = mapped_column(Text, default="{}")
+    openvpn_remote_hosts: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

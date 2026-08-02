@@ -843,6 +843,7 @@ def run_db_migrations() -> None:
     _migrate_viewer_role_to_user()
     _migrate_user_telegram_backfill()
     _migrate_nodes_mtls_enabled()
+    _migrate_nodes_openvpn_remote_hosts()
     _seed_client_templates_for_nodes()
 
 
@@ -894,6 +895,19 @@ def _migrate_nodes_mtls_enabled() -> None:
                 text("UPDATE nodes SET mtls_enabled = 1 WHERE is_local = 0")
             )
             logger.info("DB migration: backfilled nodes.mtls_enabled for remote nodes")
+
+
+def _migrate_nodes_openvpn_remote_hosts() -> None:
+    """Add per-node OpenVPN multi-remote hosts JSON column."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "openvpn_remote_hosts" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE nodes ADD COLUMN openvpn_remote_hosts TEXT"))
+        logger.info("DB migration: added nodes.openvpn_remote_hosts")
 
 
 def _migrate_user_telegram_backfill() -> None:

@@ -123,6 +123,15 @@ class NodeMtlsStatusResponse(BaseModel):
     agent_certs_count: int = 0
 
 
+class NodeRemoteHostsBody(BaseModel):
+    hosts: list[str] = Field(default_factory=list)
+
+
+class NodeRemoteHostsResponse(BaseModel):
+    hosts: list[str]
+    warnings: list[str] = Field(default_factory=list)
+
+
 class UserBase(BaseModel):
     username: str
     role: UserRole = UserRole.user

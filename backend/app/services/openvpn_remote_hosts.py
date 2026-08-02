@@ -75,6 +75,17 @@ def hosts_to_json(hosts: list[str]) -> str:
     return json.dumps(list(hosts), ensure_ascii=False)
 
 
+def sync_openvpn_host_from_remotes(adapter, hosts: list[str]) -> list[str]:
+    """Best-effort OPENVPN_HOST=hosts[0]. Empty list must not touch settings."""
+    if not hosts:
+        return []
+    try:
+        adapter.update_antizapret_settings({"openvpn_host": hosts[0]})
+        return []
+    except Exception as exc:  # noqa: BLE001 — best-effort; list already saved
+        return [f"Не удалось обновить OPENVPN_HOST: {exc}"]
+
+
 def apply_openvpn_remote_hosts(content: str, hosts: list[str]) -> str:
     if not hosts:
         return content
