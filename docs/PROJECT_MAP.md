@@ -180,7 +180,7 @@
 |--------|-------|
 | `auth`, `session`, `users` | Аутентификация, 2FA, пользователи, роли |
 | `configs`, `client_access` | VPN-клиенты, блокировки, лимиты |
-| `nodes` | Управление узлами, health, обновления; **admin** `GET/PUT /nodes/{id}/remote-hosts` → `{ hosts, warnings }` (список OpenVPN remote в БД; непустой PUT best-effort пишет `hosts[0]` в `OPENVPN_HOST`) |
+| `nodes` | Управление узлами, health, обновления; **admin** `GET/PUT /nodes/{id}/remote-hosts` → `{ hosts, warnings }` (список OpenVPN remote в БД; непустой PUT best-effort пишет `hosts[0]` в `OPENVPN_HOST`); **admin** `POST /nodes/{id}/remote-hosts/allow-first` → `{ added, host, detail?, warnings }` (идемпотентно дописать `hosts[0]` в `allow-ips.txt` + apply) |
 | `monitoring` | NOC: подключения, гео, службы |
 | `traffic` | Сбор и отображение трафика |
 | `routing`, `cidr_db` | CIDR-провайдеры, pipeline, deploy |
@@ -208,8 +208,9 @@
 - `node_adapter.py` — абстракция **LocalAdapter** / **RemoteAdapter** (HTTP к agent :9100)
 - sync groups / HA — UI: `NodeSyncGroupSection.tsx`, API: `nodes` router; см. [`NodeSync.md`](NodeSync.md), user: [`uzly.md`](uzly.md)
 - `antizapret.py`, `openvpn_management.py`, `wg_runtime.py` — работа с VPN на узле
-- `openvpn_remote_hosts.py` — validate / normalize / `apply_openvpn_remote_hosts` (патч multi-remote в `.ovpn`)
-- `profile_delivery.py` — `read_profile_file_for_delivery` (патч на download / QR / Telegram / public redeem; public — hosts активного узла)
+- `openvpn_remote_hosts.py` — validate / normalize / `apply_openvpn_remote_hosts` (патч multi-remote в `.ovpn`); `append_host_to_allow_ips`
+- `wireguard_endpoint.py` — `apply_wireguard_endpoint_host` (патч `Endpoint` → `hosts[0]` при выдаче WG/AWG)
+- `profile_delivery.py` — `read_profile_file_for_delivery` (`.ovpn` multi-remote + WG Endpoint на download / QR / Telegram / public redeem; public — hosts активного узла); `patch_openvpn_profiles_on_node` (после успешного `recreate_profiles` / `client.sh 7` из панели — multi-remote на диск)
 - `profile_files.py`, `qr_generator.py` — конфиги и QR
 
 ### Мониторинг и трафик

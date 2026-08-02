@@ -1,7 +1,7 @@
 # Multi-remote hosts — этап 06 (диск, WG delivery, allow-ips)
 
 **Дата:** 2026-08-02  
-**Статус:** approved (design)  
+**Статус:** implemented  
 **Ветка:** `feature/multi-remote-hosts`  
 **Зависит от:** MVP 01–05 (`docs/superpowers/specs/2026-08-02-multi-remote-hosts-design.md`)  
 **Продуктовый черновик:** `docs/plans/multi-remote-hosts/06-opcionalno.md`  
