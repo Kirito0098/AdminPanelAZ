@@ -415,6 +415,8 @@ class OpenVpnClient(BaseModel):
     isp: str | None = None
     location_label: str | None = None
     geo_label: str | None = None
+    via_proxy: bool = False
+    proxy_resolved: bool = False
     node_id: int | None = None
     node_name: str | None = None
     active_node_id: int | None = None
@@ -439,6 +441,8 @@ class WireGuardPeer(BaseModel):
     isp: str | None = None
     location_label: str | None = None
     geo_label: str | None = None
+    via_proxy: bool = False
+    proxy_resolved: bool = False
     node_id: int | None = None
     node_name: str | None = None
     active_node_id: int | None = None

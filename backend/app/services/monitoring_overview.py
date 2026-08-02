@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy.orm import Session
 
@@ -18,11 +18,13 @@ from app.schemas import (
     VpnConfigHaInfo,
     WireGuardPeer,
 )
+from app.services.feature_toggles import is_proxy_nodes_enabled
 from app.services.node_sync.groups import build_ha_metadata
 from app.services.ip_geo import is_local_geoip_loaded, lookup_ips_geo, parse_client_endpoint
 from app.services.node_health_score import compute_node_health_score
-from app.services.node_manager import get_active_node, get_adapter_for_node
+from app.services.node_manager import NODE_KIND_PROXY, get_active_node, get_adapter_for_node, get_proxy_adapter
 from app.services.node_compare_metrics import extract_cidr_routes_count, get_traffic_totals_by_node
+from app.services.proxy_noc_enrich import get_mappings_for_proxy, match_client_ip, normalize_proxy_host
 from app.services.resource_metrics import get_latest_samples_by_node
 from app.services.wireguard_status import wireguard_peer_is_online as _wg_is_online
 
@@ -139,17 +141,80 @@ def build_global_dashboard_summary(db: Session) -> GlobalDashboardSummary:
     )
 
 
+def _load_proxy_noc_context(db: Session) -> tuple[set[str], dict[str, list[dict[str, Any]]]]:
+    """Load proxy IPs and per-proxy mappings when proxy_nodes is enabled.
+
+    Returns ``(proxy_ips, mappings_by_proxy_ip)``. Mapping lists are shallow-copied
+    so callers cannot mutate the process-local cache.
+    """
+    if not is_proxy_nodes_enabled(db):
+        return set(), {}
+
+    proxy_nodes = db.query(Node).filter(Node.node_kind == NODE_KIND_PROXY).all()
+    proxy_ips: set[str] = set()
+    mappings_by_proxy_ip: dict[str, list[dict[str, Any]]] = {}
+
+    for proxy_node in proxy_nodes:
+        proxy_ip = normalize_proxy_host(proxy_node.host)
+        if not proxy_ip:
+            continue
+        proxy_ips.add(proxy_ip)
+
+        def _factory(_node_id: int, node: Node = proxy_node):
+            return get_proxy_adapter(node)
+
+        # Copy list — get_mappings_for_proxy may return a shared cached reference.
+        mappings_by_proxy_ip[proxy_ip] = list(get_mappings_for_proxy(_factory, proxy_node.id))
+
+    return proxy_ips, mappings_by_proxy_ip
+
+
+def _match_endpoint_proxy(
+    endpoint: str | None,
+    proxy_ips: set[str],
+    mappings_by_proxy_ip: dict[str, list[dict[str, Any]]],
+) -> tuple[str | None, bool, bool]:
+    """Match endpoint using only mappings for the proxy IP that owns the endpoint."""
+    if not proxy_ips:
+        return None, False, False
+    parsed = parse_client_endpoint(endpoint)
+    lookup_ip = parsed.get("lookup_ip")
+    if not lookup_ip or lookup_ip not in proxy_ips:
+        return None, False, False
+    mappings = mappings_by_proxy_ip.get(lookup_ip) or []
+    return match_client_ip(endpoint, mappings, {lookup_ip})
+
+
+def _geo_lookup_ip_for_endpoint(
+    endpoint: str | None,
+    proxy_ips: set[str],
+    mappings_by_proxy_ip: dict[str, list[dict[str, Any]]],
+) -> str | None:
+    resolved_ip, _via, proxy_resolved = _match_endpoint_proxy(
+        endpoint, proxy_ips, mappings_by_proxy_ip
+    )
+    if proxy_resolved and resolved_ip:
+        return resolved_ip
+    parsed = parse_client_endpoint(endpoint)
+    return parsed.get("lookup_ip")
+
+
 def _collect_lookup_ips(
     openvpn_clients: list[OpenVpnClient],
     wireguard_peers: list[WireGuardPeer],
+    *,
+    proxy_ips: set[str] | None = None,
+    mappings_by_proxy_ip: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[str | None]:
+    proxy_ips = proxy_ips or set()
+    mappings_by_proxy_ip = mappings_by_proxy_ip or {}
     ips: list[str | None] = []
     for client in openvpn_clients:
-        parsed = parse_client_endpoint(client.real_address)
-        ips.append(parsed.get("lookup_ip"))
+        ips.append(
+            _geo_lookup_ip_for_endpoint(client.real_address, proxy_ips, mappings_by_proxy_ip)
+        )
     for peer in wireguard_peers:
-        parsed = parse_client_endpoint(peer.endpoint)
-        ips.append(parsed.get("lookup_ip"))
+        ips.append(_geo_lookup_ip_for_endpoint(peer.endpoint, proxy_ips, mappings_by_proxy_ip))
     return ips
 
 
@@ -158,9 +223,10 @@ def _apply_geo_fields(
     endpoint: str | None,
     geo_map: dict[str, dict[str, str | None]],
     extra: dict | None = None,
+    lookup_ip_override: str | None = None,
 ) -> dict:
     parsed = parse_client_endpoint(endpoint)
-    lookup_ip = (parsed.get("lookup_ip") or "").strip("[]")
+    lookup_ip = (lookup_ip_override or parsed.get("lookup_ip") or "").strip("[]")
     geo = geo_map.get(lookup_ip, {}) if lookup_ip else {}
     payload = {
         "display_address": parsed.get("display_address"),
@@ -176,20 +242,57 @@ def _apply_geo_fields(
     return payload
 
 
+def _proxy_enrich_extra(
+    endpoint: str | None,
+    proxy_ips: set[str],
+    mappings_by_proxy_ip: dict[str, list[dict[str, Any]]],
+) -> tuple[dict, str | None]:
+    """Build via_proxy fields and optional geo lookup override (home IP when resolved)."""
+    resolved_ip, via_proxy, proxy_resolved = _match_endpoint_proxy(
+        endpoint, proxy_ips, mappings_by_proxy_ip
+    )
+    extra: dict = {
+        "via_proxy": via_proxy,
+        "proxy_resolved": proxy_resolved,
+    }
+    lookup_override: str | None = None
+    if proxy_resolved and resolved_ip:
+        extra["display_address"] = resolved_ip
+        extra["client_ip"] = resolved_ip
+        lookup_override = resolved_ip
+    return extra, lookup_override
+
+
 def enrich_openvpn_clients(
     clients: list[OpenVpnClient],
     geo_map: dict[str, dict[str, str | None]],
     *,
     node_id: int | None = None,
     node_name: str | None = None,
+    proxy_ips: set[str] | None = None,
+    mappings_by_proxy_ip: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[OpenVpnClient]:
-    extra = {"node_id": node_id, "node_name": node_name} if node_id is not None else None
-    return [
-        client.model_copy(
-            update=_apply_geo_fields(endpoint=client.real_address, geo_map=geo_map, extra=extra),
+    proxy_ips = proxy_ips or set()
+    mappings_by_proxy_ip = mappings_by_proxy_ip or {}
+    enriched: list[OpenVpnClient] = []
+    for client in clients:
+        extra, lookup_override = _proxy_enrich_extra(
+            client.real_address, proxy_ips, mappings_by_proxy_ip
         )
-        for client in clients
-    ]
+        if node_id is not None:
+            extra["node_id"] = node_id
+            extra["node_name"] = node_name
+        enriched.append(
+            client.model_copy(
+                update=_apply_geo_fields(
+                    endpoint=client.real_address,
+                    geo_map=geo_map,
+                    extra=extra,
+                    lookup_ip_override=lookup_override,
+                ),
+            )
+        )
+    return enriched
 
 
 def enrich_wireguard_peers(
@@ -198,14 +301,30 @@ def enrich_wireguard_peers(
     *,
     node_id: int | None = None,
     node_name: str | None = None,
+    proxy_ips: set[str] | None = None,
+    mappings_by_proxy_ip: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[WireGuardPeer]:
-    extra = {"node_id": node_id, "node_name": node_name} if node_id is not None else None
-    return [
-        peer.model_copy(
-            update=_apply_geo_fields(endpoint=peer.endpoint, geo_map=geo_map, extra=extra),
+    proxy_ips = proxy_ips or set()
+    mappings_by_proxy_ip = mappings_by_proxy_ip or {}
+    enriched: list[WireGuardPeer] = []
+    for peer in peers:
+        extra, lookup_override = _proxy_enrich_extra(
+            peer.endpoint, proxy_ips, mappings_by_proxy_ip
         )
-        for peer in peers
-    ]
+        if node_id is not None:
+            extra["node_id"] = node_id
+            extra["node_name"] = node_name
+        enriched.append(
+            peer.model_copy(
+                update=_apply_geo_fields(
+                    endpoint=peer.endpoint,
+                    geo_map=geo_map,
+                    extra=extra,
+                    lookup_ip_override=lookup_override,
+                ),
+            )
+        )
+    return enriched
 
 
 def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOverview:
@@ -213,12 +332,30 @@ def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOve
     ovpn_clients, openvpn_data_source = adapter.get_openvpn_status_snapshot()
     wireguard_peers = adapter.parse_wireguard_status()
     services = adapter.get_service_status()
-    geo_map = lookup_ips_geo(_collect_lookup_ips(ovpn_clients, wireguard_peers))
+    proxy_ips, mappings_by_proxy_ip = _load_proxy_noc_context(db)
+    geo_map = lookup_ips_geo(
+        _collect_lookup_ips(
+            ovpn_clients,
+            wireguard_peers,
+            proxy_ips=proxy_ips,
+            mappings_by_proxy_ip=mappings_by_proxy_ip,
+        )
+    )
     return MonitoringOverview(
         scope="node",
         services=services,
-        openvpn_clients=enrich_openvpn_clients(ovpn_clients, geo_map),
-        wireguard_peers=enrich_wireguard_peers(wireguard_peers, geo_map),
+        openvpn_clients=enrich_openvpn_clients(
+            ovpn_clients,
+            geo_map,
+            proxy_ips=proxy_ips,
+            mappings_by_proxy_ip=mappings_by_proxy_ip,
+        ),
+        wireguard_peers=enrich_wireguard_peers(
+            wireguard_peers,
+            geo_map,
+            proxy_ips=proxy_ips,
+            mappings_by_proxy_ip=mappings_by_proxy_ip,
+        ),
         server_ip=adapter.get_server_ip(),
         timestamp=datetime.utcnow(),
         node_id=node.id,
@@ -453,10 +590,16 @@ def build_federated_monitoring_overview(
     ha_mode: HaMode = "dedupe",
 ) -> MonitoringOverview:
     node_payloads = _collect_nodes_monitoring_data(db)
+    proxy_ips, mappings_by_proxy_ip = _load_proxy_noc_context(db)
     lookup_ips: list[str | None] = []
     for payload in node_payloads:
         lookup_ips.extend(
-            _collect_lookup_ips(payload["ovpn_clients"], payload["wireguard_peers"]),
+            _collect_lookup_ips(
+                payload["ovpn_clients"],
+                payload["wireguard_peers"],
+                proxy_ips=proxy_ips,
+                mappings_by_proxy_ip=mappings_by_proxy_ip,
+            ),
         )
 
     geo_map = lookup_ips_geo(lookup_ips)
@@ -479,8 +622,26 @@ def build_federated_monitoring_overview(
         total_connected_wireguard += summary.connected_wireguard
         if payload["server_ip"]:
             server_ips.append(payload["server_ip"])
-        all_openvpn.extend(enrich_openvpn_clients(ovpn_clients, geo_map, node_id=node.id, node_name=node.name))
-        all_wireguard.extend(enrich_wireguard_peers(wireguard_peers, geo_map, node_id=node.id, node_name=node.name))
+        all_openvpn.extend(
+            enrich_openvpn_clients(
+                ovpn_clients,
+                geo_map,
+                node_id=node.id,
+                node_name=node.name,
+                proxy_ips=proxy_ips,
+                mappings_by_proxy_ip=mappings_by_proxy_ip,
+            )
+        )
+        all_wireguard.extend(
+            enrich_wireguard_peers(
+                wireguard_peers,
+                geo_map,
+                node_id=node.id,
+                node_name=node.name,
+                proxy_ips=proxy_ips,
+                mappings_by_proxy_ip=mappings_by_proxy_ip,
+            )
+        )
         nodes_summary.append(summary)
 
     ha_lookup = _build_ha_monitoring_lookup(db)
