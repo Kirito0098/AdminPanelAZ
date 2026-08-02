@@ -26,6 +26,8 @@ from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.groups import parse_replica_node_ids
 from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
 from app.services.node_sync.vpn_state_sync import copy_openvpn_profiles_from_primary
+from app.services.openvpn_remote_hosts import parse_hosts_json
+from app.services.profile_delivery import patch_openvpn_profiles_on_node
 
 logger = logging.getLogger(__name__)
 
@@ -128,13 +130,20 @@ def apply_shared_domain_to_members(
             try:
                 doall_output = adapter.apply_config_changes()
                 recreate_output = adapter.recreate_profiles()
+                hosts = parse_hosts_json(node.openvpn_remote_hosts)
                 if is_primary:
                     primary_adapter = adapter
+                    # Patch primary remotes before replicas copy profiles.
+                    if hosts:
+                        patch_openvpn_profiles_on_node(adapter, hosts)
                 elif primary_adapter is not None:
                     # Replace locally regenerated .ovpn with a byte-copy from
                     # primary to preserve profile parity (same as Push full).
                     progress(percent, f"{node.name}: копия .ovpn с основного узла…")
                     copy_openvpn_profiles_from_primary(primary_adapter, adapter)
+                    # Then apply this replica's own remote-hosts list.
+                    if hosts:
+                        patch_openvpn_profiles_on_node(adapter, hosts)
                 else:
                     result["errors"].append(
                         {

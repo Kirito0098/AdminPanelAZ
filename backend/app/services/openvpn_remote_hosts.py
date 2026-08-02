@@ -61,10 +61,13 @@ def normalize_hosts(hosts: list[str] | None) -> list[str]:
 
 
 def parse_hosts_json(raw: str | None) -> list[str]:
-    if raw is None or str(raw).strip() == "":
+    if raw is None or not isinstance(raw, (str, bytes, bytearray)):
+        return []
+    text = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
+    if not text.strip():
         return []
     try:
-        data = json.loads(raw)
+        data = json.loads(text)
     except json.JSONDecodeError:
         return []
     if not isinstance(data, list):

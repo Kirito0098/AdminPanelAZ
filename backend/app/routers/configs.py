@@ -503,6 +503,7 @@ def create_config(
         recreate_openvpn_profiles_after_admin_change(
             adapter,
             client_names=[payload.client_name],
+            hosts=load_node_remote_hosts(db, node_id),
         )
     else:
         adapter.add_wireguard_client(payload.client_name)
@@ -605,6 +606,7 @@ def update_config(
         recreate_openvpn_profiles_after_admin_change(
             adapter,
             client_names=[config.client_name],
+            hosts=load_node_remote_hosts(db, config.node_id),
         )
         config.cert_expire_days = payload.cert_expire_days
         refresh_config_cert_expiry(config, adapter)

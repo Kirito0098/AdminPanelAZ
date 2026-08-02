@@ -17,6 +17,8 @@ from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.cidr.pipeline.file_pipeline import rollback_from_runtime_backup
 from app.services.node_adapter import NodeAdapter, RemoteNodeAdapter
 from app.services.node_manager import get_active_node, get_adapter_for_node
+from app.services.openvpn_remote_hosts import parse_hosts_json
+from app.services.profile_delivery import patch_openvpn_profiles_on_node
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,7 @@ def run_apply(
     sync_after: bool = True,
     apply_after: bool = False,
     recreate_profiles_after: bool = False,
+    hosts: list[str] | None = None,
 ) -> dict[str, Any]:
     """Sync CIDR providers, optionally run doall and recreate client profiles (client.sh 7)."""
     result: dict[str, Any] = {}
@@ -88,6 +91,8 @@ def run_apply(
         result["doall_output"] = adapter.apply_config_changes()
     if recreate_profiles_after:
         result["recreate_profiles_output"] = adapter.recreate_profiles()
+        if hosts:
+            result["remote_hosts_patch"] = patch_openvpn_profiles_on_node(adapter, hosts)
     return result
 
 
@@ -186,11 +191,15 @@ def _deploy_single_node(
         return entry
 
     if apply_after or recreate_profiles_after:
+        hosts = (
+            parse_hosts_json(node.openvpn_remote_hosts) if recreate_profiles_after else None
+        )
         apply_result = run_apply(
             adapter,
             sync_after=False,
             apply_after=apply_after,
             recreate_profiles_after=recreate_profiles_after,
+            hosts=hosts,
         )
         entry.update(apply_result)
     elif sync_after:

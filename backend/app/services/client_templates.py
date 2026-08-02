@@ -12,6 +12,7 @@ from app.services.node_sync.client_sync import maybe_replicate_create
 from app.services.node_sync.policy_sync import maybe_replicate_policy_op
 from app.services.openvpn_cert import refresh_config_cert_expiry
 from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
+from app.services.profile_delivery import load_node_remote_hosts
 from app.services.traffic.maintenance import purge_traffic_history_for_reused_name
 from app.services.traffic_limit import parse_traffic_limit_bytes, parse_traffic_limit_period_days
 
@@ -117,7 +118,11 @@ def apply_template(
     cert_days = template.cert_expire_days or 3650
     if template.vpn_type == VpnType.openvpn:
         adapter.add_openvpn_client(client_name, cert_days)
-        recreate_openvpn_profiles_after_admin_change(adapter, client_names=[client_name])
+        recreate_openvpn_profiles_after_admin_change(
+            adapter,
+            client_names=[client_name],
+            hosts=load_node_remote_hosts(db, node.id),
+        )
     else:
         adapter.add_wireguard_client(client_name)
 

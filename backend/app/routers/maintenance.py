@@ -41,6 +41,7 @@ from app.services.admin_notify import (
 from app.services.background_tasks import background_task_service
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.notify_time import get_client_timezone_from_request
+from app.services.profile_delivery import load_node_remote_hosts
 from app.config import get_settings
 from app.services.active_web_session import active_web_session_service
 from app.services.antizapret_settings import (
@@ -122,8 +123,12 @@ def run_doall(
         worker_db = SessionLocal()
         try:
             adapter = get_active_adapter(worker_db)
-            result = background_task_service.task_run_doall(adapter, progress_updater)
             node = get_active_node(worker_db)
+            result = background_task_service.task_run_doall(
+                adapter,
+                progress_updater,
+                hosts=load_node_remote_hosts(worker_db, node.id),
+            )
             admin_notify_service.send_settings_change(
                 worker_db,
                 actor_username=admin.username,
