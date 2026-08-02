@@ -34,6 +34,13 @@ def test_validate_host_rejects_bad():
         validate_host("http://evil")
 
 
+def test_validate_host_rejects_ipv6():
+    with pytest.raises(RemoteHostsError, match="IPv4 и доменные имена"):
+        validate_host("2001:db8::1")
+    with pytest.raises(RemoteHostsError, match="IPv4 и доменные имена"):
+        validate_host("::1")
+
+
 def test_normalize_max_and_dup():
     assert normalize_hosts(None) == []
     assert normalize_hosts([]) == []

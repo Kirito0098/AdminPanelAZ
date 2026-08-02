@@ -29,9 +29,13 @@ def validate_host(host: str) -> str:
     if "/" in value or "\\" in value or "@" in value:
         raise RemoteHostsError("Недопустимые символы в адресе")
     try:
-        return str(ipaddress.ip_address(value))
+        parsed = ipaddress.ip_address(value)
     except ValueError:
-        pass
+        parsed = None
+    if parsed is not None:
+        if isinstance(parsed, ipaddress.IPv6Address):
+            raise RemoteHostsError("Поддерживаются IPv4 и доменные имена")
+        return str(parsed)
     if not _HOSTNAME_RE.match(value):
         raise RemoteHostsError(f"Некорректный адрес: {value}")
     return value
@@ -123,8 +127,6 @@ def apply_openvpn_remote_hosts(content: str, hosts: list[str]) -> str:
                 new_remotes.append(f"remote {host} {port}\n")
     # Drop CRLF handling: emit \n; if original used \r\n, normalize block to \n (acceptable).
     first = remote_idxs[0]
-    keep = [ln for i, ln in enumerate(lines) if i not in set(remote_idxs)]
-    # Insert at original first remote position among remaining lines:
     # Rebuild: take lines before first remote, then new remotes, then lines after last remote
     # with all remotes removed.
     before = []
