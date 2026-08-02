@@ -1,7 +1,7 @@
 # Proxy nodes — волна 2 (склейка NOC)
 
 **Дата:** 2026-08-02  
-**Статус:** approved (design)  
+**Статус:** implemented  
 **Ветка:** `feature/multi-remote-hosts`  
 **Зависит от:** волна 1 (`docs/superpowers/specs/2026-08-02-proxy-nodes-wave1-design.md`)  
 **Продуктовый черновик:** `docs/plans/multi-remote-hosts/07-proxy-node.md` §7.3
@@ -103,11 +103,11 @@ NOC connected-clients table: subtle mark when `via_proxy` (and optionally differ
 
 ## Acceptance
 
-- [ ] Toggle off → NOC unchanged  
-- [ ] Through proxy + live mapping → home IP + geo  
-- [ ] Through proxy + no mapping → proxy IP + via_proxy mark  
-- [ ] Agent down → NOC still loads  
-- [ ] Traffic accounting unchanged  
+- [x] Toggle off → NOC unchanged  
+- [x] Through proxy + live mapping → home IP + geo  
+- [x] Through proxy + no mapping → proxy IP + via_proxy mark  
+- [x] Agent down → NOC still loads  
+- [x] Traffic accounting unchanged  
 
 ## Критерий готовности
 

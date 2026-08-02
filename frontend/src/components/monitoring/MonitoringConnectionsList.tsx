@@ -30,6 +30,7 @@ import {
 import { formatDateTime } from '@/lib/datetime'
 import { formatBitrate, formatDurationShort, sessionDurationSeconds } from '@/lib/formatTraffic'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
+import { formatProxyViaBadgeLabel } from '@/lib/proxyViaBadgeLabel'
 import { COL_CONNECTED_SINCE, COL_HANDSHAKE, COL_VPN_IP } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import type { HaNodePresence, OpenVpnClient, VpnConfigHaInfo, WireGuardPeer } from '@/types'
@@ -53,6 +54,8 @@ export type MonitoringConnectionRow = {
   geoLabel: string | null
   city?: string | null
   isp?: string | null
+  viaProxy?: boolean
+  proxyResolved?: boolean
   vpnIp: string
   rx: number
   tx: number
@@ -106,6 +109,8 @@ export function buildMonitoringConnectionRows(
         geoLabel: getConnectionGeoLabel(client),
         city: client.city,
         isp: client.isp,
+        viaProxy: client.via_proxy,
+        proxyResolved: client.proxy_resolved,
         vpnIp: client.virtual_address,
         rx: client.bytes_received,
         tx: client.bytes_sent,
@@ -140,6 +145,8 @@ export function buildMonitoringConnectionRows(
         geoLabel: getConnectionGeoLabel(peer),
         city: peer.city,
         isp: peer.isp,
+        viaProxy: peer.via_proxy,
+        proxyResolved: peer.proxy_resolved,
         vpnIp: peer.allowed_ips || '—',
         rx: peer.transfer_rx,
         tx: peer.transfer_tx,
@@ -160,14 +167,40 @@ export function buildMonitoringConnectionRows(
 type AddressBlockProps = {
   address: string
   geoLabel: string | null
+  viaProxy?: boolean
+  proxyResolved?: boolean
   size?: 'sm' | 'md'
 }
 
-function AddressBlock({ address, geoLabel, size = 'md' }: AddressBlockProps) {
+function AddressBlock({
+  address,
+  geoLabel,
+  viaProxy,
+  proxyResolved,
+  size = 'md',
+}: AddressBlockProps) {
   return (
     <div className="min-w-0">
-      <div className={cn('font-mono leading-snug text-foreground', size === 'md' ? 'text-sm' : 'text-xs')}>
-        {address}
+      <div
+        className={cn(
+          'flex flex-wrap items-center gap-1.5 font-mono leading-snug text-foreground',
+          size === 'md' ? 'text-sm' : 'text-xs',
+        )}
+      >
+        <span>{address}</span>
+        {viaProxy && (
+          <Badge
+            variant="outline"
+            className="font-sans font-normal text-[10px] text-muted-foreground"
+            title={
+              proxyResolved
+                ? 'Сессия через прокси-узел; показан домашний IP клиента'
+                : 'Сессия через прокси-узел; домашний IP не восстановлен'
+            }
+          >
+            {formatProxyViaBadgeLabel(proxyResolved)}
+          </Badge>
+        )}
       </div>
       {geoLabel && (
         <div
@@ -255,7 +288,12 @@ function ConnectionCard({
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
           <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Адрес</p>
-          <AddressBlock address={row.address} geoLabel={row.geoLabel} />
+          <AddressBlock
+            address={row.address}
+            geoLabel={row.geoLabel}
+            viaProxy={row.viaProxy}
+            proxyResolved={row.proxyResolved}
+          />
         </div>
         <div>
           <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Трафик</p>
@@ -503,7 +541,12 @@ export default function MonitoringConnectionsList({
                     </div>
                   </TableCell>
                   <TableCell>
-                    <AddressBlock address={row.address} geoLabel={row.geoLabel} />
+                    <AddressBlock
+                      address={row.address}
+                      geoLabel={row.geoLabel}
+                      viaProxy={row.viaProxy}
+                      proxyResolved={row.proxyResolved}
+                    />
                   </TableCell>
                   <TableCell className="font-mono text-sm">{row.vpnIp}</TableCell>
                   <TableCell className="text-right font-mono text-sm tabular-nums">

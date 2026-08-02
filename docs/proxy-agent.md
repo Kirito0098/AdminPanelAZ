@@ -43,6 +43,8 @@ sudo systemctl status adminpanelaz-proxy
 
 DESTINATION меняется через iptables (nat), без повторного запуска `proxy.sh`. Подробнее для пользователей: [uzly.md](uzly.md).
 
+Mappings с агента панель использует в **NOC Мониторинг**, чтобы восстановить домашний IP клиента за прокси — см. [noc-monitoring.md](noc-monitoring.md#подключения-через-прокси-узел).
+
 ## mTLS (опционально)
 
 В `proxy_agent.env`:

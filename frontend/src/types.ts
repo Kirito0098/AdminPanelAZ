@@ -296,6 +296,10 @@ export interface OpenVpnClient {
   active_node_name?: string | null
   ha_nodes?: HaNodePresence[]
   ha?: VpnConfigHaInfo | null
+  /** Endpoint IP is a known proxy node */
+  via_proxy?: boolean
+  /** Mapping found → home IP used for display/geo */
+  proxy_resolved?: boolean
 }
 
 export interface WireGuardPeer {
@@ -320,6 +324,10 @@ export interface WireGuardPeer {
   active_node_name?: string | null
   ha_nodes?: HaNodePresence[]
   ha?: VpnConfigHaInfo | null
+  /** Endpoint IP is a known proxy node */
+  via_proxy?: boolean
+  /** Mapping found → home IP used for display/geo */
+  proxy_resolved?: boolean
 }
 
 export interface MonitoringNodeSummary {
