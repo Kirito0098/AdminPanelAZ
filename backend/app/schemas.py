@@ -1126,10 +1126,15 @@ class NodeBase(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     host: str = Field(min_length=1, max_length=255)
     port: int = Field(default=9100, ge=1, le=65535)
+    node_kind: str = Field(default="vpn", max_length=16)
 
 
 class NodeCreate(NodeBase):
+    # Optional so proxy can default to 9101 when omitted (vpn keeps 9100).
+    port: int | None = Field(default=None, ge=1, le=65535)
     api_key: str | None = Field(default=None, min_length=8)
+    destination_ip: str | None = Field(default=None, max_length=64)
+    linked_vpn_node_id: int | None = None
 
 
 class NodeUpdate(BaseModel):
@@ -1137,6 +1142,8 @@ class NodeUpdate(BaseModel):
     host: str | None = Field(default=None, min_length=1, max_length=255)
     port: int | None = Field(default=None, ge=1, le=65535)
     api_key: str | None = Field(default=None, min_length=8)
+    destination_ip: str | None = Field(default=None, max_length=64)
+    linked_vpn_node_id: int | None = None
 
 
 class NodeResponse(NodeBase):
@@ -1144,6 +1151,8 @@ class NodeResponse(NodeBase):
     status: NodeStatus
     is_local: bool
     mtls_enabled: bool = False
+    destination_ip: str | None = None
+    linked_vpn_node_id: int | None = None
     last_seen_at: datetime | None = None
     metadata: dict[str, Any] = {}
     created_at: datetime

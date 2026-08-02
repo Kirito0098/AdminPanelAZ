@@ -844,6 +844,7 @@ def run_db_migrations() -> None:
     _migrate_user_telegram_backfill()
     _migrate_nodes_mtls_enabled()
     _migrate_nodes_openvpn_remote_hosts()
+    _migrate_nodes_proxy_fields()
     _seed_client_templates_for_nodes()
 
 
@@ -908,6 +909,25 @@ def _migrate_nodes_openvpn_remote_hosts() -> None:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE nodes ADD COLUMN openvpn_remote_hosts TEXT"))
         logger.info("DB migration: added nodes.openvpn_remote_hosts")
+
+
+def _migrate_nodes_proxy_fields() -> None:
+    """Add node_kind / destination_ip / linked_vpn_node_id for proxy nodes (wave 1)."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    with engine.begin() as conn:
+        if "node_kind" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN node_kind VARCHAR(16) DEFAULT 'vpn'"))
+            conn.execute(text("UPDATE nodes SET node_kind = 'vpn' WHERE node_kind IS NULL OR node_kind = ''"))
+            logger.info("DB migration: added nodes.node_kind")
+        if "destination_ip" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN destination_ip VARCHAR(64)"))
+            logger.info("DB migration: added nodes.destination_ip")
+        if "linked_vpn_node_id" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN linked_vpn_node_id INTEGER REFERENCES nodes(id)"))
+            logger.info("DB migration: added nodes.linked_vpn_node_id")
 
 
 def _migrate_user_telegram_backfill() -> None:

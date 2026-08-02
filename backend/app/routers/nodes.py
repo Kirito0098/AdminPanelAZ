@@ -50,6 +50,8 @@ from app.services.node_manager import (
     validate_node_host,
 )
 from app.services.action_log import log_action
+from app.services.feature_guards import module_disabled_message
+from app.services.feature_toggles import is_proxy_nodes_enabled
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_update_roll import enqueue_node_update_roll
 from app.services.background_tasks import background_task_service
@@ -64,6 +66,11 @@ from app.services.openvpn_remote_hosts import (
     parse_hosts_json,
     sync_openvpn_host_from_remotes,
 )
+
+NODE_KIND_VPN = "vpn"
+NODE_KIND_PROXY = "proxy"
+PROXY_DEFAULT_PORT = 9101
+VPN_DEFAULT_PORT = 9100
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 settings = get_settings()
@@ -107,9 +114,12 @@ def _to_response(node: Node) -> NodeResponse:
         name=node.name,
         host=node.host,
         port=node.port,
+        node_kind=getattr(node, "node_kind", None) or NODE_KIND_VPN,
         status=node.status,
         is_local=node.is_local,
         mtls_enabled=False if node.is_local else bool(node.mtls_enabled),
+        destination_ip=getattr(node, "destination_ip", None),
+        linked_vpn_node_id=getattr(node, "linked_vpn_node_id", None),
         last_seen_at=node.last_seen_at,
         metadata=node_metadata_dict(node),
         created_at=node.created_at,
@@ -159,14 +169,46 @@ def create_node(
     if not payload.api_key:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API-ключ обязателен для удалённого узла")
 
+    kind = (payload.node_kind or NODE_KIND_VPN).strip().lower()
+    if kind not in (NODE_KIND_VPN, NODE_KIND_PROXY):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="node_kind должен быть vpn или proxy",
+        )
+    # /api/nodes is ALWAYS_ALLOWED — enforce proxy_nodes toggle at handler level.
+    if kind == NODE_KIND_PROXY and not is_proxy_nodes_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("proxy_nodes"),
+        )
+
+    if payload.port is not None:
+        port = payload.port
+    elif kind == NODE_KIND_PROXY:
+        port = PROXY_DEFAULT_PORT
+    else:
+        port = VPN_DEFAULT_PORT
+
+    linked_vpn_node_id = payload.linked_vpn_node_id
+    if linked_vpn_node_id is not None:
+        linked = db.query(Node).filter(Node.id == linked_vpn_node_id).first()
+        if not linked or (getattr(linked, "node_kind", None) or NODE_KIND_VPN) != NODE_KIND_VPN:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="linked_vpn_node_id должен ссылаться на существующий VPN-узел",
+            )
+
     key_hash, key_encrypted = store_api_key("", payload.api_key)
     node = Node(
         name=payload.name.strip(),
         host=host,
-        port=payload.port,
+        port=port,
         api_key_hash=key_hash,
         api_key_encrypted=key_encrypted,
         is_local=False,
+        node_kind=kind,
+        destination_ip=(payload.destination_ip or None),
+        linked_vpn_node_id=linked_vpn_node_id,
         status=NodeStatus.unknown,
         node_metadata="{}",
     )
@@ -174,7 +216,8 @@ def create_node(
     db.commit()
     db.refresh(node)
 
-    if not get_active_node_id(db):
+    # Proxy nodes must never become the active VPN node.
+    if kind == NODE_KIND_VPN and not get_active_node_id(db):
         set_active_node_id(db, node.id)
         db.commit()
 
@@ -187,7 +230,7 @@ def create_node(
             user_id=admin.id,
             username=admin.username,
             remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"name={node.name}, host={node.host}",
+            details=f"name={node.name}, host={node.host}, kind={kind}",
         )
     return _to_response(node)
 
@@ -532,6 +575,12 @@ def activate_node(
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+
+    if (getattr(node, "node_kind", None) or NODE_KIND_VPN) == NODE_KIND_PROXY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Прокси-узел нельзя сделать активным для VPN",
+        )
 
     set_active_node_id(db, node.id)
     db.commit()

@@ -144,25 +144,42 @@ def clear_active_node_id(db: Session) -> None:
     _set_setting(db, ACTIVE_NODE_KEY, "")
 
 
+def _is_vpn_node(node: Node) -> bool:
+    return (getattr(node, "node_kind", None) or "vpn") == "vpn"
+
+
 def get_active_node(db: Session) -> Node:
+    """Return the active VPN node. Never returns ``node_kind=proxy``."""
     node_id = get_active_node_id(db)
     if node_id:
         node = db.query(Node).filter(Node.id == node_id).first()
         if node:
-            if node.is_local and not settings.local_antizapret_enabled:
+            if not _is_vpn_node(node):
+                _set_setting(db, ACTIVE_NODE_KEY, "")
+                db.commit()
+            elif node.is_local and not settings.local_antizapret_enabled:
                 _set_setting(db, ACTIVE_NODE_KEY, "")
                 db.commit()
             else:
                 return node
 
     if settings.local_antizapret_enabled:
-        local = db.query(Node).filter(Node.is_local.is_(True)).first()
+        local = (
+            db.query(Node)
+            .filter(Node.is_local.is_(True), Node.node_kind == "vpn")
+            .first()
+        )
         if local:
             set_active_node_id(db, local.id)
             db.commit()
             return local
 
-    remote = db.query(Node).filter(Node.is_local.is_(False)).order_by(Node.id).first()
+    remote = (
+        db.query(Node)
+        .filter(Node.is_local.is_(False), Node.node_kind == "vpn")
+        .order_by(Node.id)
+        .first()
+    )
     if remote:
         set_active_node_id(db, remote.id)
         db.commit()
@@ -240,7 +257,12 @@ def _remove_local_node(db: Session, local: Node) -> None:
     db.delete(local)
     db.commit()
     if active_id == node_id:
-        remote = db.query(Node).filter(Node.is_local.is_(False)).order_by(Node.id).first()
+        remote = (
+            db.query(Node)
+            .filter(Node.is_local.is_(False), Node.node_kind == "vpn")
+            .order_by(Node.id)
+            .first()
+        )
         if remote:
             set_active_node_id(db, remote.id)
         else:
