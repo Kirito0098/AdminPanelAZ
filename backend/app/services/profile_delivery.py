@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.models import Node
 from app.services.openvpn_remote_hosts import apply_openvpn_remote_hosts, parse_hosts_json
+from app.services.vpn_profile_visibility import protocol_key_from_file
+from app.services.wireguard_endpoint import apply_wireguard_endpoint_host
 
 
 def load_node_remote_hosts(db: Session, node_id: int | None) -> list[str]:
@@ -19,8 +21,11 @@ def load_node_remote_hosts(db: Session, node_id: int | None) -> list[str]:
 
 def read_profile_file_for_delivery(adapter, path: str, hosts: list[str]) -> str:
     raw = adapter.read_profile_file(path)
-    # Match .ovpn case-insensitively on final suffix
     name = PurePosixPath(path.replace("\\", "/")).name
-    if not name.lower().endswith(".ovpn"):
-        return raw
-    return apply_openvpn_remote_hosts(raw, hosts)
+    if name.lower().endswith(".ovpn"):
+        return apply_openvpn_remote_hosts(raw, hosts)
+    if hosts:
+        proto = protocol_key_from_file(protocol="", path=path)
+        if proto in ("wireguard", "amneziawg"):
+            return apply_wireguard_endpoint_host(raw, hosts[0])
+    return raw

@@ -4,6 +4,12 @@ from app.services.profile_delivery import read_profile_file_for_delivery
 
 OVPN = "remote 10.0.0.1 1194 udp\n"
 WG = "[Interface]\nPrivateKey=x\n"
+SAMPLE = """[Interface]
+PrivateKey=abc
+[Peer]
+Endpoint = 10.0.0.1:51820
+AllowedIPs = 0.0.0.0/0
+"""
 
 
 def test_delivery_patches_ovpn():
@@ -25,3 +31,12 @@ def test_delivery_empty_hosts_raw():
     adapter = MagicMock()
     adapter.read_profile_file.return_value = OVPN
     assert read_profile_file_for_delivery(adapter, "/x/a.ovpn", []) == OVPN
+
+
+def test_delivery_patches_wg_endpoint():
+    adapter = MagicMock()
+    adapter.read_profile_file.return_value = SAMPLE
+    out = read_profile_file_for_delivery(
+        adapter, "/client/wireguard/vpn/client-wg.conf", ["9.9.9.9", "8.8.8.8"]
+    )
+    assert "Endpoint = 9.9.9.9:51820" in out
