@@ -28,6 +28,9 @@ from app.schemas import (
     NodeUpdateRollRequest,
     NodeUpdatesResponse,
     GeoRoutingHintResponse,
+    ProxyDestinationBody,
+    ProxyMappingsResponse,
+    ProxyStatusResponse,
     ResourceHistoryPoint,
     ResourceHistoryResponse,
 )
@@ -42,6 +45,7 @@ from app.services.node_manager import (
     get_active_node,
     get_active_node_id,
     get_adapter_for_node,
+    get_proxy_adapter,
     node_metadata_dict,
     purge_node_related,
     set_active_node_id,
@@ -389,6 +393,120 @@ def health_check(node_id: int, _: User = Depends(require_admin), db: Session = D
         health=health,
         last_seen_at=node.last_seen_at,
     )
+
+
+def _require_proxy_node(node_id: int, db: Session) -> Node:
+    """Admin proxy routes: toggle on, node exists, node_kind=proxy (else 404)."""
+    # /api/nodes is ALWAYS_ALLOWED — enforce proxy_nodes toggle at handler level.
+    if not is_proxy_nodes_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("proxy_nodes"),
+        )
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+    if kind != NODE_KIND_PROXY:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не является прокси")
+    return node
+
+
+def _sync_destination_ip(node: Node, status_payload: dict, db: Session) -> None:
+    dest = status_payload.get("destination_ip") if isinstance(status_payload, dict) else None
+    if dest is None:
+        return
+    if getattr(node, "destination_ip", None) == dest:
+        return
+    node.destination_ip = dest
+    node.updated_at = datetime.utcnow()
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+
+
+@router.get("/{node_id}/proxy/status", response_model=ProxyStatusResponse)
+def get_proxy_status(
+    node_id: int,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = _require_proxy_node(node_id, db)
+    adapter = get_proxy_adapter(node)
+    payload = adapter.proxy_status()
+    return ProxyStatusResponse(
+        installed=bool(payload.get("installed")),
+        destination_ip=payload.get("destination_ip"),
+        detail=payload.get("detail"),
+    )
+
+
+@router.put("/{node_id}/proxy/status", response_model=ProxyStatusResponse)
+def refresh_proxy_status(
+    node_id: int,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Refresh status from proxy_agent and sync cached destination_ip."""
+    node = _require_proxy_node(node_id, db)
+    adapter = get_proxy_adapter(node)
+    payload = adapter.proxy_status()
+    _sync_destination_ip(node, payload, db)
+    return ProxyStatusResponse(
+        installed=bool(payload.get("installed")),
+        destination_ip=payload.get("destination_ip"),
+        detail=payload.get("detail"),
+    )
+
+
+@router.put("/{node_id}/proxy/destination", response_model=ProxyStatusResponse)
+def put_proxy_destination(
+    node_id: int,
+    payload: ProxyDestinationBody,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = _require_proxy_node(node_id, db)
+    adapter = get_proxy_adapter(node)
+    status_payload = adapter.set_destination(payload.destination_ip.strip())
+    _sync_destination_ip(node, status_payload, db)
+    # Always persist requested IP on success (agent may return same status shape).
+    if getattr(node, "destination_ip", None) != payload.destination_ip.strip():
+        node.destination_ip = payload.destination_ip.strip()
+        node.updated_at = datetime.utcnow()
+        db.add(node)
+        db.commit()
+        db.refresh(node)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="proxy_destination_update",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"node_id={node_id} destination_ip={payload.destination_ip.strip()}",
+        )
+    return ProxyStatusResponse(
+        installed=bool(status_payload.get("installed")),
+        destination_ip=status_payload.get("destination_ip"),
+        detail=status_payload.get("detail"),
+    )
+
+
+@router.get("/{node_id}/proxy/mappings", response_model=ProxyMappingsResponse)
+def get_proxy_mappings(
+    node_id: int,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = _require_proxy_node(node_id, db)
+    adapter = get_proxy_adapter(node)
+    payload = adapter.mappings()
+    raw = payload.get("mappings") if isinstance(payload, dict) else []
+    if not isinstance(raw, list):
+        raw = []
+    return ProxyMappingsResponse(mappings=raw)
 
 
 @router.post("/{node_id}/enable-mtls", response_model=NodeMtlsEnableResponse)
