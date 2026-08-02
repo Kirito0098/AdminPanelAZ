@@ -71,8 +71,10 @@ def test_allow_first_adds_and_applies(monkeypatch):
     adapter = MagicMock()
     adapter.read_config_file.return_value = "192.168.0.1\n"
     adapter.apply_config_changes.return_value = "ok"
+    replicate = MagicMock()
     monkeypatch.setattr("app.routers.nodes.get_adapter_for_node", lambda _n: adapter)
     monkeypatch.setattr("app.routers.nodes.settings.audit_log_enabled", False)
+    monkeypatch.setattr("app.routers.nodes.maybe_replicate_config_files", replicate)
 
     result = allow_first_remote_host(
         node_id=7,
@@ -85,6 +87,13 @@ def test_allow_first_adds_and_applies(monkeypatch):
     adapter.read_config_file.assert_called_once_with("allow-ips.txt")
     adapter.write_config_file.assert_called_once_with("allow-ips.txt", "192.168.0.1\n10.1.2.3\n")
     adapter.apply_config_changes.assert_called_once()
+    replicate.assert_called_once_with(
+        db,
+        node_id=7,
+        file_keys=["allow_ips"],
+        run_doall=True,
+        content_overrides={"allow_ips": "192.168.0.1\n10.1.2.3\n"},
+    )
 
 
 def test_allow_first_duplicate_skips_write(monkeypatch):
@@ -92,8 +101,10 @@ def test_allow_first_duplicate_skips_write(monkeypatch):
     db = _db_with_node(node)
     adapter = MagicMock()
     adapter.read_config_file.return_value = "10.1.2.3\nother\n"
+    replicate = MagicMock()
     monkeypatch.setattr("app.routers.nodes.get_adapter_for_node", lambda _n: adapter)
     monkeypatch.setattr("app.routers.nodes.settings.audit_log_enabled", False)
+    monkeypatch.setattr("app.routers.nodes.maybe_replicate_config_files", replicate)
 
     result = allow_first_remote_host(
         node_id=7,
@@ -106,6 +117,7 @@ def test_allow_first_duplicate_skips_write(monkeypatch):
     assert result.detail == "уже есть"
     adapter.write_config_file.assert_not_called()
     adapter.apply_config_changes.assert_not_called()
+    replicate.assert_not_called()
 
 
 def test_allow_first_apply_failure_is_warning(monkeypatch):
@@ -114,8 +126,10 @@ def test_allow_first_apply_failure_is_warning(monkeypatch):
     adapter = MagicMock()
     adapter.read_config_file.return_value = ""
     adapter.apply_config_changes.side_effect = RuntimeError("doall failed")
+    replicate = MagicMock()
     monkeypatch.setattr("app.routers.nodes.get_adapter_for_node", lambda _n: adapter)
     monkeypatch.setattr("app.routers.nodes.settings.audit_log_enabled", False)
+    monkeypatch.setattr("app.routers.nodes.maybe_replicate_config_files", replicate)
 
     result = allow_first_remote_host(
         node_id=7,
@@ -127,3 +141,4 @@ def test_allow_first_apply_failure_is_warning(monkeypatch):
     assert result.warnings
     assert "doall" in result.warnings[0].lower() or "ошибка" in result.warnings[0]
     adapter.write_config_file.assert_called_once()
+    replicate.assert_called_once()

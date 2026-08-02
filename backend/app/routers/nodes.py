@@ -54,6 +54,7 @@ from app.services.ip_restriction import ip_restriction_service
 from app.services.node_update_roll import enqueue_node_update_roll
 from app.services.background_tasks import background_task_service
 from app.services.geo_routing_hint import build_geo_routing_hint
+from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import build_ha_node_context, find_group_for_node
 from app.services.openvpn_remote_hosts import (
     RemoteHostsError,
@@ -473,6 +474,15 @@ def allow_first_remote_host(
     except Exception as exc:  # noqa: BLE001 — best-effort; file already written
         detail = getattr(exc, "detail", None) or str(exc)
         warnings.append(f"Файл сохранён, но doall.sh ошибка: {detail}")
+
+    # Same HA post-save path as edit_files PUT allow_ips.
+    maybe_replicate_config_files(
+        db,
+        node_id=node_id,
+        file_keys=["allow_ips"],
+        run_doall=True,
+        content_overrides={"allow_ips": new_content},
+    )
 
     if settings.audit_log_enabled:
         log_action(
