@@ -270,18 +270,20 @@ function NodeActions({
           {!compact && 'Обновить'}
         </Button>
       )}
-      <Button
-        variant={compact ? 'ghost' : 'outline'}
-        size={btnSize}
-        title={isProxy ? 'Перезапуск proxy_agent' : 'Перезапуск node agent'}
-        onClick={onRestart}
-      >
-        <RefreshCw size={iconSize} />
-        {!compact && 'Перезапуск'}
-      </Button>
+      {!isProxy && (
+        <Button
+          variant={compact ? 'ghost' : 'outline'}
+          size={btnSize}
+          title="Перезапуск node agent"
+          onClick={onRestart}
+        >
+          <RefreshCw size={iconSize} />
+          {!compact && 'Перезапуск'}
+        </Button>
+      )}
       {!node.is_local && (
         <>
-          {!node.mtls_enabled && (
+          {!isProxy && !node.mtls_enabled && (
             <Button
               variant={compact ? 'ghost' : 'outline'}
               size={btnSize}
@@ -292,7 +294,7 @@ function NodeActions({
               {!compact && 'Включить mTLS'}
             </Button>
           )}
-          {node.mtls_enabled && (
+          {!isProxy && node.mtls_enabled && (
             <Button
               variant={compact ? 'ghost' : 'outline'}
               size={btnSize}
@@ -303,15 +305,17 @@ function NodeActions({
               {!compact && 'Отключить mTLS'}
             </Button>
           )}
-          <Button
-            variant={compact ? 'ghost' : 'outline'}
-            size={btnSize}
-            title="Ротация API-ключа"
-            onClick={onRotateKey}
-          >
-            <KeyRound size={iconSize} />
-            {!compact && 'Ключ'}
-          </Button>
+          {!isProxy && (
+            <Button
+              variant={compact ? 'ghost' : 'outline'}
+              size={btnSize}
+              title="Ротация API-ключа"
+              onClick={onRotateKey}
+            >
+              <KeyRound size={iconSize} />
+              {!compact && 'Ключ'}
+            </Button>
+          )}
           <Button
             variant={compact ? 'ghost' : 'outline'}
             size={btnSize}
@@ -497,7 +501,9 @@ function NodeBulkActionsBar({
 }: NodeBulkActionsBarProps) {
   const selected = getSelectedNodes(nodes, selectedNodeIds)
   const remoteSelected = selected.filter((node) => !node.is_local)
-  const mtlsCandidates = remoteSelected.filter((node) => !node.mtls_enabled)
+  const mtlsCandidates = remoteSelected.filter(
+    (node) => !isProxyNode(node) && !node.mtls_enabled,
+  )
   const allSelected = nodes.length > 0 && selectedNodeIds.length === nodes.length
   const busy = bulkBusy || rollingUpdating || rollPolling
 
@@ -1067,9 +1073,11 @@ export default function NodesPage() {
       }
     }
     if (action === 'enable-mtls') {
-      const mtlsCandidates = selected.filter((node) => !node.is_local && !node.mtls_enabled)
+      const mtlsCandidates = selected.filter(
+        (node) => !node.is_local && !isProxyNode(node) && !node.mtls_enabled,
+      )
       if (mtlsCandidates.length === 0) {
-        notifyError('Нет удалённых узлов без mTLS среди выбранных')
+        notifyError('Нет удалённых VPN-узлов без mTLS среди выбранных')
         return
       }
     }
@@ -1126,7 +1134,9 @@ export default function NodesPage() {
           notifyError(`Удалено ${deletedCount} из ${remoteSelected.length}. ${failed[0]}`)
         }
       } else if (action === 'enable-mtls') {
-        const mtlsCandidates = selected.filter((node) => !node.is_local && !node.mtls_enabled)
+        const mtlsCandidates = selected.filter(
+          (node) => !node.is_local && !isProxyNode(node) && !node.mtls_enabled,
+        )
         let enabled = 0
         const failed: string[] = []
         for (const node of mtlsCandidates) {
@@ -1694,8 +1704,9 @@ export default function NodesPage() {
             ? `Удалить ${getSelectedNodes(nodes, selectedNodeIds).filter((n) => !n.is_local).length} узл(ов)?`
             : bulkConfirmAction === 'enable-mtls'
               ? `Включить mTLS на ${
-                  getSelectedNodes(nodes, selectedNodeIds).filter((n) => !n.is_local && !n.mtls_enabled)
-                    .length
+                  getSelectedNodes(nodes, selectedNodeIds).filter(
+                    (n) => !n.is_local && !isProxyNode(n) && !n.mtls_enabled,
+                  ).length
                 } узл(ах)?`
               : ''
         }

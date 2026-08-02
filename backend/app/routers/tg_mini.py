@@ -203,6 +203,7 @@ def _serialize_tg_node(node, *, active_id: int | None) -> dict:
         "status": node.status.value if hasattr(node.status, "value") else str(node.status),
         "is_local": bool(node.is_local),
         "mtls_enabled": False if node.is_local else bool(node.mtls_enabled),
+        "node_kind": (getattr(node, "node_kind", None) or "vpn"),
         "is_active": node.id == active_id,
         "last_seen_at": node.last_seen_at.isoformat() if node.last_seen_at else None,
         "metadata": {

@@ -135,11 +135,16 @@ interface MiniNodeCardProps {
   onActivate: () => void
 }
 
+function isProxyNode(node: TgMiniNode): boolean {
+  return (node.node_kind || 'vpn') === 'proxy'
+}
+
 function MiniNodeCard({ node, isActive, busy, flash, onHealth, onActivate }: MiniNodeCardProps) {
   const meta = getNodeMeta(node)
   const isBusy = busy?.id === node.id
   const healthBusy = isBusy && busy?.kind === 'health'
   const activateBusy = isBusy && busy?.kind === 'activate'
+  const canActivate = !isActive && !isProxyNode(node)
 
   return (
     <Card
@@ -217,7 +222,7 @@ function MiniNodeCard({ node, isActive, busy, flash, onHealth, onActivate }: Min
             )}
             Проверить
           </Button>
-          {!isActive && (
+          {canActivate && (
             <Button type="button" size="sm" className="gap-1.5" disabled={isBusy} onClick={onActivate}>
               {activateBusy ? (
                 <Loader2 size={14} className="animate-spin" aria-hidden />

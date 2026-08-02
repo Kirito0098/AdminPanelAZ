@@ -360,7 +360,13 @@ def delete_node(
         if fallback:
             set_active_node_id(db, fallback.id)
         else:
-            other = db.query(Node).filter(Node.is_local.is_(False)).order_by(Node.id).first()
+            # Active node is VPN-only; never promote a proxy remote.
+            other = (
+                db.query(Node)
+                .filter(Node.is_local.is_(False), Node.node_kind == "vpn")
+                .order_by(Node.id)
+                .first()
+            )
             if other:
                 set_active_node_id(db, other.id)
             else:

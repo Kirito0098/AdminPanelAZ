@@ -200,3 +200,48 @@ def test_get_active_node_skips_proxy(db, monkeypatch):
 def get_active_node_id_raw(db) -> str | None:
     row = db.query(AppSetting).filter(AppSetting.key == ACTIVE_NODE_KEY).first()
     return None if row is None else row.value
+
+
+def test_delete_active_node_fallback_skips_proxy(db, monkeypatch):
+    """After deleting the active VPN node, fallback must not promote a proxy."""
+    from app.routers import nodes as nodes_router
+    from app.services.node_manager import get_active_node_id
+
+    proxy = _add_node(db, name="proxy-fallback", kind="proxy", port=9101)
+    vpn_active = _add_node(db, name="vpn-active", kind="vpn")
+    vpn_other = _add_node(db, name="vpn-other", kind="vpn")
+    set_active_node_id(db, vpn_active.id)
+    db.commit()
+
+    monkeypatch.setattr(nodes_router, "find_group_for_node", lambda _db, _id: None)
+    monkeypatch.setattr(nodes_router, "purge_node_related", lambda _db, _id: None)
+    monkeypatch.setattr(nodes_router, "sync_local_node", lambda _db: None)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+
+    admin = SimpleNamespace(id=1, username="admin")
+    request = MagicMock()
+    nodes_router.delete_node(vpn_active.id, request, admin=admin, db=db)
+
+    assert get_active_node_id(db) == vpn_other.id
+    assert db.query(Node).filter(Node.id == proxy.id).one().node_kind == "proxy"
+
+
+def test_delete_active_node_clears_when_only_proxy_remains(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+    from app.services.node_manager import get_active_node_id
+
+    _add_node(db, name="proxy-only-left", kind="proxy", port=9101)
+    vpn_active = _add_node(db, name="vpn-last", kind="vpn")
+    set_active_node_id(db, vpn_active.id)
+    db.commit()
+
+    monkeypatch.setattr(nodes_router, "find_group_for_node", lambda _db, _id: None)
+    monkeypatch.setattr(nodes_router, "purge_node_related", lambda _db, _id: None)
+    monkeypatch.setattr(nodes_router, "sync_local_node", lambda _db: None)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+
+    admin = SimpleNamespace(id=1, username="admin")
+    request = MagicMock()
+    nodes_router.delete_node(vpn_active.id, request, admin=admin, db=db)
+
+    assert get_active_node_id(db) is None
