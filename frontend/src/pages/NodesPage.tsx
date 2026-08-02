@@ -379,7 +379,8 @@ function NodeCard({
   const meta = getNodeMeta(node)
   const lastSeen = formatLastSeen(node.last_seen_at)
   const address = node.is_local ? 'local' : `${node.host}:${node.port}`
-  const proxy = showProxyUi && isProxyNode(node)
+  const isProxy = isProxyNode(node)
+  const showProxyAffordance = showProxyUi && isProxy
 
   return (
     <Card className={cn(isActive && 'border-primary/40 bg-primary/5')}>
@@ -398,7 +399,7 @@ function NodeCard({
               )}
               <Server size={16} className="shrink-0 text-muted-foreground" />
               <span className="truncate">{node.name}</span>
-              {proxy && (
+              {showProxyAffordance && (
                 <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-800 dark:text-amber-100">
                   Прокси
                 </Badge>
@@ -445,11 +446,11 @@ function NodeCard({
         {node.status === 'offline' && meta.lastError && (
           <NodeConnectionErrorAlert node={node} lastError={meta.lastError} />
         )}
-        {proxy && <ProxyNodePanel node={node} onUpdated={onProxyUpdated} />}
+        {showProxyAffordance && <ProxyNodePanel node={node} onUpdated={onProxyUpdated} />}
         <NodeActions
           node={node}
           isActive={isActive}
-          isProxy={proxy}
+          isProxy={isProxy}
           healthLoading={healthLoading}
           activateLoading={activateLoading}
           onActivate={onActivate}
@@ -1349,7 +1350,8 @@ export default function NodesPage() {
                       const meta = getNodeMeta(node)
                       const lastSeen = formatLastSeen(node.last_seen_at)
                       const address = node.is_local ? 'local' : `${node.host}:${node.port}`
-                      const proxy = proxyNodesEnabled && isProxyNode(node)
+                      const isProxy = isProxyNode(node)
+                      const showProxyAffordance = proxyNodesEnabled && isProxy
 
                       return (
                         <Fragment key={node.id}>
@@ -1366,7 +1368,7 @@ export default function NodesPage() {
                           <TableCell className="font-medium">
                             <div className="flex flex-wrap items-center gap-2">
                               {node.name}
-                              {proxy && (
+                              {showProxyAffordance && (
                                 <Badge
                                   variant="outline"
                                   className="border-amber-500/40 text-[10px] text-amber-800 dark:text-amber-100"
@@ -1419,7 +1421,7 @@ export default function NodesPage() {
                             <NodeActions
                               node={node}
                               isActive={isActive}
-                              isProxy={proxy}
+                              isProxy={isProxy}
                               healthLoading={healthLoading === node.id}
                               activateLoading={activateLoading === node.id}
                               onActivate={() => handleActivate(node)}
@@ -1435,7 +1437,7 @@ export default function NodesPage() {
                             />
                           </TableCell>
                         </TableRow>
-                        {proxy && (
+                        {showProxyAffordance && (
                           <TableRow>
                             <TableCell colSpan={10} className="bg-muted/20 py-3">
                               <ProxyNodePanel node={node} onUpdated={load} />
