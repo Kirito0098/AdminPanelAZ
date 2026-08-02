@@ -1,0 +1,28 @@
+[Unit]
+Description=AdminPanelAZ Proxy Agent (AntiZapret RU proxy)
+Documentation=file:///opt/AdminPanelAZ/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/AdminPanelAZ/backend
+EnvironmentFile=-/opt/AdminPanelAZ/backend/proxy_agent.env
+Environment=PROXY_AGENT_STATE_DIR=/var/lib/adminpanelaz-proxy
+Environment=PROXY_AGENT_HOST=0.0.0.0
+Environment=PROXY_AGENT_PORT=9101
+Environment=PROXY_AGENT_API_KEY=change-me-proxy-agent-key
+# Needs CAP_NET_ADMIN / root to read and rewrite nat table (DESTINATION).
+ExecStart=/opt/AdminPanelAZ/scripts/systemd-exec-proxy.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=adminpanelaz-proxy
+
+[Install]
+WantedBy=multi-user.target
