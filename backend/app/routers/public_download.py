@@ -10,7 +10,8 @@ from app.constants.public_routes import PUBLIC_ROUTE_ROUTERS
 from app.services.action_log import log_action
 from app.services.feature_guards import require_openvpn_and_security
 from app.services.ip_restriction import ip_restriction_service
-from app.services.node_manager import get_active_adapter
+from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.public_download_settings import is_public_download_enabled
 from app.services.public_download_rate_limit import public_download_rate_limit_service
 from app.services.qr_download import QrDownloadService
@@ -40,7 +41,9 @@ def qr_download_get(token: str, db: Session = Depends(get_db)):
     if svc and svc.value:
         raise HTTPException(status_code=428, detail="Требуется PIN")
     row = QrDownloadService(db, **_qr_settings(db)).redeem_token(token, remote_addr="")
-    content = get_active_adapter(db).read_profile_file(row.file_path)
+    node = get_active_node(db)
+    hosts = load_node_remote_hosts(db, node.id)
+    content = read_profile_file_for_delivery(get_active_adapter(db), row.file_path, hosts)
     filename = row.config_name
     return PlainTextResponse(content, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
@@ -50,7 +53,9 @@ def qr_download_post(token: str, payload: PinRequest, request: Request, db: Sess
     cfg = _qr_settings(db)
     svc = QrDownloadService(db, **cfg)
     row = svc.redeem_token(token, pin=payload.pin or None, remote_addr=request.client.host if request.client else None)
-    content = get_active_adapter(db).read_profile_file(row.file_path)
+    node = get_active_node(db)
+    hosts = load_node_remote_hosts(db, node.id)
+    content = read_profile_file_for_delivery(get_active_adapter(db), row.file_path, hosts)
     return PlainTextResponse(content, headers={"Content-Disposition": f'attachment; filename="{row.config_name}"'})
 
 

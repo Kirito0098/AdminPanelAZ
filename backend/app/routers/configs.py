@@ -61,6 +61,7 @@ from app.services.openvpn_group import (
     set_user_openvpn_group,
 )
 from app.services.notify_time import get_client_timezone_from_request
+from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
 from app.services.profile_files import profile_files_batch_key
 from app.services.panel_publish_info import resolve_public_base_url
@@ -691,7 +692,8 @@ def download_profile(
 
     adapter = get_active_adapter(db)
     _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
-    content = adapter.read_profile_file(path)
+    hosts = load_node_remote_hosts(db, config.node_id)
+    content = read_profile_file_for_delivery(adapter, path, hosts)
     filename = build_profile_download_filename(config.client_name, path=path)
     return PlainTextResponse(content, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
@@ -712,7 +714,8 @@ def generate_qr(
 
     adapter = get_active_adapter(db)
     _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
-    content = adapter.read_profile_file(path)
+    hosts = load_node_remote_hosts(db, config.node_id)
+    content = read_profile_file_for_delivery(adapter, path, hosts)
     if prefers_download_link_qr(path=path, content=content):
         link = _qr_download_service(db, request).create_token(
             file_path=path,

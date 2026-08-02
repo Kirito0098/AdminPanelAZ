@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models import User, VpnConfig, VpnType
 from app.services.node_manager import get_active_adapter
-from app.services.node_manager import get_active_adapter
+from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename
 from app.services.telegram_profile_ui import file_caption
 from app.services.telegram import send_tg_document, send_tg_message
@@ -57,6 +57,7 @@ def send_config_files_to_chat(
     else:
         targets = [files[0]]
 
+    hosts = load_node_remote_hosts(db, config.node_id)
     sent = 0
     last_file_item: dict | None = None
     for index, file_item in enumerate(targets):
@@ -64,7 +65,7 @@ def send_config_files_to_chat(
         if not selected_path:
             continue
         try:
-            content = adapter.read_profile_file(selected_path)
+            content = read_profile_file_for_delivery(adapter, selected_path, hosts)
         except Exception as exc:
             return sent, str(exc) if sent == 0 else None
 
