@@ -11,6 +11,7 @@ from app.models import Node, NodeStatus, User
 from app.schemas import (
     ActiveNodeResponse,
     MessageResponse,
+    NodeAllowFirstRemoteHostResponse,
     NodeCreate,
     NodeHaContext,
     NodeHealthResponse,
@@ -56,6 +57,7 @@ from app.services.geo_routing_hint import build_geo_routing_hint
 from app.services.node_sync.groups import build_ha_node_context, find_group_for_node
 from app.services.openvpn_remote_hosts import (
     RemoteHostsError,
+    append_host_to_allow_ips,
     hosts_to_json,
     normalize_hosts,
     parse_hosts_json,
@@ -435,6 +437,53 @@ def put_remote_hosts(
             details=f"node_id={node_id} hosts={hosts}",
         )
     return NodeRemoteHostsResponse(hosts=hosts, warnings=warnings)
+
+
+@router.post(
+    "/{node_id}/remote-hosts/allow-first",
+    response_model=NodeAllowFirstRemoteHostResponse,
+)
+def allow_first_remote_host(
+    node_id: int,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Append the first saved remote host to allow-ips.txt on the VPN node."""
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    hosts = parse_hosts_json(node.openvpn_remote_hosts)
+    if not hosts:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Сначала задайте адреса подключения",
+        )
+    first = hosts[0]
+    adapter = get_adapter_for_node(node)
+    content = adapter.read_config_file("allow-ips.txt")
+    new_content, added = append_host_to_allow_ips(content, first)
+    if not added:
+        return NodeAllowFirstRemoteHostResponse(added=False, host=first, detail="уже есть")
+
+    adapter.write_config_file("allow-ips.txt", new_content)
+    warnings: list[str] = []
+    try:
+        adapter.apply_config_changes()
+    except Exception as exc:  # noqa: BLE001 — best-effort; file already written
+        detail = getattr(exc, "detail", None) or str(exc)
+        warnings.append(f"Файл сохранён, но doall.sh ошибка: {detail}")
+
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_remote_hosts_allow_first",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"node_id={node_id} host={first}",
+        )
+    return NodeAllowFirstRemoteHostResponse(added=True, host=first, warnings=warnings)
 
 
 @router.post("/{node_id}/rotate-key", response_model=NodeRotateKeyResponse)

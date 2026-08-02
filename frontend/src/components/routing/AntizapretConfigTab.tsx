@@ -1,5 +1,6 @@
 import {
   ApiError,
+  allowFirstRemoteHost,
   applyRouting,
   getAntizapretSettings,
   getNodeRemoteHosts,
@@ -415,9 +416,11 @@ function ConnectionAddressesCard({
   remoteHostsDirty,
   remoteHostsSaving,
   remoteHostsLoadError,
+  allowFirstBusy,
   onRetryRemoteHosts,
   onRemoteHostsChange,
   onSaveRemoteHosts,
+  onAllowFirst,
 }: {
   section: GroupedSection
   draft: Record<string, string>
@@ -430,9 +433,11 @@ function ConnectionAddressesCard({
   remoteHostsDirty: boolean
   remoteHostsSaving: boolean
   remoteHostsLoadError: string | null
+  allowFirstBusy: boolean
   onRetryRemoteHosts: () => void
   onRemoteHostsChange: (hosts: string[]) => void
   onSaveRemoteHosts: () => void
+  onAllowFirst: () => void
 }) {
   const SectionIcon = section.icon
   const openvpnField = section.fields.find((field) => field.key === 'openvpn_host')
@@ -442,6 +447,8 @@ function ConnectionAddressesCard({
   const listDisabled =
     disabled || remoteHostsSaving || activeNodeId == null || remoteHostsLoadError != null
   const canAdd = remoteHosts.length < MAX_REMOTE_HOSTS
+  const canAllowFirst =
+    !listDisabled && !allowFirstBusy && savedRemoteHosts.length > 0 && !remoteHostsDirty
 
   const moveHost = (index: number, delta: number) => {
     const next = index + delta
@@ -614,7 +621,10 @@ function ConnectionAddressesCard({
                 </li>
                 <li>Один proxy.sh направляет на один зарубежный сервер.</li>
                 <li>Список хранится в панели и не пропадает при обновлении AntiZapret.</li>
-                <li>IP прокси добавьте в allow-ips.txt на VPN-сервере.</li>
+                <li>
+                  IP прокси обычно добавляют в allow-ips.txt на VPN-сервере (кнопка ниже — только
+                  первый адрес списка; панель не ставит proxy.sh).
+                </li>
                 <li>
                   Трафик считается на зарубежном VPN, куда подключились; прокси в статистике панели
                   отдельно не учитывается.
@@ -704,6 +714,25 @@ function ConnectionAddressesCard({
                   <Save className="mr-1.5 h-4 w-4" />
                   {remoteHostsSaving ? 'Сохранение...' : 'Сохранить адреса'}
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!canAllowFirst}
+                  onClick={onAllowFirst}
+                  title={
+                    savedRemoteHosts.length === 0
+                      ? 'Сначала сохраните хотя бы один адрес'
+                      : remoteHostsDirty
+                        ? 'Сначала сохраните изменения списка'
+                        : 'Добавить первый адрес списка в allow-ips.txt на VPN-узле'
+                  }
+                >
+                  <Shield className="mr-1.5 h-4 w-4" />
+                  {allowFirstBusy
+                    ? 'Добавление в allow-ips...'
+                    : 'Добавить первый адрес в allow-ips'}
+                </Button>
               </div>
             </>
           )}
@@ -763,6 +792,7 @@ export default function AntizapretConfigTab() {
   const [remoteHosts, setRemoteHosts] = useState<string[]>([])
   const [savedRemoteHosts, setSavedRemoteHosts] = useState<string[]>([])
   const [remoteHostsSaving, setRemoteHostsSaving] = useState(false)
+  const [allowFirstBusy, setAllowFirstBusy] = useState(false)
   const [remoteHostsLoadError, setRemoteHostsLoadError] = useState<string | null>(null)
   const remoteHostsLoadedNodeIdRef = useRef<number | null>(null)
 
@@ -939,6 +969,44 @@ export default function AntizapretConfigTab() {
     }
   }, [activeNode?.id, remoteHosts, remoteHostsLoadError, notifyError, notifyWarning, success])
 
+  const allowFirst = useCallback(async () => {
+    if (activeNode?.id == null) {
+      notifyError('Нет активного узла')
+      return
+    }
+    if (savedRemoteHosts.length === 0) {
+      notifyError('Сначала задайте и сохраните адреса подключения')
+      return
+    }
+    if (remoteHostsDirty) {
+      notifyError('Сначала сохраните изменения списка адресов')
+      return
+    }
+    setAllowFirstBusy(true)
+    try {
+      const result = await allowFirstRemoteHost(activeNode.id)
+      if (result.added) {
+        success(`Адрес ${result.host} добавлен в allow-ips.txt`)
+      } else {
+        notifyWarning(result.detail ? `${result.host}: ${result.detail}` : `${result.host} уже есть в allow-ips`)
+      }
+      for (const w of result.warnings ?? []) {
+        notifyWarning(w)
+      }
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось добавить адрес в allow-ips')
+    } finally {
+      setAllowFirstBusy(false)
+    }
+  }, [
+    activeNode?.id,
+    savedRemoteHosts.length,
+    remoteHostsDirty,
+    notifyError,
+    notifyWarning,
+    success,
+  ])
+
   const renderSection = (title: string) => {
     const section = sectionsByTitle.get(title)
     if (!section) return null
@@ -957,11 +1025,13 @@ export default function AntizapretConfigTab() {
           remoteHostsDirty={remoteHostsDirty}
           remoteHostsSaving={remoteHostsSaving}
           remoteHostsLoadError={remoteHostsLoadError}
+          allowFirstBusy={allowFirstBusy}
           onRetryRemoteHosts={() => {
             if (activeNode?.id != null) void loadRemoteHosts(activeNode.id)
           }}
           onRemoteHostsChange={setRemoteHosts}
           onSaveRemoteHosts={() => void saveRemoteHosts()}
+          onAllowFirst={() => void allowFirst()}
         />
       )
     }

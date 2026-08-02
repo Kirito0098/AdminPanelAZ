@@ -100,6 +100,21 @@ def sync_openvpn_host_from_remotes(adapter_factory, hosts: list[str]) -> list[st
         return [f"Не удалось обновить OPENVPN_HOST: {detail}"]
 
 
+def append_host_to_allow_ips(content: str, host: str) -> tuple[str, bool]:
+    """Append ``host`` as a new line in allow-ips.txt if not already present.
+
+    Returns ``(new_content, added)``. Comments and blank lines are ignored for
+    duplicate detection; matching is exact on the stripped line.
+    """
+    lines = content.splitlines()
+    existing = {ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")}
+    if host in existing:
+        return content, False
+    body = content.rstrip("\n")
+    new = (body + "\n" + host + "\n") if body else (host + "\n")
+    return new, True
+
+
 def apply_openvpn_remote_hosts(content: str, hosts: list[str]) -> str:
     if not hosts:
         return content

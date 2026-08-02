@@ -592,6 +592,13 @@ export async function putNodeRemoteHosts(nodeId: number, hosts: string[]) {
   })
 }
 
+export async function allowFirstRemoteHost(nodeId: number) {
+  return apiFetch<{ added: boolean; host: string; detail?: string; warnings?: string[] }>(
+    `/nodes/${nodeId}/remote-hosts/allow-first`,
+    { method: 'POST' },
+  )
+}
+
 export async function checkNodeUpdates(id: number) {
   return apiFetch<{
     node_id: number

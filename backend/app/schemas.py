@@ -132,6 +132,13 @@ class NodeRemoteHostsResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class NodeAllowFirstRemoteHostResponse(BaseModel):
+    added: bool
+    host: str
+    detail: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
 class UserBase(BaseModel):
     username: str
     role: UserRole = UserRole.user
