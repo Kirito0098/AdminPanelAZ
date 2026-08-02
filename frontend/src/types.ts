@@ -1631,6 +1631,11 @@ export interface AntizapretSettingField {
   description: string
 }
 
+export interface NodeRemoteHostsResponse {
+  hosts: string[]
+  warnings?: string[]
+}
+
 export interface AntizapretSettingsResponse {
   settings: Record<string, string>
   schema: AntizapretSettingField[]

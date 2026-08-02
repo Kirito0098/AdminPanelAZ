@@ -581,6 +581,17 @@ export async function activateNode(id: number) {
   return apiFetch<import('../types').ActiveNode>(`/nodes/${id}/activate`, { method: 'POST' })
 }
 
+export async function getNodeRemoteHosts(nodeId: number) {
+  return apiFetch<import('../types').NodeRemoteHostsResponse>(`/nodes/${nodeId}/remote-hosts`)
+}
+
+export async function putNodeRemoteHosts(nodeId: number, hosts: string[]) {
+  return apiFetch<import('../types').NodeRemoteHostsResponse>(`/nodes/${nodeId}/remote-hosts`, {
+    method: 'PUT',
+    body: JSON.stringify({ hosts }),
+  })
+}
+
 export async function checkNodeUpdates(id: number) {
   return apiFetch<{
     node_id: number
