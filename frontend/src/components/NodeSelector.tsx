@@ -170,7 +170,9 @@ export default function NodeSelector({ compact = false }: { compact?: boolean })
         <SelectValue placeholder="Выберите узел" />
       </SelectTrigger>
       <SelectContent>
-        {nodes.map((node) => (
+        {nodes
+          .filter((node) => (node.node_kind || 'vpn') !== 'proxy')
+          .map((node) => (
           <SelectItem key={node.id} value={String(node.id)}>
             <span className="flex items-center gap-2">
               <StatusDot status={node.status} />

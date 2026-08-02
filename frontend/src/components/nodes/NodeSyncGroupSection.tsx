@@ -419,7 +419,10 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
   const [syncMode, setSyncMode] = useState('manual_full')
   const [autoSetup, setAutoSetup] = useState(true)
 
-  const onlineNodes = useMemo(() => nodes.filter((n) => n.status === 'online'), [nodes])
+  const onlineNodes = useMemo(
+    () => nodes.filter((n) => n.status === 'online' && (n.node_kind || 'vpn') !== 'proxy'),
+    [nodes],
+  )
   const prevSyncStatusRef = useRef<Map<number, SyncStatus>>(new Map())
   const notifiedReplicationRef = useRef<Set<string>>(new Set())
   const resumedTaskIdsRef = useRef<Set<string>>(new Set())

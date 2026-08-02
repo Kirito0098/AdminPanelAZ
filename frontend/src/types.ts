@@ -1,6 +1,7 @@
 export type UserRole = 'admin' | 'user'
 export type VpnType = 'openvpn' | 'wireguard'
 export type NodeStatus = 'online' | 'offline' | 'unknown'
+export type NodeKind = 'vpn' | 'proxy'
 
 export interface Node {
   id: number
@@ -10,10 +11,31 @@ export interface Node {
   status: NodeStatus
   is_local: boolean
   mtls_enabled: boolean
+  node_kind?: NodeKind | string
+  destination_ip?: string | null
+  linked_vpn_node_id?: number | null
   last_seen_at?: string | null
   metadata: Record<string, unknown>
   created_at: string
   updated_at: string
+}
+
+export interface ProxyStatusResponse {
+  installed: boolean
+  destination_ip?: string | null
+  detail?: string | null
+}
+
+export interface ProxyMappingItem {
+  client_ip: string
+  client_port?: number | null
+  proxy_sport?: number | null
+  dest_ip?: string | null
+  dest_port?: number | null
+}
+
+export interface ProxyMappingsResponse {
+  mappings: ProxyMappingItem[]
 }
 
 export interface ActiveNode {

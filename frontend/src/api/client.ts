@@ -547,6 +547,9 @@ export async function createNode(data: {
   host: string
   port: number
   api_key: string
+  node_kind?: import('../types').NodeKind | string
+  destination_ip?: string | null
+  linked_vpn_node_id?: number | null
 }) {
   return apiFetch<import('../types').Node>('/nodes', {
     method: 'POST',
@@ -556,12 +559,40 @@ export async function createNode(data: {
 
 export async function updateNode(
   id: number,
-  data: Partial<{ name: string; host: string; port: number; api_key: string }>,
+  data: Partial<{
+    name: string
+    host: string
+    port: number
+    api_key: string
+    destination_ip: string | null
+    linked_vpn_node_id: number | null
+  }>,
 ) {
   return apiFetch<import('../types').Node>(`/nodes/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   })
+}
+
+export async function getProxyNodeStatus(nodeId: number) {
+  return apiFetch<import('../types').ProxyStatusResponse>(`/nodes/${nodeId}/proxy/status`)
+}
+
+export async function putProxyNodeStatus(nodeId: number) {
+  return apiFetch<import('../types').ProxyStatusResponse>(`/nodes/${nodeId}/proxy/status`, {
+    method: 'PUT',
+  })
+}
+
+export async function putProxyDestination(nodeId: number, destinationIp: string) {
+  return apiFetch<import('../types').ProxyStatusResponse>(`/nodes/${nodeId}/proxy/destination`, {
+    method: 'PUT',
+    body: JSON.stringify({ destination_ip: destinationIp }),
+  })
+}
+
+export async function getProxyMappings(nodeId: number) {
+  return apiFetch<import('../types').ProxyMappingsResponse>(`/nodes/${nodeId}/proxy/mappings`)
 }
 
 export async function deleteNode(id: number) {
