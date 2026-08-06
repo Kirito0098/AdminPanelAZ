@@ -82,6 +82,7 @@ def run_apply(
     apply_after: bool = False,
     recreate_profiles_after: bool = False,
     hosts: list[str] | None = None,
+    ensure_openvpn_multihome: bool = False,
 ) -> dict[str, Any]:
     """Sync CIDR providers, optionally run doall and recreate client profiles (client.sh 7)."""
     result: dict[str, Any] = {}
@@ -93,6 +94,12 @@ def run_apply(
         result["recreate_profiles_output"] = adapter.recreate_profiles()
         if hosts:
             result["remote_hosts_patch"] = patch_openvpn_profiles_on_node(adapter, hosts)
+    if ensure_openvpn_multihome and (apply_after or recreate_profiles_after):
+        from app.services.openvpn_multihome import maybe_ensure_openvpn_multihome
+
+        mh = maybe_ensure_openvpn_multihome(adapter, enabled=True)
+        if mh is not None:
+            result["openvpn_multihome"] = mh
     return result
 
 
@@ -200,6 +207,7 @@ def _deploy_single_node(
             apply_after=apply_after,
             recreate_profiles_after=recreate_profiles_after,
             hosts=hosts,
+            ensure_openvpn_multihome=bool(node.openvpn_multihome),
         )
         entry.update(apply_result)
     elif sync_after:

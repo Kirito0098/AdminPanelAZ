@@ -182,6 +182,12 @@ class NodeAdapter(ABC):
     def ensure_openvpn_ban_check(self) -> dict: ...
 
     @abstractmethod
+    def ensure_openvpn_multihome(self, enabled: bool) -> dict: ...
+
+    @abstractmethod
+    def get_openvpn_multihome_status(self) -> dict: ...
+
+    @abstractmethod
     def get_warper_health(self) -> dict: ...
 
     @abstractmethod
@@ -560,6 +566,12 @@ class LocalNodeAdapter(NodeAdapter):
 
     def ensure_openvpn_ban_check(self) -> dict:
         return ensure_openvpn_ban_check(self._service.base_path)
+
+    def ensure_openvpn_multihome(self, enabled: bool) -> dict:
+        return self._service.ensure_openvpn_multihome(bool(enabled))
+
+    def get_openvpn_multihome_status(self) -> dict:
+        return self._service.get_openvpn_multihome_status()
 
     def get_warper_health(self) -> dict:
         return self._warper.get_health()
@@ -1236,6 +1248,17 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def ensure_openvpn_ban_check(self) -> dict:
         return self._request("POST", "/system/ensure-openvpn-ban-check", timeout=30.0)
+
+    def ensure_openvpn_multihome(self, enabled: bool) -> dict:
+        return self._request(
+            "POST",
+            "/openvpn/multihome",
+            json={"enabled": bool(enabled)},
+            timeout=120.0,
+        )
+
+    def get_openvpn_multihome_status(self) -> dict:
+        return self._request("GET", "/openvpn/multihome", timeout=30.0)
 
     def get_warper_health(self) -> dict:
         return self._request("GET", "/warper/health")

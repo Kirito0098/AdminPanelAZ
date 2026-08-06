@@ -10,6 +10,7 @@ def _make_node(node_id: int, name: str) -> MagicMock:
     node.id = node_id
     node.name = name
     node.openvpn_remote_hosts = None
+    node.openvpn_multihome = False
     return node
 
 

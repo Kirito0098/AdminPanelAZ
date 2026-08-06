@@ -177,7 +177,12 @@ def copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter) -> None
     replica_adapter.import_openvpn_client_profiles_archive(archive)
 
 
-def sync_openvpn_pki_from_primary(primary_adapter, replica_adapter) -> None:
+def sync_openvpn_pki_from_primary(
+    primary_adapter,
+    replica_adapter,
+    *,
+    openvpn_multihome: bool = False,
+) -> None:
     """Copy OpenVPN PKI and .ovpn profiles from primary to replica (no cert re-issue)."""
     archive = primary_adapter.export_easyrsa3_archive()
     replica_adapter.import_easyrsa3_archive(archive)
@@ -198,7 +203,18 @@ def sync_openvpn_pki_from_primary(primary_adapter, replica_adapter) -> None:
             ],
         )
 
-    restart_result = restart_all_openvpn_servers(replica_adapter)
+    if openvpn_multihome:
+        from app.services.openvpn_multihome import maybe_ensure_openvpn_multihome
+
+        mh = maybe_ensure_openvpn_multihome(replica_adapter, enabled=True) or {}
+        restart_result = mh.get("restart") or {
+            "restarted": [],
+            "skipped": [],
+            "failed": [],
+            "success": True,
+        }
+    else:
+        restart_result = restart_all_openvpn_servers(replica_adapter)
     if not restart_result.get("success"):
         failed = restart_result.get("failed") or []
         detail = "; ".join(
@@ -214,10 +230,15 @@ def sync_vpn_crypto_from_primary(
     vpn_type: VpnType,
     *,
     client_name: str | None = None,
+    openvpn_multihome: bool = False,
 ) -> None:
     """Copy primary VPN crypto material to replica for HA failover parity."""
     if vpn_type == VpnType.openvpn:
-        sync_openvpn_pki_from_primary(primary_adapter, replica_adapter)
+        sync_openvpn_pki_from_primary(
+            primary_adapter,
+            replica_adapter,
+            openvpn_multihome=openvpn_multihome,
+        )
         return
     sync_wireguard_state_from_primary(
         primary_adapter,
@@ -226,10 +247,19 @@ def sync_vpn_crypto_from_primary(
     )
 
 
-def sync_all_vpn_crypto_from_primary(primary_adapter, replica_adapter) -> None:
+def sync_all_vpn_crypto_from_primary(
+    primary_adapter,
+    replica_adapter,
+    *,
+    openvpn_multihome: bool = False,
+) -> None:
     """Copy both WireGuard and OpenVPN crypto state from primary to replica."""
     sync_wireguard_state_from_primary(primary_adapter, replica_adapter)
-    sync_openvpn_pki_from_primary(primary_adapter, replica_adapter)
+    sync_openvpn_pki_from_primary(
+        primary_adapter,
+        replica_adapter,
+        openvpn_multihome=openvpn_multihome,
+    )
 
 
 def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str, object]:
@@ -253,6 +283,7 @@ def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str,
                 adapter,
                 primary_config.vpn_type,
                 client_name=client_name,
+                openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
             )
         except Exception as exc:
             logger.warning(
@@ -305,6 +336,7 @@ def heal_crypto_drift(db, group) -> dict[str, object]:
             sync_all_vpn_crypto_from_primary(
                 primary_adapter,
                 get_adapter_for_node(replica_node),
+                openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
             )
         except Exception as exc:
             errors.append(

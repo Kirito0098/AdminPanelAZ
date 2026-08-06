@@ -50,15 +50,25 @@
 
 ## [2.21.0] - 2026-08-07
 
-> **Кратко:** прокси-узлы (`proxy_agent`, DESTINATION, NOC «домашний IP»), сводная вкладка **Конфигурация → Прокси**, multi-remote OpenVPN / allow-ips, раздельный учёт OpenVPN UDP/TCP, локальный IP на карточке клиента, расписание автообновления CIDR; AdBlock → `ANTIZAPRET_ADBLOCK` / `VPN_ADBLOCK`.
+> **Кратко:** прокси-узлы (`proxy_agent`, DESTINATION, NOC «домашний IP»), сводная вкладка **Конфигурация → Прокси**, multi-remote OpenVPN / allow-ips, **OpenVPN multihome** (несколько IP + restore после `setup.sh`), раздельный учёт OpenVPN UDP/TCP, локальный IP на карточке клиента, расписание автообновления CIDR; AdBlock → `ANTIZAPRET_ADBLOCK` / `VPN_ADBLOCK`.
 
 ### 🔄 Changed
 
 - **Конфиг AntiZapret: AdBlock** — `BLOCK_ADS` заменён на `ANTIZAPRET_ADBLOCK` (AntiZapret VPN) и добавлен `VPN_ADBLOCK` (полный VPN); при чтении/сохранении старый `BLOCK_ADS` мигрируется, как в `update.sh` AntiZapret (`antizapret_params.py`, `antizapret_settings.py`, `AntizapretConfigTab.tsx`).
 - **Docs: прокси-узлы** — в корневом README вариант «Прокси» / `--proxy-only` и ссылки; в [proxy-agent.md](docs/proxy-agent.md) — клон репо на RU, `PROXY_AGENT_ALLOWED_IPS` и таблица env; чеклисты в [proxy-nodes.md](docs/proxy-nodes.md) / [uzly.md](docs/uzly.md); уточнение `linked_vpn_node_id` (API без UI).
+- **OpenVPN restart после HA / multihome** — `restart_all_openvpn_servers` учитывает `OPENVPN_UDP_ENABLE` / `OPENVPN_TCP_ENABLE` из setup узла и не поднимает отключённые протоколы даже при fallback без systemd-статуса (`openvpn_restart.py`).
 
 ### ✨ Added
 
+- **OpenVPN multihome (несколько IP на сервере)** — в **Конфиг AntiZapret → Адреса подключения** переключатель для узлов с несколькими публичными IPv4:
+  - панель вставляет директиву `multihome` в server conf (`antizapret-udp|tcp`, `vpn-udp|tcp`) и перезапускает OpenVPN;
+  - желаемое состояние хранится в БД панели (`nodes.openvpn_multihome`, **node-local**, не реплицируется в HA);
+  - после `setup.sh` AntiZapret (`rm -rf /etc/openvpn/server/*`) стоковые conf снова без `multihome` — при открытии страницы, если флаг включён, панель **авто-восстанавливает** директиву на диск; есть кнопка **«Восстановить»** и бейдж «не на диске»;
+  - рестарт только unit’ов, разрешённых в `setup`: `OPENVPN_UDP_ENABLE` / `OPENVPN_TCP_ENABLE` (при `OPENVPN_TCP_ENABLE=n` TCP не трогается);
+  - ensure также вызывается после panel-doall / CIDR apply / shared domain / edit-files / Push full / HA crypto sync, если флаг у узла включён;
+  - скрипты и репозиторий AntiZapret **не** меняются (`custom-doall.sh` не используется);
+  - API: `GET/PUT /nodes/{id}/openvpn-multihome`; node agent: `GET/POST /openvpn/multihome`.
+  - Docs: [antizapret-config.md](docs/antizapret-config.md#openvpn-multihome-несколько-ip-на-сервере), [PROJECT_MAP.md](docs/PROJECT_MAP.md).
 - **Конфигурация → Прокси** — сводная вкладка (`/proxy`, feature `proxy_nodes`): статус/DESTINATION прокси-узлов (`ProxyNodePanel`), адреса remote активного VPN (`RemoteHostsCard`), быстрые ссылки на Узлы / AntiZapret / NOC / Модули. Docs: [proxy-nodes.md](docs/proxy-nodes.md).
 - **Маршрутизация / CIDR: расписание автообновления** — вкладка **Настройки** (`?tab=settings`): вкл/выкл, время (UTC) и интервал в днях (1/3/7/14 или своё); API `GET/PATCH /routing/cidr-db/schedule`; планировщик учитывает `CIDR_DB_REFRESH_INTERVAL_DAYS` и не гоняет ingest каждую ночь, если интервал ещё не прошёл (`cidr_scheduler.py`, `CidrScheduleCard.tsx`, `RoutingSettingsTab.tsx`).
 - **Карточка клиента: локальный IP** — в мета-блоке карточки на дашборде показывается выданный туннельный адрес (`local_ip` в `VpnConfigResponse`): WireGuard — `AllowedIPs` из серверного conf, OpenVPN — live `virtual_address` или последний из сессий трафика; переключатель «Локальный IP» в настройках карточек (`ConfigCard`, `client_local_ip.py`).
@@ -79,6 +89,8 @@
 
 ### 🧪 Tests
 
+- **OpenVPN multihome** — conf-патч / ensure helpers (`test_openvpn_multihome.py`), API toggle (`test_nodes_openvpn_multihome_api.py`), post-doall ensure (`test_background_tasks_doall.py`).
+- **OpenVPN restart + protocol flags** — пропуск TCP при `OPENVPN_TCP_ENABLE=n`, явные flags, fallback без status (`test_node_sync_openvpn_restart.py`).
 - **VPN monitor service filter** — `OPENVPN_TCP_ENABLE=n` исключает TCP unit'ы из мониторинга (`test_vpn_monitor_service_filter.py`).
 - **OpenVPN transport traffic** — маппинг профиля → `protocol_type`, фильтр потребления по UDP/TCP/all (`test_openvpn_transport_traffic.py`).
 - **Config card connection map** — раздельные флаги UDP/TCP и выбор по группе; захват локальных IP из OVPN/WG (`configCardUtils.connection.test.ts`).

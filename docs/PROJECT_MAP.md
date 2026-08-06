@@ -217,6 +217,7 @@
 - sync groups / HA — UI: `NodeSyncGroupSection.tsx`, API: `nodes` router; см. [`NodeSync.md`](NodeSync.md), user: [`uzly.md`](uzly.md)
 - `antizapret.py`, `openvpn_management.py`, `wg_runtime.py` — работа с VPN на узле
 - `openvpn_remote_hosts.py` — validate / normalize / `apply_openvpn_remote_hosts` (патч multi-remote в `.ovpn`); `append_host_to_allow_ips`
+- `openvpn_multihome.py` — `apply_multihome_to_conf` (директива `multihome` в OpenVPN server conf; restore через панель)
 - `wireguard_endpoint.py` — `apply_wireguard_endpoint_host` (патч `Endpoint` → `hosts[0]` при выдаче WG/AWG)
 - `profile_delivery.py` — `read_profile_file_for_delivery` (`.ovpn` multi-remote + WG Endpoint на download / QR / Telegram / public redeem; public — hosts активного узла); `patch_openvpn_profiles_on_node` (после успешного `recreate_profiles` / `client.sh 7` из панели — multi-remote на диск)
 - `profile_files.py`, `qr_generator.py` — конфиги и QR
@@ -257,7 +258,7 @@
 |--------|------------|
 | `User`, `RefreshToken`, `ActiveWebSession` | Пользователи, сессии; у `User` личные NOC-поля: `noc_daily_time`, `noc_weekly_dow`, `noc_weekly_time` (+ `timezone` / `last_client_timezone`) |
 | `VpnConfig` | Привязка клиента к узлу и владельцу |
-| `Node` | Узел: `node_kind` ∈ {`vpn`,`proxy`} (default `vpn`); local/remote, API key, mTLS; `openvpn_remote_hosts` — JSON remote OpenVPN (VPN); у proxy — `destination_ip` (кэш DESTINATION); `linked_vpn_node_id` (опц. FK на VPN-узел в API create/update, **UI нет** — задел волны 1) |
+| `Node` | Узел: `node_kind` ∈ {`vpn`,`proxy`} (default `vpn`); local/remote, API key, mTLS; `openvpn_remote_hosts` — JSON remote OpenVPN (VPN); `openvpn_multihome` — bool, multi-IP OpenVPN reply (VPN, node-local); у proxy — `destination_ip` (кэш DESTINATION); `linked_vpn_node_id` (опц. FK на VPN-узел в API create/update, **UI нет** — задел волны 1) |
 | `WgAccessPolicy`, `OpenVpnAccessPolicy` | Блокировки, лимиты трафика |
 | `TrafficSessionState`, `UserTrafficStatProtocol`, `UserTrafficSample` | Трафик |
 | `NodeResourceSample`, `PanelResourceSample` | Метрики ресурсов |

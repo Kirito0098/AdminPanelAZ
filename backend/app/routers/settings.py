@@ -204,6 +204,9 @@ def update_settings(
         if config_changed:
             try:
                 adapter.apply_config_changes()
+                from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
+
+                maybe_ensure_node_openvpn_multihome(adapter, get_active_node(db))
             except HTTPException:
                 raise
             except Exception as exc:

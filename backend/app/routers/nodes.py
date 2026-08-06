@@ -18,6 +18,8 @@ from app.schemas import (
     NodeMtlsDisableResponse,
     NodeMtlsEnableResponse,
     NodeMtlsStatusResponse,
+    NodeOpenVpnMultihomeBody,
+    NodeOpenVpnMultihomeResponse,
     NodeRemoteHostsBody,
     NodeRemoteHostsResponse,
     NodeResponse,
@@ -638,6 +640,9 @@ def allow_first_remote_host(
     warnings: list[str] = []
     try:
         adapter.apply_config_changes()
+        from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
+
+        maybe_ensure_node_openvpn_multihome(adapter, node)
     except Exception as exc:  # noqa: BLE001 — best-effort; file already written
         detail = getattr(exc, "detail", None) or str(exc)
         warnings.append(f"Файл сохранён, но doall.sh ошибка: {detail}")
@@ -661,6 +666,84 @@ def allow_first_remote_host(
             details=f"node_id={node_id} host={first}",
         )
     return NodeAllowFirstRemoteHostResponse(added=True, host=first, warnings=warnings)
+
+
+@router.get("/{node_id}/openvpn-multihome", response_model=NodeOpenVpnMultihomeResponse)
+def get_openvpn_multihome(
+    node_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)
+):
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    warnings: list[str] = []
+    on_disk: bool | None = None
+    try:
+        adapter = get_adapter_for_node(node)
+        status_payload = adapter.get_openvpn_multihome_status()
+        if isinstance(status_payload, dict) and "on_disk" in status_payload:
+            on_disk = bool(status_payload.get("on_disk"))
+    except Exception as exc:  # noqa: BLE001 — best-effort probe
+        detail = getattr(exc, "detail", None) or str(exc)
+        warnings.append(f"Не удалось проверить conf на диске: {detail}")
+    return NodeOpenVpnMultihomeResponse(
+        enabled=bool(node.openvpn_multihome),
+        on_disk=on_disk,
+        warnings=warnings,
+    )
+
+
+@router.put("/{node_id}/openvpn-multihome", response_model=NodeOpenVpnMultihomeResponse)
+def put_openvpn_multihome(
+    node_id: int,
+    payload: NodeOpenVpnMultihomeBody,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    enabled = bool(payload.enabled)
+    node.openvpn_multihome = enabled
+    node.updated_at = datetime.utcnow()
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+
+    warnings: list[str] = []
+    on_disk: bool | None = None
+    try:
+        adapter = get_adapter_for_node(node)
+        result = adapter.ensure_openvpn_multihome(enabled)
+        if isinstance(result, dict):
+            if "on_disk" in result:
+                on_disk = bool(result.get("on_disk"))
+            if result.get("success") is False:
+                restart = result.get("restart") or {}
+                failed = restart.get("failed") or []
+                if failed:
+                    warnings.append(
+                        "multihome записан, но перезапуск OpenVPN частично не удался: "
+                        + "; ".join(
+                            f"{item.get('unit')}: {item.get('error')}" for item in failed if isinstance(item, dict)
+                        )
+                    )
+                else:
+                    warnings.append("ensure_openvpn_multihome вернул success=false")
+    except Exception as exc:  # noqa: BLE001 — DB already saved; surface apply failure
+        detail = getattr(exc, "detail", None) or str(exc)
+        warnings.append(f"Флаг сохранён, но применить на узле не удалось: {detail}")
+
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_openvpn_multihome_update",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"node_id={node_id} enabled={enabled}",
+        )
+    return NodeOpenVpnMultihomeResponse(enabled=enabled, on_disk=on_disk, warnings=warnings)
 
 
 @router.post("/{node_id}/rotate-key", response_model=NodeRotateKeyResponse)

@@ -1691,6 +1691,12 @@ export interface NodeRemoteHostsResponse {
   warnings?: string[]
 }
 
+export interface NodeOpenVpnMultihomeResponse {
+  enabled: boolean
+  on_disk?: boolean | null
+  warnings?: string[]
+}
+
 export interface AntizapretSettingsResponse {
   settings: Record<string, string>
   schema: AntizapretSettingField[]

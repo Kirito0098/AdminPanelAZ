@@ -43,7 +43,7 @@ from app.services.cidr.pipeline.deploy_preview import compute_deploy_preview
 from app.services.cidr.pipeline.file_pipeline import list_runtime_backups
 from app.services.cidr.route_budget import build_route_budget_payload
 from app.services.env_file import EnvFileService
-from app.services.node_manager import get_active_adapter, get_adapter_for_node
+from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node
 from app.services.notify_time import get_client_timezone_from_request
 
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
@@ -454,6 +454,7 @@ def cidr_db_generate(
                     return result
                 adapter = get_adapter_for_node(node)
             else:
+                node = get_active_node(inner_db)
                 adapter = get_active_adapter(inner_db)
 
             if payload.deploy_after:
@@ -470,6 +471,7 @@ def cidr_db_generate(
                     adapter,
                     sync_after=not payload.deploy_after,
                     apply_after=payload.apply_after,
+                    ensure_openvpn_multihome=bool(getattr(node, "openvpn_multihome", False)),
                 )
                 result.update(apply_result)
         finally:

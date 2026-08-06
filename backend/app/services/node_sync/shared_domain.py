@@ -157,7 +157,18 @@ def apply_shared_domain_to_members(
                         }
                     )
                 progress(percent, f"{node.name}: перезапуск OpenVPN…")
-                restart_result = restart_all_openvpn_servers(adapter)
+                if bool(node.openvpn_multihome):
+                    from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
+
+                    mh = maybe_ensure_node_openvpn_multihome(adapter, node) or {}
+                    restart_result = mh.get("restart") or {
+                        "restarted": [],
+                        "skipped": [],
+                        "failed": [],
+                        "success": True,
+                    }
+                else:
+                    restart_result = restart_all_openvpn_servers(adapter)
                 result["openvpn_restart"].append(
                     {
                         "node_id": node.id,

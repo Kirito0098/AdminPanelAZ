@@ -128,6 +128,7 @@ def run_doall(
                 adapter,
                 progress_updater,
                 hosts=load_node_remote_hosts(worker_db, node.id),
+                ensure_openvpn_multihome=bool(node.openvpn_multihome),
             )
             admin_notify_service.send_settings_change(
                 worker_db,

@@ -417,6 +417,7 @@ class BackgroundTaskService:
         *,
         recreate_profiles: bool = True,
         hosts: list[str] | None = None,
+        ensure_openvpn_multihome: bool = False,
     ) -> dict[str, str]:
         if progress_updater:
             progress_updater(10, "AntiZapret: запуск doall.sh…")
@@ -439,7 +440,21 @@ class BackgroundTaskService:
                 recreate_output = result.output
             except Exception as exc:
                 raise self._adapter_error(exc) from exc
-        combined = "\n".join(part for part in [doall_output, recreate_output] if part).strip()
+        multihome_output = ""
+        if ensure_openvpn_multihome:
+            if progress_updater:
+                progress_updater(90, "AntiZapret: восстановление OpenVPN multihome…")
+            try:
+                mh = adapter.ensure_openvpn_multihome(True)
+                if isinstance(mh, dict):
+                    multihome_output = json.dumps(mh, ensure_ascii=False)
+                else:
+                    multihome_output = str(mh or "")
+            except Exception as exc:
+                raise self._adapter_error(exc) from exc
+        combined = "\n".join(
+            part for part in [doall_output, recreate_output, multihome_output] if part
+        ).strip()
         return {
             "message": (
                 "doall и пересоздание профилей клиентов выполнены успешно"
@@ -456,6 +471,7 @@ class BackgroundTaskService:
         *,
         recreate_profiles: bool = True,
         hosts: list[str] | None = None,
+        ensure_openvpn_multihome: bool = False,
     ) -> dict[str, str]:
         if progress_updater:
             progress_updater(5, "Синхронизация провайдеров…")
@@ -469,6 +485,7 @@ class BackgroundTaskService:
             progress_updater,
             recreate_profiles=recreate_profiles,
             hosts=hosts,
+            ensure_openvpn_multihome=ensure_openvpn_multihome,
         )
         combined = "\n".join(part for part in [sync_text, result.get("output", "")] if part).strip()
         return {
@@ -512,6 +529,7 @@ class BackgroundTaskService:
                     _node_progress,
                     recreate_profiles=captured_recreate,
                     hosts=hosts,
+                    ensure_openvpn_multihome=bool(node.openvpn_multihome),
                 )
                 result["message"] = f"{node_label}: {result.get('message', 'Маршрутизация применена')}"
                 result["output"] = json.dumps(

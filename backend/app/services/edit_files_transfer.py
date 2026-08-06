@@ -142,6 +142,9 @@ def run_edit_files_transfer(
         if run_doall:
             try:
                 doall_output = adapter.apply_config_changes()
+                from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
+
+                maybe_ensure_node_openvpn_multihome(adapter, node)
             except Exception as exc:
                 per_node.append(
                     {

@@ -56,6 +56,7 @@ def _enqueue_routing_apply_tasks(
                 adapter,
                 progress_updater,
                 hosts=load_node_remote_hosts(worker_db, node.id),
+                ensure_openvpn_multihome=bool(node.openvpn_multihome),
             )
         finally:
             worker_db.close()

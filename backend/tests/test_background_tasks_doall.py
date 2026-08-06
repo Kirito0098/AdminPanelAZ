@@ -10,6 +10,7 @@ def _adapter() -> MagicMock:
     adapter.apply_config_changes.return_value = "doall ok"
     adapter.recreate_profiles.return_value = "recreate ok"
     adapter.sync_cidr_providers.return_value = {"synced": True}
+    adapter.ensure_openvpn_multihome.return_value = {"success": True, "enabled": True}
     return adapter
 
 
@@ -18,6 +19,7 @@ def test_task_run_doall_recreates_profiles_by_default():
     result = background_task_service.task_run_doall(adapter)
     adapter.apply_config_changes.assert_called_once()
     adapter.recreate_profiles.assert_called_once()
+    adapter.ensure_openvpn_multihome.assert_not_called()
     assert "recreate ok" in result["output"]
 
 
@@ -41,3 +43,15 @@ def test_task_routing_apply_default_recreates():
     adapter = _adapter()
     background_task_service.task_routing_apply(adapter)
     adapter.recreate_profiles.assert_called_once()
+
+
+def test_task_run_doall_ensures_multihome_when_flagged():
+    adapter = _adapter()
+    background_task_service.task_run_doall(adapter, ensure_openvpn_multihome=True)
+    adapter.ensure_openvpn_multihome.assert_called_once_with(True)
+
+
+def test_task_routing_apply_ensures_multihome_when_flagged():
+    adapter = _adapter()
+    background_task_service.task_routing_apply(adapter, ensure_openvpn_multihome=True)
+    adapter.ensure_openvpn_multihome.assert_called_once_with(True)

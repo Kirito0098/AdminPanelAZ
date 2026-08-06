@@ -630,6 +630,22 @@ export async function allowFirstRemoteHost(nodeId: number) {
   )
 }
 
+export async function getNodeOpenVpnMultihome(nodeId: number) {
+  return apiFetch<import('../types').NodeOpenVpnMultihomeResponse>(
+    `/nodes/${nodeId}/openvpn-multihome`,
+  )
+}
+
+export async function putNodeOpenVpnMultihome(nodeId: number, enabled: boolean) {
+  return apiFetch<import('../types').NodeOpenVpnMultihomeResponse>(
+    `/nodes/${nodeId}/openvpn-multihome`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    },
+  )
+}
+
 export async function checkNodeUpdates(id: number) {
   return apiFetch<{
     node_id: number

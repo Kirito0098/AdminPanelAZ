@@ -169,7 +169,18 @@ def run_push_full(
                 )
 
             progress(percent, f"Перезапуск OpenVPN на {replica_name}…")
-            restart_result = restart_all_openvpn_servers(replica_adapter)
+            if replica_node is not None and bool(getattr(replica_node, "openvpn_multihome", False)):
+                from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
+
+                mh = maybe_ensure_node_openvpn_multihome(replica_adapter, replica_node) or {}
+                restart_result = mh.get("restart") or {
+                    "restarted": [],
+                    "skipped": [],
+                    "failed": [],
+                    "success": True,
+                }
+            else:
+                restart_result = restart_all_openvpn_servers(replica_adapter)
             openvpn_restart.append(
                 {
                     "node_id": replica_id,

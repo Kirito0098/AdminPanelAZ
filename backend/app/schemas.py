@@ -139,6 +139,16 @@ class NodeAllowFirstRemoteHostResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class NodeOpenVpnMultihomeBody(BaseModel):
+    enabled: bool = False
+
+
+class NodeOpenVpnMultihomeResponse(BaseModel):
+    enabled: bool
+    on_disk: bool | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
 class UserBase(BaseModel):
     username: str
     role: UserRole = UserRole.user

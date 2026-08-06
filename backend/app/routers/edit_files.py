@@ -68,6 +68,9 @@ def save_edit_file(
         adapter = get_active_adapter(db)
         adapter.write_config_file(_filename_for_key(file_key), payload.content)
         output = adapter.apply_config_changes()
+        from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
+
+        maybe_ensure_node_openvpn_multihome(adapter, get_active_node(db))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -95,6 +98,9 @@ def save_batch(
     output = None
     if payload.run_doall:
         output = adapter.apply_config_changes()
+        from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
+
+        maybe_ensure_node_openvpn_multihome(adapter, get_active_node(db))
     maybe_replicate_config_files(
         db,
         node_id=get_active_node(db).id,
