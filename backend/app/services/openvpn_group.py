@@ -11,6 +11,19 @@ from app.constants.public_routes import (
 )
 from app.models import AppSetting
 
+# Traffic stat / sample protocol_type values for OpenVPN transports.
+OPENVPN_PROTOCOL_LEGACY = "openvpn"
+OPENVPN_PROTOCOL_UDP = "openvpn-udp"
+OPENVPN_PROTOCOL_TCP = "openvpn-tcp"
+OPENVPN_PROTOCOL_ALL = frozenset({OPENVPN_PROTOCOL_LEGACY, OPENVPN_PROTOCOL_UDP, OPENVPN_PROTOCOL_TCP})
+WIREGUARD_PROTOCOL = frozenset({"wireguard"})
+
+_GROUP_PROTOCOL_TYPES: dict[str, frozenset[str]] = {
+    "GROUP_UDP": frozenset({OPENVPN_PROTOCOL_UDP}),
+    "GROUP_TCP": frozenset({OPENVPN_PROTOCOL_TCP}),
+    DEFAULT_OPENVPN_GROUP: OPENVPN_PROTOCOL_ALL,
+}
+
 
 def _setting_key(user_id: int) -> str:
     return f"openvpn_group:user:{user_id}"
@@ -21,6 +34,16 @@ def normalize_openvpn_group(group: str | None) -> str:
     if raw not in OPENVPN_GROUP_VARIANTS:
         return DEFAULT_OPENVPN_GROUP
     return raw
+
+
+def protocol_types_for_openvpn_group(group: str | None) -> frozenset[str]:
+    """Map UI OpenVPN group toggle to traffic ``protocol_type`` filters."""
+    normalized = normalize_openvpn_group(group)
+    return _GROUP_PROTOCOL_TYPES.get(normalized, OPENVPN_PROTOCOL_ALL)
+
+
+def is_openvpn_protocol_type(protocol_type: str | None) -> bool:
+    return (protocol_type or "").strip().lower().startswith("openvpn")
 
 
 def get_user_openvpn_group(db: Session, user_id: int) -> str:

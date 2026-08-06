@@ -34,6 +34,7 @@ import {
   pickAzFile,
   pickPrimaryFile,
   pickVpnFile,
+  resolveDisplayedTraffic,
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { Badge } from '@/components/ui/badge'
@@ -58,6 +59,7 @@ interface ConfigCardProps {
   config: VpnConfig
   tab: ProtocolTab
   policy?: ClientAccessPolicy
+  openvpnGroup?: string | null
   userRole: UserRole
   filesLoading?: boolean
   loadingAction?: ActionKey | null
@@ -135,13 +137,18 @@ function isNoiseMetaLine(
   return false
 }
 
-function formatTrafficMeta(policy: ClientAccessPolicy | undefined): MetaRow {
+function formatTrafficMeta(
+  policy: ClientAccessPolicy | undefined,
+  openvpnGroup?: string | null,
+): MetaRow {
   if (!policy) {
     return metaRow('traffic', Gauge, 'Трафик', '—')
   }
 
+  const displayed = resolveDisplayedTraffic(policy, openvpnGroup)
+
   if (policy.traffic_limit_human) {
-    let value = `${policy.traffic_consumed_human || '0 B'} / ${policy.traffic_limit_human}`
+    let value = `${displayed.human || '0 B'} / ${policy.traffic_limit_human}`
     if (policy.traffic_limit_period_label) {
       value += ` · ${policy.traffic_limit_period_label}`
     }
@@ -157,10 +164,7 @@ function formatTrafficMeta(policy: ClientAccessPolicy | undefined): MetaRow {
     )
   }
 
-  const consumed =
-    policy.traffic_consumed_human && (policy.traffic_consumed_bytes ?? 0) > 0
-      ? policy.traffic_consumed_human
-      : '0 B'
+  const consumed = displayed.human && displayed.bytes > 0 ? displayed.human : '0 B'
   return metaRow('traffic', Gauge, 'Трафик', `${consumed} · без лимита`, 'default')
 }
 
@@ -189,6 +193,7 @@ function buildCompactMeta(
   isAdmin: boolean,
   tone: 'active' | 'expiring' | 'expired',
   isOnline: boolean | null,
+  openvpnGroup?: string | null,
 ): MetaRow[] {
   const rows: MetaRow[] = [
     metaRow('created', Calendar, 'Создан', formatCreatedAt(config.created_at)),
@@ -210,11 +215,12 @@ function buildCompactMeta(
     rows.push(metaRow('owner', UserRound, 'Владелец', config.owner_username))
   }
 
-  rows.push(formatTrafficMeta(policy))
+  const trafficGroup = tab === 'openvpn' ? openvpnGroup : null
+  rows.push(formatTrafficMeta(policy, trafficGroup))
   rows.push(formatBlockMeta(policy))
   rows.push(formatConnectionMeta(isOnline))
 
-  const { lines } = buildAccessMeta(config, tab, policy)
+  const { lines } = buildAccessMeta(config, tab, policy, trafficGroup)
   const keyMeta = config.vpn_type === 'openvpn' ? lines.slice(1) : lines
 
   for (const line of keyMeta) {
@@ -386,6 +392,7 @@ export default function ConfigCard({
   config,
   tab,
   policy,
+  openvpnGroup = null,
   userRole,
   filesLoading = false,
   loadingAction,
@@ -406,7 +413,8 @@ export default function ConfigCard({
 }: ConfigCardProps) {
   const status = getConfigStatus(config, tab, policy)
   const StatusIcon = statusIcons[status.variant]
-  const { tone } = buildAccessMeta(config, tab, policy)
+  const trafficGroup = tab === 'openvpn' ? openvpnGroup : null
+  const { tone } = buildAccessMeta(config, tab, policy, trafficGroup)
   const vpnFile = pickVpnFile(config, tab)
   const azFile = pickAzFile(config, tab)
   const primaryFile = pickPrimaryFile(config, tab)
@@ -417,7 +425,7 @@ export default function ConfigCard({
   const { fields } = viewPrefs
   const unifiedButtonAccent = resolveButtonAccent(viewPrefs)
   const unifiedBadgeAccent = resolveBadgeAccent(viewPrefs)
-  const metaRows = buildCompactMeta(config, tab, policy, isAdmin, tone, isOnline).filter((row) => {
+  const metaRows = buildCompactMeta(config, tab, policy, isAdmin, tone, isOnline, openvpnGroup).filter((row) => {
     if (!isMetaKeyVisible(row.key, fields)) return false
     if (!fields.metaTraffic && (row.key === 'traffic' || row.label.startsWith('Трафик') || row.label.startsWith('Лимит'))) {
       return false
@@ -432,11 +440,12 @@ export default function ConfigCard({
   const showQr = fields.qrButtons && showQrDownloads
   const showTraffic = fields.trafficLink && showTrafficLink
   const showDanger = fields.dangerActions
+  const displayedTraffic = resolveDisplayedTraffic(policy, trafficGroup)
   const trafficLimitPercent =
     fields.metaTraffic &&
     policy?.traffic_limit_bytes != null &&
     policy.traffic_limit_bytes > 0
-      ? Math.min(((policy.traffic_consumed_bytes ?? 0) / policy.traffic_limit_bytes) * 100, 100)
+      ? Math.min((displayedTraffic.bytes / policy.traffic_limit_bytes) * 100, 100)
       : null
 
   const vpnDownloadAccent = applyAccent(

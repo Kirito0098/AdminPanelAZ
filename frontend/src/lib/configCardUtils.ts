@@ -147,15 +147,44 @@ export interface AccessMetaLine {
   text: string
 }
 
+/** Pick consumed traffic for the OpenVPN UDP/TCP group toggle (display only). */
+export function resolveDisplayedTraffic(
+  policy: ClientAccessPolicy | undefined,
+  openvpnGroup?: string | null,
+): { bytes: number; human: string | null | undefined } {
+  if (!policy) {
+    return { bytes: 0, human: null }
+  }
+  if (openvpnGroup === 'GROUP_UDP') {
+    return {
+      bytes: policy.traffic_consumed_udp_bytes ?? 0,
+      human: policy.traffic_consumed_udp_human,
+    }
+  }
+  if (openvpnGroup === 'GROUP_TCP') {
+    return {
+      bytes: policy.traffic_consumed_tcp_bytes ?? 0,
+      human: policy.traffic_consumed_tcp_human,
+    }
+  }
+  return {
+    bytes: policy.traffic_consumed_bytes ?? 0,
+    human: policy.traffic_consumed_human,
+  }
+}
+
 export function buildAccessMeta(
   config: VpnConfig,
   tab: ProtocolTab,
   policy?: ClientAccessPolicy,
+  openvpnGroup?: string | null,
 ): { lines: AccessMetaLine[]; tone: 'active' | 'expiring' | 'expired' } {
   const lines: AccessMetaLine[] = []
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
   const isBlocked = policy?.is_blocked ?? false
   let tone: 'active' | 'expiring' | 'expired' = 'active'
+  const displayed =
+    tab === 'openvpn' ? resolveDisplayedTraffic(policy, openvpnGroup) : resolveDisplayedTraffic(policy, null)
 
   if (config.vpn_type === 'openvpn') {
     lines.push({ text: `Сертификат: ${formatCertExpiry(config)}` })
@@ -174,18 +203,17 @@ export function buildAccessMeta(
       limitText += ` (${policy.traffic_limit_period_label})`
     }
     lines.push({ text: limitText })
-    if (policy.traffic_consumed_human) {
+    if (displayed.human) {
       const left = policy.traffic_bytes_left_human ? `, осталось ${policy.traffic_bytes_left_human}` : ''
-      lines.push({ text: `Трафик: ${policy.traffic_consumed_human}${left}` })
+      lines.push({ text: `Трафик: ${displayed.human}${left}` })
     }
     if (policy.traffic_limit_exceeded) {
       tone = 'expired'
     }
   } else if (!isBlocked) {
-    const consumed = policy?.traffic_consumed_human
-    const hasTraffic = Boolean(consumed && (policy?.traffic_consumed_bytes ?? 0) > 0)
+    const hasTraffic = Boolean(displayed.human && displayed.bytes > 0)
     lines.push({
-      text: hasTraffic ? `Трафик: ${consumed} · лимит не задан` : 'Трафик · Лимит не задан',
+      text: hasTraffic ? `Трафик: ${displayed.human} · лимит не задан` : 'Трафик · Лимит не задан',
     })
   }
 
@@ -265,10 +293,16 @@ export function matchesPresenceFilter(
   filter: ClientPresenceFilter,
   policy: ClientAccessPolicy | undefined,
   connectionMap?: ClientConnectionMap | null,
+  openvpnGroup?: string | null,
 ): boolean {
   if (filter === 'all') return true
   if (filter === 'blocked') return isConfigBlocked(policy)
-  const connected = isConfigConnected(config.client_name, tab, connectionMap)
+  const connected = isConfigConnected(
+    config.client_name,
+    tab,
+    connectionMap,
+    tab === 'openvpn' ? openvpnGroup : null,
+  )
   if (filter === 'online') return connected === true
   if (filter === 'offline') return connected === false
   return true
@@ -322,7 +356,26 @@ export function getProtocolBadgeVariant(tab: ProtocolTab): 'default' | 'secondar
   return 'outline'
 }
 
-export type ClientConnectionMap = Record<string, { openvpn: boolean; wireguard: boolean }>
+export type ClientConnectionEntry = {
+  openvpn: boolean
+  openvpnUdp: boolean
+  openvpnTcp: boolean
+  wireguard: boolean
+}
+
+export type ClientConnectionMap = Record<string, ClientConnectionEntry>
+
+/** Derive OpenVPN transport from a live status profile (e.g. antizapret-udp). */
+export function openvpnTransportFromProfile(profile?: string | null): 'udp' | 'tcp' | null {
+  const name = (profile || '').trim().toLowerCase()
+  if (name.endsWith('-udp')) return 'udp'
+  if (name.endsWith('-tcp')) return 'tcp'
+  return null
+}
+
+function emptyConnectionEntry(): ClientConnectionEntry {
+  return { openvpn: false, openvpnUdp: false, openvpnTcp: false, wireguard: false }
+}
 
 export function buildClientConnectionMap(
   openvpnClients: OpenVpnClient[],
@@ -333,16 +386,23 @@ export function buildClientConnectionMap(
   for (const client of openvpnClients) {
     const key = client.common_name.trim().toLowerCase()
     if (!key) continue
-    map[key] = { openvpn: true, wireguard: map[key]?.wireguard ?? false }
+    const prev = map[key] ?? emptyConnectionEntry()
+    const transport = openvpnTransportFromProfile(client.profile)
+    map[key] = {
+      ...prev,
+      openvpn: true,
+      openvpnUdp: prev.openvpnUdp || transport === 'udp',
+      openvpnTcp: prev.openvpnTcp || transport === 'tcp',
+    }
   }
 
   for (const peer of wireguardPeers) {
     const name = (peer.client_name || '').trim()
     if (!name) continue
     const key = name.toLowerCase()
-    const prev = map[key]
-    const wireguardOnline = isWireGuardOnline(peer) || (prev?.wireguard ?? false)
-    map[key] = { openvpn: prev?.openvpn ?? false, wireguard: wireguardOnline }
+    const prev = map[key] ?? emptyConnectionEntry()
+    const wireguardOnline = isWireGuardOnline(peer) || prev.wireguard
+    map[key] = { ...prev, wireguard: wireguardOnline }
   }
 
   return map
@@ -352,11 +412,15 @@ export function isConfigConnected(
   clientName: string,
   tab: ProtocolTab,
   connectionMap?: ClientConnectionMap | null,
+  openvpnGroup?: string | null,
 ): boolean | null {
   if (!connectionMap) return null
   const entry = connectionMap[clientName.trim().toLowerCase()]
   if (!entry) return false
-  return tab === 'openvpn' ? entry.openvpn : entry.wireguard
+  if (tab !== 'openvpn') return entry.wireguard
+  if (openvpnGroup === 'GROUP_UDP') return entry.openvpnUdp
+  if (openvpnGroup === 'GROUP_TCP') return entry.openvpnTcp
+  return entry.openvpn
 }
 
 export function formatBlockStatus(policy?: ClientAccessPolicy): {

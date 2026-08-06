@@ -81,7 +81,9 @@ def fetch_traffic_chart(
         total_delta = int(item.delta_received or 0) + int(item.delta_sent or 0)
         net = "antizapret" if item.network_type == "antizapret" else "vpn"
         protocol = (item.protocol_type or "openvpn").strip().lower()
-        if protocol not in ("openvpn", "wireguard"):
+        if protocol.startswith("openvpn"):
+            protocol = "openvpn"
+        elif protocol != "wireguard":
             protocol = "openvpn"
 
         if protocol_filter != "all" and protocol != protocol_filter:

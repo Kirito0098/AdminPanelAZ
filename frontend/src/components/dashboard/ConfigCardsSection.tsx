@@ -202,14 +202,21 @@ export default function ConfigCardsSection({
           .filter((c) => !q || c.client_name.toLowerCase().includes(q))
           .filter((c) => matchesFilter(c, tab, filter, getPolicyForConfig(c, policies)))
           .filter((c) =>
-            matchesPresenceFilter(c, tab, presenceFilter, getPolicyForConfig(c, policies), connectionMap),
+            matchesPresenceFilter(
+              c,
+              tab,
+              presenceFilter,
+              getPolicyForConfig(c, policies),
+              connectionMap,
+              tab === 'openvpn' ? openvpnGroup : null,
+            ),
           )
           .sort((a, b) => a.client_name.localeCompare(b.client_name, 'ru'))
         return acc
       },
       {} as Record<ProtocolTab, VpnConfig[]>,
     )
-  }, [configs, search, filter, presenceFilter, policies, tagFilterIds, connectionMap])
+  }, [configs, search, filter, presenceFilter, policies, tagFilterIds, connectionMap, openvpnGroup])
 
   const tabCounts = useMemo(
     () =>
@@ -709,6 +716,7 @@ export default function ConfigCardsSection({
                         config={config}
                         tab={tab}
                         policy={getPolicyForConfig(config, policies)}
+                        openvpnGroup={tab === 'openvpn' ? openvpnGroup : null}
                         userRole={userRole}
                         filesLoading={filesLoading}
                         loadingAction={getCardLoading(config.id)}
@@ -732,7 +740,12 @@ export default function ConfigCardsSection({
                         }
                         showQrDownloads={qrDownloadsEnabled}
                         showTrafficLink={trafficLinkEnabled}
-                        isOnline={isConfigConnected(config.client_name, tab, connectionMap)}
+                        isOnline={isConfigConnected(
+                          config.client_name,
+                          tab,
+                          connectionMap,
+                          tab === 'openvpn' ? openvpnGroup : null,
+                        )}
                         viewPrefs={viewPrefs}
                       />
                     ))}

@@ -14,12 +14,42 @@ from app.schemas import (
     VpnConfigHaInfo,
     WireGuardPeer,
 )
+from app.services.openvpn_group import (
+    OPENVPN_PROTOCOL_LEGACY,
+    OPENVPN_PROTOCOL_TCP,
+    OPENVPN_PROTOCOL_UDP,
+    is_openvpn_protocol_type,
+)
 from app.services.wireguard_status import wireguard_peer_is_online
 
 
 def _profile_from_log_name(log_name: str) -> str:
     base = log_name.replace("-status.log", "")
     return base
+
+
+def protocol_type_from_profile(profile: str | None) -> str:
+    """Derive persisted ``protocol_type`` from a collector profile name.
+
+    Examples: ``antizapret-udp`` → ``openvpn-udp``, ``vpn-tcp`` → ``openvpn-tcp``,
+    ``antizapret-wg`` → ``wireguard``. Legacy combined OpenVPN profiles without a
+    transport suffix stay as ``openvpn``.
+    """
+    name = (profile or "").strip().lower()
+    if name.endswith("-wg") or name.endswith("-awg"):
+        return "wireguard"
+    if name.endswith("-udp"):
+        return OPENVPN_PROTOCOL_UDP
+    if name.endswith("-tcp"):
+        return OPENVPN_PROTOCOL_TCP
+    return OPENVPN_PROTOCOL_LEGACY
+
+
+def _summary_protocol_key(protocol_type: str | None) -> str:
+    """Collapse openvpn / openvpn-udp / openvpn-tcp into one summary row."""
+    if is_openvpn_protocol_type(protocol_type):
+        return OPENVPN_PROTOCOL_LEGACY
+    return (protocol_type or OPENVPN_PROTOCOL_LEGACY).strip().lower() or OPENVPN_PROTOCOL_LEGACY
 
 
 def _parse_status_timestamp(value, fallback: datetime) -> datetime:
@@ -140,8 +170,8 @@ class TrafficCollectorService:
                 current_tx = int(client.get("bytes_sent") or 0)
                 common_name = (client.get("common_name") or "-").strip()
                 is_antizapret = str(profile).startswith("antizapret")
-                is_wireguard = str(profile).endswith("-wg")
-                protocol_type = "wireguard" if is_wireguard else "openvpn"
+                protocol_type = protocol_type_from_profile(profile)
+                is_wireguard = protocol_type == "wireguard"
 
                 # Real last-connection time reported by the protocol (WireGuard
                 # handshake); OpenVPN clients in the status are connected right
@@ -283,7 +313,7 @@ class TrafficCollectorService:
 
         for row in stats:
             client_lower = (row.common_name or "").lower()
-            protocol = row.protocol_type
+            protocol = _summary_protocol_key(row.protocol_type)
             key = (client_lower, protocol)
             agg = aggregates.get(key)
             if agg is None:
@@ -324,7 +354,8 @@ class TrafficCollectorService:
             agg["tx_az"] += int(row.total_sent_antizapret or 0)
             agg["total_sessions"] += int(row.total_sessions or 0)
 
-            recent = recent_usage.get((row.node_id, client_lower, protocol), {})
+            # Samples keep transport-specific protocol_type; look up raw key.
+            recent = recent_usage.get((row.node_id, client_lower, row.protocol_type), {})
             node_1d = int(recent.get("days_1", 0))
             node_7d = int(recent.get("days_7", 0))
             node_30d = int(recent.get("days_30", 0))
@@ -482,8 +513,8 @@ class TrafficCollectorService:
         q_stats = self.db.query(UserTrafficStatProtocol).filter(UserTrafficStatProtocol.node_id == self.node_id)
 
         if scope == "openvpn":
-            q_samples = q_samples.filter(UserTrafficSample.protocol_type == "openvpn")
-            q_stats = q_stats.filter(UserTrafficStatProtocol.protocol_type == "openvpn")
+            q_samples = q_samples.filter(UserTrafficSample.protocol_type.like("openvpn%"))
+            q_stats = q_stats.filter(UserTrafficStatProtocol.protocol_type.like("openvpn%"))
         elif scope == "wireguard":
             q_samples = q_samples.filter(UserTrafficSample.protocol_type == "wireguard")
             q_stats = q_stats.filter(UserTrafficStatProtocol.protocol_type == "wireguard")

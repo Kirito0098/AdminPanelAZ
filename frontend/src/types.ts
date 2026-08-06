@@ -1301,6 +1301,10 @@ export interface ClientAccessPolicy {
   traffic_limit_human?: string | null
   traffic_consumed_bytes?: number | null
   traffic_consumed_human?: string | null
+  traffic_consumed_udp_bytes?: number | null
+  traffic_consumed_udp_human?: string | null
+  traffic_consumed_tcp_bytes?: number | null
+  traffic_consumed_tcp_human?: string | null
   traffic_bytes_left?: number | null
   traffic_bytes_left_human?: string | null
   traffic_limit_exceeded?: boolean

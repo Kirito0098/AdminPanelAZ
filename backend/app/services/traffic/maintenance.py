@@ -15,6 +15,7 @@ from app.services.traffic.collector import (
     _parse_status_timestamp,
     build_session_key,
     build_status_rows,
+    protocol_type_from_profile,
 )
 
 
@@ -124,6 +125,7 @@ class TrafficMaintenanceService:
         allowed_client_names: set[str] | None = None,
     ) -> tuple[list[dict], dict]:
         stats_keys: set[tuple[str, str]] = set()
+        openvpn_identities: set[str] = set()
         for row in self.db.query(UserTrafficStatProtocol).filter(
             UserTrafficStatProtocol.node_id == self.node_id
         ).all():
@@ -131,6 +133,8 @@ class TrafficMaintenanceService:
             proto = (row.protocol_type or "").strip().lower()
             if identity and proto:
                 stats_keys.add((identity, proto))
+                if proto.startswith("openvpn"):
+                    openvpn_identities.add(identity)
 
         configs = (
             self.db.query(VpnConfig)
@@ -150,9 +154,14 @@ class TrafficMaintenanceService:
                 continue
             if allowed_client_names is not None and name not in allowed_client_names:
                 continue
-            proto = "wireguard" if cfg.vpn_type == VpnType.wireguard else "openvpn"
-            if (identity, proto) in stats_keys:
-                continue
+            if cfg.vpn_type == VpnType.wireguard:
+                if (identity, "wireguard") in stats_keys:
+                    continue
+                proto = "wireguard"
+            else:
+                if identity in openvpn_identities:
+                    continue
+                proto = "openvpn"
             rows_out.append({
                 "common_name": name,
                 "protocol_type": proto,
@@ -191,7 +200,7 @@ class TrafficMaintenanceService:
                 self.db.query(UserTrafficSample)
                 .filter(
                     UserTrafficSample.node_id == self.node_id,
-                    UserTrafficSample.protocol_type == "openvpn",
+                    UserTrafficSample.protocol_type.like("openvpn%"),
                 )
                 .delete(synchronize_session=False)
             )
@@ -357,9 +366,11 @@ class TrafficMaintenanceService:
                 continue
 
             protocol = (sample.protocol_type or "openvpn").strip().lower()
-            if protocol not in ("openvpn", "wireguard"):
+            if protocol.startswith("openvpn"):
+                pass
+            elif protocol != "wireguard":
                 protocol = "openvpn"
-            if protocol == "openvpn" and common_name.strip().lower() in wireguard_only_clients:
+            if protocol.startswith("openvpn") and common_name.strip().lower() in wireguard_only_clients:
                 protocol = "wireguard"
 
             sample_dt = sample.created_at or now
@@ -426,9 +437,7 @@ class TrafficMaintenanceService:
                 .all()
             )
             for state_row in seed_sessions:
-                protocol_type = (
-                    "wireguard" if str(state_row.profile or "").strip().lower().endswith("-wg") else "openvpn"
-                )
+                protocol_type = protocol_type_from_profile(state_row.profile)
                 seed_protocols_by_name[(state_row.common_name or "").strip()].add(protocol_type)
 
         active_identities = {
@@ -482,7 +491,7 @@ class TrafficMaintenanceService:
                 UserTrafficStatProtocol.node_id == self.node_id
             )
             if scope == "openvpn":
-                stats_query = stats_query.filter(UserTrafficStatProtocol.protocol_type == "openvpn")
+                stats_query = stats_query.filter(UserTrafficStatProtocol.protocol_type.like("openvpn%"))
             elif scope == "wireguard":
                 stats_query = stats_query.filter(UserTrafficStatProtocol.protocol_type == "wireguard")
             stats_query.delete(synchronize_session=False)

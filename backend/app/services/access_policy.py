@@ -8,6 +8,12 @@ from sqlalchemy.orm import Session
 from app.models import Node, OpenVpnAccessPolicy, WgAccessPolicy
 from app.services.node_adapter import NodeAdapter
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
+from app.services.openvpn_group import (
+    OPENVPN_PROTOCOL_ALL,
+    OPENVPN_PROTOCOL_TCP,
+    OPENVPN_PROTOCOL_UDP,
+    WIREGUARD_PROTOCOL,
+)
 from app.services.traffic_limit import (
     TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED,
     TrafficLimitExceededError,
@@ -99,41 +105,66 @@ class AccessPolicyService:
             "node_name": self.node_name,
         }
 
-    def _consumed_bytes(self, client_name: str, *, period_days: int | None = None) -> int:
+    def _consumed_bytes(
+        self,
+        client_name: str,
+        *,
+        period_days: int | None = None,
+        protocol_types: set[str] | frozenset[str] | None = None,
+    ) -> int:
         return get_client_consumed_traffic_bytes(
             self.db,
             client_name=client_name,
             node_id=self.node_id,
             period_days=period_days,
+            protocol_types=protocol_types,
             normalize_identity=lambda name: (name or "").strip().lower(),
         )
 
     def _ovpn_traffic_state(self, row: OpenVpnAccessPolicy | None, *, client_name: str | None = None) -> dict:
         if row is None:
             name = (client_name or "").strip()
-            consumed = self._consumed_bytes(name, period_days=None) if name else 0
-            return resolve_traffic_limit_state(
-                traffic_limit_bytes=None,
-                traffic_limit_period_days=None,
-                consumed_bytes=consumed,
-            )
-        consumed = self._consumed_bytes(row.client_name, period_days=row.traffic_limit_period_days)
-        return resolve_traffic_limit_state(
-            traffic_limit_bytes=row.traffic_limit_bytes,
-            traffic_limit_period_days=row.traffic_limit_period_days,
+            period_days = None
+            limit_bytes = None
+        else:
+            name = row.client_name
+            period_days = row.traffic_limit_period_days
+            limit_bytes = row.traffic_limit_bytes
+
+        consumed = self._consumed_bytes(name, period_days=period_days, protocol_types=OPENVPN_PROTOCOL_ALL) if name else 0
+        state = resolve_traffic_limit_state(
+            traffic_limit_bytes=limit_bytes,
+            traffic_limit_period_days=period_days,
             consumed_bytes=consumed,
         )
+        if name:
+            state["traffic_consumed_udp_bytes"] = self._consumed_bytes(
+                name, period_days=period_days, protocol_types={OPENVPN_PROTOCOL_UDP}
+            )
+            state["traffic_consumed_tcp_bytes"] = self._consumed_bytes(
+                name, period_days=period_days, protocol_types={OPENVPN_PROTOCOL_TCP}
+            )
+        else:
+            state["traffic_consumed_udp_bytes"] = 0
+            state["traffic_consumed_tcp_bytes"] = 0
+        return state
 
     def _wg_traffic_state(self, row: WgAccessPolicy | None, *, client_name: str | None = None) -> dict:
         if row is None:
             name = (client_name or "").strip().lower()
-            consumed = self._consumed_bytes(name, period_days=None) if name else 0
+            consumed = (
+                self._consumed_bytes(name, period_days=None, protocol_types=WIREGUARD_PROTOCOL) if name else 0
+            )
             return resolve_traffic_limit_state(
                 traffic_limit_bytes=None,
                 traffic_limit_period_days=None,
                 consumed_bytes=consumed,
             )
-        consumed = self._consumed_bytes(row.client_name, period_days=row.traffic_limit_period_days)
+        consumed = self._consumed_bytes(
+            row.client_name,
+            period_days=row.traffic_limit_period_days,
+            protocol_types=WIREGUARD_PROTOCOL,
+        )
         return resolve_traffic_limit_state(
             traffic_limit_bytes=row.traffic_limit_bytes,
             traffic_limit_period_days=row.traffic_limit_period_days,
@@ -141,11 +172,16 @@ class AccessPolicyService:
         )
 
     def _traffic_human_fields(self, traffic_state: dict) -> dict:
-        return {
+        fields = {
             **traffic_state,
             "traffic_consumed_human": human_bytes(traffic_state.get("traffic_consumed_bytes")),
             "traffic_bytes_left_human": human_bytes(traffic_state.get("traffic_bytes_left")),
         }
+        if "traffic_consumed_udp_bytes" in traffic_state:
+            fields["traffic_consumed_udp_human"] = human_bytes(traffic_state.get("traffic_consumed_udp_bytes"))
+        if "traffic_consumed_tcp_bytes" in traffic_state:
+            fields["traffic_consumed_tcp_human"] = human_bytes(traffic_state.get("traffic_consumed_tcp_bytes"))
+        return fields
 
     def read_banned_clients(self) -> set[str]:
         if self._adapter is not None:

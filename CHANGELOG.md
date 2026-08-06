@@ -52,6 +52,17 @@
 - **install.sh --proxy-only** — роль «только proxy_agent» по образцу `--node-only`: env + ключ + systemd `adminpanelaz-proxy`, без панели и без `proxy.sh`.
 - **Несколько адресов OpenVPN на узле** — в **Конфиг AntiZapret → Адреса подключения** админ задаёт упорядоченный список IP/доменов (до 8) на активном узле; при скачивании `.ovpn` (сайт, QR, Telegram, публичная ссылка) панель подставляет несколько `remote` в этом порядке. Список в БД панели переживает `setup.sh`; непустой список пишет первый адрес в `OPENVPN_HOST`, пустой патч выключает и `OPENVPN_HOST` не трогает. API: `GET/PUT /nodes/{id}/remote-hosts`. Docs: [antizapret-config.md](docs/antizapret-config.md#несколько-адресов-подключения).
 - **Multi-remote этап 06** — после пересборки профилей из панели `.ovpn` на диске получают multi-`remote`; при скачивании WG/Amnezia `Endpoint` = первый адрес списка (порт сохраняется, на диск не пишется); кнопка «Добавить первый адрес в allow-ips» / `POST /nodes/{id}/remote-hosts/allow-first` идемпотентно дописывает `hosts[0]` в `allow-ips.txt`. После `setup.sh` диск снова сток до следующей пересборки из панели; выдача всегда патчит из БД.
+- **Раздельный учёт OpenVPN UDP/TCP** — коллектор пишет `protocol_type` `openvpn-udp` / `openvpn-tcp` по суффиксу профиля; в политике доступа — поля `traffic_consumed_udp_*` / `traffic_consumed_tcp_*` (лимиты и блокировки по-прежнему по сумме всего OpenVPN).
+
+### 🐛 Fixed
+
+- **Карточка конфига: трафик по группе UDP+TCP / UDP / TCP** — переключатель больше не показывает одну сумму OpenVPN: в режиме UDP или TCP отображается расход только этого транспорта (`ConfigCard`, `resolveDisplayedTraffic`, `access_policy.py`).
+- **Карточка конфига: «Подключение» по группе UDP/TCP** — статус онлайн/офлайн и фильтр присутствия учитывают профиль сессии (`*-udp` / `*-tcp`), а не любое OpenVPN-подключение (`buildClientConnectionMap`, `isConfigConnected`).
+
+### 🧪 Tests
+
+- **OpenVPN transport traffic** — маппинг профиля → `protocol_type`, фильтр потребления по UDP/TCP/all (`test_openvpn_transport_traffic.py`).
+- **Config card connection map** — раздельные флаги UDP/TCP и выбор по группе (`configCardUtils.connection.test.ts`).
 
 ---
 
