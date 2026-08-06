@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.21.0](#2210---2026-08-07) — 2026-08-07
 - [2.20.0](#2200---2026-08-02) — 2026-08-02
 - [2.19.0](#2190---2026-07-30) — 2026-07-30
 - [2.18.0](#2180---2026-07-26) — 2026-07-26
@@ -45,6 +46,12 @@
 
 ## [Unreleased]
 
+---
+
+## [2.21.0] - 2026-08-07
+
+> **Кратко:** прокси-узлы (`proxy_agent`, DESTINATION, NOC «домашний IP»), сводная вкладка **Конфигурация → Прокси**, multi-remote OpenVPN / allow-ips, раздельный учёт OpenVPN UDP/TCP, локальный IP на карточке клиента, расписание автообновления CIDR; AdBlock → `ANTIZAPRET_ADBLOCK` / `VPN_ADBLOCK`.
+
 ### 🔄 Changed
 
 - **Конфиг AntiZapret: AdBlock** — `BLOCK_ADS` заменён на `ANTIZAPRET_ADBLOCK` (AntiZapret VPN) и добавлен `VPN_ADBLOCK` (полный VPN); при чтении/сохранении старый `BLOCK_ADS` мигрируется, как в `update.sh` AntiZapret (`antizapret_params.py`, `antizapret_settings.py`, `AntizapretConfigTab.tsx`).
@@ -67,6 +74,8 @@
 - **NOC: ложные инциденты при выключенном TCP/WG** — службы `openvpn-server@*-tcp` / `wg-quick@*` больше не попадают в ленту инцидентов и health score, если в `setup` задано `OPENVPN_TCP_ENABLE=n` / `WIREGUARD_ENABLE=n` (аналогично UDP) (`antizapret_settings.py`, `antizapret.py`).
 - **Карточка конфига: трафик по группе UDP+TCP / UDP / TCP** — переключатель больше не показывает одну сумму OpenVPN: в режиме UDP или TCP отображается расход только этого транспорта (`ConfigCard`, `resolveDisplayedTraffic`, `access_policy.py`).
 - **Карточка конфига: «Подключение» по группе UDP/TCP** — статус онлайн/офлайн и фильтр присутствия учитывают профиль сессии (`*-udp` / `*-tcp`), а не любое OpenVPN-подключение (`buildClientConnectionMap`, `isConfigConnected`).
+- **Адреса подключения: только IPv4/hostname** — в списке remote отклоняется IPv6 (ломает OpenVPN); допускаются IPv4 и домены (`openvpn_remote_hosts.py`).
+- **HA: allow-ips после «Добавить первый адрес»** — `POST .../remote-hosts/allow-first` реплицирует `allow_ips` на replica (как PUT из редактора файлов) + `doall` (`nodes.py`, `maybe_replicate_config_files`).
 
 ### 🧪 Tests
 
@@ -74,6 +83,10 @@
 - **OpenVPN transport traffic** — маппинг профиля → `protocol_type`, фильтр потребления по UDP/TCP/all (`test_openvpn_transport_traffic.py`).
 - **Config card connection map** — раздельные флаги UDP/TCP и выбор по группе; захват локальных IP из OVPN/WG (`configCardUtils.connection.test.ts`).
 - **Client local IP** — нормализация CIDR/порта и разбор `# Client` + `AllowedIPs` из WG conf (`test_client_local_ip.py`).
+- **Multi-remote / allow-ips** — нормализация remote (в т.ч. reject IPv6), API remote-hosts, патч `.ovpn` на диске, WG Endpoint, allow-first + HA replicate (`test_openvpn_remote_hosts.py`, `test_nodes_remote_hosts_api.py`, `test_patch_openvpn_on_disk.py`, `test_profile_delivery.py`, `test_wireguard_endpoint.py`, `test_remote_hosts_allow_first.py`).
+- **Прокси-узлы** — модель/`node_kind`, adapter, DESTINATION/iptables, NOC enrich + overview, badge label (`test_proxy_nodes_model.py`, `test_proxy_node_adapter.py`, `test_proxy_agent_destination.py`, `test_proxy_noc_enrich.py`, `test_monitoring_overview_proxy.py`, `proxyViaBadgeLabel.test.ts`).
+- **AdBlock params** — миграция `BLOCK_ADS` → `ANTIZAPRET_ADBLOCK` / `VPN_ADBLOCK` (`test_antizapret_adblock_settings.py`).
+- **HA scope `/proxy`** — путь сводки прокси в group-scope (`haNodeScope.test.ts`).
 
 ---
 
@@ -2188,7 +2201,9 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.19.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.21.0...HEAD
+[2.21.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.20.0...v2.21.0
+[2.20.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.19.0...v2.20.0
 [2.19.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.16.0...v2.17.0
