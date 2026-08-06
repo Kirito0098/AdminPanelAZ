@@ -60,6 +60,12 @@ def read_antizapret_settings(setup_path: Path) -> dict[str, str]:
         else:
             m = re.search(rf"^{re.escape(env)}=([yn])$", content, re.M | re.I)
             settings[key] = m.group(1).lower() if m else default
+
+    # Legacy BLOCK_ADS → ANTIZAPRET_ADBLOCK (AntiZapret update.sh migrates the same way).
+    if not re.search(r"^ANTIZAPRET_ADBLOCK=", content, re.M | re.I):
+        legacy = re.search(r"^BLOCK_ADS=([yn])$", content, re.M | re.I)
+        if legacy:
+            settings["ANTIZAPRET_ADBLOCK"] = legacy.group(1).lower()
     return settings
 
 
@@ -67,6 +73,10 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
     """Apply partial updates to setup file. Unknown keys are ignored."""
     if not isinstance(new_settings, dict):
         raise ValueError("Ожидается JSON-объект")
+
+    # Accept legacy API key block_ads as ANTIZAPRET_ADBLOCK.
+    if "block_ads" in new_settings and "ANTIZAPRET_ADBLOCK" not in new_settings:
+        new_settings = {**new_settings, "ANTIZAPRET_ADBLOCK": new_settings["block_ads"]}
 
     desired: dict[str, str] = {}
     for p in ANTIZAPRET_PARAMS:
@@ -94,6 +104,7 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
     new_lines: list[str] = []
     found: set[str] = set()
     changes = 0
+    migrate_block_ads = "ANTIZAPRET_ADBLOCK" in desired
 
     for line in lines:
         stripped = line.strip()
@@ -102,6 +113,14 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
             continue
 
         key_part = stripped.split("=", 1)[0].strip()
+        # Rename legacy BLOCK_ADS when writing ANTIZAPRET_ADBLOCK (same as update.sh).
+        if migrate_block_ads and key_part.upper() == "BLOCK_ADS":
+            val = desired["ANTIZAPRET_ADBLOCK"]
+            comment = " " + stripped.split("#", 1)[1].strip() if "#" in stripped else ""
+            new_lines.append(f"ANTIZAPRET_ADBLOCK={val}{comment}\n")
+            found.add("ANTIZAPRET_ADBLOCK")
+            changes += 1
+            continue
         if key_part in desired:
             val = desired[key_part]
             comment = " " + stripped.split("#", 1)[1].strip() if "#" in stripped else ""

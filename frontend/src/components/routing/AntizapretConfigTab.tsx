@@ -133,9 +133,9 @@ const FIELD_SECTIONS: {
   },
   {
     title: 'AdBlock',
-    description: 'Блокировка рекламы и трекеров в VPN-трафике',
+    description: 'Блокировка рекламы и трекеров в AntiZapret и полном VPN',
     icon: Ban,
-    keys: ['block_ads'],
+    keys: ['ANTIZAPRET_ADBLOCK', 'VPN_ADBLOCK'],
   },
   {
     title: 'Адреса подключения',

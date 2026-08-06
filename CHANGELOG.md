@@ -45,6 +45,10 @@
 
 ## [Unreleased]
 
+### 🔄 Changed
+
+- **Конфиг AntiZapret: AdBlock** — `BLOCK_ADS` заменён на `ANTIZAPRET_ADBLOCK` (AntiZapret VPN) и добавлен `VPN_ADBLOCK` (полный VPN); при чтении/сохранении старый `BLOCK_ADS` мигрируется, как в `update.sh` AntiZapret (`antizapret_params.py`, `antizapret_settings.py`, `AntizapretConfigTab.tsx`).
+
 ### ✨ Added
 
 - **Прокси-узлы (волна 1)** — feature toggle `proxy_nodes` / `FEATURE_PROXY_NODES_ENABLED` (**default off**): узлы `node_kind=proxy`, отдельный `proxy_agent` на RU (`:9101`, systemd `adminpanelaz-proxy`), панель через `ProxyNodeAdapter` — health/status, смена DESTINATION в iptables, mappings. Панель **не** ставит `proxy.sh`. Прокси нельзя активировать как VPN. Автоустановка агента: `sudo ./install.sh --proxy-only --with-systemd -y` (или мастер). Docs: [proxy-nodes.md](docs/proxy-nodes.md), [uzly.md](docs/uzly.md), [proxy-agent.md](docs/proxy-agent.md).
