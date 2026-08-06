@@ -66,6 +66,8 @@ describe('isHaGroupScopePath', () => {
     expect(isHaGroupScopePath('/')).toBe(true)
     expect(isHaGroupScopePath('/traffic')).toBe(true)
     expect(isHaGroupScopePath('/routing')).toBe(true)
+    expect(isHaGroupScopePath('/antizapret')).toBe(true)
+    expect(isHaGroupScopePath('/proxy')).toBe(true)
     expect(isHaGroupScopePath('/settings/vpn')).toBe(true)
     expect(isHaGroupScopePath('/edit-files')).toBe(true)
   })

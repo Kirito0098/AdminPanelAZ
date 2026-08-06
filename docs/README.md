@@ -24,13 +24,13 @@
 | Мониторинг трафика | [traffic-monitoring.md](traffic-monitoring.md) | Все |
 | Маршрутизация / CIDR | [routing-cidr.md](routing-cidr.md) | Только админ |
 | Конфиг AntiZapret | [antizapret-config.md](antizapret-config.md) | Только админ |
+| Прокси | [proxy-nodes.md](proxy-nodes.md) | Только админ (меню **Конфигурация → Прокси**, модуль `proxy_nodes`) |
 | AZ-WARP | [warper.md](warper.md) | Только админ |
 | Telegram | [Telegram.md](Telegram.md) | Только админ |
 | Редактор файлов | [edit-files.md](edit-files.md) | Только админ |
 | Журналы | [logs.md](logs.md) | Только админ |
 | Сервер | [server-monitor.md](server-monitor.md) | Только админ |
 | Узлы | [uzly.md](uzly.md) | Только админ |
-| Прокси AntiZapret (полная схема) | [proxy-nodes.md](proxy-nodes.md) | Только админ |
 | proxy_agent (установка на RU) | [proxy-agent.md](proxy-agent.md) | Только админ |
 | Настройки | [nastrojki/README.md](nastrojki/README.md) | Все (часть — только админ) |
 

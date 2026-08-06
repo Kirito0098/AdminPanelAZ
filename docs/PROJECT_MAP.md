@@ -124,6 +124,7 @@
 | `/traffic` | `TrafficPage` | [`traffic-monitoring.md`](traffic-monitoring.md) |
 | `/routing` | `RoutingPage` | [`routing-cidr.md`](routing-cidr.md) |
 | `/antizapret` | `AntizapretConfigPage` | [`antizapret-config.md`](antizapret-config.md) |
+| `/proxy` | `ProxyHubPage` | [`proxy-nodes.md`](proxy-nodes.md) |
 | `/warper` | `WarperPage` | [`warper.md`](warper.md) |
 | `/telegram` | `TelegramPage` | [`Telegram.md`](Telegram.md) |
 | `/edit-files` | `EditFilesPage` | [`edit-files.md`](edit-files.md) |
@@ -160,6 +161,7 @@
 | `/traffic` | `TrafficPage` | `traffic_sync` | [traffic-monitoring](traffic-monitoring.md) | Трафик по клиентам, лимиты |
 | `/routing` | `RoutingPage` | `routing` | [routing-cidr](routing-cidr.md) | CIDR-провайдеры, pipeline |
 | `/antizapret` | `AntizapretConfigPage` (`AntizapretConfigTab`: секция «Адреса подключения» / список remote OpenVPN) | `antizapret_config` | [antizapret-config](antizapret-config.md) | Конфиг AntiZapret (admin); multi-remote OpenVPN per-node |
+| `/proxy` | `ProxyHubPage` (`ProxyHubView`: прокси-узлы + `RemoteHostsCard` + ссылки) | `proxy_nodes` | [proxy-nodes](proxy-nodes.md) | Сводка прокси (admin); DESTINATION / remote / NOC links |
 | `/warper` | `WarperPage` | `warper` | [warper](warper.md) | AZ-WARP / Cloudflare WARP |
 | `/telegram` | `TelegramPage` | `telegram` | [Telegram](Telegram.md) | Настройки бота и Mini App |
 | `/edit-files` | `EditFilesPage` | `edit_files` | [edit-files](edit-files.md) | Редактор файлов AntiZapret |

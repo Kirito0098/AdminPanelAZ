@@ -4,6 +4,7 @@ const HA_GROUP_SCOPE_PREFIXES = [
   '/traffic',
   '/routing',
   '/antizapret',
+  '/proxy',
   '/edit-files',
   '/settings',
 ] as const

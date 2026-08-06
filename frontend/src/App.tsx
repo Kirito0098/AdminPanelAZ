@@ -17,6 +17,7 @@ import MonitoringPage from './pages/MonitoringPage'
 import NodesPage from './pages/NodesPage'
 import RoutingPage from './pages/RoutingPage'
 import AntizapretConfigPage from './pages/AntizapretConfigPage'
+import ProxyHubPage from './pages/ProxyHubPage'
 import WarperPage from './pages/WarperPage'
 import TelegramPage from './pages/TelegramPage'
 import SettingsPage from './pages/SettingsPage'
@@ -51,6 +52,7 @@ export default function App() {
                   <Route path="traffic" element={<FeatureGuardRoute feature="traffic_sync"><TrafficPage /></FeatureGuardRoute>} />
                   <Route path="routing" element={<FeatureGuardRoute feature="routing"><RoutingPage /></FeatureGuardRoute>} />
                   <Route path="antizapret" element={<FeatureGuardRoute feature="antizapret_config"><AntizapretConfigPage /></FeatureGuardRoute>} />
+                  <Route path="proxy" element={<FeatureGuardRoute feature="proxy_nodes"><ProxyHubPage /></FeatureGuardRoute>} />
                   <Route path="warper" element={<FeatureGuardRoute feature="warper"><WarperPage /></FeatureGuardRoute>} />
                   <Route path="telegram" element={<FeatureGuardRoute feature="telegram"><TelegramPage /></FeatureGuardRoute>} />
                   <Route path="edit-files" element={<FeatureGuardRoute feature="edit_files"><EditFilesPage /></FeatureGuardRoute>} />
