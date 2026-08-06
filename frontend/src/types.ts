@@ -1022,6 +1022,25 @@ export interface CidrDbStatus {
   active_task?: CidrPipelineTask | null
 }
 
+export interface CidrDbSchedule {
+  enabled: boolean
+  hour: number
+  minute: number
+  interval_days: number
+  refresh_time: string
+  last_run_at?: string | null
+  next_run_at?: string | null
+  timezone: string
+}
+
+export interface CidrDbScheduleUpdate {
+  enabled?: boolean
+  hour?: number
+  minute?: number
+  interval_days?: number
+  refresh_time?: string
+}
+
 export interface AntifilterStatus {
   success: boolean
   cidr_count?: number

@@ -1047,6 +1047,17 @@ export async function getCidrDbStatus() {
   return apiFetch<import('../types').CidrDbStatus>('/routing/cidr-db/status')
 }
 
+export async function getCidrDbSchedule() {
+  return apiFetch<import('../types').CidrDbSchedule>('/routing/cidr-db/schedule')
+}
+
+export async function updateCidrDbSchedule(payload: import('../types').CidrDbScheduleUpdate) {
+  return apiFetch<import('../types').CidrDbSchedule>('/routing/cidr-db/schedule', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function getCidrDbStatusSummary() {
   return apiFetch<{
     success: boolean

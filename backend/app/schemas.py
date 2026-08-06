@@ -810,6 +810,25 @@ class RetentionSettingsUpdate(BaseModel):
     panel_resource_metrics_retention_days: int | None = Field(default=None, ge=1, le=3650)
 
 
+class CidrDbScheduleResponse(BaseModel):
+    enabled: bool = True
+    hour: int = 2
+    minute: int = 30
+    interval_days: int = 1
+    refresh_time: str = "02:30"
+    last_run_at: datetime | None = None
+    next_run_at: datetime | None = None
+    timezone: str = "UTC"
+
+
+class CidrDbScheduleUpdate(BaseModel):
+    enabled: bool | None = None
+    hour: int | None = Field(default=None, ge=0, le=23)
+    minute: int | None = Field(default=None, ge=0, le=59)
+    interval_days: int | None = Field(default=None, ge=1, le=90)
+    refresh_time: str | None = None
+
+
 class SecretRotationItemResponse(BaseModel):
     secret_id: str
     label: str

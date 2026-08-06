@@ -19,6 +19,7 @@ SETTINGS_CHANGE_LABELS: dict[str, str] = {
     "settings_cidr_update_queued": "Обновление CIDR-файлов",
     "settings_cidr_rollback_queued": "Откат CIDR-файлов",
     "settings_cidr_db_refresh_queued": "Обновление CIDR из базы",
+    "settings_cidr_db_schedule_update": "Изменено расписание автообновления CIDR",
     "settings_cidr_db_clear": "Очистка базы CIDR",
     "settings_cidr_generate_from_db": "Генерация CIDR из базы",
     "settings_antifilter_refresh": "Обновление AntiFilter",
