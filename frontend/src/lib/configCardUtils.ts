@@ -361,6 +361,8 @@ export type ClientConnectionEntry = {
   openvpnUdp: boolean
   openvpnTcp: boolean
   wireguard: boolean
+  /** Issued/live tunnel IP (OpenVPN virtual_address / WG AllowedIPs). */
+  localIp?: string | null
 }
 
 export type ClientConnectionMap = Record<string, ClientConnectionEntry>
@@ -373,8 +375,33 @@ export function openvpnTransportFromProfile(profile?: string | null): 'udp' | 't
   return null
 }
 
+function normalizeTunnelIp(raw?: string | null): string | null {
+  if (!raw) return null
+  const parts: string[] = []
+  for (const chunk of raw.split(',')) {
+    let token = chunk.trim()
+    if (!token || token === '(none)' || token === 'none') continue
+    token = token.split('/')[0]?.trim() || ''
+    if (token.includes(':') && token.includes('.') && token.split(':').length === 2) {
+      token = token.split(':')[0] || ''
+    }
+    if (token && !parts.includes(token)) parts.push(token)
+  }
+  return parts.length ? parts.join(', ') : null
+}
+
+function mergeLocalIp(prev: string | null | undefined, next: string | null): string | null {
+  if (!next) return prev || null
+  if (!prev) return next
+  const parts = prev.split(', ').filter(Boolean)
+  for (const part of next.split(', ')) {
+    if (part && !parts.includes(part)) parts.push(part)
+  }
+  return parts.join(', ')
+}
+
 function emptyConnectionEntry(): ClientConnectionEntry {
-  return { openvpn: false, openvpnUdp: false, openvpnTcp: false, wireguard: false }
+  return { openvpn: false, openvpnUdp: false, openvpnTcp: false, wireguard: false, localIp: null }
 }
 
 export function buildClientConnectionMap(
@@ -393,6 +420,7 @@ export function buildClientConnectionMap(
       openvpn: true,
       openvpnUdp: prev.openvpnUdp || transport === 'udp',
       openvpnTcp: prev.openvpnTcp || transport === 'tcp',
+      localIp: mergeLocalIp(prev.localIp, normalizeTunnelIp(client.virtual_address)),
     }
   }
 
@@ -402,10 +430,24 @@ export function buildClientConnectionMap(
     const key = name.toLowerCase()
     const prev = map[key] ?? emptyConnectionEntry()
     const wireguardOnline = isWireGuardOnline(peer) || prev.wireguard
-    map[key] = { ...prev, wireguard: wireguardOnline }
+    map[key] = {
+      ...prev,
+      wireguard: wireguardOnline,
+      localIp: mergeLocalIp(prev.localIp, normalizeTunnelIp(peer.allowed_ips)),
+    }
   }
 
   return map
+}
+
+export function getConfigLocalIp(
+  clientName: string,
+  connectionMap?: ClientConnectionMap | null,
+  fallback?: string | null,
+): string | null {
+  const fromMap = connectionMap?.[clientName.trim().toLowerCase()]?.localIp
+  const value = (fromMap || fallback || '').trim()
+  return value || null
 }
 
 export function isConfigConnected(

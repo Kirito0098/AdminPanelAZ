@@ -51,6 +51,7 @@
 
 ### ✨ Added
 
+- **Карточка клиента: локальный IP** — в мета-блоке карточки на дашборде показывается выданный туннельный адрес (`local_ip` в `VpnConfigResponse`): WireGuard — `AllowedIPs` из серверного conf, OpenVPN — live `virtual_address` или последний из сессий трафика; переключатель «Локальный IP» в настройках карточек (`ConfigCard`, `client_local_ip.py`).
 - **Прокси-узлы (волна 1)** — feature toggle `proxy_nodes` / `FEATURE_PROXY_NODES_ENABLED` (**default off**): узлы `node_kind=proxy`, отдельный `proxy_agent` на RU (`:9101`, systemd `adminpanelaz-proxy`), панель через `ProxyNodeAdapter` — health/status, смена DESTINATION в iptables, mappings. Панель **не** ставит `proxy.sh`. Прокси нельзя активировать как VPN. Автоустановка агента: `sudo ./install.sh --proxy-only --with-systemd -y` (или мастер). Docs: [proxy-nodes.md](docs/proxy-nodes.md), [uzly.md](docs/uzly.md), [proxy-agent.md](docs/proxy-agent.md).
 - **Прокси-узлы (волна 2, NOC IP)** — при включённом модуле overview NOC склеивает сессию с mappings `proxy_agent`: домашний IP + geo при совпадении порта, иначе IP прокси + пометка «через прокси» / «IP не восстановлен» в списке подключений. Docs: [proxy-nodes.md](docs/proxy-nodes.md), [noc-monitoring.md](docs/noc-monitoring.md#подключения-через-прокси-узел).
 - **install.sh --proxy-only** — роль «только proxy_agent» по образцу `--node-only`: env + ключ + systemd `adminpanelaz-proxy`, без панели и без `proxy.sh`.
@@ -68,7 +69,8 @@
 
 - **VPN monitor service filter** — `OPENVPN_TCP_ENABLE=n` исключает TCP unit'ы из мониторинга (`test_vpn_monitor_service_filter.py`).
 - **OpenVPN transport traffic** — маппинг профиля → `protocol_type`, фильтр потребления по UDP/TCP/all (`test_openvpn_transport_traffic.py`).
-- **Config card connection map** — раздельные флаги UDP/TCP и выбор по группе (`configCardUtils.connection.test.ts`).
+- **Config card connection map** — раздельные флаги UDP/TCP и выбор по группе; захват локальных IP из OVPN/WG (`configCardUtils.connection.test.ts`).
+- **Client local IP** — нормализация CIDR/порта и разбор `# Client` + `AllowedIPs` из WG conf (`test_client_local_ip.py`).
 
 ---
 

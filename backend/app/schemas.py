@@ -276,6 +276,7 @@ class VpnConfigResponse(BaseModel):
     tags: list["ConfigTagResponse"] = []
     ha: VpnConfigHaInfo | None = None
     ha_replicate_warning: str | None = None
+    local_ip: str | None = None
 
     model_config = {"from_attributes": True}
 

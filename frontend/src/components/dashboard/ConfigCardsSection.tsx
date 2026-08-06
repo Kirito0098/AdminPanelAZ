@@ -32,6 +32,7 @@ import { useProgress } from '@/context/ProgressContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import {
   configMatchesTab,
+  getConfigLocalIp,
   getPolicyForConfig,
   isConfigConnected,
   matchesFilter,
@@ -746,6 +747,7 @@ export default function ConfigCardsSection({
                           connectionMap,
                           tab === 'openvpn' ? openvpnGroup : null,
                         )}
+                        localIp={getConfigLocalIp(config.client_name, connectionMap, config.local_ip)}
                         viewPrefs={viewPrefs}
                       />
                     ))}

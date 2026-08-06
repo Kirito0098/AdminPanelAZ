@@ -12,6 +12,7 @@ import {
   KeyRound,
   Loader2,
   MoreHorizontal,
+  Network,
   QrCode,
   Shield,
   Trash2,
@@ -76,6 +77,8 @@ interface ConfigCardProps {
   showQrDownloads?: boolean
   showTrafficLink?: boolean
   isOnline?: boolean | null
+  /** Live VPN IP from monitoring; falls back to config.local_ip. */
+  localIp?: string | null
   viewPrefs?: ConfigCardViewPrefs
 }
 
@@ -93,6 +96,7 @@ interface MetaRow {
   value: string
   tone?: 'default' | 'warning' | 'danger' | 'success'
   wide?: boolean
+  mono?: boolean
 }
 
 function splitMetaText(text: string): { label: string; value: string } {
@@ -114,8 +118,9 @@ function metaRow(
   value: string,
   tone: MetaRow['tone'] = 'default',
   wide = false,
+  mono = false,
 ): MetaRow {
-  return { key, icon, label, value, tone, wide }
+  return { key, icon, label, value, tone, wide, mono }
 }
 
 function isNoiseMetaLine(
@@ -186,6 +191,11 @@ function formatConnectionMeta(online: boolean | null): MetaRow {
   )
 }
 
+function formatLocalIpMeta(localIp?: string | null): MetaRow {
+  const value = (localIp || '').trim()
+  return metaRow('localIp', Network, 'Локальный IP', value || '—', 'default', false, true)
+}
+
 function buildCompactMeta(
   config: VpnConfig,
   tab: ProtocolTab,
@@ -194,6 +204,7 @@ function buildCompactMeta(
   tone: 'active' | 'expiring' | 'expired',
   isOnline: boolean | null,
   openvpnGroup?: string | null,
+  localIp?: string | null,
 ): MetaRow[] {
   const rows: MetaRow[] = [
     metaRow('created', Calendar, 'Создан', formatCreatedAt(config.created_at)),
@@ -214,6 +225,8 @@ function buildCompactMeta(
   if (isAdmin && config.owner_username) {
     rows.push(metaRow('owner', UserRound, 'Владелец', config.owner_username))
   }
+
+  rows.push(formatLocalIpMeta(localIp ?? config.local_ip))
 
   const trafficGroup = tab === 'openvpn' ? openvpnGroup : null
   rows.push(formatTrafficMeta(policy, trafficGroup))
@@ -255,7 +268,14 @@ function MetaLine({ row }: { row: MetaRow }) {
     >
       <Icon size={12} className="mt-0.5 shrink-0 text-muted-foreground" />
       <span className="shrink-0 text-muted-foreground">{row.label}</span>
-      <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{row.value}</span>
+      <span
+        className={cn(
+          'min-w-0 font-medium [overflow-wrap:anywhere]',
+          row.mono && 'font-mono text-[11px]',
+        )}
+      >
+        {row.value}
+      </span>
     </div>
   )
 }
@@ -409,6 +429,7 @@ export default function ConfigCard({
   showQrDownloads = true,
   showTrafficLink = false,
   isOnline = null,
+  localIp = null,
   viewPrefs = DEFAULT_CONFIG_CARD_VIEW_PREFS,
 }: ConfigCardProps) {
   const status = getConfigStatus(config, tab, policy)
@@ -425,7 +446,17 @@ export default function ConfigCard({
   const { fields } = viewPrefs
   const unifiedButtonAccent = resolveButtonAccent(viewPrefs)
   const unifiedBadgeAccent = resolveBadgeAccent(viewPrefs)
-  const metaRows = buildCompactMeta(config, tab, policy, isAdmin, tone, isOnline, openvpnGroup).filter((row) => {
+  const resolvedLocalIp = (localIp || config.local_ip || '').trim() || null
+  const metaRows = buildCompactMeta(
+    config,
+    tab,
+    policy,
+    isAdmin,
+    tone,
+    isOnline,
+    openvpnGroup,
+    resolvedLocalIp,
+  ).filter((row) => {
     if (!isMetaKeyVisible(row.key, fields)) return false
     if (!fields.metaTraffic && (row.key === 'traffic' || row.label.startsWith('Трафик') || row.label.startsWith('Лимит'))) {
       return false

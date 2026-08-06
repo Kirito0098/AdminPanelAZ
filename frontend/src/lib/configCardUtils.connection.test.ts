@@ -69,6 +69,26 @@ describe('buildClientConnectionMap / isConfigConnected', () => {
     expect(isConfigConnected('Alice', 'wireguard', map, 'GROUP_UDP')).toBe(true)
     expect(isConfigConnected('Alice', 'openvpn', map, 'GROUP_UDP')).toBe(false)
   })
+
+  it('captures issued local IPs from OpenVPN and WireGuard', () => {
+    const map = buildClientConnectionMap(
+      [ovpn({ common_name: 'Alice', virtual_address: '10.0.0.2' })],
+      [
+        {
+          client_name: 'Bob',
+          interface: 'vpn',
+          public_key: 'y',
+          endpoint: null,
+          allowed_ips: '10.8.0.5/32',
+          latest_handshake: null,
+          transfer_rx: 0,
+          transfer_tx: 0,
+        },
+      ],
+    )
+    expect(map.alice?.localIp).toBe('10.0.0.2')
+    expect(map.bob?.localIp).toBe('10.8.0.5')
+  })
 })
 
 describe('resolveDisplayedTraffic', () => {
