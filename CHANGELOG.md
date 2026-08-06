@@ -48,6 +48,7 @@
 ### 🔄 Changed
 
 - **Конфиг AntiZapret: AdBlock** — `BLOCK_ADS` заменён на `ANTIZAPRET_ADBLOCK` (AntiZapret VPN) и добавлен `VPN_ADBLOCK` (полный VPN); при чтении/сохранении старый `BLOCK_ADS` мигрируется, как в `update.sh` AntiZapret (`antizapret_params.py`, `antizapret_settings.py`, `AntizapretConfigTab.tsx`).
+- **Docs: прокси-узлы** — в корневом README вариант «Прокси» / `--proxy-only` и ссылки; в [proxy-agent.md](docs/proxy-agent.md) — клон репо на RU, `PROXY_AGENT_ALLOWED_IPS` и таблица env; чеклисты в [proxy-nodes.md](docs/proxy-nodes.md) / [uzly.md](docs/uzly.md); уточнение `linked_vpn_node_id` (API без UI).
 
 ### ✨ Added
 

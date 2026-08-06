@@ -55,6 +55,7 @@ AntiZapret ставится **отдельно** на VPN-сервер — см.
 | **Только панель** | Веб-интерфейс управления | Отдельный **управляющий сервер**; к нему потом подключаются VPN-узлы (AntiZapret на других машинах) |
 | **Панель + узел** | Панель и **локальный узел** на одном хосте | **AntiZapret уже установлен** на этом же сервере (`/root/antizapret`) — типичный случай «всё на одном VDS» |
 | **Узел** | Только **node agent** (без панели) | Отдельный **VPN-сервер**, который нужно **подключить к уже работающей панели** на другом хосте |
+| **Прокси** | Только **proxy_agent** (без панели и без `proxy.sh`) | Отдельный **RU VPS**, где вы **уже** поставили AntiZapret `proxy.sh`; агент — мониторинг и смена DESTINATION из панели ([прокси](docs/proxy-nodes.md), [установка агента](docs/proxy-agent.md)) |
 
 #### Установка
 
@@ -68,7 +69,16 @@ sudo bash /tmp/install.sh
 
 Мастер спросит: тип установки, порты, логин/пароль администратора, ключ node agent (если ставите узел) и каталог бэкапов.
 
-После установки откройте `http://IP:порт/` из вывода мастера. Дальше в панели:
+На **RU-прокси** (репозиторий уже на машине, `proxy.sh` установлен вручную):
+
+```bash
+cd /opt/AdminPanelAZ
+sudo ./install.sh --proxy-only --with-systemd -y
+```
+
+Подробнее: [docs/proxy-agent.md](docs/proxy-agent.md) · полная схема: [docs/proxy-nodes.md](docs/proxy-nodes.md).
+
+После установки панели откройте `http://IP:порт/` из вывода мастера. Дальше в панели:
 
 - **Настройки → Адрес сайта и HTTPS** — DDNS, домен, Let's Encrypt. **Рекомендуем сразу перейти на HTTPS** — так доступ к панели защищён (шифрование трафика, безопасный вход).
 - **Telegram** — bot token / chat (раздел уже в меню)
@@ -113,6 +123,7 @@ sudo bash /tmp/install.sh
 - OpenVPN, WireGuard, AmneziaWG — создание, скачивание, QR-коды ([инструкция](docs/konfiguracii.md))
 - Блокировка, срок действия, лимиты трафика
 - Несколько VPN-серверов (узлов) из одной панели ([инструкция](docs/uzly.md))
+- **Прокси-узлы** (модуль, по умолчанию выкл.) — RU `proxy.sh` + `proxy_agent`, DESTINATION из панели, домашний IP в NOC ([прокси](docs/proxy-nodes.md))
 - **HA (отказоустойчивость)** — группы синхронизации primary + replica, один домен, Push full, verify и авто-репликация с primary ([Node Sync](docs/NodeSync.md), UI: **Узлы → Группы синхронизации**)
 
 <p align="center">
@@ -202,6 +213,7 @@ AntiZapret и VPN-конфиги при удалении панели **не т�
 
 - **VPN-клиенты** — [docs/konfiguracii.md](docs/konfiguracii.md)
 - **Несколько серверов и HA** — [docs/uzly.md](docs/uzly.md) · [docs/NodeSync.md](docs/NodeSync.md)
+- **Прокси AntiZapret** — [docs/proxy-nodes.md](docs/proxy-nodes.md) · [docs/proxy-agent.md](docs/proxy-agent.md)
 - **NOC и трафик** — [docs/noc-monitoring.md](docs/noc-monitoring.md) · [docs/traffic-monitoring.md](docs/traffic-monitoring.md)
 - **Настройки и бэкапы** — [docs/nastrojki/README.md](docs/nastrojki/README.md)
 - **Адрес сайта, HTTPS, StatusOpenVPN** — [docs/nastrojki/set-i-publikaciya.md](docs/nastrojki/set-i-publikaciya.md)
@@ -274,6 +286,7 @@ CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|
 cd /opt/AdminPanelAZ
 sudo ./scripts/adminpanel-menu.sh   # меню: перезапуск, бэкап, обновление
 sudo systemctl restart adminpanelaz # перезапуск панели
+sudo systemctl restart adminpanelaz-proxy  # proxy_agent на RU (порт 9101)
 sudo ./scripts/nginx-setup.sh       # сменить HTTPS после установки
 sudo ./scripts/nginx-repair.sh      # восстановить nginx (например после uninstall StatusOpenVPN)
 ```
