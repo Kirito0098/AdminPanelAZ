@@ -60,11 +60,13 @@
 
 ### 🐛 Fixed
 
+- **NOC: ложные инциденты при выключенном TCP/WG** — службы `openvpn-server@*-tcp` / `wg-quick@*` больше не попадают в ленту инцидентов и health score, если в `setup` задано `OPENVPN_TCP_ENABLE=n` / `WIREGUARD_ENABLE=n` (аналогично UDP) (`antizapret_settings.py`, `antizapret.py`).
 - **Карточка конфига: трафик по группе UDP+TCP / UDP / TCP** — переключатель больше не показывает одну сумму OpenVPN: в режиме UDP или TCP отображается расход только этого транспорта (`ConfigCard`, `resolveDisplayedTraffic`, `access_policy.py`).
 - **Карточка конфига: «Подключение» по группе UDP/TCP** — статус онлайн/офлайн и фильтр присутствия учитывают профиль сессии (`*-udp` / `*-tcp`), а не любое OpenVPN-подключение (`buildClientConnectionMap`, `isConfigConnected`).
 
 ### 🧪 Tests
 
+- **VPN monitor service filter** — `OPENVPN_TCP_ENABLE=n` исключает TCP unit'ы из мониторинга (`test_vpn_monitor_service_filter.py`).
 - **OpenVPN transport traffic** — маппинг профиля → `protocol_type`, фильтр потребления по UDP/TCP/all (`test_openvpn_transport_traffic.py`).
 - **Config card connection map** — раздельные флаги UDP/TCP и выбор по группе (`configCardUtils.connection.test.ts`).
 

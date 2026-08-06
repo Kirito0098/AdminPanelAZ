@@ -516,6 +516,11 @@ class AntiZapretService:
         return None
 
     def get_service_status(self) -> list[MonitoringService]:
+        from app.services.antizapret_settings import (
+            is_vpn_monitor_service_expected,
+            read_protocol_enable_flags,
+        )
+
         services = [
             "openvpn-server@antizapret-udp",
             "openvpn-server@antizapret-tcp",
@@ -524,8 +529,13 @@ class AntiZapretService:
             "wg-quick@antizapret",
             "wg-quick@vpn",
         ]
+        # Skip units disabled in setup (e.g. OPENVPN_TCP_ENABLE=n) so NOC
+        # incidents / health score do not treat intentional stop as failure.
+        enable_flags = read_protocol_enable_flags(self.base_path / "setup")
         result_list: list[MonitoringService] = []
         for svc in services:
+            if not is_vpn_monitor_service_expected(svc, enable_flags):
+                continue
             try:
                 result = subprocess.run(
                     ["systemctl", "is-active", svc],

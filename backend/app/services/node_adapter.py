@@ -1102,8 +1102,16 @@ class RemoteNodeAdapter(NodeAdapter):
         return data.get("server_ip")
 
     def get_service_status(self) -> list[MonitoringService]:
+        from app.services.antizapret_settings import filter_vpn_monitor_services
+
         overview = self._get_monitoring_overview()
-        return [MonitoringService(**s) for s in overview.get("services", [])]
+        services = [MonitoringService(**s) for s in overview.get("services", [])]
+        try:
+            settings = self.get_antizapret_settings()
+            services = filter_vpn_monitor_services(services, settings)
+        except Exception:
+            pass
+        return services
 
     def parse_openvpn_status(self) -> list[OpenVpnClient]:
         clients, _ = self.get_openvpn_status_snapshot()
