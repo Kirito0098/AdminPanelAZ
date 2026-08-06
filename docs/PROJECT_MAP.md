@@ -33,9 +33,9 @@
          └─────────────┴─────────────┘
                        ▼
          ┌─────────────────────────────┐
-         │ VPN-узлы (Node)             │
-         │ Local: AntiZapret на месте  │
-         │ Remote: node agent :9100    │
+         │ Узлы (Node)                 │
+         │ VPN local / remote :9100    │
+         │ Proxy RU: proxy_agent :9101 │
          └─────────────────────────────┘
 ```
 
@@ -66,6 +66,7 @@
 │   │   ├── services/            # бизнес-логика (~140 файлов)
 │   │   ├── middleware/          # rate limit, security, sessions
 │   │   └── static/tg_mini/      # собранный Mini App
+│   └── proxy_agent/             # агент прокси-узла (:9101)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.tsx              # маршруты веб-панели
@@ -88,6 +89,8 @@
 │   ├── logs.md
 │   ├── server-monitor.md
 │   ├── uzly.md
+│   ├── proxy-nodes.md           # полная схема прокси (UI + allow-ips + NOC)
+│   ├── proxy-agent.md           # systemd install proxy_agent на RU
 │   ├── nastrojki/               # инструкции по подразделам Настроек
 │   │   ├── README.md
 │   │   ├── profil.md … diagnostika.md
@@ -96,7 +99,7 @@
 │   ├── NodeSync.md              # HA / sync groups (разработчик)
 │   └── PROJECT_MAP.md           # этот файл
 ├── install.sh
-├── systemd/                     # adminpanelaz*.service
+├── systemd/                     # adminpanelaz*.service (+ adminpanelaz-proxy)
 └── .runtime/                    # локальный runtime (опционально)
 ```
 
@@ -121,6 +124,7 @@
 | `/traffic` | `TrafficPage` | [`traffic-monitoring.md`](traffic-monitoring.md) |
 | `/routing` | `RoutingPage` | [`routing-cidr.md`](routing-cidr.md) |
 | `/antizapret` | `AntizapretConfigPage` | [`antizapret-config.md`](antizapret-config.md) |
+| `/proxy` | `ProxyHubPage` | [`proxy-nodes.md`](proxy-nodes.md) |
 | `/warper` | `WarperPage` | [`warper.md`](warper.md) |
 | `/telegram` | `TelegramPage` | [`Telegram.md`](Telegram.md) |
 | `/edit-files` | `EditFilesPage` | [`edit-files.md`](edit-files.md) |
@@ -156,13 +160,14 @@
 | `/monitoring` | `MonitoringPage` | `logs_dashboard` | [noc-monitoring](noc-monitoring.md) | NOC: подключения, графики, службы |
 | `/traffic` | `TrafficPage` | `traffic_sync` | [traffic-monitoring](traffic-monitoring.md) | Трафик по клиентам, лимиты |
 | `/routing` | `RoutingPage` | `routing` | [routing-cidr](routing-cidr.md) | CIDR-провайдеры, pipeline |
-| `/antizapret` | `AntizapretConfigPage` | `antizapret_config` | [antizapret-config](antizapret-config.md) | Конфиг AntiZapret (admin) |
+| `/antizapret` | `AntizapretConfigPage` (`AntizapretConfigTab`: секция «Адреса подключения» / список remote OpenVPN) | `antizapret_config` | [antizapret-config](antizapret-config.md) | Конфиг AntiZapret (admin); multi-remote OpenVPN per-node |
+| `/proxy` | `ProxyHubPage` (`ProxyHubView`: прокси-узлы + `RemoteHostsCard` + ссылки) | `proxy_nodes` | [proxy-nodes](proxy-nodes.md) | Сводка прокси (admin); DESTINATION / remote / NOC links |
 | `/warper` | `WarperPage` | `warper` | [warper](warper.md) | AZ-WARP / Cloudflare WARP |
 | `/telegram` | `TelegramPage` | `telegram` | [Telegram](Telegram.md) | Настройки бота и Mini App |
 | `/edit-files` | `EditFilesPage` | `edit_files` | [edit-files](edit-files.md) | Редактор файлов AntiZapret |
 | `/logs` | `LogsPage` | `logs_dashboard` / `action_logs` | [logs](logs.md) | Журналы |
 | `/server-monitor` | `ServerMonitorPage` | `server_monitor` | [server-monitor](server-monitor.md) | vnStat, нагрузка сервера |
-| `/nodes` | `NodesPage` | — (admin) | [uzly](uzly.md) | VPN-узлы, sync groups (HA) |
+| `/nodes` | `NodesPage` | — (admin); UI прокси при `proxy_nodes` | [proxy-nodes](proxy-nodes.md), [uzly](uzly.md), [proxy-agent](proxy-agent.md) | VPN-узлы, sync groups (HA); при toggle — прокси-узлы (`node_kind=proxy`) |
 | `/settings` | `SettingsPage` | — | [nastrojki](nastrojki/README.md) | Пользователи, бэкапы, безопасность… |
 | `/login` | `LoginPage` | — | [profil](nastrojki/profil.md) | JWT + 2FA + passkey |
 
@@ -180,7 +185,7 @@
 |--------|-------|
 | `auth`, `session`, `users` | Аутентификация, 2FA, пользователи, роли |
 | `configs`, `client_access` | VPN-клиенты, блокировки, лимиты |
-| `nodes` | Управление узлами, health, обновления |
+| `nodes` | Управление узлами, health, обновления; **admin** `GET/PUT /nodes/{id}/remote-hosts` → `{ hosts, warnings }` (список OpenVPN remote в БД; непустой PUT best-effort пишет `hosts[0]` в `OPENVPN_HOST`); **admin** `POST /nodes/{id}/remote-hosts/allow-first` → `{ added, host, detail?, warnings }` (идемпотентно дописать `hosts[0]` в `allow-ips.txt` + apply); при `proxy_nodes`: CRUD `node_kind=proxy` (default port 9101); **admin** `GET/PUT /nodes/{id}/proxy/status`, `PUT /nodes/{id}/proxy/destination`, `GET /nodes/{id}/proxy/mappings` (handler-level toggle — `/api/nodes` в ALWAYS_ALLOWED) |
 | `monitoring` | NOC: подключения, гео, службы |
 | `traffic` | Сбор и отображение трафика |
 | `routing`, `cidr_db` | CIDR-провайдеры, pipeline, deploy |
@@ -204,10 +209,17 @@
 ## Сервисный слой (где искать логику)
 
 ### VPN и узлы
-- `node_manager.py` — активный узел, CRUD узлов
-- `node_adapter.py` — абстракция **LocalAdapter** / **RemoteAdapter** (HTTP к agent :9100)
+- `node_manager.py` — активный узел, CRUD узлов; activate / `get_active_node` только `node_kind=vpn`
+- `node_adapter.py` — абстракция **LocalAdapter** / **RemoteAdapter** (HTTP к VPN node agent :9100)
+- `proxy_node_adapter.py` — HTTP к **proxy_agent** `:9101` (health, `/proxy/status`, `/proxy/destination`, `/proxy/mappings`)
+- `backend/proxy_agent/` — отдельный FastAPI-агент на RU; systemd `adminpanelaz-proxy`, install: `scripts/install-proxy-systemd.sh`; user: [`proxy-agent.md`](proxy-agent.md)
+- Feature toggle `proxy_nodes` (`FEATURE_PROXY_NODES_ENABLED`, default off) — `feature_toggles.py` / `is_proxy_nodes_enabled`
 - sync groups / HA — UI: `NodeSyncGroupSection.tsx`, API: `nodes` router; см. [`NodeSync.md`](NodeSync.md), user: [`uzly.md`](uzly.md)
 - `antizapret.py`, `openvpn_management.py`, `wg_runtime.py` — работа с VPN на узле
+- `openvpn_remote_hosts.py` — validate / normalize / `apply_openvpn_remote_hosts` (патч multi-remote в `.ovpn`); `append_host_to_allow_ips`
+- `openvpn_multihome.py` — `apply_multihome_to_conf` (директива `multihome` в OpenVPN server conf; restore через панель)
+- `wireguard_endpoint.py` — `apply_wireguard_endpoint_host` (патч `Endpoint` → `hosts[0]` при выдаче WG/AWG)
+- `profile_delivery.py` — `read_profile_file_for_delivery` (`.ovpn` multi-remote + WG Endpoint на download / QR / Telegram / public redeem; public — hosts активного узла); `patch_openvpn_profiles_on_node` (после успешного `recreate_profiles` / `client.sh 7` из панели — multi-remote на диск)
 - `profile_files.py`, `qr_generator.py` — конфиги и QR
 
 ### Мониторинг и трафик
@@ -246,7 +258,7 @@
 |--------|------------|
 | `User`, `RefreshToken`, `ActiveWebSession` | Пользователи, сессии; у `User` личные NOC-поля: `noc_daily_time`, `noc_weekly_dow`, `noc_weekly_time` (+ `timezone` / `last_client_timezone`) |
 | `VpnConfig` | Привязка клиента к узлу и владельцу |
-| `Node` | VPN-узел (local/remote, API key, mTLS) |
+| `Node` | Узел: `node_kind` ∈ {`vpn`,`proxy`} (default `vpn`); local/remote, API key, mTLS; `openvpn_remote_hosts` — JSON remote OpenVPN (VPN); `openvpn_multihome` — bool, multi-IP OpenVPN reply (VPN, node-local); у proxy — `destination_ip` (кэш DESTINATION); `linked_vpn_node_id` (опц. FK на VPN-узел в API create/update, **UI нет** — задел волны 1) |
 | `WgAccessPolicy`, `OpenVpnAccessPolicy` | Блокировки, лимиты трафика |
 | `TrafficSessionState`, `UserTrafficStatProtocol`, `UserTrafficSample` | Трафик |
 | `NodeResourceSample`, `PanelResourceSample` | Метрики ресурсов |

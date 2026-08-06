@@ -3,6 +3,7 @@ import {
   FlaskConical,
   LayoutDashboard,
   Route,
+  Settings2,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
@@ -18,6 +19,7 @@ import RoutingOverviewTab from '@/components/routing/RoutingOverviewTab'
 import RoutingPageHeader from '@/components/routing/RoutingPageHeader'
 import RoutingPageSkeleton from '@/components/routing/RoutingPageSkeleton'
 import RoutingSectionCards from '@/components/routing/RoutingSectionCards'
+import RoutingSettingsTab from '@/components/routing/RoutingSettingsTab'
 import RoutingWorkflowGuide from '@/components/routing/RoutingWorkflowGuide'
 import { ROUTING_TAB_UPDATE, WORKFLOW_CHAIN } from '@/components/routing/routingLabels'
 import { getRoutingWorkflowState, type RoutingTab } from '@/components/routing/routingWorkflow'
@@ -25,6 +27,8 @@ import { useRoutingPage } from '@/components/routing/useRoutingPage'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNode } from '@/context/NodeContext'
 import { useAuth } from '@/context/AuthContext'
+
+const ADMIN_TABS = new Set<RoutingTab>(['pipeline', 'settings'])
 
 const ROUTING_TABS: Array<{ id: RoutingTab; label: string; shortLabel: string; icon: typeof Route; description: string; adminOnly?: boolean }> = [
   {
@@ -56,6 +60,14 @@ const ROUTING_TABS: Array<{ id: RoutingTab; label: string; shortLabel: string; i
     icon: Route,
     description: 'Включение CIDR-списков для маршрутизации на активном узле',
   },
+  {
+    id: 'settings',
+    label: 'Настройки',
+    shortLabel: 'Настр.',
+    icon: Settings2,
+    description: 'Автообновление базы CIDR и параметры расписания',
+    adminOnly: true,
+  },
 ]
 
 const PUBLIC_TABS = new Set<RoutingTab>(['overview', 'providers', 'analysis'])
@@ -69,7 +81,7 @@ export default function RoutingPage() {
   const tab = useMemo(() => {
     const value = searchParams.get('tab') as RoutingTab | null
     if (value && PUBLIC_TABS.has(value)) return value
-    if (value === 'pipeline' && isAdmin) return value
+    if (value && ADMIN_TABS.has(value) && isAdmin) return value
     return 'overview'
   }, [searchParams, isAdmin])
 
@@ -262,6 +274,12 @@ export default function RoutingPage() {
               recentRollbackStamp={recentRollbackStamp}
               workflow={workflow}
             />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="settings" className="mt-0">
+            <RoutingSettingsTab />
           </TabsContent>
         )}
 

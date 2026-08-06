@@ -41,6 +41,10 @@ WIZ_ADMIN_MUST_CHANGE_PASSWORD="${WIZ_ADMIN_MUST_CHANGE_PASSWORD:-true}"
 WIZ_NODE_AGENT_PORT="${WIZ_NODE_AGENT_PORT:-9100}"
 WIZ_NODE_AGENT_API_KEY="${WIZ_NODE_AGENT_API_KEY:-}"
 WIZ_NODE_AGENT_ALLOWED_IPS="${WIZ_NODE_AGENT_ALLOWED_IPS:-}"
+WIZ_PROXY_AGENT_PORT="${WIZ_PROXY_AGENT_PORT:-9101}"
+WIZ_PROXY_AGENT_API_KEY="${WIZ_PROXY_AGENT_API_KEY:-}"
+WIZ_PROXY_AGENT_ALLOWED_IPS="${WIZ_PROXY_AGENT_ALLOWED_IPS:-}"
+WIZ_PROXY_AGENT_MTLS_ENABLED="${WIZ_PROXY_AGENT_MTLS_ENABLED:-false}"
 WIZ_AUTH_RATE_LIMIT_BACKEND="${WIZ_AUTH_RATE_LIMIT_BACKEND:-memory}"
 WIZ_API_RATE_LIMIT_BACKEND="${WIZ_API_RATE_LIMIT_BACKEND:-memory}"
 WIZ_REDIS_URL="${WIZ_REDIS_URL:-}"
@@ -51,6 +55,7 @@ WIZ_RUN_MODE="${WIZ_RUN_MODE:-systemd}"
 WIZ_CIDR_DB_REFRESH_ENABLED="${WIZ_CIDR_DB_REFRESH_ENABLED:-true}"
 WIZ_CIDR_DB_REFRESH_HOUR="${WIZ_CIDR_DB_REFRESH_HOUR:-2}"
 WIZ_CIDR_DB_REFRESH_MINUTE="${WIZ_CIDR_DB_REFRESH_MINUTE:-30}"
+WIZ_CIDR_DB_REFRESH_INTERVAL_DAYS="${WIZ_CIDR_DB_REFRESH_INTERVAL_DAYS:-1}"
 WIZ_TRAFFIC_SYNC_ENABLED="${WIZ_TRAFFIC_SYNC_ENABLED:-true}"
 WIZ_TELEGRAM_ENABLED="${WIZ_TELEGRAM_ENABLED:-false}"
 WIZ_TELEGRAM_BOT_TOKEN="${WIZ_TELEGRAM_BOT_TOKEN:-}"
@@ -59,6 +64,7 @@ WIZ_AUTO_BACKUP_ENABLED="${WIZ_AUTO_BACKUP_ENABLED:-true}"
 WIZ_AUTO_BACKUP_DAYS="${WIZ_AUTO_BACKUP_DAYS:-7}"
 WIZ_STATE_DIR="${WIZ_STATE_DIR:-}"
 WIZ_NODE_STATE_DIR="${WIZ_NODE_STATE_DIR:-}"
+WIZ_PROXY_STATE_DIR="${WIZ_PROXY_STATE_DIR:-}"
 WIZ_BACKUP_ROOT="${WIZ_BACKUP_ROOT:-/var/backups/adminpanelaz}"
 
 WIZ_ACCEPT_DEFAULTS="${WIZ_ACCEPT_DEFAULTS:-false}"
@@ -79,6 +85,10 @@ wiz_set_total_steps() {
   case "$WIZ_INSTALL_TYPE" in
     node)
       # тип → порты → node agent
+      WIZ_TOTAL_STEPS=3
+      ;;
+    proxy)
+      # тип → порты → proxy agent
       WIZ_TOTAL_STEPS=3
       ;;
     controller)
@@ -573,6 +583,14 @@ wizard_check_antizapret() {
 
 wizard_configure_antizapret() {
   WIZ_ANTIZAPRET_PATH="/root/antizapret"
+  if [[ "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
+    WIZ_REQUIRE_ANTIZAPRET=false
+    ui_info_box "RU-прокси" \
+      "proxy_agent ставится этим установщиком." \
+      "Скрипт AntiZapret proxy.sh панель НЕ ставит — установите его отдельно на этом хосте" \
+      "по инструкции AntiZapret, если ещё не установлен."
+    return 0
+  fi
   wizard_check_antizapret
 }
 
@@ -587,6 +605,7 @@ wizard_ask_install_type() {
     "   (AntiZapret уже должен быть установлен в /root/antizapret)." \
     "3) Только Node agent — это VPN-сервер (узел); панель управляет им с" \
     "   другого хоста." \
+    "4) Только proxy_agent — RU-прокси (порт 9101); proxy.sh ставится отдельно." \
     "Не уверены? Один сервер с уже установленным AntiZapret — выберите 2."
   echo
   if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
@@ -597,7 +616,8 @@ wizard_ask_install_type() {
     wiz_prompt_choice "Какой компонент устанавливаем?" 2 \
       "Только панель (управление удалёнными узлами, без локального AntiZapret)" \
       "Панель + локальный AntiZapret (AntiZapret уже установлен в /root/antizapret)" \
-      "Только Node agent (удалённый VPN-сервер)"
+      "Только Node agent (удалённый VPN-сервер)" \
+      "Только proxy_agent (RU-прокси, без панели)"
 
     case "$REPLY" in
       1)
@@ -612,6 +632,10 @@ wizard_ask_install_type() {
         WIZ_INSTALL_TYPE="node"
         WIZ_REQUIRE_ANTIZAPRET=true
         ;;
+      4)
+        WIZ_INSTALL_TYPE="proxy"
+        WIZ_REQUIRE_ANTIZAPRET=false
+        ;;
     esac
   fi
   wiz_set_total_steps
@@ -623,6 +647,13 @@ wizard_ask_network() {
     wiz_step "Порты node agent"
     wiz_prompt_port "Порт node agent" "$WIZ_NODE_AGENT_PORT" "Node agent" "any"
     WIZ_NODE_AGENT_PORT="$REPLY"
+    echo
+    return 0
+  fi
+  if [[ "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
+    wiz_step "Порты proxy_agent"
+    wiz_prompt_port "Порт proxy_agent" "$WIZ_PROXY_AGENT_PORT" "Proxy agent" "any"
+    WIZ_PROXY_AGENT_PORT="$REPLY"
     echo
     return 0
   fi
@@ -670,7 +701,7 @@ wizard_ddns_fqdn() {
 # DDNS интерактивно не спрашиваем — настройка в UI: Настройки → Адрес сайта и HTTPS.
 # Env-override (CI): WIZ_DDNS_PROVIDER=duckdns|noip + credentials → setup_ddns_if_selected в install.sh.
 wizard_ask_ddns() {
-  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
+  if [[ "$WIZ_INSTALL_TYPE" == "node" || "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
     return 0
   fi
   # Интерактивно оставляем none, если провайдер не задан извне.
@@ -688,7 +719,7 @@ wizard_ask_ddns() {
 
 # APP_ENV всегда production при install (без интерактивного выбора).
 wizard_ask_app_env() {
-  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
+  if [[ "$WIZ_INSTALL_TYPE" == "node" || "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
     return 0
   fi
   WIZ_APP_ENV="production"
@@ -698,7 +729,7 @@ wizard_ask_app_env() {
 # Дефолт публикации: HTTP напрямую (без интерактивного выбора).
 # Env/CI: если WIZ_NGINX_MODE задан извне (не none/http_direct) — уважаем, не спрашиваем.
 wizard_apply_default_publish_http_direct() {
-  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
+  if [[ "$WIZ_INSTALL_TYPE" == "node" || "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
     return 0
   fi
 
@@ -749,7 +780,7 @@ wizard_ask_https() {
 }
 
 wizard_ask_admin() {
-  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
+  if [[ "$WIZ_INSTALL_TYPE" == "node" || "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
     return 0
   fi
 
@@ -792,7 +823,7 @@ wizard_ask_admin() {
 }
 
 wizard_ask_node_agent() {
-  if [[ "$WIZ_INSTALL_TYPE" == "controller" ]]; then
+  if [[ "$WIZ_INSTALL_TYPE" == "controller" || "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
     return 0
   fi
 
@@ -825,6 +856,37 @@ wizard_ask_node_agent() {
   echo
 }
 
+wizard_ask_proxy_agent() {
+  if [[ "$WIZ_INSTALL_TYPE" != "proxy" ]]; then
+    return 0
+  fi
+
+  wiz_step "Proxy agent"
+  ui_info_box "Что это" \
+    "proxy_agent — служба на RU-прокси (порт 9101), которой управляет панель." \
+    "API-ключ нужно указать в панели при добавлении узла типа «Прокси»." \
+    "Скрипт proxy.sh AntiZapret этим установщиком не ставится."
+  echo
+  print_info "Порт proxy_agent: ${WIZ_PROXY_AGENT_PORT} (задан на шаге сети)"
+
+  wiz_prompt_yesno "Сгенерировать PROXY_AGENT_API_KEY автоматически (рекомендуется)?" "y"
+  if [[ "$REPLY" == "y" ]]; then
+    WIZ_PROXY_AGENT_API_KEY="$(random_hex)"
+    echo "  Будет сгенерирован ключ (покажем в конце установки)."
+  else
+    wiz_prompt_secret "Введите PROXY_AGENT_API_KEY (мин. 24 символа)" ""
+    if [[ -z "$REPLY" ]]; then
+      die "proxy_agent не может работать без API-ключа. Выберите автогенерацию ключа (ответ 'y')."
+    fi
+    WIZ_PROXY_AGENT_API_KEY="$REPLY"
+  fi
+
+  print_info "Ограничьте доступ к порту ${WIZ_PROXY_AGENT_PORT} firewall: только IP панели управления."
+  wiz_prompt "Разрешённые IP панели (PROXY_AGENT_ALLOWED_IPS, CIDR через запятую, пусто = без ограничения)" ""
+  WIZ_PROXY_AGENT_ALLOWED_IPS="$REPLY"
+  echo
+}
+
 # mTLS / ротация / Redis — не спрашиваем; дефолты off (workers=1 → Redis не нужен).
 wizard_ask_security_hardening() {
   WIZ_NODE_AGENT_MTLS_ENABLED="false"
@@ -839,14 +901,14 @@ wizard_ask_firewall() {
 # Запуск всегда systemd, workers=1 (без выбора manual/daemon и без prompt workers).
 wizard_ask_services() {
   WIZ_RUN_MODE="systemd"
-  if [[ "$WIZ_INSTALL_TYPE" != "node" ]]; then
+  if [[ "$WIZ_INSTALL_TYPE" != "node" && "$WIZ_INSTALL_TYPE" != "proxy" ]]; then
     WIZ_UVICORN_WORKERS="1"
   fi
 }
 
 # Профиль ресурсов всегда full (apply-resource-profile вызывается из install.sh).
 wizard_ask_resource_profile() {
-  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
+  if [[ "$WIZ_INSTALL_TYPE" == "node" || "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
     return 0
   fi
   WIZ_RESOURCE_PROFILE="full"
@@ -863,18 +925,23 @@ wizard_ask_optional() {
 wizard_ask_paths() {
   local default_state="$ROOT_DIR/.runtime"
   local default_node_state="$ROOT_DIR/.runtime/node"
+  local default_proxy_state="$ROOT_DIR/.runtime/proxy"
 
   if [[ "$WIZ_RUN_MODE" == "systemd" ]]; then
     default_state="/var/lib/adminpanelaz"
     default_node_state="/var/lib/adminpanelaz-node"
+    default_proxy_state="/var/lib/adminpanelaz-proxy"
   fi
 
   WIZ_STATE_DIR="${WIZ_STATE_DIR:-$default_state}"
-  if [[ "$WIZ_INSTALL_TYPE" != "controller" ]]; then
+  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
     WIZ_NODE_STATE_DIR="${WIZ_NODE_STATE_DIR:-$default_node_state}"
   fi
+  if [[ "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
+    WIZ_PROXY_STATE_DIR="${WIZ_PROXY_STATE_DIR:-$default_proxy_state}"
+  fi
 
-  if [[ "$WIZ_INSTALL_TYPE" != "node" ]]; then
+  if [[ "$WIZ_INSTALL_TYPE" != "node" && "$WIZ_INSTALL_TYPE" != "proxy" ]]; then
     wiz_step "Пути"
     wiz_prompt "Каталог бэкапов (BACKUP_ROOT)" "$WIZ_BACKUP_ROOT"
     WIZ_BACKUP_ROOT="$REPLY"
@@ -905,16 +972,20 @@ wizard_apply_run_mode_flags() {
 
   case "$WIZ_INSTALL_TYPE" in
     node) WITH_NODE_AGENT=true ;;
+    proxy) ;;
   esac
 
   export ADMINPANELAZ_STATE_DIR="$WIZ_STATE_DIR"
   export NODE_AGENT_STATE_DIR="$WIZ_NODE_STATE_DIR"
+  export PROXY_AGENT_STATE_DIR="$WIZ_PROXY_STATE_DIR"
   export BACKEND_HOST="$WIZ_BACKEND_HOST"
   export BACKEND_PORT="$WIZ_BACKEND_PORT"
   export UVICORN_WORKERS="$WIZ_UVICORN_WORKERS"
   export ANTIZAPRET_PATH="$WIZ_ANTIZAPRET_PATH"
   export NODE_AGENT_PORT="$WIZ_NODE_AGENT_PORT"
   export NODE_AGENT_API_KEY="$WIZ_NODE_AGENT_API_KEY"
+  export PROXY_AGENT_PORT="$WIZ_PROXY_AGENT_PORT"
+  export PROXY_AGENT_API_KEY="$WIZ_PROXY_AGENT_API_KEY"
 }
 
 wizard_show_summary() {
@@ -932,13 +1003,18 @@ wizard_show_summary() {
       fi
       ;;
     node) install_label="только node agent" ;;
+    proxy) install_label="только proxy_agent (RU)" ;;
   esac
 
   wiz_summary_section "Что устанавливаем"
   ui_summary_row "Тип установки" "$install_label"
-  ui_summary_row "AntiZapret" "$WIZ_ANTIZAPRET_PATH"
+  if [[ "$WIZ_INSTALL_TYPE" != "proxy" ]]; then
+    ui_summary_row "AntiZapret" "$WIZ_ANTIZAPRET_PATH"
+  else
+    ui_summary_row "proxy.sh" "вручную (AntiZapret), не этим установщиком"
+  fi
 
-  if [[ "$WIZ_INSTALL_TYPE" != "node" ]]; then
+  if [[ "$WIZ_INSTALL_TYPE" != "node" && "$WIZ_INSTALL_TYPE" != "proxy" ]]; then
     wiz_summary_section "Сеть и доступ"
     local access_summary backend_summary access_host
     access_host="$(wizard_public_access_host)"
@@ -1016,7 +1092,7 @@ wizard_show_summary() {
     ui_summary_row "Каталог бэкапов" "$WIZ_BACKUP_ROOT"
   fi
 
-  if [[ "$WIZ_INSTALL_TYPE" != "controller" ]]; then
+  if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
     wiz_summary_section "Node agent"
     ui_summary_row "Порт" "$WIZ_NODE_AGENT_PORT"
     ui_summary_row "API-ключ" "${WIZ_NODE_AGENT_API_KEY:0:8}... (полностью — в конце установки)"
@@ -1024,10 +1100,18 @@ wizard_show_summary() {
     ui_summary_row "Каталог данных" "$WIZ_NODE_STATE_DIR"
   fi
 
+  if [[ "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
+    wiz_summary_section "Proxy agent"
+    ui_summary_row "Порт" "$WIZ_PROXY_AGENT_PORT"
+    ui_summary_row "API-ключ" "${WIZ_PROXY_AGENT_API_KEY:0:8}... (полностью — в конце установки)"
+    ui_summary_row "Разрешённые IP" "${WIZ_PROXY_AGENT_ALLOWED_IPS:-(без ограничения)}"
+    ui_summary_row "Каталог данных" "$WIZ_PROXY_STATE_DIR"
+  fi
+
   wiz_summary_section "Запуск и система"
   ui_summary_row "Каталог данных" "$WIZ_STATE_DIR"
   ui_summary_row "Режим запуска" "$WIZ_RUN_MODE"
-  if [[ "$WIZ_INSTALL_TYPE" != "node" && "$WIZ_NGINX_MODE" == "http_direct" ]]; then
+  if [[ "$WIZ_INSTALL_TYPE" != "node" && "$WIZ_INSTALL_TYPE" != "proxy" && "$WIZ_NGINX_MODE" == "http_direct" ]]; then
     echo
     print_info "HTTPS и домен — в панели: Настройки → Адрес сайта и HTTPS."
   fi
@@ -1076,6 +1160,7 @@ run_install_wizard() {
   wizard_apply_default_publish_http_direct
   wizard_ask_admin
   wizard_ask_node_agent
+  wizard_ask_proxy_agent
   wizard_ask_services
   wizard_ask_security_hardening
   wizard_ask_resource_profile
@@ -1099,6 +1184,13 @@ wizard_install_controller() {
 wizard_install_node() {
   case "$WIZ_INSTALL_TYPE" in
     node) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+wizard_install_proxy() {
+  case "$WIZ_INSTALL_TYPE" in
+    proxy) return 0 ;;
     *) return 1 ;;
   esac
 }

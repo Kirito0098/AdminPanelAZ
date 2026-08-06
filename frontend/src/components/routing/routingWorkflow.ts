@@ -2,7 +2,7 @@ import type { CidrDbStatus, CidrProviderInfo } from '@/types'
 import { STAGE_BUILD, STAGE_DEPLOY, STAGE_LOAD } from './routingLabels'
 import { pluralProviders } from './utils'
 
-export type RoutingTab = 'overview' | 'providers' | 'pipeline' | 'analysis'
+export type RoutingTab = 'overview' | 'providers' | 'pipeline' | 'analysis' | 'settings'
 
 export type WorkflowStage = 1 | 2 | 3 | 4
 

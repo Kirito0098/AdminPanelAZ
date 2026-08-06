@@ -181,6 +181,13 @@ function ModuleToggleCard({
 
       <p className="text-sm leading-relaxed text-muted-foreground">{item.description}</p>
 
+      {item.key === 'proxy_nodes' && (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
+          Включайте только если уже установили proxy.sh сами. Панель не ставит и не запускает
+          proxy.sh.
+        </p>
+      )}
+
       {item.resource_savings && (
         <p className="text-xs text-muted-foreground">Экономия: {item.resource_savings}</p>
       )}

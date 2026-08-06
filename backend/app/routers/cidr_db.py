@@ -1,15 +1,22 @@
 """CIDR database pipeline API (download, antifilter, generate)."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import os
+import re
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
 from app.cidr_database import get_cidr_db
+from app.config import get_settings
 from app.database import get_db
-from app.schemas import RouteBudgetInfo
+from app.schemas import CidrDbScheduleResponse, CidrDbScheduleUpdate, RouteBudgetInfo
 from app.services.action_log import log_action
+from app.services.admin_notify import admin_notify_service
+from app.services.cidr.cidr_scheduler import compute_next_run_at, get_last_cron_run_at
 from app.services.cidr.cidr_tasks import (
     create_cidr_task,
     find_active_cidr_task,
@@ -35,7 +42,12 @@ from app.services.cidr.pipeline.deploy import list_compile_artifacts
 from app.services.cidr.pipeline.deploy_preview import compute_deploy_preview
 from app.services.cidr.pipeline.file_pipeline import list_runtime_backups
 from app.services.cidr.route_budget import build_route_budget_payload
-from app.services.node_manager import get_active_adapter, get_adapter_for_node
+from app.services.env_file import EnvFileService
+from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node
+from app.services.notify_time import get_client_timezone_from_request
+
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+_TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 router = APIRouter(prefix="/routing/cidr-db", tags=["cidr-db"])
 
@@ -166,6 +178,108 @@ def _deploy_target_label(payload: CidrDbDeployRequest) -> str:
     if payload.target_node_id is not None:
         return str(payload.target_node_id)
     return "active"
+
+
+def _parse_refresh_time(value: str) -> tuple[int, int]:
+    match = _TIME_RE.match((value or "").strip())
+    if not match:
+        raise HTTPException(status_code=400, detail="Некорректное время (ожидается ЧЧ:ММ)")
+    return int(match.group(1)), int(match.group(2))
+
+
+def _build_schedule_response(db: Session) -> CidrDbScheduleResponse:
+    cfg = get_settings()
+    hour = max(0, min(23, int(cfg.cidr_db_refresh_hour)))
+    minute = max(0, min(59, int(cfg.cidr_db_refresh_minute)))
+    interval_days = max(1, int(cfg.cidr_db_refresh_interval_days or 1))
+    last_run = get_last_cron_run_at(db)
+    next_run = compute_next_run_at(
+        enabled=bool(cfg.cidr_db_refresh_enabled),
+        hour=hour,
+        minute=minute,
+        interval_days=interval_days,
+        last_run=last_run,
+    )
+    return CidrDbScheduleResponse(
+        enabled=bool(cfg.cidr_db_refresh_enabled),
+        hour=hour,
+        minute=minute,
+        interval_days=interval_days,
+        refresh_time=f"{hour:02d}:{minute:02d}",
+        last_run_at=last_run,
+        next_run_at=next_run,
+        timezone="UTC",
+    )
+
+
+@router.get("/schedule", response_model=CidrDbScheduleResponse)
+def get_cidr_db_schedule(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    return _build_schedule_response(db)
+
+
+@router.patch("/schedule", response_model=CidrDbScheduleResponse)
+def update_cidr_db_schedule(
+    payload: CidrDbScheduleUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    env_service = EnvFileService(_ENV_FILE)
+    cfg = get_settings()
+
+    enabled = cfg.cidr_db_refresh_enabled if payload.enabled is None else payload.enabled
+    hour = cfg.cidr_db_refresh_hour
+    minute = cfg.cidr_db_refresh_minute
+    if payload.refresh_time is not None:
+        hour, minute = _parse_refresh_time(payload.refresh_time)
+    if payload.hour is not None:
+        hour = payload.hour
+    if payload.minute is not None:
+        minute = payload.minute
+    interval_days = (
+        cfg.cidr_db_refresh_interval_days
+        if payload.interval_days is None
+        else payload.interval_days
+    )
+
+    hour = max(0, min(23, int(hour)))
+    minute = max(0, min(59, int(minute)))
+    interval_days = max(1, min(90, int(interval_days)))
+
+    env_service.set_env_value("CIDR_DB_REFRESH_ENABLED", "true" if enabled else "false")
+    env_service.set_env_value("CIDR_DB_REFRESH_HOUR", str(hour))
+    env_service.set_env_value("CIDR_DB_REFRESH_MINUTE", str(minute))
+    env_service.set_env_value("CIDR_DB_REFRESH_INTERVAL_DAYS", str(interval_days))
+    os.environ["CIDR_DB_REFRESH_ENABLED"] = "true" if enabled else "false"
+    os.environ["CIDR_DB_REFRESH_HOUR"] = str(hour)
+    os.environ["CIDR_DB_REFRESH_MINUTE"] = str(minute)
+    os.environ["CIDR_DB_REFRESH_INTERVAL_DAYS"] = str(interval_days)
+    get_settings.cache_clear()
+
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_cidr_db_schedule_update",
+        details=(
+            f"enabled={'вкл' if enabled else 'выкл'} "
+            f"time={hour:02d}:{minute:02d} UTC interval={interval_days}d"
+        ),
+        client_timezone=get_client_timezone_from_request(request),
+    )
+    log_action(
+        db,
+        action="cidr_db_schedule_update",
+        user_id=admin.id,
+        username=admin.username,
+        details=(
+            f"enabled={'true' if enabled else 'false'} "
+            f"time={hour:02d}:{minute:02d} interval={interval_days}d"
+        ),
+    )
+    return _build_schedule_response(db)
 
 
 @router.get("/status")
@@ -340,6 +454,7 @@ def cidr_db_generate(
                     return result
                 adapter = get_adapter_for_node(node)
             else:
+                node = get_active_node(inner_db)
                 adapter = get_active_adapter(inner_db)
 
             if payload.deploy_after:
@@ -356,6 +471,7 @@ def cidr_db_generate(
                     adapter,
                     sync_after=not payload.deploy_after,
                     apply_after=payload.apply_after,
+                    ensure_openvpn_multihome=bool(getattr(node, "openvpn_multihome", False)),
                 )
                 result.update(apply_result)
         finally:

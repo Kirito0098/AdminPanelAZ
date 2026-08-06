@@ -11,12 +11,17 @@ from app.models import Node, NodeStatus, User
 from app.schemas import (
     ActiveNodeResponse,
     MessageResponse,
+    NodeAllowFirstRemoteHostResponse,
     NodeCreate,
     NodeHaContext,
     NodeHealthResponse,
     NodeMtlsDisableResponse,
     NodeMtlsEnableResponse,
     NodeMtlsStatusResponse,
+    NodeOpenVpnMultihomeBody,
+    NodeOpenVpnMultihomeResponse,
+    NodeRemoteHostsBody,
+    NodeRemoteHostsResponse,
     NodeResponse,
     NodeRotateKeyResponse,
     NodeUpdate,
@@ -25,6 +30,9 @@ from app.schemas import (
     NodeUpdateRollRequest,
     NodeUpdatesResponse,
     GeoRoutingHintResponse,
+    ProxyDestinationBody,
+    ProxyMappingsResponse,
+    ProxyStatusResponse,
     ResourceHistoryPoint,
     ResourceHistoryResponse,
 )
@@ -39,6 +47,7 @@ from app.services.node_manager import (
     get_active_node,
     get_active_node_id,
     get_adapter_for_node,
+    get_proxy_adapter,
     node_metadata_dict,
     purge_node_related,
     set_active_node_id,
@@ -47,11 +56,27 @@ from app.services.node_manager import (
     validate_node_host,
 )
 from app.services.action_log import log_action
+from app.services.feature_guards import module_disabled_message
+from app.services.feature_toggles import is_proxy_nodes_enabled
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_update_roll import enqueue_node_update_roll
 from app.services.background_tasks import background_task_service
 from app.services.geo_routing_hint import build_geo_routing_hint
+from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import build_ha_node_context, find_group_for_node
+from app.services.openvpn_remote_hosts import (
+    RemoteHostsError,
+    append_host_to_allow_ips,
+    hosts_to_json,
+    normalize_hosts,
+    parse_hosts_json,
+    sync_openvpn_host_from_remotes,
+)
+
+NODE_KIND_VPN = "vpn"
+NODE_KIND_PROXY = "proxy"
+PROXY_DEFAULT_PORT = 9101
+VPN_DEFAULT_PORT = 9100
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 settings = get_settings()
@@ -95,9 +120,12 @@ def _to_response(node: Node) -> NodeResponse:
         name=node.name,
         host=node.host,
         port=node.port,
+        node_kind=getattr(node, "node_kind", None) or NODE_KIND_VPN,
         status=node.status,
         is_local=node.is_local,
         mtls_enabled=False if node.is_local else bool(node.mtls_enabled),
+        destination_ip=getattr(node, "destination_ip", None),
+        linked_vpn_node_id=getattr(node, "linked_vpn_node_id", None),
         last_seen_at=node.last_seen_at,
         metadata=node_metadata_dict(node),
         created_at=node.created_at,
@@ -147,14 +175,46 @@ def create_node(
     if not payload.api_key:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API-ключ обязателен для удалённого узла")
 
+    kind = (payload.node_kind or NODE_KIND_VPN).strip().lower()
+    if kind not in (NODE_KIND_VPN, NODE_KIND_PROXY):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="node_kind должен быть vpn или proxy",
+        )
+    # /api/nodes is ALWAYS_ALLOWED — enforce proxy_nodes toggle at handler level.
+    if kind == NODE_KIND_PROXY and not is_proxy_nodes_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("proxy_nodes"),
+        )
+
+    if payload.port is not None:
+        port = payload.port
+    elif kind == NODE_KIND_PROXY:
+        port = PROXY_DEFAULT_PORT
+    else:
+        port = VPN_DEFAULT_PORT
+
+    linked_vpn_node_id = payload.linked_vpn_node_id
+    if linked_vpn_node_id is not None:
+        linked = db.query(Node).filter(Node.id == linked_vpn_node_id).first()
+        if not linked or (getattr(linked, "node_kind", None) or NODE_KIND_VPN) != NODE_KIND_VPN:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="linked_vpn_node_id должен ссылаться на существующий VPN-узел",
+            )
+
     key_hash, key_encrypted = store_api_key("", payload.api_key)
     node = Node(
         name=payload.name.strip(),
         host=host,
-        port=payload.port,
+        port=port,
         api_key_hash=key_hash,
         api_key_encrypted=key_encrypted,
         is_local=False,
+        node_kind=kind,
+        destination_ip=(payload.destination_ip or None),
+        linked_vpn_node_id=linked_vpn_node_id,
         status=NodeStatus.unknown,
         node_metadata="{}",
     )
@@ -162,7 +222,8 @@ def create_node(
     db.commit()
     db.refresh(node)
 
-    if not get_active_node_id(db):
+    # Proxy nodes must never become the active VPN node.
+    if kind == NODE_KIND_VPN and not get_active_node_id(db):
         set_active_node_id(db, node.id)
         db.commit()
 
@@ -175,7 +236,7 @@ def create_node(
             user_id=admin.id,
             username=admin.username,
             remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"name={node.name}, host={node.host}",
+            details=f"name={node.name}, host={node.host}, kind={kind}",
         )
     return _to_response(node)
 
@@ -301,7 +362,13 @@ def delete_node(
         if fallback:
             set_active_node_id(db, fallback.id)
         else:
-            other = db.query(Node).filter(Node.is_local.is_(False)).order_by(Node.id).first()
+            # Active node is VPN-only; never promote a proxy remote.
+            other = (
+                db.query(Node)
+                .filter(Node.is_local.is_(False), Node.node_kind == "vpn")
+                .order_by(Node.id)
+                .first()
+            )
             if other:
                 set_active_node_id(db, other.id)
             else:
@@ -334,6 +401,120 @@ def health_check(node_id: int, _: User = Depends(require_admin), db: Session = D
         health=health,
         last_seen_at=node.last_seen_at,
     )
+
+
+def _require_proxy_node(node_id: int, db: Session) -> Node:
+    """Admin proxy routes: toggle on, node exists, node_kind=proxy (else 404)."""
+    # /api/nodes is ALWAYS_ALLOWED — enforce proxy_nodes toggle at handler level.
+    if not is_proxy_nodes_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("proxy_nodes"),
+        )
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+    if kind != NODE_KIND_PROXY:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не является прокси")
+    return node
+
+
+def _sync_destination_ip(node: Node, status_payload: dict, db: Session) -> None:
+    dest = status_payload.get("destination_ip") if isinstance(status_payload, dict) else None
+    if dest is None:
+        return
+    if getattr(node, "destination_ip", None) == dest:
+        return
+    node.destination_ip = dest
+    node.updated_at = datetime.utcnow()
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+
+
+@router.get("/{node_id}/proxy/status", response_model=ProxyStatusResponse)
+def get_proxy_status(
+    node_id: int,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = _require_proxy_node(node_id, db)
+    adapter = get_proxy_adapter(node)
+    payload = adapter.proxy_status()
+    return ProxyStatusResponse(
+        installed=bool(payload.get("installed")),
+        destination_ip=payload.get("destination_ip"),
+        detail=payload.get("detail"),
+    )
+
+
+@router.put("/{node_id}/proxy/status", response_model=ProxyStatusResponse)
+def refresh_proxy_status(
+    node_id: int,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Refresh status from proxy_agent and sync cached destination_ip."""
+    node = _require_proxy_node(node_id, db)
+    adapter = get_proxy_adapter(node)
+    payload = adapter.proxy_status()
+    _sync_destination_ip(node, payload, db)
+    return ProxyStatusResponse(
+        installed=bool(payload.get("installed")),
+        destination_ip=payload.get("destination_ip"),
+        detail=payload.get("detail"),
+    )
+
+
+@router.put("/{node_id}/proxy/destination", response_model=ProxyStatusResponse)
+def put_proxy_destination(
+    node_id: int,
+    payload: ProxyDestinationBody,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = _require_proxy_node(node_id, db)
+    adapter = get_proxy_adapter(node)
+    status_payload = adapter.set_destination(payload.destination_ip.strip())
+    _sync_destination_ip(node, status_payload, db)
+    # Always persist requested IP on success (agent may return same status shape).
+    if getattr(node, "destination_ip", None) != payload.destination_ip.strip():
+        node.destination_ip = payload.destination_ip.strip()
+        node.updated_at = datetime.utcnow()
+        db.add(node)
+        db.commit()
+        db.refresh(node)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="proxy_destination_update",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"node_id={node_id} destination_ip={payload.destination_ip.strip()}",
+        )
+    return ProxyStatusResponse(
+        installed=bool(status_payload.get("installed")),
+        destination_ip=status_payload.get("destination_ip"),
+        detail=status_payload.get("detail"),
+    )
+
+
+@router.get("/{node_id}/proxy/mappings", response_model=ProxyMappingsResponse)
+def get_proxy_mappings(
+    node_id: int,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = _require_proxy_node(node_id, db)
+    adapter = get_proxy_adapter(node)
+    payload = adapter.mappings()
+    raw = payload.get("mappings") if isinstance(payload, dict) else []
+    if not isinstance(raw, list):
+        raw = []
+    return ProxyMappingsResponse(mappings=raw)
 
 
 @router.post("/{node_id}/enable-mtls", response_model=NodeMtlsEnableResponse)
@@ -387,6 +568,184 @@ def disable_node_mtls(
     )
 
 
+@router.get("/{node_id}/remote-hosts", response_model=NodeRemoteHostsResponse)
+def get_remote_hosts(node_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    return NodeRemoteHostsResponse(hosts=parse_hosts_json(node.openvpn_remote_hosts))
+
+
+@router.put("/{node_id}/remote-hosts", response_model=NodeRemoteHostsResponse)
+def put_remote_hosts(
+    node_id: int,
+    payload: NodeRemoteHostsBody,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    try:
+        hosts = normalize_hosts(payload.hosts)
+    except RemoteHostsError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    node.openvpn_remote_hosts = hosts_to_json(hosts) if hosts else None
+    node.updated_at = datetime.utcnow()
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+    warnings = sync_openvpn_host_from_remotes(lambda: get_adapter_for_node(node), hosts)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_remote_hosts_update",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"node_id={node_id} hosts={hosts}",
+        )
+    return NodeRemoteHostsResponse(hosts=hosts, warnings=warnings)
+
+
+@router.post(
+    "/{node_id}/remote-hosts/allow-first",
+    response_model=NodeAllowFirstRemoteHostResponse,
+)
+def allow_first_remote_host(
+    node_id: int,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Append the first saved remote host to allow-ips.txt on the VPN node."""
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    hosts = parse_hosts_json(node.openvpn_remote_hosts)
+    if not hosts:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Сначала задайте адреса подключения",
+        )
+    first = hosts[0]
+    adapter = get_adapter_for_node(node)
+    content = adapter.read_config_file("allow-ips.txt")
+    new_content, added = append_host_to_allow_ips(content, first)
+    if not added:
+        return NodeAllowFirstRemoteHostResponse(added=False, host=first, detail="уже есть")
+
+    adapter.write_config_file("allow-ips.txt", new_content)
+    warnings: list[str] = []
+    try:
+        adapter.apply_config_changes()
+        from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
+
+        maybe_ensure_node_openvpn_multihome(adapter, node)
+    except Exception as exc:  # noqa: BLE001 — best-effort; file already written
+        detail = getattr(exc, "detail", None) or str(exc)
+        warnings.append(f"Файл сохранён, но doall.sh ошибка: {detail}")
+
+    # Same HA post-save path as edit_files PUT allow_ips.
+    maybe_replicate_config_files(
+        db,
+        node_id=node_id,
+        file_keys=["allow_ips"],
+        run_doall=True,
+        content_overrides={"allow_ips": new_content},
+    )
+
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_remote_hosts_allow_first",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"node_id={node_id} host={first}",
+        )
+    return NodeAllowFirstRemoteHostResponse(added=True, host=first, warnings=warnings)
+
+
+@router.get("/{node_id}/openvpn-multihome", response_model=NodeOpenVpnMultihomeResponse)
+def get_openvpn_multihome(
+    node_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)
+):
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    warnings: list[str] = []
+    on_disk: bool | None = None
+    try:
+        adapter = get_adapter_for_node(node)
+        status_payload = adapter.get_openvpn_multihome_status()
+        if isinstance(status_payload, dict) and "on_disk" in status_payload:
+            on_disk = bool(status_payload.get("on_disk"))
+    except Exception as exc:  # noqa: BLE001 — best-effort probe
+        detail = getattr(exc, "detail", None) or str(exc)
+        warnings.append(f"Не удалось проверить conf на диске: {detail}")
+    return NodeOpenVpnMultihomeResponse(
+        enabled=bool(node.openvpn_multihome),
+        on_disk=on_disk,
+        warnings=warnings,
+    )
+
+
+@router.put("/{node_id}/openvpn-multihome", response_model=NodeOpenVpnMultihomeResponse)
+def put_openvpn_multihome(
+    node_id: int,
+    payload: NodeOpenVpnMultihomeBody,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    enabled = bool(payload.enabled)
+    node.openvpn_multihome = enabled
+    node.updated_at = datetime.utcnow()
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+
+    warnings: list[str] = []
+    on_disk: bool | None = None
+    try:
+        adapter = get_adapter_for_node(node)
+        result = adapter.ensure_openvpn_multihome(enabled)
+        if isinstance(result, dict):
+            if "on_disk" in result:
+                on_disk = bool(result.get("on_disk"))
+            if result.get("success") is False:
+                restart = result.get("restart") or {}
+                failed = restart.get("failed") or []
+                if failed:
+                    warnings.append(
+                        "multihome записан, но перезапуск OpenVPN частично не удался: "
+                        + "; ".join(
+                            f"{item.get('unit')}: {item.get('error')}" for item in failed if isinstance(item, dict)
+                        )
+                    )
+                else:
+                    warnings.append("ensure_openvpn_multihome вернул success=false")
+    except Exception as exc:  # noqa: BLE001 — DB already saved; surface apply failure
+        detail = getattr(exc, "detail", None) or str(exc)
+        warnings.append(f"Флаг сохранён, но применить на узле не удалось: {detail}")
+
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_openvpn_multihome_update",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"node_id={node_id} enabled={enabled}",
+        )
+    return NodeOpenVpnMultihomeResponse(enabled=enabled, on_disk=on_disk, warnings=warnings)
+
+
 @router.post("/{node_id}/rotate-key", response_model=NodeRotateKeyResponse)
 def rotate_node_key(
     node_id: int,
@@ -423,6 +782,12 @@ def activate_node(
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+
+    if (getattr(node, "node_kind", None) or NODE_KIND_VPN) == NODE_KIND_PROXY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Прокси-узел нельзя сделать активным для VPN",
+        )
 
     set_active_node_id(db, node.id)
     db.commit()

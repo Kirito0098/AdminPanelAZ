@@ -23,6 +23,7 @@ from app.services.node_sync.policy_sync import maybe_replicate_policy_op
 from app.services.node_sync.vpn_state_sync import copy_openvpn_profiles_from_primary
 from app.services.openvpn_cert import refresh_config_cert_expiry
 from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
+from app.services.profile_delivery import load_node_remote_hosts
 from app.services.traffic.maintenance import purge_traffic_history_for_reused_name
 from app.services.traffic_limit import parse_traffic_limit_period_days
 
@@ -523,7 +524,11 @@ def _recreate_ovpn_profiles_after_import(
     try:
         adapter = get_active_adapter(db)
         try:
-            recreate_openvpn_profiles_after_admin_change(adapter, client_names=ovpn_names)
+            recreate_openvpn_profiles_after_admin_change(
+                adapter,
+                client_names=ovpn_names,
+                hosts=load_node_remote_hosts(db, node_id),
+            )
         except Exception as exc:
             logger.warning("CSV import: profile recreate failed: %s", exc)
             return [f"Пересоздание профилей: {exc}"]

@@ -112,6 +112,7 @@ class Settings(BaseSettings):
     cidr_db_refresh_enabled: bool = True
     cidr_db_refresh_hour: int = 2
     cidr_db_refresh_minute: int = 30
+    cidr_db_refresh_interval_days: int = 1
     cidr_db_compile_after_refresh: bool = False
     cidr_db_deploy_after_compile: bool = False
     cidr_db_deploy_target: str = "active"

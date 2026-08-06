@@ -213,7 +213,11 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
         adapter = get_adapter_for_node(replica_node)
         if shadow is None:
             try:
-                sync_openvpn_pki_from_primary(primary_adapter, adapter)
+                sync_openvpn_pki_from_primary(
+                    primary_adapter,
+                    adapter,
+                    openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
+                )
                 result.successes.append(
                     {"node_id": replica_node.id, "node_name": replica_node.name, "fallback": True}
                 )
@@ -232,7 +236,11 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
                 )
             continue
         try:
-            sync_openvpn_pki_from_primary(primary_adapter, adapter)
+            sync_openvpn_pki_from_primary(
+                primary_adapter,
+                adapter,
+                openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
+            )
             shadow.cert_expire_days = cert_expire_days
             shadow.cert_expires_at = primary_config.cert_expires_at
             db.flush()

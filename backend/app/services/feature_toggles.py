@@ -233,6 +233,33 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         frontend_paths=("/telegram",),
     ),
     FeatureToggleDefinition(
+        key="proxy_nodes",
+        env_key="FEATURE_PROXY_NODES_ENABLED",
+        label="Прокси-узлы",
+        description=(
+            "Управление прокси-узлами (proxy_agent): создание узлов kind=proxy, "
+            "статус/destination/mappings. Включайте только если уже используете proxy.sh. "
+            "Важно: префикс /api/nodes в ALWAYS_ALLOWED — создание proxy и будущие "
+            "маршруты /api/nodes/{id}/proxy/* проверяются только в обработчиках "
+            "(is_enabled / is_proxy_nodes_enabled), не middleware."
+        ),
+        icon="🔗",
+        disable_hint=(
+            "Создание прокси-узлов и proxy-API будут недоступны. "
+            "Существующие VPN-узлы не затрагиваются."
+        ),
+        resource_impact_level="minimal",
+        default=False,
+        group="app_module",
+        # Paths are documentation for operators/UI; middleware cannot gate them because
+        # /api/nodes is ALWAYS_ALLOWED. Handlers must call is_proxy_nodes_enabled().
+        api_paths=(
+            "/api/nodes/{id}/proxy/status",
+            "/api/nodes/{id}/proxy/destination",
+            "/api/nodes/{id}/proxy/mappings",
+        ),
+    ),
+    FeatureToggleDefinition(
         key="backups",
         env_key="FEATURE_BACKUPS_ENABLED",
         label="Резервные копии",
@@ -425,6 +452,7 @@ RESOURCE_PROFILES: dict[str, dict] = {
             "antizapret_config": False,
             "warper": False,
             "telegram": False,
+            "proxy_nodes": False,
             "diagnostics_tests": False,
             "runtime_backup_cleanup": True,
             "nightly_idle_restart": True,
@@ -464,6 +492,7 @@ RESOURCE_PROFILES: dict[str, dict] = {
             "antizapret_config": True,
             "warper": False,
             "telegram": False,
+            "proxy_nodes": False,
             "diagnostics_tests": True,
             "runtime_backup_cleanup": True,
             "nightly_idle_restart": True,
@@ -503,6 +532,7 @@ RESOURCE_PROFILES: dict[str, dict] = {
             "antizapret_config": True,
             "warper": True,
             "telegram": False,
+            "proxy_nodes": False,
             "diagnostics_tests": True,
             "runtime_backup_cleanup": True,
             "nightly_idle_restart": True,
@@ -641,3 +671,16 @@ class FeatureToggleService:
             "toggles": self.list_toggles(),
             "profiles": self.list_resource_profiles(),
         }
+
+
+def is_proxy_nodes_enabled(db=None) -> bool:
+    """Return whether the proxy_nodes feature toggle is enabled.
+
+    ``db`` is unused (toggle is env-backed) and kept for call-site parity with
+    other ``is_*_enabled(db)`` helpers. Prefer this over middleware path guards:
+    ``/api/nodes`` is ALWAYS_ALLOWED.
+    """
+    from app.services.feature_guards import get_feature_service
+
+    _ = db
+    return get_feature_service().is_enabled("proxy_nodes")

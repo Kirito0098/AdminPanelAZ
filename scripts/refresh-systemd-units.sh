@@ -7,8 +7,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PANEL_UNIT="/etc/systemd/system/adminpanelaz.service"
 NODE_UNIT="/etc/systemd/system/adminpanelaz-node.service"
+PROXY_UNIT="/etc/systemd/system/adminpanelaz-proxy.service"
 DO_PANEL="${REFRESH_PANEL:-1}"
 DO_NODE="${REFRESH_NODE:-1}"
+DO_PROXY="${REFRESH_PROXY:-1}"
 
 log() {
   echo "[refresh-systemd] $*"
@@ -73,6 +75,30 @@ if [[ "$DO_NODE" == "1" && -f "$NODE_UNIT" ]]; then
     NODE_AGENT_PORT="${port:-9100}" \
     NODE_AGENT_API_KEY="${api_key:-change-me-node-agent-key}" \
     "$ROOT_DIR/scripts/install-node-systemd.sh"
+  refreshed=1
+fi
+
+if [[ "$DO_PROXY" == "1" && -f "$PROXY_UNIT" ]]; then
+  user="$(_unit_field "$PROXY_UNIT" User)"
+  group="$(_unit_field "$PROXY_UNIT" Group)"
+  state="$(_unit_env "$PROXY_UNIT" PROXY_AGENT_STATE_DIR)"
+  port="$(_unit_env "$PROXY_UNIT" PROXY_AGENT_PORT)"
+  api_key="$(_unit_env "$PROXY_UNIT" PROXY_AGENT_API_KEY)"
+  proxy_env="$ROOT_DIR/backend/proxy_agent.env"
+  if [[ -z "$api_key" || "$api_key" == "change-me-proxy-agent-key" ]]; then
+    api_key="$(_env_file_value "$proxy_env" PROXY_AGENT_API_KEY)"
+  fi
+  if [[ -z "$port" ]]; then
+    port="$(_env_file_value "$proxy_env" PROXY_AGENT_PORT)"
+  fi
+  log "Обновление unit adminpanelaz-proxy из шаблона репо…"
+  INSTALL_FROM_INSTALL_SH=1 \
+    INSTALL_USER="${user:-root}" \
+    INSTALL_GROUP="${group:-root}" \
+    PROXY_AGENT_STATE_DIR="${state:-/var/lib/adminpanelaz-proxy}" \
+    PROXY_AGENT_PORT="${port:-9101}" \
+    PROXY_AGENT_API_KEY="${api_key:-change-me-proxy-agent-key}" \
+    "$ROOT_DIR/scripts/install-proxy-systemd.sh"
   refreshed=1
 fi
 

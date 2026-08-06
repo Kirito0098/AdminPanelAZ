@@ -29,6 +29,7 @@ from app.services.node_sync.antizapret_sync import enqueue_ha_routing_apply_repl
 from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import find_sync_group_for_primary, is_auto_sync_enabled, require_ha_primary_for_config_ops
 from app.services.node_sync.provider_sync import deploy_compiled_providers_to_replicas, replicate_provider_content
+from app.services.profile_delivery import load_node_remote_hosts
 
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
@@ -50,7 +51,13 @@ def _enqueue_routing_apply_tasks(
         worker_db = SessionLocal()
         try:
             adapter = get_active_adapter(worker_db)
-            return background_task_service.task_routing_apply(adapter, progress_updater)
+            node = get_active_node(worker_db)
+            return background_task_service.task_routing_apply(
+                adapter,
+                progress_updater,
+                hosts=load_node_remote_hosts(worker_db, node.id),
+                ensure_openvpn_multihome=bool(node.openvpn_multihome),
+            )
         finally:
             worker_db.close()
 

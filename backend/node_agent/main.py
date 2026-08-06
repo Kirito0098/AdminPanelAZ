@@ -145,6 +145,10 @@ class ServiceRestartRequest(BaseModel):
     service_name: str
 
 
+class OpenVpnMultihomeRequest(BaseModel):
+    enabled: bool = False
+
+
 class RotateApiKeyRequest(BaseModel):
     new_api_key: str = Field(min_length=24)
 
@@ -247,6 +251,16 @@ def server_ip(_: None = Depends(verify_api_key)):
 @app.post("/openvpn/management/disconnect")
 def openvpn_disconnect(payload: WireGuardClientRequest, _: None = Depends(verify_api_key)):
     return openvpn_management_service.disconnect_client(payload.client_name)
+
+
+@app.get("/openvpn/multihome")
+def openvpn_multihome_status(_: None = Depends(verify_api_key)):
+    return service.get_openvpn_multihome_status()
+
+
+@app.post("/openvpn/multihome")
+def openvpn_multihome_ensure(payload: OpenVpnMultihomeRequest, _: None = Depends(verify_api_key)):
+    return service.ensure_openvpn_multihome(bool(payload.enabled))
 
 
 @app.get("/clients/openvpn")

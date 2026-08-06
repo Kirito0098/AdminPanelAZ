@@ -36,6 +36,7 @@ from app.services.config_csv_ops import (
 from app.services.config_tags import get_tags_for_configs, resolve_config_ids_by_tags
 from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_adapter import NodeAdapter
+from app.services.client_local_ip import build_client_local_ip_map
 from app.services.config_import import format_config_disk_sync_message, import_clients_from_disk
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.client_sync import (
@@ -61,6 +62,7 @@ from app.services.openvpn_group import (
     set_user_openvpn_group,
 )
 from app.services.notify_time import get_client_timezone_from_request
+from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
 from app.services.profile_files import profile_files_batch_key
 from app.services.panel_publish_info import resolve_public_base_url
@@ -78,9 +80,25 @@ from app.services.vpn_profile_visibility import (
     resolve_effective_visible_vpn_profiles,
     resolve_openvpn_group_for_user,
 )
+
 router = APIRouter(prefix="/configs", tags=["configs"])
 
 PROFILE_FILES_MAX_WORKERS = 12
+
+
+def _local_ip_for_config(db: Session, config: VpnConfig, adapter: NodeAdapter | None = None) -> str | None:
+    try:
+        node_adapter = adapter or get_active_adapter(db)
+        active = get_active_node(db)
+        mapping = build_client_local_ip_map(
+            node_adapter,
+            db,
+            node_id=active.id if active else None,
+            configs=[config],
+        )
+        return mapping.get((config.client_name or "").strip().lower())
+    except Exception:
+        return None
 
 
 def _qr_download_service(db: Session, request: Request) -> QrDownloadService:
@@ -166,6 +184,7 @@ def _to_response(
     tags: list[ConfigTagResponse] | None = None,
     ha_replicate_warning: str | None = None,
     visibility_policy: dict | None = None,
+    local_ip: str | None = None,
 ) -> VpnConfigResponse:
     owner = db.query(User).filter(User.id == config.owner_id).first()
     files: list[dict[str, str]] = []
@@ -197,6 +216,7 @@ def _to_response(
         tags=tags or [],
         ha=_ha_info_for_config(db, config),
         ha_replicate_warning=ha_replicate_warning,
+        local_ip=local_ip,
     )
 
 
@@ -332,6 +352,19 @@ def list_configs(
             visibility_policy=visibility_policy,
         )
     tags_map = get_tags_for_configs(db, [c.id for c in configs]) if configs else {}
+    local_ip_map: dict[str, str] = {}
+    if configs:
+        try:
+            ip_adapter = adapter or get_active_adapter(db)
+            active = get_active_node(db)
+            local_ip_map = build_client_local_ip_map(
+                ip_adapter,
+                db,
+                node_id=active.id if active else None,
+                configs=configs,
+            )
+        except Exception:
+            local_ip_map = {}
     return [
         _to_response(
             c,
@@ -345,6 +378,7 @@ def list_configs(
                 ConfigTagResponse(id=t.id, name=t.name, color=t.color)
                 for t in tags_map.get(c.id, [])
             ],
+            local_ip=local_ip_map.get((c.client_name or "").strip().lower()),
         )
         for c in configs
     ]
@@ -502,6 +536,7 @@ def create_config(
         recreate_openvpn_profiles_after_admin_change(
             adapter,
             client_names=[payload.client_name],
+            hosts=load_node_remote_hosts(db, node_id),
         )
     else:
         adapter.add_wireguard_client(payload.client_name)
@@ -544,6 +579,7 @@ def create_config(
         ha_replicate_warning=ha_replicate_warning,
         visibility_policy=_viewer_visibility_policy(db, current_user),
         openvpn_group=resolve_openvpn_group_for_user(db, current_user),
+        local_ip=_local_ip_for_config(db, config, adapter),
     )
 
 
@@ -565,6 +601,7 @@ def get_config(
         include_files=include_files,
         visibility_policy=_viewer_visibility_policy(db, current_user),
         openvpn_group=resolve_openvpn_group_for_user(db, current_user),
+        local_ip=_local_ip_for_config(db, config),
     )
 
 
@@ -604,6 +641,7 @@ def update_config(
         recreate_openvpn_profiles_after_admin_change(
             adapter,
             client_names=[config.client_name],
+            hosts=load_node_remote_hosts(db, config.node_id),
         )
         config.cert_expire_days = payload.cert_expire_days
         refresh_config_cert_expiry(config, adapter)
@@ -630,6 +668,7 @@ def update_config(
         include_files=True,
         visibility_policy=_viewer_visibility_policy(db, current_user),
         openvpn_group=resolve_openvpn_group_for_user(db, current_user),
+        local_ip=_local_ip_for_config(db, config),
     )
 
 
@@ -691,7 +730,8 @@ def download_profile(
 
     adapter = get_active_adapter(db)
     _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
-    content = adapter.read_profile_file(path)
+    hosts = load_node_remote_hosts(db, config.node_id)
+    content = read_profile_file_for_delivery(adapter, path, hosts)
     filename = build_profile_download_filename(config.client_name, path=path)
     return PlainTextResponse(content, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
@@ -712,7 +752,8 @@ def generate_qr(
 
     adapter = get_active_adapter(db)
     _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
-    content = adapter.read_profile_file(path)
+    hosts = load_node_remote_hosts(db, config.node_id)
+    content = read_profile_file_for_delivery(adapter, path, hosts)
     if prefers_download_link_qr(path=path, content=content):
         link = _qr_download_service(db, request).create_token(
             file_path=path,

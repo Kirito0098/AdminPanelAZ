@@ -33,6 +33,8 @@ from app.services.notify_time import (
     get_client_timezone_from_request,
     remember_client_timezone,
 )
+from app.services.openvpn_profile_repair import recreate_openvpn_profiles
+from app.services.profile_delivery import load_node_remote_hosts
 from app.services.vpn_profile_visibility import (
     get_default_visible_vpn_profiles,
     set_default_visible_vpn_profiles,
@@ -202,6 +204,9 @@ def update_settings(
         if config_changed:
             try:
                 adapter.apply_config_changes()
+                from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
+
+                maybe_ensure_node_openvpn_multihome(adapter, get_active_node(db))
             except HTTPException:
                 raise
             except Exception as exc:
@@ -243,8 +248,16 @@ def recreate_profiles(
     admin: User = Depends(require_admin),
 ):
     require_ha_primary_for_config_ops(db)
-    output = get_active_adapter(db).recreate_profiles()
     node = get_active_node(db)
+    result = recreate_openvpn_profiles(
+        get_active_adapter(db),
+        hosts=load_node_remote_hosts(db, node.id),
+    )
+    if not result.success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.errors[0] if result.errors else "Ошибка пересоздания профилей",
+        )
     admin_notify_service.send_settings_change(
         db,
         actor_username=admin.username,
@@ -254,7 +267,7 @@ def recreate_profiles(
         node_name=node.name,
         client_timezone=get_client_timezone_from_request(request),
     )
-    return MessageResponse(message="Профили пересозданы", detail=output)
+    return MessageResponse(message="Профили пересозданы", detail=result.output)
 
 
 @router.get("/monitor", response_model=MonitorSettingsResponse)

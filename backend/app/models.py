@@ -245,7 +245,14 @@ class Node(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_local: Mapped[bool] = mapped_column(Boolean, default=False)
     mtls_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    node_kind: Mapped[str] = mapped_column(String(16), default="vpn")
+    destination_ip: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    linked_vpn_node_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("nodes.id"), nullable=True, default=None, index=True
+    )
     node_metadata: Mapped[str] = mapped_column(Text, default="{}")
+    openvpn_remote_hosts: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    openvpn_multihome: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

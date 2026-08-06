@@ -41,7 +41,7 @@ def test_az_host_updates_conflict_with_panel_domain():
     )
     assert (
         az_host_updates_conflict_with_panel_domain(
-            {"block_ads": "y"},
+            {"ANTIZAPRET_ADBLOCK": "y"},
             "panel.example.com",
         )
         is None

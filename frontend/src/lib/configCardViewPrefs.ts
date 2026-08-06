@@ -12,6 +12,7 @@ export interface ConfigCardFieldVisibility {
   metaCreated: boolean
   metaCert: boolean
   metaOwner: boolean
+  metaLocalIp: boolean
   metaTraffic: boolean
   metaBlock: boolean
   metaConnection: boolean
@@ -39,6 +40,7 @@ export const DEFAULT_CONFIG_CARD_VIEW_PREFS: ConfigCardViewPrefs = {
     metaCreated: true,
     metaCert: true,
     metaOwner: true,
+    metaLocalIp: true,
     metaTraffic: true,
     metaBlock: true,
     metaConnection: true,
@@ -244,6 +246,7 @@ export const FIELD_LABELS: Record<keyof ConfigCardFieldVisibility, string> = {
   metaCreated: 'Дата создания',
   metaCert: 'Срок сертификата',
   metaOwner: 'Владелец',
+  metaLocalIp: 'Локальный IP',
   metaTraffic: 'Трафик',
   metaBlock: 'Блокировка',
   metaConnection: 'Онлайн / офлайн',
@@ -276,6 +279,7 @@ export function isMetaKeyVisible(
   if (key === 'created') return fields.metaCreated
   if (key === 'cert') return fields.metaCert
   if (key === 'owner') return fields.metaOwner
+  if (key === 'localIp') return fields.metaLocalIp
   if (key === 'traffic') return fields.metaTraffic
   if (key === 'block') return fields.metaBlock
   if (key === 'connection') return fields.metaConnection

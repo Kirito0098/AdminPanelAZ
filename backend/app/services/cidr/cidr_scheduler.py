@@ -1,4 +1,4 @@
-"""Scheduled nightly CIDR DB refresh worker."""
+"""Scheduled CIDR DB refresh worker (time-of-day + interval days)."""
 
 import asyncio
 import logging
@@ -9,11 +9,14 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal
+from app.models import AppSetting
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.cidr.pipeline.deploy import compute_artifact_stamp
 from app.services.cidr.pipeline.orchestrator import run_compile, run_ingest, run_multi_deploy
 
 logger = logging.getLogger(__name__)
+
+LAST_RUN_SETTING_KEY = "cidr_db_refresh_last_run"
 
 
 def _seconds_until_next_run(hour: int, minute: int) -> float:
@@ -22,6 +25,74 @@ def _seconds_until_next_run(hour: int, minute: int) -> float:
     if target <= now:
         target += timedelta(days=1)
     return (target - now).total_seconds()
+
+
+def _get_setting(db: Session, key: str, default: str = "") -> str:
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    return row.value if row else default
+
+
+def _set_setting(db: Session, key: str, value: str) -> None:
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if row:
+        row.value = value
+    else:
+        db.add(AppSetting(key=key, value=value))
+
+
+def get_last_cron_run_at(db: Session) -> datetime | None:
+    raw = _get_setting(db, LAST_RUN_SETTING_KEY, "")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _should_run_interval(db: Session, interval_days: int) -> bool:
+    days = max(1, int(interval_days or 1))
+    last = get_last_cron_run_at(db)
+    if last is None:
+        return True
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    elapsed = (datetime.now(timezone.utc) - last).total_seconds()
+    return elapsed >= days * 86400
+
+
+def mark_cron_run(db: Session, when: datetime | None = None) -> None:
+    stamp = (when or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+    _set_setting(db, LAST_RUN_SETTING_KEY, stamp)
+
+
+def compute_next_run_at(
+    *,
+    enabled: bool,
+    hour: int,
+    minute: int,
+    interval_days: int,
+    last_run: datetime | None,
+    now: datetime | None = None,
+) -> datetime | None:
+    """Next wall-clock slot (UTC) when the scheduler may attempt a run."""
+    if not enabled:
+        return None
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    days = max(1, int(interval_days or 1))
+
+    candidate = current.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= current:
+        candidate += timedelta(days=1)
+
+    if last_run is not None:
+        lr = last_run if last_run.tzinfo else last_run.replace(tzinfo=timezone.utc)
+        earliest = lr + timedelta(days=days)
+        while candidate < earliest:
+            candidate += timedelta(days=1)
+    return candidate
 
 
 def _resolve_cron_deploy_kwargs(settings: Settings) -> dict[str, Any]:
@@ -59,11 +130,11 @@ def _summarize_deploy_result(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_nightly_cidr_pipeline(db: Session, settings: Settings) -> dict[str, Any]:
-    """Run ingest and optionally compile + deploy for the nightly cron."""
+    """Run ingest and optionally compile + deploy for the scheduled cron."""
     svc = CidrDbUpdaterService(db=db)
     summary: dict[str, Any] = {"refresh": None, "compile": None, "deploy": None}
 
-    logger.info("CIDR DB scheduler: starting nightly refresh")
+    logger.info("CIDR DB scheduler: starting scheduled refresh")
     refresh_result = run_ingest(db, triggered_by="cron")
     summary["refresh"] = refresh_result
     log_id = refresh_result.get("log_id")
@@ -185,18 +256,50 @@ def run_nightly_cidr_pipeline(db: Session, settings: Settings) -> dict[str, Any]
 
 
 async def run_cidr_db_scheduler_loop() -> None:
-    settings = get_settings()
     while True:
         try:
+            settings = get_settings()
             if not settings.cidr_db_refresh_enabled:
                 await asyncio.sleep(3600)
                 continue
-            delay = _seconds_until_next_run(settings.cidr_db_refresh_hour, settings.cidr_db_refresh_minute)
-            logger.info("CIDR DB scheduler: next refresh in %.0f seconds", delay)
+
+            hour = max(0, min(23, int(settings.cidr_db_refresh_hour)))
+            minute = max(0, min(59, int(settings.cidr_db_refresh_minute)))
+            delay = _seconds_until_next_run(hour, minute)
+            logger.info(
+                "CIDR DB scheduler: next check in %.0f seconds (UTC %02d:%02d, every %d day(s))",
+                delay,
+                hour,
+                minute,
+                max(1, int(settings.cidr_db_refresh_interval_days or 1)),
+            )
             await asyncio.sleep(delay)
+
+            settings = get_settings()
+            if not settings.cidr_db_refresh_enabled:
+                continue
+
             db = SessionLocal()
             try:
-                run_nightly_cidr_pipeline(db, settings)
+                interval_days = max(1, int(settings.cidr_db_refresh_interval_days or 1))
+                if not _should_run_interval(db, interval_days):
+                    last = get_last_cron_run_at(db)
+                    logger.info(
+                        "CIDR DB scheduler: skipped (interval=%d day(s), last_run=%s)",
+                        interval_days,
+                        last.isoformat() if last else "never",
+                    )
+                else:
+                    summary = run_nightly_cidr_pipeline(db, settings)
+                    refresh_status = str((summary.get("refresh") or {}).get("status") or "")
+                    if refresh_status in ("ok", "partial"):
+                        mark_cron_run(db)
+                        db.commit()
+                    else:
+                        logger.warning(
+                            "CIDR DB scheduler: refresh status=%s — last_run not updated, will retry next slot",
+                            refresh_status or "empty",
+                        )
             finally:
                 db.close()
             await asyncio.sleep(60)

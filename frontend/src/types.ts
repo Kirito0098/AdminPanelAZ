@@ -1,6 +1,7 @@
 export type UserRole = 'admin' | 'user'
 export type VpnType = 'openvpn' | 'wireguard'
 export type NodeStatus = 'online' | 'offline' | 'unknown'
+export type NodeKind = 'vpn' | 'proxy'
 
 export interface Node {
   id: number
@@ -10,10 +11,31 @@ export interface Node {
   status: NodeStatus
   is_local: boolean
   mtls_enabled: boolean
+  node_kind?: NodeKind | string
+  destination_ip?: string | null
+  linked_vpn_node_id?: number | null
   last_seen_at?: string | null
   metadata: Record<string, unknown>
   created_at: string
   updated_at: string
+}
+
+export interface ProxyStatusResponse {
+  installed: boolean
+  destination_ip?: string | null
+  detail?: string | null
+}
+
+export interface ProxyMappingItem {
+  client_ip: string
+  client_port?: number | null
+  proxy_sport?: number | null
+  dest_ip?: string | null
+  dest_port?: number | null
+}
+
+export interface ProxyMappingsResponse {
+  mappings: ProxyMappingItem[]
 }
 
 export interface ActiveNode {
@@ -229,6 +251,8 @@ export interface VpnConfig {
   tags?: ConfigTag[]
   ha?: VpnConfigHaInfo | null
   ha_replicate_warning?: string | null
+  /** Issued VPN tunnel IP (WireGuard AllowedIPs / OpenVPN virtual address). */
+  local_ip?: string | null
   profile_files: Array<{
     protocol: string
     variant: string
@@ -274,6 +298,10 @@ export interface OpenVpnClient {
   active_node_name?: string | null
   ha_nodes?: HaNodePresence[]
   ha?: VpnConfigHaInfo | null
+  /** Endpoint IP is a known proxy node */
+  via_proxy?: boolean
+  /** Mapping found → home IP used for display/geo */
+  proxy_resolved?: boolean
 }
 
 export interface WireGuardPeer {
@@ -298,6 +326,10 @@ export interface WireGuardPeer {
   active_node_name?: string | null
   ha_nodes?: HaNodePresence[]
   ha?: VpnConfigHaInfo | null
+  /** Endpoint IP is a known proxy node */
+  via_proxy?: boolean
+  /** Mapping found → home IP used for display/geo */
+  proxy_resolved?: boolean
 }
 
 export interface MonitoringNodeSummary {
@@ -990,6 +1022,25 @@ export interface CidrDbStatus {
   active_task?: CidrPipelineTask | null
 }
 
+export interface CidrDbSchedule {
+  enabled: boolean
+  hour: number
+  minute: number
+  interval_days: number
+  refresh_time: string
+  last_run_at?: string | null
+  next_run_at?: string | null
+  timezone: string
+}
+
+export interface CidrDbScheduleUpdate {
+  enabled?: boolean
+  hour?: number
+  minute?: number
+  interval_days?: number
+  refresh_time?: string
+}
+
 export interface AntifilterStatus {
   success: boolean
   cidr_count?: number
@@ -1271,6 +1322,10 @@ export interface ClientAccessPolicy {
   traffic_limit_human?: string | null
   traffic_consumed_bytes?: number | null
   traffic_consumed_human?: string | null
+  traffic_consumed_udp_bytes?: number | null
+  traffic_consumed_udp_human?: string | null
+  traffic_consumed_tcp_bytes?: number | null
+  traffic_consumed_tcp_human?: string | null
   traffic_bytes_left?: number | null
   traffic_bytes_left_human?: string | null
   traffic_limit_exceeded?: boolean
@@ -1629,6 +1684,17 @@ export interface AntizapretSettingField {
   param_label: string
   title: string
   description: string
+}
+
+export interface NodeRemoteHostsResponse {
+  hosts: string[]
+  warnings?: string[]
+}
+
+export interface NodeOpenVpnMultihomeResponse {
+  enabled: boolean
+  on_disk?: boolean | null
+  warnings?: string[]
 }
 
 export interface AntizapretSettingsResponse {

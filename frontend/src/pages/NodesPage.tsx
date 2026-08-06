@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, Fragment, useEffect, useState } from 'react'
 import {
   Check,
   Download,
@@ -32,6 +32,7 @@ import {
 } from '@/api/client'
 import NodeUpdateDialog from '@/components/NodeUpdateDialog'
 import NodeOfflineNotifyCard from '@/components/nodes/NodeOfflineNotifyCard'
+import ProxyNodePanel, { AZ_PROXY_SH_DOCS_URL } from '@/components/nodes/ProxyNodePanel'
 import NodeSyncGroupSection from '@/components/nodes/NodeSyncGroupSection'
 import { NodeBadge, NodeStatusBadge, statusLabels } from '@/components/NodeSelector'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
@@ -61,6 +62,13 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Table,
   TableBody,
   TableCell,
@@ -69,21 +77,30 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useAuth } from '@/context/AuthContext'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { formatDateTime } from '@/lib/datetime'
 import { findNodeHaMembership, nodeDeleteBlockedMessage, nodeHaDeleteBlockedHint } from '@/lib/nodeHa'
 import { cn } from '@/lib/utils'
-import type { Node, NodeMtlsStatus, NodeSyncGroup } from '@/types'
+import type { Node, NodeKind, NodeMtlsStatus, NodeSyncGroup } from '@/types'
 import { Navigate } from 'react-router-dom'
 
 type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | 'disable-mtls' | 'restart-agent' | null
 type BulkConfirmAction = 'delete' | 'enable-mtls' | null
 
+const PROXY_DEFAULT_PORT = 9101
+const VPN_DEFAULT_PORT = 9100
+
 function getSelectedNodes(nodes: Node[], selectedNodeIds: number[]) {
   const idSet = new Set(selectedNodeIds)
   return nodes.filter((node) => idSet.has(node.id))
+}
+
+/** True when node_kind is proxy (defaults to vpn if unset). */
+export function isProxyNode(node: Node): boolean {
+  return (node.node_kind || 'vpn') === 'proxy'
 }
 
 function isWrongVersionSslError(error: string) {
@@ -175,6 +192,7 @@ function formatLastSeen(lastSeen?: string | null) {
 type NodeActionsProps = {
   node: Node
   isActive: boolean
+  isProxy: boolean
   healthLoading: boolean
   activateLoading: boolean
   onActivate: () => void
@@ -192,6 +210,7 @@ type NodeActionsProps = {
 function NodeActions({
   node,
   isActive,
+  isProxy,
   healthLoading,
   activateLoading,
   onActivate,
@@ -210,7 +229,7 @@ function NodeActions({
 
   return (
     <div className={cn('flex flex-wrap items-center', compact ? 'justify-end gap-0.5' : 'gap-2')}>
-      {!isActive && (
+      {!isProxy && !isActive && (
         <Button
           variant={compact ? 'ghost' : 'outline'}
           size={btnSize}
@@ -240,27 +259,31 @@ function NodeActions({
         )}
         {!compact && 'Здоровье'}
       </Button>
-      <Button
-        variant={compact ? 'ghost' : 'outline'}
-        size={btnSize}
-        title="Обновление узла"
-        onClick={onUpdate}
-      >
-        <Download size={iconSize} />
-        {!compact && 'Обновить'}
-      </Button>
-      <Button
-        variant={compact ? 'ghost' : 'outline'}
-        size={btnSize}
-        title="Перезапуск node agent"
-        onClick={onRestart}
-      >
-        <RefreshCw size={iconSize} />
-        {!compact && 'Перезапуск'}
-      </Button>
+      {!isProxy && (
+        <Button
+          variant={compact ? 'ghost' : 'outline'}
+          size={btnSize}
+          title="Обновление узла"
+          onClick={onUpdate}
+        >
+          <Download size={iconSize} />
+          {!compact && 'Обновить'}
+        </Button>
+      )}
+      {!isProxy && (
+        <Button
+          variant={compact ? 'ghost' : 'outline'}
+          size={btnSize}
+          title="Перезапуск node agent"
+          onClick={onRestart}
+        >
+          <RefreshCw size={iconSize} />
+          {!compact && 'Перезапуск'}
+        </Button>
+      )}
       {!node.is_local && (
         <>
-          {!node.mtls_enabled && (
+          {!isProxy && !node.mtls_enabled && (
             <Button
               variant={compact ? 'ghost' : 'outline'}
               size={btnSize}
@@ -271,7 +294,7 @@ function NodeActions({
               {!compact && 'Включить mTLS'}
             </Button>
           )}
-          {node.mtls_enabled && (
+          {!isProxy && node.mtls_enabled && (
             <Button
               variant={compact ? 'ghost' : 'outline'}
               size={btnSize}
@@ -282,15 +305,17 @@ function NodeActions({
               {!compact && 'Отключить mTLS'}
             </Button>
           )}
-          <Button
-            variant={compact ? 'ghost' : 'outline'}
-            size={btnSize}
-            title="Ротация API-ключа"
-            onClick={onRotateKey}
-          >
-            <KeyRound size={iconSize} />
-            {!compact && 'Ключ'}
-          </Button>
+          {!isProxy && (
+            <Button
+              variant={compact ? 'ghost' : 'outline'}
+              size={btnSize}
+              title="Ротация API-ключа"
+              onClick={onRotateKey}
+            >
+              <KeyRound size={iconSize} />
+              {!compact && 'Ключ'}
+            </Button>
+          )}
           <Button
             variant={compact ? 'ghost' : 'outline'}
             size={btnSize}
@@ -319,6 +344,7 @@ function NodeActions({
 type NodeCardProps = {
   node: Node
   isActive: boolean
+  showProxyUi: boolean
   healthLoading: boolean
   activateLoading: boolean
   selected?: boolean
@@ -332,11 +358,13 @@ type NodeCardProps = {
   onDisableMtls: () => void
   onEdit: () => void
   onDelete: () => void
+  onProxyUpdated?: () => void | Promise<void>
 }
 
 function NodeCard({
   node,
   isActive,
+  showProxyUi,
   healthLoading,
   activateLoading,
   selected = false,
@@ -350,10 +378,13 @@ function NodeCard({
   onDisableMtls,
   onEdit,
   onDelete,
+  onProxyUpdated,
 }: NodeCardProps) {
   const meta = getNodeMeta(node)
   const lastSeen = formatLastSeen(node.last_seen_at)
   const address = node.is_local ? 'local' : `${node.host}:${node.port}`
+  const isProxy = isProxyNode(node)
+  const showProxyAffordance = showProxyUi && isProxy
 
   return (
     <Card className={cn(isActive && 'border-primary/40 bg-primary/5')}>
@@ -372,6 +403,11 @@ function NodeCard({
               )}
               <Server size={16} className="shrink-0 text-muted-foreground" />
               <span className="truncate">{node.name}</span>
+              {showProxyAffordance && (
+                <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-800 dark:text-amber-100">
+                  Прокси
+                </Badge>
+              )}
               {isActive && (
                 <Badge variant="default" className="text-[10px]">
                   <Check size={10} />
@@ -414,9 +450,11 @@ function NodeCard({
         {node.status === 'offline' && meta.lastError && (
           <NodeConnectionErrorAlert node={node} lastError={meta.lastError} />
         )}
+        {showProxyAffordance && <ProxyNodePanel node={node} onUpdated={onProxyUpdated} />}
         <NodeActions
           node={node}
           isActive={isActive}
+          isProxy={isProxy}
           healthLoading={healthLoading}
           activateLoading={activateLoading}
           onActivate={onActivate}
@@ -463,7 +501,9 @@ function NodeBulkActionsBar({
 }: NodeBulkActionsBarProps) {
   const selected = getSelectedNodes(nodes, selectedNodeIds)
   const remoteSelected = selected.filter((node) => !node.is_local)
-  const mtlsCandidates = remoteSelected.filter((node) => !node.mtls_enabled)
+  const mtlsCandidates = remoteSelected.filter(
+    (node) => !isProxyNode(node) && !node.mtls_enabled,
+  )
   const allSelected = nodes.length > 0 && selectedNodeIds.length === nodes.length
   const busy = bulkBusy || rollingUpdating || rollPolling
 
@@ -598,6 +638,9 @@ function NodeBulkActionsBar({
 export default function NodesPage() {
   const { user } = useAuth()
   const { activeNode, refresh, refreshNodes, activate } = useNode()
+  const { features } = useFeatureModules()
+  // Default-off toggle: treat missing key as disabled (isEnabled() falls back to true).
+  const proxyNodesEnabled = features.proxy_nodes === true
   const { success, warning, error: notifyError } = useNotifications()
   const [nodes, setNodes] = useState<Node[]>([])
   const [loading, setLoading] = useState(true)
@@ -605,7 +648,8 @@ export default function NodesPage() {
   const [editing, setEditing] = useState<Node | null>(null)
   const [name, setName] = useState('')
   const [host, setHost] = useState('')
-  const [port, setPort] = useState(9100)
+  const [port, setPort] = useState(VPN_DEFAULT_PORT)
+  const [nodeKind, setNodeKind] = useState<NodeKind>('vpn')
   const [apiKey, setApiKey] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [healthLoading, setHealthLoading] = useState<number | null>(null)
@@ -666,7 +710,8 @@ export default function NodesPage() {
     setEditing(null)
     setName('')
     setHost('')
-    setPort(9100)
+    setPort(VPN_DEFAULT_PORT)
+    setNodeKind('vpn')
     setApiKey('')
   }
 
@@ -675,11 +720,17 @@ export default function NodesPage() {
     setShowDialog(true)
   }
 
+  const handleNodeKindChange = (kind: NodeKind) => {
+    setNodeKind(kind)
+    setPort(kind === 'proxy' ? PROXY_DEFAULT_PORT : VPN_DEFAULT_PORT)
+  }
+
   const openEdit = (node: Node) => {
     setEditing(node)
     setName(node.name)
     setHost(node.host)
     setPort(node.port)
+    setNodeKind(isProxyNode(node) ? 'proxy' : 'vpn')
     setApiKey('')
     setShowDialog(true)
   }
@@ -727,20 +778,28 @@ export default function NodesPage() {
         await refresh()
         success('Узел обновлён')
       } else {
-        const created = await createNode({ name: trimmedName, host: trimmedHost, port, api_key: apiKey })
+        const kind = proxyNodesEnabled && nodeKind === 'proxy' ? 'proxy' : 'vpn'
+        const created = await createNode({
+          name: trimmedName,
+          host: trimmedHost,
+          port,
+          api_key: apiKey,
+          node_kind: kind,
+        })
         closeDialog()
         await load()
         await refresh()
         if (created.status === 'offline') {
           const lastError =
             typeof created.metadata?.last_error === 'string' ? created.metadata.last_error : null
+          const agentLabel = kind === 'proxy' ? 'proxy_agent' : 'node agent'
           warning(
             lastError
-              ? `Узел добавлен, но агент недоступен: ${lastError}. Запустите node agent на сервере и нажмите «Здоровье».`
-              : 'Узел добавлен, но агент недоступен. Запустите node agent на сервере и нажмите «Здоровье».',
+              ? `Узел добавлен, но агент недоступен: ${lastError}. Запустите ${agentLabel} на сервере и нажмите «Здоровье».`
+              : `Узел добавлен, но агент недоступен. Запустите ${agentLabel} на сервере и нажмите «Здоровье».`,
           )
         } else {
-          success('Узел добавлен и доступен')
+          success(kind === 'proxy' ? 'Прокси-узел добавлен и доступен' : 'Узел добавлен и доступен')
         }
       }
     } catch (err) {
@@ -1014,9 +1073,11 @@ export default function NodesPage() {
       }
     }
     if (action === 'enable-mtls') {
-      const mtlsCandidates = selected.filter((node) => !node.is_local && !node.mtls_enabled)
+      const mtlsCandidates = selected.filter(
+        (node) => !node.is_local && !isProxyNode(node) && !node.mtls_enabled,
+      )
       if (mtlsCandidates.length === 0) {
-        notifyError('Нет удалённых узлов без mTLS среди выбранных')
+        notifyError('Нет удалённых VPN-узлов без mTLS среди выбранных')
         return
       }
     }
@@ -1073,7 +1134,9 @@ export default function NodesPage() {
           notifyError(`Удалено ${deletedCount} из ${remoteSelected.length}. ${failed[0]}`)
         }
       } else if (action === 'enable-mtls') {
-        const mtlsCandidates = selected.filter((node) => !node.is_local && !node.mtls_enabled)
+        const mtlsCandidates = selected.filter(
+          (node) => !node.is_local && !isProxyNode(node) && !node.mtls_enabled,
+        )
         let enabled = 0
         const failed: string[] = []
         for (const node of mtlsCandidates) {
@@ -1129,7 +1192,9 @@ export default function NodesPage() {
               <NodeBadge name={activeNode?.name} status={activeNode?.status} />
             </div>
             <p className="text-sm text-muted-foreground">
-              Управление VPN-серверами (node agent)
+              {proxyNodesEnabled
+                ? 'VPN-узлы (node agent) и прокси-узлы (proxy_agent)'
+                : 'Управление VPN-серверами (node agent)'}
             </p>
           </div>
         </div>
@@ -1242,6 +1307,7 @@ export default function NodesPage() {
                     key={node.id}
                     node={node}
                     isActive={activeNode?.id === node.id}
+                    showProxyUi={proxyNodesEnabled}
                     healthLoading={healthLoading === node.id}
                     activateLoading={activateLoading === node.id}
                     selected={selectedNodeIds.includes(node.id)}
@@ -1255,6 +1321,7 @@ export default function NodesPage() {
                     onDisableMtls={() => handleDisableMtls(node)}
                     onEdit={() => openEdit(node)}
                     onDelete={() => handleDelete(node)}
+                    onProxyUpdated={load}
                   />
                 ))}
                 desktop={
@@ -1293,9 +1360,12 @@ export default function NodesPage() {
                       const meta = getNodeMeta(node)
                       const lastSeen = formatLastSeen(node.last_seen_at)
                       const address = node.is_local ? 'local' : `${node.host}:${node.port}`
+                      const isProxy = isProxyNode(node)
+                      const showProxyAffordance = proxyNodesEnabled && isProxy
 
                       return (
-                        <TableRow key={node.id} className={cn(isActive && 'bg-primary/5')}>
+                        <Fragment key={node.id}>
+                        <TableRow className={cn(isActive && 'bg-primary/5')}>
                           <TableCell>
                             <input
                               type="checkbox"
@@ -1308,6 +1378,14 @@ export default function NodesPage() {
                           <TableCell className="font-medium">
                             <div className="flex flex-wrap items-center gap-2">
                               {node.name}
+                              {showProxyAffordance && (
+                                <Badge
+                                  variant="outline"
+                                  className="border-amber-500/40 text-[10px] text-amber-800 dark:text-amber-100"
+                                >
+                                  Прокси
+                                </Badge>
+                              )}
                               {isActive && (
                                 <Badge variant="default" className="text-[10px]">
                                   <Check size={10} />
@@ -1353,6 +1431,7 @@ export default function NodesPage() {
                             <NodeActions
                               node={node}
                               isActive={isActive}
+                              isProxy={isProxy}
                               healthLoading={healthLoading === node.id}
                               activateLoading={activateLoading === node.id}
                               onActivate={() => handleActivate(node)}
@@ -1361,13 +1440,21 @@ export default function NodesPage() {
                               onRestart={() => handleRestartAgent(node)}
                               onRotateKey={() => handleRotateKey(node)}
                               onEnableMtls={() => handleEnableMtls(node)}
-                    onDisableMtls={() => handleDisableMtls(node)}
+                              onDisableMtls={() => handleDisableMtls(node)}
                               onEdit={() => openEdit(node)}
                               onDelete={() => handleDelete(node)}
                               compact
                             />
                           </TableCell>
                         </TableRow>
+                        {showProxyAffordance && (
+                          <TableRow>
+                            <TableCell colSpan={10} className="bg-muted/20 py-3">
+                              <ProxyNodePanel node={node} onUpdated={load} />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        </Fragment>
                       )
                     })}
                   </TableBody>
@@ -1395,25 +1482,61 @@ export default function NodesPage() {
             </DialogTitle>
             <DialogDescription>
               {editing
-                ? 'Измените параметры подключения к удалённому node agent'
-                : 'Подключение к node agent на VPN-сервере'}
+                ? isProxyNode(editing)
+                  ? 'Измените параметры подключения к proxy_agent'
+                  : 'Измените параметры подключения к удалённому node agent'
+                : proxyNodesEnabled && nodeKind === 'proxy'
+                  ? 'Подключение к proxy_agent на RU-прокси'
+                  : 'Подключение к node agent на VPN-сервере'}
             </DialogDescription>
           </DialogHeader>
 
           <form noValidate onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-4">
-              {!editing && (
+              {!editing && proxyNodesEnabled && (
+                <div className="grid gap-2">
+                  <Label htmlFor="node-kind">Тип узла</Label>
+                  <Select
+                    value={nodeKind}
+                    onValueChange={(value) => handleNodeKindChange(value as NodeKind)}
+                  >
+                    <SelectTrigger id="node-kind">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="vpn">VPN (node agent)</SelectItem>
+                      <SelectItem value="proxy">Прокси (proxy_agent)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {!editing && nodeKind === 'vpn' && (
                 <SettingsAlert variant="info">
                   Сначала на VPN-сервере установите и запустите <strong>node agent</strong> (
                   <code className="text-xs">systemctl start adminpanelaz-node</code>), затем укажите его{' '}
                   <strong>публичный IP или домен</strong> (не 127.0.0.1) и тот же API-ключ. Порт —{' '}
-                  <strong>9100</strong>.
+                  <strong>{VPN_DEFAULT_PORT}</strong>.
+                </SettingsAlert>
+              )}
+              {!editing && proxyNodesEnabled && nodeKind === 'proxy' && (
+                <SettingsAlert variant="warning" title="Прокси-узел">
+                  Сначала сами установите{' '}
+                  <a
+                    href={AZ_PROXY_SH_DOCS_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium underline underline-offset-2"
+                  >
+                    proxy.sh по инструкции AntiZapret
+                  </a>
+                  , затем запустите <strong>proxy_agent</strong> (порт{' '}
+                  <strong>{PROXY_DEFAULT_PORT}</strong>). Панель не ставит и не запускает proxy.sh.
                 </SettingsAlert>
               )}
               {editing && !editing.is_local && (
                 <SettingsAlert variant="warning" title="API-ключ">
                   Оставьте поле ключа пустым, если не хотите его менять. Новый ключ нужно прописать в
-                  конфигурации node agent на сервере.
+                  конфигурации {isProxyNode(editing) ? 'proxy_agent' : 'node agent'} на сервере.
                 </SettingsAlert>
               )}
 
@@ -1424,7 +1547,7 @@ export default function NodesPage() {
                     id="node-name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="vpn-eu-1"
+                    placeholder={nodeKind === 'proxy' ? 'proxy-ru-1' : 'vpn-eu-1'}
                   />
                   <p className="text-xs text-muted-foreground">Отображаемое имя в панели и селекторе узлов</p>
                 </div>
@@ -1581,8 +1704,9 @@ export default function NodesPage() {
             ? `Удалить ${getSelectedNodes(nodes, selectedNodeIds).filter((n) => !n.is_local).length} узл(ов)?`
             : bulkConfirmAction === 'enable-mtls'
               ? `Включить mTLS на ${
-                  getSelectedNodes(nodes, selectedNodeIds).filter((n) => !n.is_local && !n.mtls_enabled)
-                    .length
+                  getSelectedNodes(nodes, selectedNodeIds).filter(
+                    (n) => !n.is_local && !isProxyNode(n) && !n.mtls_enabled,
+                  ).length
                 } узл(ах)?`
               : ''
         }

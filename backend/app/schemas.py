@@ -123,6 +123,32 @@ class NodeMtlsStatusResponse(BaseModel):
     agent_certs_count: int = 0
 
 
+class NodeRemoteHostsBody(BaseModel):
+    hosts: list[str] = Field(default_factory=list)
+
+
+class NodeRemoteHostsResponse(BaseModel):
+    hosts: list[str]
+    warnings: list[str] = Field(default_factory=list)
+
+
+class NodeAllowFirstRemoteHostResponse(BaseModel):
+    added: bool
+    host: str
+    detail: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class NodeOpenVpnMultihomeBody(BaseModel):
+    enabled: bool = False
+
+
+class NodeOpenVpnMultihomeResponse(BaseModel):
+    enabled: bool
+    on_disk: bool | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
 class UserBase(BaseModel):
     username: str
     role: UserRole = UserRole.user
@@ -260,6 +286,7 @@ class VpnConfigResponse(BaseModel):
     tags: list["ConfigTagResponse"] = []
     ha: VpnConfigHaInfo | None = None
     ha_replicate_warning: str | None = None
+    local_ip: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -399,6 +426,8 @@ class OpenVpnClient(BaseModel):
     isp: str | None = None
     location_label: str | None = None
     geo_label: str | None = None
+    via_proxy: bool = False
+    proxy_resolved: bool = False
     node_id: int | None = None
     node_name: str | None = None
     active_node_id: int | None = None
@@ -423,6 +452,8 @@ class WireGuardPeer(BaseModel):
     isp: str | None = None
     location_label: str | None = None
     geo_label: str | None = None
+    via_proxy: bool = False
+    proxy_resolved: bool = False
     node_id: int | None = None
     node_name: str | None = None
     active_node_id: int | None = None
@@ -789,6 +820,25 @@ class RetentionSettingsUpdate(BaseModel):
     panel_resource_metrics_retention_days: int | None = Field(default=None, ge=1, le=3650)
 
 
+class CidrDbScheduleResponse(BaseModel):
+    enabled: bool = True
+    hour: int = 2
+    minute: int = 30
+    interval_days: int = 1
+    refresh_time: str = "02:30"
+    last_run_at: datetime | None = None
+    next_run_at: datetime | None = None
+    timezone: str = "UTC"
+
+
+class CidrDbScheduleUpdate(BaseModel):
+    enabled: bool | None = None
+    hour: int | None = Field(default=None, ge=0, le=23)
+    minute: int | None = Field(default=None, ge=0, le=59)
+    interval_days: int | None = Field(default=None, ge=1, le=90)
+    refresh_time: str | None = None
+
+
 class SecretRotationItemResponse(BaseModel):
     secret_id: str
     label: str
@@ -1110,10 +1160,15 @@ class NodeBase(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     host: str = Field(min_length=1, max_length=255)
     port: int = Field(default=9100, ge=1, le=65535)
+    node_kind: str = Field(default="vpn", max_length=16)
 
 
 class NodeCreate(NodeBase):
+    # Optional so proxy can default to 9101 when omitted (vpn keeps 9100).
+    port: int | None = Field(default=None, ge=1, le=65535)
     api_key: str | None = Field(default=None, min_length=8)
+    destination_ip: str | None = Field(default=None, max_length=64)
+    linked_vpn_node_id: int | None = None
 
 
 class NodeUpdate(BaseModel):
@@ -1121,6 +1176,8 @@ class NodeUpdate(BaseModel):
     host: str | None = Field(default=None, min_length=1, max_length=255)
     port: int | None = Field(default=None, ge=1, le=65535)
     api_key: str | None = Field(default=None, min_length=8)
+    destination_ip: str | None = Field(default=None, max_length=64)
+    linked_vpn_node_id: int | None = None
 
 
 class NodeResponse(NodeBase):
@@ -1128,6 +1185,8 @@ class NodeResponse(NodeBase):
     status: NodeStatus
     is_local: bool
     mtls_enabled: bool = False
+    destination_ip: str | None = None
+    linked_vpn_node_id: int | None = None
     last_seen_at: datetime | None = None
     metadata: dict[str, Any] = {}
     created_at: datetime
@@ -1141,6 +1200,28 @@ class NodeHealthResponse(BaseModel):
     status: NodeStatus
     health: dict[str, Any] = {}
     last_seen_at: datetime | None = None
+
+
+class ProxyDestinationBody(BaseModel):
+    destination_ip: str = Field(min_length=7, max_length=64)
+
+
+class ProxyStatusResponse(BaseModel):
+    installed: bool
+    destination_ip: str | None = None
+    detail: str | None = None
+
+
+class ProxyMappingItem(BaseModel):
+    client_ip: str
+    client_port: int | None = None
+    proxy_sport: int | None = None
+    dest_ip: str | None = None
+    dest_port: int | None = None
+
+
+class ProxyMappingsResponse(BaseModel):
+    mappings: list[ProxyMappingItem] = []
 
 
 class ActiveNodeResponse(BaseModel):

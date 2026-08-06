@@ -345,6 +345,7 @@ def test_handle_client_renew_cert_syncs_openvpn_pki(monkeypatch):
     replica_node = MagicMock()
     replica_node.id = 5
     replica_node.name = "replica-4"
+    replica_node.openvpn_multihome = False
 
     db = MagicMock()
 
@@ -375,7 +376,11 @@ def test_handle_client_renew_cert_syncs_openvpn_pki(monkeypatch):
         {"primary_config": primary_config, "cert_expire_days": 180},
     )
 
-    sync_mock.assert_called_once_with(primary_adapter, replica_adapter)
+    sync_mock.assert_called_once_with(
+        primary_adapter,
+        replica_adapter,
+        openvpn_multihome=False,
+    )
     assert result.operation == ReplicateOperation.CLIENT_RENEW_CERT
     assert result.successes == [{"node_id": 5, "config_id": 50}]
     assert shadow.cert_expire_days == 180

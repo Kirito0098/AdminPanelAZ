@@ -9,6 +9,8 @@ def _make_node(node_id: int, name: str) -> MagicMock:
     node = MagicMock()
     node.id = node_id
     node.name = name
+    node.openvpn_remote_hosts = None
+    node.openvpn_multihome = False
     return node
 
 
@@ -39,17 +41,19 @@ def test_apply_shared_domain_copies_ovpn_from_primary_to_replica():
     adapters = {1: primary_adapter, 2: replica_adapter}
 
     copy_mock = MagicMock()
+    patch_mock = MagicMock(return_value={"patched": 0, "warnings": []})
     with patch.object(shared_domain, "get_member_nodes", return_value=[primary, replica]):
         with patch.object(
             shared_domain, "get_adapter_for_node", side_effect=lambda node: adapters[node.id]
         ):
             with patch.object(shared_domain, "copy_openvpn_profiles_from_primary", copy_mock):
-                with patch.object(
-                    shared_domain,
-                    "restart_all_openvpn_servers",
-                    return_value={"restarted": [], "failed": [], "skipped": [], "success": True},
-                ):
-                    result = shared_domain.apply_shared_domain_to_members(db, group)
+                with patch.object(shared_domain, "patch_openvpn_profiles_on_node", patch_mock):
+                    with patch.object(
+                        shared_domain,
+                        "restart_all_openvpn_servers",
+                        return_value={"restarted": [], "failed": [], "skipped": [], "success": True},
+                    ):
+                        result = shared_domain.apply_shared_domain_to_members(db, group)
 
     assert result["success"] is True
     # client.sh 7 ran on both nodes (hosts must land in profiles)
@@ -57,6 +61,52 @@ def test_apply_shared_domain_copies_ovpn_from_primary_to_replica():
     replica_adapter.recreate_profiles.assert_called_once()
     # but replica .ovpn got replaced with a byte-copy from primary
     copy_mock.assert_called_once_with(primary_adapter, replica_adapter)
+    # empty openvpn_remote_hosts → no disk patch
+    patch_mock.assert_not_called()
+
+
+def test_apply_shared_domain_patches_remotes_per_node_after_recreate():
+    """Primary: recreate → patch → copy; replica: recreate → copy → patch (own hosts)."""
+    group = _make_group()
+    primary = _make_node(1, "primary")
+    primary.openvpn_remote_hosts = '["1.1.1.1"]'
+    replica = _make_node(2, "replica")
+    replica.openvpn_remote_hosts = '["2.2.2.2"]'
+    db = MagicMock()
+
+    primary_adapter = _adapter()
+    replica_adapter = _adapter()
+    adapters = {1: primary_adapter, 2: replica_adapter}
+    timeline: list[tuple] = []
+
+    def _patch(adapter, hosts):
+        timeline.append(("patch", adapter, list(hosts)))
+        return {"patched": 1, "warnings": []}
+
+    def _copy(src, dst):
+        timeline.append(("copy", src, dst))
+
+    with patch.object(shared_domain, "get_member_nodes", return_value=[primary, replica]):
+        with patch.object(
+            shared_domain, "get_adapter_for_node", side_effect=lambda node: adapters[node.id]
+        ):
+            with patch.object(shared_domain, "copy_openvpn_profiles_from_primary", side_effect=_copy):
+                with patch.object(
+                    shared_domain, "patch_openvpn_profiles_on_node", side_effect=_patch
+                ):
+                    with patch.object(
+                        shared_domain,
+                        "restart_all_openvpn_servers",
+                        return_value={"restarted": [], "failed": [], "skipped": [], "success": True},
+                    ):
+                        result = shared_domain.apply_shared_domain_to_members(db, group)
+
+    assert result["success"] is True
+    assert timeline == [
+        ("patch", primary_adapter, ["1.1.1.1"]),
+        ("copy", primary_adapter, replica_adapter),
+        ("patch", replica_adapter, ["2.2.2.2"]),
+    ]
 
 
 def test_apply_shared_domain_skips_copy_and_records_error_when_primary_apply_failed():

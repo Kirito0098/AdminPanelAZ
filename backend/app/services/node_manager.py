@@ -30,9 +30,12 @@ from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.antizapret import AntiZapretService
 from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
 from app.services.node_health import HEALTH_METADATA_KEYS
+from app.services.proxy_node_adapter import ProxyNodeAdapter
 
 settings = get_settings()
 ACTIVE_NODE_KEY = "active_node_id"
+NODE_KIND_VPN = "vpn"
+NODE_KIND_PROXY = "proxy"
 
 
 def _get_setting(db: Session, key: str, default: str = "") -> str:
@@ -136,7 +139,18 @@ def get_active_node_id(db: Session) -> int | None:
         return None
 
 
+def _is_vpn_node(node: Node) -> bool:
+    return (getattr(node, "node_kind", None) or "vpn") == "vpn"
+
+
 def set_active_node_id(db: Session, node_id: int) -> None:
+    """Set active VPN node. Rejects ``node_kind=proxy`` for all callers (HTTP, TG, mini)."""
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if node is not None and not _is_vpn_node(node):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Прокси-узел нельзя сделать активным для VPN",
+        )
     _set_setting(db, ACTIVE_NODE_KEY, str(node_id))
 
 
@@ -145,24 +159,37 @@ def clear_active_node_id(db: Session) -> None:
 
 
 def get_active_node(db: Session) -> Node:
+    """Return the active VPN node. Never returns ``node_kind=proxy``."""
     node_id = get_active_node_id(db)
     if node_id:
         node = db.query(Node).filter(Node.id == node_id).first()
         if node:
-            if node.is_local and not settings.local_antizapret_enabled:
+            if not _is_vpn_node(node):
+                _set_setting(db, ACTIVE_NODE_KEY, "")
+                db.commit()
+            elif node.is_local and not settings.local_antizapret_enabled:
                 _set_setting(db, ACTIVE_NODE_KEY, "")
                 db.commit()
             else:
                 return node
 
     if settings.local_antizapret_enabled:
-        local = db.query(Node).filter(Node.is_local.is_(True)).first()
+        local = (
+            db.query(Node)
+            .filter(Node.is_local.is_(True), Node.node_kind == "vpn")
+            .first()
+        )
         if local:
             set_active_node_id(db, local.id)
             db.commit()
             return local
 
-    remote = db.query(Node).filter(Node.is_local.is_(False)).order_by(Node.id).first()
+    remote = (
+        db.query(Node)
+        .filter(Node.is_local.is_(False), Node.node_kind == "vpn")
+        .order_by(Node.id)
+        .first()
+    )
     if remote:
         set_active_node_id(db, remote.id)
         db.commit()
@@ -174,7 +201,42 @@ def get_active_node(db: Session) -> Node:
     )
 
 
+def _node_kind(node: Node) -> str:
+    return (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+
+
+def get_proxy_adapter(node: Node, api_key_override: str | None = None) -> ProxyNodeAdapter:
+    """HTTP adapter for ``node_kind=proxy`` (proxy_agent). Not a NodeAdapter."""
+    if _node_kind(node) != NODE_KIND_PROXY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Узел не является прокси",
+        )
+    if node.is_local:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Прокси-узел не может быть локальным",
+        )
+    api_key = api_key_override or get_api_key_plain(node)
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"API-ключ узла '{node.name}' недоступен",
+        )
+    return ProxyNodeAdapter(
+        host=node.host,
+        port=node.port,
+        api_key=api_key,
+        mtls_enabled=bool(node.mtls_enabled),
+    )
+
+
 def get_adapter_for_node(node: Node) -> NodeAdapter:
+    if _node_kind(node) == NODE_KIND_PROXY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Прокси-узел не поддерживает VPN-операции; используйте get_proxy_adapter",
+        )
     if node.is_local:
         meta = node_metadata_dict(node)
         raw_path = meta.get("antizapret_path")
@@ -240,7 +302,12 @@ def _remove_local_node(db: Session, local: Node) -> None:
     db.delete(local)
     db.commit()
     if active_id == node_id:
-        remote = db.query(Node).filter(Node.is_local.is_(False)).order_by(Node.id).first()
+        remote = (
+            db.query(Node)
+            .filter(Node.is_local.is_(False), Node.node_kind == "vpn")
+            .order_by(Node.id)
+            .first()
+        )
         if remote:
             set_active_node_id(db, remote.id)
         else:
@@ -287,6 +354,11 @@ def sync_local_node(db: Session) -> Node | None:
 
 def check_node_health(node: Node, api_key_override: str | None = None) -> dict:
     try:
+        if _node_kind(node) == NODE_KIND_PROXY:
+            adapter = get_proxy_adapter(node, api_key_override=api_key_override)
+            health = adapter.health()
+            health["status"] = "online"
+            return health
         if node.is_local:
             adapter = LocalNodeAdapter()
         else:

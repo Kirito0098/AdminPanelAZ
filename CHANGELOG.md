@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.21.0](#2210---2026-08-07) — 2026-08-07
 - [2.20.0](#2200---2026-08-02) — 2026-08-02
 - [2.19.0](#2190---2026-07-30) — 2026-07-30
 - [2.18.0](#2180---2026-07-26) — 2026-07-26
@@ -44,6 +45,60 @@
 ---
 
 ## [Unreleased]
+
+---
+
+## [2.21.0] - 2026-08-07
+
+> **Кратко:** прокси-узлы (`proxy_agent`, DESTINATION, NOC «домашний IP»), сводная вкладка **Конфигурация → Прокси**, multi-remote OpenVPN / allow-ips, **OpenVPN multihome** (несколько IP + restore после `setup.sh`), раздельный учёт OpenVPN UDP/TCP, локальный IP на карточке клиента, расписание автообновления CIDR; AdBlock → `ANTIZAPRET_ADBLOCK` / `VPN_ADBLOCK`.
+
+### 🔄 Changed
+
+- **Конфиг AntiZapret: AdBlock** — `BLOCK_ADS` заменён на `ANTIZAPRET_ADBLOCK` (AntiZapret VPN) и добавлен `VPN_ADBLOCK` (полный VPN); при чтении/сохранении старый `BLOCK_ADS` мигрируется, как в `update.sh` AntiZapret (`antizapret_params.py`, `antizapret_settings.py`, `AntizapretConfigTab.tsx`).
+- **Docs: прокси-узлы** — в корневом README вариант «Прокси» / `--proxy-only` и ссылки; в [proxy-agent.md](docs/proxy-agent.md) — клон репо на RU, `PROXY_AGENT_ALLOWED_IPS` и таблица env; чеклисты в [proxy-nodes.md](docs/proxy-nodes.md) / [uzly.md](docs/uzly.md); уточнение `linked_vpn_node_id` (API без UI).
+- **OpenVPN restart после HA / multihome** — `restart_all_openvpn_servers` учитывает `OPENVPN_UDP_ENABLE` / `OPENVPN_TCP_ENABLE` из setup узла и не поднимает отключённые протоколы даже при fallback без systemd-статуса (`openvpn_restart.py`).
+
+### ✨ Added
+
+- **OpenVPN multihome (несколько IP на сервере)** — в **Конфиг AntiZapret → Адреса подключения** переключатель для узлов с несколькими публичными IPv4:
+  - панель вставляет директиву `multihome` в server conf (`antizapret-udp|tcp`, `vpn-udp|tcp`) и перезапускает OpenVPN;
+  - желаемое состояние хранится в БД панели (`nodes.openvpn_multihome`, **node-local**, не реплицируется в HA);
+  - после `setup.sh` AntiZapret (`rm -rf /etc/openvpn/server/*`) стоковые conf снова без `multihome` — при открытии страницы, если флаг включён, панель **авто-восстанавливает** директиву на диск; есть кнопка **«Восстановить»** и бейдж «не на диске»;
+  - рестарт только unit’ов, разрешённых в `setup`: `OPENVPN_UDP_ENABLE` / `OPENVPN_TCP_ENABLE` (при `OPENVPN_TCP_ENABLE=n` TCP не трогается);
+  - ensure также вызывается после panel-doall / CIDR apply / shared domain / edit-files / Push full / HA crypto sync, если флаг у узла включён;
+  - скрипты и репозиторий AntiZapret **не** меняются (`custom-doall.sh` не используется);
+  - API: `GET/PUT /nodes/{id}/openvpn-multihome`; node agent: `GET/POST /openvpn/multihome`.
+  - Docs: [antizapret-config.md](docs/antizapret-config.md#openvpn-multihome-несколько-ip-на-сервере), [PROJECT_MAP.md](docs/PROJECT_MAP.md).
+- **Конфигурация → Прокси** — сводная вкладка (`/proxy`, feature `proxy_nodes`): статус/DESTINATION прокси-узлов (`ProxyNodePanel`), адреса remote активного VPN (`RemoteHostsCard`), быстрые ссылки на Узлы / AntiZapret / NOC / Модули. Docs: [proxy-nodes.md](docs/proxy-nodes.md).
+- **Маршрутизация / CIDR: расписание автообновления** — вкладка **Настройки** (`?tab=settings`): вкл/выкл, время (UTC) и интервал в днях (1/3/7/14 или своё); API `GET/PATCH /routing/cidr-db/schedule`; планировщик учитывает `CIDR_DB_REFRESH_INTERVAL_DAYS` и не гоняет ingest каждую ночь, если интервал ещё не прошёл (`cidr_scheduler.py`, `CidrScheduleCard.tsx`, `RoutingSettingsTab.tsx`).
+- **Карточка клиента: локальный IP** — в мета-блоке карточки на дашборде показывается выданный туннельный адрес (`local_ip` в `VpnConfigResponse`): WireGuard — `AllowedIPs` из серверного conf, OpenVPN — live `virtual_address` или последний из сессий трафика; переключатель «Локальный IP» в настройках карточек (`ConfigCard`, `client_local_ip.py`).
+- **Прокси-узлы (волна 1)** — feature toggle `proxy_nodes` / `FEATURE_PROXY_NODES_ENABLED` (**default off**): узлы `node_kind=proxy`, отдельный `proxy_agent` на RU (`:9101`, systemd `adminpanelaz-proxy`), панель через `ProxyNodeAdapter` — health/status, смена DESTINATION в iptables, mappings. Панель **не** ставит `proxy.sh`. Прокси нельзя активировать как VPN. Автоустановка агента: `sudo ./install.sh --proxy-only --with-systemd -y` (или мастер). Docs: [proxy-nodes.md](docs/proxy-nodes.md), [uzly.md](docs/uzly.md), [proxy-agent.md](docs/proxy-agent.md).
+- **Прокси-узлы (волна 2, NOC IP)** — при включённом модуле overview NOC склеивает сессию с mappings `proxy_agent`: домашний IP + geo при совпадении порта, иначе IP прокси + пометка «через прокси» / «IP не восстановлен» в списке подключений. Docs: [proxy-nodes.md](docs/proxy-nodes.md), [noc-monitoring.md](docs/noc-monitoring.md#подключения-через-прокси-узел).
+- **install.sh --proxy-only** — роль «только proxy_agent» по образцу `--node-only`: env + ключ + systemd `adminpanelaz-proxy`, без панели и без `proxy.sh`.
+- **Несколько адресов OpenVPN на узле** — в **Конфиг AntiZapret → Адреса подключения** админ задаёт упорядоченный список IP/доменов (до 8) на активном узле; при скачивании `.ovpn` (сайт, QR, Telegram, публичная ссылка) панель подставляет несколько `remote` в этом порядке. Список в БД панели переживает `setup.sh`; непустой список пишет первый адрес в `OPENVPN_HOST`, пустой патч выключает и `OPENVPN_HOST` не трогает. API: `GET/PUT /nodes/{id}/remote-hosts`. Docs: [antizapret-config.md](docs/antizapret-config.md#несколько-адресов-подключения).
+- **Multi-remote этап 06** — после пересборки профилей из панели `.ovpn` на диске получают multi-`remote`; при скачивании WG/Amnezia `Endpoint` = первый адрес списка (порт сохраняется, на диск не пишется); кнопка «Добавить первый адрес в allow-ips» / `POST /nodes/{id}/remote-hosts/allow-first` идемпотентно дописывает `hosts[0]` в `allow-ips.txt`. После `setup.sh` диск снова сток до следующей пересборки из панели; выдача всегда патчит из БД.
+- **Раздельный учёт OpenVPN UDP/TCP** — коллектор пишет `protocol_type` `openvpn-udp` / `openvpn-tcp` по суффиксу профиля; в политике доступа — поля `traffic_consumed_udp_*` / `traffic_consumed_tcp_*` (лимиты и блокировки по-прежнему по сумме всего OpenVPN).
+
+### 🐛 Fixed
+
+- **NOC: ложные инциденты при выключенном TCP/WG** — службы `openvpn-server@*-tcp` / `wg-quick@*` больше не попадают в ленту инцидентов и health score, если в `setup` задано `OPENVPN_TCP_ENABLE=n` / `WIREGUARD_ENABLE=n` (аналогично UDP) (`antizapret_settings.py`, `antizapret.py`).
+- **Карточка конфига: трафик по группе UDP+TCP / UDP / TCP** — переключатель больше не показывает одну сумму OpenVPN: в режиме UDP или TCP отображается расход только этого транспорта (`ConfigCard`, `resolveDisplayedTraffic`, `access_policy.py`).
+- **Карточка конфига: «Подключение» по группе UDP/TCP** — статус онлайн/офлайн и фильтр присутствия учитывают профиль сессии (`*-udp` / `*-tcp`), а не любое OpenVPN-подключение (`buildClientConnectionMap`, `isConfigConnected`).
+- **Адреса подключения: только IPv4/hostname** — в списке remote отклоняется IPv6 (ломает OpenVPN); допускаются IPv4 и домены (`openvpn_remote_hosts.py`).
+- **HA: allow-ips после «Добавить первый адрес»** — `POST .../remote-hosts/allow-first` реплицирует `allow_ips` на replica (как PUT из редактора файлов) + `doall` (`nodes.py`, `maybe_replicate_config_files`).
+
+### 🧪 Tests
+
+- **OpenVPN multihome** — conf-патч / ensure helpers (`test_openvpn_multihome.py`), API toggle (`test_nodes_openvpn_multihome_api.py`), post-doall ensure (`test_background_tasks_doall.py`).
+- **OpenVPN restart + protocol flags** — пропуск TCP при `OPENVPN_TCP_ENABLE=n`, явные flags, fallback без status (`test_node_sync_openvpn_restart.py`).
+- **VPN monitor service filter** — `OPENVPN_TCP_ENABLE=n` исключает TCP unit'ы из мониторинга (`test_vpn_monitor_service_filter.py`).
+- **OpenVPN transport traffic** — маппинг профиля → `protocol_type`, фильтр потребления по UDP/TCP/all (`test_openvpn_transport_traffic.py`).
+- **Config card connection map** — раздельные флаги UDP/TCP и выбор по группе; захват локальных IP из OVPN/WG (`configCardUtils.connection.test.ts`).
+- **Client local IP** — нормализация CIDR/порта и разбор `# Client` + `AllowedIPs` из WG conf (`test_client_local_ip.py`).
+- **Multi-remote / allow-ips** — нормализация remote (в т.ч. reject IPv6), API remote-hosts, патч `.ovpn` на диске, WG Endpoint, allow-first + HA replicate (`test_openvpn_remote_hosts.py`, `test_nodes_remote_hosts_api.py`, `test_patch_openvpn_on_disk.py`, `test_profile_delivery.py`, `test_wireguard_endpoint.py`, `test_remote_hosts_allow_first.py`).
+- **Прокси-узлы** — модель/`node_kind`, adapter, DESTINATION/iptables, NOC enrich + overview, badge label (`test_proxy_nodes_model.py`, `test_proxy_node_adapter.py`, `test_proxy_agent_destination.py`, `test_proxy_noc_enrich.py`, `test_monitoring_overview_proxy.py`, `proxyViaBadgeLabel.test.ts`).
+- **AdBlock params** — миграция `BLOCK_ADS` → `ANTIZAPRET_ADBLOCK` / `VPN_ADBLOCK` (`test_antizapret_adblock_settings.py`).
+- **HA scope `/proxy`** — путь сводки прокси в group-scope (`haNodeScope.test.ts`).
 
 ---
 
@@ -2158,7 +2213,9 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.19.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.21.0...HEAD
+[2.21.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.20.0...v2.21.0
+[2.20.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.19.0...v2.20.0
 [2.19.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.16.0...v2.17.0

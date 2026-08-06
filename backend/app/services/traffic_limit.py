@@ -222,6 +222,7 @@ def get_client_consumed_traffic_bytes(
     client_name: str,
     node_id: int | None = None,
     period_days: int | None = None,
+    protocol_types: set[str] | frozenset[str] | None = None,
     normalize_identity=None,
 ):
     from app.models import UserTrafficSample, UserTrafficStatProtocol
@@ -230,6 +231,12 @@ def get_client_consumed_traffic_bytes(
     target = normalize_identity(client_name)
     if not target:
         return 0
+
+    allowed_protocols = None
+    if protocol_types is not None:
+        allowed_protocols = {str(p).strip().lower() for p in protocol_types if str(p).strip()}
+        if not allowed_protocols:
+            return 0
 
     def _match_names(model):
         names = []
@@ -257,6 +264,8 @@ def get_client_consumed_traffic_bytes(
         )
         if node_id is not None:
             query = query.filter(UserTrafficSample.node_id == node_id)
+        if allowed_protocols is not None:
+            query = query.filter(UserTrafficSample.protocol_type.in_(sorted(allowed_protocols)))
         total = 0
         for row in query.all():
             total += int(row.delta_received or 0) + int(row.delta_sent or 0)
@@ -271,6 +280,8 @@ def get_client_consumed_traffic_bytes(
         query = db.query(UserTrafficStatProtocol).filter_by(common_name=candidate)
         if node_id is not None:
             query = query.filter(UserTrafficStatProtocol.node_id == node_id)
+        if allowed_protocols is not None:
+            query = query.filter(UserTrafficStatProtocol.protocol_type.in_(sorted(allowed_protocols)))
         for row in query.all():
             total += int(row.total_received or 0) + int(row.total_sent or 0)
     return total

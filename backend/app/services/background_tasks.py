@@ -416,6 +416,8 @@ class BackgroundTaskService:
         progress_updater: Callable[[int, str, str | None], None] | None = None,
         *,
         recreate_profiles: bool = True,
+        hosts: list[str] | None = None,
+        ensure_openvpn_multihome: bool = False,
     ) -> dict[str, str]:
         if progress_updater:
             progress_updater(10, "AntiZapret: запуск doall.sh…")
@@ -428,10 +430,31 @@ class BackgroundTaskService:
             if progress_updater:
                 progress_updater(65, "AntiZapret: пересоздание профилей клиентов…")
             try:
-                recreate_output = adapter.recreate_profiles()
+                from app.services.openvpn_profile_repair import recreate_openvpn_profiles
+
+                result = recreate_openvpn_profiles(adapter, hosts=hosts)
+                if not result.success:
+                    raise RuntimeError(
+                        result.errors[0] if result.errors else "Ошибка пересоздания профилей"
+                    )
+                recreate_output = result.output
             except Exception as exc:
                 raise self._adapter_error(exc) from exc
-        combined = "\n".join(part for part in [doall_output, recreate_output] if part).strip()
+        multihome_output = ""
+        if ensure_openvpn_multihome:
+            if progress_updater:
+                progress_updater(90, "AntiZapret: восстановление OpenVPN multihome…")
+            try:
+                mh = adapter.ensure_openvpn_multihome(True)
+                if isinstance(mh, dict):
+                    multihome_output = json.dumps(mh, ensure_ascii=False)
+                else:
+                    multihome_output = str(mh or "")
+            except Exception as exc:
+                raise self._adapter_error(exc) from exc
+        combined = "\n".join(
+            part for part in [doall_output, recreate_output, multihome_output] if part
+        ).strip()
         return {
             "message": (
                 "doall и пересоздание профилей клиентов выполнены успешно"
@@ -447,6 +470,8 @@ class BackgroundTaskService:
         progress_updater: Callable[[int, str, str | None], None] | None = None,
         *,
         recreate_profiles: bool = True,
+        hosts: list[str] | None = None,
+        ensure_openvpn_multihome: bool = False,
     ) -> dict[str, str]:
         if progress_updater:
             progress_updater(5, "Синхронизация провайдеров…")
@@ -455,7 +480,13 @@ class BackgroundTaskService:
         except Exception as exc:
             raise self._adapter_error(exc) from exc
         sync_text = json.dumps(sync_output, ensure_ascii=False) if isinstance(sync_output, dict) else str(sync_output or "")
-        result = self.task_run_doall(adapter, progress_updater, recreate_profiles=recreate_profiles)
+        result = self.task_run_doall(
+            adapter,
+            progress_updater,
+            recreate_profiles=recreate_profiles,
+            hosts=hosts,
+            ensure_openvpn_multihome=ensure_openvpn_multihome,
+        )
         combined = "\n".join(part for part in [sync_text, result.get("output", "")] if part).strip()
         return {
             "message": "Маршрутизация применена (doall.sh)",
@@ -474,6 +505,7 @@ class BackgroundTaskService:
         def _callable(progress_updater: Callable[[int, str, str | None], None] | None = None) -> dict[str, str]:
             from app.models import Node
             from app.services.node_manager import get_adapter_for_node
+            from app.services.profile_delivery import load_node_remote_hosts
 
             db = SessionLocal()
             try:
@@ -491,8 +523,13 @@ class BackgroundTaskService:
                     progress_updater(percent, staged, msg)
 
                 adapter = get_adapter_for_node(node)
+                hosts = load_node_remote_hosts(db, captured_node_id) if captured_recreate else None
                 result = self.task_routing_apply(
-                    adapter, _node_progress, recreate_profiles=captured_recreate
+                    adapter,
+                    _node_progress,
+                    recreate_profiles=captured_recreate,
+                    hosts=hosts,
+                    ensure_openvpn_multihome=bool(node.openvpn_multihome),
                 )
                 result["message"] = f"{node_label}: {result.get('message', 'Маршрутизация применена')}"
                 result["output"] = json.dumps(

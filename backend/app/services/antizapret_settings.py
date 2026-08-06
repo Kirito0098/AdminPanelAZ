@@ -3,10 +3,29 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from app.services.antizapret_params import ANTIZAPRET_PARAMS, KNOWN_SETTING_KEYS
+
+# systemd unit → setup flag that must be enabled for the unit to be monitored.
+VPN_MONITOR_SERVICE_FLAGS: dict[str, str] = {
+    "openvpn-server@antizapret-udp": "OPENVPN_UDP_ENABLE",
+    "openvpn-server@antizapret-tcp": "OPENVPN_TCP_ENABLE",
+    "openvpn-server@vpn-udp": "OPENVPN_UDP_ENABLE",
+    "openvpn-server@vpn-tcp": "OPENVPN_TCP_ENABLE",
+    "wg-quick@antizapret": "WIREGUARD_ENABLE",
+    "wg-quick@vpn": "WIREGUARD_ENABLE",
+}
+
+_PROTOCOL_ENABLE_ENVS: tuple[str, ...] = (
+    "OPENVPN_UDP_ENABLE",
+    "OPENVPN_TCP_ENABLE",
+    "WIREGUARD_ENABLE",
+)
+
+_ServiceT = TypeVar("_ServiceT")
 
 
 def normalize_flag(v: Any) -> str:
@@ -40,6 +59,54 @@ def read_setup_env_value(setup_path: Path, env_name: str, default: str = "") -> 
     return match.group(1).strip() if match else default
 
 
+def is_setup_flag_enabled(raw: str | None, *, default: bool = True) -> bool:
+    """Parse AntiZapret y/n-style flags; empty → default (usually treat as enabled)."""
+    s = (raw or "").strip().lower()
+    if not s:
+        return default
+    return s in ("y", "yes", "true", "1", "on")
+
+
+def is_vpn_monitor_service_expected(
+    service_name: str,
+    settings: Mapping[str, str],
+    *,
+    default_enabled: bool = True,
+) -> bool:
+    """Whether a VPN systemd unit should be monitored given setup enable flags."""
+    env_name = VPN_MONITOR_SERVICE_FLAGS.get(service_name)
+    if env_name is None:
+        return True
+    return is_setup_flag_enabled(settings.get(env_name), default=default_enabled)
+
+
+def filter_vpn_monitor_services(
+    services: Sequence[_ServiceT],
+    settings: Mapping[str, str],
+    *,
+    default_enabled: bool = True,
+) -> list[_ServiceT]:
+    """Drop VPN units disabled in setup (e.g. OPENVPN_TCP_ENABLE=n)."""
+    return [
+        svc
+        for svc in services
+        if is_vpn_monitor_service_expected(
+            getattr(svc, "name", "") or "",
+            settings,
+            default_enabled=default_enabled,
+        )
+    ]
+
+
+def read_protocol_enable_flags(setup_path: Path) -> dict[str, str]:
+    """Return OPENVPN_UDP/TCP_ENABLE and WIREGUARD_ENABLE as y/n (default y)."""
+    flags: dict[str, str] = {}
+    for env_name in _PROTOCOL_ENABLE_ENVS:
+        raw = read_setup_env_value(setup_path, env_name, "y")
+        flags[env_name] = "y" if is_setup_flag_enabled(raw, default=True) else "n"
+    return flags
+
+
 def is_openvpn_verbose_log_enabled(setup_path: Path) -> bool:
     return read_setup_env_value(setup_path, "OPENVPN_LOG", "n").lower() == "y"
 
@@ -60,6 +127,15 @@ def read_antizapret_settings(setup_path: Path) -> dict[str, str]:
         else:
             m = re.search(rf"^{re.escape(env)}=([yn])$", content, re.M | re.I)
             settings[key] = m.group(1).lower() if m else default
+
+    # Legacy BLOCK_ADS → ANTIZAPRET_ADBLOCK (AntiZapret update.sh migrates the same way).
+    if not re.search(r"^ANTIZAPRET_ADBLOCK=", content, re.M | re.I):
+        legacy = re.search(r"^BLOCK_ADS=([yn])$", content, re.M | re.I)
+        if legacy:
+            settings["ANTIZAPRET_ADBLOCK"] = legacy.group(1).lower()
+
+    # Protocol enable flags (monitoring / incidents; not in ANTIZAPRET_PARAMS UI schema).
+    settings.update(read_protocol_enable_flags(setup_path))
     return settings
 
 
@@ -67,6 +143,10 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
     """Apply partial updates to setup file. Unknown keys are ignored."""
     if not isinstance(new_settings, dict):
         raise ValueError("Ожидается JSON-объект")
+
+    # Accept legacy API key block_ads as ANTIZAPRET_ADBLOCK.
+    if "block_ads" in new_settings and "ANTIZAPRET_ADBLOCK" not in new_settings:
+        new_settings = {**new_settings, "ANTIZAPRET_ADBLOCK": new_settings["block_ads"]}
 
     desired: dict[str, str] = {}
     for p in ANTIZAPRET_PARAMS:
@@ -94,6 +174,7 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
     new_lines: list[str] = []
     found: set[str] = set()
     changes = 0
+    migrate_block_ads = "ANTIZAPRET_ADBLOCK" in desired
 
     for line in lines:
         stripped = line.strip()
@@ -102,6 +183,14 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
             continue
 
         key_part = stripped.split("=", 1)[0].strip()
+        # Rename legacy BLOCK_ADS when writing ANTIZAPRET_ADBLOCK (same as update.sh).
+        if migrate_block_ads and key_part.upper() == "BLOCK_ADS":
+            val = desired["ANTIZAPRET_ADBLOCK"]
+            comment = " " + stripped.split("#", 1)[1].strip() if "#" in stripped else ""
+            new_lines.append(f"ANTIZAPRET_ADBLOCK={val}{comment}\n")
+            found.add("ANTIZAPRET_ADBLOCK")
+            changes += 1
+            continue
         if key_part in desired:
             val = desired[key_part]
             comment = " " + stripped.split("#", 1)[1].strip() if "#" in stripped else ""

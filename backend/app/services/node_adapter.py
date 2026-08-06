@@ -182,6 +182,12 @@ class NodeAdapter(ABC):
     def ensure_openvpn_ban_check(self) -> dict: ...
 
     @abstractmethod
+    def ensure_openvpn_multihome(self, enabled: bool) -> dict: ...
+
+    @abstractmethod
+    def get_openvpn_multihome_status(self) -> dict: ...
+
+    @abstractmethod
     def get_warper_health(self) -> dict: ...
 
     @abstractmethod
@@ -560,6 +566,12 @@ class LocalNodeAdapter(NodeAdapter):
 
     def ensure_openvpn_ban_check(self) -> dict:
         return ensure_openvpn_ban_check(self._service.base_path)
+
+    def ensure_openvpn_multihome(self, enabled: bool) -> dict:
+        return self._service.ensure_openvpn_multihome(bool(enabled))
+
+    def get_openvpn_multihome_status(self) -> dict:
+        return self._service.get_openvpn_multihome_status()
 
     def get_warper_health(self) -> dict:
         return self._warper.get_health()
@@ -1102,8 +1114,16 @@ class RemoteNodeAdapter(NodeAdapter):
         return data.get("server_ip")
 
     def get_service_status(self) -> list[MonitoringService]:
+        from app.services.antizapret_settings import filter_vpn_monitor_services
+
         overview = self._get_monitoring_overview()
-        return [MonitoringService(**s) for s in overview.get("services", [])]
+        services = [MonitoringService(**s) for s in overview.get("services", [])]
+        try:
+            settings = self.get_antizapret_settings()
+            services = filter_vpn_monitor_services(services, settings)
+        except Exception:
+            pass
+        return services
 
     def parse_openvpn_status(self) -> list[OpenVpnClient]:
         clients, _ = self.get_openvpn_status_snapshot()
@@ -1228,6 +1248,17 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def ensure_openvpn_ban_check(self) -> dict:
         return self._request("POST", "/system/ensure-openvpn-ban-check", timeout=30.0)
+
+    def ensure_openvpn_multihome(self, enabled: bool) -> dict:
+        return self._request(
+            "POST",
+            "/openvpn/multihome",
+            json={"enabled": bool(enabled)},
+            timeout=120.0,
+        )
+
+    def get_openvpn_multihome_status(self) -> dict:
+        return self._request("GET", "/openvpn/multihome", timeout=30.0)
 
     def get_warper_health(self) -> dict:
         return self._request("GET", "/warper/health")
