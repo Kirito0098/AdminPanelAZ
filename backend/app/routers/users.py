@@ -126,6 +126,17 @@ def update_user(
     if payload.role is not None:
         if not is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять роль")
+        if user.role == UserRole.admin and payload.role != UserRole.admin:
+            other_admins = (
+                db.query(User)
+                .filter(User.role == UserRole.admin, User.id != user.id, User.is_active.is_(True))
+                .count()
+            )
+            if other_admins == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Нельзя снять роль у последнего администратора",
+                )
         user.role = payload.role
     if payload.theme is not None:
         user.theme = payload.theme
