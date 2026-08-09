@@ -24,7 +24,7 @@ export function firstNonEmptyRemoteHost(hosts: string[]): string | undefined {
 export type RemoteHostsCardProps = {
   nodeId: number | null
   disabled?: boolean
-  /** Standalone card vs list block embedded in AntiZapret «Адреса подключения». */
+  /** Standalone card vs list block embedded in AntiZapret «OpenVPN (панель)». */
   variant?: 'card' | 'embedded'
   className?: string
   id?: string
