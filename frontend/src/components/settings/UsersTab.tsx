@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
-  ChevronDown,
   MoreHorizontal,
   Pencil,
   Save,
@@ -46,6 +45,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useNotifications } from '@/context/NotificationContext'
+import { SettingsCollapsible, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { ROLE_HINTS, ROLE_LABELS } from '@/components/settings/settingsLabels'
 import { cn } from '@/lib/utils'
 import type { User as PanelUser, UserRole, VisibleVpnProfilesPolicy, VpnConfig } from '@/types'
@@ -429,55 +429,45 @@ export default function UsersTab({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-semibold tracking-tight">Учётные записи</h3>
-            <Badge variant="secondary" className="tabular-nums">
-              {stats.total}
-            </Badge>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {stats.admins} админ.
-            {' · '}
-            {stats.regular} польз.
-            {' · '}
-            {stats.active} активных
-          </p>
-        </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-          <div className="relative w-full sm:w-64">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={userQuery}
-              onChange={(e) => setUserQuery(e.target.value)}
-              placeholder="Поиск: логин, роль, Telegram…"
-              className="h-9 pl-9"
-              aria-label="Поиск пользователей"
-            />
-            {userQuery ? (
-              <button
-                type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                onClick={() => setUserQuery('')}
-                aria-label="Очистить поиск"
-              >
-                <X size={14} />
-              </button>
-            ) : null}
-          </div>
-          <Button
-            type="button"
-            size="sm"
-            className="h-9 shrink-0 gap-1.5"
-            onClick={() => setCreateOpen((v) => !v)}
-            aria-expanded={createOpen}
-          >
-            <UserPlus size={15} />
-            Добавить
-          </Button>
-        </div>
-      </div>
+      <SettingsToolbar
+        title="Учётные записи"
+        count={stats.total}
+        meta={`${stats.admins} админ. · ${stats.regular} польз. · ${stats.active} активных`}
+        actions={
+          <>
+            <div className="relative w-full sm:w-64">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={userQuery}
+                onChange={(e) => setUserQuery(e.target.value)}
+                placeholder="Поиск: логин, роль, Telegram…"
+                className="h-9 pl-9"
+                aria-label="Поиск пользователей"
+              />
+              {userQuery ? (
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  onClick={() => setUserQuery('')}
+                  aria-label="Очистить поиск"
+                >
+                  <X size={14} />
+                </button>
+              ) : null}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="h-9 shrink-0 gap-1.5"
+              onClick={() => setCreateOpen((v) => !v)}
+              aria-expanded={createOpen}
+            >
+              <UserPlus size={15} />
+              Добавить
+            </Button>
+          </>
+        }
+      />
 
       {createOpen ? (
         <Card className="border-primary/25 shadow-sm">
@@ -666,58 +656,37 @@ export default function UsersTab({
         </CardContent>
       </Card>
 
-      <div className="rounded-lg border bg-muted/20">
-        <button
-          type="button"
-          onClick={() => setPolicyOpen((v) => !v)}
-          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-          aria-expanded={policyOpen}
-        >
-          <div className="flex min-w-0 items-start gap-2.5">
-            <EyeOff size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
-            <div className="min-w-0">
-              <p className="text-sm font-medium">Видимость VPN-профилей по умолчанию</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Что видят обычные пользователи без персонального исключения
-              </p>
+      <SettingsCollapsible
+        open={policyOpen}
+        onOpenChange={setPolicyOpen}
+        title="Видимость VPN-профилей по умолчанию"
+        description="Что видят обычные пользователи без персонального исключения"
+        icon={<EyeOff size={16} />}
+      >
+        {defaultPolicyLoading ? (
+          <Spinner label="Загрузка политики..." className="py-4" />
+        ) : (
+          <>
+            <VpnVisibilityPolicyEditor value={defaultPolicy} onChange={setDefaultPolicy} />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void saveDefaultVisibility()}
+                disabled={savingDefaultPolicy}
+              >
+                <Save size={15} />
+                {savingDefaultPolicy ? 'Сохранение...' : 'Сохранить умолчание'}
+              </Button>
+              {isVisibleVpnPolicyEmpty(defaultPolicy) && (
+                <span className="text-xs text-amber-700 dark:text-amber-300">
+                  Пустой каталог — пользователи не увидят профили
+                </span>
+              )}
             </div>
-          </div>
-          <ChevronDown
-            size={16}
-            className={cn(
-              'shrink-0 text-muted-foreground transition-transform',
-              policyOpen && 'rotate-180',
-            )}
-          />
-        </button>
-        {policyOpen ? (
-          <div className="space-y-3 border-t px-4 py-3">
-            {defaultPolicyLoading ? (
-              <Spinner label="Загрузка политики..." className="py-4" />
-            ) : (
-              <>
-                <VpnVisibilityPolicyEditor value={defaultPolicy} onChange={setDefaultPolicy} />
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => void saveDefaultVisibility()}
-                    disabled={savingDefaultPolicy}
-                  >
-                    <Save size={15} />
-                    {savingDefaultPolicy ? 'Сохранение...' : 'Сохранить умолчание'}
-                  </Button>
-                  {isVisibleVpnPolicyEmpty(defaultPolicy) && (
-                    <span className="text-xs text-amber-700 dark:text-amber-300">
-                      Пустой каталог — пользователи не увидят профили
-                    </span>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        ) : null}
-      </div>
+          </>
+        )}
+      </SettingsCollapsible>
 
       <AppDialog
         open={activeEditor !== null}

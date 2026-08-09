@@ -1,15 +1,17 @@
-import { FormEvent } from 'react'
-import type { LucideIcon } from 'lucide-react'
-import { Clock, Globe, KeyRound, Moon, Palette, Save, Sun } from 'lucide-react'
+import { FormEvent, useState } from 'react'
+import { Clock, KeyRound, Moon, Palette, Save, Send, Sun } from 'lucide-react'
 import TwoFactorTab from '@/components/settings/TwoFactorTab'
 import PasskeysTab from '@/components/settings/PasskeysTab'
 import PersonalTelegramCard from '@/components/settings/PersonalTelegramCard'
 import NocScheduleCard from '@/components/settings/NocScheduleCard'
+import { SettingsCollapsible, SettingsPanel, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useAuth } from '@/context/AuthContext'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useTimezone } from '@/context/TimezoneContext'
 import { formatDateTime, getTimeZoneLabel } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
@@ -24,46 +26,6 @@ interface PersonalTabProps {
   onCurrentPwdChange: (value: string) => void
   onNewPwdChange: (value: string) => void
   onChangePassword: (e: FormEvent) => void
-}
-
-function SectionHeading({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="md:col-span-2">
-      <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-      <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-    </div>
-  )
-}
-
-function MetricPill({
-  icon: Icon,
-  label,
-  value,
-  tone = 'default',
-}: {
-  icon: LucideIcon
-  label: string
-  value: string
-  tone?: 'default' | 'success' | 'muted'
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 shadow-sm backdrop-blur-sm">
-      <div
-        className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-          tone === 'success' && 'bg-primary/15 text-primary',
-          tone === 'muted' && 'bg-muted text-muted-foreground',
-          tone === 'default' && 'bg-muted/80 text-foreground',
-        )}
-      >
-        <Icon size={18} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="truncate text-sm font-semibold">{value}</p>
-      </div>
-    </div>
-  )
 }
 
 const THEME_OPTIONS = [
@@ -97,37 +59,32 @@ export default function PersonalTab({
   onChangePassword,
 }: PersonalTabProps) {
   const { timeZone, effectiveTimeZone, browserTimeZone, options, setTimeZone } = useTimezone()
+  const { isEnabled } = useFeatureModules()
+  const { user } = useAuth()
+  const [extrasOpen, setExtrasOpen] = useState(false)
   const now = new Date()
   const themeLabel = theme === 'light' ? 'Светлая' : 'Тёмная'
   const tzLabel = timeZone
     ? options.find((o) => o.value === timeZone)?.label ?? effectiveTimeZone
     : `Браузер (${getTimeZoneLabel(browserTimeZone)})`
 
+  const showTelegramCard = isEnabled('telegram') && Boolean(user)
+  const showNocCard = user?.role === 'admin'
+  const showExtras = showTelegramCard || showNocCard
+
   return (
-    <div className="flex flex-col gap-4 orientation-compact-settings-tab">
-      <div className="grid gap-4 md:grid-cols-2 md:items-start">
-        <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card p-4 md:col-span-2">
-          <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/10 blur-2xl" />
-          <div className="relative grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <MetricPill icon={Palette} label="Тема" value={themeLabel} tone="success" />
-            <MetricPill icon={Globe} label="Часовой пояс" value={tzLabel} />
-            <MetricPill
-              icon={Clock}
-              label="Сейчас"
-              value={formatDateTime(now)}
-              tone="default"
-            />
-          </div>
-        </div>
+    <div className="space-y-4">
+      <SettingsToolbar
+        title="Профиль"
+        meta={
+          <>
+            Тема: {themeLabel} · Часовой пояс: {tzLabel}
+          </>
+        }
+      />
 
-        <SectionHeading
-          title="Интерфейс"
-          description="Тема оформления и отображение даты и времени"
-        />
-
-        <div className="grid gap-4 md:col-span-2 md:grid-cols-2 md:items-stretch">
-        <Card className="flex h-full flex-col overflow-hidden shadow-sm">
-          <div className="h-1 bg-gradient-to-r from-violet-500/70 to-violet-500/15" />
+      <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
+        <Card className="flex h-full flex-col shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Palette size={18} />
@@ -179,8 +136,7 @@ export default function PersonalTab({
           </CardContent>
         </Card>
 
-        <Card className="flex h-full flex-col overflow-hidden shadow-sm">
-          <div className="h-1 bg-gradient-to-r from-sky-500/70 to-sky-500/15" />
+        <Card className="flex h-full flex-col shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Clock size={18} />
@@ -222,68 +178,68 @@ export default function PersonalTab({
             </div>
           </CardContent>
         </Card>
-        </div>
-
-        <PersonalTelegramCard />
-
-        <NocScheduleCard />
-
-        <SectionHeading
-          title="Безопасность"
-          description="Пароль, двухфакторная аутентификация и вход без пароля"
-        />
-
-        <Card className="overflow-hidden shadow-sm md:col-span-2">
-          <div className="h-1 bg-gradient-to-r from-primary/80 to-primary/15" />
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <KeyRound size={18} />
-              Смена пароля
-            </CardTitle>
-            <CardDescription>Обновите пароль для вашей учётной записи</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form noValidate onSubmit={onChangePassword} className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
-                <div className="flex flex-col space-y-2 rounded-xl border bg-muted/20 p-4">
-                  <Label htmlFor="currentPwd">Текущий пароль</Label>
-                  <Input
-                    id="currentPwd"
-                    type="password"
-                    value={currentPwd}
-                    onChange={(e) => onCurrentPwdChange(e.target.value)}
-                    autoComplete="current-password"
-                    className="w-full"
-                  />
-                </div>
-                <div className="flex flex-col space-y-2 rounded-xl border bg-muted/20 p-4">
-                  <Label htmlFor="newPwd">Новый пароль</Label>
-                  <Input
-                    id="newPwd"
-                    type="password"
-                    value={newPwd}
-                    onChange={(e) => onNewPwdChange(e.target.value)}
-                    autoComplete="new-password"
-                    className="w-full"
-                  />
-                </div>
-              </div>
-              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs text-muted-foreground">Минимум 4 символа</p>
-                <Button type="submit" className="w-full gap-1.5 sm:w-auto sm:shrink-0">
-                  <Save size={16} />
-                  Сохранить пароль
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-4 md:col-span-2 md:grid-cols-2 md:items-stretch">
-          <TwoFactorTab className="h-full" />
-          <PasskeysTab className="h-full" />
-        </div>
       </div>
+
+      <SettingsPanel>
+        <div className="mb-3 flex items-center gap-2">
+          <KeyRound size={18} className="text-muted-foreground" />
+          <div>
+            <h3 className="text-sm font-semibold tracking-tight">Смена пароля</h3>
+            <p className="text-xs text-muted-foreground">Обновите пароль для вашей учётной записи</p>
+          </div>
+        </div>
+        <form noValidate onSubmit={onChangePassword} className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
+            <div className="flex flex-col space-y-2 rounded-xl border bg-muted/20 p-4">
+              <Label htmlFor="currentPwd">Текущий пароль</Label>
+              <Input
+                id="currentPwd"
+                type="password"
+                value={currentPwd}
+                onChange={(e) => onCurrentPwdChange(e.target.value)}
+                autoComplete="current-password"
+                className="w-full"
+              />
+            </div>
+            <div className="flex flex-col space-y-2 rounded-xl border bg-muted/20 p-4">
+              <Label htmlFor="newPwd">Новый пароль</Label>
+              <Input
+                id="newPwd"
+                type="password"
+                value={newPwd}
+                onChange={(e) => onNewPwdChange(e.target.value)}
+                autoComplete="new-password"
+                className="w-full"
+              />
+            </div>
+          </div>
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">Минимум 4 символа</p>
+            <Button type="submit" className="w-full gap-1.5 sm:w-auto sm:shrink-0">
+              <Save size={16} />
+              Сохранить пароль
+            </Button>
+          </div>
+        </form>
+      </SettingsPanel>
+
+      <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
+        <TwoFactorTab className="h-full" />
+        <PasskeysTab className="h-full" />
+      </div>
+
+      {showExtras ? (
+        <SettingsCollapsible
+          open={extrasOpen}
+          onOpenChange={setExtrasOpen}
+          title="Telegram и NOC-сводка"
+          description="Привязка Telegram-аккаунта и персональное расписание сводок"
+          icon={<Send size={16} />}
+        >
+          {showTelegramCard ? <PersonalTelegramCard /> : null}
+          {showNocCard ? <NocScheduleCard /> : null}
+        </SettingsCollapsible>
+      ) : null}
     </div>
   )
 }

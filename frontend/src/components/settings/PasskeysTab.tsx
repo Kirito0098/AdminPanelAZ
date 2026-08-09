@@ -94,13 +94,7 @@ export default function PasskeysTab({ className }: { className?: string }) {
   }
 
   return (
-    <Card className={cn('flex h-full flex-col overflow-hidden shadow-sm', className)}>
-      <div
-        className={cn(
-          'h-1 bg-gradient-to-r',
-          credentials.length > 0 ? 'from-cyan-500/70 to-cyan-500/15' : 'from-muted-foreground/30 to-muted/10',
-        )}
-      />
+    <Card className={cn('flex h-full flex-col shadow-sm', className)}>
       <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
         <div>
           <CardTitle className="flex items-center gap-2 text-base">

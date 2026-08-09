@@ -154,7 +154,7 @@ export default function DdnsSettingsCard({ onSuggestDomain }: Props) {
 
   if (loading) {
     return (
-      <Card className="overflow-hidden shadow-sm md:col-span-2">
+      <Card className="shadow-sm">
         <CardContent className="flex items-center gap-3 py-8 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin text-primary" />
           Загрузка DDNS…
@@ -165,7 +165,7 @@ export default function DdnsSettingsCard({ onSuggestDomain }: Props) {
 
   if (loadError) {
     return (
-      <Card className="overflow-hidden shadow-sm md:col-span-2">
+      <Card className="shadow-sm">
         <CardContent className="space-y-3 py-6">
           <SettingsAlert variant="danger" title="DDNS недоступен">
             {loadError}
@@ -179,8 +179,7 @@ export default function DdnsSettingsCard({ onSuggestDomain }: Props) {
   }
 
   return (
-    <Card className="overflow-hidden shadow-sm md:col-span-2">
-      <div className="h-1 bg-gradient-to-r from-teal-500/70 to-teal-500/15" />
+    <Card className="shadow-sm">
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle className="flex items-center gap-2 text-base">

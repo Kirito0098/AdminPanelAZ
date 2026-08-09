@@ -11,11 +11,12 @@ import {
 } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import { SettingsToolbar } from '@/components/settings/SettingsChrome'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -71,15 +72,6 @@ function FormField({
     </div>
   )
 }
-function SectionHeading({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="md:col-span-2">
-      <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-      <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-    </div>
-  )
-}
-
 function ListRow({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl border bg-card/50 p-3 transition-colors [@media(hover:hover)]:hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between">
@@ -219,35 +211,25 @@ export default function AlertRulesCard() {
   }
 
   if (loading) {
-    return <Spinner label="Загрузка правил уведомлений..." className="py-12 md:col-span-2" />
+    return <Spinner label="Загрузка правил уведомлений..." className="py-12" />
   }
 
   return (
-    <div className="space-y-4 md:col-span-2">
+    <div className="space-y-4">
       <ConfirmDialogHost dialogProps={dialogProps} />
 
-      <SectionHeading
-        title="Свои правила"
-        description="Дополнительные условия поверх порогов CPU и RAM — например, число клиентов или недоступность узла"
-      />
-
-      <Card className="overflow-hidden shadow-sm">
-        <div className="h-1 bg-gradient-to-r from-violet-500/70 to-violet-500/15" />
-        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <BellRing size={18} />
-              Правила уведомлений
-            </CardTitle>
-            <CardDescription className="mt-1.5">
-              При срабатывании сообщение уходит в Telegram — как и при высокой нагрузке
-            </CardDescription>
-          </div>
+      <SettingsToolbar
+        title="Правила уведомлений"
+        meta="Свои условия поверх порогов CPU и RAM — число клиентов, недоступность узла и т.д. Срабатывание уходит в Telegram, как и при высокой нагрузке."
+        actions={
           <Badge variant={enabledCount > 0 ? 'default' : 'secondary'} className="shrink-0">
             {enabledCount} / {rules.length} вкл.
           </Badge>
-        </CardHeader>
-        <CardContent className="space-y-5">
+        }
+      />
+
+      <Card className="shadow-sm">
+        <CardContent className="space-y-5 pt-4">
           <InlineProgressBar active={saving} label="Создание правила..." />
 
           <form onSubmit={handleCreate} className="space-y-4 rounded-xl border bg-muted/15 p-4">

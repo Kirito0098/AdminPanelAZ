@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState, type LucideIcon } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react'
 import { ApiError, runSiteDiagnostics } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import { SettingsCollapsible, SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -117,39 +119,6 @@ const GUIDED_STEPS: Array<{ id: string; title: string; description: string }> = 
     description: 'Сводка и что делать дальше',
   },
 ]
-
-function MetricPill({
-  icon: Icon,
-  label,
-  value,
-  tone = 'default',
-}: {
-  icon: LucideIcon
-  label: string
-  value: string
-  tone?: 'default' | 'success' | 'warning' | 'danger' | 'muted'
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 shadow-sm backdrop-blur-sm">
-      <div
-        className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-          tone === 'success' && 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
-          tone === 'warning' && 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-          tone === 'danger' && 'bg-destructive/15 text-destructive',
-          tone === 'muted' && 'bg-muted text-muted-foreground',
-          tone === 'default' && 'bg-primary/10 text-primary',
-        )}
-      >
-        <Icon size={18} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="truncate text-sm font-semibold">{value}</p>
-      </div>
-    </div>
-  )
-}
 
 function StepCard({
   step,
@@ -289,6 +258,7 @@ export default function RunbookTab() {
   const [report, setReport] = useState<SiteDiagnosticsReport | null>(null)
   const [expandedStep, setExpandedStep] = useState<string | null>(null)
   const [showJson, setShowJson] = useState(false)
+  const [commandsOpen, setCommandsOpen] = useState(true)
 
   const run = useCallback(async () => {
     setRunning(true)
@@ -369,118 +339,65 @@ export default function RunbookTab() {
 
   return (
     <div className="space-y-4">
-      <div
-        className={cn(
-          'relative overflow-hidden rounded-xl border p-5',
-          heroState === 'running' && 'border-primary/30 bg-gradient-to-br from-primary/10 via-card to-card',
-          heroState === 'ok' && 'border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 via-card to-card',
-          heroState === 'warn' && 'border-amber-500/20 bg-gradient-to-br from-amber-500/10 via-card to-card',
-          heroState === 'fail' && 'border-destructive/30 bg-gradient-to-br from-destructive/10 via-card to-card',
-          heroState === 'idle' && 'border-border/80 bg-gradient-to-br from-muted/30 via-card to-card',
-        )}
-      >
-        <div
-          className={cn(
-            'pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full blur-3xl',
-            heroState === 'running' && 'bg-primary/20',
-            heroState === 'ok' && 'bg-emerald-500/15',
-            heroState === 'warn' && 'bg-amber-500/15',
-            heroState === 'fail' && 'bg-destructive/15',
-            heroState === 'idle' && 'bg-muted/40',
-          )}
-        />
-        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-4">
-            <div
-              className={cn(
-                'flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl shadow-sm',
-                heroState === 'running' && 'bg-primary/15 text-primary',
-                heroState === 'ok' && 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
-                heroState === 'warn' && 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-                heroState === 'fail' && 'bg-destructive/15 text-destructive',
-                heroState === 'idle' && 'bg-muted text-muted-foreground',
-              )}
-            >
-              {heroState === 'running' ? (
-                <Loader2 size={28} className="animate-spin" />
-              ) : heroState === 'ok' ? (
-                <CheckCircle2 size={28} />
-              ) : heroState === 'fail' ? (
-                <XCircle size={28} />
-              ) : heroState === 'warn' ? (
-                <AlertTriangle size={28} />
-              ) : (
-                <Stethoscope size={28} />
-              )}
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-lg font-semibold tracking-tight">{heroCopy.title}</h3>
-                {heroCopy.badge && (
-                  <Badge
-                    variant={
-                      heroState === 'ok'
-                        ? 'success'
-                        : heroState === 'warn'
-                          ? 'warning'
-                          : heroState === 'fail'
-                            ? 'destructive'
-                            : 'secondary'
-                    }
-                  >
-                    {heroCopy.badge}
-                  </Badge>
-                )}
-              </div>
-              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{heroCopy.description}</p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="lg"
-              className="gap-2"
-              onClick={() => void run()}
-              disabled={running}
-            >
-              {running ? <RefreshCw size={18} className="animate-spin" /> : <Play size={18} />}
+      <SettingsToolbar
+        title="Диагностика запуска"
+        meta={
+          report ? (
+            <SettingsMetaLine
+              items={[
+                { label: 'успешно', value: report.summary.ok },
+                { label: 'предупреждений', value: report.summary.warn },
+                { label: 'ошибок', value: report.summary.fail },
+                { label: 'сервис', value: report.service_name },
+              ]}
+            />
+          ) : (
+            'Проверка сервиса, файлов, сайта и сети на этом сервере'
+          )
+        }
+        actions={
+          <>
+            {heroCopy.badge && (
+              <Badge
+                variant={
+                  heroState === 'ok'
+                    ? 'success'
+                    : heroState === 'warn'
+                      ? 'warning'
+                      : heroState === 'fail'
+                        ? 'destructive'
+                        : 'secondary'
+                }
+              >
+                {heroCopy.badge}
+              </Badge>
+            )}
+            <Button size="sm" className="gap-2" onClick={() => void run()} disabled={running}>
+              {running ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
               {running ? 'Проверяем...' : report ? 'Запустить снова' : 'Запустить диагностику'}
             </Button>
             {report && (
               <>
-                <Button variant="outline" onClick={() => setShowJson((v) => !v)} disabled={running}>
+                <Button variant="outline" size="sm" onClick={() => setShowJson((v) => !v)} disabled={running}>
                   {showJson ? 'Скрыть JSON' : 'JSON-отчёт'}
                 </Button>
-                <Button variant="outline" className="gap-2" onClick={() => void copyJson()} disabled={running}>
-                  <Copy size={16} />
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => void copyJson()} disabled={running}>
+                  <Copy size={14} />
                   Копировать
                 </Button>
               </>
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
-      {report && !running && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricPill icon={CheckCircle2} label="Успешно" value={String(report.summary.ok)} tone="success" />
-          <MetricPill icon={AlertTriangle} label="Предупреждения" value={String(report.summary.warn)} tone="warning" />
-          <MetricPill icon={XCircle} label="Ошибки" value={String(report.summary.fail)} tone="danger" />
-          <MetricPill
-            icon={Server}
-            label="Сервис"
-            value={report.service_name}
-            tone="muted"
-          />
-        </div>
-      )}
+      <p className="text-sm text-muted-foreground">{heroCopy.description}</p>
 
       <SettingsAlert variant="info" title="Где выполняется проверка">
         Диагностика запускается на сервере панели. Для VPN-узлов и WARP используйте соответствующие разделы NOC.
       </SettingsAlert>
 
-      <Card className="overflow-hidden border-border/80 shadow-sm">
-        <div className="h-1 bg-gradient-to-r from-primary/80 via-primary/40 to-transparent" />
+      <Card className="shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Шаги проверки</CardTitle>
           <CardDescription>
@@ -521,40 +438,34 @@ export default function RunbookTab() {
       </Card>
 
       {report && !running && report.summary.fail > 0 && report.recommended_commands.length > 0 && (
-        <Card className="overflow-hidden border-amber-500/20 shadow-sm">
-          <div className="h-1 bg-gradient-to-r from-amber-500/80 to-amber-500/20" />
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Terminal size={18} />
-              Рекомендуемые команды
-            </CardTitle>
-            <CardDescription>
-              Выполните на сервере панели от имени администратора, если подсказки выше указывают на сбой
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {report.recommended_commands.map((cmd) => (
-              <div
-                key={cmd}
-                className="flex items-start gap-2 rounded-xl border bg-muted/20 p-3 font-mono text-xs sm:text-sm"
+        <SettingsCollapsible
+          open={commandsOpen}
+          onOpenChange={setCommandsOpen}
+          title="Рекомендуемые команды"
+          description="Выполните на сервере панели от имени администратора, если подсказки выше указывают на сбой"
+          icon={<Terminal size={16} />}
+        >
+          {report.recommended_commands.map((cmd) => (
+            <div
+              key={cmd}
+              className="flex items-start gap-2 rounded-lg border bg-card/60 p-3 font-mono text-xs sm:text-sm"
+            >
+              <code className="min-w-0 flex-1 whitespace-pre-wrap break-all leading-relaxed text-foreground">
+                {cmd}
+              </code>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                onClick={() => void copyCommand(cmd)}
+                aria-label="Копировать команду"
               >
-                <code className="min-w-0 flex-1 whitespace-pre-wrap break-all leading-relaxed text-foreground">
-                  {cmd}
-                </code>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="shrink-0"
-                  onClick={() => void copyCommand(cmd)}
-                  aria-label="Копировать команду"
-                >
-                  <Copy size={16} />
-                </Button>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+                <Copy size={16} />
+              </Button>
+            </div>
+          ))}
+        </SettingsCollapsible>
       )}
 
       {showJson && report && (

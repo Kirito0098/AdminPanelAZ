@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
-import { cn } from '@/lib/utils'
 
 type Props = {
   className?: string
@@ -60,10 +59,9 @@ export default function PanelRestartCard({ className, compact = false, onRestart
   }
 
   return (
-    <div className={cn('md:col-span-2', className)}>
+    <div className={className}>
       <ConfirmDialogHost dialogProps={dialogProps} />
-      <Card className="overflow-hidden border-destructive/30 shadow-sm">
-        <div className="h-1 bg-gradient-to-r from-destructive/80 to-destructive/20" />
+      <Card className="border-destructive/30 shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <ServerCrash size={18} className="text-destructive" />

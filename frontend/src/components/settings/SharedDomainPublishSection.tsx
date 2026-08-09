@@ -105,7 +105,7 @@ export default function SharedDomainPublishSection({
   const origin = host ? formatPublicHttpsOrigin(host, httpsPublicPort) : 'https://ваш-домен'
 
   return (
-    <div className="space-y-4 rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 via-card/50 to-card p-4 sm:col-span-2">
+    <div className="space-y-4 rounded-xl border bg-muted/15 p-4 sm:col-span-2">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">

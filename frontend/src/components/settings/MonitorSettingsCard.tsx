@@ -1,12 +1,13 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { Activity, Cpu, MemoryStick, Save, Timer, TimerOff } from 'lucide-react'
+import { Cpu, MemoryStick, Save } from 'lucide-react'
 import { ApiError, getMonitorSettings, updateMonitorSettings } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import { SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useNotifications } from '@/context/NotificationContext'
@@ -29,38 +30,6 @@ function formatInterval(seconds: number) {
 function formatSustained(seconds: number) {
   if (seconds === 0) return 'Сразу'
   return formatInterval(seconds)
-}
-
-function MetricPill({
-  icon: Icon,
-  label,
-  value,
-  tone = 'default',
-}: {
-  icon: LucideIcon
-  label: string
-  value: string
-  tone?: 'default' | 'success' | 'warning' | 'muted'
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 shadow-sm backdrop-blur-sm">
-      <div
-        className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-          tone === 'success' && 'bg-primary/15 text-primary',
-          tone === 'warning' && 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-          tone === 'muted' && 'bg-muted text-muted-foreground',
-          tone === 'default' && 'bg-muted/80 text-foreground',
-        )}
-      >
-        <Icon size={18} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="truncate text-sm font-semibold">{value}</p>
-      </div>
-    </div>
-  )
 }
 
 function PresetButtons({
@@ -203,37 +172,27 @@ export default function MonitorSettingsCard() {
     return <Spinner label="Загрузка настроек мониторинга..." className="py-12" />
   }
 
-  const thresholdTone = cpu >= 90 || ram >= 90 ? 'warning' : 'success'
-
   return (
-    <div className="space-y-4 md:col-span-2">
-      <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-amber-500/5 via-card to-card p-4">
-        <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-amber-500/10 blur-2xl" />
-        <div className="relative grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricPill icon={Cpu} label="Порог CPU" value={`${cpu}%`} tone={thresholdTone} />
-          <MetricPill icon={MemoryStick} label="Порог RAM" value={`${ram}%`} tone={thresholdTone} />
-          <MetricPill icon={Timer} label="Проверка" value={formatInterval(intervalSec)} />
-          <MetricPill
-            icon={sustainedSec === 0 ? TimerOff : Activity}
-            label="Удержание"
-            value={formatSustained(sustainedSec)}
-            tone={sustainedSec === 0 ? 'muted' : 'default'}
+    <div className="space-y-4">
+      <SettingsToolbar
+        title="Нагрузка на сервер"
+        meta={
+          <SettingsMetaLine
+            items={[
+              { label: 'порог CPU', value: `${cpu}%` },
+              { label: 'порог RAM', value: `${ram}%` },
+              { label: 'проверка', value: formatInterval(intervalSec) },
+              { label: 'удержание', value: formatSustained(sustainedSec) },
+            ]}
           />
-        </div>
-      </div>
+        }
+      />
+      <p className="text-sm text-muted-foreground">
+        Панель следит за CPU и RAM и шлёт предупреждение в Telegram, если нагрузка долго выше порога
+      </p>
 
-      <Card className="overflow-hidden shadow-sm">
-        <div className="h-1 bg-gradient-to-r from-amber-500/70 to-amber-500/15" />
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Activity size={18} />
-            Нагрузка на сервер
-          </CardTitle>
-          <CardDescription>
-            Панель следит за CPU и RAM и шлёт предупреждение в Telegram, если нагрузка долго выше порога
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      <Card className="shadow-sm">
+        <CardContent className="pt-4">
           <InlineProgressBar active={saving} label="Сохранение настроек..." />
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="grid gap-4 md:grid-cols-2">

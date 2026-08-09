@@ -115,13 +115,7 @@ export default function TwoFactorTab({ className }: { className?: string }) {
   }
 
   return (
-    <Card className={cn('flex h-full flex-col overflow-hidden shadow-sm', className)}>
-      <div
-        className={cn(
-          'h-1 bg-gradient-to-r',
-          enabled ? 'from-emerald-500/70 to-emerald-500/15' : 'from-amber-500/70 to-amber-500/15',
-        )}
-      />
+    <Card className={cn('flex h-full flex-col shadow-sm', className)}>
       <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
         <div>
           <CardTitle className="flex items-center gap-2 text-base">

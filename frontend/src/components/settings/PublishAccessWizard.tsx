@@ -236,8 +236,7 @@ export default function PublishAccessWizard({
   }
 
   return (
-    <Card className="overflow-hidden shadow-sm md:col-span-2">
-      <div className="h-1 bg-gradient-to-r from-primary/80 to-primary/15" />
+    <Card className="overflow-hidden shadow-sm">
       <CardHeader className="space-y-4 pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
