@@ -1,6 +1,7 @@
-"""Propagate Sync Group shared_domain into setup hosts on every member node.
+"""Propagate Sync Group shared domains into setup hosts on every member node.
 
-Writes ``OPENVPN_HOST`` / ``WIREGUARD_HOST`` = ``shared_domain`` to
+Writes ``OPENVPN_HOST`` from ``shared_domain`` and ``WIREGUARD_HOST`` from
+``shared_domain_wireguard`` (falling back to ``shared_domain`` when empty) to
 ``/root/antizapret/setup`` on the primary and all replicas, then runs
 ``doall.sh`` (apply_config_changes) and ``client.sh 7`` (recreate_profiles) on
 each node so the new hosts land in regenerated client profiles.
@@ -23,7 +24,12 @@ from sqlalchemy.orm import Session
 
 from app.models import Node, NodeSyncGroup, SyncStatus
 from app.services.node_manager import get_adapter_for_node
-from app.services.node_sync.groups import parse_replica_node_ids
+from app.services.node_sync.groups import (
+    effective_openvpn_domain,
+    effective_wireguard_domain,
+    format_shared_domains_label,
+    parse_replica_node_ids,
+)
 from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
 from app.services.node_sync.vpn_state_sync import copy_openvpn_profiles_from_primary
 from app.services.openvpn_remote_hosts import parse_hosts_json
@@ -32,25 +38,6 @@ from app.services.profile_delivery import patch_openvpn_profiles_on_node
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[int, str, str | None], None]
-
-
-def _shared_domain_success_message(result: dict[str, Any]) -> str:
-    domain = str(result.get("domain") or "").strip()
-    nodes = [str(item.get("node_name") or item.get("node_id") or "") for item in result.get("updated") or []]
-    nodes = [name for name in nodes if name]
-    restarted = [
-        str(item.get("node_name") or item.get("node_id") or "")
-        for item in result.get("openvpn_restart") or []
-        if item.get("restarted")
-    ]
-    restarted = [name for name in restarted if name]
-    parts = [f"Домен {domain} записан в setup"]
-    if nodes:
-        parts.append(f"узлы: {', '.join(nodes)}")
-    parts.append("выполнены doall.sh и client.sh 7")
-    if restarted:
-        parts.append(f"OpenVPN перезапущен на: {', '.join(restarted)}")
-    return ". ".join(parts) + "."
 
 
 def get_member_nodes(db: Session, group: NodeSyncGroup) -> list[Node]:
@@ -68,6 +55,31 @@ def get_member_nodes(db: Session, group: NodeSyncGroup) -> list[Node]:
     return nodes
 
 
+def _shared_domain_success_message(result: dict[str, Any]) -> str:
+    domain = str(result.get("domain") or "").strip()
+    openvpn = str(result.get("openvpn_host") or "").strip()
+    wireguard = str(result.get("wireguard_host") or "").strip()
+    if openvpn and wireguard and openvpn != wireguard:
+        domain_part = f"Домены OpenVPN={openvpn}, WG/AWG={wireguard} записаны в setup"
+    else:
+        domain_part = f"Домен {domain or openvpn or wireguard} записан в setup"
+    nodes = [str(item.get("node_name") or item.get("node_id") or "") for item in result.get("updated") or []]
+    nodes = [name for name in nodes if name]
+    restarted = [
+        str(item.get("node_name") or item.get("node_id") or "")
+        for item in result.get("openvpn_restart") or []
+        if item.get("restarted")
+    ]
+    restarted = [name for name in restarted if name]
+    parts = [domain_part]
+    if nodes:
+        parts.append(f"узлы: {', '.join(nodes)}")
+    parts.append("выполнены doall.sh и client.sh 7")
+    if restarted:
+        parts.append(f"OpenVPN перезапущен на: {', '.join(restarted)}")
+    return ". ".join(parts) + "."
+
+
 def apply_shared_domain_to_members(
     db: Session,
     group: NodeSyncGroup,
@@ -75,13 +87,14 @@ def apply_shared_domain_to_members(
     run_apply: bool = True,
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
-    """Write shared_domain hosts to setup on all members, then doall.sh + client.sh 7.
+    """Write shared domain hosts to setup on all members, then doall.sh + client.sh 7.
 
     Errors on one node are recorded but never abort the rest (partial failure is
     reflected via ``success=False`` and the ``errors`` list).
     """
-    domain = (group.shared_domain or "").strip()
-    updates = {"openvpn_host": domain, "wireguard_host": domain}
+    openvpn_host = effective_openvpn_domain(group)
+    wireguard_host = effective_wireguard_domain(group)
+    updates = {"openvpn_host": openvpn_host, "wireguard_host": wireguard_host}
     nodes = get_member_nodes(db, group)
 
     def progress(percent: int, stage: str, message: str | None = None) -> None:
@@ -89,16 +102,18 @@ def apply_shared_domain_to_members(
             progress_callback(percent, stage, message)
 
     result: dict[str, Any] = {
-        "domain": domain,
+        "domain": format_shared_domains_label(group),
+        "openvpn_host": openvpn_host,
+        "wireguard_host": wireguard_host,
         "updated": [],
         "applied": [],
         "openvpn_restart": [],
         "errors": [],
     }
 
-    if not domain:
+    if not openvpn_host:
         result["success"] = False
-        result["errors"].append({"error": "shared_domain пуст"})
+        result["errors"].append({"error": "shared_domain (OpenVPN) пуст"})
         return result
     if not nodes:
         result["success"] = False

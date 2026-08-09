@@ -600,6 +600,7 @@ def _migrate_node_sync_groups_table() -> None:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name VARCHAR(128) NOT NULL,
                     shared_domain VARCHAR(255) NOT NULL,
+                    shared_domain_wireguard VARCHAR(255),
                     primary_node_id INTEGER NOT NULL REFERENCES nodes(id),
                     replica_node_ids TEXT NOT NULL DEFAULT '[]',
                     sync_mode VARCHAR(32) NOT NULL DEFAULT 'manual_full',
@@ -617,6 +618,26 @@ def _migrate_node_sync_groups_table() -> None:
         )
         conn.execute(text("CREATE INDEX ix_node_sync_groups_primary ON node_sync_groups(primary_node_id)"))
         logger.info("DB migration: created node_sync_groups table")
+
+
+def _migrate_node_sync_groups_wireguard_domain() -> None:
+    """Separate WireGuard/AmneziaWG shared domain (like AntiZapret OPENVPN_HOST / WIREGUARD_HOST)."""
+    inspector = inspect(engine)
+    if "node_sync_groups" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("node_sync_groups")}
+    if "shared_domain_wireguard" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE node_sync_groups ADD COLUMN shared_domain_wireguard VARCHAR(255)"))
+        # Existing groups used one domain for both protocols — keep that behaviour.
+        conn.execute(
+            text(
+                "UPDATE node_sync_groups SET shared_domain_wireguard = shared_domain "
+                "WHERE shared_domain_wireguard IS NULL OR shared_domain_wireguard = ''"
+            )
+        )
+        logger.info("DB migration: added node_sync_groups.shared_domain_wireguard")
 
 
 def _migrate_vpn_configs_ha_links() -> None:
@@ -770,6 +791,7 @@ def run_db_migrations() -> None:
     """Lightweight SQLite migrations for columns added after initial deploy."""
     _migrate_alert_rules_table()
     _migrate_node_sync_groups_table()
+    _migrate_node_sync_groups_wireguard_domain()
     _migrate_vpn_configs_ha_links()
     _migrate_vpn_configs_node_scope()
     _migrate_access_policy_node_scope()

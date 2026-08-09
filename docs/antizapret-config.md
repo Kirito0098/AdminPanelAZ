@@ -133,7 +133,7 @@ API: `GET/PUT /nodes/{id}/openvpn-multihome`.
 
 | Реплицируется | Не реплицируется |
 |---------------|------------------|
-| Все ключи из `ANTIZAPRET_PARAMS`, включая `ANTIZAPRET_WARP`, `VPN_WARP`, `openvpn_host` → `OPENVPN_HOST`, `wireguard_host` → `WIREGUARD_HOST` (общий `shared_domain` в HA) | Сейчас пусто (`ANTIZAPRET_HA_SETTING_EXCLUDE = {}`) |
+| Все ключи из `ANTIZAPRET_PARAMS`, включая `ANTIZAPRET_WARP`, `VPN_WARP`, `openvpn_host` → `OPENVPN_HOST`, `wireguard_host` → `WIREGUARD_HOST` (HA: `shared_domain` / `shared_domain_wireguard`) | Сейчас пусто (`ANTIZAPRET_HA_SETTING_EXCLUDE = {}`) |
 | Partial update: только поля из текущего PUT | Строки вне `ANTIZAPRET_PARAMS` (напр. `OPENVPN_LOG`) — panel API их не шлёт |
 
 Константа в коде: `ANTIZAPRET_HA_SETTING_EXCLUDE` (`antizapret_params.py`).

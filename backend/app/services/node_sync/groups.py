@@ -31,6 +31,41 @@ def serialize_replica_node_ids(replica_ids: list[int]) -> str:
     return json.dumps(sorted(set(int(item) for item in replica_ids)))
 
 
+def effective_openvpn_domain(group: NodeSyncGroup) -> str:
+    """HA OpenVPN host → OPENVPN_HOST (stored in shared_domain)."""
+    return (group.shared_domain or "").strip()
+
+
+def optional_wireguard_domain(group: NodeSyncGroup) -> str | None:
+    """Stored WG override, or None when unset / empty (fall back to OpenVPN)."""
+    raw = getattr(group, "shared_domain_wireguard", None)
+    if not isinstance(raw, str):
+        return None
+    return raw.strip() or None
+
+
+def effective_wireguard_domain(group: NodeSyncGroup) -> str:
+    """HA WireGuard/AmneziaWG host → WIREGUARD_HOST.
+
+    Empty ``shared_domain_wireguard`` falls back to OpenVPN shared_domain (legacy
+    single-domain groups and AntiZapret when both hosts match).
+    """
+    return optional_wireguard_domain(group) or effective_openvpn_domain(group)
+
+
+def format_shared_domains_label(group: NodeSyncGroup) -> str:
+    """Human-readable domain(s) for badges, DNS titles, confirm dialogs."""
+    ovpn = effective_openvpn_domain(group)
+    wg = effective_wireguard_domain(group)
+    if not ovpn and not wg:
+        return ""
+    if not ovpn:
+        return wg
+    if not wg or ovpn == wg:
+        return ovpn
+    return f"{ovpn} / {wg}"
+
+
 def group_member_node_ids(group: NodeSyncGroup) -> set[int]:
     members = {group.primary_node_id}
     members.update(parse_replica_node_ids(group.replica_node_ids))
@@ -110,6 +145,7 @@ def apply_group_fields(
     *,
     name: str | None = None,
     shared_domain: str | None = None,
+    shared_domain_wireguard: str | None = None,
     primary_node_id: int | None = None,
     replica_node_ids: list[int] | None = None,
     sync_mode: str | None = None,
@@ -118,6 +154,10 @@ def apply_group_fields(
         group.name = name.strip()
     if shared_domain is not None:
         group.shared_domain = shared_domain.strip()
+    if shared_domain_wireguard is not None:
+        # Empty string clears the override → fall back to shared_domain on apply.
+        stripped = shared_domain_wireguard.strip()
+        group.shared_domain_wireguard = stripped or None
     if primary_node_id is not None:
         group.primary_node_id = primary_node_id
     if replica_node_ids is not None:
@@ -165,6 +205,7 @@ def build_ha_node_context(db: Session, node_id: int) -> dict[str, Any] | None:
         "sync_group_id": group.id,
         "group_name": group.name,
         "shared_domain": group.shared_domain,
+        "shared_domain_wireguard": optional_wireguard_domain(group),
         "role": role,
         "primary_node_id": group.primary_node_id,
         "primary_node_name": primary.name if primary else None,
@@ -189,7 +230,7 @@ def _raise_ha_replica_forbidden(
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail=(
-            f"Узел «{node_name}» — replica в HA-группе «{group.name}» ({group.shared_domain}). "
+            f"Узел «{node_name}» — replica в HA-группе «{group.name}» ({format_shared_domains_label(group)}). "
             f"{operation_hint} на primary («{primary_name}»)."
         ),
     )
@@ -268,6 +309,7 @@ def build_ha_metadata(group: NodeSyncGroup | None) -> dict[str, Any] | None:
     return {
         "sync_group_id": group.id,
         "shared_domain": group.shared_domain,
+        "shared_domain_wireguard": optional_wireguard_domain(group),
         "node_count": replica_count + 1,
         "sync_status": group.sync_status.value if hasattr(group.sync_status, "value") else str(group.sync_status),
         "sync_mode": group.sync_mode,
@@ -340,6 +382,7 @@ def group_to_dict(group: NodeSyncGroup, db: Session) -> dict[str, Any]:
         "id": group.id,
         "name": group.name,
         "shared_domain": group.shared_domain,
+        "shared_domain_wireguard": optional_wireguard_domain(group),
         "primary_node_id": group.primary_node_id,
         "primary_node_name": primary.name if primary else None,
         "replica_node_ids": replicas,

@@ -12,7 +12,7 @@ from app.models import Node, NodeStatus, NodeSyncGroup
 from app.services.node_adapter import NodeAdapter
 from app.services.node_manager import check_node_health, get_adapter_for_node, update_node_from_health
 from app.services.node_sync.fingerprints import CONFIG_FP_PREFIX
-from app.services.node_sync.groups import parse_replica_node_ids
+from app.services.node_sync.groups import optional_wireguard_domain, parse_replica_node_ids
 from app.services.openvpn_pki import profile_issues_payload, validate_all_openvpn_profiles
 
 
@@ -167,6 +167,7 @@ def verify_sync_group(
         result = {
             "ready": False,
             "shared_domain": group.shared_domain,
+            "shared_domain_wireguard": optional_wireguard_domain(group),
             "primary_node_id": group.primary_node_id,
             "replicas": [],
             "summary": "Основной узел offline или не найден",
@@ -260,6 +261,7 @@ def verify_sync_group(
     result = {
         "ready": ready,
         "shared_domain": group.shared_domain,
+        "shared_domain_wireguard": optional_wireguard_domain(group),
         "primary_node_id": group.primary_node_id,
         "replicas": replica_results,
         "summary": summary,

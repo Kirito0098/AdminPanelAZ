@@ -46,6 +46,10 @@
 
 ## [Unreleased]
 
+### ✨ Added
+
+- **HA Sync Group: отдельные домены для OpenVPN и WireGuard/AmneziaWG** — в группе синхронизации можно указать `shared_domain` (`OPENVPN_HOST`) и `shared_domain_wireguard` (`WIREGUARD_HOST`), как в оригинальном AntiZapret `setup.sh`. Пустой WG-домен = тот же, что OpenVPN. Apply shared domain / HA Setup пишут оба хоста на все узлы группы. Docs: [NodeSync.md](docs/NodeSync.md), [uzly.md](docs/uzly.md).
+
 ---
 
 ## [2.21.0] - 2026-08-07

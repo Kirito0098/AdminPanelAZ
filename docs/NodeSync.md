@@ -2,11 +2,11 @@
 
 ## Сценарий
 
-Один домен (`vpn.example.com`), два A-записи (primary IP + replica IP). Клиент переключается между IP только если PKI (`/etc/openvpn/easyrsa3`), WireGuard peers и клиенты совпадают на обоих серверах.
+Один или два домена (`ovpn.example.com` / `awg.example.com`), A-записи на primary IP + replica IP. Клиент переключается между IP только если PKI (`/etc/openvpn/easyrsa3`), WireGuard peers и клиенты совпадают на обоих серверах.
 
 ## MVP (этап 5.1–5.3)
 
-- **Sync Group** — primary + 1+ replica, shared domain
+- **Sync Group** — primary + 1+ replica, shared domains (`shared_domain` → `OPENVPN_HOST`, `shared_domain_wireguard` → `WIREGUARD_HOST`; пустой WG-домен = тот же, что OpenVPN)
 - **Push full** — `client.sh 8` на primary → transfer → **HA restore** на replica (`?ha_replica=true`): **wipe-and-replace** VPN/crypto (PKI `easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG) — **без `client.sh 7`**. Каталог `config/` — **merge** (как раньше). Дополнительно копирует непустые `OPENVPN_HOST` / `WIREGUARD_HOST` из `setup` primary на каждую replica **перед** restore. После restore — **байт-копия `.ovpn`** с primary, **prune** VPN-клиентов only-on-replica, restart OpenVPN + apply WireGuard runtime. Ошибки copy/prune/restart → `sync_status=failed` (не warning).
 - **Verify** — списки OVPN/WG клиентов + checksums PKI/WG/config/**`.ovpn`** + **read-only проверка сертификатов в `.ovpn`**
 
@@ -120,11 +120,15 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 |---------|------------|------------|
 | Config files | `warper-include-ips.txt` и др. node-local файлы | `CONFIG_FINGERPRINT_EXCLUDE` в `fingerprints.py` |
 | Setup (`/root/antizapret/setup`) | (пусто) — все ключи из `ANTIZAPRET_PARAMS`, включая `ANTIZAPRET_WARP` / `VPN_WARP` | `ANTIZAPRET_HA_SETTING_EXCLUDE` |
-| Setup | **`OPENVPN_HOST` / `WIREGUARD_HOST` реплицируются** (общий `shared_domain`) | — |
+| Setup | **`OPENVPN_HOST` / `WIREGUARD_HOST` реплицируются** (из `shared_domain` / `shared_domain_wireguard`) | — |
 
 ### Apply shared domain (`POST …/apply-shared-domain`)
 
-Записывает `shared_domain` группы в `OPENVPN_HOST` и `WIREGUARD_HOST` в `/root/antizapret/setup` на **primary и всех replica**, затем на каждом узле выполняет `doall.sh` (apply_config_changes) + `client.sh 7` (recreate_profiles), чтобы новый хост попал в перегенерированные профили клиентов. Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается при **HA Setup** (если включён toggle «Сразу настроить» при создании), при изменении `shared_domain` в группе, а также вручную кнопкой «Домен → узлы». Создание группы **без** Setup **не** применяет домен автоматически.
+Записывает домены группы в setup на **primary и всех replica**:
+- `shared_domain` → `OPENVPN_HOST`
+- `shared_domain_wireguard` → `WIREGUARD_HOST` (если пусто — тот же host, что `shared_domain`)
+
+Так же, как в оригинальном AntiZapret `setup.sh`, можно задать **разные** домены для OpenVPN и WireGuard/AmneziaWG. Затем на каждом узле выполняется `doall.sh` (apply_config_changes) + `client.sh 7` (recreate_profiles), чтобы новые хосты попали в перегенерированные профили клиентов. Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается при **HA Setup** (если включён toggle «Сразу настроить» при создании), при изменении доменов в группе, а также вручную кнопкой «Домен → узлы». Создание группы **без** Setup **не** применяет домены автоматически.
 | Verify / Push full | Excluded config не ломают паритет fingerprint `antizapret/config` | `fingerprints.py` |
 
 ### Partial failure

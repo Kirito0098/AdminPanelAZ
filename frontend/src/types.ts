@@ -48,6 +48,7 @@ export interface NodeHaContext {
   sync_group_id: number
   group_name: string
   shared_domain: string
+  shared_domain_wireguard?: string | null
   role: 'primary' | 'replica'
   primary_node_id: number
   primary_node_name?: string | null
@@ -93,6 +94,7 @@ export interface NodeSyncReplicaVerifyResult {
 export interface NodeSyncVerifyResult {
   ready: boolean
   shared_domain: string
+  shared_domain_wireguard?: string | null
   primary_node_id: number
   replicas: NodeSyncReplicaVerifyResult[]
   summary: string
@@ -112,7 +114,10 @@ export interface NodeSyncGroupMember {
 export interface NodeSyncGroup {
   id: number
   name: string
+  /** OpenVPN host (OPENVPN_HOST). */
   shared_domain: string
+  /** WireGuard/AmneziaWG host (WIREGUARD_HOST). Empty/null → same as shared_domain. */
+  shared_domain_wireguard?: string | null
   primary_node_id: number
   primary_node_name?: string | null
   replica_node_ids: number[]
@@ -230,6 +235,7 @@ export interface ActiveWebSession {
 export interface VpnConfigHaInfo {
   sync_group_id: number
   shared_domain: string
+  shared_domain_wireguard?: string | null
   node_count: number
   sync_status: SyncStatus
   sync_mode: string

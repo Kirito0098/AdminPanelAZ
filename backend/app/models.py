@@ -218,7 +218,10 @@ class NodeSyncGroup(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(128))
+    # OpenVPN host (OPENVPN_HOST); also the legacy single shared domain for badges/DNS.
     shared_domain: Mapped[str] = mapped_column(String(255))
+    # WireGuard/AmneziaWG host (WIREGUARD_HOST). Empty → same as shared_domain.
+    shared_domain_wireguard: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     primary_node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     replica_node_ids: Mapped[str] = mapped_column(Text, default="[]")
     sync_mode: Mapped[str] = mapped_column(String(32), default="manual_full")

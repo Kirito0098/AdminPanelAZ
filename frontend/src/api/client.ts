@@ -753,6 +753,7 @@ export async function getNodeSyncGroups() {
 export async function createNodeSyncGroup(data: {
   name: string
   shared_domain: string
+  shared_domain_wireguard?: string | null
   primary_node_id: number
   replica_node_ids: number[]
   sync_mode?: string
@@ -768,6 +769,7 @@ export async function updateNodeSyncGroup(
   data: Partial<{
     name: string
     shared_domain: string
+    shared_domain_wireguard: string | null
     primary_node_id: number
     replica_node_ids: number[]
     sync_mode: string

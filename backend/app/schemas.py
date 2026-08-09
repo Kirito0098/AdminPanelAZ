@@ -265,6 +265,7 @@ class VpnConfigUpdate(BaseModel):
 class VpnConfigHaInfo(BaseModel):
     sync_group_id: int
     shared_domain: str
+    shared_domain_wireguard: str | None = None
     node_count: int
     sync_status: SyncStatus
     sync_mode: str
@@ -1234,6 +1235,7 @@ class NodeHaContext(BaseModel):
     sync_group_id: int
     group_name: str
     shared_domain: str
+    shared_domain_wireguard: str | None = None
     role: str
     primary_node_id: int
     primary_node_name: str | None = None
@@ -1268,6 +1270,8 @@ class NodeUpdateResult(BaseModel):
 class NodeSyncGroupCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     shared_domain: str = Field(min_length=1, max_length=255)
+    # Empty / omitted → same as shared_domain (OPENVPN_HOST) for WIREGUARD_HOST.
+    shared_domain_wireguard: str | None = Field(default=None, max_length=255)
     primary_node_id: int = Field(ge=1)
     replica_node_ids: list[int] = Field(min_length=1)
     sync_mode: str = Field(default="manual_full", max_length=32)
@@ -1276,6 +1280,7 @@ class NodeSyncGroupCreate(BaseModel):
 class NodeSyncGroupUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
     shared_domain: str | None = Field(default=None, min_length=1, max_length=255)
+    shared_domain_wireguard: str | None = Field(default=None, max_length=255)
     primary_node_id: int | None = Field(default=None, ge=1)
     replica_node_ids: list[int] | None = None
     sync_mode: str | None = Field(default=None, max_length=32)
@@ -1302,6 +1307,7 @@ class NodeSyncReplicaVerifyResult(BaseModel):
 class NodeSyncVerifyResponse(BaseModel):
     ready: bool
     shared_domain: str
+    shared_domain_wireguard: str | None = None
     primary_node_id: int
     replicas: list[NodeSyncReplicaVerifyResult] = []
     summary: str = ""
@@ -1321,6 +1327,7 @@ class NodeSyncGroupResponse(BaseModel):
     id: int
     name: str
     shared_domain: str
+    shared_domain_wireguard: str | None = None
     primary_node_id: int
     primary_node_name: str | None = None
     replica_node_ids: list[int] = []
