@@ -49,14 +49,23 @@ export function hasVpnProfiles(config: VpnConfig, tab?: ProtocolTab): boolean {
   return files.some(isVpnProfile)
 }
 
+function preferPrimaryConf(files: ProfileFile[]): ProfileFile | undefined {
+  if (!files.length) return undefined
+  return (
+    files.find((file) => file.path.toLowerCase().endsWith('-am.conf')) ||
+    files.find((file) => file.path.toLowerCase().endsWith('.conf')) ||
+    files[0]
+  )
+}
+
 export function pickAzFile(config: VpnConfig, tab?: ProtocolTab): ProfileFile | undefined {
   const files = tab ? profileFilesForTab(config, tab) : config.profile_files
-  return files.find(isAzProfile)
+  return preferPrimaryConf(files.filter(isAzProfile))
 }
 
 export function pickVpnFile(config: VpnConfig, tab?: ProtocolTab): ProfileFile | undefined {
   const files = tab ? profileFilesForTab(config, tab) : config.profile_files
-  return files.find(isVpnProfile)
+  return preferPrimaryConf(files.filter(isVpnProfile))
 }
 
 export function protocolLabel(tab: ProtocolTab): string {

@@ -66,6 +66,18 @@ def test_build_profile_download_filename_handles_awg2_paths():
         "alice",
         path="/opt/antizapret-awg/clients/vpn/vpn-alice-am.conf",
     ) == "AWG2-VPN-alice.conf"
+    assert build_profile_download_filename(
+        "alice",
+        protocol="amneziawg2",
+        variant="antizapret",
+        path="/opt/antizapret-awg/clients/antizapret/antizapret-alice.vpn",
+    ) == "AWG2-AZ-alice.vpn"
+    assert build_profile_download_filename(
+        "alice",
+        protocol="amneziawg2",
+        variant="vpn",
+        path="/opt/antizapret-awg/clients/vpn/vpn-alice-vpnuri.txt",
+    ) == "AWG2-VPN-alice-vpnuri.txt"
 
 
 def test_remote_node_adapter_awg2_methods_hit_expected_routes(monkeypatch):

@@ -66,7 +66,16 @@ def build_profile_download_filename(
     if proto == "amneziawg":
         return f"AWG-{profile_prefix}-{safe_name}.conf"
     if proto == "amneziawg2":
-        return f"AWG2-{profile_prefix}-{safe_name}.conf"
+        # Primary tunnel profiles are *-am.conf; sidecars (.vpn / vpnuri) keep a distinct name.
+        path_name = PurePosixPath(path).name if path else ""
+        lower_name = path_name.lower()
+        if lower_name.endswith("-am.conf") or lower_name.endswith(".conf"):
+            return f"AWG2-{profile_prefix}-{safe_name}.conf"
+        if lower_name.endswith(".vpn"):
+            return f"AWG2-{profile_prefix}-{safe_name}.vpn"
+        if "vpnuri" in lower_name or lower_name.endswith(".txt"):
+            return f"AWG2-{profile_prefix}-{safe_name}-vpnuri.txt"
+        return path_name or f"AWG2-{profile_prefix}-{safe_name}.conf"
 
     raw = PurePosixPath(path).name if path else f"{profile_prefix}-{safe_name}.txt"
     return raw or f"{profile_prefix}-{safe_name}.txt"

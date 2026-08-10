@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
-import { Download, Loader2, Plus, RefreshCw, Shield, Trash2, Users } from 'lucide-react'
+import { Columns2, Download, Loader2, Plus, RefreshCw, Shield, Trash2, Users } from 'lucide-react'
 import {
   ApiError,
   createConfig,
@@ -11,14 +11,32 @@ import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import EmptyState from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
-import { formatDate } from '@/lib/datetime'
-import { cn } from '@/lib/utils'
+import {
+  formatCreatedAt,
+  getDownloadFilename,
+  hasAzProfiles,
+  hasVpnProfiles,
+  pickAzFile,
+  pickVpnFile,
+} from '@/lib/configCardUtils'
+import {
+  GRID_COLS_OPTIONS,
+  gridColsClass,
+  type CardGridCols,
+} from '@/lib/configCardViewPrefs'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
+import { cn } from '@/lib/utils'
 import type { Awg2HealthResponse, VpnConfig } from '@/types'
 
 interface ClientsTabProps {
@@ -26,6 +44,29 @@ interface ClientsTabProps {
 }
 
 const CLIENT_NAME_RE = /^[a-zA-Z0-9_-]{1,32}$/
+const GRID_STORAGE_KEY = 'awg2-clients:gridCols'
+const GRID_COLS_ALLOWED: readonly CardGridCols[] = ['auto', '1', '2', '3', '4']
+
+function loadAwg2GridCols(): CardGridCols {
+  if (typeof window === 'undefined') return 'auto'
+  try {
+    const value = window.localStorage.getItem(GRID_STORAGE_KEY)
+    return value && (GRID_COLS_ALLOWED as readonly string[]).includes(value)
+      ? (value as CardGridCols)
+      : 'auto'
+  } catch {
+    return 'auto'
+  }
+}
+
+function saveAwg2GridCols(cols: CardGridCols) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(GRID_STORAGE_KEY, cols)
+  } catch {
+    /* ignore quota / privacy mode */
+  }
+}
 
 function sortClients(items: VpnConfig[]): VpnConfig[] {
   return [...items].sort((a, b) => b.created_at.localeCompare(a.created_at))
@@ -43,8 +84,19 @@ export default function ClientsTab({ health }: ClientsTabProps) {
   const [submitting, setSubmitting] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<VpnConfig | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [downloadBusyId, setDownloadBusyId] = useState<number | null>(null)
+  const [gridCols, setGridCols] = useState<CardGridCols>('auto')
 
   const ready = Boolean(health?.installed)
+
+  useEffect(() => {
+    setGridCols(loadAwg2GridCols())
+  }, [])
+
+  const handleGridColsChange = (cols: CardGridCols) => {
+    setGridCols(cols)
+    saveAwg2GridCols(cols)
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -112,6 +164,7 @@ export default function ClientsTab({ health }: ClientsTabProps) {
 
   const handleDownload = async (config: VpnConfig, path: string, filename: string) => {
     let downloadName = filename
+    setDownloadBusyId(config.id)
     try {
       await withInline(async () => {
         const response = await downloadProfile(config.id, path)
@@ -128,6 +181,8 @@ export default function ClientsTab({ health }: ClientsTabProps) {
       success(`Файл «${downloadName}» скачан`)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка скачивания файла')
+    } finally {
+      setDownloadBusyId(null)
     }
   }
 
@@ -162,25 +217,68 @@ export default function ClientsTab({ health }: ClientsTabProps) {
                 <Badge variant="secondary">{clientCount}</Badge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                Конфигурации AmneziaWG2 на текущем узле. Создание, удаление и скачивание используют обычные API конфигураций.
+                Конфигурации AmneziaWG 2.0 на текущем узле. Создание, удаление и скачивание — те же API, что в
+                Конфигурациях.
               </p>
             </div>
           </div>
 
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-1.5 self-start"
-            onClick={() => void load()}
-            disabled={loading}
-          >
-            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
-            Обновить
-          </Button>
+          <div className="flex flex-wrap items-center gap-2 self-start">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  title="Столбцы карточек"
+                  aria-label="Столбцы карточек"
+                >
+                  <Columns2 className="h-4 w-4" />
+                  {GRID_COLS_OPTIONS.find((option) => option.value === gridCols)?.label ?? 'Авто'}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 p-3">
+                <DropdownMenuLabel className="px-0 text-xs font-medium text-muted-foreground">
+                  Столбцы
+                </DropdownMenuLabel>
+                <div className="flex flex-wrap items-center gap-1 rounded-xl border bg-muted/30 p-1">
+                  {GRID_COLS_OPTIONS.map((option) => (
+                    <Button
+                      key={option.value}
+                      type="button"
+                      size="sm"
+                      variant={gridCols === option.value ? 'default' : 'ghost'}
+                      className="h-7 flex-1 px-2 text-xs"
+                      onClick={() => handleGridColsChange(option.value)}
+                    >
+                      {option.label}
+                    </Button>
+                  ))}
+                </div>
+                <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+                  «Авто» — 1→2→3→4 колонки по ширине экрана.
+                </p>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => void load()}
+              disabled={loading}
+            >
+              <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+              Обновить
+            </Button>
+          </div>
         </div>
 
-        <form className="mt-4 grid gap-3 rounded-lg border bg-background/60 p-4 sm:grid-cols-2 xl:grid-cols-4" onSubmit={handleCreate}>
+        <form
+          className="mt-4 grid gap-3 rounded-lg border bg-background/60 p-4 sm:grid-cols-2 xl:grid-cols-4"
+          onSubmit={handleCreate}
+        >
           <div className="space-y-2">
             <Label htmlFor="awg2-client-name">Имя клиента</Label>
             <Input
@@ -228,8 +326,8 @@ export default function ClientsTab({ health }: ClientsTabProps) {
       )}
 
       {loading ? (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {Array.from({ length: 2 }).map((_, index) => (
+        <div className={cn('grid items-stretch gap-3', gridColsClass(gridCols))}>
+          {Array.from({ length: 4 }).map((_, index) => (
             <div key={index} className="rounded-xl border bg-card/50 p-4">
               <div className="flex items-center gap-3">
                 <Skeleton className="h-10 w-10 rounded-xl" />
@@ -254,68 +352,128 @@ export default function ClientsTab({ health }: ClientsTabProps) {
           />
         </div>
       ) : (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {clients.map((config) => (
-            <div key={config.id} className="rounded-xl border bg-card/50 p-4 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="truncate text-base font-semibold">{config.client_name}</h3>
-                    <Badge variant="outline">AWG2</Badge>
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {config.description?.trim() || 'Без описания'}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="shrink-0 text-destructive hover:text-destructive"
-                  onClick={() => setDeleteTarget(config)}
-                  title="Удалить клиента"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
+        <div className={cn('grid items-stretch gap-3', gridColsClass(gridCols))}>
+          {clients.map((config) => {
+            const tab = 'amneziawg2' as const
+            const vpnFile = pickVpnFile(config, tab)
+            const azFile = pickAzFile(config, tab)
+            const hasBoth = hasVpnProfiles(config, tab) && hasAzProfiles(config, tab)
+            const busy = downloadBusyId === config.id
 
-              <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                <div>
-                  <dt className="text-muted-foreground">Создан</dt>
-                  <dd>{formatDate(config.created_at)}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Срок сертификата</dt>
-                  <dd>{config.cert_expire_days ? `${config.cert_expire_days} дн.` : '—'}</dd>
-                </div>
-              </dl>
-
-              <div className="mt-4 space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Файлы профиля
-                </p>
-                {config.profile_files?.length ? (
-                  <div className="flex flex-wrap gap-2">
-                    {config.profile_files.map((file) => (
-                      <Button
-                        key={`${config.id}:${file.path}`}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5"
-                        onClick={() => void handleDownload(config, file.path, file.download_filename ?? file.filename)}
-                      >
-                        <Download className="h-3.5 w-3.5" />
-                        <span className="max-w-[16rem] truncate">{file.download_filename ?? file.filename}</span>
-                      </Button>
-                    ))}
+            return (
+              <div key={config.id} className="flex flex-col rounded-xl border bg-card/50 p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="truncate text-base font-semibold">{config.client_name}</h3>
+                      <Badge variant="outline">AWG2</Badge>
+                      {hasVpnProfiles(config, tab) && (
+                        <Badge className="bg-sky-600/90 text-white hover:bg-sky-600/90">VPN</Badge>
+                      )}
+                      {hasAzProfiles(config, tab) && (
+                        <Badge className="bg-orange-600/90 text-white hover:bg-orange-600/90">AntiZapret</Badge>
+                      )}
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {config.description?.trim() || 'Без описания'}
+                    </p>
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Файлы появятся после генерации профиля на сервере.</p>
-                )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0 text-destructive hover:text-destructive"
+                    onClick={() => setDeleteTarget(config)}
+                    title="Удалить клиента"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                  <div>
+                    <dt className="text-muted-foreground">Создан</dt>
+                    <dd>{formatCreatedAt(config.created_at)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Срок сертификата</dt>
+                    <dd>{config.cert_expire_days ? `${config.cert_expire_days} дн.` : '—'}</dd>
+                  </div>
+                </dl>
+
+                <div className="mt-auto space-y-2 border-t border-border/60 pt-2.5">
+                  {vpnFile || azFile ? (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {hasBoth ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 min-w-0 flex-1 gap-1.5 px-2 text-xs text-sky-600"
+                            title={`Скачать VPN: ${getDownloadFilename(config, vpnFile!)}`}
+                            disabled={busy}
+                            onClick={() =>
+                              void handleDownload(config, vpnFile!.path, getDownloadFilename(config, vpnFile!))
+                            }
+                          >
+                            {busy ? (
+                              <Loader2 size={14} className="shrink-0 animate-spin" />
+                            ) : (
+                              <Download size={14} className="shrink-0" />
+                            )}
+                            <span className="truncate">VPN</span>
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 min-w-0 flex-1 gap-1.5 px-2 text-xs text-orange-600"
+                            title={`Скачать AntiZapret: ${getDownloadFilename(config, azFile!)}`}
+                            disabled={busy}
+                            onClick={() =>
+                              void handleDownload(config, azFile!.path, getDownloadFilename(config, azFile!))
+                            }
+                          >
+                            {busy ? (
+                              <Loader2 size={14} className="shrink-0 animate-spin" />
+                            ) : (
+                              <Download size={14} className="shrink-0" />
+                            )}
+                            <span className="truncate">AntiZapret</span>
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 min-w-0 gap-1.5 px-2 text-xs sm:col-span-2"
+                          title={`Скачать: ${getDownloadFilename(config, (vpnFile || azFile)!)}`}
+                          disabled={busy}
+                          onClick={() => {
+                            const file = (vpnFile || azFile)!
+                            void handleDownload(config, file.path, getDownloadFilename(config, file))
+                          }}
+                        >
+                          {busy ? (
+                            <Loader2 size={14} className="shrink-0 animate-spin" />
+                          ) : (
+                            <Download size={14} className="shrink-0" />
+                          )}
+                          <span className="truncate">Скачать</span>
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Файлы появятся после генерации профиля на сервере.
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -325,7 +483,9 @@ export default function ClientsTab({ health }: ClientsTabProps) {
           if (!open) setDeleteTarget(null)
         }}
         title="Удалить клиента?"
-        description={deleteTarget ? `Клиент «${deleteTarget.client_name}» будет удалён вместе с конфигурацией.` : undefined}
+        description={
+          deleteTarget ? `Клиент «${deleteTarget.client_name}» будет удалён вместе с конфигурацией.` : undefined
+        }
         icon={Trash2}
         destructive
         confirmLabel="Удалить"
