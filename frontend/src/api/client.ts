@@ -1637,6 +1637,10 @@ export async function applyAwg2Obfuscation(payload: {
   })
 }
 
+export async function getAwg2Monitoring() {
+  return apiFetch<import('../types').Awg2MonitoringResponse>('/awg2/monitoring')
+}
+
 export async function getWarperStatus() {
   return apiFetch<import('../types').WarperStatusResponse>('/warper/status')
 }

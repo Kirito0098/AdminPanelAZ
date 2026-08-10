@@ -165,7 +165,7 @@
 | `/antizapret` | `AntizapretConfigPage` (`AntizapretConfigTab`: секция «Адреса подключения» / список remote OpenVPN) | `antizapret_config` | [antizapret-config](antizapret-config.md) | Конфиг AntiZapret (admin); multi-remote OpenVPN per-node |
 | `/proxy` | `ProxyHubPage` (`ProxyHubView`: прокси-узлы + `RemoteHostsCard` + ссылки) | `proxy_nodes` | [proxy-nodes](proxy-nodes.md) | Сводка прокси (admin); DESTINATION / remote / NOC links |
 | `/warper` | `WarperPage` | `warper` | [warper](warper.md) | AZ-WARP / Cloudflare WARP |
-| `/awg2` | `Awg2Page` | `awg2` | [awg2](awg2.md) | AZ-AWG2: health, клиенты `amneziawg2`, Dashboard AmneziaWG 2.0 |
+| `/awg2` | `Awg2Page` | `awg2` | [awg2](awg2.md) | AZ-AWG2: health, клиенты, обфускация, мониторинг `amneziawg2` |
 | `/telegram` | `TelegramPage` | `telegram` | [Telegram](Telegram.md) | Настройки бота и Mini App |
 | `/edit-files` | `EditFilesPage` | `edit_files` | [edit-files](edit-files.md) | Редактор файлов AntiZapret |
 | `/logs` | `LogsPage` | `logs_dashboard` / `action_logs` | [logs](logs.md) | Журналы |
@@ -193,7 +193,7 @@
 | `traffic` | Сбор и отображение трафика |
 | `routing`, `cidr_db` | CIDR-провайдеры, pipeline, deploy |
 | `warper` | AZ-WARP |
-| `awg2` | AZ-AWG2 (клиенты `amneziawg2`, Dashboard, docs) |
+| `awg2` | AZ-AWG2 (клиенты `amneziawg2`, обфускация, мониторинг, Dashboard, docs) |
 | `edit_files` | Редактор конфигов AntiZapret |
 | `backups`, `maintenance`, `system` | Бэкапы, обслуживание, обновления |
 | `settings`, `security` | Настройки панели, IP whitelist, firewall |
@@ -251,7 +251,7 @@
 ### Прочее
 - `backup_manager.py`, `backup_scheduler.py`
 - `warper.py` — AZ-WARP
-- `awg2.py` — AZ-AWG2 detect/health/status + клиенты `awg-client`
+- `awg2.py` — AZ-AWG2 detect/health/status, клиенты `awg-client`, obfuscation, monitoring (`awg_stats` / dump)
 - `background_tasks.py` — long-running задачи с polling
 - `admin_notify.py` — уведомления админам в Telegram
 

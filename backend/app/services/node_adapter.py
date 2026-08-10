@@ -236,6 +236,9 @@ class NodeAdapter(ABC):
     ) -> dict: ...
 
     @abstractmethod
+    def get_awg2_monitoring(self) -> dict: ...
+
+    @abstractmethod
     def get_warper_status(self) -> dict: ...
 
     @abstractmethod
@@ -531,6 +534,9 @@ class LocalNodeAdapter(NodeAdapter):
             host=host,
             fp=fp,
         )
+
+    def get_awg2_monitoring(self) -> dict:
+        return self._awg2.get_monitoring()
 
     def read_easyrsa_index(self) -> str:
         return self._service.read_easyrsa_index()
@@ -1435,6 +1441,9 @@ class RemoteNodeAdapter(NodeAdapter):
             json=payload,
             timeout=180.0,
         )
+
+    def get_awg2_monitoring(self) -> dict:
+        return self._request("GET", "/awg2/monitoring", timeout=60.0)
 
     def get_warper_status(self) -> dict:
         return self._request("GET", "/warper/status")

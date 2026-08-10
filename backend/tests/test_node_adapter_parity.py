@@ -192,3 +192,25 @@ def test_remote_node_adapter_awg2_obfuscation_hit_expected_routes(monkeypatch):
             "timeout": 180.0,
         },
     )
+
+
+def test_local_node_adapter_awg2_monitoring_delegate():
+    adapter, _service, awg2 = _local_adapter()
+    awg2.get_monitoring.return_value = {"ifaces": [], "clients": [], "stats_available": False}
+
+    assert adapter.get_awg2_monitoring()["stats_available"] is False
+    awg2.get_monitoring.assert_called_once_with()
+
+
+def test_remote_node_adapter_awg2_monitoring_hit_expected_routes(monkeypatch):
+    adapter = RemoteNodeAdapter("10.0.0.2", 9100, "k" * 32, mtls_enabled=False)
+    request_calls: list[tuple[str, str, dict]] = []
+
+    def fake_request(method, path, **kwargs):
+        request_calls.append((method, path, kwargs))
+        return {"ifaces": [{"name": "vpn-awg"}], "clients": [], "stats_available": True}
+
+    monkeypatch.setattr(adapter, "_request", fake_request)
+
+    assert adapter.get_awg2_monitoring()["stats_available"] is True
+    assert request_calls == [("GET", "/awg2/monitoring", {"timeout": 60.0})]

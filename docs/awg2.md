@@ -36,7 +36,9 @@
 | Вкладка | Для чего |
 |---------|----------|
 | **Клиенты** | Список `VpnConfig` типа `amneziawg2`, создание, удаление, скачивание |
-| **Справка** | Отличия от стока и AZ-WARP, команды install/update, заметка про HA |
+| **Обфускация** | Текущий профиль, regenerate / apply (`awg-obfuscation`); после apply — переимпорт профилей |
+| **Мониторинг** | Карточки интерфейсов и таблица клиентов (online / handshake / traffic) |
+| **Справка** | Отличия от стока и AZ-WARP, команды install/update, HA / stats.db |
 
 ---
 
@@ -82,6 +84,14 @@ bash <(curl -fsSL https://raw.githubusercontent.com/blindtechnique/az-awg2/main/
 
 Стоковая вкладка **AmneziaWG** эти конфиги не показывает.
 
+### Мониторинг клиентов
+
+1. Откройте вкладку **Мониторинг** на `/awg2`
+2. Смотрите карточки интерфейсов (порт, subnet, число пиров) и таблицу клиентов
+3. Online ≈ последний handshake младше **180 секунд**
+4. Источник: `awg_stats.py overview` при наличии `/opt/antizapret-awg/stats.db`; иначе live `awg show dump` (без 500)
+5. Детальная карточка клиента и GeoIP пока не доступны (волна 3c)
+
 ---
 
 ## HA (синхронизация узлов)
@@ -91,6 +101,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/blindtechnique/az-awg2/main/
 Если на replica нет слоя `az-awg2`, синхронизация завершается ошибкой и страница показывает `install_command`.
 
 Применяется byte-copy + `apply_runtime`, а не `awg-client add` на replica.
+
+`stats.db` остаётся **локальным** на каждом узле и в HA-архив не уезжает.
 
 ---
 
@@ -112,6 +124,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/blindtechnique/az-awg2/main/
 - Не прерывайте установку/обновление слоя на сервере
 - Не путайте вкладки **AmneziaWG** и **AmneziaWG 2.0** на Dashboard
 - Для HA-копии AWG2 учитывайте byte-copy crypto-sync и исключения архива из среза 2a
+- После смены обфускации переимпортируйте клиентские профили
 
 ---
 

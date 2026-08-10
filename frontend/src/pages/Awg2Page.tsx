@@ -1,9 +1,10 @@
-import { Eye, RefreshCw, Server, Shield, Users } from 'lucide-react'
+import { Activity, Eye, RefreshCw, Server, Shield, Users } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { getAwg2Health, getAwg2Status } from '@/api/client'
 import ClientsTab from '@/components/awg2/ClientsTab'
 import Awg2HelpStub from '@/components/awg2/Awg2HelpStub'
 import Awg2InstallPrompt from '@/components/awg2/Awg2InstallPrompt'
+import MonitoringTab from '@/components/awg2/MonitoringTab'
 import ObfuscationTab from '@/components/awg2/ObfuscationTab'
 import { formatAwg2NodeLabel } from '@/components/awg2/utils'
 import { Badge } from '@/components/ui/badge'
@@ -14,7 +15,7 @@ import { useNode } from '@/context/NodeContext'
 import { cn } from '@/lib/utils'
 import type { Awg2HealthResponse, Awg2StatusResponse } from '@/types'
 
-type Awg2Tab = 'clients' | 'obfuscation' | 'help'
+type Awg2Tab = 'clients' | 'obfuscation' | 'monitoring' | 'help'
 
 function statusMeta(health: Awg2HealthResponse | null) {
   if (!health) {
@@ -149,6 +150,10 @@ export default function Awg2Page() {
                 <Eye className="h-4 w-4" />
                 <span>Обфускация</span>
               </TabsTrigger>
+              <TabsTrigger value="monitoring" className="gap-1.5">
+                <Activity className="h-4 w-4" />
+                <span>Мониторинг</span>
+              </TabsTrigger>
               <TabsTrigger value="help" className="gap-1.5">
                 <Shield className="h-4 w-4" />
                 <span>Справка</span>
@@ -161,6 +166,10 @@ export default function Awg2Page() {
 
             <TabsContent value="obfuscation" className="mt-0 focus-visible:outline-none">
               <ObfuscationTab health={health} />
+            </TabsContent>
+
+            <TabsContent value="monitoring" className="mt-0 focus-visible:outline-none">
+              <MonitoringTab health={health} />
             </TabsContent>
 
             <TabsContent value="help" className="mt-0 focus-visible:outline-none">

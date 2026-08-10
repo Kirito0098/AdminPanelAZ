@@ -36,13 +36,23 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
             <p>
               <span className="font-medium text-foreground">HA:</span> репликация клиентов AWG2 на
               replica поддерживается. Если на replica не установлен слой AZ-AWG2, sync завершится
-              ошибкой и вернёт команду установки для этого узла.
+              ошибкой и вернёт команду установки для этого узла. <code className="text-xs">stats.db</code>{' '}
+              в HA-архив не входит (локальная статистика узла).
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Обфускация:</span> вкладка меняет preset /
+              template через <code className="text-xs">awg-obfuscation</code>; после apply переимпортируйте
+              клиентские профили.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Мониторинг:</span> overview клиентов
+              (online / handshake / traffic) из <code className="text-xs">awg_stats</code> или live{' '}
+              <code className="text-xs">awg show dump</code>. Детальная карточка клиента и GeoIP — позже.
             </p>
           </div>
           <p className="text-muted-foreground">
-            Во вкладке клиентов доступны список профилей, создание, удаление и скачивание.
-            Если слой не установлен на текущем узле или на HA replica, сначала выполните команду
-            установки на сервере по SSH. Панель install.sh не запускает.
+            Вкладки: клиенты, обфускация, мониторинг. Если слой не установлен на текущем узле или на HA
+            replica, сначала выполните команду установки на сервере по SSH. Панель install.sh не запускает.
           </p>
           <div>
             <p className="mb-1.5 text-xs font-medium text-muted-foreground">Установка:</p>

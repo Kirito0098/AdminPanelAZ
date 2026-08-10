@@ -277,3 +277,21 @@ def test_regenerate_obfuscation_maps_not_installed():
         with pytest.raises(HTTPException) as exc:
             awg2_router.regenerate_obfuscation(db=MagicMock(), _=SimpleNamespace())
     assert exc.value.status_code == 409
+
+
+def test_get_monitoring_ok():
+    node = SimpleNamespace(id=1, name="local", host="127.0.0.1")
+    adapter = MagicMock()
+    adapter.get_awg2_monitoring.return_value = {
+        "ifaces": [{"name": "antizapret-awg", "peer_count": 1}],
+        "clients": [{"name": "ivan", "online": True}],
+        "stats_available": True,
+    }
+    with (
+        patch.object(awg2_router, "get_active_node", return_value=node),
+        patch.object(awg2_router, "get_active_adapter", return_value=adapter),
+    ):
+        result = awg2_router.get_monitoring(db=MagicMock(), _=SimpleNamespace())
+    assert result["stats_available"] is True
+    assert result["clients"][0]["name"] == "ivan"
+    assert result["node_id"] == 1

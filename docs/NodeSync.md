@@ -21,7 +21,7 @@
 ### AWG2 HA crypto-sync
 
 - Для AZ-AWG2 в HA используется crypto-sync через byte-copy, а не `awg-client add` на replica.
-- Архивируются пути `/etc/amnezia/amneziawg` и `/opt/antizapret-awg/clients`; из архива исключаются `stats.db`, `venv/` и `__pycache__/`.
+- Архивируются пути `/etc/amnezia/amneziawg` и `/opt/antizapret-awg/clients`; из архива исключаются `stats.db`, `venv/` и `__pycache__/`. Локальный `stats.db` на узле остаётся для мониторинга и в HA не копируется.
 - Если на replica нет слоя `az-awg2`, синхронизация завершается ошибкой и панель показывает `install_command`.
 - После restore на replica выполняется `apply_runtime`, чтобы применить состояние узла.
 

@@ -107,3 +107,13 @@ def apply_obfuscation(
         raise _map_awg2_exc(exc) from exc
     ha = _ha_sync_awg2_from_active(db)
     return {**result, **_node_meta(node), "ha": ha, "reimport_required": True}
+
+
+@router.get("/monitoring")
+def get_monitoring(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    node = get_active_node(db)
+    try:
+        data = get_active_adapter(db).get_awg2_monitoring()
+    except Exception as exc:  # noqa: BLE001
+        raise _map_awg2_exc(exc) from exc
+    return {**data, **_node_meta(node)}

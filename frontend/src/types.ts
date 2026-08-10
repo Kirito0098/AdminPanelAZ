@@ -1785,6 +1785,28 @@ export interface Awg2ObfuscationResponse {
   node_host?: string | null
 }
 
+export interface Awg2MonitoringResponse {
+  ifaces: Array<{
+    name: string
+    port?: string | null
+    subnet?: string | null
+    peer_count?: number | null
+  }>
+  clients: Array<{
+    name: string
+    iface?: string
+    online: boolean
+    handshake_age_s?: number | null
+    rx?: number | null
+    tx?: number | null
+    pubkey?: string
+  }>
+  stats_available: boolean
+  node_id?: number | null
+  node_name?: string | null
+  node_host?: string | null
+}
+
 export interface WarperStatusResponse {
   status: Record<string, unknown>
   node_id?: number | null

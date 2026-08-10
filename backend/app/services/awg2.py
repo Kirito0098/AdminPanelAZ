@@ -6,9 +6,12 @@ import io
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
+import sys
 import tarfile
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +24,11 @@ AWG2_AMNEZIA_DIR = Path(os.environ.get("AWG2_AMNEZIA_DIR", "/etc/amnezia/amnezia
 AWG2_CLIENT_DIR = AWG2_OVERLAY_DIR / "clients"
 AWG2_SERVICES_ENV = AWG2_AMNEZIA_DIR / "services.env"
 AWG2_CLIENT_LOCK = Path(os.environ.get("AWG2_CLIENT_LOCK", "/run/antizapret-awg-client.lock"))
+AWG2_STATS_SCRIPT = Path(
+    os.environ.get("AWG2_STATS_SCRIPT", str(AWG2_OVERLAY_DIR / "bin" / "awg_stats.py"))
+)
+AWG2_STATS_DB = Path(os.environ.get("AWG2_STATS_DB", str(AWG2_OVERLAY_DIR / "stats.db")))
+AWG2_ONLINE_WINDOW_S = 180
 AWG2_TUNNELS = ("antizapret", "vpn")
 AWG2_OBFUSCATION_PRESETS = frozenset({"router", "low", "medium", "high", "paranoid"})
 AWG2_OBFUSCATION_TEMPLATES = frozenset({"quic", "tls", "web", "voip", "dns", "mixed"})
@@ -159,6 +167,139 @@ def _replace_tree_from_snapshot(source: Path, target: Path) -> None:
 
 def _tree_has_files(root: Path) -> bool:
     return root.is_dir() and any(item.is_file() for item in root.rglob("*"))
+
+
+def _stats_db_path() -> Path:
+    if AWG2_STATS_DB.is_file():
+        return AWG2_STATS_DB
+    overlay_db = AWG2_OVERLAY_DIR / "stats.db"
+    if overlay_db.is_file():
+        return overlay_db
+    return AWG2_STATS_DB
+
+
+def _parse_overview_tsv(text: str) -> list[dict[str, Any]]:
+    """Parse machine-readable overview: name iface online handshake_age rx tx."""
+    clients: list[dict[str, Any]] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+        name, iface, online_raw, age_raw, rx_raw, tx_raw = parts[:6]
+        if name.lower() == "name" and iface.lower() == "iface":
+            continue
+        try:
+            online_flag = online_raw.strip().lower() in {"1", "true", "yes", "online"}
+            age = int(float(age_raw))
+            rx = int(float(rx_raw))
+            tx = int(float(tx_raw))
+        except ValueError:
+            continue
+        clients.append(
+            {
+                "name": name,
+                "iface": iface,
+                "online": online_flag,
+                "handshake_age_s": age,
+                "rx": rx,
+                "tx": tx,
+            }
+        )
+    return clients
+
+
+def _clients_from_stats_db(db_path: Path) -> list[dict[str, Any]]:
+    """Structured overview from stats.db (same ONLINE_WINDOW as awg_stats.py)."""
+    now = int(time.time())
+    clients: list[dict[str, Any]] = []
+    try:
+        with sqlite3.connect(str(db_path), timeout=5) as conn:
+            rows = conn.execute(
+                """
+                SELECT p.name, p.iface, t.rx_life, t.tx_life, t.last_handshake
+                FROM peers p
+                LEFT JOIN totals t ON p.pubkey = t.pubkey
+                WHERE COALESCE(p.origin, 'awg2') = 'awg2'
+                ORDER BY (COALESCE(t.rx_life, 0) + COALESCE(t.tx_life, 0)) DESC
+                """
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    for name, iface, rx_life, tx_life, last_hs in rows:
+        hs = int(last_hs or 0)
+        age = (now - hs) if hs else None
+        online = bool(hs and age is not None and age < AWG2_ONLINE_WINDOW_S)
+        clients.append(
+            {
+                "name": str(name or ""),
+                "iface": str(iface or ""),
+                "online": online,
+                "handshake_age_s": age,
+                "rx": int(rx_life or 0),
+                "tx": int(tx_life or 0),
+            }
+        )
+    return clients
+
+
+def _load_peer_names() -> dict[str, str]:
+    """Map peer pubkey → client name from amneziawg server confs."""
+    mapping: dict[str, str] = {}
+    if not AWG2_AMNEZIA_DIR.is_dir():
+        return mapping
+    for conf in sorted(AWG2_AMNEZIA_DIR.glob("*.conf")):
+        name: str | None = None
+        try:
+            lines = conf.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            s = line.strip()
+            if s.startswith("#") and len(s) > 1:
+                comment = s[1:].strip()
+                low = comment.lower()
+                if low.startswith("privatekey") or low.startswith("presharedkey"):
+                    continue
+                name = comment.split("=", 1)[1].strip() if low.startswith("client =") else comment
+            elif s.lower().startswith("publickey"):
+                pk = s.split("=", 1)[1].strip() if "=" in s else ""
+                if pk:
+                    mapping[pk] = name or pk[:8]
+                name = None
+    return mapping
+
+
+def _parse_awg_dump(text: str, *, iface: str, names: dict[str, str], now: int) -> list[dict[str, Any]]:
+    """Parse `awg show <iface> dump` peer rows (skip interface/header first line)."""
+    clients: list[dict[str, Any]] = []
+    for i, raw in enumerate(text.splitlines()):
+        fields = raw.split("\t")
+        if i == 0 or len(fields) < 8:
+            continue
+        try:
+            handshake = int(fields[4] or 0)
+            rx = int(fields[5] or 0)
+            tx = int(fields[6] or 0)
+        except ValueError:
+            continue
+        pubkey = fields[0]
+        age = (now - handshake) if handshake else None
+        online = bool(handshake and age is not None and age < AWG2_ONLINE_WINDOW_S)
+        clients.append(
+            {
+                "name": names.get(pubkey, pubkey[:8] if pubkey else "unknown"),
+                "iface": iface,
+                "online": online,
+                "handshake_age_s": age,
+                "rx": rx,
+                "tx": tx,
+                "pubkey": pubkey,
+            }
+        )
+    return clients
 
 
 class Awg2Service:
@@ -387,6 +528,103 @@ class Awg2Service:
                 "vpn": len(self.list_clients("vpn")),
             },
         }
+
+    def get_monitoring(self) -> dict[str, Any]:
+        """Iface summary + clients overview (stats.db) or live dump fallback."""
+        _ensure_installed()
+        env = _read_services_env()
+        iface_specs = [
+            ("antizapret", env.get("AZ_IFACE"), env.get("AZ_PORT"), env.get("AZ_SUBNET")),
+            ("vpn", env.get("VPN_IFACE"), env.get("VPN_PORT"), env.get("VPN_SUBNET")),
+        ]
+        dump_by_iface: dict[str, str] = {}
+        ifaces: list[dict[str, Any]] = []
+        for _tunnel, name, port, subnet in iface_specs:
+            if not name:
+                continue
+            dump_text = self._awg_show_dump(name)
+            dump_by_iface[name] = dump_text
+            peer_count = 0
+            for i, line in enumerate(dump_text.splitlines()):
+                if i == 0:
+                    continue
+                if len(line.split("\t")) >= 8:
+                    peer_count += 1
+            ifaces.append(
+                {
+                    "name": name,
+                    "port": port,
+                    "subnet": subnet,
+                    "peer_count": peer_count,
+                }
+            )
+
+        stats_db = _stats_db_path()
+        stats_file_present = stats_db.is_file()
+        clients: list[dict[str, Any]] = []
+        stats_available = False
+
+        if stats_file_present:
+            overview_text = self._run_stats_overview()
+            clients = _parse_overview_tsv(overview_text)
+            if not clients:
+                clients = _clients_from_stats_db(stats_db)
+            if clients:
+                stats_available = True
+
+        if not clients:
+            names = _load_peer_names()
+            now = int(time.time())
+            for iface_name, dump_text in dump_by_iface.items():
+                clients.extend(
+                    _parse_awg_dump(dump_text, iface=iface_name, names=names, now=now)
+                )
+            stats_available = False
+
+        return {
+            "ifaces": ifaces,
+            "clients": clients,
+            "stats_available": stats_available,
+        }
+
+    def _run_stats_overview(self) -> str:
+        script = AWG2_STATS_SCRIPT
+        if not script.is_file():
+            return ""
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(script), "overview"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+                env={
+                    **os.environ,
+                    "AWG_STATS_DB": str(_stats_db_path()),
+                    "AWG_DIR": str(AWG2_AMNEZIA_DIR),
+                },
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        if completed.returncode != 0:
+            return ""
+        return completed.stdout or ""
+
+    def _awg_show_dump(self, iface: str) -> str:
+        awg_bin = shutil.which("awg") or "awg"
+        try:
+            completed = subprocess.run(
+                [awg_bin, "show", iface, "dump"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        if completed.returncode != 0:
+            return ""
+        return completed.stdout or ""
 
     def list_clients(self, tunnel: str = "antizapret") -> list[str]:
         if tunnel not in AWG2_TUNNELS:
