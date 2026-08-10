@@ -45,6 +45,27 @@ def test_local_node_adapter_awg2_archive_runtime_delegate():
     awg2.apply_runtime.assert_called_once_with()
 
 
+def test_local_node_adapter_awg2_obfuscation_delegate():
+    adapter, _service, awg2 = _local_adapter()
+    awg2.get_obfuscation.return_value = {"preset": "medium"}
+    awg2.regenerate_obfuscation.return_value = {"preset": "medium", "regen_all": "ok"}
+    awg2.apply_obfuscation.return_value = {"preset": "high"}
+
+    assert adapter.get_awg2_obfuscation() == {"preset": "medium"}
+    assert adapter.awg2_obfuscation_regenerate()["regen_all"] == "ok"
+    assert adapter.awg2_obfuscation_apply(preset="high", template="web", mtu=1280) == {"preset": "high"}
+
+    awg2.get_obfuscation.assert_called_once_with()
+    awg2.regenerate_obfuscation.assert_called_once_with()
+    awg2.apply_obfuscation.assert_called_once_with(
+        preset="high",
+        template="web",
+        mtu=1280,
+        host=None,
+        fp=None,
+    )
+
+
 def test_local_node_adapter_get_profile_files_branches_awg2():
     adapter, service, awg2 = _local_adapter()
     service.get_profile_files.return_value = [{"path": "ovpn"}]
@@ -143,3 +164,31 @@ def test_remote_node_adapter_awg2_archive_runtime_hit_expected_routes(monkeypatc
         {"content": b"payload", "timeout": 120.0},
     )
     assert request_calls[1] == ("POST", "/awg2/runtime/apply", {"timeout": 60.0})
+
+
+def test_remote_node_adapter_awg2_obfuscation_hit_expected_routes(monkeypatch):
+    adapter = RemoteNodeAdapter("10.0.0.2", 9100, "k" * 32, mtls_enabled=False)
+    request_calls: list[tuple[str, str, dict]] = []
+
+    def fake_request(method, path, **kwargs):
+        request_calls.append((method, path, kwargs))
+        return {"preset": "high", "reimport_required": False}
+
+    monkeypatch.setattr(adapter, "_request", fake_request)
+
+    assert adapter.get_awg2_obfuscation()["preset"] == "high"
+    assert adapter.awg2_obfuscation_regenerate()["preset"] == "high"
+    assert adapter.awg2_obfuscation_apply(preset="high", template="web", mtu=1280, host="ex.com")[
+        "preset"
+    ] == "high"
+
+    assert request_calls[0] == ("GET", "/awg2/obfuscation", {"timeout": 60.0})
+    assert request_calls[1] == ("POST", "/awg2/obfuscation/regenerate", {"timeout": 180.0})
+    assert request_calls[2] == (
+        "POST",
+        "/awg2/obfuscation/apply",
+        {
+            "json": {"preset": "high", "template": "web", "mtu": 1280, "host": "ex.com"},
+            "timeout": 180.0,
+        },
+    )

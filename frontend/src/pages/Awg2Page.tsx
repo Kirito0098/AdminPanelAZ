@@ -1,9 +1,10 @@
-import { RefreshCw, Server, Shield, Users } from 'lucide-react'
+import { Eye, RefreshCw, Server, Shield, Users } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { getAwg2Health, getAwg2Status } from '@/api/client'
 import ClientsTab from '@/components/awg2/ClientsTab'
 import Awg2HelpStub from '@/components/awg2/Awg2HelpStub'
 import Awg2InstallPrompt from '@/components/awg2/Awg2InstallPrompt'
+import ObfuscationTab from '@/components/awg2/ObfuscationTab'
 import { formatAwg2NodeLabel } from '@/components/awg2/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,7 +14,7 @@ import { useNode } from '@/context/NodeContext'
 import { cn } from '@/lib/utils'
 import type { Awg2HealthResponse, Awg2StatusResponse } from '@/types'
 
-type Awg2Tab = 'clients' | 'help'
+type Awg2Tab = 'clients' | 'obfuscation' | 'help'
 
 function statusMeta(health: Awg2HealthResponse | null) {
   if (!health) {
@@ -134,7 +135,7 @@ export default function Awg2Page() {
                 )}
               </dl>
               <p className="mt-3 text-muted-foreground">
-                Клиенты управляются во вкладке ниже. Если нужно обновить слой, используйте команду установки.
+                Клиенты и обфускация — во вкладках ниже. Если нужно обновить слой, используйте команду установки.
               </p>
             </div>
           )}
@@ -144,6 +145,10 @@ export default function Awg2Page() {
                 <Users className="h-4 w-4" />
                 <span>Клиенты</span>
               </TabsTrigger>
+              <TabsTrigger value="obfuscation" className="gap-1.5">
+                <Eye className="h-4 w-4" />
+                <span>Обфускация</span>
+              </TabsTrigger>
               <TabsTrigger value="help" className="gap-1.5">
                 <Shield className="h-4 w-4" />
                 <span>Справка</span>
@@ -152,6 +157,10 @@ export default function Awg2Page() {
 
             <TabsContent value="clients" className="mt-0 focus-visible:outline-none">
               <ClientsTab health={health} />
+            </TabsContent>
+
+            <TabsContent value="obfuscation" className="mt-0 focus-visible:outline-none">
+              <ObfuscationTab health={health} />
             </TabsContent>
 
             <TabsContent value="help" className="mt-0 focus-visible:outline-none">

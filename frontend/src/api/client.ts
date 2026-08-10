@@ -1614,6 +1614,29 @@ export async function getAwg2Status() {
   return apiFetch<import('../types').Awg2StatusResponse>('/awg2/status')
 }
 
+export async function getAwg2Obfuscation() {
+  return apiFetch<import('../types').Awg2ObfuscationResponse>('/awg2/obfuscation')
+}
+
+export async function regenerateAwg2Obfuscation() {
+  return apiFetch<import('../types').Awg2ObfuscationResponse>('/awg2/obfuscation/regenerate', {
+    method: 'POST',
+  })
+}
+
+export async function applyAwg2Obfuscation(payload: {
+  preset: string
+  template: string
+  mtu?: number | null
+  host?: string | null
+  fp?: string | null
+}) {
+  return apiFetch<import('../types').Awg2ObfuscationResponse>('/awg2/obfuscation/apply', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function getWarperStatus() {
   return apiFetch<import('../types').WarperStatusResponse>('/warper/status')
 }

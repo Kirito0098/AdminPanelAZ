@@ -15,12 +15,16 @@ from typing import Any
 from fastapi import HTTPException, status
 
 AWG2_CLIENT_BIN = Path(os.environ.get("AWG2_CLIENT_BIN", "/usr/local/bin/awg-client"))
+AWG2_OBFUSCATION_BIN = Path(os.environ.get("AWG2_OBFUSCATION_BIN", "/usr/local/bin/awg-obfuscation"))
 AWG2_OVERLAY_DIR = Path(os.environ.get("AWG2_OVERLAY_DIR", "/opt/antizapret-awg"))
 AWG2_AMNEZIA_DIR = Path(os.environ.get("AWG2_AMNEZIA_DIR", "/etc/amnezia/amneziawg"))
 AWG2_CLIENT_DIR = AWG2_OVERLAY_DIR / "clients"
 AWG2_SERVICES_ENV = AWG2_AMNEZIA_DIR / "services.env"
 AWG2_CLIENT_LOCK = Path(os.environ.get("AWG2_CLIENT_LOCK", "/run/antizapret-awg-client.lock"))
 AWG2_TUNNELS = ("antizapret", "vpn")
+AWG2_OBFUSCATION_PRESETS = frozenset({"router", "low", "medium", "high", "paranoid"})
+AWG2_OBFUSCATION_TEMPLATES = frozenset({"quic", "tls", "web", "voip", "dns", "mixed"})
+AWG2_OBFUSCATION_FPS = frozenset({"chrome", "firefox", "safari"})
 
 AWG2_INSTALL_CMD = (
     "bash <(curl -fsSL https://raw.githubusercontent.com/blindtechnique/az-awg2/main/install.sh)"
@@ -97,17 +101,21 @@ def _flock_prefix() -> list[str]:
     return []
 
 
-def _read_services_env() -> dict[str, str]:
+def _read_kv_file(path: Path) -> dict[str, str]:
     data: dict[str, str] = {}
-    if not AWG2_SERVICES_ENV.is_file():
+    if not path.is_file():
         return data
-    for line in AWG2_SERVICES_ENV.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
         data[key.strip()] = value.strip().strip('"').strip("'")
     return data
+
+
+def _read_services_env() -> dict[str, str]:
+    return _read_kv_file(AWG2_SERVICES_ENV)
 
 
 def _ensure_replica_installed() -> None:
@@ -177,6 +185,99 @@ class Awg2Service:
             err = (completed.stderr or completed.stdout or "awg-client failed").strip()
             raise RuntimeError(err)
         return (completed.stdout or "").strip()
+
+    def _run_obfuscation(self, *args: str, timeout: int = 180) -> str:
+        _ensure_installed()
+        if not AWG2_OBFUSCATION_BIN.is_file():
+            raise RuntimeError(f"awg-obfuscation binary not found: {AWG2_OBFUSCATION_BIN}")
+        cmd = [str(AWG2_OBFUSCATION_BIN), *args]
+        completed = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if completed.returncode != 0:
+            err = (completed.stderr or completed.stdout or "awg-obfuscation failed").strip()
+            raise RuntimeError(err)
+        return (completed.stdout or "").strip()
+
+    def _regen_all_clients(self) -> str:
+        return self._run_awg_client("regen-all")
+
+    def get_obfuscation(self) -> dict[str, Any]:
+        _ensure_installed()
+        meta = _read_kv_file(AWG2_AMNEZIA_DIR / "obfuscation.meta")
+        env = _read_kv_file(AWG2_AMNEZIA_DIR / "obfuscation.env")
+        params: dict[str, str] = {}
+        for key, value in env.items():
+            if key.startswith("AWG_"):
+                params[key[4:]] = value
+            else:
+                params[key] = value
+        mtu_raw = meta.get("META_MTU")
+        mtu: Any = mtu_raw
+        if mtu_raw is not None and str(mtu_raw).strip().isdigit():
+            mtu = int(str(mtu_raw).strip())
+        template = meta.get("META_TEMPLATE") or None
+        host = meta.get("META_HOST") or None
+        return {
+            "preset": meta.get("META_PRESET"),
+            "template": template,
+            "fp": meta.get("META_FP"),
+            "host": host,
+            "mtu": mtu,
+            "generated": meta.get("META_GENERATED"),
+            "params": params,
+        }
+
+    def regenerate_obfuscation(self) -> dict[str, Any]:
+        _ensure_installed()
+        output = self._run_obfuscation("--regenerate")
+        regen_out = self._regen_all_clients()
+        profile = self.get_obfuscation()
+        profile["output"] = output
+        profile["regen_all"] = regen_out
+        return profile
+
+    def apply_obfuscation(
+        self,
+        preset: str,
+        template: str,
+        mtu: int | None = None,
+        host: str | None = None,
+        fp: str | None = None,
+    ) -> dict[str, Any]:
+        preset_value = (preset or "").strip().lower()
+        template_value = (template or "").strip().lower()
+        if preset_value not in AWG2_OBFUSCATION_PRESETS:
+            raise ValueError(f"Недопустимый preset: {preset}")
+        if template_value not in AWG2_OBFUSCATION_TEMPLATES:
+            raise ValueError(f"Недопустимый template: {template}")
+
+        fp_value: str | None = None
+        if fp:
+            fp_value = str(fp).strip().lower()
+            if fp_value not in AWG2_OBFUSCATION_FPS:
+                raise ValueError(f"Недопустимый fp: {fp}")
+
+        _ensure_installed()
+
+        args = ["--preset", preset_value, "--template", template_value, "--apply"]
+        if mtu is not None:
+            args.extend(["--mtu", str(int(mtu))])
+        if host:
+            args.extend(["--host", str(host).strip()])
+        if fp_value:
+            args.extend(["--fp", fp_value])
+
+        output = self._run_obfuscation(*args)
+        regen_out = self._regen_all_clients()
+        profile = self.get_obfuscation()
+        profile["output"] = output
+        profile["regen_all"] = regen_out
+        return profile
 
     def add_client(self, name: str) -> str:
         name = self.validate_client_name(name)

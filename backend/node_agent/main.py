@@ -132,6 +132,14 @@ class Awg2ClientRequest(BaseModel):
     client_name: str = Field(min_length=1, max_length=32)
 
 
+class Awg2ObfuscationApplyRequest(BaseModel):
+    preset: str = Field(min_length=1, max_length=32)
+    template: str = Field(min_length=1, max_length=32)
+    mtu: int | None = None
+    host: str | None = None
+    fp: str | None = None
+
+
 class ProfileFilesClientRequest(BaseModel):
     client_name: str = Field(min_length=1, max_length=32)
     vpn_type: str
@@ -738,6 +746,48 @@ def awg2_apply_runtime(_: None = Depends(verify_api_key)):
         return Awg2Service().apply_runtime()
     except Awg2NotInstalledError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.get("/awg2/obfuscation")
+def awg2_get_obfuscation(_: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().get_obfuscation()
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.post("/awg2/obfuscation/regenerate")
+def awg2_regenerate_obfuscation(_: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().regenerate_obfuscation()
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.post("/awg2/obfuscation/apply")
+def awg2_apply_obfuscation(payload: Awg2ObfuscationApplyRequest, _: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().apply_obfuscation(
+            preset=payload.preset,
+            template=payload.template,
+            mtu=payload.mtu,
+            host=payload.host,
+            fp=payload.fp,
+        )
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
 @app.get("/warper/status")

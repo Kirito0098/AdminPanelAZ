@@ -225,3 +225,55 @@ def test_delete_amneziawg2_calls_replicate_and_awg2():
     adapter.awg2_delete_client.assert_called_once_with("awg2user")
     adapter.delete_wireguard_client.assert_not_called()
     replicate.assert_called_once()
+
+
+def test_get_obfuscation_ok():
+    node = SimpleNamespace(id=1, name="local", host="127.0.0.1")
+    adapter = MagicMock()
+    adapter.get_awg2_obfuscation.return_value = {
+        "preset": "medium",
+        "template": "web",
+        "params": {"Jc": "4"},
+    }
+    with (
+        patch.object(awg2_router, "get_active_node", return_value=node),
+        patch.object(awg2_router, "get_active_adapter", return_value=adapter),
+    ):
+        result = awg2_router.get_obfuscation(db=MagicMock(), _=SimpleNamespace())
+    assert result["preset"] == "medium"
+    assert result["node_id"] == 1
+
+
+def test_apply_obfuscation_returns_reimport_and_ha_warnings():
+    from app.schemas import Awg2ObfuscationApply
+
+    node = SimpleNamespace(id=1, name="local", host="127.0.0.1")
+    adapter = MagicMock()
+    adapter.awg2_obfuscation_apply.return_value = {"preset": "high", "template": "web"}
+    payload = Awg2ObfuscationApply(preset="high", template="web", mtu=1280)
+    with (
+        patch.object(awg2_router, "get_active_node", return_value=node),
+        patch.object(awg2_router, "get_active_adapter", return_value=adapter),
+        patch.object(
+            awg2_router,
+            "_ha_sync_awg2_from_active",
+            return_value={"attempted": True, "errors": [{"node_name": "r1", "error": "down"}]},
+        ),
+    ):
+        result = awg2_router.apply_obfuscation(payload=payload, db=MagicMock(), _=SimpleNamespace())
+    assert result["reimport_required"] is True
+    assert result["ha"]["errors"][0]["node_name"] == "r1"
+    adapter.awg2_obfuscation_apply.assert_called_once()
+
+
+def test_regenerate_obfuscation_maps_not_installed():
+    node = SimpleNamespace(id=1, name="local", host="127.0.0.1")
+    adapter = MagicMock()
+    adapter.awg2_obfuscation_regenerate.side_effect = Awg2NotInstalledError("not installed")
+    with (
+        patch.object(awg2_router, "get_active_node", return_value=node),
+        patch.object(awg2_router, "get_active_adapter", return_value=adapter),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            awg2_router.regenerate_obfuscation(db=MagicMock(), _=SimpleNamespace())
+    assert exc.value.status_code == 409

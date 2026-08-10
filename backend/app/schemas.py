@@ -1746,3 +1746,11 @@ class TrafficClientSessionsResponse(BaseModel):
     node_name: str | None = None
     ha_aggregated: bool = False
     nodes: list[TrafficSessionNodeSummary] | None = None
+
+
+class Awg2ObfuscationApply(BaseModel):
+    preset: Literal["router", "low", "medium", "high", "paranoid"]
+    template: Literal["quic", "tls", "web", "voip", "dns", "mixed"]
+    mtu: int | None = Field(default=None, ge=576, le=1500)
+    host: str | None = Field(default=None, max_length=253)
+    fp: Literal["chrome", "firefox", "safari"] | None = None

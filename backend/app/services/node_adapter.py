@@ -219,6 +219,23 @@ class NodeAdapter(ABC):
     def apply_awg2_runtime(self) -> dict: ...
 
     @abstractmethod
+    def get_awg2_obfuscation(self) -> dict: ...
+
+    @abstractmethod
+    def awg2_obfuscation_regenerate(self) -> dict: ...
+
+    @abstractmethod
+    def awg2_obfuscation_apply(
+        self,
+        *,
+        preset: str,
+        template: str,
+        mtu: int | None = None,
+        host: str | None = None,
+        fp: str | None = None,
+    ) -> dict: ...
+
+    @abstractmethod
     def get_warper_status(self) -> dict: ...
 
     @abstractmethod
@@ -491,6 +508,29 @@ class LocalNodeAdapter(NodeAdapter):
 
     def apply_awg2_runtime(self) -> dict:
         return self._awg2.apply_runtime()
+
+    def get_awg2_obfuscation(self) -> dict:
+        return self._awg2.get_obfuscation()
+
+    def awg2_obfuscation_regenerate(self) -> dict:
+        return self._awg2.regenerate_obfuscation()
+
+    def awg2_obfuscation_apply(
+        self,
+        *,
+        preset: str,
+        template: str,
+        mtu: int | None = None,
+        host: str | None = None,
+        fp: str | None = None,
+    ) -> dict:
+        return self._awg2.apply_obfuscation(
+            preset=preset,
+            template=template,
+            mtu=mtu,
+            host=host,
+            fp=fp,
+        )
 
     def read_easyrsa_index(self) -> str:
         return self._service.read_easyrsa_index()
@@ -1366,6 +1406,35 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def apply_awg2_runtime(self) -> dict:
         return self._request("POST", "/awg2/runtime/apply", timeout=60.0)
+
+    def get_awg2_obfuscation(self) -> dict:
+        return self._request("GET", "/awg2/obfuscation", timeout=60.0)
+
+    def awg2_obfuscation_regenerate(self) -> dict:
+        return self._request("POST", "/awg2/obfuscation/regenerate", timeout=180.0)
+
+    def awg2_obfuscation_apply(
+        self,
+        *,
+        preset: str,
+        template: str,
+        mtu: int | None = None,
+        host: str | None = None,
+        fp: str | None = None,
+    ) -> dict:
+        payload: dict = {"preset": preset, "template": template}
+        if mtu is not None:
+            payload["mtu"] = mtu
+        if host is not None:
+            payload["host"] = host
+        if fp is not None:
+            payload["fp"] = fp
+        return self._request(
+            "POST",
+            "/awg2/obfuscation/apply",
+            json=payload,
+            timeout=180.0,
+        )
 
     def get_warper_status(self) -> dict:
         return self._request("GET", "/warper/status")

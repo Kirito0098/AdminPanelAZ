@@ -1,7 +1,7 @@
 # AZ-AWG2 — срез 2b (обфускация)
 
 **Дата:** 2026-08-10  
-**Статус:** draft  
+**Статус:** implemented  
 **Эпик:** [az-awg2-epic](2026-08-10-az-awg2-epic.md)  
 **План:** [wave2b plan](../plans/2026-08-10-az-awg2-wave2b.md)  
 **Зависит от:** [2a](2026-08-10-az-awg2-wave2a-design.md) (HA sync после apply желателен)

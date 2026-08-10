@@ -1765,6 +1765,26 @@ export interface Awg2StatusResponse {
   node_host?: string | null
 }
 
+export interface Awg2ObfuscationResponse {
+  preset?: string | null
+  template?: string | null
+  mtu?: number | string | null
+  host?: string | null
+  fp?: string | null
+  generated?: string | null
+  params?: Record<string, string>
+  reimport_required?: boolean
+  ha?: {
+    attempted?: boolean
+    errors?: Array<{ node_name?: string | null; error?: string | null }>
+  }
+  output?: string
+  regen_all?: string
+  node_id?: number | null
+  node_name?: string | null
+  node_host?: string | null
+}
+
 export interface WarperStatusResponse {
   status: Record<string, unknown>
   node_id?: number | null
