@@ -1606,6 +1606,14 @@ export async function getWarperHealth() {
   return apiFetch<import('../types').WarperHealthResponse>('/warper/health')
 }
 
+export async function getAwg2Health() {
+  return apiFetch<import('../types').Awg2HealthResponse>('/awg2/health')
+}
+
+export async function getAwg2Status() {
+  return apiFetch<import('../types').Awg2StatusResponse>('/awg2/status')
+}
+
 export async function getWarperStatus() {
   return apiFetch<import('../types').WarperStatusResponse>('/warper/status')
 }

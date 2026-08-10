@@ -1733,6 +1733,38 @@ export interface WarperHealthResponse {
   node_host?: string | null
 }
 
+export interface Awg2HealthResponse {
+  installed: boolean
+  awg_client?: boolean
+  overlay_dir?: boolean
+  amnezia_dir?: boolean
+  missing_components?: string[]
+  install_command?: string
+  update_command?: string
+  node_id?: number | null
+  node_name?: string | null
+  node_host?: string | null
+}
+
+export interface Awg2StatusResponse {
+  installed: boolean
+  services_env?: {
+    AZ_IFACE?: string | null
+    VPN_IFACE?: string | null
+    AZ_PORT?: string | null
+    VPN_PORT?: string | null
+    AZ_SUBNET?: string | null
+    VPN_SUBNET?: string | null
+  }
+  client_counts?: {
+    antizapret?: number
+    vpn?: number
+  }
+  node_id?: number | null
+  node_name?: string | null
+  node_host?: string | null
+}
+
 export interface WarperStatusResponse {
   status: Record<string, unknown>
   node_id?: number | null

@@ -17,6 +17,7 @@ from app.models import User, UserRole, VpnConfig, VpnType
 from app.routers import (
     alert_rules,
     auth,
+    awg2,
     backups,
     cidr_db,
     client_access,
@@ -219,6 +220,7 @@ app.include_router(node_sync.router, prefix=_API_PREFIX)
 app.include_router(nodes.router, prefix=_API_PREFIX)
 app.include_router(routing.router, prefix=_API_PREFIX)
 app.include_router(warper.router, prefix=_API_PREFIX)
+app.include_router(awg2.router, prefix=_API_PREFIX)
 app.include_router(cidr_db.router, prefix=_API_PREFIX)
 app.include_router(traffic.router, prefix=_API_PREFIX)
 app.include_router(client_access.router, prefix=_API_PREFIX)

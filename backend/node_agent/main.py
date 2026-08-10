@@ -34,6 +34,7 @@ from app.services.profile_files import profile_files_batch_key
 from app.services.server_monitor import ServerMonitorService
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 from app.services.warper import WarperService, run_warper_action
+from app.services.awg2 import Awg2NotInstalledError, Awg2Service
 
 NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
@@ -664,6 +665,19 @@ class WarperCatalogNameRequest(BaseModel):
 @app.get("/warper/health")
 def warper_health(_: None = Depends(verify_api_key)):
     return run_warper_action("health")
+
+
+@app.get("/awg2/health")
+def awg2_health(_: None = Depends(verify_api_key)):
+    return Awg2Service().get_health()
+
+
+@app.get("/awg2/status")
+def awg2_status(_: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().get_status()
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @app.get("/warper/status")

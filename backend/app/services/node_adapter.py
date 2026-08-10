@@ -24,6 +24,7 @@ from app.services.server_monitor import get_server_monitor
 from app.services.node_remote_cache import get_cached_monitoring_overview, monitoring_overview_cache_key
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 from app.services.warper import WarperService, build_ip_ranges_text_from_items, build_user_domains_text_from_items
+from app.services.awg2 import Awg2Service
 
 _settings = get_settings()
 
@@ -191,6 +192,12 @@ class NodeAdapter(ABC):
     def get_warper_health(self) -> dict: ...
 
     @abstractmethod
+    def get_awg2_health(self) -> dict: ...
+
+    @abstractmethod
+    def get_awg2_status(self) -> dict: ...
+
+    @abstractmethod
     def get_warper_status(self) -> dict: ...
 
     @abstractmethod
@@ -318,9 +325,15 @@ class NodeAdapter(ABC):
 
 
 class LocalNodeAdapter(NodeAdapter):
-    def __init__(self, service: AntiZapretService | None = None, warper: WarperService | None = None):
+    def __init__(
+        self,
+        service: AntiZapretService | None = None,
+        warper: WarperService | None = None,
+        awg2: Awg2Service | None = None,
+    ):
         self._service = service or AntiZapretService()
         self._warper = warper or WarperService()
+        self._awg2 = awg2 or Awg2Service()
         self._cidr = CidrRoutingService(self._service.base_path, get_cidr_list_dir())
         self._monitor = get_server_monitor()
 
@@ -575,6 +588,12 @@ class LocalNodeAdapter(NodeAdapter):
 
     def get_warper_health(self) -> dict:
         return self._warper.get_health()
+
+    def get_awg2_health(self) -> dict:
+        return self._awg2.get_health()
+
+    def get_awg2_status(self) -> dict:
+        return self._awg2.get_status()
 
     def get_warper_status(self) -> dict:
         return self._warper.get_status()
@@ -1262,6 +1281,12 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def get_warper_health(self) -> dict:
         return self._request("GET", "/warper/health")
+
+    def get_awg2_health(self) -> dict:
+        return self._request("GET", "/awg2/health")
+
+    def get_awg2_status(self) -> dict:
+        return self._request("GET", "/awg2/status")
 
     def get_warper_status(self) -> dict:
         return self._request("GET", "/warper/status")
