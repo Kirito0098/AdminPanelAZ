@@ -47,7 +47,13 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
             <p>
               <span className="font-medium text-foreground">Мониторинг:</span> overview клиентов
               (online / handshake / traffic) из <code className="text-xs">awg_stats</code> или live{' '}
-              <code className="text-xs">awg show dump</code>. Детальная карточка клиента и GeoIP — позже.
+              <code className="text-xs">awg show dump</code>. Клик по строке или «Статистика» на карточке
+              клиента — endpoint, GeoIP (если MMDB загружена) и дневной трафик из{' '}
+              <code className="text-xs">stats.db</code>.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Блокировки:</span> временная / постоянная /
+              снятие — те же действия, что на Dashboard для WireGuard; на HA replica кнопки скрыты.
             </p>
             <p>
               <span className="font-medium text-foreground">TTL клиентов:</span> для профилей{' '}

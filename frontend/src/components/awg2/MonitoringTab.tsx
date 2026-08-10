@@ -1,6 +1,7 @@
 import { Activity, Network, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { getAwg2Monitoring } from '@/api/client'
+import Awg2ClientStatsSheet from '@/components/awg2/Awg2ClientStatsSheet'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -31,6 +32,7 @@ export default function MonitoringTab({ health }: MonitoringTabProps) {
   const [data, setData] = useState<Awg2MonitoringResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [statsClientName, setStatsClientName] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (disabled) {
@@ -124,7 +126,7 @@ export default function MonitoringTab({ health }: MonitoringTabProps) {
             <div className="border-b px-4 py-3">
               <h3 className="text-sm font-medium">Клиенты</h3>
               <p className="text-xs text-muted-foreground">
-                Online ≈ handshake &lt; 180 с. Deep client / GeoIP — в волне 3c.
+                Нажмите на строку, чтобы открыть endpoint, GeoIP и дневную статистику клиента.
               </p>
             </div>
             {clients.length === 0 ? (
@@ -144,7 +146,11 @@ export default function MonitoringTab({ health }: MonitoringTabProps) {
                   </TableHeader>
                   <TableBody>
                     {clients.map((client) => (
-                      <TableRow key={`${client.iface ?? ''}-${client.name}-${client.pubkey ?? ''}`}>
+                      <TableRow
+                        key={`${client.iface ?? ''}-${client.name}-${client.pubkey ?? ''}`}
+                        className="cursor-pointer"
+                        onClick={() => setStatsClientName(client.name)}
+                      >
                         <TableCell className="font-medium">{client.name}</TableCell>
                         <TableCell>
                           <Badge variant={client.online ? 'success' : 'secondary'}>
@@ -172,6 +178,14 @@ export default function MonitoringTab({ health }: MonitoringTabProps) {
           </div>
         </>
       )}
+
+      <Awg2ClientStatsSheet
+        clientName={statsClientName}
+        open={statsClientName != null}
+        onOpenChange={(open) => {
+          if (!open) setStatsClientName(null)
+        }}
+      />
     </div>
   )
 }

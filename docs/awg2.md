@@ -126,7 +126,17 @@ bash <(curl -fsSL https://raw.githubusercontent.com/blindtechnique/az-awg2/main/
 2. Смотрите карточки интерфейсов (порт, subnet, число пиров) и таблицу клиентов
 3. Online ≈ последний handshake младше **180 секунд**
 4. Источник: `awg_stats.py overview` при наличии `/opt/antizapret-awg/stats.db`; иначе live `awg show dump` (без 500)
-5. Детальная карточка клиента и GeoIP пока не доступны (волна 3c)
+5. Клик по строке клиента (или **Статистика** на вкладке **Клиенты**) открывает drawer: endpoint, GeoIP (если MMDB в `data/geoip/`) и дневной трафик
+
+### Блокировка клиента
+
+На Dashboard (вкладка **AmneziaWG 2.0**) и на `/awg2` → **Клиенты**:
+
+- **Временная блокировка** — peer снимается с runtime, срок в policy DB
+- **Блокировать навсегда** — до ручной разблокировки
+- **Снять блокировку** — восстановление peer в `awg`
+
+На HA replica mutating-действия скрыты (как для WireGuard).
 
 ---
 

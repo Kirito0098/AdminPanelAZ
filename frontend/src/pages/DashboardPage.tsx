@@ -130,9 +130,7 @@ export default function DashboardPage() {
     contentMode: import('../api/client').QrContentMode
     downloadUrl?: string
   } | null>(null)
-  const [policies, setPolicies] = useState<
-    Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
-  >({})
+  const [policies, setPolicies] = useState<Record<string, import('../types').ClientPoliciesResponseEntry>>({})
   const [connectionMap, setConnectionMap] = useState<ClientConnectionMap | null>(null)
   const [panelUsers, setPanelUsers] = useState<User[]>([])
   const [ownerId, setOwnerId] = useState<number | null>(null)

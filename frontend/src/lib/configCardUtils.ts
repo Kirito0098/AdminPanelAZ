@@ -1,4 +1,4 @@
-import type { ClientAccessPolicy, OpenVpnClient, VpnConfig, WireGuardPeer } from '@/types'
+import type { ClientAccessPolicy, ClientPoliciesResponseEntry, OpenVpnClient, VpnConfig, WireGuardPeer } from '@/types'
 import { formatDate } from '@/lib/datetime'
 import { getProfileDownloadFilename } from '@/lib/profileDownloadName'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
@@ -344,11 +344,13 @@ export function matchesPresenceFilter(
 
 export function getPolicyForConfig(
   config: VpnConfig,
-  policies: Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>,
+  policies: Record<string, ClientPoliciesResponseEntry>,
 ): ClientAccessPolicy | undefined {
   const entry = policies[config.client_name]
   if (!entry) return undefined
-  return config.vpn_type === 'openvpn' ? entry.openvpn : entry.wireguard
+  if (config.vpn_type === 'openvpn') return entry.openvpn
+  if (config.vpn_type === 'amneziawg2') return entry.amneziawg2 ?? entry.wireguard
+  return entry.wireguard
 }
 
 export type ConfigStatusVariant = 'success' | 'destructive' | 'warning' | 'secondary'

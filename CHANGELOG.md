@@ -48,6 +48,7 @@
 
 ### ✨ Added
 
+- **AZ-AWG2 волна 3c (access + deep stats UI)** — temp/permanent/unblock для `amneziawg2` через `/api/client-access/amneziawg2/*` (Dashboard, `/awg2` → Клиенты; HA replica readonly). Drawer статистики клиента: `GET /api/awg2/clients/{name}/stats` — endpoint, GeoIP, дневной трафик (Monitoring row click + «Статистика»). Docs: [`awg2.md`](docs/awg2.md).
 - **AZ-AWG2 волна 3b (Telegram + Mini App)** — `/awg2` в боте (admin status), Mini App страница AZ-AWG2 (read-only), create/list/download `amneziawg2` в Mini Configs с TTL; toggle `awg2` гасит команду и nav. Без install/обфускации в TG. Docs: [`awg2.md`](docs/awg2.md).
 - **AZ-AWG2 волна 3a (frontend UX)** — потоковая установка/обновление слоя прямо из `/awg2` с live-логом SSE, TTL при создании клиентов AWG2 (`нет` / `30m` / `2h` / `6h` / `7d`), бейджи `истекает …` на `/awg2` и Dashboard, узкая вкладка **Бэкап** (download/upload restore только для AWG2). Docs: [`awg2.md`](docs/awg2.md).
 - **AZ-AWG2 волна 2 (срезы 2a–2c)** — HA crypto-sync `amneziawg2` (archive без `stats.db`), вкладка **Обфускация** (`awg-obfuscation` regen/apply + HA warn), вкладка **Мониторинг** (`GET /api/awg2/monitoring`: overview или live `awg show dump`, online ≈ handshake &lt; 180s). Docs: [`awg2.md`](docs/awg2.md), [`NodeSync.md`](docs/NodeSync.md).

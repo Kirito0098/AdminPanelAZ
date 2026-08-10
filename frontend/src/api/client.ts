@@ -1423,7 +1423,7 @@ export async function transferEditFiles(payload: {
 
 export async function getClientPolicies(clients: string) {
   const params = new URLSearchParams({ clients })
-  return apiFetch<Record<string, { openvpn: import('../types').ClientAccessPolicy; wireguard: import('../types').ClientAccessPolicy }>>(
+  return apiFetch<Record<string, import('../types').ClientPoliciesResponseEntry>>(
     `/client-access/policies?${params}`,
   )
 }
@@ -1472,6 +1472,27 @@ export async function wgUnblock(clientName: string) {
 
 export async function wgPermanentBlock(clientName: string) {
   return apiFetch('/client-access/wireguard/permanent-block', {
+    method: 'POST',
+    body: JSON.stringify({ client_name: clientName }),
+  })
+}
+
+export async function awg2TempBlock(clientName: string, days: number) {
+  return apiFetch('/client-access/amneziawg2/temp-block', {
+    method: 'POST',
+    body: JSON.stringify({ client_name: clientName, days }),
+  })
+}
+
+export async function awg2Unblock(clientName: string) {
+  return apiFetch('/client-access/amneziawg2/unblock', {
+    method: 'POST',
+    body: JSON.stringify({ client_name: clientName }),
+  })
+}
+
+export async function awg2PermanentBlock(clientName: string) {
+  return apiFetch('/client-access/amneziawg2/permanent-block', {
     method: 'POST',
     body: JSON.stringify({ client_name: clientName }),
   })
@@ -1640,6 +1661,10 @@ export async function applyAwg2Obfuscation(payload: {
 
 export async function getAwg2Monitoring() {
   return apiFetch<import('../types').Awg2MonitoringResponse>('/awg2/monitoring')
+}
+
+export async function getAwg2ClientStats(clientName: string) {
+  return apiFetch<import('../types').Awg2ClientStats>(`/awg2/clients/${encodeURIComponent(clientName)}/stats`)
 }
 
 export function openAwg2InstallStream(

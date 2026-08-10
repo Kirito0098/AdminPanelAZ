@@ -281,12 +281,14 @@ export async function getTgClientPolicy(
   vpnType: VpnType,
 ): Promise<ClientAccessPolicy | null> {
   const params = new URLSearchParams({ clients: clientName })
-  const data = await panelApiFetch<
-    Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
-  >(`/client-access/policies?${params.toString()}`)
+  const data = await panelApiFetch<Record<string, import('../types').ClientPoliciesResponseEntry>>(
+    `/client-access/policies?${params.toString()}`,
+  )
   const entry = data[clientName]
   if (!entry) return null
-  return vpnType === 'openvpn' ? entry.openvpn : entry.wireguard
+  if (vpnType === 'openvpn') return entry.openvpn
+  if (vpnType === 'amneziawg2') return entry.amneziawg2 ?? entry.wireguard
+  return entry.wireguard
 }
 
 async function postClientAccess(path: string, clientName: string, extra?: Record<string, unknown>) {

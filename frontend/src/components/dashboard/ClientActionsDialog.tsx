@@ -15,6 +15,9 @@ import {
   Zap,
 } from 'lucide-react'
 import {
+  awg2PermanentBlock,
+  awg2TempBlock,
+  awg2Unblock,
   ApiError,
   createOneTimeLink,
   deleteConfig,
@@ -203,6 +206,7 @@ export default function ClientActionsDialog({
   const vpnFile = pickVpnFile(config, tab)
   const azFile = pickAzFile(config, tab)
   const isOpenVpn = config.vpn_type === 'openvpn'
+  const isAwg2 = config.vpn_type === 'amneziawg2'
   const isBlocked = policy?.is_blocked ?? false
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
   const wgExpired = Boolean(policy?.expired) || blockMode === 'expired'
@@ -419,7 +423,37 @@ export default function ClientActionsDialog({
             ),
         },
       ]
-    : [
+    : isAwg2
+      ? [
+          {
+            key: 'temp-block',
+            label: 'Временная блокировка',
+            icon: <Ban size={14} />,
+            hidden: !canManage || haReplicaReadonly,
+            onClick: () =>
+              askNumber(
+                'Временная блокировка',
+                `Укажите срок блокировки для клиента «${config.client_name}»`,
+                '7',
+                async (days) => {
+                  await awg2TempBlock(config.client_name, days)
+                  onNotifySuccess('Клиент временно заблокирован')
+                },
+              ),
+          },
+          {
+            key: 'unblock',
+            label: 'Снять блокировку',
+            icon: <Unlock size={14} />,
+            hidden: !canManage || !isBlocked || haReplicaReadonly,
+            onClick: () =>
+              runAction('unblock', async () => {
+                await awg2Unblock(config.client_name)
+                onNotifySuccess('Блокировка снята')
+              }),
+          },
+        ]
+      : [
         {
           key: 'temp-block',
           label: 'Временная блокировка',
@@ -488,7 +522,7 @@ export default function ClientActionsDialog({
               },
             ),
         },
-      ]
+        ]
 
   const dangerActions: ActionItem[] = [
     {
@@ -504,6 +538,8 @@ export default function ClientActionsDialog({
           async () => {
             if (isOpenVpn) {
               await openvpnPermanentBlock(config.client_name)
+            } else if (isAwg2) {
+              await awg2PermanentBlock(config.client_name)
             } else {
               await wgPermanentBlock(config.client_name)
             }

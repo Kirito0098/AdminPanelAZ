@@ -1,12 +1,17 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
-import { Columns2, Download, Loader2, Plus, RefreshCw, Shield, Trash2, Users } from 'lucide-react'
+import { Ban, BarChart3, Columns2, Download, Loader2, Plus, RefreshCw, Shield, Trash2, Unlock, Users } from 'lucide-react'
 import {
   ApiError,
+  awg2PermanentBlock,
+  awg2TempBlock,
+  awg2Unblock,
   createConfig,
   deleteConfig,
   downloadProfile,
+  getClientPolicies,
   getConfigs,
 } from '@/api/client'
+import Awg2ClientStatsSheet from '@/components/awg2/Awg2ClientStatsSheet'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import EmptyState from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/badge'
@@ -29,6 +34,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import {
   formatAccessExpiryBadge,
   formatCreatedAt,
@@ -46,7 +52,7 @@ import {
 } from '@/lib/configCardViewPrefs'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
 import { cn } from '@/lib/utils'
-import type { Awg2HealthResponse, VpnConfig } from '@/types'
+import type { Awg2HealthResponse, ClientAccessPolicy, ClientPoliciesResponseEntry, VpnConfig } from '@/types'
 import { AWG2_TTL_OPTIONS } from './utils'
 
 interface ClientsTabProps {
@@ -82,10 +88,14 @@ function sortClients(items: VpnConfig[]): VpnConfig[] {
   return [...items].sort((a, b) => b.created_at.localeCompare(a.created_at))
 }
 
+type BlockPromptMode = 'temp' | 'permanent' | 'unblock' | null
+
 export default function ClientsTab({ health }: ClientsTabProps) {
   const { success, error: notifyError } = useNotifications()
   const { withInline } = useProgress()
+  const haReplicaReadonly = useHaReplicaReadonly()
   const [clients, setClients] = useState<VpnConfig[]>([])
+  const [policies, setPolicies] = useState<Record<string, ClientPoliciesResponseEntry>>({})
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [clientName, setClientName] = useState('')
@@ -97,6 +107,11 @@ export default function ClientsTab({ health }: ClientsTabProps) {
   const [deleting, setDeleting] = useState(false)
   const [downloadBusyId, setDownloadBusyId] = useState<number | null>(null)
   const [gridCols, setGridCols] = useState<CardGridCols>('auto')
+  const [blockTarget, setBlockTarget] = useState<VpnConfig | null>(null)
+  const [blockPromptMode, setBlockPromptMode] = useState<BlockPromptMode>(null)
+  const [blockDays, setBlockDays] = useState('7')
+  const [blockBusy, setBlockBusy] = useState(false)
+  const [statsClientName, setStatsClientName] = useState<string | null>(null)
 
   const ready = Boolean(health?.installed)
 
@@ -109,19 +124,36 @@ export default function ClientsTab({ health }: ClientsTabProps) {
     saveAwg2GridCols(cols)
   }
 
+  const loadPolicies = useCallback(async (items: VpnConfig[]) => {
+    if (!items.length) {
+      setPolicies({})
+      return
+    }
+    try {
+      const names = items.map((c) => c.client_name).join(',')
+      const data = await getClientPolicies(names)
+      setPolicies(data)
+    } catch {
+      setPolicies({})
+    }
+  }, [])
+
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError(null)
     try {
       const data = await getConfigs(true)
-      setClients(sortClients(data.filter((config) => config.vpn_type === 'amneziawg2')))
+      const awg2Clients = sortClients(data.filter((config) => config.vpn_type === 'amneziawg2'))
+      setClients(awg2Clients)
+      await loadPolicies(awg2Clients)
     } catch (err) {
       setClients([])
+      setPolicies({})
       setLoadError(err instanceof Error ? err.message : 'Не удалось загрузить клиентов')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [loadPolicies])
 
   useEffect(() => {
     if (!ready) return
@@ -213,6 +245,50 @@ export default function ClientsTab({ health }: ClientsTabProps) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка удаления клиента')
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const getAwg2Policy = (name: string): ClientAccessPolicy | undefined =>
+    policies[name]?.amneziawg2 ?? policies[name]?.wireguard
+
+  const openBlockPrompt = (config: VpnConfig, mode: Exclude<BlockPromptMode, null>) => {
+    setBlockTarget(config)
+    setBlockPromptMode(mode)
+    if (mode === 'temp') setBlockDays('7')
+  }
+
+  const closeBlockPrompt = () => {
+    if (blockBusy) return
+    setBlockTarget(null)
+    setBlockPromptMode(null)
+  }
+
+  const handleBlockAction = async () => {
+    if (!blockTarget || !blockPromptMode) return
+    setBlockBusy(true)
+    try {
+      const name = blockTarget.client_name
+      if (blockPromptMode === 'unblock') {
+        await awg2Unblock(name)
+        success('Блокировка снята')
+      } else if (blockPromptMode === 'permanent') {
+        await awg2PermanentBlock(name)
+        success('Клиент заблокирован')
+      } else {
+        const days = Number.parseInt(blockDays, 10)
+        if (!Number.isFinite(days) || days < 1 || days > 3650) {
+          notifyError('Срок блокировки: от 1 до 3650 дней')
+          return
+        }
+        await awg2TempBlock(name, days)
+        success(`Клиент заблокирован на ${days} дн.`)
+      }
+      closeBlockPrompt()
+      await load()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка блокировки клиента')
+    } finally {
+      setBlockBusy(false)
     }
   }
 
@@ -387,6 +463,8 @@ export default function ClientsTab({ health }: ClientsTabProps) {
             const azFile = pickAzFile(config, tab)
             const hasBoth = hasVpnProfiles(config, tab) && hasAzProfiles(config, tab)
             const busy = downloadBusyId === config.id
+            const policy = getAwg2Policy(config.client_name)
+            const isBlocked = policy?.is_blocked ?? false
 
             return (
               <div key={config.id} className="flex flex-col rounded-xl border bg-card/50 p-4 shadow-sm">
@@ -395,6 +473,7 @@ export default function ClientsTab({ health }: ClientsTabProps) {
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="truncate text-base font-semibold">{config.client_name}</h3>
                       <Badge variant="outline">AWG2</Badge>
+                      {isBlocked && <Badge variant="destructive">заблокирован</Badge>}
                       {config.expires_at && (
                         <Badge variant="warning">{formatAccessExpiryBadge(config.expires_at)}</Badge>
                       )}
@@ -414,8 +493,9 @@ export default function ClientsTab({ health }: ClientsTabProps) {
                     variant="ghost"
                     size="icon"
                     className="shrink-0 text-destructive hover:text-destructive"
+                    disabled={haReplicaReadonly}
                     onClick={() => setDeleteTarget(config)}
-                    title="Удалить клиента"
+                    title={haReplicaReadonly ? 'На replica удаление недоступно' : 'Удалить клиента'}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -439,6 +519,53 @@ export default function ClientsTab({ health }: ClientsTabProps) {
                 </dl>
 
                 <div className="mt-auto space-y-2 border-t border-border/60 pt-2.5">
+                  {!haReplicaReadonly && (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1.5 px-2 text-xs"
+                        onClick={() => openBlockPrompt(config, 'temp')}
+                      >
+                        <Ban className="h-3.5 w-3.5 shrink-0" />
+                        Временная блокировка
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1.5 px-2 text-xs text-destructive hover:text-destructive"
+                        disabled={isBlocked}
+                        onClick={() => openBlockPrompt(config, 'permanent')}
+                      >
+                        <Ban className="h-3.5 w-3.5 shrink-0" />
+                        Блокировать навсегда
+                      </Button>
+                      {isBlocked && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1.5 px-2 text-xs sm:col-span-2"
+                          onClick={() => openBlockPrompt(config, 'unblock')}
+                        >
+                          <Unlock className="h-3.5 w-3.5 shrink-0" />
+                          Снять блокировку
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-8 w-full gap-1.5 px-2 text-xs"
+                    onClick={() => setStatsClientName(config.client_name)}
+                  >
+                    <BarChart3 className="h-3.5 w-3.5 shrink-0" />
+                    Статистика
+                  </Button>
                   {vpnFile || azFile ? (
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       {hasBoth ? (
@@ -528,6 +655,73 @@ export default function ClientsTab({ health }: ClientsTabProps) {
         confirmLabel="Удалить"
         loading={deleting}
         onConfirm={handleDelete}
+      />
+
+      <ConfirmDialog
+        open={blockPromptMode === 'unblock'}
+        onOpenChange={(open) => {
+          if (!open) closeBlockPrompt()
+        }}
+        title="Снять блокировку?"
+        description={
+          blockTarget ? <>Разблокировать клиента «{blockTarget.client_name}» и восстановить доступ?</> : undefined
+        }
+        confirmLabel="Разблокировать"
+        loading={blockBusy}
+        onConfirm={() => void handleBlockAction()}
+      />
+
+      <ConfirmDialog
+        open={blockPromptMode === 'permanent'}
+        onOpenChange={(open) => {
+          if (!open) closeBlockPrompt()
+        }}
+        title="Блокировать навсегда"
+        description={
+          blockTarget
+            ? <>Заблокировать клиента «{blockTarget.client_name}» до ручной разблокировки?</>
+            : undefined
+        }
+        confirmLabel="Заблокировать"
+        destructive
+        loading={blockBusy}
+        onConfirm={() => void handleBlockAction()}
+      />
+
+      <ConfirmDialog
+        open={blockPromptMode === 'temp'}
+        onOpenChange={(open) => {
+          if (!open) closeBlockPrompt()
+        }}
+        title="Временная блокировка"
+        description={
+          blockTarget ? <>Укажите срок блокировки для «{blockTarget.client_name}».</> : undefined
+        }
+        confirmLabel="Заблокировать"
+        destructive
+        loading={blockBusy}
+        onConfirm={() => void handleBlockAction()}
+      >
+        <div className="space-y-2">
+          <Label htmlFor="awg2-block-days">Срок (дни, 1–3650)</Label>
+          <Input
+            id="awg2-block-days"
+            type="number"
+            min={1}
+            max={3650}
+            value={blockDays}
+            onChange={(e) => setBlockDays(e.target.value)}
+            autoFocus
+          />
+        </div>
+      </ConfirmDialog>
+
+      <Awg2ClientStatsSheet
+        clientName={statsClientName}
+        open={statsClientName != null}
+        onOpenChange={(open) => {
+          if (!open) setStatsClientName(null)
+        }}
       />
     </div>
   )

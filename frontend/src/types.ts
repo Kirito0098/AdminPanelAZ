@@ -1360,6 +1360,12 @@ export interface ClientAccessPolicy {
   traffic_limit_unblock_label?: string | null
 }
 
+export interface ClientPoliciesResponseEntry {
+  openvpn: ClientAccessPolicy
+  wireguard: ClientAccessPolicy
+  amneziawg2?: ClientAccessPolicy
+}
+
 export interface FeatureToggleItem {
   key: string
   env_key: string
@@ -1847,6 +1853,29 @@ export interface Awg2MonitoringResponse {
   node_id?: number | null
   node_name?: string | null
   node_host?: string | null
+}
+
+export interface Awg2ClientStatsDailyRow {
+  day: string
+  rx: number
+  tx: number
+}
+
+export interface Awg2ClientStatsGeo {
+  city?: string | null
+  country?: string | null
+  isp?: string | null
+}
+
+export interface Awg2ClientStats {
+  name: string
+  online: boolean
+  endpoint?: string | null
+  handshake_age_s?: number | null
+  rx_life?: number | null
+  tx_life?: number | null
+  daily: Awg2ClientStatsDailyRow[]
+  geo: Awg2ClientStatsGeo | null
 }
 
 export interface Awg2RestoreResponse {
