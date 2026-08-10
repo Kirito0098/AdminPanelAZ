@@ -51,6 +51,7 @@ export default function Configs() {
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
   const [openvpnEnabled, setOpenvpnEnabled] = useState(true)
   const [wireguardEnabled, setWireguardEnabled] = useState(true)
+  const [awg2Enabled, setAwg2Enabled] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -101,12 +102,17 @@ export default function Configs() {
             !policy ||
             policy.protocols.includes('wireguard') ||
             policy.protocols.includes('amneziawg'))
+        const allowAwg2 =
+          Boolean(data.features.awg2) &&
+          (isAdmin || !policy || policy.protocols.includes('amneziawg2'))
         setOpenvpnEnabled(allowOpenvpn)
         setWireguardEnabled(allowWireguard)
+        setAwg2Enabled(allowAwg2)
       })
       .catch(() => {
         setOpenvpnEnabled(true)
         setWireguardEnabled(true)
+        setAwg2Enabled(false)
       })
   }, [isAdmin, settings?.visible_vpn_profiles])
 
@@ -119,6 +125,7 @@ export default function Configs() {
       all: configs.length,
       openvpn: configs.filter((c) => c.vpn_type === 'openvpn').length,
       wireguard: configs.filter((c) => c.vpn_type === 'wireguard').length,
+      amneziawg2: configs.filter((c) => c.vpn_type === 'amneziawg2').length,
     }),
     [configs],
   )
@@ -142,7 +149,7 @@ export default function Configs() {
   const hasActiveFilters = search.trim().length > 0 || protocol !== 'all'
   const isForeignConfig = Boolean(activeConfig && activeConfig.is_mine === false)
   const canCreate =
-    (openvpnEnabled || wireguardEnabled) &&
+    (openvpnEnabled || wireguardEnabled || awg2Enabled) &&
     (quota?.can_create ?? true)
   const canManageConfig = (config: TgMiniConfig) => isAdmin || config.is_mine !== false
 
@@ -405,6 +412,7 @@ export default function Configs() {
         currentUserId={settings?.user_id}
         openvpnEnabled={openvpnEnabled}
         wireguardEnabled={wireguardEnabled}
+        awg2Enabled={awg2Enabled}
         quota={quota}
         onCreated={() => void load({ silent: true })}
       />

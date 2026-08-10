@@ -16,7 +16,7 @@ from app.services.telegram_bot_handlers.ui import send_or_edit
 from app.services import telegram_bot_i18n as i18n
 from app.services.telegram_bot_handlers import settings_fsm
 
-_ADMIN_ACTIONS = frozenset({"settings", "nodes", "cidr", "warper"})
+_ADMIN_ACTIONS = frozenset({"settings", "nodes", "cidr", "warper", "awg2"})
 
 
 def _admin_menu_visible(ctx: BotContext) -> bool:
@@ -29,6 +29,10 @@ def _cidr_visible(ctx: BotContext) -> bool:
 
 def _warper_visible(ctx: BotContext) -> bool:
     return _admin_menu_visible(ctx) and get_feature_service().is_enabled("warper")
+
+
+def _awg2_visible(ctx: BotContext) -> bool:
+    return _admin_menu_visible(ctx) and get_feature_service().is_enabled("awg2")
 
 
 def _linked_user_menu_visible(ctx: BotContext) -> bool:
@@ -46,6 +50,7 @@ def _menu_button_label(action: str) -> str:
         "nodes": i18n.BTN_MENU_NODES,
         "cidr": i18n.BTN_MENU_CIDR,
         "warper": i18n.BTN_MENU_WARPER,
+        "awg2": i18n.BTN_MENU_AWG2,
     }[action]
 
 
@@ -59,6 +64,8 @@ def _more_menu_row_actions(ctx: BotContext) -> list[list[str]]:
             module_row.append("cidr")
         if _warper_visible(ctx):
             module_row.append("warper")
+        if _awg2_visible(ctx):
+            module_row.append("awg2")
         if module_row:
             rows.append(module_row)
 
@@ -161,6 +168,10 @@ async def _dispatch_action(ctx: BotContext, action: str, *, message_id: int | No
         from app.services.telegram_bot_handlers.warper_status import handle_warper_status
 
         await handle_warper_status(ctx, message_id=message_id)
+    elif action == "awg2":
+        from app.services.telegram_bot_handlers.awg2_status import handle_awg2_status
+
+        await handle_awg2_status(ctx, message_id=message_id)
 
 
 async def handle_menu_text(ctx: BotContext, text: str) -> bool:

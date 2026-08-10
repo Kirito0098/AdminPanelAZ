@@ -2,7 +2,7 @@ import { Search, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
-export type ProtocolFilter = 'all' | 'openvpn' | 'wireguard'
+export type ProtocolFilter = 'all' | 'openvpn' | 'wireguard' | 'amneziawg2'
 
 type ProtocolCounts = Partial<Record<ProtocolFilter, number>>
 
@@ -20,6 +20,7 @@ const PROTOCOL_OPTIONS: Array<{ value: ProtocolFilter; label: string }> = [
   { value: 'all', label: 'Все' },
   { value: 'openvpn', label: 'OpenVPN' },
   { value: 'wireguard', label: 'WG / AWG' },
+  { value: 'amneziawg2', label: 'AWG2' },
 ]
 
 export function matchesSearchQuery(value: string, query: string): boolean {

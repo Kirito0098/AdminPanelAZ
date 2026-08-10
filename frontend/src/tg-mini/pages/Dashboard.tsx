@@ -154,14 +154,14 @@ export default function Dashboard() {
   }, [load])
 
   const filteredOpenVpn = useMemo(() => {
-    if (!data || protocol === 'wireguard') return []
+    if (!data || (protocol !== 'all' && protocol !== 'openvpn')) return []
     return data.openvpn_clients.filter((client) =>
       matchesSearchQuery(String(client.common_name || ''), search),
     )
   }, [data, protocol, search])
 
   const filteredWireguard = useMemo(() => {
-    if (!data || protocol === 'openvpn') return []
+    if (!data || (protocol !== 'all' && protocol !== 'wireguard')) return []
     return data.wireguard_peers.filter((peer) => {
       const label = peer.client_name || peer.public_key
       return matchesSearchQuery(label, search)

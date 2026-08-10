@@ -1,12 +1,22 @@
+import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { TG_MINI_NO_INIT_DATA } from '@/tg-mini/lib/telegramInitData'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import { Button } from '@/components/ui/button'
 import Spinner from '@/components/ui/Spinner'
 import MiniBottomNav from '@/tg-mini/components/MiniBottomNav'
+import { getTgFeatureModules } from '@/tg-mini/api'
 
 export default function MiniShell() {
   const { status, error, settings, isAdmin, retryAuth } = useTgAuth()
+  const [features, setFeatures] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    if (status !== 'ready') return
+    void getTgFeatureModules()
+      .then((data) => setFeatures(data.features || {}))
+      .catch(() => setFeatures({}))
+  }, [status])
 
   if (status === 'loading') {
     return (
@@ -45,7 +55,7 @@ export default function MiniShell() {
         <Outlet />
       </main>
 
-      <MiniBottomNav isAdmin={isAdmin} />
+      <MiniBottomNav isAdmin={isAdmin} features={features} />
     </div>
   )
 }

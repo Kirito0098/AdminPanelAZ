@@ -570,6 +570,16 @@ body.tg-mini-app {
   background: hsl(142 76% 36% / 0.16);
 }
 
+.tg-mini-protocol-awg2 {
+  color: hsl(173 70% 32%);
+  background: hsl(173 70% 36% / 0.12);
+}
+
+.dark .tg-mini-protocol-awg2 {
+  color: hsl(173 65% 55%);
+  background: hsl(173 70% 36% / 0.16);
+}
+
 .tg-mini-protocol-default {
   color: hsl(var(--muted-foreground));
   background: hsl(var(--muted));

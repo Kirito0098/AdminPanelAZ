@@ -745,6 +745,26 @@ export interface TgMiniWarperStatus {
   kresd_patched?: boolean | null
 }
 
+export interface TgMiniAwg2TopTraffic {
+  name: string
+  rx: number
+  tx: number
+}
+
+export interface TgMiniAwg2Status {
+  node_id: number
+  node_name: string
+  node_host: string
+  installed: boolean
+  missing_components: string[]
+  install_command?: string | null
+  online_count: number
+  peer_count: number
+  ifaces_summary: string
+  top_traffic: TgMiniAwg2TopTraffic[]
+  health_error?: string | null
+}
+
 export interface TgMiniCidrPipelineTask {
   task_id?: string | number | null
   task_type?: string | null

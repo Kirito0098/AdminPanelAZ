@@ -73,6 +73,7 @@ BTN_MENU_SETTINGS = "⚙️ Настройки"
 BTN_MENU_NODES = "🖥 Узлы"
 BTN_MENU_CIDR = "🗂 CIDR"
 BTN_MENU_WARPER = "🌐 WARP"
+BTN_MENU_AWG2 = "🛡️ AWG2"
 
 MENU_KEYBOARD_PLACEHOLDER = "Конфиги, статус или Ещё…"
 MENU_MORE_TITLE = "📋 <b>Дополнительно</b>\n\n<i>Остальные разделы — кнопками ниже.</i>"
@@ -88,6 +89,7 @@ MENU_ACTIONS: dict[str, str] = {
     BTN_MENU_NODES: "nodes",
     BTN_MENU_CIDR: "cidr",
     BTN_MENU_WARPER: "warper",
+    BTN_MENU_AWG2: "awg2",
     # Старые подписи кнопок (до обновления меню)
     "🌐 AZ-WARP": "warper",
 }
@@ -105,6 +107,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("nodes", "VPN-узлы (admin)"),
     ("cidr", "Статус CIDR pipeline (admin)"),
     ("warper", "Статус AZ-WARP (admin)"),
+    ("awg2", "Статус AZ-AWG2 (admin)"),
 )
 
 # --- /start ---
@@ -154,6 +157,7 @@ HELP_FOOTER = "<i>💡 Кнопки внизу чата — основной с�
 HELP_ADMIN_CIDR = "• /cidr — статус CIDR pipeline"
 HELP_ADMIN_NODES = "• /nodes — VPN-узлы (health, активация)"
 HELP_ADMIN_WARPER = "• /warper — статус AZ-WARP"
+HELP_ADMIN_AWG2 = "• /awg2 — статус AZ-AWG2"
 HELP_ADMIN_SETTINGS = "/settings — настройки панели (inline-меню)"
 HELP_ADMIN_FOOTER = ""
 HELP_LINES = HELP_LINES_MAIN
@@ -424,6 +428,27 @@ WARPER_BODY = (
 )
 WARPER_DISABLED = MODULE_DISABLED.format(name="AZ-WARP")
 WARPER_ERROR = "Не удалось получить статус AZ-WARP: {detail}"
+
+# --- /awg2 ---
+
+AWG2_TITLE = "🛡️ <b>AZ-AWG2</b>"
+AWG2_YES = "да"
+AWG2_NO = "нет"
+AWG2_NONE = "—"
+AWG2_MISSING = "Не хватает: <code>{components}</code>"
+AWG2_INSTALL_HINT = "Установка на узле (SSH, не из бота):\n<code>{command}</code>"
+AWG2_HEALTH_ERROR = "Ошибка health: <code>{detail}</code>"
+AWG2_BODY = (
+    "{title}\n\n"
+    "Узел: <code>{node_name}</code> ({node_host})\n"
+    "Установлен: <b>{installed_label}</b>\n"
+    "{details}"
+    "Online: <b>{online_count}</b> · peers: <b>{peer_count}</b>\n"
+    "Интерфейсы: <code>{ifaces_summary}</code>\n"
+    "Топ трафика:\n{top_traffic}"
+)
+AWG2_DISABLED = MODULE_DISABLED.format(name="AZ-AWG2")
+AWG2_ERROR = "Не удалось получить статус AZ-AWG2: {detail}"
 
 # --- /nodes ---
 

@@ -20,6 +20,7 @@ import type {
   TgMiniQrLink,
   TgMiniSettings,
   TgMiniWarperStatus,
+  TgMiniAwg2Status,
   TgMiniCidrStatus,
   User,
   VpnConfig,
@@ -209,6 +210,10 @@ export async function getTgWarperStatus(): Promise<TgMiniWarperStatus> {
   return tgFetch<TgMiniWarperStatus>('/warper/status')
 }
 
+export async function getTgAwg2Status(): Promise<TgMiniAwg2Status> {
+  return tgFetch<TgMiniAwg2Status>('/awg2/status')
+}
+
 export async function getTgCidrStatus(): Promise<TgMiniCidrStatus> {
   return tgFetch<TgMiniCidrStatus>('/cidr/status')
 }
@@ -231,6 +236,7 @@ export async function createTgPanelConfig(data: {
   cert_expire_days?: number
   description?: string
   owner_id?: number
+  ttl?: string
 }): Promise<VpnConfig> {
   return panelApiFetch<VpnConfig>('/configs', {
     method: 'POST',

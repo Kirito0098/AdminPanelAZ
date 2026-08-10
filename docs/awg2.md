@@ -19,6 +19,16 @@
 Если слой не установлен — страница покажет SSH-команду и кнопку **«Установить из панели»** с live-логом.
 `install-base` и возможная перезагрузка по-прежнему остаются только в SSH.
 
+### Telegram / Mini App
+
+| Канал | Возможности |
+|-------|-------------|
+| Бот `/awg2` (admin) | Краткий статус слоя: installed, online/peers, top-3 трафика; кнопка в «⋯ Ещё» рядом с AZ-WARP |
+| Mini App `/awg2` (admin) | Read-only карточки (health + мониторинг); **без** install / обфускации / backup |
+| Mini App → Конфиги | Create / download / delete `amneziawg2` при toggle `awg2` и visibility; опциональный TTL |
+
+Модуль `awg2` выключен → команда и пункт Mini App скрыты / disabled.
+
 ---
 
 ## Чем отличается
