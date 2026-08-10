@@ -9,11 +9,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import AmneziaWg2AccessPolicy, Node, NodeStatus
+from app.models import AmneziaWg2AccessPolicy, Node, NodeStatus, User, UserRole, VpnConfig, VpnType
 from app.routers import client_access
 from app.services.access_policy import AccessPolicyService
 from app.services.feature_guards import blocked_json_response, check_path_access
 from app.services.feature_toggles import FeatureToggleService
+from app.services.policy_import import copy_access_policies_from_node
+from app.services.node_sync import policy_sync
 from app.services.node_adapter import LocalNodeAdapter, RemoteNodeAdapter
 
 
@@ -31,9 +33,9 @@ def db():
         engine.dispose()
 
 
-def _make_node(db) -> Node:
+def _make_node(db, *, name: str = "node-1") -> Node:
     node = Node(
-        name="node-1",
+        name=name,
         host="127.0.0.1",
         port=9100,
         api_key_hash="",
@@ -46,6 +48,14 @@ def _make_node(db) -> Node:
     db.commit()
     db.refresh(node)
     return node
+
+
+def _make_owner(db) -> User:
+    user = User(username="owner", password_hash="hash", role=UserRole.admin, is_active=True)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 def _make_service(db, node_id: int) -> AccessPolicyService:
@@ -142,6 +152,80 @@ def test_awg2_unblock_clears_flags_and_restores_runtime(db):
     assert row.block_until is None
     awg2_block.assert_called_once_with("locked")
     awg2_unblock.assert_called_once_with("locked")
+
+
+def test_replicate_awg2_block_temp_invokes_replica_awg2_runtime(db):
+    owner = _make_owner(db)
+    primary = _make_node(db, name="primary")
+    replica = _make_node(db, name="replica")
+    primary_config = VpnConfig(
+        node_id=primary.id,
+        client_name="Ivan",
+        vpn_type=VpnType.amneziawg2,
+        owner_id=owner.id,
+    )
+    db.add(primary_config)
+    db.commit()
+    db.refresh(primary_config)
+    adapter = MagicMock()
+    group = SimpleNamespace(primary_node_id=primary.id, sync_mode="auto")
+    shadow = SimpleNamespace(node_id=replica.id, id=77)
+
+    with (
+        patch.object(policy_sync, "get_replica_nodes", return_value=[replica]),
+        patch.object(policy_sync, "get_shadow_configs", return_value=[shadow]),
+        patch.object(policy_sync, "get_adapter_for_node", return_value=adapter),
+        patch.object(policy_sync, "finalize_replicate_outcome"),
+    ):
+        result = policy_sync.replicate_policy_op(
+            db,
+            group,
+            primary_config,
+            "block_temp",
+            days=3,
+            actor="admin",
+        )
+
+    row = (
+        db.query(AmneziaWg2AccessPolicy)
+        .filter_by(node_id=replica.id, client_name="ivan")
+        .first()
+    )
+    assert result == {"applied": [{"node_id": replica.id, "config_id": 77}], "errors": [], "skipped": False}
+    assert row is not None
+    assert row.is_temp_blocked is True
+    assert row.block_days == 3
+    adapter.block_awg2_client_runtime.assert_called_once_with("ivan")
+
+
+def test_copy_access_policies_from_node_copies_awg2_rows(db):
+    source = _make_node(db, name="source")
+    target = _make_node(db, name="target")
+    db.add(
+        AmneziaWg2AccessPolicy(
+            node_id=source.id,
+            client_name="ivan",
+            is_temp_blocked=True,
+            block_reason="manual_temp",
+            block_days=5,
+            updated_by="admin",
+        )
+    )
+    db.commit()
+
+    copied = copy_access_policies_from_node(db, source, target)
+
+    row = (
+        db.query(AmneziaWg2AccessPolicy)
+        .filter_by(node_id=target.id, client_name="ivan")
+        .first()
+    )
+    assert copied == 1
+    assert row is not None
+    assert row.is_temp_blocked is True
+    assert row.block_reason == "manual_temp"
+    assert row.block_days == 5
+    assert row.updated_by == "admin"
 
 
 def test_awg2_access_routes_disabled_when_feature_off(tmp_path: Path):

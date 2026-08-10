@@ -70,7 +70,12 @@ def _ha_sync_awg2_from_active(db: Session) -> dict[str, Any]:
         for replica in replicas:
             try:
                 replica_adapter = get_adapter_for_node(replica)
-                sync_amneziawg2_state_from_primary(primary_adapter, replica_adapter)
+                sync_amneziawg2_state_from_primary(
+                    primary_adapter,
+                    replica_adapter,
+                    db=db,
+                    replica_node=replica,
+                )
             except Exception as exc:  # noqa: BLE001 — collect warnings, do not fail apply
                 errors.append({"node_name": getattr(replica, "name", None), "error": str(exc)})
         return {"attempted": True, "errors": errors}

@@ -9,7 +9,15 @@ from typing import Any, Literal
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Node, NodeSyncGroup, OpenVpnAccessPolicy, VpnConfig, VpnType, WgAccessPolicy
+from app.models import (
+    AmneziaWg2AccessPolicy,
+    Node,
+    NodeSyncGroup,
+    OpenVpnAccessPolicy,
+    VpnConfig,
+    VpnType,
+    WgAccessPolicy,
+)
 from app.services.access_policy import NODE_DEFAULT_POLICY_CLIENT, AccessPolicyService, is_node_default_policy_client
 from app.services.node_manager import get_adapter_for_node, node_metadata_dict
 from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes, is_auto_sync_enabled
@@ -74,6 +82,15 @@ def _apply_policy_op(
         if op == "clear_traffic_limit":
             return svc.openvpn_clear_traffic_limit(client_name, actor=actor)
         raise ValueError(f"Unsupported OpenVPN policy op: {op}")
+
+    if primary_config.vpn_type == VpnType.amneziawg2:
+        if op == "block_temp":
+            return svc.awg2_temp_block(client_name, int(kwargs["days"]), actor=actor)
+        if op == "block_permanent":
+            return svc.awg2_permanent_block(client_name, actor=actor)
+        if op == "unblock":
+            return svc.awg2_unblock(client_name, actor=actor)
+        raise ValueError(f"Unsupported AmneziaWG2 policy op: {op}")
 
     if op == "set_wg_expiry":
         return svc.wg_set_expiry(
@@ -293,6 +310,8 @@ def heal_policy_drift(db: Session, group: NodeSyncGroup) -> dict[str, Any]:
                 if is_node_default_policy_client(row.client_name):
                     continue
                 svc.reconcile_wg(row.client_name, apply_runtime=True)
+            for row in db.query(AmneziaWg2AccessPolicy).filter_by(node_id=replica_node.id).all():
+                svc.reconcile_awg2(row.client_name, apply_runtime=True)
         except Exception as exc:
             logger.warning(
                 "HA policy heal failed on replica %s: %s",
