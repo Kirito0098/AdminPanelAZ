@@ -349,10 +349,10 @@ def test_antizapret_export_easyrsa3_archive_contains_pki_files(tmp_path, monkeyp
     assert "easyrsa3/pki/index.txt" in names
 
 
-def test_handle_client_create_uses_crypto_sync(monkeypatch):
+def test_handle_client_create_passes_replica_context_for_awg2_crypto_sync(monkeypatch):
     primary_config = MagicMock()
     primary_config.client_name = "alice"
-    primary_config.vpn_type = VpnType.wireguard
+    primary_config.vpn_type = VpnType.amneziawg2
     primary_config.id = 10
     primary_config.owner_id = 1
     primary_config.cert_expire_days = None
@@ -388,10 +388,11 @@ def test_handle_client_create_uses_crypto_sync(monkeypatch):
     sync_mock.assert_called_once_with(
         primary_adapter,
         replica_adapter,
-        VpnType.wireguard,
+        VpnType.amneziawg2,
+        db=db,
+        replica_node=replica_node,
         client_name="alice",
     )
-    replica_adapter.add_wireguard_client.assert_not_called()
     assert len(result.successes) == 1
     assert result.successes[0]["node_id"] == 2
     assert result.errors == []
@@ -482,6 +483,8 @@ def test_handle_client_delete_syncs_crypto_from_primary(monkeypatch):
         primary_adapter,
         replica_adapter,
         VpnType.wireguard,
+        db=db,
+        replica_node=replica_node,
     )
     replica_adapter.delete_wireguard_client.assert_not_called()
     assert result.successes == [{"node_id": 4, "config_id": 40}]

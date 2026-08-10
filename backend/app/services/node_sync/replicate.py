@@ -136,6 +136,8 @@ def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, 
                 primary_adapter,
                 adapter,
                 primary_config.vpn_type,
+                db=db,
+                replica_node=replica_node,
                 client_name=primary_config.client_name,
             )
         except Exception as exc:
@@ -182,6 +184,8 @@ def _handle_client_delete(db: Session, group: NodeSyncGroup, payload: dict[str, 
                 primary_adapter,
                 adapter,
                 shadow.vpn_type,
+                db=db,
+                replica_node=replica_node,
             )
         except Exception as exc:
             logger.warning(
