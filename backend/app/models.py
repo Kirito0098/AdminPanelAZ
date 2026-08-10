@@ -17,6 +17,7 @@ class UserRole(str, enum.Enum):
 class VpnType(str, enum.Enum):
     openvpn = "openvpn"
     wireguard = "wireguard"
+    amneziawg2 = "amneziawg2"
 
 
 DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {

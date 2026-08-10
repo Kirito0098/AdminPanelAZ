@@ -332,3 +332,27 @@ def test_maybe_replicate_delete_skips_fallback_when_shadow_deleted(monkeypatch):
 
     assert result == delete_result
     fallback.assert_not_called()
+
+
+def test_maybe_replicate_create_skips_amneziawg2(monkeypatch):
+    primary_config = _make_config(config_id=1, node_id=1, client_name="awg2", vpn_type=VpnType.amneziawg2)
+    lookup = MagicMock()
+    replicate = MagicMock()
+    monkeypatch.setattr(client_sync, "find_sync_group_for_primary", lookup)
+    monkeypatch.setattr(client_sync, "replicate_client_create", replicate)
+
+    assert client_sync.maybe_replicate_create(MagicMock(), node_id=1, primary_config=primary_config) is None
+    lookup.assert_not_called()
+    replicate.assert_not_called()
+
+
+def test_maybe_replicate_delete_skips_amneziawg2(monkeypatch):
+    primary_config = _make_config(config_id=1, node_id=1, client_name="awg2", vpn_type=VpnType.amneziawg2)
+    lookup = MagicMock()
+    replicate = MagicMock()
+    monkeypatch.setattr(client_sync, "find_sync_group_for_primary", lookup)
+    monkeypatch.setattr(client_sync, "replicate_client_delete", replicate)
+
+    assert client_sync.maybe_replicate_delete(MagicMock(), node_id=1, primary_config=primary_config) is None
+    lookup.assert_not_called()
+    replicate.assert_not_called()

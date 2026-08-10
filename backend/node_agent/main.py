@@ -34,7 +34,7 @@ from app.services.profile_files import profile_files_batch_key
 from app.services.server_monitor import ServerMonitorService
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 from app.services.warper import WarperService, run_warper_action
-from app.services.awg2 import Awg2NotInstalledError, Awg2Service
+from app.services.awg2 import Awg2NotInstalledError, Awg2Service, is_awg2_profile_path
 
 NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
@@ -125,6 +125,10 @@ class OpenVpnClientRequest(BaseModel):
 
 
 class WireGuardClientRequest(BaseModel):
+    client_name: str = Field(min_length=1, max_length=32)
+
+
+class Awg2ClientRequest(BaseModel):
     client_name: str = Field(min_length=1, max_length=32)
 
 
@@ -298,6 +302,26 @@ def delete_wireguard(client_name: str, _: None = Depends(verify_api_key)):
     return {"message": f"Клиент '{client_name}' удалён", "detail": output}
 
 
+@app.get("/clients/amneziawg2")
+def list_awg2_clients(
+    tunnel: str = Query("antizapret"),
+    _: None = Depends(verify_api_key),
+):
+    return {"clients": Awg2Service().list_clients(tunnel)}
+
+
+@app.post("/clients/amneziawg2")
+def add_awg2_client(payload: Awg2ClientRequest, _: None = Depends(verify_api_key)):
+    output = Awg2Service().add_client(payload.client_name)
+    return {"message": "AmneziaWG2 клиент создан", "detail": output}
+
+
+@app.delete("/clients/amneziawg2/{client_name}")
+def delete_awg2_client(client_name: str, _: None = Depends(verify_api_key)):
+    output = Awg2Service().delete_client(client_name)
+    return {"message": f"Клиент '{client_name}' удалён", "detail": output}
+
+
 @app.post("/clients/wireguard/{client_name}/block")
 def block_wireguard(client_name: str, _: None = Depends(verify_api_key)):
     return block_client_runtime(client_name)
@@ -457,6 +481,8 @@ def restart_service(payload: ServiceRestartRequest, _: None = Depends(verify_api
 @app.get("/profiles/files")
 def profile_files(client_name: str, vpn_type: str, _: None = Depends(verify_api_key)):
     vt = VpnType(vpn_type)
+    if vt == VpnType.amneziawg2:
+        return {"files": Awg2Service().get_profile_files(client_name)}
     return {"files": service.get_profile_files(client_name, vt)}
 
 
@@ -470,18 +496,26 @@ def profile_files_batch(payload: ProfileFilesBatchRequest, _: None = Depends(ver
         except ValueError:
             files_by_client[key] = []
             continue
-        files_by_client[key] = service.get_profile_files(item.client_name, vt)
+        if vt == VpnType.amneziawg2:
+            files_by_client[key] = Awg2Service().get_profile_files(item.client_name)
+        else:
+            files_by_client[key] = service.get_profile_files(item.client_name, vt)
     return {"files_by_client": files_by_client}
 
 
 @app.get("/profiles/download")
 def profile_download(path: str, _: None = Depends(verify_api_key)):
+    if is_awg2_profile_path(path):
+        return {"content": Awg2Service().read_profile_file(path)}
     return {"content": service.read_profile_file(path)}
 
 
 @app.put("/profiles/upload")
 def profile_upload(payload: ProfileUploadRequest, _: None = Depends(verify_api_key)):
-    service.write_profile_file(payload.path, payload.content)
+    if is_awg2_profile_path(payload.path):
+        Awg2Service().write_profile_file(payload.path, payload.content)
+    else:
+        service.write_profile_file(payload.path, payload.content)
     return {"message": "Профиль сохранён"}
 
 

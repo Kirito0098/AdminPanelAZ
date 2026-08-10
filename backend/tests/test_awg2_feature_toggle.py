@@ -1,8 +1,11 @@
-"""AZ-AWG2 wave 1a: feature toggle registration and path guards."""
+"""AZ-AWG2 wave 1a/1b: feature toggle registration, path guards, require_vpn_type."""
 
 from pathlib import Path
 
-from app.services.feature_guards import check_path_access
+import pytest
+from fastapi import HTTPException
+
+from app.services.feature_guards import check_path_access, require_vpn_type
 from app.services.feature_toggles import FEATURE_TOGGLE_BY_KEY, FeatureToggleService
 
 
@@ -37,3 +40,14 @@ def test_awg2_path_allowed_when_enabled(tmp_path: Path):
     service = _svc(env_file, FEATURE_AWG2_ENABLED=True)
     assert check_path_access("/api/awg2/health", service=service) is None
     assert check_path_access("/api/awg2/status", service=service) is None
+
+
+def test_require_vpn_type_amneziawg2(tmp_path: Path):
+    env_file = tmp_path / ".env"
+    service = _svc(env_file, FEATURE_AWG2_ENABLED=False)
+    with pytest.raises(HTTPException) as exc:
+        require_vpn_type("amneziawg2", service=service)
+    assert exc.value.status_code == 403
+
+    service = _svc(env_file, FEATURE_AWG2_ENABLED=True)
+    require_vpn_type("amneziawg2", service=service)  # no raise

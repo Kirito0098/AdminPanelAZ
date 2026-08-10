@@ -24,7 +24,7 @@ from app.services.server_monitor import get_server_monitor
 from app.services.node_remote_cache import get_cached_monitoring_overview, monitoring_overview_cache_key
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 from app.services.warper import WarperService, build_ip_ranges_text_from_items, build_user_domains_text_from_items
-from app.services.awg2 import Awg2Service
+from app.services.awg2 import Awg2Service, is_awg2_profile_path
 
 _settings = get_settings()
 
@@ -52,6 +52,18 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def list_wireguard_clients(self) -> list[str]: ...
+
+    @abstractmethod
+    def awg2_add_client(self, client_name: str) -> str: ...
+
+    @abstractmethod
+    def awg2_delete_client(self, client_name: str) -> str: ...
+
+    @abstractmethod
+    def awg2_list_clients(self, tunnel: str = "antizapret") -> list[str]: ...
+
+    @abstractmethod
+    def list_amneziawg2_clients(self) -> list[str]: ...
 
     @abstractmethod
     def recreate_profiles(self) -> str: ...
@@ -358,6 +370,18 @@ class LocalNodeAdapter(NodeAdapter):
     def list_wireguard_clients(self) -> list[str]:
         return self._service.list_wireguard_clients()
 
+    def awg2_add_client(self, client_name: str) -> str:
+        return self._awg2.add_client(client_name)
+
+    def awg2_delete_client(self, client_name: str) -> str:
+        return self._awg2.delete_client(client_name)
+
+    def awg2_list_clients(self, tunnel: str = "antizapret") -> list[str]:
+        return self._awg2.list_clients(tunnel)
+
+    def list_amneziawg2_clients(self) -> list[str]:
+        return self._awg2.list_all_client_names()
+
     def recreate_profiles(self) -> str:
         return self._service.recreate_profiles()
 
@@ -429,12 +453,19 @@ class LocalNodeAdapter(NodeAdapter):
         return self._service.get_config_file_fingerprints()
 
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]:
+        if vpn_type == VpnType.amneziawg2:
+            return self._awg2.get_profile_files(client_name)
         return self._service.get_profile_files(client_name, vpn_type)
 
     def read_profile_file(self, path: str) -> str:
+        if is_awg2_profile_path(path):
+            return self._awg2.read_profile_file(path)
         return self._service.read_profile_file(path)
 
     def write_profile_file(self, path: str, content: str) -> None:
+        if is_awg2_profile_path(path):
+            self._awg2.write_profile_file(path, content)
+            return
         self._service.write_profile_file(path, content)
 
     def export_wireguard_client_profiles_archive(self) -> bytes:
@@ -950,6 +981,22 @@ class RemoteNodeAdapter(NodeAdapter):
     def list_wireguard_clients(self) -> list[str]:
         data = self._request("GET", "/clients/wireguard")
         return data.get("clients", [])
+
+    def awg2_add_client(self, client_name: str) -> str:
+        data = self._request("POST", "/clients/amneziawg2", json={"client_name": client_name})
+        return data.get("message", "ok")
+
+    def awg2_delete_client(self, client_name: str) -> str:
+        data = self._request("DELETE", f"/clients/amneziawg2/{client_name}")
+        return data.get("message", "ok")
+
+    def awg2_list_clients(self, tunnel: str = "antizapret") -> list[str]:
+        data = self._request("GET", "/clients/amneziawg2", params={"tunnel": tunnel})
+        return data.get("clients", [])
+
+    def list_amneziawg2_clients(self) -> list[str]:
+        names = set(self.awg2_list_clients("antizapret")) | set(self.awg2_list_clients("vpn"))
+        return sorted(names)
 
     def recreate_profiles(self) -> str:
         data = self._request("POST", "/configs/recreate-profiles", timeout=300.0)

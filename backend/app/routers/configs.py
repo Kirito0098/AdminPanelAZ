@@ -68,6 +68,7 @@ from app.services.profile_files import profile_files_batch_key
 from app.services.panel_publish_info import resolve_public_base_url
 from app.services.qr_download import QrDownloadService
 from app.services.qr_generator import generate_qr_png, prefers_download_link_qr
+from app.services.awg2 import AWG2_INSTALL_CMD
 from app.services.security import SecurityService
 from app.services.vpn_profile_visibility import (
     POLICY_GROUP_TO_SETTING,
@@ -538,8 +539,28 @@ def create_config(
             client_names=[payload.client_name],
             hosts=load_node_remote_hosts(db, node_id),
         )
-    else:
+    elif payload.vpn_type == VpnType.wireguard:
         adapter.add_wireguard_client(payload.client_name)
+    elif payload.vpn_type == VpnType.amneziawg2:
+        try:
+            health = adapter.get_awg2_health()
+        except HTTPException as exc:
+            if exc.status_code not in {status.HTTP_404_NOT_FOUND} and exc.status_code < 500:
+                raise
+            health = {"installed": False, "install_command": AWG2_INSTALL_CMD}
+        except (ConnectionError, OSError):
+            health = {"installed": False, "install_command": AWG2_INSTALL_CMD}
+        if not health.get("installed"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": "AZ-AWG2 не установлен на узле",
+                    "install_command": health.get("install_command") or AWG2_INSTALL_CMD,
+                },
+            )
+        adapter.awg2_add_client(payload.client_name)
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неизвестный тип VPN")
 
     config = VpnConfig(
         node_id=node_id,
@@ -557,7 +578,7 @@ def create_config(
 
     ha_replicate_warning = None
     group = find_sync_group_for_primary(db, node_id)
-    if group:
+    if group and config.vpn_type != VpnType.amneziawg2:
         replicate_result = maybe_replicate_create(db, node_id=node_id, primary_config=config)
         ha_replicate_warning = format_ha_replicate_errors(replicate_result)
 
@@ -689,6 +710,8 @@ def delete_config(
     adapter = get_active_adapter(db)
     if config.vpn_type == VpnType.openvpn:
         adapter.delete_openvpn_client(config.client_name)
+    elif config.vpn_type == VpnType.amneziawg2:
+        adapter.awg2_delete_client(config.client_name)
     else:
         adapter.delete_wireguard_client(config.client_name)
 
@@ -697,7 +720,7 @@ def delete_config(
     node = get_active_node(db)
 
     sync_group = find_sync_group_for_primary(db, node.id)
-    if sync_group:
+    if sync_group and config.vpn_type != VpnType.amneziawg2:
         maybe_replicate_delete(db, node_id=node.id, primary_config=config)
 
     purge_ha_shadow_configs(db, config.id)

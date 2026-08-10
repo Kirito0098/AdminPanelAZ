@@ -1,15 +1,19 @@
-import { RefreshCw, Server, Shield } from 'lucide-react'
+import { RefreshCw, Server, Shield, Users } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { getAwg2Health, getAwg2Status } from '@/api/client'
+import ClientsTab from '@/components/awg2/ClientsTab'
 import Awg2HelpStub from '@/components/awg2/Awg2HelpStub'
 import Awg2InstallPrompt from '@/components/awg2/Awg2InstallPrompt'
 import { formatAwg2NodeLabel } from '@/components/awg2/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useNode } from '@/context/NodeContext'
 import { cn } from '@/lib/utils'
 import type { Awg2HealthResponse, Awg2StatusResponse } from '@/types'
+
+type Awg2Tab = 'clients' | 'help'
 
 function statusMeta(health: Awg2HealthResponse | null) {
   if (!health) {
@@ -23,6 +27,7 @@ function statusMeta(health: Awg2HealthResponse | null) {
 
 export default function Awg2Page() {
   const { activeNode } = useNode()
+  const [tab, setTab] = useState<Awg2Tab>('clients')
   const [health, setHealth] = useState<Awg2HealthResponse | null>(null)
   const [status, setStatus] = useState<Awg2StatusResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -129,11 +134,30 @@ export default function Awg2Page() {
                 )}
               </dl>
               <p className="mt-3 text-muted-foreground">
-                Клиенты появятся в следующем срезе. Сейчас раздел — оболочка статуса и установки.
+                Клиенты управляются во вкладке ниже. Если нужно обновить слой, используйте команду установки.
               </p>
             </div>
           )}
-          <Awg2HelpStub health={health} />
+          <Tabs value={tab} onValueChange={(value) => setTab(value as Awg2Tab)} className="space-y-4">
+            <TabsList className="flex h-auto w-full flex-wrap gap-1 bg-muted/50 p-1">
+              <TabsTrigger value="clients" className="gap-1.5">
+                <Users className="h-4 w-4" />
+                <span>Клиенты</span>
+              </TabsTrigger>
+              <TabsTrigger value="help" className="gap-1.5">
+                <Shield className="h-4 w-4" />
+                <span>Справка</span>
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="clients" className="mt-0 focus-visible:outline-none">
+              <ClientsTab health={health} />
+            </TabsContent>
+
+            <TabsContent value="help" className="mt-0 focus-visible:outline-none">
+              <Awg2HelpStub health={health} />
+            </TabsContent>
+          </Tabs>
         </div>
       ) : !loading ? (
         <Awg2InstallPrompt health={health} activeNode={activeNode} />
