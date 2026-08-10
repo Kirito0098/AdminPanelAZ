@@ -33,6 +33,10 @@ from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.profile_files import profile_files_batch_key
 from app.services.server_monitor import ServerMonitorService
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
+from app.services.awg2_runtime import (
+    block_client_runtime as awg2_block_client_runtime,
+    unblock_client_runtime as awg2_unblock_client_runtime,
+)
 from app.services.warper import WarperService, run_warper_action
 from app.services.awg2 import Awg2NotInstalledError, Awg2Service, is_awg2_profile_path
 
@@ -344,6 +348,16 @@ def block_wireguard(client_name: str, _: None = Depends(verify_api_key)):
 @app.post("/clients/wireguard/{client_name}/unblock")
 def unblock_wireguard(client_name: str, _: None = Depends(verify_api_key)):
     return unblock_client_runtime(client_name)
+
+
+@app.post("/clients/amneziawg2/{client_name}/block")
+def block_awg2(client_name: str, _: None = Depends(verify_api_key)):
+    return awg2_block_client_runtime(client_name)
+
+
+@app.post("/clients/amneziawg2/{client_name}/unblock")
+def unblock_awg2(client_name: str, _: None = Depends(verify_api_key)):
+    return awg2_unblock_client_runtime(client_name)
 
 
 @app.get("/wireguard/server-config/{interface}")

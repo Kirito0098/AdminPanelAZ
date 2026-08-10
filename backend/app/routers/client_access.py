@@ -1,14 +1,14 @@
 import logging
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import User, UserRole, VpnType
+from app.models import AmneziaWg2AccessPolicy, User, UserRole, VpnType
 from app.services.access_policy import (
     AccessPolicyService,
 )
@@ -380,6 +380,120 @@ def wg_unblock(payload: BlockRequest, request: Request, db: Session = Depends(ge
         db,
         client_name=payload.client_name,
         vpn_type=VpnType.wireguard,
+        op="unblock",
+        actor=user.username,
+    )
+    return result
+
+
+@router.get("/amneziawg2/status")
+def awg2_status(
+    client_name: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    svc = _service(db)
+    if client_name:
+        return svc.get_awg2_policy(client_name)
+    node_id = get_active_node(db).id
+    rows = (
+        db.query(AmneziaWg2AccessPolicy)
+        .filter_by(node_id=node_id)
+        .order_by(AmneziaWg2AccessPolicy.client_name.asc())
+        .all()
+    )
+    return {
+        row.client_name: svc.get_awg2_policy(row.client_name)
+        for row in rows
+    }
+
+
+@router.post("/amneziawg2/temp-block")
+def awg2_temp_block(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    if not payload.days:
+        raise HTTPException(status_code=400, detail="Укажите срок блокировки")
+    result = _service(db).awg2_temp_block(payload.client_name, payload.days, actor=user.username)
+    log_action(
+        db,
+        action="awg2_temp_block",
+        user_id=user.id,
+        username=user.username,
+        details=f"{payload.client_name} {payload.days}d",
+        remote_addr=request.client.host,
+    )
+    _notify_client_ban(
+        db,
+        request,
+        user,
+        client_name=payload.client_name,
+        target_type="amneziawg2",
+        action="temp_block",
+        days=payload.days,
+        block_until=result.get("block_until"),
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.amneziawg2,
+        op="block_temp",
+        actor=user.username,
+        days=payload.days,
+    )
+    return result
+
+
+@router.post("/amneziawg2/permanent-block")
+def awg2_perm_block(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    result = _service(db).awg2_permanent_block(payload.client_name, actor=user.username)
+    log_action(
+        db,
+        action="awg2_perm_block",
+        user_id=user.id,
+        username=user.username,
+        details=payload.client_name,
+        remote_addr=request.client.host,
+    )
+    _notify_client_ban(
+        db,
+        request,
+        user,
+        client_name=payload.client_name,
+        target_type="amneziawg2",
+        action="permanent_block",
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.amneziawg2,
+        op="block_permanent",
+        actor=user.username,
+    )
+    return result
+
+
+@router.post("/amneziawg2/unblock")
+def awg2_unblock(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    result = _service(db).awg2_unblock(payload.client_name, actor=user.username)
+    log_action(
+        db,
+        action="awg2_unblock",
+        user_id=user.id,
+        username=user.username,
+        details=payload.client_name,
+        remote_addr=request.client.host,
+    )
+    _notify_client_ban(
+        db,
+        request,
+        user,
+        client_name=payload.client_name,
+        target_type="amneziawg2",
+        action="unblock",
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.amneziawg2,
         op="unblock",
         actor=user.username,
     )

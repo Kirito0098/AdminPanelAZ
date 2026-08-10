@@ -620,6 +620,24 @@ class AccessPolicyService:
         self.reconcile_awg2(client_name, force_runtime=True)
         return self._awg2_state(row)
 
+    def get_awg2_policy(self, client_name: str) -> dict:
+        normalized = client_name.strip().lower()
+        node_id = self._require_node_id()
+        row = (
+            self.db.query(AmneziaWg2AccessPolicy)
+            .filter_by(node_id=node_id, client_name=normalized)
+            .first()
+        )
+        if row is None:
+            return self._attach_node_context({
+                "is_blocked": False,
+                "block_mode": "none",
+                "blocked_days_left": None,
+                "block_duration_days": None,
+                "block_until": None,
+            })
+        return self._awg2_state(row)
+
     def _apply_wg_client_runtime(self, client_name: str, *, is_blocked: bool) -> dict | None:
         self.wg_runtime_calls += 1
         normalized = client_name.strip().lower()
@@ -842,7 +860,8 @@ class AccessPolicyService:
         for name in client_names:
             ovpn = self.get_openvpn_policy(name)
             wg = self.get_wg_policy(name)
-            result[name] = {"openvpn": ovpn, "wireguard": wg}
+            awg2 = self.get_awg2_policy(name)
+            result[name] = {"openvpn": ovpn, "wireguard": wg, "amneziawg2": awg2}
         return result
 
     def reconcile_all_wg_policies(

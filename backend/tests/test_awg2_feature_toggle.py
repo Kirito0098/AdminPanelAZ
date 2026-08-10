@@ -21,7 +21,7 @@ def test_awg2_toggle_registered_default_off(tmp_path: Path):
     defn = FEATURE_TOGGLE_BY_KEY["awg2"]
     assert defn.default is False
     assert defn.env_key == "FEATURE_AWG2_ENABLED"
-    assert defn.api_prefixes == ("/api/awg2",)
+    assert defn.api_prefixes == ("/api/awg2", "/api/client-access/amneziawg2")
     assert "/awg2" in defn.frontend_paths
     assert defn.label == "AZ-AWG2"
     service = FeatureToggleService(env_file)
@@ -33,6 +33,8 @@ def test_awg2_path_blocked_when_disabled(tmp_path: Path):
     service = _svc(env_file, FEATURE_AWG2_ENABLED=False)
     blocked = check_path_access("/api/awg2/health", service=service)
     assert blocked is not None and blocked[0] == "awg2"
+    blocked = check_path_access("/api/client-access/amneziawg2/status", service=service)
+    assert blocked is not None and blocked[0] == "awg2"
 
 
 def test_awg2_path_allowed_when_enabled(tmp_path: Path):
@@ -40,6 +42,7 @@ def test_awg2_path_allowed_when_enabled(tmp_path: Path):
     service = _svc(env_file, FEATURE_AWG2_ENABLED=True)
     assert check_path_access("/api/awg2/health", service=service) is None
     assert check_path_access("/api/awg2/status", service=service) is None
+    assert check_path_access("/api/client-access/amneziawg2/status", service=service) is None
 
 
 def test_require_vpn_type_amneziawg2(tmp_path: Path):

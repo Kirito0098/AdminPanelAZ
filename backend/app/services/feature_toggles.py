@@ -204,7 +204,7 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         resource_impact_level="minimal",
         default=False,
         group="app_module",
-        api_prefixes=("/api/awg2",),
+        api_prefixes=("/api/awg2", "/api/client-access/amneziawg2"),
         frontend_paths=("/awg2",),
     ),
     FeatureToggleDefinition(
