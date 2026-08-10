@@ -287,7 +287,7 @@ export async function getTgClientPolicy(
   const entry = data[clientName]
   if (!entry) return null
   if (vpnType === 'openvpn') return entry.openvpn
-  if (vpnType === 'amneziawg2') return entry.amneziawg2 ?? entry.wireguard
+  if (vpnType === 'amneziawg2') return entry.amneziawg2 ?? null
   return entry.wireguard
 }
 
