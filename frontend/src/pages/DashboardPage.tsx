@@ -24,6 +24,7 @@ import {
   getConfigQuota,
   getConfigs,
   getDashboardSummary,
+  getAwg2Health,
   getEffectiveVisibleVpnProfiles,
   getMonitoring,
   getUsers,
@@ -94,6 +95,12 @@ export default function DashboardPage() {
       visibilityPolicy == null ||
       visibilityPolicy.protocols.includes('wireguard') ||
       visibilityPolicy.protocols.includes('amneziawg'))
+  const awg2ToggleOn = isEnabled('awg2')
+  const awg2Visible =
+    awg2ToggleOn &&
+    (user?.role === 'admin' ||
+      visibilityPolicy == null ||
+      visibilityPolicy.protocols.includes('amneziawg2'))
   const { activeNode } = useNode()
   const haReplicaReadonly = useHaReplicaReadonly()
   const { success, error: notifyError, warning: notifyWarning } = useNotifications()
@@ -113,6 +120,7 @@ export default function DashboardPage() {
   const [description, setDescription] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [awg2Installed, setAwg2Installed] = useState(false)
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [qrPreview, setQrPreview] = useState<{
     url: string
@@ -129,9 +137,10 @@ export default function DashboardPage() {
   const [templates, setTemplates] = useState<ClientTemplate[]>([])
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
   const isAdmin = user?.role === 'admin'
+  const awg2CreateEnabled = awg2Visible && awg2Installed
   // Hide create when can_create is false (flag off or quota exhausted) — including unlimited quota.
   const createBlocked = !isAdmin && quota != null && !quota.can_create
-  const canCreateClient = (openvpnEnabled || wireguardEnabled) && !createBlocked
+  const canCreateClient = (openvpnEnabled || wireguardEnabled || awg2CreateEnabled) && !createBlocked
   const quotaReached = createBlocked && quota != null && !quota.unlimited
   const createDisabledByAdmin = createBlocked && quota != null && quota.unlimited
 
@@ -142,9 +151,33 @@ export default function DashboardPage() {
   }, [user?.id])
 
   useEffect(() => {
+    if (!awg2ToggleOn) {
+      setAwg2Installed(false)
+      return
+    }
+    // Health is admin-only; users with visibility rely on backend 409 if layer missing.
+    if (!isAdmin) {
+      setAwg2Installed(true)
+      return
+    }
+    let cancelled = false
+    void getAwg2Health()
+      .then((health) => {
+        if (!cancelled) setAwg2Installed(Boolean(health.installed))
+      })
+      .catch(() => {
+        if (!cancelled) setAwg2Installed(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [awg2ToggleOn, isAdmin, activeNode?.id])
+
+  useEffect(() => {
     if (openvpnEnabled) setVpnType('openvpn')
     else if (wireguardEnabled) setVpnType('wireguard')
-  }, [openvpnEnabled, wireguardEnabled])
+    else if (awg2CreateEnabled) setVpnType('amneziawg2')
+  }, [openvpnEnabled, wireguardEnabled, awg2CreateEnabled])
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
@@ -646,6 +679,7 @@ export default function DashboardPage() {
                 <SelectContent>
                   {openvpnEnabled && <SelectItem value="openvpn">OpenVPN</SelectItem>}
                   {wireguardEnabled && <SelectItem value="wireguard">WireGuard / AmneziaWG</SelectItem>}
+                  {awg2CreateEnabled && <SelectItem value="amneziawg2">AmneziaWG 2.0</SelectItem>}
                 </SelectContent>
               </Select>
             </div>

@@ -3,7 +3,7 @@ import { formatDate } from '@/lib/datetime'
 import { getProfileDownloadFilename } from '@/lib/profileDownloadName'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 
-export type ProtocolTab = 'openvpn' | 'wireguard' | 'amneziawg'
+export type ProtocolTab = 'openvpn' | 'wireguard' | 'amneziawg' | 'amneziawg2'
 export type ClientFilter = 'all' | 'active' | 'expiring' | 'expired'
 export type ClientPresenceFilter = 'all' | 'online' | 'offline' | 'blocked'
 
@@ -27,6 +27,7 @@ export function isVpnProfile(file: ProfileFile): boolean {
 function profileProtocolForTab(tab: ProtocolTab): ProfileFile['protocol'] {
   if (tab === 'openvpn') return 'openvpn'
   if (tab === 'amneziawg') return 'amneziawg'
+  if (tab === 'amneziawg2') return 'amneziawg2'
   return 'wireguard'
 }
 
@@ -61,15 +62,23 @@ export function pickVpnFile(config: VpnConfig, tab?: ProtocolTab): ProfileFile |
 export function protocolLabel(tab: ProtocolTab): string {
   if (tab === 'openvpn') return 'OpenVPN'
   if (tab === 'amneziawg') return 'AmneziaWG'
+  if (tab === 'amneziawg2') return 'AmneziaWG 2.0'
   return 'WireGuard'
 }
 
-function hasProtocolProfiles(config: VpnConfig, protocol: 'amneziawg' | 'wireguard' | 'openvpn'): boolean {
+function hasProtocolProfiles(
+  config: VpnConfig,
+  protocol: 'amneziawg' | 'amneziawg2' | 'wireguard' | 'openvpn',
+): boolean {
   if (!config.profile_files?.length) return false
   return config.profile_files.some((file) => file.protocol === protocol)
 }
 
 export function configMatchesTab(config: VpnConfig, tab: ProtocolTab): boolean {
+  if (tab === 'amneziawg2') {
+    return config.vpn_type === 'amneziawg2' || hasProtocolProfiles(config, 'amneziawg2')
+  }
+  if (config.vpn_type === 'amneziawg2') return false
   if (tab === 'openvpn') return config.vpn_type === 'openvpn'
   if (!config.profile_files?.length) return config.vpn_type === 'wireguard'
   if (tab === 'amneziawg') return hasProtocolProfiles(config, 'amneziawg')
@@ -352,7 +361,7 @@ export function getDownloadFilename(config: VpnConfig, file: ProfileFile): strin
 
 export function getProtocolBadgeVariant(tab: ProtocolTab): 'default' | 'secondary' | 'outline' {
   if (tab === 'openvpn') return 'default'
-  if (tab === 'amneziawg') return 'secondary'
+  if (tab === 'amneziawg' || tab === 'amneziawg2') return 'secondary'
   return 'outline'
 }
 

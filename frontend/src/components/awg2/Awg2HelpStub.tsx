@@ -21,12 +21,38 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
             AZ-AWG2 — параллельный слой AmneziaWG 2.0 (az-awg2) поверх AntiZapret.
             Штатные WireGuard и стоковый AmneziaWG не затрагиваются.
           </p>
+          <div className="space-y-1.5 text-muted-foreground">
+            <p>
+              <span className="font-medium text-foreground">Vs стоковый AmneziaWG:</span> отдельный
+              overlay (`/opt/antizapret-awg`), тип конфига <code className="text-xs">amneziawg2</code>,
+              своя вкладка на Dashboard и клиенты через <code className="text-xs">awg-client</code>.
+              Вкладка «AmneziaWG» в Конфигурациях остаётся для стока AntiZapret.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Vs AZ-WARP:</span> WARP точечно гонит
+              выбранные домены через Cloudflare. AZ-AWG2 выдаёт полноценные VPN-профили (оба
+              туннеля: AntiZapret и полный VPN) для клиентов AmneziaWG 2.0.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">HA:</span> репликация клиентов AWG2 на
+              replica — позже (срез 2a). В волне 1 create/delete на активном узле без HA sync.
+            </p>
+          </div>
           <p className="text-muted-foreground">
-            Во вкладке клиентов доступны список профилей, создание новых конфигураций, удаление и скачивание файлов.
-            Если слой не установлен на текущем узле, сначала используйте команду установки ниже.
+            Во вкладке клиентов доступны список профилей, создание, удаление и скачивание.
+            Если слой не установлен на текущем узле — сначала команда установки на сервере по SSH
+            (панель install.sh не запускает).
           </p>
           <div>
-            <p className="mb-1.5 text-xs font-medium text-muted-foreground">Обновление слоя (без смены обфускации):</p>
+            <p className="mb-1.5 text-xs font-medium text-muted-foreground">Установка:</p>
+            <pre className="overflow-x-auto rounded-lg border bg-muted/50 p-3 font-mono text-xs">
+              {health?.install_command?.trim() || AWG2_INSTALL_CMD}
+            </pre>
+          </div>
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+              Обновление слоя (без смены обфускации):
+            </p>
             <pre className="overflow-x-auto rounded-lg border bg-muted/50 p-3 font-mono text-xs">{updateCmd}</pre>
           </div>
         </div>

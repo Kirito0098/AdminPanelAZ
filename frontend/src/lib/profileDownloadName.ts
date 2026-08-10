@@ -50,6 +50,9 @@ function buildProfileDownloadFilename(
   if (protocol === 'amneziawg') {
     return `AWG-${profilePrefix}-${safeName}.conf`
   }
+  if (protocol === 'amneziawg2') {
+    return `AWG2-${profilePrefix}-${safeName}.conf`
+  }
 
   const fallback = file.path.split('/').pop()
   return fallback || `${profilePrefix}-${safeName}.txt`

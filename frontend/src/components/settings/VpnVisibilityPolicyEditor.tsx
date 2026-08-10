@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 
 export const FULL_VISIBLE_VPN_POLICY: VisibleVpnProfilesPolicy = {
   routes: ['az', 'vpn'],
-  protocols: ['openvpn', 'wireguard', 'amneziawg'],
+  protocols: ['openvpn', 'wireguard', 'amneziawg', 'amneziawg2'],
   openvpn_groups: ['udp_tcp', 'udp', 'tcp'],
 }
 
@@ -24,6 +24,7 @@ const PROTOCOL_OPTIONS = [
   { key: 'openvpn', label: 'OpenVPN' },
   { key: 'wireguard', label: 'WireGuard' },
   { key: 'amneziawg', label: 'AmneziaWG' },
+  { key: 'amneziawg2', label: 'AmneziaWG 2.0' },
 ] as const
 
 function toggleValue(list: string[], key: string, checked: boolean): string[] {

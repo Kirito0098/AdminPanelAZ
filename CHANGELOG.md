@@ -48,7 +48,7 @@
 
 ### ✨ Added
 
-- **AZ-AWG2 shell (срез 1a)** — opt-in модуль `awg2` / `FEATURE_AWG2_ENABLED` (default off): страница `/awg2`, install-prompt с командой `az-awg2`, API `GET /api/awg2/health|status`, parity в node_agent. Клиенты и `VpnType.amneziawg2` — в срезе 1b; полный `docs/awg2.md` — в 1c.
+- **AZ-AWG2 волна 1 (срезы 1a–1c)** — opt-in модуль `awg2` / `FEATURE_AWG2_ENABLED` (default off): страница `/awg2` (health, install-prompt, клиенты), `VpnType.amneziawg2` через `awg-client` без HA replicate, Dashboard — отдельная вкладка и тип **AmneziaWG 2.0** (только при toggle + installed), visibility/quota, docs [`awg2.md`](docs/awg2.md).
 - **HA Sync Group: отдельные домены для OpenVPN и WireGuard/AmneziaWG** — в группе синхронизации можно указать `shared_domain` (`OPENVPN_HOST`) и `shared_domain_wireguard` (`WIREGUARD_HOST`), как в оригинальном AntiZapret `setup.sh`. Пустой WG-домен = тот же, что OpenVPN. Apply shared domain / HA Setup пишут оба хоста на все узлы группы. Docs: [NodeSync.md](docs/NodeSync.md), [uzly.md](docs/uzly.md).
 
 ---
