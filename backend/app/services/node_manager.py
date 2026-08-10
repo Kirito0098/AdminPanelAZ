@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_password_hash, verify_password
 from app.config import get_settings
 from app.models import (
+    AmneziaWg2AccessPolicy,
     AlertRule,
     AppSetting,
     ClientTemplate,
@@ -285,6 +286,7 @@ def purge_node_related(db: Session, node_id: int) -> None:
         UserTrafficStatProtocol,
         WgAccessPolicy,
         OpenVpnAccessPolicy,
+        AmneziaWg2AccessPolicy,
         NodeResourceSample,
         UserTrafficSample,
         ConnectionCountSample,

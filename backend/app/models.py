@@ -328,6 +328,23 @@ class WgAccessPolicy(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class AmneziaWg2AccessPolicy(Base):
+    __tablename__ = "amneziawg2_access_policies"
+    __table_args__ = (UniqueConstraint("node_id", "client_name", name="uq_awg2_access_node_client"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    client_name: Mapped[str] = mapped_column(String(64), index=True)
+    is_temp_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_permanent_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    block_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    block_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    block_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    block_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class OpenVpnAccessPolicy(Base):
     __tablename__ = "openvpn_access_policy"
     __table_args__ = (UniqueConstraint("node_id", "client_name", name="uq_ovpn_access_node_client"),)

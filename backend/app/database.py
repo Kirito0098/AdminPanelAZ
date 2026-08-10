@@ -267,6 +267,47 @@ def _migrate_access_policy_node_scope() -> None:
         db.close()
 
 
+def _migrate_awg2_access_policy_table() -> None:
+    inspector = inspect(engine)
+    if "amneziawg2_access_policies" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE amneziawg2_access_policies (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    node_id INTEGER NOT NULL,
+                    client_name VARCHAR(64) NOT NULL,
+                    is_temp_blocked BOOLEAN,
+                    is_permanent_blocked BOOLEAN,
+                    block_reason VARCHAR(32),
+                    block_started_at DATETIME,
+                    block_days INTEGER,
+                    block_until DATETIME,
+                    updated_by VARCHAR(64),
+                    updated_at DATETIME,
+                    FOREIGN KEY(node_id) REFERENCES nodes (id),
+                    UNIQUE (node_id, client_name)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_amneziawg2_access_policies_node_id "
+                "ON amneziawg2_access_policies (node_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_amneziawg2_access_policies_client_name "
+                "ON amneziawg2_access_policies (client_name)"
+            )
+        )
+    logger.info("DB migration: created amneziawg2_access_policies table")
+
+
 def _migrate_node_resource_sample_table() -> None:
     inspector = inspect(engine)
     if "node_resource_sample" in inspector.get_table_names():
@@ -795,6 +836,7 @@ def run_db_migrations() -> None:
     _migrate_vpn_configs_ha_links()
     _migrate_vpn_configs_node_scope()
     _migrate_access_policy_node_scope()
+    _migrate_awg2_access_policy_table()
     _migrate_node_resource_sample_table()
     _migrate_connection_count_samples_table()
     _migrate_panel_resource_sample_table()
