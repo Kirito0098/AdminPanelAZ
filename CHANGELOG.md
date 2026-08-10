@@ -46,14 +46,36 @@
 
 ## [Unreleased]
 
+> **Кратко:** opt-in модуль **AmneziaWG 2.0 (AZ-AWG2)** волны 1–3c (install SSE, клиенты/TTL, HA crypto-sync, обфускация, мониторинг, Telegram/Mini, access + deep stats); отдельные shared-домены OpenVPN и WG в HA; вкладка **OpenVPN панели** (remotes + multihome); единый denser chrome Настроек / Edit Files / Users; фикс nginx `ACCESS_PATH` на нестандартном порту и light-diff Myers.
+
 ### ✨ Added
 
-- **AZ-AWG2 волна 3c (access + deep stats UI)** — temp/permanent/unblock для `amneziawg2` через `/api/client-access/amneziawg2/*` (Dashboard, `/awg2` → Клиенты; HA replica readonly). Drawer статистики клиента: `GET /api/awg2/clients/{name}/stats` — endpoint, GeoIP, дневной трафик (Monitoring row click + «Статистика»). Docs: [`awg2.md`](docs/awg2.md).
-- **AZ-AWG2 волна 3b (Telegram + Mini App)** — `/awg2` в боте (admin status), Mini App страница AZ-AWG2 (read-only), create/list/download `amneziawg2` в Mini Configs с TTL; toggle `awg2` гасит команду и nav. Без install/обфускации в TG. Docs: [`awg2.md`](docs/awg2.md).
+- **AZ-AWG2 волна 3c (access + deep stats UI)** — temp/permanent/unblock для `amneziawg2` через `/api/client-access/amneziawg2/*` (Dashboard, `/awg2` → Клиенты; HA replica readonly). После HA crypto-sync / import archive на replica восстанавливается runtime block peer’ов и реплицируются access-policy rows. Drawer статистики клиента: `GET /api/awg2/clients/{name}/stats` — endpoint, GeoIP, дневной трафик (Monitoring row click + «Статистика»). Управление блоками AWG2 **не** в Telegram Mini App. Docs: [`awg2.md`](docs/awg2.md).
+- **AZ-AWG2 волна 3b (Telegram + Mini App)** — `/awg2` в боте (admin status), Mini App страница AZ-AWG2 (read-only), create/list/download `amneziawg2` в Mini Configs с TTL; toggle `awg2` гасит команду и nav. Без install/обфускации/block в TG. Docs: [`awg2.md`](docs/awg2.md).
 - **AZ-AWG2 волна 3a (frontend UX)** — потоковая установка/обновление слоя прямо из `/awg2` с live-логом SSE, TTL при создании клиентов AWG2 (`нет` / `30m` / `2h` / `6h` / `7d`), бейджи `истекает …` на `/awg2` и Dashboard, узкая вкладка **Бэкап** (download/upload restore только для AWG2). Docs: [`awg2.md`](docs/awg2.md).
 - **AZ-AWG2 волна 2 (срезы 2a–2c)** — HA crypto-sync `amneziawg2` (archive без `stats.db`), вкладка **Обфускация** (`awg-obfuscation` regen/apply + HA warn), вкладка **Мониторинг** (`GET /api/awg2/monitoring`: overview или live `awg show dump`, online ≈ handshake &lt; 180s). Docs: [`awg2.md`](docs/awg2.md), [`NodeSync.md`](docs/NodeSync.md).
-- **AZ-AWG2 волна 1 (срезы 1a–1c)** — opt-in модуль `awg2` / `FEATURE_AWG2_ENABLED` (default off): страница `/awg2` (health, install-prompt, клиенты), `VpnType.amneziawg2` через `awg-client` без HA replicate, Dashboard — отдельная вкладка и тип **AmneziaWG 2.0** (только при toggle + installed), visibility/quota, docs [`awg2.md`](docs/awg2.md).
+- **AZ-AWG2 волна 1 (срезы 1a–1c)** — opt-in модуль `awg2` / `FEATURE_AWG2_ENABLED` (default off): страница `/awg2` (health, install-prompt, клиенты), `VpnType.amneziawg2` через `awg-client` без HA replicate на create/delete в волне 1, Dashboard — отдельная вкладка и тип **AmneziaWG 2.0** (только при toggle + installed), visibility/quota, docs [`awg2.md`](docs/awg2.md).
 - **HA Sync Group: отдельные домены для OpenVPN и WireGuard/AmneziaWG** — в группе синхронизации можно указать `shared_domain` (`OPENVPN_HOST`) и `shared_domain_wireguard` (`WIREGUARD_HOST`), как в оригинальном AntiZapret `setup.sh`. Пустой WG-домен = тот же, что OpenVPN. Apply shared domain / HA Setup пишут оба хоста на все узлы группы. Docs: [NodeSync.md](docs/NodeSync.md), [uzly.md](docs/uzly.md).
+- **Конфиг AntiZapret → OpenVPN панели** — multi-remote и multihome вынесены из общей вкладки настроек AZ в отдельную вкладку `OpenVpnPanelTab` (панельные overrides, не `setup.sh`). Docs: [antizapret-config.md](docs/antizapret-config.md).
+
+### 🔄 Changed
+
+- **Настройки: denser toolbar chrome** — общие `SettingsChrome` вместо MetricPill-heroes и accent strips; единая иерархия на Backup, Maintenance, Security, Updates, Personal, VPN Network, Feature Toggles, Monitoring и др. (`SettingsChrome.tsx`, вкладки Settings).
+- **Edit Files** — chrome как у Настроек: `PageSectionHeader` и сворачиваемая справка (`EditFilesPage.tsx`).
+- **Users (Настройки)** — обновлённый layout вкладки; нельзя понизить последнего активного admin (`UsersTab.tsx`, `users.py`).
+- **AZ-AWG2 ClientsTab** — скачивание primary `.conf` с действиями VPN/AntiZapret как на Конфигурациях; сетка карточек 2–4 колонки на широких экранах (`ClientsTab.tsx`, `profileDownloadName`).
+
+### 🐛 Fixed
+
+- **nginx `ACCESS_PATH`: порт на slash-redirect** — относительный 301 вместо `$host`, чтобы нестандартный порт (например `:8443`) не срезался при редиректе со слэшем; `:443` без изменений (`adminpanelaz-subpath.conf.template`).
+- **light-diff Myers** — корректная реконструкция ops для пустых файлов (больше не появляются невалидные L0 entries) (`buildLightDiff.ts`).
+- **HA AWG2 crypto-sync** — в пути create/delete на replica пробрасываются `db` и контекст узла, чтобы после import archive снова применялись blocked-peer runtime state (`replicate.py`, `vpn_state_sync.py`).
+
+### 🧪 Tests
+
+- **AZ-AWG2** — shell/toggle/health, client lifecycle, HA crypto-sync, obfuscation, monitoring, install SSE / TTL / backup, Telegram, access policy + runtime block/unblock, deep client stats, replica reapply после sync (`test_awg2_*.py`, `test_vpn_state_sync.py`, `test_node_adapter_parity.py`, `haNodeScope.test.ts`).
+- **HA shared domain WG** — отдельные `shared_domain` / `shared_domain_wireguard` (`test_node_sync_shared_domain.py`, `haBadgeLabel.test.ts`).
+- **light-diff** — пустые файлы и Myers reconstruction (`buildLightDiff.test.ts`).
 
 ---
 
