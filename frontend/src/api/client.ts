@@ -317,6 +317,7 @@ export async function createConfig(data: {
   client_name: string
   vpn_type: import('../types').VpnType
   cert_expire_days?: number
+  ttl?: string
   description?: string
   owner_id?: number
 }) {
@@ -1641,6 +1642,48 @@ export async function getAwg2Monitoring() {
   return apiFetch<import('../types').Awg2MonitoringResponse>('/awg2/monitoring')
 }
 
+export function openAwg2InstallStream(
+  options: {
+    mode: 'install' | 'update'
+    preset?: string
+    template?: string
+    mtu?: number | null
+  },
+  onEvent: (event: import('../types').Awg2InstallStreamEvent) => void,
+  onError?: (message: string) => void,
+): EventSource | null {
+  const token = getToken()
+  if (!token) return null
+  const params = new URLSearchParams({
+    token,
+    mode: options.mode,
+  })
+  if (options.preset?.trim()) params.set('preset', options.preset.trim())
+  if (options.template?.trim()) params.set('template', options.template.trim())
+  if (options.mtu != null && Number.isFinite(options.mtu)) params.set('mtu', String(options.mtu))
+  const source = new EventSource(`${API_BASE}/awg2/install/stream?${params.toString()}`)
+  source.onmessage = (event) => {
+    try {
+      onEvent(JSON.parse(event.data) as import('../types').Awg2InstallStreamEvent)
+    } catch {
+      onError?.('Ошибка разбора потока установки AZ-AWG2')
+    }
+  }
+  source.onerror = () => {
+    onError?.('Соединение с потоком установки прервано')
+  }
+  return source
+}
+
+export async function restoreAwg2Backup(file: File) {
+  const form = new FormData()
+  form.append('archive', file)
+  return apiFetch<import('../types').Awg2RestoreResponse>('/awg2/restore', {
+    method: 'POST',
+    body: form,
+  })
+}
+
 export async function getWarperStatus() {
   return apiFetch<import('../types').WarperStatusResponse>('/warper/status')
 }
@@ -1988,6 +2031,31 @@ export function downloadBackup(fileName: string) {
   const token = getToken()
   const url = `${API_BASE}/backups/${encodeURIComponent(fileName)}/download`
   return fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+}
+
+export async function downloadAwg2Backup(retry = true): Promise<Response> {
+  const headers = new Headers()
+  const token = getToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const sessionId = getWebSessionId()
+  if (sessionId) headers.set('X-Web-Session-Id', sessionId)
+
+  const response = await fetch(`${API_BASE}/awg2/backup`, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+  })
+  if (response.status === 401 && retry) {
+    const newToken = await refreshAccessToken()
+    if (newToken) {
+      return downloadAwg2Backup(false)
+    }
+    localStorage.removeItem('token')
+  }
+  if (!response.ok) {
+    throw await parseApiError(response, 'Ошибка скачивания бэкапа AZ-AWG2')
+  }
+  return response
 }
 
 export type QrContentMode = 'profile' | 'download-link'

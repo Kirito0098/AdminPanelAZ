@@ -21,23 +21,7 @@ import Spinner from '@/components/ui/Spinner'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import type { Awg2HealthResponse, Awg2ObfuscationResponse } from '@/types'
-
-const PRESETS = [
-  { value: 'router', label: 'router — минимум шума' },
-  { value: 'low', label: 'low — лёгкая обфускация' },
-  { value: 'medium', label: 'medium — баланс' },
-  { value: 'high', label: 'high — агрессивный DPI' },
-  { value: 'paranoid', label: 'paranoid — максимум' },
-] as const
-
-const TEMPLATES = [
-  { value: 'quic', label: 'quic' },
-  { value: 'tls', label: 'tls' },
-  { value: 'web', label: 'web' },
-  { value: 'voip', label: 'voip' },
-  { value: 'dns', label: 'dns' },
-  { value: 'mixed', label: 'mixed' },
-] as const
+import { AWG2_PRESETS, AWG2_TEMPLATES } from './utils'
 
 const FPS = [
   { value: 'chrome', label: 'chrome' },
@@ -263,7 +247,7 @@ export default function ObfuscationTab({ health }: ObfuscationTabProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PRESETS.map((item) => (
+                {AWG2_PRESETS.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
                     {item.label}
                   </SelectItem>
@@ -278,7 +262,7 @@ export default function ObfuscationTab({ health }: ObfuscationTabProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {TEMPLATES.map((item) => (
+                {AWG2_TEMPLATES.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
                     {item.label}
                   </SelectItem>

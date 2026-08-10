@@ -49,10 +49,21 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
               (online / handshake / traffic) из <code className="text-xs">awg_stats</code> или live{' '}
               <code className="text-xs">awg show dump</code>. Детальная карточка клиента и GeoIP — позже.
             </p>
+            <p>
+              <span className="font-medium text-foreground">TTL клиентов:</span> для профилей{' '}
+              <code className="text-xs">amneziawg2</code> можно задать автоистечение при создании:
+              нет / 30m / 2h / 6h / 7d. На карточках появится бейдж с оставшимся временем.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">Backup:</span> вкладка «Бэкап» делает узкий
+              экспорт/restore только слоя AZ-AWG2. Это не замена полному <code className="text-xs">awg-backup</code>,
+              backup AntiZapret или backup панели.
+            </p>
           </div>
           <p className="text-muted-foreground">
-            Вкладки: клиенты, обфускация, мониторинг. Если слой не установлен на текущем узле или на HA
-            replica, сначала выполните команду установки на сервере по SSH. Панель install.sh не запускает.
+            Вкладки: клиенты, обфускация, мониторинг, бэкап. Если слой не установлен на текущем узле или на
+            HA replica, сначала выполните установку по SSH либо запустите install.sh из панели. install-base и
+            возможная перезагрузка остаются только в SSH.
           </p>
           <div>
             <p className="mb-1.5 text-xs font-medium text-muted-foreground">Установка:</p>

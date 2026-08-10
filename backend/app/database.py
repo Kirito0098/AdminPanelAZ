@@ -833,6 +833,7 @@ def run_db_migrations() -> None:
         ],
         "vpn_configs": [
             ("cert_expires_at", "DATETIME"),
+            ("expires_at", "DATETIME"),
         ],
         "users": [
             ("totp_secret_encrypted", "VARCHAR(512)"),

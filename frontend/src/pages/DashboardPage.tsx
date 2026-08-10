@@ -36,6 +36,7 @@ import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
 import MetricCard from '@/components/noc/MetricCard'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
+import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
@@ -117,6 +118,7 @@ export default function DashboardPage() {
   const [clientName, setClientName] = useState('')
   const [vpnType, setVpnType] = useState<VpnType>('openvpn')
   const [certDays, setCertDays] = useState(3650)
+  const [awg2Ttl, setAwg2Ttl] = useState('none')
   const [description, setDescription] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -287,6 +289,7 @@ export default function DashboardPage() {
     setDescription('')
     setVpnType('openvpn')
     setCertDays(3650)
+    setAwg2Ttl('none')
     setOwnerId(user?.id ?? null)
   }
 
@@ -320,6 +323,7 @@ export default function DashboardPage() {
           client_name: name,
           vpn_type: vpnType,
           cert_expire_days: vpnType === 'openvpn' ? certDays : undefined,
+          ttl: vpnType === 'amneziawg2' && awg2Ttl !== 'none' ? awg2Ttl : undefined,
           description: description || undefined,
           owner_id: isAdmin && ownerId ? ownerId : undefined,
         })
@@ -694,6 +698,23 @@ export default function DashboardPage() {
                   value={certDays}
                   onChange={(e) => setCertDays(Number(e.target.value))}
                 />
+              </div>
+            )}
+            {vpnType === 'amneziawg2' && (
+              <div className="space-y-2">
+                <Label htmlFor="awg2Ttl">TTL</Label>
+                <Select value={awg2Ttl} onValueChange={setAwg2Ttl}>
+                  <SelectTrigger id="awg2Ttl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AWG2_TTL_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
             <div className="space-y-2">

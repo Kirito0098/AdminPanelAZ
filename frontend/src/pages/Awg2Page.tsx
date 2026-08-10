@@ -1,8 +1,10 @@
-import { Activity, Eye, RefreshCw, Server, Shield, Users } from 'lucide-react'
+import { Activity, Download, Eye, RefreshCw, Server, Shield, Users } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { getAwg2Health, getAwg2Status } from '@/api/client'
+import BackupTab from '@/components/awg2/BackupTab'
 import ClientsTab from '@/components/awg2/ClientsTab'
 import Awg2HelpStub from '@/components/awg2/Awg2HelpStub'
+import Awg2InstallDialog from '@/components/awg2/Awg2InstallDialog'
 import Awg2InstallPrompt from '@/components/awg2/Awg2InstallPrompt'
 import MonitoringTab from '@/components/awg2/MonitoringTab'
 import ObfuscationTab from '@/components/awg2/ObfuscationTab'
@@ -15,7 +17,7 @@ import { useNode } from '@/context/NodeContext'
 import { cn } from '@/lib/utils'
 import type { Awg2HealthResponse, Awg2StatusResponse } from '@/types'
 
-type Awg2Tab = 'clients' | 'obfuscation' | 'monitoring' | 'help'
+type Awg2Tab = 'clients' | 'obfuscation' | 'monitoring' | 'backup' | 'help'
 
 function statusMeta(health: Awg2HealthResponse | null) {
   if (!health) {
@@ -106,9 +108,9 @@ export default function Awg2Page() {
 
       {ready ? (
         <div className="space-y-4">
-          {status?.services_env && (
-            <div className="rounded-xl border bg-card/50 p-4 text-sm">
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Слой на узле</p>
+          <div className="rounded-xl border bg-card/50 p-4 text-sm">
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Слой на узле</p>
+            {status?.services_env ? (
               <dl className="grid gap-2 sm:grid-cols-2">
                 {status.services_env.AZ_IFACE && (
                   <div>
@@ -135,11 +137,22 @@ export default function Awg2Page() {
                   </div>
                 )}
               </dl>
-              <p className="mt-3 text-muted-foreground">
-                Клиенты и обфускация — во вкладках ниже. Если нужно обновить слой, используйте команду установки.
-              </p>
-            </div>
-          )}
+            ) : (
+              <p className="text-muted-foreground">Служебные параметры слоя сейчас не доступны, но обновление можно запустить из панели.</p>
+            )}
+              <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <p className="text-muted-foreground">
+                  Клиенты, обфускация и узкий backup/restore доступны во вкладках ниже. install-base и
+                  перезагрузка остаются только по SSH.
+                </p>
+                <Awg2InstallDialog
+                  mode="update"
+                  triggerLabel="Обновить слой"
+                  triggerVariant="outline"
+                  onCompleted={() => void load()}
+                />
+              </div>
+          </div>
           <Tabs value={tab} onValueChange={(value) => setTab(value as Awg2Tab)} className="space-y-4">
             <TabsList className="flex h-auto w-full flex-wrap gap-1 bg-muted/50 p-1">
               <TabsTrigger value="clients" className="gap-1.5">
@@ -153,6 +166,10 @@ export default function Awg2Page() {
               <TabsTrigger value="monitoring" className="gap-1.5">
                 <Activity className="h-4 w-4" />
                 <span>Мониторинг</span>
+              </TabsTrigger>
+              <TabsTrigger value="backup" className="gap-1.5">
+                <Download className="h-4 w-4" />
+                <span>Бэкап</span>
               </TabsTrigger>
               <TabsTrigger value="help" className="gap-1.5">
                 <Shield className="h-4 w-4" />
@@ -172,13 +189,17 @@ export default function Awg2Page() {
               <MonitoringTab health={health} />
             </TabsContent>
 
+            <TabsContent value="backup" className="mt-0 focus-visible:outline-none">
+              <BackupTab onRestored={() => void load()} />
+            </TabsContent>
+
             <TabsContent value="help" className="mt-0 focus-visible:outline-none">
               <Awg2HelpStub health={health} />
             </TabsContent>
           </Tabs>
         </div>
       ) : !loading ? (
-        <Awg2InstallPrompt health={health} activeNode={activeNode} />
+        <Awg2InstallPrompt health={health} activeNode={activeNode} onInstalled={() => void load()} />
       ) : null}
     </div>
   )

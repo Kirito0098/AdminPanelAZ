@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from datetime import datetime
+from unittest.mock import MagicMock, call, patch
+
+import httpx
 
 from app.models import VpnType
 from app.services import awg2 as awg2_module
@@ -45,6 +48,23 @@ def test_local_node_adapter_awg2_archive_runtime_delegate():
     awg2.apply_runtime.assert_called_once_with()
 
 
+def test_local_node_adapter_awg2_backup_restore_delegate():
+    adapter, _service, awg2 = _local_adapter()
+    awg2.export_narrow_backup.return_value = b"backup"
+    awg2.apply_runtime.return_value = {"success": True, "synced": ["antizapret-awg"]}
+
+    assert adapter.export_awg2_backup() == b"backup"
+    assert adapter.restore_awg2_backup(b"payload") == {"success": True, "synced": ["antizapret-awg"]}
+
+    awg2.export_narrow_backup.assert_called_once_with()
+    awg2.import_narrow_backup.assert_called_once_with(b"payload")
+    awg2.apply_runtime.assert_called_once_with()
+    assert awg2.mock_calls[-2:] == [
+        call.import_narrow_backup(b"payload"),
+        call.apply_runtime(),
+    ]
+
+
 def test_local_node_adapter_awg2_obfuscation_delegate():
     adapter, _service, awg2 = _local_adapter()
     awg2.get_obfuscation.return_value = {"preset": "medium"}
@@ -64,6 +84,50 @@ def test_local_node_adapter_awg2_obfuscation_delegate():
         host=None,
         fp=None,
     )
+
+
+def test_local_node_adapter_awg2_install_stream_delegate():
+    adapter, _service, awg2 = _local_adapter()
+    awg2.iter_install_stream_events.return_value = iter([{"event": "start"}, {"event": "done"}])
+
+    assert list(
+        adapter.awg2_iter_install_stream(
+            "install",
+            preset="high",
+            template="web",
+            mtu=1280,
+        )
+    ) == [{"event": "start"}, {"event": "done"}]
+
+    awg2.iter_install_stream_events.assert_called_once_with(
+        "install",
+        preset="high",
+        template="web",
+        mtu=1280,
+    )
+
+
+def test_local_node_adapter_awg2_expiry_map_delegates():
+    adapter, _service, awg2 = _local_adapter()
+    expiry = {"ivan": datetime(2030, 1, 1, 12, 0, 0)}
+    awg2.read_expiry_map.return_value = expiry
+
+    assert adapter.awg2_expiry_map() == expiry
+    awg2.read_expiry_map.assert_called_once_with()
+
+
+def test_remote_node_adapter_awg2_expiry_map_hits_expected_route(monkeypatch):
+    adapter = RemoteNodeAdapter("10.0.0.2", 9100, "k" * 32, mtls_enabled=False)
+    request_calls: list[tuple[str, str, dict]] = []
+
+    def fake_request(method, path, **kwargs):
+        request_calls.append((method, path, kwargs))
+        return {"expiry": {"ivan": "2030-01-01T12:00:00", "broken": "not-a-date"}}
+
+    monkeypatch.setattr(adapter, "_request", fake_request)
+
+    assert adapter.awg2_expiry_map() == {"ivan": datetime(2030, 1, 1, 12, 0, 0)}
+    assert request_calls == [("GET", "/awg2/expiry", {"timeout": 60.0})]
 
 
 def test_local_node_adapter_get_profile_files_branches_awg2():
@@ -166,6 +230,41 @@ def test_remote_node_adapter_awg2_archive_runtime_hit_expected_routes(monkeypatc
     assert request_calls[1] == ("POST", "/awg2/runtime/apply", {"timeout": 60.0})
 
 
+def test_remote_node_adapter_awg2_backup_restore_hit_expected_routes(monkeypatch):
+    adapter = RemoteNodeAdapter("10.0.0.2", 9100, "k" * 32, mtls_enabled=False)
+    request_calls: list[tuple[str, str, dict]] = []
+    byte_calls: list[tuple[str, str, dict]] = []
+
+    def fake_request(method, path, **kwargs):
+        request_calls.append((method, path, kwargs))
+        return {"success": True, "synced": ["vpn-awg"]}
+
+    def fake_request_bytes(method, path, **kwargs):
+        byte_calls.append((method, path, kwargs))
+        return b"backup"
+
+    monkeypatch.setattr(adapter, "_request", fake_request)
+    monkeypatch.setattr(adapter, "_request_bytes", fake_request_bytes)
+
+    assert adapter.export_awg2_backup() == b"backup"
+    assert adapter.restore_awg2_backup(b"payload", "narrow.tar.gz") == {
+        "success": True,
+        "synced": ["vpn-awg"],
+    }
+
+    assert byte_calls == [("POST", "/awg2/backup", {"timeout": 120.0})]
+    assert request_calls == [
+        (
+            "POST",
+            "/awg2/restore",
+            {
+                "files": {"archive": ("narrow.tar.gz", b"payload", "application/gzip")},
+                "timeout": 120.0,
+            },
+        )
+    ]
+
+
 def test_remote_node_adapter_awg2_obfuscation_hit_expected_routes(monkeypatch):
     adapter = RemoteNodeAdapter("10.0.0.2", 9100, "k" * 32, mtls_enabled=False)
     request_calls: list[tuple[str, str, dict]] = []
@@ -214,3 +313,56 @@ def test_remote_node_adapter_awg2_monitoring_hit_expected_routes(monkeypatch):
 
     assert adapter.get_awg2_monitoring()["stats_available"] is True
     assert request_calls == [("GET", "/awg2/monitoring", {"timeout": 60.0})]
+
+
+def test_remote_node_adapter_awg2_install_stream_hits_expected_route(monkeypatch):
+    adapter = RemoteNodeAdapter("10.0.0.2", 9100, "k" * 32, mtls_enabled=False)
+    stream_calls: list[tuple[str, str, dict]] = []
+
+    class _Response:
+        status_code = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def iter_lines(self):
+            yield 'data: {"event":"start","mode":"install"}'
+            yield ""
+            yield 'data: {"event":"log","line":"step 1"}'
+            yield 'data: {"event":"done","success":true,"return_code":0}'
+
+    def fake_stream(method, url, **kwargs):
+        stream_calls.append((method, url, kwargs))
+        return _Response()
+
+    monkeypatch.setattr("app.services.node_adapter.httpx.stream", fake_stream)
+
+    events = list(
+        adapter.awg2_iter_install_stream(
+            "install",
+            preset="high",
+            template="web",
+            mtu=1280,
+        )
+    )
+
+    assert events == [
+        {"event": "start", "mode": "install"},
+        {"event": "log", "line": "step 1"},
+        {"event": "done", "success": True, "return_code": 0},
+    ]
+    assert len(stream_calls) == 1
+    method, url, kwargs = stream_calls[0]
+    assert (method, url) == ("GET", "http://10.0.0.2:9100/awg2/install/stream")
+    assert kwargs["headers"] == {"X-Node-Key": "k" * 32}
+    assert kwargs["params"] == {
+        "mode": "install",
+        "preset": "high",
+        "template": "web",
+        "mtu": "1280",
+    }
+    assert isinstance(kwargs["timeout"], httpx.Timeout)
+    assert kwargs["timeout"].connect == 30.0

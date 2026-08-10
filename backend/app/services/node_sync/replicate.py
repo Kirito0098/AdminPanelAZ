@@ -105,6 +105,7 @@ def upsert_shadow_config(
         existing.sync_group_id = group.id
         existing.ha_primary_config_id = primary_config.id
         existing.cert_expires_at = primary_config.cert_expires_at
+        existing.expires_at = primary_config.expires_at
         return existing
 
     shadow = VpnConfig(
@@ -114,6 +115,7 @@ def upsert_shadow_config(
         owner_id=primary_config.owner_id,
         cert_expire_days=primary_config.cert_expire_days,
         cert_expires_at=primary_config.cert_expires_at,
+        expires_at=primary_config.expires_at,
         description=primary_config.description,
         sync_group_id=group.id,
         ha_primary_config_id=primary_config.id,

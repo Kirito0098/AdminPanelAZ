@@ -78,3 +78,7 @@ def should_start_noc_report_scheduler() -> bool:
 def should_start_alert_rules_worker() -> bool:
     settings = get_settings()
     return settings.alert_rules_enabled and get_feature_service().is_enabled("telegram")
+
+
+def should_start_awg2_expire() -> bool:
+    return get_feature_service().is_enabled("awg2")

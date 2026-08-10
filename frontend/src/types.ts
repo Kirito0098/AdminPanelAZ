@@ -250,6 +250,7 @@ export interface VpnConfig {
   /** Validity the certificate was issued for — not the remaining time. */
   cert_expire_days?: number | null
   cert_expires_at?: string | null
+  expires_at?: string | null
   cert_days_left?: number | null
   description?: string | null
   created_at: string
@@ -1746,6 +1747,27 @@ export interface Awg2HealthResponse {
   node_host?: string | null
 }
 
+export type Awg2InstallStreamEvent =
+  | {
+      event: 'start'
+      mode: 'install' | 'update'
+      argv?: string[]
+      mtu?: number | null
+    }
+  | {
+      event: 'log'
+      line?: string
+    }
+  | {
+      event: 'done'
+      return_code?: number | null
+      success: boolean
+    }
+  | {
+      event: 'error'
+      detail?: string
+    }
+
 export interface Awg2StatusResponse {
   installed: boolean
   services_env?: {
@@ -1802,6 +1824,18 @@ export interface Awg2MonitoringResponse {
     pubkey?: string
   }>
   stats_available: boolean
+  node_id?: number | null
+  node_name?: string | null
+  node_host?: string | null
+}
+
+export interface Awg2RestoreResponse {
+  message: string
+  runtime?: Record<string, unknown>
+  ha?: {
+    attempted?: boolean
+    errors?: Array<{ node_name?: string | null; error?: string | null }>
+  }
   node_id?: number | null
   node_name?: string | null
   node_host?: string | null

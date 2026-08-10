@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import fcntl
 import io
 import os
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -12,8 +14,9 @@ import sys
 import tarfile
 import tempfile
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator, Literal
 
 from fastapi import HTTPException, status
 
@@ -24,12 +27,18 @@ AWG2_AMNEZIA_DIR = Path(os.environ.get("AWG2_AMNEZIA_DIR", "/etc/amnezia/amnezia
 AWG2_CLIENT_DIR = AWG2_OVERLAY_DIR / "clients"
 AWG2_SERVICES_ENV = AWG2_AMNEZIA_DIR / "services.env"
 AWG2_CLIENT_LOCK = Path(os.environ.get("AWG2_CLIENT_LOCK", "/run/antizapret-awg-client.lock"))
+AWG2_INSTALL_LOCK = Path(
+    os.environ.get("AWG2_INSTALL_LOCK", "/run/antizapret-awg-install.lock")
+)
 AWG2_STATS_SCRIPT = Path(
     os.environ.get("AWG2_STATS_SCRIPT", str(AWG2_OVERLAY_DIR / "bin" / "awg_stats.py"))
 )
 AWG2_STATS_DB = Path(os.environ.get("AWG2_STATS_DB", str(AWG2_OVERLAY_DIR / "stats.db")))
+AWG2_EXPIRY_TSV = Path(os.environ.get("AWG2_EXPIRY_TSV", str(AWG2_OVERLAY_DIR / "expiry.tsv")))
 AWG2_ONLINE_WINDOW_S = 180
 AWG2_TUNNELS = ("antizapret", "vpn")
+AWG2_STATE_ARCHIVE_KIND = "az-awg2-state"
+AWG2_NARROW_BACKUP_KIND = "az-awg2-narrow-backup"
 AWG2_OBFUSCATION_PRESETS = frozenset({"router", "low", "medium", "high", "paranoid"})
 AWG2_OBFUSCATION_TEMPLATES = frozenset({"quic", "tls", "web", "voip", "dns", "mixed"})
 AWG2_OBFUSCATION_FPS = frozenset({"chrome", "firefox", "safari"})
@@ -42,6 +51,62 @@ AWG2_UPDATE_CMD = (
 )
 
 _CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+_TTL_RE = re.compile(r"^(?P<value>[1-9]\d*)\s*(?P<unit>[smhdSMHD])$")
+
+
+def parse_ttl_to_seconds(ttl: str) -> int:
+    raw = (ttl or "").strip()
+    match = _TTL_RE.fullmatch(raw)
+    if match is None:
+        raise ValueError("Некорректный TTL. Используйте формат вроде 15m, 2h или 7d")
+    value = int(match.group("value"))
+    unit = match.group("unit").lower()
+    factor = {
+        "s": 1,
+        "m": 60,
+        "h": 60 * 60,
+        "d": 24 * 60 * 60,
+    }.get(unit)
+    if factor is None:
+        raise ValueError("Некорректный TTL")
+    return value * factor
+
+
+def compute_expires_at(ttl: str | None) -> datetime | None:
+    if ttl is None or not ttl.strip():
+        return None
+    return datetime.utcnow() + timedelta(seconds=parse_ttl_to_seconds(ttl))
+
+
+def read_expiry_map() -> dict[str, datetime]:
+    """Parse `expiry.tsv` (`name<TAB>tunnel<TAB>unix_ts`) into `{name: expires_at}` (naive UTC).
+
+    A client has one row per tunnel; the latest timestamp wins so the panel never expires a
+    row earlier than the node itself would.
+    """
+    result: dict[str, datetime] = {}
+    if not AWG2_EXPIRY_TSV.is_file():
+        return result
+    try:
+        raw = AWG2_EXPIRY_TSV.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return result
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        name = parts[0].strip()
+        stamp = parts[2].strip()
+        if not name or not stamp.isdigit():
+            continue
+        expires_at = datetime.utcfromtimestamp(int(stamp))
+        current = result.get(name)
+        if current is None or expires_at > current:
+            result[name] = expires_at
+    return result
 
 
 class Awg2NotInstalledError(Exception):
@@ -109,6 +174,135 @@ def _flock_prefix() -> list[str]:
     return []
 
 
+def build_install_argv(
+    mode: Literal["install", "update"],
+    *,
+    preset: str | None = None,
+    template: str | None = None,
+    mtu: int | None = None,
+    fp: str = "chrome",
+) -> list[str]:
+    if mode not in {"install", "update"}:
+        raise ValueError(f"unknown AWG2 install mode: {mode}")
+
+    if mode == "update":
+        return ["bash", "-lc", AWG2_UPDATE_CMD]
+
+    args = [AWG2_INSTALL_CMD, "--no-bot"]
+    preset_value = (preset or "").strip().lower()
+    template_value = (template or "").strip().lower()
+    fp_value = (fp or "chrome").strip().lower()
+
+    if preset_value:
+        if preset_value not in AWG2_OBFUSCATION_PRESETS:
+            raise ValueError(f"Недопустимый preset: {preset}")
+        if not template_value:
+            raise ValueError("template is required when preset is set")
+        if template_value not in AWG2_OBFUSCATION_TEMPLATES:
+            raise ValueError(f"Недопустимый template: {template}")
+        if fp_value not in AWG2_OBFUSCATION_FPS:
+            raise ValueError(f"Недопустимый fp: {fp}")
+        args.extend(
+            [
+                "--preset",
+                shlex.quote(preset_value),
+                "--template",
+                shlex.quote(template_value),
+                "--fp",
+                shlex.quote(fp_value),
+            ]
+        )
+
+    # Upstream install.sh has no --mtu CLI flag; surface mtu in the start event only.
+    _ = mtu
+    return ["bash", "-lc", " ".join(args)]
+
+
+def base_installed() -> bool:
+    base_root = Path("/root/antizapret")
+    return any((base_root / name).is_file() for name in ("client.sh", "up.sh"))
+
+
+def _acquire_install_lock():
+    AWG2_INSTALL_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    handle = AWG2_INSTALL_LOCK.open("a+", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    return handle
+
+
+def iter_install_stream_events(
+    mode: Literal["install", "update"],
+    *,
+    preset: str | None = None,
+    template: str | None = None,
+    mtu: int | None = None,
+    fp: str = "chrome",
+) -> Iterator[dict[str, Any]]:
+    lock_handle = None
+    proc: subprocess.Popen[str] | None = None
+    try:
+        lock_handle = _acquire_install_lock()
+        if lock_handle is None:
+            yield {"event": "error", "detail": "Установка AZ-AWG2 уже выполняется: lock занят"}
+            return
+
+        if mode == "install" and not base_installed():
+            yield {
+                "event": "error",
+                "detail": (
+                    "Не найдена база AntiZapret на узле "
+                    "(/root/antizapret/client.sh или /root/antizapret/up.sh). "
+                    "Установите базу по SSH; панель не запускает install-base."
+                ),
+            }
+            return
+
+        argv = build_install_argv(
+            mode,
+            preset=preset,
+            template=template,
+            mtu=mtu,
+            fp=fp,
+        )
+        yield {
+            "event": "start",
+            "mode": mode,
+            "argv": argv,
+            "mtu": mtu,
+        }
+        proc = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        stdout = proc.stdout
+        if stdout is None:
+            yield {"event": "error", "detail": "stdout установки недоступен"}
+            return
+        for line in iter(stdout.readline, ""):
+            if line:
+                yield {"event": "log", "line": line.rstrip("\n")}
+        rc = proc.wait(timeout=600)
+        yield {"event": "done", "return_code": rc, "success": rc == 0}
+    except Exception as exc:
+        yield {"event": "error", "detail": str(exc)}
+    finally:
+        if proc and proc.poll() is None:
+            proc.kill()
+        if lock_handle is not None:
+            try:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            lock_handle.close()
+
+
 def _read_kv_file(path: Path) -> dict[str, str]:
     data: dict[str, str] = {}
     if not path.is_file():
@@ -156,6 +350,67 @@ def _write_tree_to_archive(archive: tarfile.TarFile, root: Path, archive_prefix:
         archive.add(item, arcname=f"{archive_prefix}/{item.relative_to(root).as_posix()}")
 
 
+def _write_file_to_archive(archive: tarfile.TarFile, path: Path, arcname: str) -> None:
+    if path.is_file():
+        archive.add(path, arcname=arcname)
+
+
+def _build_manifest(kind: str) -> bytes:
+    return "\n".join(
+        [
+            f"kind={kind}",
+            f"amnezia_dir={AWG2_AMNEZIA_DIR}",
+            f"client_dir={AWG2_CLIENT_DIR}",
+            f"expiry_tsv={AWG2_EXPIRY_TSV}",
+        ]
+    ).encode("utf-8")
+
+
+def _write_manifest_to_archive(archive: tarfile.TarFile, kind: str) -> None:
+    manifest = _build_manifest(kind)
+    info = tarfile.TarInfo(name="MANIFEST")
+    info.size = len(manifest)
+    archive.addfile(info, io.BytesIO(manifest))
+
+
+def _read_manifest_kind(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key.strip() == "kind":
+            return value.strip()
+    return None
+
+
+def _validate_narrow_backup_members(members: list[tarfile.TarInfo]) -> None:
+    allowed_top_level = {"amneziawg", "clients", "awgstate", "MANIFEST"}
+    forbidden_top_level = {"openvpn", "config", "knot", "client"}
+
+    for member in members:
+        name = member.name.rstrip("/")
+        if not name:
+            continue
+        if name == "MANIFEST":
+            continue
+
+        parts = Path(name).parts
+        if not parts:
+            continue
+        top_level = parts[0]
+        if top_level in forbidden_top_level:
+            raise ValueError(f"AWG2 narrow backup contains forbidden member: {name}")
+        if top_level not in allowed_top_level:
+            raise ValueError(f"AWG2 narrow backup contains unexpected member: {name}")
+        if "stats.db" in parts:
+            raise ValueError(f"AWG2 narrow backup contains forbidden member: {name}")
+        if top_level == "awgstate" and name != "awgstate/expiry.tsv":
+            raise ValueError(f"AWG2 narrow backup contains unexpected member: {name}")
+
+
 def _replace_tree_from_snapshot(source: Path, target: Path) -> None:
     if target.exists():
         shutil.rmtree(target, ignore_errors=True)
@@ -167,6 +422,26 @@ def _replace_tree_from_snapshot(source: Path, target: Path) -> None:
 
 def _tree_has_files(root: Path) -> bool:
     return root.is_dir() and any(item.is_file() for item in root.rglob("*"))
+
+
+def _replace_awg2_snapshot(
+    *,
+    source_amnezia: Path,
+    source_clients: Path,
+    source_expiry: Path,
+) -> None:
+    if not _tree_has_files(source_amnezia) or not _tree_has_files(source_clients):
+        raise ValueError(
+            "AWG2 archive must contain both amneziawg/ and clients/ files before import"
+        )
+
+    _replace_tree_from_snapshot(source_amnezia, AWG2_AMNEZIA_DIR)
+    _replace_tree_from_snapshot(source_clients, AWG2_CLIENT_DIR)
+    if source_expiry.is_file():
+        AWG2_EXPIRY_TSV.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_expiry, AWG2_EXPIRY_TSV)
+    else:
+        AWG2_EXPIRY_TSV.unlink(missing_ok=True)
 
 
 def _stats_db_path() -> Path:
@@ -420,13 +695,19 @@ class Awg2Service:
         profile["regen_all"] = regen_out
         return profile
 
-    def add_client(self, name: str) -> str:
+    def add_client(self, name: str, ttl: str | None = None) -> str:
         name = self.validate_client_name(name)
+        ttl_value = ttl.strip() if ttl else None
+        if ttl_value:
+            parse_ttl_to_seconds(ttl_value)
         created: list[str] = []
         outputs: list[str] = []
         try:
             for tunnel in AWG2_TUNNELS:
-                outputs.append(self._run_awg_client("add", name, tunnel))
+                args = ["add", name, tunnel]
+                if ttl_value:
+                    args.extend(["--ttl", ttl_value])
+                outputs.append(self._run_awg_client(*args))
                 created.append(tunnel)
         except Exception:
             for tunnel in reversed(created):
@@ -456,6 +737,30 @@ class Awg2Service:
                     continue
                 raise
         return "\n".join(outputs) or f"Клиент '{name}' удалён (файлов не было)"
+
+    def expire_check(self) -> str:
+        return self._run_awg_client("expire-check")
+
+    def iter_install_stream_events(
+        self,
+        mode: Literal["install", "update"],
+        *,
+        preset: str | None = None,
+        template: str | None = None,
+        mtu: int | None = None,
+        fp: str = "chrome",
+    ) -> Iterator[dict[str, Any]]:
+        return iter_install_stream_events(
+            mode,
+            preset=preset,
+            template=template,
+            mtu=mtu,
+            fp=fp,
+        )
+
+    def read_expiry_map(self) -> dict[str, datetime]:
+        """Parse the upstream `expiry.tsv` into `{client_name: expires_at}` (UTC, naive)."""
+        return read_expiry_map()
 
     def get_profile_files(self, client_name: str) -> list[dict[str, str]]:
         name = self.validate_client_name(client_name)
@@ -651,16 +956,8 @@ class Awg2Service:
         with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
             _write_tree_to_archive(archive, AWG2_AMNEZIA_DIR, "amneziawg")
             _write_tree_to_archive(archive, AWG2_CLIENT_DIR, "clients")
-            manifest = "\n".join(
-                [
-                    "kind=az-awg2-state",
-                    f"amnezia_dir={AWG2_AMNEZIA_DIR}",
-                    f"client_dir={AWG2_CLIENT_DIR}",
-                ]
-            ).encode("utf-8")
-            info = tarfile.TarInfo(name="MANIFEST")
-            info.size = len(manifest)
-            archive.addfile(info, io.BytesIO(manifest))
+            _write_file_to_archive(archive, AWG2_EXPIRY_TSV, "awgstate/expiry.tsv")
+            _write_manifest_to_archive(archive, AWG2_STATE_ARCHIVE_KIND)
         return buffer.getvalue()
 
     def import_state_archive(self, data: bytes) -> None:
@@ -675,13 +972,45 @@ class Awg2Service:
 
             source_amnezia = temp_root / "amneziawg"
             source_clients = temp_root / "clients"
-            if not _tree_has_files(source_amnezia) or not _tree_has_files(source_clients):
+            source_expiry = temp_root / "awgstate" / "expiry.tsv"
+            _replace_awg2_snapshot(
+                source_amnezia=source_amnezia,
+                source_clients=source_clients,
+                source_expiry=source_expiry,
+            )
+
+    def export_narrow_backup(self) -> bytes:
+        _ensure_replica_installed()
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            _write_tree_to_archive(archive, AWG2_AMNEZIA_DIR, "amneziawg")
+            _write_tree_to_archive(archive, AWG2_CLIENT_DIR, "clients")
+            _write_file_to_archive(archive, AWG2_EXPIRY_TSV, "awgstate/expiry.tsv")
+            _write_manifest_to_archive(archive, AWG2_NARROW_BACKUP_KIND)
+        return buffer.getvalue()
+
+    def import_narrow_backup(self, data: bytes) -> None:
+        if not data:
+            raise ValueError("empty AWG2 backup")
+        _ensure_replica_installed()
+
+        with tempfile.TemporaryDirectory(prefix="awg2-backup-restore-") as temp_dir:
+            temp_root = Path(temp_dir)
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+                _validate_narrow_backup_members(archive.getmembers())
+                archive.extractall(path=temp_root, filter="data")
+
+            manifest_kind = _read_manifest_kind(temp_root / "MANIFEST")
+            if manifest_kind != AWG2_NARROW_BACKUP_KIND:
                 raise ValueError(
-                    "AWG2 archive must contain both amneziawg/ and clients/ files before import"
+                    f"AWG2 backup MANIFEST kind must be {AWG2_NARROW_BACKUP_KIND}"
                 )
 
-            _replace_tree_from_snapshot(source_amnezia, AWG2_AMNEZIA_DIR)
-            _replace_tree_from_snapshot(source_clients, AWG2_CLIENT_DIR)
+            _replace_awg2_snapshot(
+                source_amnezia=temp_root / "amneziawg",
+                source_clients=temp_root / "clients",
+                source_expiry=temp_root / "awgstate" / "expiry.tsv",
+            )
 
     def apply_runtime(self) -> dict[str, Any]:
         _ensure_replica_installed()

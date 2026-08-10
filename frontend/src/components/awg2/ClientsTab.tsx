@@ -19,10 +19,18 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import {
+  formatAccessExpiryBadge,
   formatCreatedAt,
   getDownloadFilename,
   hasAzProfiles,
@@ -30,6 +38,7 @@ import {
   pickAzFile,
   pickVpnFile,
 } from '@/lib/configCardUtils'
+import { formatDateTime } from '@/lib/datetime'
 import {
   GRID_COLS_OPTIONS,
   gridColsClass,
@@ -38,6 +47,7 @@ import {
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
 import { cn } from '@/lib/utils'
 import type { Awg2HealthResponse, VpnConfig } from '@/types'
+import { AWG2_TTL_OPTIONS } from './utils'
 
 interface ClientsTabProps {
   health: Awg2HealthResponse | null
@@ -80,6 +90,7 @@ export default function ClientsTab({ health }: ClientsTabProps) {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [clientName, setClientName] = useState('')
   const [description, setDescription] = useState('')
+  const [ttl, setTtl] = useState<string>('none')
   const [certDays, setCertDays] = useState(3650)
   const [submitting, setSubmitting] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<VpnConfig | null>(null)
@@ -122,6 +133,7 @@ export default function ClientsTab({ health }: ClientsTabProps) {
   const resetForm = () => {
     setClientName('')
     setDescription('')
+    setTtl('none')
     setCertDays(3650)
   }
 
@@ -149,6 +161,7 @@ export default function ClientsTab({ health }: ClientsTabProps) {
           client_name: trimmedName,
           vpn_type: 'amneziawg2',
           cert_expire_days: certDays,
+          ttl: ttl !== 'none' ? ttl : undefined,
           description: description.trim() || undefined,
         })
         await load()
@@ -276,7 +289,7 @@ export default function ClientsTab({ health }: ClientsTabProps) {
         </div>
 
         <form
-          className="mt-4 grid gap-3 rounded-lg border bg-background/60 p-4 sm:grid-cols-2 xl:grid-cols-4"
+          className="mt-4 grid gap-3 rounded-lg border bg-background/60 p-4 sm:grid-cols-2 xl:grid-cols-5"
           onSubmit={handleCreate}
         >
           <div className="space-y-2">
@@ -299,6 +312,21 @@ export default function ClientsTab({ health }: ClientsTabProps) {
               value={certDays}
               onChange={(e) => setCertDays(Number(e.target.value))}
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="awg2-ttl">TTL</Label>
+            <Select value={ttl} onValueChange={setTtl}>
+              <SelectTrigger id="awg2-ttl">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {AWG2_TTL_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2 sm:col-span-2 xl:col-span-1">
             <Label htmlFor="awg2-description">Описание</Label>
@@ -367,6 +395,9 @@ export default function ClientsTab({ health }: ClientsTabProps) {
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="truncate text-base font-semibold">{config.client_name}</h3>
                       <Badge variant="outline">AWG2</Badge>
+                      {config.expires_at && (
+                        <Badge variant="warning">{formatAccessExpiryBadge(config.expires_at)}</Badge>
+                      )}
                       {hasVpnProfiles(config, tab) && (
                         <Badge className="bg-sky-600/90 text-white hover:bg-sky-600/90">VPN</Badge>
                       )}
@@ -399,6 +430,12 @@ export default function ClientsTab({ health }: ClientsTabProps) {
                     <dt className="text-muted-foreground">Срок сертификата</dt>
                     <dd>{config.cert_expire_days ? `${config.cert_expire_days} дн.` : '—'}</dd>
                   </div>
+                  {config.expires_at && (
+                    <div className="sm:col-span-2">
+                      <dt className="text-muted-foreground">Истекает</dt>
+                      <dd>{formatDateTime(config.expires_at)}</dd>
+                    </div>
+                  )}
                 </dl>
 
                 <div className="mt-auto space-y-2 border-t border-border/60 pt-2.5">

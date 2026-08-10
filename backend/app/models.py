@@ -136,6 +136,7 @@ class VpnConfig(Base):
     # Validity the certificate was issued for; `cert_expires_at` is the real notAfter (naive UTC).
     cert_expire_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cert_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sync_group_id: Mapped[int | None] = mapped_column(ForeignKey("node_sync_groups.id"), nullable=True, index=True)
     ha_primary_config_id: Mapped[int | None] = mapped_column(ForeignKey("vpn_configs.id"), nullable=True, index=True)

@@ -8,6 +8,7 @@ from typing import Callable
 
 from app.config import get_settings
 from app.services.backup_scheduler import run_backup_scheduler_loop, run_runtime_backup_cleanup_loop
+from app.services.awg2_expire_worker import run_awg2_expire_loop
 from app.services.cert_sync_worker import run_cert_sync_loop
 from app.services.cidr.cidr_scheduler import run_cidr_db_scheduler_loop
 from app.services.node_sync.reconcile_worker import run_node_sync_reconcile_loop
@@ -42,6 +43,7 @@ from app.services.worker_lifecycle import (
     should_start_user_reminders,
     should_start_noc_report_scheduler,
     should_start_alert_rules_worker,
+    should_start_awg2_expire,
 )
 
 TaskFactory = Callable[[], asyncio.Task]
@@ -68,6 +70,7 @@ def get_worker_startup_plan() -> dict[str, bool]:
         "user_reminders": should_start_user_reminders(),
         "noc_report_scheduler": should_start_noc_report_scheduler(),
         "alert_rules": should_start_alert_rules_worker(),
+        "awg2_expire": should_start_awg2_expire(),
     }
 
 
@@ -76,26 +79,27 @@ def spawn_background_tasks(
     app_root: Path,
     db_path: Path,
     env_path: Path,
+    worker_lifecycle: bool = True,
     create_task: Callable = asyncio.create_task,
 ) -> dict[str, asyncio.Task | None]:
     """Create asyncio tasks for enabled workers. Used by main.py lifespan."""
     settings = get_settings()
-    plan = get_worker_startup_plan()
+    plan = get_worker_startup_plan() if worker_lifecycle else {}
     tasks: dict[str, asyncio.Task | None] = {}
 
-    if plan["traffic_collector"]:
+    if plan.get("traffic_collector"):
         tasks["traffic_collector"] = create_task(run_traffic_collector_loop())
-    if plan["cert_sync"]:
+    if plan.get("cert_sync"):
         tasks["cert_sync"] = create_task(run_cert_sync_loop())
-    if plan["node_health"]:
+    if plan.get("node_health"):
         tasks["node_health"] = create_task(run_node_health_loop())
-    if plan["resource_metrics"]:
+    if plan.get("resource_metrics"):
         tasks["resource_metrics"] = create_task(run_resource_metrics_loop())
     if plan.get("connection_history"):
         tasks["connection_history"] = create_task(run_connection_history_loop())
-    if plan["panel_resource_metrics"]:
+    if plan.get("panel_resource_metrics"):
         tasks["panel_resource_metrics"] = create_task(run_panel_resource_metrics_loop())
-    if plan["backup_scheduler"]:
+    if plan.get("backup_scheduler"):
         tasks["backup_scheduler"] = create_task(
             run_backup_scheduler_loop(
                 app_root=app_root,
@@ -104,26 +108,28 @@ def spawn_background_tasks(
                 env_path=env_path,
             )
         )
-    if plan["runtime_backup_cleanup"]:
+    if plan.get("runtime_backup_cleanup"):
         tasks["runtime_backup_cleanup"] = create_task(run_runtime_backup_cleanup_loop(env_path=env_path))
-    if plan["cidr_scheduler"]:
+    if plan.get("cidr_scheduler"):
         tasks["cidr_scheduler"] = create_task(run_cidr_db_scheduler_loop())
-    if plan["wg_policy_sync"]:
+    if plan.get("wg_policy_sync"):
         tasks["wg_policy_sync"] = create_task(run_wg_policy_sync_loop())
-    if plan["node_sync_reconcile"]:
+    if plan.get("node_sync_reconcile"):
         tasks["node_sync_reconcile"] = create_task(run_node_sync_reconcile_loop())
-    if plan["nightly_idle_restart"]:
+    if plan.get("nightly_idle_restart"):
         tasks["nightly_idle_restart"] = create_task(run_nightly_idle_restart_loop())
-    if plan["key_rotation"]:
+    if plan.get("key_rotation"):
         tasks["key_rotation"] = create_task(run_node_key_rotation_loop())
-    if plan["retention"]:
+    if plan.get("retention"):
         tasks["retention"] = create_task(run_retention_loop())
-    if plan["user_reminders"]:
+    if plan.get("user_reminders"):
         tasks["user_reminders"] = create_task(run_user_reminder_loop())
-    if plan["noc_report_scheduler"]:
+    if plan.get("noc_report_scheduler"):
         tasks["noc_report_scheduler"] = create_task(run_noc_report_scheduler_loop())
-    if plan["alert_rules"]:
+    if plan.get("alert_rules"):
         tasks["alert_rules"] = create_task(run_alert_rules_loop())
+    if plan.get("awg2_expire"):
+        tasks["awg2_expire"] = create_task(run_awg2_expire_loop())
 
     tasks["webhook_delivery"] = create_task(run_webhook_delivery_loop())
 

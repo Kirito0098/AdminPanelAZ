@@ -99,3 +99,4 @@ docs/plans/
 
 # Local accidental venv at repo root
 .venv/
+.worktrees/

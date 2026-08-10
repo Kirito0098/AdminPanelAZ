@@ -54,7 +54,7 @@ class NodeAdapter(ABC):
     def list_wireguard_clients(self) -> list[str]: ...
 
     @abstractmethod
-    def awg2_add_client(self, client_name: str) -> str: ...
+    def awg2_add_client(self, client_name: str, ttl: str | None = None) -> str: ...
 
     @abstractmethod
     def awg2_delete_client(self, client_name: str) -> str: ...
@@ -64,6 +64,12 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def list_amneziawg2_clients(self) -> list[str]: ...
+
+    @abstractmethod
+    def awg2_expire_check(self) -> str: ...
+
+    @abstractmethod
+    def awg2_expiry_map(self) -> dict[str, datetime]: ...
 
     @abstractmethod
     def recreate_profiles(self) -> str: ...
@@ -219,6 +225,12 @@ class NodeAdapter(ABC):
     def apply_awg2_runtime(self) -> dict: ...
 
     @abstractmethod
+    def export_awg2_backup(self) -> bytes: ...
+
+    @abstractmethod
+    def restore_awg2_backup(self, data: bytes, archive_name: str = "az-awg2-backup.tar.gz") -> dict: ...
+
+    @abstractmethod
     def get_awg2_obfuscation(self) -> dict: ...
 
     @abstractmethod
@@ -237,6 +249,16 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def get_awg2_monitoring(self) -> dict: ...
+
+    @abstractmethod
+    def awg2_iter_install_stream(
+        self,
+        mode: str,
+        *,
+        preset: str | None = None,
+        template: str | None = None,
+        mtu: int | None = None,
+    ): ...
 
     @abstractmethod
     def get_warper_status(self) -> dict: ...
@@ -399,8 +421,10 @@ class LocalNodeAdapter(NodeAdapter):
     def list_wireguard_clients(self) -> list[str]:
         return self._service.list_wireguard_clients()
 
-    def awg2_add_client(self, client_name: str) -> str:
-        return self._awg2.add_client(client_name)
+    def awg2_add_client(self, client_name: str, ttl: str | None = None) -> str:
+        if ttl is None:
+            return self._awg2.add_client(client_name)
+        return self._awg2.add_client(client_name, ttl=ttl)
 
     def awg2_delete_client(self, client_name: str) -> str:
         return self._awg2.delete_client(client_name)
@@ -410,6 +434,12 @@ class LocalNodeAdapter(NodeAdapter):
 
     def list_amneziawg2_clients(self) -> list[str]:
         return self._awg2.list_all_client_names()
+
+    def awg2_expire_check(self) -> str:
+        return self._awg2.expire_check()
+
+    def awg2_expiry_map(self) -> dict[str, datetime]:
+        return self._awg2.read_expiry_map()
 
     def recreate_profiles(self) -> str:
         return self._service.recreate_profiles()
@@ -512,6 +542,14 @@ class LocalNodeAdapter(NodeAdapter):
     def apply_awg2_runtime(self) -> dict:
         return self._awg2.apply_runtime()
 
+    def export_awg2_backup(self) -> bytes:
+        return self._awg2.export_narrow_backup()
+
+    def restore_awg2_backup(self, data: bytes, archive_name: str = "az-awg2-backup.tar.gz") -> dict:
+        _ = archive_name
+        self._awg2.import_narrow_backup(data)
+        return self._awg2.apply_runtime()
+
     def get_awg2_obfuscation(self) -> dict:
         return self._awg2.get_obfuscation()
 
@@ -537,6 +575,21 @@ class LocalNodeAdapter(NodeAdapter):
 
     def get_awg2_monitoring(self) -> dict:
         return self._awg2.get_monitoring()
+
+    def awg2_iter_install_stream(
+        self,
+        mode: str,
+        *,
+        preset: str | None = None,
+        template: str | None = None,
+        mtu: int | None = None,
+    ):
+        return self._awg2.iter_install_stream_events(
+            mode,
+            preset=preset,
+            template=template,
+            mtu=mtu,
+        )
 
     def read_easyrsa_index(self) -> str:
         return self._service.read_easyrsa_index()
@@ -1046,8 +1099,11 @@ class RemoteNodeAdapter(NodeAdapter):
         data = self._request("GET", "/clients/wireguard")
         return data.get("clients", [])
 
-    def awg2_add_client(self, client_name: str) -> str:
-        data = self._request("POST", "/clients/amneziawg2", json={"client_name": client_name})
+    def awg2_add_client(self, client_name: str, ttl: str | None = None) -> str:
+        payload: dict[str, str] = {"client_name": client_name}
+        if ttl is not None:
+            payload["ttl"] = ttl
+        data = self._request("POST", "/clients/amneziawg2", json=payload)
         return data.get("message", "ok")
 
     def awg2_delete_client(self, client_name: str) -> str:
@@ -1061,6 +1117,20 @@ class RemoteNodeAdapter(NodeAdapter):
     def list_amneziawg2_clients(self) -> list[str]:
         names = set(self.awg2_list_clients("antizapret")) | set(self.awg2_list_clients("vpn"))
         return sorted(names)
+
+    def awg2_expire_check(self) -> str:
+        data = self._request("POST", "/awg2/expire-check", timeout=120.0)
+        return data.get("detail") or data.get("message", "ok")
+
+    def awg2_expiry_map(self) -> dict[str, datetime]:
+        data = self._request("GET", "/awg2/expiry", timeout=60.0)
+        result: dict[str, datetime] = {}
+        for name, raw in (data.get("expiry") or {}).items():
+            try:
+                result[name] = datetime.fromisoformat(str(raw))
+            except ValueError:
+                continue
+        return result
 
     def recreate_profiles(self) -> str:
         data = self._request("POST", "/configs/recreate-profiles", timeout=300.0)
@@ -1413,6 +1483,17 @@ class RemoteNodeAdapter(NodeAdapter):
     def apply_awg2_runtime(self) -> dict:
         return self._request("POST", "/awg2/runtime/apply", timeout=60.0)
 
+    def export_awg2_backup(self) -> bytes:
+        return self._request_bytes("POST", "/awg2/backup", timeout=120.0)
+
+    def restore_awg2_backup(self, data: bytes, archive_name: str = "az-awg2-backup.tar.gz") -> dict:
+        return self._request(
+            "POST",
+            "/awg2/restore",
+            files={"archive": (archive_name, data, "application/gzip")},
+            timeout=120.0,
+        )
+
     def get_awg2_obfuscation(self) -> dict:
         return self._request("GET", "/awg2/obfuscation", timeout=60.0)
 
@@ -1444,6 +1525,44 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def get_awg2_monitoring(self) -> dict:
         return self._request("GET", "/awg2/monitoring", timeout=60.0)
+
+    def awg2_iter_install_stream(
+        self,
+        mode: str,
+        *,
+        preset: str | None = None,
+        template: str | None = None,
+        mtu: int | None = None,
+    ):
+        import json
+
+        params: dict[str, str] = {"mode": mode}
+        if preset is not None:
+            params["preset"] = preset
+        if template is not None:
+            params["template"] = template
+        if mtu is not None:
+            params["mtu"] = str(mtu)
+
+        with httpx.stream(
+            "GET",
+            f"{self.base_url}/awg2/install/stream",
+            headers=self._headers(),
+            params=params,
+            timeout=httpx.Timeout(660.0, connect=30.0),
+            **self._client_kwargs(),
+        ) as response:
+            if response.status_code >= 400:
+                detail = response.read().decode("utf-8", errors="replace")
+                yield {"event": "error", "detail": detail or f"HTTP {response.status_code}"}
+                return
+            for line in response.iter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                try:
+                    yield json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
 
     def get_warper_status(self) -> dict:
         return self._request("GET", "/warper/status")

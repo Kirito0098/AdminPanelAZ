@@ -252,6 +252,7 @@ class VpnConfigCreate(BaseModel):
     client_name: str = Field(min_length=1, max_length=32, pattern=r"^[a-zA-Z0-9_-]+$")
     vpn_type: VpnType
     cert_expire_days: int | None = Field(default=3650, ge=1, le=3650)
+    ttl: str | None = None
     description: str | None = None
     owner_id: int | None = None
 
@@ -279,6 +280,7 @@ class VpnConfigResponse(BaseModel):
     owner_username: str | None = None
     cert_expire_days: int | None
     cert_expires_at: datetime | None = None
+    expires_at: datetime | None = None
     cert_days_left: int | None = None
     description: str | None
     created_at: datetime
