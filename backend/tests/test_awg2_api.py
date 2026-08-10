@@ -383,3 +383,26 @@ def test_get_monitoring_ok():
     assert result["stats_available"] is True
     assert result["clients"][0]["name"] == "ivan"
     assert result["node_id"] == 1
+
+
+def test_get_client_stats_ok():
+    node = SimpleNamespace(id=1, name="local", host="127.0.0.1")
+    adapter = MagicMock()
+    adapter.get_awg2_client_stats.return_value = {
+        "name": "ivan",
+        "online": True,
+        "endpoint": "1.2.3.4:12345",
+        "handshake_age_s": 12,
+        "rx_life": 10,
+        "tx_life": 20,
+        "daily": [{"day": "2026-08-10", "rx": 1, "tx": 2}],
+        "geo": None,
+    }
+    with (
+        patch.object(awg2_router, "get_active_node", return_value=node),
+        patch.object(awg2_router, "get_active_adapter", return_value=adapter),
+    ):
+        result = awg2_router.get_client_stats("ivan", db=MagicMock(), _=SimpleNamespace())
+    assert result["name"] == "ivan"
+    assert result["daily"][0]["day"] == "2026-08-10"
+    assert result["node_id"] == 1

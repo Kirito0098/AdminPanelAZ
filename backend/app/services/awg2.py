@@ -20,6 +20,8 @@ from typing import Any, Iterator, Literal
 
 from fastapi import HTTPException, status
 
+from app.services.ip_geo import is_local_geoip_loaded, parse_client_endpoint
+
 AWG2_CLIENT_BIN = Path(os.environ.get("AWG2_CLIENT_BIN", "/usr/local/bin/awg-client"))
 AWG2_OBFUSCATION_BIN = Path(os.environ.get("AWG2_OBFUSCATION_BIN", "/usr/local/bin/awg-obfuscation"))
 AWG2_OVERLAY_DIR = Path(os.environ.get("AWG2_OVERLAY_DIR", "/opt/antizapret-awg"))
@@ -119,6 +121,10 @@ class Awg2ReplicaNotInstalledError(Awg2NotInstalledError):
     def __init__(self, message: str, *, install_command: str):
         super().__init__(message)
         self.install_command = install_command
+
+
+class Awg2ClientNotFoundError(LookupError):
+    """Requested AWG2 client was not found in stats or runtime dumps."""
 
 
 def detect_awg2_installation() -> dict[str, Any]:
@@ -577,6 +583,156 @@ def _parse_awg_dump(text: str, *, iface: str, names: dict[str, str], now: int) -
     return clients
 
 
+def _daily_rows_from_stats_db(db_path: Path, client_name: str) -> list[dict[str, Any]]:
+    try:
+        with sqlite3.connect(str(db_path), timeout=5) as conn:
+            rows = conn.execute(
+                """
+                SELECT d.day, SUM(COALESCE(d.rx, 0)), SUM(COALESCE(d.tx, 0))
+                FROM daily d
+                JOIN peers p ON p.pubkey = d.pubkey
+                WHERE COALESCE(p.origin, 'awg2') = 'awg2' AND p.name = ?
+                GROUP BY d.day
+                ORDER BY d.day ASC
+                """,
+                (client_name,),
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+
+    daily: list[dict[str, Any]] = []
+    for day, rx, tx in rows:
+        if day is None:
+            continue
+        day_value = str(day).strip()
+        if day_value.isdigit() and len(day_value) >= 10:
+            try:
+                day_value = datetime.utcfromtimestamp(int(day_value)).strftime("%Y-%m-%d")
+            except (OverflowError, OSError, ValueError):
+                pass
+        daily.append({"day": day_value, "rx": int(rx or 0), "tx": int(tx or 0)})
+    return daily
+
+
+def _client_stats_from_stats_db(db_path: Path, client_name: str, *, now: int) -> dict[str, Any] | None:
+    try:
+        with sqlite3.connect(str(db_path), timeout=5) as conn:
+            rows = conn.execute(
+                """
+                SELECT p.iface, t.rx_life, t.tx_life, t.last_handshake, t.endpoint
+                FROM peers p
+                LEFT JOIN totals t ON p.pubkey = t.pubkey
+                WHERE COALESCE(p.origin, 'awg2') = 'awg2' AND p.name = ?
+                ORDER BY COALESCE(t.last_handshake, 0) DESC, p.iface ASC
+                """,
+                (client_name,),
+            ).fetchall()
+    except sqlite3.Error:
+        return None
+
+    if not rows:
+        return None
+
+    rx_life = 0
+    tx_life = 0
+    online = False
+    handshake_age_s: int | None = None
+    endpoint: str | None = None
+    best_handshake = -1
+
+    for _iface, rx_value, tx_value, last_hs, endpoint_value in rows:
+        rx_life += int(rx_value or 0)
+        tx_life += int(tx_value or 0)
+        hs = int(last_hs or 0)
+        age = (now - hs) if hs else None
+        if age is not None:
+            if handshake_age_s is None or age < handshake_age_s:
+                handshake_age_s = age
+            if age < AWG2_ONLINE_WINDOW_S:
+                online = True
+        if endpoint_value and hs >= best_handshake:
+            endpoint = str(endpoint_value)
+            best_handshake = hs
+
+    return {
+        "name": client_name,
+        "online": online,
+        "endpoint": endpoint,
+        "handshake_age_s": handshake_age_s,
+        "rx_life": rx_life,
+        "tx_life": tx_life,
+        "daily": _daily_rows_from_stats_db(db_path, client_name),
+    }
+
+
+def _client_stats_from_dump(
+    client_name: str,
+    *,
+    dump_by_iface: dict[str, str],
+    now: int,
+) -> dict[str, Any] | None:
+    names = _load_peer_names()
+    rx_life = 0
+    tx_life = 0
+    online = False
+    handshake_age_s: int | None = None
+    endpoint: str | None = None
+    best_handshake = -1
+    matched = False
+
+    for _iface, dump_text in dump_by_iface.items():
+        for i, raw in enumerate(dump_text.splitlines()):
+            fields = raw.split("\t")
+            if i == 0 or len(fields) < 8:
+                continue
+            pubkey = fields[0]
+            resolved_name = names.get(pubkey, pubkey[:8] if pubkey else "unknown")
+            if resolved_name != client_name:
+                continue
+            matched = True
+            try:
+                handshake = int(fields[4] or 0)
+                rx = int(fields[5] or 0)
+                tx = int(fields[6] or 0)
+            except ValueError:
+                continue
+            rx_life += rx
+            tx_life += tx
+            age = (now - handshake) if handshake else None
+            if age is not None:
+                if handshake_age_s is None or age < handshake_age_s:
+                    handshake_age_s = age
+                if age < AWG2_ONLINE_WINDOW_S:
+                    online = True
+            endpoint_value = (fields[2] or "").strip() or None
+            if endpoint_value and handshake >= best_handshake:
+                endpoint = endpoint_value
+                best_handshake = handshake
+
+    if not matched:
+        return None
+
+    return {
+        "name": client_name,
+        "online": online,
+        "endpoint": endpoint,
+        "handshake_age_s": handshake_age_s,
+        "rx_life": rx_life,
+        "tx_life": tx_life,
+        "daily": [],
+    }
+
+
+def _lookup_local_geo_for_endpoint(endpoint: str | None) -> dict[str, str | None] | None:
+    parsed = parse_client_endpoint(endpoint)
+    lookup_ip = parsed.get("lookup_ip")
+    if not lookup_ip or not is_local_geoip_loaded():
+        return None
+    from app.services import geoip_local
+
+    return geoip_local.lookup_geo_local(lookup_ip)
+
+
 class Awg2Service:
     def ensure_installed(self) -> None:
         _ensure_installed()
@@ -891,6 +1047,30 @@ class Awg2Service:
             "clients": clients,
             "stats_available": stats_available,
         }
+
+    def get_client_stats(self, name: str) -> dict[str, Any]:
+        _ensure_installed()
+        client_name = self.validate_client_name(name)
+        now = int(time.time())
+        payload: dict[str, Any] | None = None
+        stats_db = _stats_db_path()
+        if stats_db.is_file():
+            payload = _client_stats_from_stats_db(stats_db, client_name, now=now)
+
+        if payload is None:
+            env = _read_services_env()
+            dump_by_iface: dict[str, str] = {}
+            for iface_name in (env.get("AZ_IFACE"), env.get("VPN_IFACE")):
+                if not iface_name:
+                    continue
+                dump_by_iface[iface_name] = self._awg_show_dump(iface_name)
+            payload = _client_stats_from_dump(client_name, dump_by_iface=dump_by_iface, now=now)
+
+        if payload is None:
+            raise Awg2ClientNotFoundError(f"AWG2 client not found: {client_name}")
+
+        payload["geo"] = _lookup_local_geo_for_endpoint(payload.get("endpoint"))
+        return payload
 
     def _run_stats_overview(self) -> str:
         script = AWG2_STATS_SCRIPT

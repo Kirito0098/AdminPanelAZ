@@ -301,6 +301,14 @@ def test_local_node_adapter_awg2_monitoring_delegate():
     awg2.get_monitoring.assert_called_once_with()
 
 
+def test_local_node_adapter_awg2_client_stats_delegate():
+    adapter, _service, awg2 = _local_adapter()
+    awg2.get_client_stats.return_value = {"name": "ivan", "daily": []}
+
+    assert adapter.get_awg2_client_stats("ivan") == {"name": "ivan", "daily": []}
+    awg2.get_client_stats.assert_called_once_with("ivan")
+
+
 def test_remote_node_adapter_awg2_monitoring_hit_expected_routes(monkeypatch):
     adapter = RemoteNodeAdapter("10.0.0.2", 9100, "k" * 32, mtls_enabled=False)
     request_calls: list[tuple[str, str, dict]] = []
@@ -313,6 +321,20 @@ def test_remote_node_adapter_awg2_monitoring_hit_expected_routes(monkeypatch):
 
     assert adapter.get_awg2_monitoring()["stats_available"] is True
     assert request_calls == [("GET", "/awg2/monitoring", {"timeout": 60.0})]
+
+
+def test_remote_node_adapter_awg2_client_stats_hit_expected_route(monkeypatch):
+    adapter = RemoteNodeAdapter("10.0.0.2", 9100, "k" * 32, mtls_enabled=False)
+    request_calls: list[tuple[str, str, dict]] = []
+
+    def fake_request(method, path, **kwargs):
+        request_calls.append((method, path, kwargs))
+        return {"name": "ivan", "daily": []}
+
+    monkeypatch.setattr(adapter, "_request", fake_request)
+
+    assert adapter.get_awg2_client_stats("ivan") == {"name": "ivan", "daily": []}
+    assert request_calls == [("GET", "/awg2/clients/ivan/stats", {"timeout": 60.0})]
 
 
 def test_remote_node_adapter_awg2_install_stream_hits_expected_route(monkeypatch):

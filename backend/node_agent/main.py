@@ -38,7 +38,12 @@ from app.services.awg2_runtime import (
     unblock_client_runtime as awg2_unblock_client_runtime,
 )
 from app.services.warper import WarperService, run_warper_action
-from app.services.awg2 import Awg2NotInstalledError, Awg2Service, is_awg2_profile_path
+from app.services.awg2 import (
+    Awg2ClientNotFoundError,
+    Awg2NotInstalledError,
+    Awg2Service,
+    is_awg2_profile_path,
+)
 
 NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
@@ -861,6 +866,20 @@ def awg2_get_monitoring(_: None = Depends(verify_api_key)):
         return Awg2Service().get_monitoring()
     except Awg2NotInstalledError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.get("/awg2/clients/{client_name}/stats")
+def awg2_get_client_stats(client_name: str, _: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().get_client_stats(client_name)
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Awg2ClientNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RuntimeError as exc:

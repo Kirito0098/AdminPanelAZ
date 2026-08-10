@@ -261,6 +261,9 @@ class NodeAdapter(ABC):
     def get_awg2_monitoring(self) -> dict: ...
 
     @abstractmethod
+    def get_awg2_client_stats(self, client_name: str) -> dict: ...
+
+    @abstractmethod
     def awg2_iter_install_stream(
         self,
         mode: str,
@@ -585,6 +588,9 @@ class LocalNodeAdapter(NodeAdapter):
 
     def get_awg2_monitoring(self) -> dict:
         return self._awg2.get_monitoring()
+
+    def get_awg2_client_stats(self, client_name: str) -> dict:
+        return self._awg2.get_client_stats(client_name)
 
     def awg2_iter_install_stream(
         self,
@@ -1547,6 +1553,9 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def get_awg2_monitoring(self) -> dict:
         return self._request("GET", "/awg2/monitoring", timeout=60.0)
+
+    def get_awg2_client_stats(self, client_name: str) -> dict:
+        return self._request("GET", f"/awg2/clients/{client_name}/stats", timeout=60.0)
 
     def awg2_iter_install_stream(
         self,
