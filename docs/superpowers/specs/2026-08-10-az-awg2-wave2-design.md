@@ -1,12 +1,28 @@
-# AZ-AWG2 — волна 2 (HA + обфускация + мониторинг)
+# AZ-AWG2 — волна 2 (сводный спек: срезы 2a–2c)
 
 **Дата:** 2026-08-10  
-**Статус:** draft  
-**Зависит от:** [`2026-08-10-az-awg2-design.md`](2026-08-10-az-awg2-design.md) (волна 1)  
-**Upstream:** [blindtechnique/az-awg2](https://github.com/blindtechnique/az-awg2)  
-**План реализации:** [`docs/superpowers/plans/2026-08-10-az-awg2-wave2.md`](../plans/2026-08-10-az-awg2-wave2.md)
+**Статус:** draft — **выполнять по срезам**  
+**Эпик:** [`2026-08-10-az-awg2-epic.md`](2026-08-10-az-awg2-epic.md)  
+**Зависит от:** срезы 1a–1c
+
+| Срез | Спек | План |
+|------|------|------|
+| **2a** HA | [wave2a](2026-08-10-az-awg2-wave2a-design.md) | [plan](../plans/2026-08-10-az-awg2-wave2a.md) |
+| **2b** обфускация | [wave2b](2026-08-10-az-awg2-wave2b-design.md) | [plan](../plans/2026-08-10-az-awg2-wave2b.md) |
+| **2c** мониторинг | [wave2c](2026-08-10-az-awg2-wave2c-design.md) | [plan](../plans/2026-08-10-az-awg2-wave2c.md) |
+
+Монолитный план-справочник: [`../plans/2026-08-10-az-awg2-wave2.md`](../plans/2026-08-10-az-awg2-wave2.md)
+
+Ниже — исходное полное описание волны 2.
+
+---
+
+# AZ-AWG2 — волна 2 (HA + обфускация + мониторинг) [архив текста]
+
+**Upstream:** [blindtechnique/az-awg2](https://github.com/blindtechnique/az-awg2)
 
 ## Цель
+
 
 Довести модуль AZ-AWG2 до HA-паритета со стоковым WireGuard и сделать вкладку `/awg2` операторски полезной: управление обфускацией и мониторинг peers/трафика без Telegram-бота az-awg2.
 

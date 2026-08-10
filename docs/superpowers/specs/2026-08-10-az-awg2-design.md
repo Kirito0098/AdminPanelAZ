@@ -1,12 +1,29 @@
-# AZ-AWG2 — волна 1 (вкладка + VpnConfig)
+# AZ-AWG2 — волна 1 (сводный спек: срезы 1a–1c)
 
 **Дата:** 2026-08-10  
-**Статус:** draft  
-**Upstream:** [blindtechnique/az-awg2](https://github.com/blindtechnique/az-awg2) (AmneziaWG 2.0 parallel layer)  
+**Статус:** draft — **выполнять по срезам**, не целиком  
+**Эпик:** [`2026-08-10-az-awg2-epic.md`](2026-08-10-az-awg2-epic.md)  
+**Upstream:** [blindtechnique/az-awg2](https://github.com/blindtechnique/az-awg2)
+
+| Срез | Спек | План |
+|------|------|------|
+| **1a** shell | [wave1a](2026-08-10-az-awg2-wave1a-design.md) | [plan](../plans/2026-08-10-az-awg2-wave1a.md) |
+| **1b** clients | [wave1b](2026-08-10-az-awg2-wave1b-design.md) | [plan](../plans/2026-08-10-az-awg2-wave1b.md) |
+| **1c** Dashboard/docs | [wave1c](2026-08-10-az-awg2-wave1c-design.md) | [plan](../plans/2026-08-10-az-awg2-wave1c.md) |
+
+Детальный монолитный план (справочник сниппетов): [`../plans/2026-08-10-az-awg2.md`](../plans/2026-08-10-az-awg2.md)
+
+Ниже — исходное полное описание волны 1 (для контекста). Реализация только через 1a→1b→1c.
+
+---
+
+# AZ-AWG2 — волна 1 (вкладка + VpnConfig) [архив текста]
+
 **Образец интеграции:** AZ-WARP (`WarperService`, `/warper`, feature toggle)  
-**Волна 2:** [`2026-08-10-az-awg2-wave2-design.md`](2026-08-10-az-awg2-wave2-design.md) (HA + обфускация + мониторинг). TTL / TG / remote install — волна 3+.
+**Далее:** срезы [2a](2026-08-10-az-awg2-wave2a-design.md)–[2c](2026-08-10-az-awg2-wave2c-design.md); эпик [wave3](2026-08-10-az-awg2-wave3.md).
 
 ## Цель
+
 
 Дать админу отдельную страницу **AZ-AWG2** для управления параллельным слоем AmneziaWG 2.0 на активном VPN-узле: статус, инструкция установки, создание/удаление клиентов, скачивание `.conf` / QR / `vpn://`. Клиенты хранятся как `VpnConfig` с типом `amneziawg2` и подчиняются квотам / visibility / client-access в **веб-панели**. Роль `user` видит и скачивает свои конфиги на Dashboard.
 
