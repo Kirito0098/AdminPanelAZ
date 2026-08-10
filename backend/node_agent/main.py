@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -710,6 +710,32 @@ def awg2_health(_: None = Depends(verify_api_key)):
 def awg2_status(_: None = Depends(verify_api_key)):
     try:
         return Awg2Service().get_status()
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.get("/awg2/state/archive")
+def awg2_export_archive(_: None = Depends(verify_api_key)):
+    try:
+        return Response(content=Awg2Service().export_state_archive(), media_type="application/gzip")
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/awg2/state/archive")
+async def awg2_import_archive(request: Request, _: None = Depends(verify_api_key)):
+    try:
+        data = await request.body()
+        Awg2Service().import_state_archive(data)
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return {"success": True}
+
+
+@app.post("/awg2/runtime/apply")
+def awg2_apply_runtime(_: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().apply_runtime()
     except Awg2NotInstalledError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 

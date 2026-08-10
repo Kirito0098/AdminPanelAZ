@@ -111,7 +111,7 @@ def test_awg2_status_maps_not_installed_to_409():
     assert exc.value.status_code == 409
 
 
-def test_create_amneziawg2_skips_ha_and_calls_awg2():
+def test_create_amneziawg2_calls_replicate_and_awg2():
     db = _FakeDb(owner=SimpleNamespace(id=1, username="owner"))
     current_user = SimpleNamespace(id=1, username="admin", role=UserRole.admin)
     payload = VpnConfigCreate(client_name="awg2user", vpn_type=VpnType.amneziawg2)
@@ -145,7 +145,7 @@ def test_create_amneziawg2_skips_ha_and_calls_awg2():
     assert result == {"ok": True}
     adapter.awg2_add_client.assert_called_once_with("awg2user")
     adapter.add_wireguard_client.assert_not_called()
-    replicate.assert_not_called()
+    replicate.assert_called_once()
 
 
 def test_create_amneziawg2_not_installed_409():
@@ -201,7 +201,7 @@ def test_create_amneziawg2_health_probe_failure_409():
     assert exc.value.detail["install_command"] == AWG2_INSTALL_CMD
 
 
-def test_delete_amneziawg2_skips_ha_and_calls_awg2():
+def test_delete_amneziawg2_calls_replicate_and_awg2():
     db = _FakeDb()
     current_user = SimpleNamespace(id=1, username="admin", role=UserRole.admin)
     config = SimpleNamespace(id=11, client_name="awg2user", vpn_type=VpnType.amneziawg2)
@@ -224,4 +224,4 @@ def test_delete_amneziawg2_skips_ha_and_calls_awg2():
     assert result.message == "Клиент 'awg2user' удалён"
     adapter.awg2_delete_client.assert_called_once_with("awg2user")
     adapter.delete_wireguard_client.assert_not_called()
-    replicate.assert_not_called()
+    replicate.assert_called_once()

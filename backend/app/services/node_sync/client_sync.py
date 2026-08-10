@@ -59,8 +59,6 @@ def replicate_client_delete(
 
 
 def maybe_replicate_create(db: Session, *, node_id: int, primary_config: VpnConfig) -> dict[str, Any] | None:
-    if primary_config.vpn_type.value == "amneziawg2":
-        return None
     group = find_sync_group_for_primary(db, node_id)
     if not group:
         return None
@@ -88,8 +86,6 @@ def purge_ha_shadow_configs(db: Session, primary_config_id: int) -> int:
 
 
 def maybe_replicate_delete(db: Session, *, node_id: int, primary_config: VpnConfig) -> dict[str, Any] | None:
-    if primary_config.vpn_type.value == "amneziawg2":
-        return None
     group = find_sync_group_for_primary(db, node_id)
     if not group:
         return None

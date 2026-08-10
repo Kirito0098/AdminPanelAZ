@@ -86,9 +86,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/blindtechnique/az-awg2/main/
 
 ## HA (синхронизация узлов)
 
-В волне 1 клиенты `amneziawg2` **не** реплицируются на replica. Создание и удаление работают только на активном узле.
+В срезе 2a клиенты `amneziawg2` реплицируются в HA как crypto-sync: с primary копируются `/etc/amnezia/amneziawg` и `/opt/antizapret-awg/clients`, при архивировании исключаются `stats.db`, `venv/` и `__pycache__/`.
 
-Репликация HA для AWG2 — **позже (срез 2a)**.
+Если на replica нет слоя `az-awg2`, синхронизация завершается ошибкой и страница показывает `install_command`.
+
+Применяется byte-copy + `apply_runtime`, а не `awg-client add` на replica.
 
 ---
 
@@ -109,7 +111,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/blindtechnique/az-awg2/main/
 
 - Не прерывайте установку/обновление слоя на сервере
 - Не путайте вкладки **AmneziaWG** и **AmneziaWG 2.0** на Dashboard
-- До среза 2a не рассчитывайте на автоматическую копию клиентов AWG2 между узлами HA
+- Для HA-копии AWG2 учитывайте byte-copy crypto-sync и исключения архива из среза 2a
 
 ---
 

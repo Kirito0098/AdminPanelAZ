@@ -18,6 +18,13 @@
 - **Download / QR / Telegram** читают `.ovpn` с диска без repair; при выдаче панель может подставить multi-remote из списка узла в БД (диск и HA-копия остаются стоковыми). Список remote **не** реплицируется Push full — задаётся на каждом узле отдельно ([antizapret-config.md](antizapret-config.md#несколько-адресов-подключения)).
 - **Verify** сравнивает fingerprint `openvpn/client_profiles` и блок `openvpn_profile_certs` (read-only). При расхождении — **Push full**, не автоматический renew.
 
+### AWG2 HA crypto-sync
+
+- Для AZ-AWG2 в HA используется crypto-sync через byte-copy, а не `awg-client add` на replica.
+- Архивируются пути `/etc/amnezia/amneziawg` и `/opt/antizapret-awg/clients`; из архива исключаются `stats.db`, `venv/` и `__pycache__/`.
+- Если на replica нет слоя `az-awg2`, синхронизация завершается ошибкой и панель показывает `install_command`.
+- После restore на replica выполняется `apply_runtime`, чтобы применить состояние узла.
+
 ## API
 
 | Method | Route |

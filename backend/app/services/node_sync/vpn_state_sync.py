@@ -9,6 +9,7 @@ import tarfile
 from fastapi import HTTPException
 
 from app.models import VpnType
+from app.services.awg2 import AWG2_INSTALL_CMD
 from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
 from app.services.openvpn_pki import validate_all_openvpn_profiles
 
@@ -224,6 +225,26 @@ def sync_openvpn_pki_from_primary(
         raise HTTPException(status_code=500, detail=detail)
 
 
+def sync_amneziawg2_state_from_primary(primary_adapter, replica_adapter) -> None:
+    """Copy AZ-AWG2 state archive from primary to replica and apply runtime."""
+    health = replica_adapter.get_awg2_health()
+    if not health.get("installed"):
+        cmd = health.get("install_command") or AWG2_INSTALL_CMD
+        raise RuntimeError(f"AZ-AWG2 не установлен на replica. Установите: {cmd}")
+
+    archive = primary_adapter.export_awg2_state_archive()
+    if not archive:
+        raise RuntimeError("Пустой архив состояния AZ-AWG2 с primary")
+
+    replica_adapter.import_awg2_state_archive(archive)
+    runtime = replica_adapter.apply_awg2_runtime()
+    if not runtime.get("success"):
+        logger.warning(
+            "HA AWG2 runtime apply partial: %s",
+            runtime.get("errors") or [],
+        )
+
+
 def sync_vpn_crypto_from_primary(
     primary_adapter,
     replica_adapter,
@@ -239,6 +260,9 @@ def sync_vpn_crypto_from_primary(
             replica_adapter,
             openvpn_multihome=openvpn_multihome,
         )
+        return
+    if vpn_type == VpnType.amneziawg2:
+        sync_amneziawg2_state_from_primary(primary_adapter, replica_adapter)
         return
     sync_wireguard_state_from_primary(
         primary_adapter,
@@ -260,6 +284,11 @@ def sync_all_vpn_crypto_from_primary(
         replica_adapter,
         openvpn_multihome=openvpn_multihome,
     )
+    try:
+        if primary_adapter.get_awg2_health().get("installed"):
+            sync_amneziawg2_state_from_primary(primary_adapter, replica_adapter)
+    except Exception as exc:
+        logger.warning("HA full crypto: AWG2 sync skipped/failed: %s", exc)
 
 
 def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str, object]:

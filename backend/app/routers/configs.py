@@ -578,7 +578,7 @@ def create_config(
 
     ha_replicate_warning = None
     group = find_sync_group_for_primary(db, node_id)
-    if group and config.vpn_type != VpnType.amneziawg2:
+    if group:
         replicate_result = maybe_replicate_create(db, node_id=node_id, primary_config=config)
         ha_replicate_warning = format_ha_replicate_errors(replicate_result)
 
@@ -720,7 +720,7 @@ def delete_config(
     node = get_active_node(db)
 
     sync_group = find_sync_group_for_primary(db, node.id)
-    if sync_group and config.vpn_type != VpnType.amneziawg2:
+    if sync_group:
         maybe_replicate_delete(db, node_id=node.id, primary_config=config)
 
     purge_ha_shadow_configs(db, config.id)

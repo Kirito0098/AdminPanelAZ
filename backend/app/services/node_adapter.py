@@ -210,6 +210,15 @@ class NodeAdapter(ABC):
     def get_awg2_status(self) -> dict: ...
 
     @abstractmethod
+    def export_awg2_state_archive(self) -> bytes: ...
+
+    @abstractmethod
+    def import_awg2_state_archive(self, data: bytes) -> None: ...
+
+    @abstractmethod
+    def apply_awg2_runtime(self) -> dict: ...
+
+    @abstractmethod
     def get_warper_status(self) -> dict: ...
 
     @abstractmethod
@@ -473,6 +482,15 @@ class LocalNodeAdapter(NodeAdapter):
 
     def import_wireguard_client_profiles_archive(self, data: bytes) -> None:
         self._service.import_wireguard_client_profiles_archive(data)
+
+    def export_awg2_state_archive(self) -> bytes:
+        return self._awg2.export_state_archive()
+
+    def import_awg2_state_archive(self, data: bytes) -> None:
+        self._awg2.import_state_archive(data)
+
+    def apply_awg2_runtime(self) -> dict:
+        return self._awg2.apply_runtime()
 
     def read_easyrsa_index(self) -> str:
         return self._service.read_easyrsa_index()
@@ -1334,6 +1352,20 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def get_awg2_status(self) -> dict:
         return self._request("GET", "/awg2/status")
+
+    def export_awg2_state_archive(self) -> bytes:
+        return self._request_bytes("GET", "/awg2/state/archive", timeout=120.0)
+
+    def import_awg2_state_archive(self, data: bytes) -> None:
+        self._request(
+            "POST",
+            "/awg2/state/archive",
+            content=data,
+            timeout=120.0,
+        )
+
+    def apply_awg2_runtime(self) -> dict:
+        return self._request("POST", "/awg2/runtime/apply", timeout=60.0)
 
     def get_warper_status(self) -> dict:
         return self._request("GET", "/warper/status")

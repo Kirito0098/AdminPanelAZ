@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import os
 import re
+import shutil
 import subprocess
+import tarfile
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +34,14 @@ _CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 
 class Awg2NotInstalledError(Exception):
     """az-awg2 layer is not installed on this node."""
+
+
+class Awg2ReplicaNotInstalledError(Awg2NotInstalledError):
+    """AZ-AWG2 replica is not installed enough for HA sync operations."""
+
+    def __init__(self, message: str, *, install_command: str):
+        super().__init__(message)
+        self.install_command = install_command
 
 
 def detect_awg2_installation() -> dict[str, Any]:
@@ -96,6 +108,49 @@ def _read_services_env() -> dict[str, str]:
         key, _, value = line.partition("=")
         data[key.strip()] = value.strip().strip('"').strip("'")
     return data
+
+
+def _ensure_replica_installed() -> None:
+    missing: list[str] = []
+    if not AWG2_CLIENT_BIN.is_file():
+        missing.append("awg_client")
+    if not AWG2_OVERLAY_DIR.is_dir():
+        missing.append("overlay_dir")
+    if not AWG2_AMNEZIA_DIR.is_dir():
+        missing.append("amnezia_dir")
+    if missing:
+        raise Awg2ReplicaNotInstalledError(
+            f"AZ-AWG2 replica is not installed: missing {', '.join(missing)}",
+            install_command=AWG2_INSTALL_CMD,
+        )
+
+
+def _is_excluded_archive_path(path: Path) -> bool:
+    if path.name == "stats.db" or path.suffix == ".pyc":
+        return True
+    return any(part in {"venv", "__pycache__"} for part in path.parts)
+
+
+def _write_tree_to_archive(archive: tarfile.TarFile, root: Path, archive_prefix: str) -> None:
+    if not root.is_dir():
+        return
+    for item in sorted(root.rglob("*")):
+        if not item.is_file() or _is_excluded_archive_path(item.relative_to(root)):
+            continue
+        archive.add(item, arcname=f"{archive_prefix}/{item.relative_to(root).as_posix()}")
+
+
+def _replace_tree_from_snapshot(source: Path, target: Path) -> None:
+    if target.exists():
+        shutil.rmtree(target, ignore_errors=True)
+    if source.is_dir():
+        shutil.copytree(source, target)
+    else:
+        target.mkdir(parents=True, exist_ok=True)
+
+
+def _tree_has_files(root: Path) -> bool:
+    return root.is_dir() and any(item.is_file() for item in root.rglob("*"))
 
 
 class Awg2Service:
@@ -250,3 +305,134 @@ class Awg2Service:
     def list_all_client_names(self) -> list[str]:
         names = set(self.list_clients("antizapret")) | set(self.list_clients("vpn"))
         return sorted(names)
+
+    def export_state_archive(self) -> bytes:
+        _ensure_replica_installed()
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            _write_tree_to_archive(archive, AWG2_AMNEZIA_DIR, "amneziawg")
+            _write_tree_to_archive(archive, AWG2_CLIENT_DIR, "clients")
+            manifest = "\n".join(
+                [
+                    "kind=az-awg2-state",
+                    f"amnezia_dir={AWG2_AMNEZIA_DIR}",
+                    f"client_dir={AWG2_CLIENT_DIR}",
+                ]
+            ).encode("utf-8")
+            info = tarfile.TarInfo(name="MANIFEST")
+            info.size = len(manifest)
+            archive.addfile(info, io.BytesIO(manifest))
+        return buffer.getvalue()
+
+    def import_state_archive(self, data: bytes) -> None:
+        if not data:
+            raise ValueError("empty AWG2 archive")
+        _ensure_replica_installed()
+
+        with tempfile.TemporaryDirectory(prefix="awg2-import-") as temp_dir:
+            temp_root = Path(temp_dir)
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+                archive.extractall(path=temp_root, filter="data")
+
+            source_amnezia = temp_root / "amneziawg"
+            source_clients = temp_root / "clients"
+            if not _tree_has_files(source_amnezia) or not _tree_has_files(source_clients):
+                raise ValueError(
+                    "AWG2 archive must contain both amneziawg/ and clients/ files before import"
+                )
+
+            _replace_tree_from_snapshot(source_amnezia, AWG2_AMNEZIA_DIR)
+            _replace_tree_from_snapshot(source_clients, AWG2_CLIENT_DIR)
+
+    def apply_runtime(self) -> dict[str, Any]:
+        _ensure_replica_installed()
+        env = _read_services_env()
+        interfaces = [
+            iface.strip()
+            for iface in (env.get("AZ_IFACE", ""), env.get("VPN_IFACE", ""))
+            if iface and iface.strip()
+        ]
+        synced: list[str] = []
+        restarted: list[str] = []
+        errors: list[dict[str, str | None]] = []
+        awg_bin = shutil.which("awg")
+
+        if not interfaces:
+            return {
+                "success": False,
+                "synced": synced,
+                "restarted": restarted,
+                "errors": [
+                    {
+                        "interface": None,
+                        "stderr": "services.env does not define AZ_IFACE or VPN_IFACE",
+                    }
+                ],
+            }
+
+        for interface in interfaces:
+            sync_error = "awg unavailable"
+            if awg_bin:
+                sync_error = self._sync_runtime_interface(interface)
+                if sync_error is None:
+                    synced.append(interface)
+                    continue
+
+            restart = subprocess.run(
+                ["systemctl", "restart", f"awg-quick@{interface}"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if restart.returncode == 0:
+                restarted.append(interface)
+            else:
+                errors.append(
+                    {
+                        "interface": interface,
+                        "sync_error": sync_error,
+                        "stderr": (restart.stderr or restart.stdout or "awg-quick restart failed").strip(),
+                    }
+                )
+
+        return {
+            "success": not errors,
+            "synced": synced,
+            "restarted": restarted,
+            "errors": errors,
+        }
+
+    def _sync_runtime_interface(self, interface: str) -> str | None:
+        strip_result = subprocess.run(
+            ["awg-quick", "strip", interface],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if strip_result.returncode != 0:
+            return (strip_result.stderr or strip_result.stdout or "awg-quick strip failed").strip()
+
+        stripped_config = strip_result.stdout or ""
+        if not stripped_config.strip():
+            return "empty stripped config"
+
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".conf", delete=False) as temp_file:
+                temp_file.write(stripped_config)
+                temp_path = temp_file.name
+            sync_result = subprocess.run(
+                ["awg", "syncconf", interface, temp_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if sync_result.returncode == 0:
+                return None
+            return (sync_result.stderr or sync_result.stdout or "awg syncconf failed").strip()
+        finally:
+            if temp_path:
+                Path(temp_path).unlink(missing_ok=True)

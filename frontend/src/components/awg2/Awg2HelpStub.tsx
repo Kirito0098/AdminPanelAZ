@@ -35,13 +35,14 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
             </p>
             <p>
               <span className="font-medium text-foreground">HA:</span> репликация клиентов AWG2 на
-              replica — позже (срез 2a). В волне 1 create/delete на активном узле без HA sync.
+              replica поддерживается. Если на replica не установлен слой AZ-AWG2, sync завершится
+              ошибкой и вернёт команду установки для этого узла.
             </p>
           </div>
           <p className="text-muted-foreground">
             Во вкладке клиентов доступны список профилей, создание, удаление и скачивание.
-            Если слой не установлен на текущем узле — сначала команда установки на сервере по SSH
-            (панель install.sh не запускает).
+            Если слой не установлен на текущем узле или на HA replica, сначала выполните команду
+            установки на сервере по SSH. Панель install.sh не запускает.
           </p>
           <div>
             <p className="mb-1.5 text-xs font-medium text-muted-foreground">Установка:</p>

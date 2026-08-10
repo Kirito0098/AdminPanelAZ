@@ -1,13 +1,14 @@
 import io
 import tarfile
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
 
 from app.models import VpnType
 from app.services.antizapret import AntiZapretService
+from app.services import awg2
 from app.services.node_sync import vpn_state_sync
 from app.services.openvpn_pki import ProfileValidationResult
 from app.services.node_sync.replicate import (
@@ -155,6 +156,43 @@ def test_sync_wireguard_state_continues_when_runtime_apply_fails():
     vpn_state_sync.sync_wireguard_state_from_primary(primary, replica)
 
     replica.import_wireguard_client_profiles_archive.assert_called_once()
+
+
+def test_sync_amneziawg2_requires_replica_installed():
+    primary = MagicMock()
+    replica = MagicMock()
+    replica.get_awg2_health.return_value = {
+        "installed": False,
+        "install_command": awg2.AWG2_INSTALL_CMD,
+    }
+
+    with pytest.raises(Exception) as exc:
+        vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica)
+
+    assert "install" in str(exc.value).lower() or awg2.AWG2_INSTALL_CMD in str(exc.value)
+
+
+def test_sync_amneziawg2_exports_imports_applies():
+    primary = MagicMock()
+    replica = MagicMock()
+    replica.get_awg2_health.return_value = {"installed": True}
+    primary.export_awg2_state_archive.return_value = b"fake-tar"
+    replica.apply_awg2_runtime.return_value = {"success": True}
+
+    vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica)
+
+    replica.import_awg2_state_archive.assert_called_once_with(b"fake-tar")
+    replica.apply_awg2_runtime.assert_called_once()
+
+
+def test_sync_vpn_crypto_routes_amneziawg2():
+    primary = MagicMock()
+    replica = MagicMock()
+
+    with patch("app.services.node_sync.vpn_state_sync.sync_amneziawg2_state_from_primary") as sync_awg:
+        vpn_state_sync.sync_vpn_crypto_from_primary(primary, replica, VpnType.amneziawg2)
+
+    sync_awg.assert_called_once_with(primary, replica)
 
 
 def test_antizapret_wireguard_server_config_roundtrip(tmp_path, monkeypatch):

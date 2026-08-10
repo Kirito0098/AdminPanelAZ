@@ -31,6 +31,20 @@ def test_local_node_adapter_awg2_methods_delegate():
     awg2.list_clients.assert_called_once_with("vpn")
 
 
+def test_local_node_adapter_awg2_archive_runtime_delegate():
+    adapter, _service, awg2 = _local_adapter()
+    awg2.export_state_archive.return_value = b"archive"
+    awg2.apply_runtime.return_value = {"success": True}
+
+    assert adapter.export_awg2_state_archive() == b"archive"
+    adapter.import_awg2_state_archive(b"payload")
+    assert adapter.apply_awg2_runtime() == {"success": True}
+
+    awg2.export_state_archive.assert_called_once_with()
+    awg2.import_state_archive.assert_called_once_with(b"payload")
+    awg2.apply_runtime.assert_called_once_with()
+
+
 def test_local_node_adapter_get_profile_files_branches_awg2():
     adapter, service, awg2 = _local_adapter()
     service.get_profile_files.return_value = [{"path": "ovpn"}]
@@ -100,3 +114,32 @@ def test_remote_node_adapter_awg2_methods_hit_expected_routes(monkeypatch):
     assert calls[1][0:2] == ("DELETE", "/clients/amneziawg2/alice")
     assert calls[2][0:2] == ("GET", "/clients/amneziawg2")
     assert calls[2][2]["params"] == {"tunnel": "vpn"}
+
+
+def test_remote_node_adapter_awg2_archive_runtime_hit_expected_routes(monkeypatch):
+    adapter = RemoteNodeAdapter("10.0.0.2", 9100, "k" * 32, mtls_enabled=False)
+    request_calls: list[tuple[str, str, dict]] = []
+    byte_calls: list[tuple[str, str, dict]] = []
+
+    def fake_request(method, path, **kwargs):
+        request_calls.append((method, path, kwargs))
+        return {"success": True}
+
+    def fake_request_bytes(method, path, **kwargs):
+        byte_calls.append((method, path, kwargs))
+        return b"archive"
+
+    monkeypatch.setattr(adapter, "_request", fake_request)
+    monkeypatch.setattr(adapter, "_request_bytes", fake_request_bytes)
+
+    assert adapter.export_awg2_state_archive() == b"archive"
+    adapter.import_awg2_state_archive(b"payload")
+    assert adapter.apply_awg2_runtime() == {"success": True}
+
+    assert byte_calls == [("GET", "/awg2/state/archive", {"timeout": 120.0})]
+    assert request_calls[0] == (
+        "POST",
+        "/awg2/state/archive",
+        {"content": b"payload", "timeout": 120.0},
+    )
+    assert request_calls[1] == ("POST", "/awg2/runtime/apply", {"timeout": 60.0})

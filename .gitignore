@@ -96,3 +96,6 @@ scripts/capture-readme-screenshots.mjs
 
 # --- Local implementation plans (owner-only; not for public repo) ---
 docs/plans/
+
+# Local accidental venv at repo root
+.venv/
