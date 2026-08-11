@@ -7,11 +7,13 @@ export const MONITORING_PROTOCOL_COLORS = {
   total: 'hsl(217, 33%, 55%)',
 } as const
 
+// Keep order aligned with .monitoring-slice-dot-* in styles/index.css (geo legends).
+// AWG 2.0 chart bars use MONITORING_PROTOCOL_COLORS.amneziawg2 via getProtocolBarColor — not this palette.
 const MONITORING_SLICE_COLORS = [
   MONITORING_PROTOCOL_COLORS.openvpn,
   MONITORING_PROTOCOL_COLORS.wireguard,
-  MONITORING_PROTOCOL_COLORS.amneziawg2,
   MONITORING_PROTOCOL_COLORS.total,
+  'hsl(38, 92%, 50%)',
   'hsl(280, 65%, 55%)',
   'hsl(0, 72%, 58%)',
   'hsl(210, 16%, 46%)',
