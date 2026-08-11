@@ -444,7 +444,7 @@ MCP: codebase-memory — wg_runtime, access_policy, lookup_geo_local; github —
 | **Спек** | `docs/superpowers/specs/2026-08-11-az-awg2-noc-traffic-design.md` §4a |
 | **План** | `docs/superpowers/plans/2026-08-11-az-awg2-wave4a.md` |
 | **Режим** | **Subagent-Driven** |
-| **Next** | 4b — traffic collector + limits |
+| **Next** | 4b — traffic collector + limits (реализован) |
 
 ### Промпт
 
@@ -476,6 +476,45 @@ cd /opt/AdminPanelAZ/frontend && npm run build
 
 ---
 
+## Срез 4b — Traffic monitoring + limits
+
+| | |
+|--|--|
+| **Спек** | `docs/superpowers/specs/2026-08-11-az-awg2-noc-traffic-design.md` §4b |
+| **План** | `docs/superpowers/plans/2026-08-11-az-awg2-wave4b.md` |
+| **Режим** | **Subagent-Driven** |
+| **Next** | — (эпик 1a–4b закрыт по критериям) |
+
+### Промпт
+
+```text
+Реализуй срез AZ-AWG2 4b строго по спеку §4b и плану.
+
+Спек: docs/superpowers/specs/2026-08-11-az-awg2-noc-traffic-design.md
+План: docs/superpowers/plans/2026-08-11-az-awg2-wave4b.md
+
+Правила:
+- Только traffic collector/chart/reset/HA aggregate + limits/auto-block + UI TrafficPage/ClientActionsDialog.
+- protocol_type=amneziawg2; никогда не писать AWG2 как wireguard.
+- Gates: FEATURE_AWG2_ENABLED + traffic monitoring; off → нет новых samples / нет UI третьего протокола.
+- MCP: codebase-memory — traffic collector, access_policy, client_access; github при необходимости.
+- Коммиты — по SDD / явной просьбе.
+
+Выполняй через superpowers:subagent-driven-development — субагент на задачу плана, ревью между задачами.
+```
+
+### Проверка
+
+```bash
+cd /opt/AdminPanelAZ/backend && PYTHONPATH=. .venv/bin/pytest \
+  tests/test_traffic_awg2_collector.py tests/test_traffic_awg2_scopes.py \
+  tests/test_awg2_traffic_limit.py tests/test_awg2_traffic_limit_api.py -q
+cd /opt/AdminPanelAZ/frontend && npm run build
+# UI: awg2+traffic on → бейдж/сброс/серия AWG 2.0 + set/clear limit; off → как pre-4b
+```
+
+---
+
 ## Чеклист «срез закрыт»
 
 - [ ] Все tasks плана `[x]` или явно отложены  
@@ -499,10 +538,11 @@ docs/superpowers/
 └── plans/
     ├── 2026-08-10-az-awg2-wave1a.md … wave3c.md
     ├── 2026-08-11-az-awg2-wave4a.md
+    ├── 2026-08-11-az-awg2-wave4b.md
     ├── 2026-08-10-az-awg2.md          (сниппеты волны 1)
     └── 2026-08-10-az-awg2-wave2.md    (сниппеты волны 2)
 ```
 
 ## Старт прямо сейчас
 
-Скопируй промпт **среза 4a** (или следующего незакрытого среза) в новый Agent-чат (режим Agent, не Ask).
+Срезы **1a–4b** закрыты по планам. Для регрессий / hotfix копируй промпт нужного среза в новый Agent-чат (режим Agent, не Ask).

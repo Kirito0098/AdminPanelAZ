@@ -1,7 +1,7 @@
 # AZ-AWG2 — NOC + мониторинг трафика (волны 4a / 4b)
 
 **Дата:** 2026-08-11  
-**Статус:** draft (4a implemented — plan: [wave4a](../plans/2026-08-11-az-awg2-wave4a.md); 4b pending)  
+**Статус:** implemented (4a — plan: [wave4a](../plans/2026-08-11-az-awg2-wave4a.md); 4b — plan: [wave4b](../plans/2026-08-11-az-awg2-wave4b.md))  
 **Эпик:** [az-awg2-epic](2026-08-10-az-awg2-epic.md)  
 **Подход:** третий протокол рядом с OpenVPN / WireGuard (не вливать в WG)  
 **Зависит от:** волны 1–3c (особенно `get_awg2_monitoring`, access block runtime, HA crypto для AWG2)
