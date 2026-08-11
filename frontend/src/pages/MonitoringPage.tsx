@@ -1147,6 +1147,8 @@ export default function MonitoringPage() {
                   showWireGuard={showWireGuard}
                   isWireGuardOnline={isWireGuardOnline}
                   onlineOnly={onlineOnly}
+                  amneziawg2Peers={visibleAmneziaWg2List}
+                  showAmneziaWg2={showAmneziaWg2}
                 />
               )}
             </div>

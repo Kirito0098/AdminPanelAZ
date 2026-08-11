@@ -23,6 +23,8 @@ type MonitoringGeoSummaryProps = {
   showWireGuard: boolean
   isWireGuardOnline: (peer: WireGuardPeer) => boolean
   onlineOnly?: boolean
+  amneziawg2Peers?: WireGuardPeer[]
+  showAmneziaWg2?: boolean
 }
 
 type GeoDonutCardProps = {
@@ -152,6 +154,8 @@ export default function MonitoringGeoSummary({
   showWireGuard,
   isWireGuardOnline,
   onlineOnly = true,
+  amneziawg2Peers,
+  showAmneziaWg2 = false,
 }: MonitoringGeoSummaryProps) {
   const geoConnections = useMemo(
     () =>
@@ -160,8 +164,19 @@ export default function MonitoringGeoSummary({
         showWireGuard,
         isWireGuardOnline,
         onlineOnly,
+        amneziawg2Peers,
+        showAmneziaWg2,
       }),
-    [openvpnClients, wireguardPeers, showOpenVpn, showWireGuard, isWireGuardOnline, onlineOnly],
+    [
+      openvpnClients,
+      wireguardPeers,
+      showOpenVpn,
+      showWireGuard,
+      isWireGuardOnline,
+      onlineOnly,
+      amneziawg2Peers,
+      showAmneziaWg2,
+    ],
   )
 
   const citySlices = useMemo(() => buildGeoPieSlices(geoConnections, 'city'), [geoConnections])

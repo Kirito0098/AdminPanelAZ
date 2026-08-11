@@ -105,6 +105,8 @@ export function collectMonitoringGeoConnections(
     showWireGuard: boolean
     isWireGuardOnline: (peer: WireGuardPeer) => boolean
     onlineOnly?: boolean
+    amneziawg2Peers?: WireGuardPeer[]
+    showAmneziaWg2?: boolean
   },
 ): Array<{ city: string | null; isp: string | null }> {
   const items: Array<{ city: string | null; isp: string | null }> = []
@@ -120,6 +122,16 @@ export function collectMonitoringGeoConnections(
 
   if (options.showWireGuard) {
     for (const peer of wireguardPeers) {
+      if (options.onlineOnly && !options.isWireGuardOnline(peer)) continue
+      items.push({
+        city: getConnectionCity(peer),
+        isp: getConnectionIsp(peer),
+      })
+    }
+  }
+
+  if (options.showAmneziaWg2 && options.amneziawg2Peers) {
+    for (const peer of options.amneziawg2Peers) {
       if (options.onlineOnly && !options.isWireGuardOnline(peer)) continue
       items.push({
         city: getConnectionCity(peer),
