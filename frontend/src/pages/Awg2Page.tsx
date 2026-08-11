@@ -1,37 +1,23 @@
-import { Activity, Download, Eye, RefreshCw, Server, Shield, Users } from 'lucide-react'
+import { Download, Eye, Shield } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { getAwg2Health, getAwg2Status } from '@/api/client'
+import Awg2Hero from '@/components/awg2/Awg2Hero'
+import Awg2OverviewCards from '@/components/awg2/Awg2OverviewCards'
 import BackupTab from '@/components/awg2/BackupTab'
-import ClientsTab from '@/components/awg2/ClientsTab'
 import Awg2HelpStub from '@/components/awg2/Awg2HelpStub'
-import Awg2InstallDialog from '@/components/awg2/Awg2InstallDialog'
 import Awg2InstallPrompt from '@/components/awg2/Awg2InstallPrompt'
-import MonitoringTab from '@/components/awg2/MonitoringTab'
 import ObfuscationTab from '@/components/awg2/ObfuscationTab'
-import { formatAwg2NodeLabel } from '@/components/awg2/utils'
-import { Badge } from '@/components/ui/badge'
+import { formatAwg2NodeLabel, type Awg2Tab } from '@/components/awg2/utils'
+import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Skeleton } from '@/components/ui/skeleton'
 import { useNode } from '@/context/NodeContext'
-import { cn } from '@/lib/utils'
 import type { Awg2HealthResponse, Awg2StatusResponse } from '@/types'
-
-type Awg2Tab = 'clients' | 'obfuscation' | 'monitoring' | 'backup' | 'help'
-
-function statusMeta(health: Awg2HealthResponse | null) {
-  if (!health) {
-    return { label: 'Нет данных', variant: 'secondary' as const, dot: 'bg-muted-foreground' }
-  }
-  if (!health.installed) {
-    return { label: 'Не установлен', variant: 'warning' as const, dot: 'bg-amber-500' }
-  }
-  return { label: 'Установлен', variant: 'success' as const, dot: 'bg-emerald-500' }
-}
 
 export default function Awg2Page() {
   const { activeNode } = useNode()
-  const [tab, setTab] = useState<Awg2Tab>('clients')
+  const [tab, setTab] = useState<Awg2Tab>('obfuscation')
   const [health, setHealth] = useState<Awg2HealthResponse | null>(null)
   const [status, setStatus] = useState<Awg2StatusResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -64,140 +50,72 @@ export default function Awg2Page() {
 
   const nodeLabel = formatAwg2NodeLabel(health, activeNode)
   const ready = Boolean(health?.installed)
-  const meta = statusMeta(health)
 
   return (
-    <div className="space-y-5">
-      <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-card via-card to-muted/30 p-5 shadow-sm">
-        <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/5" />
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-start gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <Shield className="h-6 w-6" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-semibold tracking-tight">AZ-AWG2</h1>
-                {loading ? (
-                  <Skeleton className="h-6 w-24 rounded-full" />
-                ) : (
-                  <Badge variant={meta.variant} className="gap-1.5">
-                    <span className={cn('h-2 w-2 rounded-full', meta.dot)} />
-                    {meta.label}
-                  </Badge>
-                )}
-              </div>
-              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-                <Server className="h-3.5 w-3.5 shrink-0" />
-                <span>{nodeLabel}</span>
-              </p>
-            </div>
-          </div>
-          <Button variant="outline" size="sm" className="gap-1.5 self-start sm:self-auto" onClick={() => void load()} disabled={loading}>
-            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
-            Обновить
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <Awg2Hero
+        health={health}
+        loading={loading}
+        nodeLabel={nodeLabel}
+        onRefresh={() => void load()}
+        onUpdated={() => void load()}
+      />
 
       {loadError && (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <SettingsAlert variant="danger" title="Ошибка загрузки">
           {loadError}
-        </div>
+        </SettingsAlert>
       )}
 
+      {ready && (
+        <SettingsAlert variant="info" title="Данные активного узла">
+          Слой AmneziaWG 2.0 управляется на{' '}
+          <strong>{activeNode?.name ?? nodeLabel}</strong>
+          {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
+          Клиенты — на странице{' '}
+          <Link to="/" className="font-medium text-foreground underline-offset-2 hover:underline">
+            Конфигурации
+          </Link>{' '}
+          (вкладка AmneziaWG 2.0). install-base и перезагрузка — только по SSH.
+        </SettingsAlert>
+      )}
+
+      {ready && <Awg2OverviewCards health={health} status={status} loading={loading} />}
+
       {ready ? (
-        <div className="space-y-4">
-          <div className="rounded-xl border bg-card/50 p-4 text-sm">
-            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Слой на узле</p>
-            {status?.services_env ? (
-              <dl className="grid gap-2 sm:grid-cols-2">
-                {status.services_env.AZ_IFACE && (
-                  <div>
-                    <dt className="text-muted-foreground">AntiZapret iface</dt>
-                    <dd className="font-mono text-xs">{status.services_env.AZ_IFACE}</dd>
-                  </div>
-                )}
-                {status.services_env.VPN_IFACE && (
-                  <div>
-                    <dt className="text-muted-foreground">VPN iface</dt>
-                    <dd className="font-mono text-xs">{status.services_env.VPN_IFACE}</dd>
-                  </div>
-                )}
-                {status.services_env.AZ_PORT && (
-                  <div>
-                    <dt className="text-muted-foreground">AntiZapret port</dt>
-                    <dd className="font-mono text-xs">{status.services_env.AZ_PORT}</dd>
-                  </div>
-                )}
-                {status.services_env.VPN_PORT && (
-                  <div>
-                    <dt className="text-muted-foreground">VPN port</dt>
-                    <dd className="font-mono text-xs">{status.services_env.VPN_PORT}</dd>
-                  </div>
-                )}
-              </dl>
-            ) : (
-              <p className="text-muted-foreground">Служебные параметры слоя сейчас не доступны, но обновление можно запустить из панели.</p>
-            )}
-              <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <p className="text-muted-foreground">
-                  Клиенты, обфускация и узкий backup/restore доступны во вкладках ниже. install-base и
-                  перезагрузка остаются только по SSH.
-                </p>
-                <Awg2InstallDialog
-                  mode="update"
-                  triggerLabel="Обновить слой"
-                  triggerVariant="outline"
-                  onCompleted={() => void load()}
-                />
-              </div>
-          </div>
-          <Tabs value={tab} onValueChange={(value) => setTab(value as Awg2Tab)} className="space-y-4">
-            <TabsList className="flex h-auto w-full flex-wrap gap-1 bg-muted/50 p-1">
-              <TabsTrigger value="clients" className="gap-1.5">
-                <Users className="h-4 w-4" />
-                <span>Клиенты</span>
-              </TabsTrigger>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as Awg2Tab)} className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <TabsList className="flex h-auto w-full flex-wrap gap-1 bg-muted/50 p-1 sm:inline-flex sm:w-auto">
               <TabsTrigger value="obfuscation" className="gap-1.5">
                 <Eye className="h-4 w-4" />
-                <span>Обфускация</span>
-              </TabsTrigger>
-              <TabsTrigger value="monitoring" className="gap-1.5">
-                <Activity className="h-4 w-4" />
-                <span>Мониторинг</span>
+                Обфускация
               </TabsTrigger>
               <TabsTrigger value="backup" className="gap-1.5">
                 <Download className="h-4 w-4" />
-                <span>Бэкап</span>
+                Бэкап
               </TabsTrigger>
               <TabsTrigger value="help" className="gap-1.5">
                 <Shield className="h-4 w-4" />
-                <span>Справка</span>
+                Справка
               </TabsTrigger>
             </TabsList>
+            <Button asChild variant="outline" size="sm">
+              <Link to="/">Конфигурации · AmneziaWG 2.0</Link>
+            </Button>
+          </div>
 
-            <TabsContent value="clients" className="mt-0 focus-visible:outline-none">
-              <ClientsTab health={health} />
-            </TabsContent>
+          <TabsContent value="obfuscation" className="mt-0 focus-visible:outline-none">
+            <ObfuscationTab health={health} />
+          </TabsContent>
 
-            <TabsContent value="obfuscation" className="mt-0 focus-visible:outline-none">
-              <ObfuscationTab health={health} />
-            </TabsContent>
+          <TabsContent value="backup" className="mt-0 focus-visible:outline-none">
+            <BackupTab onRestored={() => void load()} />
+          </TabsContent>
 
-            <TabsContent value="monitoring" className="mt-0 focus-visible:outline-none">
-              <MonitoringTab health={health} />
-            </TabsContent>
-
-            <TabsContent value="backup" className="mt-0 focus-visible:outline-none">
-              <BackupTab onRestored={() => void load()} />
-            </TabsContent>
-
-            <TabsContent value="help" className="mt-0 focus-visible:outline-none">
-              <Awg2HelpStub health={health} />
-            </TabsContent>
-          </Tabs>
-        </div>
+          <TabsContent value="help" className="mt-0 focus-visible:outline-none">
+            <Awg2HelpStub health={health} />
+          </TabsContent>
+        </Tabs>
       ) : !loading ? (
         <Awg2InstallPrompt health={health} activeNode={activeNode} onInstalled={() => void load()} />
       ) : null}

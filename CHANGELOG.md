@@ -66,6 +66,7 @@
 - **Edit Files** — chrome как у Настроек: `PageSectionHeader` и сворачиваемая справка (`EditFilesPage.tsx`).
 - **Users (Настройки)** — обновлённый layout вкладки; нельзя понизить последнего активного admin (`UsersTab.tsx`, `users.py`).
 - **AZ-AWG2 ClientsTab** — скачивание primary `.conf` с действиями VPN/AntiZapret как на Конфигурациях; сетка карточек 2–4 колонки на широких экранах (`ClientsTab.tsx`, `profileDownloadName`).
+- **AZ-AWG2 UI** — слой / обфускация / backup на `/awg2`; клиенты и статистика только через Конфигурации + NOC + Мониторинг трафика (вкладки Клиенты и Мониторинг убраны).
 
 ### 🐛 Fixed
 

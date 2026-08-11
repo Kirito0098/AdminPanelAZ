@@ -1,4 +1,29 @@
-import type { Awg2HealthResponse, Node } from '@/types'
+import type { Awg2HealthResponse, Awg2StatusResponse, Node } from '@/types'
+
+export type Awg2Tab = 'obfuscation' | 'backup' | 'help'
+
+export function awg2StatusMeta(health: Awg2HealthResponse | null) {
+  if (!health) {
+    return { label: 'Нет данных', variant: 'secondary' as const, dot: 'bg-muted-foreground' }
+  }
+  if (!health.installed) {
+    return { label: 'Не установлен', variant: 'warning' as const, dot: 'bg-amber-500' }
+  }
+  return { label: 'Установлен', variant: 'success' as const, dot: 'bg-emerald-500' }
+}
+
+export function formatAwg2ClientCount(status: Awg2StatusResponse | null): string {
+  const vpn = status?.client_counts?.vpn
+  if (typeof vpn === 'number') return String(vpn)
+  const az = status?.client_counts?.antizapret
+  if (typeof az === 'number') return String(az)
+  return '—'
+}
+
+export function formatAwg2IfacePort(iface?: string | null, port?: string | null): string {
+  const parts = [iface, port].map((p) => (typeof p === 'string' ? p.trim() : '')).filter(Boolean)
+  return parts.length ? parts.join(' · ') : '—'
+}
 
 export const AWG2_INSTALL_CMD =
   'bash <(curl -fsSL https://raw.githubusercontent.com/blindtechnique/az-awg2/main/install.sh)'

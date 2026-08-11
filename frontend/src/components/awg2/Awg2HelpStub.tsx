@@ -40,25 +40,25 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
               в HA-архив не входит (локальная статистика узла).
             </p>
             <p>
+              <span className="font-medium text-foreground">Клиенты:</span> создание, скачивание, блокировки
+              и TTL — на странице{' '}
+              <strong className="text-foreground">Конфигурации</strong> (вкладка AmneziaWG 2.0). Отдельной
+              вкладки клиентов на `/awg2` нет.
+            </p>
+            <p>
               <span className="font-medium text-foreground">Обфускация:</span> вкладка меняет preset /
               template через <code className="text-xs">awg-obfuscation</code>; после apply переимпортируйте
               клиентские профили.
             </p>
             <p>
-              <span className="font-medium text-foreground">Мониторинг:</span> overview клиентов
-              (online / handshake / traffic) из <code className="text-xs">awg_stats</code> или live{' '}
-              <code className="text-xs">awg show dump</code>. Клик по строке или «Статистика» на карточке
-              клиента — endpoint, GeoIP (если MMDB загружена) и дневной трафик из{' '}
-              <code className="text-xs">stats.db</code>.
-            </p>
-            <p>
-              <span className="font-medium text-foreground">Блокировки:</span> временная / постоянная /
-              снятие — те же действия, что на Dashboard для WireGuard; на HA replica кнопки скрыты.
+              <span className="font-medium text-foreground">Статистика:</span> live-пиры AWG 2.0 — в{' '}
+              <strong className="text-foreground">NOC Мониторинг</strong>; накопленный RX/TX и лимиты — в{' '}
+              <strong className="text-foreground">Мониторинг трафика</strong> (протокол AWG 2.0).
             </p>
             <p>
               <span className="font-medium text-foreground">TTL клиентов:</span> для профилей{' '}
-              <code className="text-xs">amneziawg2</code> можно задать автоистечение при создании:
-              нет / 30m / 2h / 6h / 7d. На карточках появится бейдж с оставшимся временем.
+              <code className="text-xs">amneziawg2</code> можно задать автоистечение при создании на
+              Конфигурациях: нет / 30m / 2h / 6h / 7d.
             </p>
             <p>
               <span className="font-medium text-foreground">Backup:</span> вкладка «Бэкап» делает узкий
@@ -67,7 +67,7 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
             </p>
           </div>
           <p className="text-muted-foreground">
-            Вкладки: клиенты, обфускация, мониторинг, бэкап. Если слой не установлен на текущем узле или на
+            Вкладки: обфускация, бэкап, справка. Если слой не установлен на текущем узле или на
             HA replica, сначала выполните установку по SSH либо запустите install.sh из панели. install-base и
             возможная перезагрузка остаются только в SSH.
           </p>
