@@ -500,6 +500,70 @@ def awg2_unblock(payload: BlockRequest, request: Request, db: Session = Depends(
     return result
 
 
+@router.post("/amneziawg2/set-traffic-limit")
+def awg2_set_traffic_limit(
+    payload: TrafficLimitRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    try:
+        limit_bytes = parse_traffic_limit_bytes(payload.limit_value, payload.limit_unit)
+        period_days = parse_traffic_limit_period_days(payload.limit_period_days)
+        result = _service(db).awg2_set_traffic_limit(
+            payload.client_name,
+            limit_bytes,
+            period_days=period_days,
+            actor=user.username,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    log_action(
+        db,
+        action="awg2_traffic_limit_set",
+        user_id=user.id,
+        username=user.username,
+        details=f"{payload.client_name} {payload.limit_value}{payload.limit_unit}",
+        remote_addr=request.client.host,
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.amneziawg2,
+        op="set_traffic_limit",
+        actor=user.username,
+        limit_bytes=limit_bytes,
+        period_days=period_days,
+    )
+    return result
+
+
+@router.post("/amneziawg2/clear-traffic-limit")
+def awg2_clear_traffic_limit(
+    payload: BlockRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    result = _service(db).awg2_clear_traffic_limit(payload.client_name, actor=user.username)
+    log_action(
+        db,
+        action="awg2_traffic_limit_clear",
+        user_id=user.id,
+        username=user.username,
+        details=payload.client_name,
+        remote_addr=request.client.host,
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=payload.client_name,
+        vpn_type=VpnType.amneziawg2,
+        op="clear_traffic_limit",
+        actor=user.username,
+    )
+    return result
+
+
 @router.post("/openvpn/set-traffic-limit")
 def openvpn_set_traffic_limit(
     payload: TrafficLimitRequest,

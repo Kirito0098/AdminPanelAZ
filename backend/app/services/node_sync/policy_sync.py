@@ -90,6 +90,15 @@ def _apply_policy_op(
             return svc.awg2_permanent_block(client_name, actor=actor)
         if op == "unblock":
             return svc.awg2_unblock(client_name, actor=actor)
+        if op == "set_traffic_limit":
+            return svc.awg2_set_traffic_limit(
+                client_name,
+                int(kwargs["limit_bytes"]),
+                period_days=kwargs.get("period_days"),
+                actor=actor,
+            )
+        if op == "clear_traffic_limit":
+            return svc.awg2_clear_traffic_limit(client_name, actor=actor)
         raise ValueError(f"Unsupported AmneziaWG2 policy op: {op}")
 
     if op == "set_wg_expiry":
