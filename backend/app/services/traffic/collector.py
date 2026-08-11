@@ -32,10 +32,13 @@ def protocol_type_from_profile(profile: str | None) -> str:
     """Derive persisted ``protocol_type`` from a collector profile name.
 
     Examples: ``antizapret-udp`` → ``openvpn-udp``, ``vpn-tcp`` → ``openvpn-tcp``,
-    ``antizapret-wg`` → ``wireguard``. Legacy combined OpenVPN profiles without a
-    transport suffix stay as ``openvpn``.
+    ``antizapret-wg`` → ``wireguard``, ``antizapret-awg2`` → ``amneziawg2``.
+    Legacy combined OpenVPN profiles without a transport suffix stay as ``openvpn``.
     """
     name = (profile or "").strip().lower()
+    # Must check -awg2 before -awg: the stock -awg suffix maps to wireguard.
+    if name.endswith("-awg2"):
+        return "amneziawg2"
     if name.endswith("-wg") or name.endswith("-awg"):
         return "wireguard"
     if name.endswith("-udp"):
@@ -75,6 +78,7 @@ def _parse_status_timestamp(value, fallback: datetime) -> datetime:
 def build_status_rows(
     openvpn_clients: list[OpenVpnClient],
     wireguard_peers: list[WireGuardPeer],
+    amneziawg2_peers: list | None = None,
 ) -> list[dict]:
     """Convert monitoring data into status rows for traffic persistence."""
     rows: list[dict] = []
@@ -116,12 +120,39 @@ def build_status_rows(
             }],
         })
 
+    for peer in amneziawg2_peers or []:
+        if not peer.client_name or not wireguard_peer_is_online(peer):
+            continue
+        profile = (
+            "antizapret-awg2"
+            if "antizapret" in (peer.interface or "").lower()
+            else "vpn-awg2"
+        )
+        rows.append({
+            "profile": profile,
+            "traffic_clients": [{
+                "common_name": peer.client_name,
+                "real_address": peer.endpoint or "",
+                "virtual_address": peer.allowed_ips or "",
+                "bytes_received": peer.transfer_rx,
+                "bytes_sent": peer.transfer_tx,
+                "connected_since_ts": 0,
+                "session_kind": "amneziawg2",
+                "peer_public_key": peer.public_key,
+                "last_seen_iso": peer.latest_handshake,
+            }],
+        })
+
     return rows
 
 
 def build_session_key(profile: str, client: dict) -> str:
     session_kind = (client.get("session_kind") or "").strip().lower()
-    if session_kind == "wireguard" or str(profile).endswith("-wg"):
+    if (
+        session_kind in {"wireguard", "amneziawg2"}
+        or str(profile).endswith("-wg")
+        or str(profile).endswith("-awg2")
+    ):
         return (
             f"{profile}|wg|{client.get('common_name', '-')}|"
             f"{client.get('peer_public_key', '-')}|{client.get('virtual_address', '-')}"
@@ -171,7 +202,7 @@ class TrafficCollectorService:
                 common_name = (client.get("common_name") or "-").strip()
                 is_antizapret = str(profile).startswith("antizapret")
                 protocol_type = protocol_type_from_profile(profile)
-                is_wireguard = protocol_type == "wireguard"
+                is_handshake_protocol = protocol_type in {"wireguard", "amneziawg2"}
 
                 # Real last-connection time reported by the protocol (WireGuard
                 # handshake); OpenVPN clients in the status are connected right
@@ -183,7 +214,7 @@ class TrafficCollectorService:
                 was_inactive = bool(session_state and not session_state.is_active)
 
                 connected_ts = int(client.get("connected_since_ts") or 0)
-                if is_wireguard and connected_ts <= 0:
+                if is_handshake_protocol and connected_ts <= 0:
                     connected_ts = int(client_seen.timestamp())
 
                 if is_new:
@@ -202,7 +233,7 @@ class TrafficCollectorService:
                     )
                     self.db.add(session_state)
                     sessions[session_key] = session_state
-                    if is_wireguard:
+                    if is_handshake_protocol:
                         delta_rx, delta_tx = 0, 0
                     else:
                         delta_rx, delta_tx = max(current_rx, 0), max(current_tx, 0)
@@ -216,7 +247,7 @@ class TrafficCollectorService:
                     session_state.last_bytes_received = current_rx
                     session_state.last_bytes_sent = current_tx
                     session_state.last_seen_at = client_seen
-                    if is_wireguard and (was_inactive or int(session_state.connected_since_ts or 0) <= 0):
+                    if is_handshake_protocol and (was_inactive or int(session_state.connected_since_ts or 0) <= 0):
                         session_state.connected_since_ts = connected_ts
                     session_state.is_active = True
                     session_state.ended_at = None

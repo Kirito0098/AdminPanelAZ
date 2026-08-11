@@ -7,6 +7,8 @@ import time
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node
+from app.services.awg2_noc import fetch_awg2_peers_for_adapter
+from app.services.feature_toggles import is_awg2_enabled
 from app.services.node_manager import get_adapter_for_node
 from app.services.traffic.collector import TrafficCollectorService, build_status_rows
 
@@ -33,6 +35,7 @@ def _collect_all_nodes():
     nodes_processed = 0
     try:
         nodes = db.query(Node).all()
+        awg2_enabled = is_awg2_enabled(db)
         for node in nodes:
             node_started = time.perf_counter()
             wg_runtime_calls = 0
@@ -41,7 +44,8 @@ def _collect_all_nodes():
                 adapter = get_adapter_for_node(node)
                 ovpn = adapter.parse_openvpn_status()
                 wg = adapter.parse_wireguard_status()
-                status_rows = build_status_rows(ovpn, wg)
+                awg2_peers = fetch_awg2_peers_for_adapter(adapter) if awg2_enabled else []
+                status_rows = build_status_rows(ovpn, wg, awg2_peers)
                 collector = TrafficCollectorService(db, node.id)
                 collector.persist_snapshot(status_rows)
                 if settings.traffic_limit_reconcile_after_sync:
