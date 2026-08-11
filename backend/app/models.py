@@ -439,6 +439,7 @@ class ConnectionCountSample(Base):
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     openvpn_count: Mapped[int] = mapped_column(Integer, default=0)
     wireguard_count: Mapped[int] = mapped_column(Integer, default=0)
+    amneziawg2_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 

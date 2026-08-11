@@ -361,6 +361,7 @@ def _migrate_connection_count_samples_table() -> None:
                     node_id INTEGER NOT NULL,
                     openvpn_count INTEGER DEFAULT 0,
                     wireguard_count INTEGER DEFAULT 0,
+                    amneziawg2_count INTEGER DEFAULT 0,
                     created_at DATETIME,
                     FOREIGN KEY(node_id) REFERENCES nodes (id)
                 )
@@ -386,6 +387,20 @@ def _migrate_connection_count_samples_table() -> None:
             )
         )
     logger.info("DB migration: created connection_count_samples table")
+
+
+def _migrate_connection_count_samples_awg2_column() -> None:
+    inspector = inspect(engine)
+    if "connection_count_samples" not in inspector.get_table_names():
+        return
+    existing = {c["name"] for c in inspector.get_columns("connection_count_samples")}
+    if "amneziawg2_count" in existing:
+        return
+    with engine.begin() as conn:
+        conn.execute(text(
+            "ALTER TABLE connection_count_samples ADD COLUMN amneziawg2_count INTEGER DEFAULT 0"
+        ))
+    logger.info("DB migration: added connection_count_samples.amneziawg2_count")
 
 
 def _migrate_active_web_session_table() -> None:
@@ -839,6 +854,7 @@ def run_db_migrations() -> None:
     _migrate_awg2_access_policy_table()
     _migrate_node_resource_sample_table()
     _migrate_connection_count_samples_table()
+    _migrate_connection_count_samples_awg2_column()
     _migrate_panel_resource_sample_table()
     _migrate_active_web_session_table()
     _migrate_stage2_admin_productivity()

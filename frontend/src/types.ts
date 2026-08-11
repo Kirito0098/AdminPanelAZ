@@ -345,6 +345,7 @@ export interface MonitoringNodeSummary {
   status: string
   connected_openvpn: number
   connected_wireguard: number
+  connected_amneziawg2?: number
   active_services: number
   total_services: number
   cpu_percent?: number | null
@@ -382,6 +383,7 @@ export interface MonitoringOverview {
   services: MonitoringService[]
   openvpn_clients: OpenVpnClient[]
   wireguard_peers: WireGuardPeer[]
+  amneziawg2_peers?: WireGuardPeer[]
   server_ip?: string | null
   timestamp: string
   node_id?: number | null
@@ -393,6 +395,7 @@ export interface MonitoringOverview {
   nodes_total?: number
   total_connected_openvpn?: number
   total_connected_wireguard?: number
+  total_connected_amneziawg2?: number
   served_from_cache?: boolean
   geoip_mode?: 'local_mmdb' | 'ip_api' | 'none'
   ha_mode?: 'dedupe' | 'raw'
@@ -417,6 +420,7 @@ export interface ConnectionHistoryPoint {
   timestamp: string
   openvpn: number
   wireguard: number
+  amneziawg2?: number
   total: number
 }
 
