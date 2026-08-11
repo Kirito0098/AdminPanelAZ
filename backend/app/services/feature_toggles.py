@@ -700,3 +700,15 @@ def is_proxy_nodes_enabled(db=None) -> bool:
 
     _ = db
     return get_feature_service().is_enabled("proxy_nodes")
+
+
+def is_awg2_enabled(db=None) -> bool:
+    """Return whether the awg2 feature toggle is enabled.
+
+    ``db`` is unused (toggle is env-backed) and kept for call-site parity with
+    other ``is_*_enabled(db)`` helpers.
+    """
+    from app.services.feature_guards import get_feature_service
+
+    _ = db
+    return get_feature_service().is_enabled("awg2")

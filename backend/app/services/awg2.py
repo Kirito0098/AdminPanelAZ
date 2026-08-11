@@ -567,6 +567,8 @@ def _parse_awg_dump(text: str, *, iface: str, names: dict[str, str], now: int) -
         except ValueError:
             continue
         pubkey = fields[0]
+        raw_endpoint = fields[2] if len(fields) > 2 else ""
+        endpoint = None if (not raw_endpoint or raw_endpoint == "(none)") else raw_endpoint
         age = (now - handshake) if handshake else None
         online = bool(handshake and age is not None and age < AWG2_ONLINE_WINDOW_S)
         clients.append(
@@ -578,6 +580,7 @@ def _parse_awg_dump(text: str, *, iface: str, names: dict[str, str], now: int) -
                 "rx": rx,
                 "tx": tx,
                 "pubkey": pubkey,
+                "endpoint": endpoint,
             }
         )
     return clients
