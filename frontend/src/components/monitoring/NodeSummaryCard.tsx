@@ -5,6 +5,7 @@ import {
   ResourceMetricInline,
 } from '@/components/monitoring/nodeSummaryMetrics'
 import { NodeStatusBadge } from '@/components/NodeSelector'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { cn } from '@/lib/utils'
 import type { MonitoringNodeSummary, NodeStatus } from '@/types'
 
@@ -15,6 +16,8 @@ type NodeSummaryCardProps = {
 }
 
 export default function NodeSummaryCard({ node, isActive, onSelect }: NodeSummaryCardProps) {
+  const { isEnabled } = useFeatureModules()
+  const showAwg2 = isEnabled('awg2')
   const servicesIncomplete =
     node.total_services > 0 && node.active_services < node.total_services
 
@@ -53,7 +56,12 @@ export default function NodeSummaryCard({ node, isActive, onSelect }: NodeSummar
         </div>
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs sm:grid-cols-4">
+      <dl
+        className={cn(
+          'mt-4 grid gap-x-4 gap-y-3 text-xs',
+          showAwg2 ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-4',
+        )}
+      >
         <div>
           <dt className="text-muted-foreground">OVPN</dt>
           <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">{node.connected_openvpn}</dd>
@@ -62,6 +70,14 @@ export default function NodeSummaryCard({ node, isActive, onSelect }: NodeSummar
           <dt className="text-muted-foreground">WG</dt>
           <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">{node.connected_wireguard}</dd>
         </div>
+        {showAwg2 && (
+          <div>
+            <dt className="text-muted-foreground">AWG 2.0</dt>
+            <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">
+              {node.connected_amneziawg2 ?? 0}
+            </dd>
+          </div>
+        )}
         <div>
           <dt className="text-muted-foreground">Службы</dt>
           <dd
@@ -78,7 +94,7 @@ export default function NodeSummaryCard({ node, isActive, onSelect }: NodeSummar
           <dt className="text-muted-foreground">CIDR</dt>
           <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">{node.cidr_routes_count ?? '—'}</dd>
         </div>
-        <div className="col-span-2 sm:col-span-4">
+        <div className={cn('col-span-2', showAwg2 ? 'sm:col-span-5' : 'sm:col-span-4')}>
           <dt className="text-muted-foreground">Трафик</dt>
           <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">
             {node.total_traffic_bytes != null ? formatBytes(node.total_traffic_bytes) : '—'}

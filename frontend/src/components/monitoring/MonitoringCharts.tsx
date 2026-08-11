@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import type { ConnectionHistoryPoint, MonitoringOverview } from '@/types'
 
 interface HistoryPoint {
@@ -36,6 +37,7 @@ interface HistoryPoint {
   connections: number
   ovpn: number
   wg: number
+  awg2: number
 }
 
 interface MonitoringChartsProps {
@@ -58,7 +60,8 @@ function formatBytes(n: number) {
 function totalTraffic(data: MonitoringOverview) {
   const ovpn = data.openvpn_clients.reduce((s, c) => s + c.bytes_received + c.bytes_sent, 0)
   const wg = data.wireguard_peers.reduce((s, p) => s + p.transfer_rx + p.transfer_tx, 0)
-  return ovpn + wg
+  const awg2 = (data.amneziawg2_peers ?? []).reduce((s, p) => s + p.transfer_rx + p.transfer_tx, 0)
+  return ovpn + wg + awg2
 }
 
 export default function MonitoringCharts({
@@ -68,22 +71,27 @@ export default function MonitoringCharts({
   onHistoryPeriodChange,
   historyLoading = false,
 }: MonitoringChartsProps) {
+  const { isEnabled } = useFeatureModules()
+  const showAwg2 = isEnabled('awg2')
   const [liveTail, setLiveTail] = useState<HistoryPoint[]>([])
 
   useEffect(() => {
     const wgActive = data.wireguard_peers.filter(isWireGuardOnline).length
+    const awg2Peers = data.amneziawg2_peers ?? []
+    const awg2Active = awg2Peers.filter(isWireGuardOnline).length
     const point: HistoryPoint = {
       time: formatTime(data.timestamp, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      connections: data.openvpn_clients.length + wgActive,
+      connections: data.openvpn_clients.length + wgActive + (showAwg2 ? awg2Active : 0),
       ovpn: data.openvpn_clients.length,
       wg: wgActive,
+      awg2: awg2Active,
     }
     setLiveTail((prev) => {
       const last = prev[prev.length - 1]
       if (last && last.time === point.time) return prev
       return [...prev.slice(-4), point]
     })
-  }, [data])
+  }, [data, showAwg2])
 
   const serverPoints: HistoryPoint[] = useMemo(() => {
     if (!serverHistory?.length) return []
@@ -92,6 +100,7 @@ export default function MonitoringCharts({
       connections: p.total,
       ovpn: p.openvpn,
       wg: p.wireguard,
+      awg2: p.amneziawg2 ?? 0,
     }))
   }, [serverHistory])
 
@@ -99,11 +108,16 @@ export default function MonitoringCharts({
 
   const connectionsBar = useMemo(() => {
     const wgActive = data.wireguard_peers.filter(isWireGuardOnline).length
-    return [
+    const awg2Active = (data.amneziawg2_peers ?? []).filter(isWireGuardOnline).length
+    const bars = [
       { name: 'OpenVPN', count: data.openvpn_clients.length },
       { name: 'WireGuard', count: wgActive },
     ]
-  }, [data])
+    if (showAwg2) {
+      bars.push({ name: 'AWG 2.0', count: awg2Active })
+    }
+    return bars
+  }, [data, showAwg2])
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -162,6 +176,16 @@ export default function MonitoringCharts({
                   strokeWidth={2}
                   dot={false}
                 />
+                {showAwg2 && (
+                  <Line
+                    type="monotone"
+                    dataKey="awg2"
+                    name="AWG 2.0"
+                    stroke={MONITORING_PROTOCOL_COLORS.amneziawg2}
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                )}
                 <Line
                   type="monotone"
                   dataKey="connections"

@@ -41,9 +41,11 @@ const PAGE_SIZE = 25
 type SortKey = NocSortKey
 type SortDir = 'asc' | 'desc'
 
+export type MonitoringConnectionProtocol = 'openvpn' | 'wireguard' | 'amneziawg2'
+
 export type MonitoringConnectionRow = {
   key: string
-  protocol: 'openvpn' | 'wireguard'
+  protocol: MonitoringConnectionProtocol
   clientName: string
   online: boolean
   nodeName?: string | null
@@ -68,6 +70,18 @@ export type MonitoringConnectionRow = {
   interfaceName?: string
 }
 
+function protocolLabel(protocol: MonitoringConnectionProtocol) {
+  if (protocol === 'openvpn') return 'OpenVPN'
+  if (protocol === 'amneziawg2') return 'AWG 2.0'
+  return 'WireGuard'
+}
+
+function protocolBadgeVariant(protocol: MonitoringConnectionProtocol): 'default' | 'secondary' | 'outline' {
+  if (protocol === 'openvpn') return 'default'
+  if (protocol === 'amneziawg2') return 'outline'
+  return 'secondary'
+}
+
 function parseTime(value?: string | null): number {
   if (!value) return 0
   const ms = Date.parse(value)
@@ -79,6 +93,49 @@ function formatHandshake(value?: string | null) {
   return formatDateTime(value)
 }
 
+function pushWireGuardStyleRows(
+  rows: MonitoringConnectionRow[],
+  peers: WireGuardPeer[],
+  options: {
+    protocol: 'wireguard' | 'amneziawg2'
+    keyPrefix: string
+    isOnline: (peer: WireGuardPeer) => boolean
+    rates?: Map<string, { rxBps: number | null; txBps: number | null }>
+  },
+) {
+  for (const peer of peers) {
+    const online = options.isOnline(peer)
+    const key = `${options.keyPrefix}-${peer.ha?.sync_group_id ?? peer.active_node_id ?? peer.node_id ?? 'node'}-${peer.interface}-${peer.public_key}`
+    const rate = options.rates?.get(key)
+    rows.push({
+      key,
+      protocol: options.protocol,
+      clientName: peer.client_name || '—',
+      online,
+      nodeName: peer.active_node_name ?? peer.node_name,
+      activeNodeName: peer.active_node_name ?? peer.node_name,
+      haNodes: peer.ha_nodes,
+      ha: peer.ha,
+      address: getConnectionDisplayAddress(peer, 'endpoint'),
+      geoLabel: getConnectionGeoLabel(peer),
+      city: peer.city,
+      isp: peer.isp,
+      viaProxy: peer.via_proxy,
+      proxyResolved: peer.proxy_resolved,
+      vpnIp: peer.allowed_ips || '—',
+      rx: peer.transfer_rx,
+      tx: peer.transfer_tx,
+      timeLabel: formatHandshake(peer.latest_handshake),
+      sortTime: parseTime(peer.latest_handshake),
+      // WG/AWG2 have no reliable session start in v1
+      durationSec: null,
+      rxBps: rate?.rxBps ?? null,
+      txBps: rate?.txBps ?? null,
+      interfaceName: peer.interface,
+    })
+  }
+}
+
 export function buildMonitoringConnectionRows(
   openvpnClients: OpenVpnClient[],
   wireguardPeers: WireGuardPeer[],
@@ -87,6 +144,9 @@ export function buildMonitoringConnectionRows(
     showWireGuard: boolean
     isWireGuardOnline: (peer: WireGuardPeer) => boolean
     rates?: Map<string, { rxBps: number | null; txBps: number | null }>
+    amneziawg2Peers?: WireGuardPeer[]
+    showAmneziaWg2?: boolean
+    isAwg2Online?: (peer: WireGuardPeer) => boolean
   },
 ): MonitoringConnectionRow[] {
   const rows: MonitoringConnectionRow[] = []
@@ -128,37 +188,21 @@ export function buildMonitoringConnectionRows(
   }
 
   if (options.showWireGuard) {
-    for (const peer of wireguardPeers) {
-      const online = options.isWireGuardOnline(peer)
-      const key = `wg-${peer.ha?.sync_group_id ?? peer.active_node_id ?? peer.node_id ?? 'node'}-${peer.interface}-${peer.public_key}`
-      const rate = rates?.get(key)
-      rows.push({
-        key,
-        protocol: 'wireguard',
-        clientName: peer.client_name || '—',
-        online,
-        nodeName: peer.active_node_name ?? peer.node_name,
-        activeNodeName: peer.active_node_name ?? peer.node_name,
-        haNodes: peer.ha_nodes,
-        ha: peer.ha,
-        address: getConnectionDisplayAddress(peer, 'endpoint'),
-        geoLabel: getConnectionGeoLabel(peer),
-        city: peer.city,
-        isp: peer.isp,
-        viaProxy: peer.via_proxy,
-        proxyResolved: peer.proxy_resolved,
-        vpnIp: peer.allowed_ips || '—',
-        rx: peer.transfer_rx,
-        tx: peer.transfer_tx,
-        timeLabel: formatHandshake(peer.latest_handshake),
-        sortTime: parseTime(peer.latest_handshake),
-        // WG has no reliable session start in v1
-        durationSec: null,
-        rxBps: rate?.rxBps ?? null,
-        txBps: rate?.txBps ?? null,
-        interfaceName: peer.interface,
-      })
-    }
+    pushWireGuardStyleRows(rows, wireguardPeers, {
+      protocol: 'wireguard',
+      keyPrefix: 'wg',
+      isOnline: options.isWireGuardOnline,
+      rates,
+    })
+  }
+
+  if (options.showAmneziaWg2 && options.amneziawg2Peers) {
+    pushWireGuardStyleRows(rows, options.amneziawg2Peers, {
+      protocol: 'amneziawg2',
+      keyPrefix: 'awg2',
+      isOnline: options.isAwg2Online ?? options.isWireGuardOnline,
+      rates,
+    })
   }
 
   return rows
@@ -276,8 +320,8 @@ function ConnectionCard({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {showNodeColumn && <NodeCell row={row} />}
-          <Badge variant={row.protocol === 'openvpn' ? 'default' : 'secondary'} className="text-xs">
-            {row.protocol === 'openvpn' ? 'OpenVPN' : 'WireGuard'}
+          <Badge variant={protocolBadgeVariant(row.protocol)} className="text-xs">
+            {protocolLabel(row.protocol)}
           </Badge>
           <Badge variant={row.online ? 'success' : 'secondary'} className="text-xs">
             {row.online ? 'Онлайн' : 'Офлайн'}
@@ -510,12 +554,16 @@ export default function MonitoringConnectionsList({
               {visibleRows.map((row) => (
                 <TableRow
                   key={row.key}
-                  className={cn('align-top', row.online && row.protocol === 'wireguard' && 'bg-emerald-500/5')}
+                  className={cn(
+                    'align-top',
+                    row.online && row.protocol === 'wireguard' && 'bg-emerald-500/5',
+                    row.online && row.protocol === 'amneziawg2' && 'bg-amber-500/5',
+                  )}
                 >
                   <TableCell>
                     <div className="flex flex-col gap-1.5">
-                      <Badge variant={row.protocol === 'openvpn' ? 'default' : 'secondary'} className="w-fit text-xs">
-                        {row.protocol === 'openvpn' ? 'OpenVPN' : 'WireGuard'}
+                      <Badge variant={protocolBadgeVariant(row.protocol)} className="w-fit text-xs">
+                        {protocolLabel(row.protocol)}
                       </Badge>
                       <Badge variant={row.online ? 'success' : 'secondary'} className="w-fit text-xs">
                         {row.online ? 'Онлайн' : 'Офлайн'}
