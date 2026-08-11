@@ -549,6 +549,9 @@ class TrafficCollectorService:
         elif scope == "wireguard":
             q_samples = q_samples.filter(UserTrafficSample.protocol_type == "wireguard")
             q_stats = q_stats.filter(UserTrafficStatProtocol.protocol_type == "wireguard")
+        elif scope == "amneziawg2":
+            q_samples = q_samples.filter(UserTrafficSample.protocol_type == "amneziawg2")
+            q_stats = q_stats.filter(UserTrafficStatProtocol.protocol_type == "amneziawg2")
 
         deleted = q_samples.delete(synchronize_session=False)
         q_sessions.delete(synchronize_session=False)

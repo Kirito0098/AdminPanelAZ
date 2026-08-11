@@ -21,7 +21,7 @@ from app.services.traffic.collector import (
 
 def normalize_traffic_protocol_scope(protocol_scope: str | None) -> str:
     scope = (protocol_scope or "all").strip().lower()
-    if scope not in ("all", "openvpn", "wireguard"):
+    if scope not in ("all", "openvpn", "wireguard", "amneziawg2"):
         return "all"
     return scope
 
@@ -32,11 +32,15 @@ def normalize_traffic_client_identity(raw_name: str | None) -> str:
 
 def _profile_matches_protocol_scope(profile: str | None, protocol_scope: str) -> bool:
     scope = normalize_traffic_protocol_scope(protocol_scope)
-    is_wireguard_profile = str(profile or "").strip().lower().endswith("-wg")
-    if scope == "wireguard":
-        return is_wireguard_profile
+    if scope == "all":
+        return True
+    proto = protocol_type_from_profile(profile)
     if scope == "openvpn":
-        return not is_wireguard_profile
+        return proto.startswith("openvpn")
+    if scope == "wireguard":
+        return proto == "wireguard"
+    if scope == "amneziawg2":
+        return proto == "amneziawg2"
     return True
 
 
@@ -54,6 +58,8 @@ class TrafficMaintenanceService:
                 continue
             if row.vpn_type == VpnType.wireguard:
                 protocols_by_client[name.lower()].add("WireGuard")
+            elif row.vpn_type == VpnType.amneziawg2:
+                protocols_by_client[name.lower()].add("AmneziaWG2")
             else:
                 protocols_by_client[name.lower()].add("OpenVPN")
         return dict(protocols_by_client)
@@ -77,9 +83,13 @@ class TrafficMaintenanceService:
         return result
 
     def collect_status_rows_for_snapshot(self, adapter) -> list[dict]:
+        from app.services.awg2_noc import fetch_awg2_peers_for_adapter
+        from app.services.feature_toggles import is_awg2_enabled
+
         ovpn = adapter.parse_openvpn_status()
         wg = adapter.parse_wireguard_status()
-        return build_status_rows(ovpn, wg)
+        awg2 = fetch_awg2_peers_for_adapter(adapter) if is_awg2_enabled(self.db) else []
+        return build_status_rows(ovpn, wg, awg2)
 
     def get_deleted_persisted_traffic_rows(self) -> tuple[list[dict], dict]:
         existing = self.collect_existing_config_client_names()
@@ -158,6 +168,10 @@ class TrafficMaintenanceService:
                 if (identity, "wireguard") in stats_keys:
                     continue
                 proto = "wireguard"
+            elif cfg.vpn_type == VpnType.amneziawg2:
+                if (identity, "amneziawg2") in stats_keys:
+                    continue
+                proto = "amneziawg2"
             else:
                 if identity in openvpn_identities:
                     continue
@@ -209,6 +223,31 @@ class TrafficMaintenanceService:
                 .filter(
                     TrafficSessionState.node_id == self.node_id,
                     ~TrafficSessionState.profile.like("%-wg"),
+                    ~TrafficSessionState.profile.like("%-awg"),
+                    ~TrafficSessionState.profile.like("%-awg2"),
+                )
+                .delete(synchronize_session=False)
+            )
+            return {
+                "scope": scope,
+                "deleted_samples": int(deleted_samples or 0),
+                "deleted_sessions": int(deleted_sessions or 0),
+            }
+
+        if scope == "amneziawg2":
+            deleted_samples = (
+                self.db.query(UserTrafficSample)
+                .filter(
+                    UserTrafficSample.node_id == self.node_id,
+                    UserTrafficSample.protocol_type == "amneziawg2",
+                )
+                .delete(synchronize_session=False)
+            )
+            deleted_sessions = (
+                self.db.query(TrafficSessionState)
+                .filter(
+                    TrafficSessionState.node_id == self.node_id,
+                    TrafficSessionState.profile.like("%-awg2"),
                 )
                 .delete(synchronize_session=False)
             )
@@ -225,6 +264,7 @@ class TrafficMaintenanceService:
                 (UserTrafficSample.protocol_type == "wireguard")
                 | (
                     (UserTrafficSample.protocol_type != "wireguard")
+                    & (UserTrafficSample.protocol_type != "amneziawg2")
                     & func.lower(UserTrafficSample.common_name).in_(sorted(wireguard_only_clients))
                 )
             )
@@ -236,7 +276,11 @@ class TrafficMaintenanceService:
             self.db.query(TrafficSessionState)
             .filter(
                 TrafficSessionState.node_id == self.node_id,
-                TrafficSessionState.profile.like("%-wg"),
+                TrafficSessionState.profile.like("%-wg")
+                | (
+                    TrafficSessionState.profile.like("%-awg")
+                    & ~TrafficSessionState.profile.like("%-awg2")
+                ),
             )
             .delete(synchronize_session=False)
         )
@@ -368,7 +412,7 @@ class TrafficMaintenanceService:
             protocol = (sample.protocol_type or "openvpn").strip().lower()
             if protocol.startswith("openvpn"):
                 pass
-            elif protocol != "wireguard":
+            elif protocol not in ("wireguard", "amneziawg2"):
                 protocol = "openvpn"
             if protocol.startswith("openvpn") and common_name.strip().lower() in wireguard_only_clients:
                 protocol = "wireguard"
@@ -480,6 +524,7 @@ class TrafficMaintenanceService:
             "all": "вся статистика",
             "openvpn": "OpenVPN",
             "wireguard": "WireGuard/AWG",
+            "amneziawg2": "AmneziaWG 2.0",
         }
 
         try:
@@ -494,6 +539,8 @@ class TrafficMaintenanceService:
                 stats_query = stats_query.filter(UserTrafficStatProtocol.protocol_type.like("openvpn%"))
             elif scope == "wireguard":
                 stats_query = stats_query.filter(UserTrafficStatProtocol.protocol_type == "wireguard")
+            elif scope == "amneziawg2":
+                stats_query = stats_query.filter(UserTrafficStatProtocol.protocol_type == "amneziawg2")
             stats_query.delete(synchronize_session=False)
 
             baseline_info = self.seed_traffic_session_baseline_for_scope(status_rows, scope, now=now)
