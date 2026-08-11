@@ -159,10 +159,13 @@ class NocWeeklyImageRenderer:
         summary = self.data.get("summary") or {}
         nodes = summary.get("nodes") or []
         top = self.data.get("top_clients") or []
+        awg2_enabled = bool(summary.get("awg2_enabled"))
+        kpi_cards = 9 if awg2_enabled else 8
+        kpi_rows = (kpi_cards + 1) // 2
 
         h = self.theme.PAD
         h += 76  # header
-        h += 4 * (self.KPI_ROW_H + self.theme.GAP) + self.KPI_WIDE_H + self.theme.GAP
+        h += kpi_rows * (self.KPI_ROW_H + self.theme.GAP) + self.KPI_WIDE_H + self.theme.GAP
         if nodes:
             h += 28 + 32 + len(nodes) * 30 + self.theme.GAP
         h += 28 + max(1, len(top)) * 34 + self.theme.GAP
@@ -301,31 +304,46 @@ class NocWeeklyImageRenderer:
                 "value": f"{summary.get('total_wireguard', 0)} / {summary.get('total_wireguard_peak', 0)}",
                 "sub": "среднее / пик",
             },
-            {
-                "label": "Изм. трафика",
-                "value": delta_text,
-                "sub": "к предыдущему периоду",
-                "value_color": delta_color,
-                "mono_value": False,
-            },
-            {
-                "label": "CPU",
-                "value": _format_resource_avg_peak(resource.get("cpu_avg"), resource.get("cpu_peak")) or "-",
-                "bar_pct": _metric_bar_pct(resource.get("cpu_avg"), resource.get("cpu_peak")),
-                "bar_color": t.DANGER if (resource.get("cpu_peak") or 0) >= 85 else t.ACCENT,
-            },
-            {
-                "label": "RAM",
-                "value": _format_resource_avg_peak(resource.get("memory_avg"), resource.get("memory_peak")) or "-",
-                "bar_pct": _metric_bar_pct(resource.get("memory_avg"), resource.get("memory_peak")),
-                "bar_color": t.WARNING if (resource.get("memory_peak") or 0) >= 85 else t.ACCENT,
-            },
-            {
-                "label": "Лимит трафика",
-                "value": str(traffic_limit.get("blocks_in_period", 0)),
-                "sub": f"заблокировано сейчас: {traffic_limit.get('blocked_now', 0)}",
-            },
         ]
+        if bool(summary.get("awg2_enabled")):
+            cards.append(
+                {
+                    "label": "AmneziaWG2 сессии",
+                    "value": (
+                        f"{summary.get('total_amneziawg2', 0)} / "
+                        f"{summary.get('total_amneziawg2_peak', 0)}"
+                    ),
+                    "sub": "среднее / пик",
+                }
+            )
+        cards.extend(
+            [
+                {
+                    "label": "Изм. трафика",
+                    "value": delta_text,
+                    "sub": "к предыдущему периоду",
+                    "value_color": delta_color,
+                    "mono_value": False,
+                },
+                {
+                    "label": "CPU",
+                    "value": _format_resource_avg_peak(resource.get("cpu_avg"), resource.get("cpu_peak")) or "-",
+                    "bar_pct": _metric_bar_pct(resource.get("cpu_avg"), resource.get("cpu_peak")),
+                    "bar_color": t.DANGER if (resource.get("cpu_peak") or 0) >= 85 else t.ACCENT,
+                },
+                {
+                    "label": "RAM",
+                    "value": _format_resource_avg_peak(resource.get("memory_avg"), resource.get("memory_peak")) or "-",
+                    "bar_pct": _metric_bar_pct(resource.get("memory_avg"), resource.get("memory_peak")),
+                    "bar_color": t.WARNING if (resource.get("memory_peak") or 0) >= 85 else t.ACCENT,
+                },
+                {
+                    "label": "Лимит трафика",
+                    "value": str(traffic_limit.get("blocks_in_period", 0)),
+                    "sub": f"заблокировано сейчас: {traffic_limit.get('blocked_now', 0)}",
+                },
+            ]
+        )
 
         x0 = t.PAD
         row = 0
@@ -340,6 +358,9 @@ class NocWeeklyImageRenderer:
                 row += 1
 
         disk_y = y + row * (row_h + t.GAP)
+        if col != 0:
+            # Odd card count: disk starts on the next full row.
+            disk_y = y + (row + 1) * (row_h + t.GAP)
         disk_val = _format_resource_avg_peak(resource.get("disk_avg"), resource.get("disk_peak")) or "-"
         self._draw_kpi_card(
             draw,
@@ -368,8 +389,13 @@ class NocWeeklyImageRenderer:
         y = self._draw_section_title(draw, y, "Узлы")
         x0 = t.PAD
         cw = self._content_w()
-        cols = ["Узел", "Статус", "OVPN", "WG", "CPU", "RAM", "Диск", "7д", "Всего"]
-        widths = [0.17, 0.07, 0.08, 0.08, 0.13, 0.13, 0.13, 0.09, 0.12]
+        awg2_enabled = bool(summary.get("awg2_enabled"))
+        if awg2_enabled:
+            cols = ["Узел", "Статус", "OVPN", "WG", "AWG2", "CPU", "RAM", "Диск", "7д", "Всего"]
+            widths = [0.15, 0.07, 0.07, 0.07, 0.07, 0.12, 0.12, 0.12, 0.09, 0.12]
+        else:
+            cols = ["Узел", "Статус", "OVPN", "WG", "CPU", "RAM", "Диск", "7д", "Всего"]
+            widths = [0.17, 0.07, 0.08, 0.08, 0.13, 0.13, 0.13, 0.09, 0.12]
         col_px = [int(cw * w) for w in widths]
         col_px[-1] = cw - sum(col_px[:-1])
 
@@ -392,12 +418,20 @@ class NocWeeklyImageRenderer:
                 status,
                 f"{node.get('openvpn', 0)}/{node.get('openvpn_peak', 0)}",
                 f"{node.get('wireguard', 0)}/{node.get('wireguard_peak', 0)}",
-                _format_resource_avg_peak(node.get("cpu_percent"), node.get("cpu_peak")) or "-",
-                _format_resource_avg_peak(node.get("memory_percent"), node.get("memory_peak")) or "-",
-                _format_resource_avg_peak(node.get("disk_percent"), node.get("disk_peak")) or "-",
-                human_bytes(node.get("period_traffic_bytes")) or "0 B",
-                human_bytes(node.get("traffic_bytes")) or "0 B",
             ]
+            if awg2_enabled:
+                values.append(
+                    f"{node.get('amneziawg2', 0)}/{node.get('amneziawg2_peak', 0)}"
+                )
+            values.extend(
+                [
+                    _format_resource_avg_peak(node.get("cpu_percent"), node.get("cpu_peak")) or "-",
+                    _format_resource_avg_peak(node.get("memory_percent"), node.get("memory_peak")) or "-",
+                    _format_resource_avg_peak(node.get("disk_percent"), node.get("disk_peak")) or "-",
+                    human_bytes(node.get("period_traffic_bytes")) or "0 B",
+                    human_bytes(node.get("traffic_bytes")) or "0 B",
+                ]
+            )
             cx = x0 + 10
             for idx, val in enumerate(values):
                 color = status_color if idx == 1 else t.TEXT
