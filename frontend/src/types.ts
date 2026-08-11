@@ -1654,6 +1654,7 @@ export interface TrafficChartData {
   antizapret_bytes: number[]
   openvpn_bytes: number[]
   wireguard_bytes: number[]
+  amneziawg2_bytes?: number[]
   total_vpn: number
   total_antizapret: number
   total: number

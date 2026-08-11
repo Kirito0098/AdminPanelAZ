@@ -1260,7 +1260,7 @@ export async function getTrafficClientSessions(client: string, limit = 30) {
   return apiFetch<import('../types').TrafficClientSessions>(`/traffic/client-sessions?${params}`)
 }
 
-export async function resetTraffic(scope: 'all' | 'openvpn' | 'wireguard' = 'all') {
+export async function resetTraffic(scope: 'all' | 'openvpn' | 'wireguard' | 'amneziawg2' = 'all') {
   return apiFetch('/traffic/reset', { method: 'POST', body: JSON.stringify({ scope }) })
 }
 
@@ -1541,6 +1541,30 @@ export async function wgSetTrafficLimit(
 
 export async function wgClearTrafficLimit(clientName: string) {
   return apiFetch('/client-access/wireguard/clear-traffic-limit', {
+    method: 'POST',
+    body: JSON.stringify({ client_name: clientName }),
+  })
+}
+
+export async function awg2SetTrafficLimit(
+  clientName: string,
+  limitValue: number,
+  limitUnit = 'MB',
+  limitPeriodDays?: number | null,
+) {
+  return apiFetch('/client-access/amneziawg2/set-traffic-limit', {
+    method: 'POST',
+    body: JSON.stringify({
+      client_name: clientName,
+      limit_value: limitValue,
+      limit_unit: limitUnit,
+      limit_period_days: limitPeriodDays ?? null,
+    }),
+  })
+}
+
+export async function awg2ClearTrafficLimit(clientName: string) {
+  return apiFetch('/client-access/amneziawg2/clear-traffic-limit', {
     method: 'POST',
     body: JSON.stringify({ client_name: clientName }),
   })

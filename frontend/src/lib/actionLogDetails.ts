@@ -369,11 +369,13 @@ export function actionLogDetailsLabel(action: string, details?: string | null): 
     case 'wg_unblock':
     case 'openvpn_traffic_limit_clear':
     case 'wg_traffic_limit_clear':
+    case 'awg2_traffic_limit_clear':
       return `Клиент: ${raw}`
     case 'openvpn_disconnect':
       return formatDisconnect(raw) ?? formatGeneric(raw)
     case 'openvpn_traffic_limit_set':
     case 'wg_traffic_limit_set':
+    case 'awg2_traffic_limit_set':
       return formatTrafficLimit(raw) ?? formatGeneric(raw)
     case 'security_settings_update':
       return formatSecuritySettings(raw)

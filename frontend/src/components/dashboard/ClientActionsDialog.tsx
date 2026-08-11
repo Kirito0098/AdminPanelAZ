@@ -15,7 +15,9 @@ import {
   Zap,
 } from 'lucide-react'
 import {
+  awg2ClearTrafficLimit,
   awg2PermanentBlock,
+  awg2SetTrafficLimit,
   awg2TempBlock,
   awg2Unblock,
   ApiError,
@@ -451,6 +453,35 @@ export default function ClientActionsDialog({
                 await awg2Unblock(config.client_name)
                 onNotifySuccess('Блокировка снята')
               }),
+          },
+          {
+            key: 'traffic-limit',
+            label: 'Лимит трафика',
+            icon: <Gauge size={14} />,
+            hidden: !canManage || haReplicaReadonly,
+            onClick: () => {
+              setLimitValue('10')
+              setLimitUnit('GB')
+              setLimitPeriodDays('7')
+              setPromptTitle('Лимит трафика')
+              setPromptMessage(`Укажите лимит для клиента «${config.client_name}»`)
+              setPromptMode('traffic-limit')
+            },
+          },
+          {
+            key: 'clear-traffic-limit',
+            label: 'Снять лимит трафика',
+            icon: <Gauge size={14} />,
+            hidden: !canManage || !hasTrafficLimit || haReplicaReadonly,
+            onClick: () =>
+              askConfirm(
+                'Снять лимит трафика',
+                `Снять лимит трафика для «${config.client_name}»?`,
+                async () => {
+                  await awg2ClearTrafficLimit(config.client_name)
+                  onNotifySuccess('Лимит трафика снят')
+                },
+              ),
           },
         ]
       : [
@@ -950,6 +981,8 @@ export default function ClientActionsDialog({
               void runAction('traffic-limit', async () => {
                 if (isOpenVpn) {
                   await openvpnSetTrafficLimit(config.client_name, value, limitUnit, period)
+                } else if (isAwg2) {
+                  await awg2SetTrafficLimit(config.client_name, value, limitUnit, period)
                 } else {
                   await wgSetTrafficLimit(config.client_name, value, limitUnit, period)
                 }

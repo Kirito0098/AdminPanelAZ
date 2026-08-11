@@ -18,6 +18,7 @@ import {
   YAxis,
 } from 'recharts'
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
+import { MONITORING_PROTOCOL_COLORS } from '@/components/monitoring/monitoringChartTheme'
 import { getTrafficClientSessions } from '@/api/client'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import EmptyState from '@/components/ui/EmptyState'
@@ -40,6 +41,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { PercentBar } from '@/components/ui/percent-bar'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { formatDateTime } from '@/lib/datetime'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { COL_VPN_IP } from '@/lib/uiLabels'
@@ -59,6 +61,7 @@ function getProtocolLabel(protocol: string) {
   const p = protocol.toLowerCase()
   if (p === 'wireguard') return 'WireGuard'
   if (p === 'openvpn') return 'OpenVPN'
+  if (p === 'amneziawg2') return 'AWG 2.0'
   return protocol
 }
 
@@ -66,6 +69,7 @@ function getProtocolVariant(protocol: string): 'default' | 'secondary' | 'outlin
   const p = protocol.toLowerCase()
   if (p === 'openvpn') return 'default'
   if (p === 'wireguard') return 'secondary'
+  if (p === 'amneziawg2') return 'outline'
   return 'outline'
 }
 
@@ -146,6 +150,8 @@ export default function TrafficClientDetails({
   policy,
   policyLoading = false,
 }: TrafficClientDetailsProps) {
+  const { isEnabled } = useFeatureModules()
+  const showAwg2 = isEnabled('awg2')
   const [showInactiveSources, setShowInactiveSources] = useState(false)
   const [sessions, setSessions] = useState<TrafficClientSessions | null>(null)
   const [sessionsLoading, setSessionsLoading] = useState(false)
@@ -212,8 +218,21 @@ export default function TrafficClientDetails({
       label,
       vpn: chartData.vpn_bytes?.[i] ?? 0,
       antizapret: chartData.antizapret_bytes?.[i] ?? 0,
+      openvpn: chartData.openvpn_bytes?.[i] ?? 0,
+      wireguard: chartData.wireguard_bytes?.[i] ?? 0,
+      amneziawg2: chartData.amneziawg2_bytes?.[i] ?? 0,
       total: (chartData.vpn_bytes?.[i] ?? 0) + (chartData.antizapret_bytes?.[i] ?? 0),
     })) ?? []
+
+  const showProtocolSeries = showAwg2
+
+  const SERIES_LABELS: Record<string, string> = {
+    vpn: 'VPN',
+    antizapret: 'AntiZapret',
+    openvpn: 'OpenVPN',
+    wireguard: 'WireGuard',
+    amneziawg2: 'AWG 2.0',
+  }
 
   const limitPercent =
     policy?.traffic_limit_bytes && policy.traffic_limit_bytes > 0
@@ -476,14 +495,33 @@ export default function TrafficClientDetails({
               {({ width, height }) => (
                 <AreaChart width={width} height={height} data={chartPoints} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <defs>
-                    <linearGradient id={`focusTrafficVpn_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={CHART_VPN} stopOpacity={0.35} />
-                      <stop offset="95%" stopColor={CHART_VPN} stopOpacity={0.02} />
-                    </linearGradient>
-                    <linearGradient id={`focusTrafficAz_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={CHART_ANTIZAPRET} stopOpacity={0.35} />
-                      <stop offset="95%" stopColor={CHART_ANTIZAPRET} stopOpacity={0.02} />
-                    </linearGradient>
+                    {showProtocolSeries ? (
+                      <>
+                        <linearGradient id={`focusTrafficOvpn_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={MONITORING_PROTOCOL_COLORS.openvpn} stopOpacity={0.35} />
+                          <stop offset="95%" stopColor={MONITORING_PROTOCOL_COLORS.openvpn} stopOpacity={0.02} />
+                        </linearGradient>
+                        <linearGradient id={`focusTrafficWg_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={MONITORING_PROTOCOL_COLORS.wireguard} stopOpacity={0.35} />
+                          <stop offset="95%" stopColor={MONITORING_PROTOCOL_COLORS.wireguard} stopOpacity={0.02} />
+                        </linearGradient>
+                        <linearGradient id={`focusTrafficAwg2_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={MONITORING_PROTOCOL_COLORS.amneziawg2} stopOpacity={0.35} />
+                          <stop offset="95%" stopColor={MONITORING_PROTOCOL_COLORS.amneziawg2} stopOpacity={0.02} />
+                        </linearGradient>
+                      </>
+                    ) : (
+                      <>
+                        <linearGradient id={`focusTrafficVpn_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={CHART_VPN} stopOpacity={0.35} />
+                          <stop offset="95%" stopColor={CHART_VPN} stopOpacity={0.02} />
+                        </linearGradient>
+                        <linearGradient id={`focusTrafficAz_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={CHART_ANTIZAPRET} stopOpacity={0.35} />
+                          <stop offset="95%" stopColor={CHART_ANTIZAPRET} stopOpacity={0.02} />
+                        </linearGradient>
+                      </>
+                    )}
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
                   <XAxis
@@ -503,29 +541,63 @@ export default function TrafficClientDetails({
                   <Tooltip
                     formatter={(v: number, name: string) => [
                       formatBytes(v),
-                      name === 'vpn' ? 'VPN' : 'AntiZapret',
+                      SERIES_LABELS[name] ?? name,
                     ]}
                     labelFormatter={(label) => `Период: ${label}`}
                   />
-                  <Legend formatter={(value) => (value === 'vpn' ? 'VPN' : 'AntiZapret')} />
-                  <Area
-                    type="monotone"
-                    dataKey="vpn"
-                    stackId="1"
-                    stroke={CHART_VPN}
-                    fill={`url(#focusTrafficVpn_${chartIdSuffix})`}
-                    strokeWidth={2}
-                    name="vpn"
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="antizapret"
-                    stackId="1"
-                    stroke={CHART_ANTIZAPRET}
-                    fill={`url(#focusTrafficAz_${chartIdSuffix})`}
-                    strokeWidth={2}
-                    name="antizapret"
-                  />
+                  <Legend formatter={(value) => SERIES_LABELS[value] ?? value} />
+                  {showProtocolSeries ? (
+                    <>
+                      <Area
+                        type="monotone"
+                        dataKey="openvpn"
+                        stackId="proto"
+                        stroke={MONITORING_PROTOCOL_COLORS.openvpn}
+                        fill={`url(#focusTrafficOvpn_${chartIdSuffix})`}
+                        strokeWidth={2}
+                        name="openvpn"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="wireguard"
+                        stackId="proto"
+                        stroke={MONITORING_PROTOCOL_COLORS.wireguard}
+                        fill={`url(#focusTrafficWg_${chartIdSuffix})`}
+                        strokeWidth={2}
+                        name="wireguard"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="amneziawg2"
+                        stackId="proto"
+                        stroke={MONITORING_PROTOCOL_COLORS.amneziawg2}
+                        fill={`url(#focusTrafficAwg2_${chartIdSuffix})`}
+                        strokeWidth={2}
+                        name="amneziawg2"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <Area
+                        type="monotone"
+                        dataKey="vpn"
+                        stackId="1"
+                        stroke={CHART_VPN}
+                        fill={`url(#focusTrafficVpn_${chartIdSuffix})`}
+                        strokeWidth={2}
+                        name="vpn"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="antizapret"
+                        stackId="1"
+                        stroke={CHART_ANTIZAPRET}
+                        fill={`url(#focusTrafficAz_${chartIdSuffix})`}
+                        strokeWidth={2}
+                        name="antizapret"
+                      />
+                    </>
+                  )}
                 </AreaChart>
               )}
             </ChartResponsive>

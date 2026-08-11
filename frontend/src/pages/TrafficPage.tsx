@@ -63,6 +63,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useAuth } from '@/context/AuthContext'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
@@ -99,6 +100,7 @@ function getProtocolLabel(protocol: string) {
   const p = protocol.toLowerCase()
   if (p === 'wireguard') return 'WireGuard'
   if (p === 'openvpn') return 'OpenVPN'
+  if (p === 'amneziawg2') return 'AWG 2.0'
   return protocol
 }
 
@@ -106,6 +108,7 @@ function getProtocolVariant(protocol: string): 'default' | 'secondary' | 'outlin
   const p = protocol.toLowerCase()
   if (p === 'openvpn') return 'default'
   if (p === 'wireguard') return 'secondary'
+  if (p === 'amneziawg2') return 'outline'
   return 'outline'
 }
 
@@ -296,6 +299,8 @@ export default function TrafficPage() {
   const { activeNode, loading: nodeLoading } = useNode()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  const { isEnabled } = useFeatureModules()
+  const awg2Enabled = isEnabled('awg2')
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -319,7 +324,7 @@ export default function TrafficPage() {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('total_bytes')
   const [resetting, setResetting] = useState(false)
-  const [resetScope, setResetScope] = useState<'all' | 'openvpn' | 'wireguard'>('all')
+  const [resetScope, setResetScope] = useState<'all' | 'openvpn' | 'wireguard' | 'amneziawg2'>('all')
   const [deletedRows, setDeletedRows] = useState<
     Array<{
       common_name: string
@@ -414,7 +419,13 @@ export default function TrafficPage() {
           return
         }
         const proto = selectedProtocol.toLowerCase()
-        setClientPolicy(proto === 'wireguard' ? entry.wireguard : entry.openvpn)
+        if (proto === 'wireguard') {
+          setClientPolicy(entry.wireguard ?? null)
+        } else if (proto === 'amneziawg2') {
+          setClientPolicy(entry.amneziawg2 ?? null)
+        } else {
+          setClientPolicy(entry.openvpn ?? null)
+        }
       })
       .catch(() => setClientPolicy(null))
       .finally(() => setPolicyLoading(false))
@@ -435,7 +446,9 @@ export default function TrafficPage() {
     if (!selectedClient) return
     setChartLoading(true)
     try {
-      setChartData(await getTrafficChart(selectedClient, chartRange))
+      // Always request all protocols so awg2-enabled UI can render amneziawg2_bytes
+      // alongside openvpn/wireguard when the feature toggle is on.
+      setChartData(await getTrafficChart(selectedClient, chartRange, 'all'))
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки графика')
     } finally {
@@ -493,6 +506,12 @@ export default function TrafficPage() {
   useEffect(() => {
     loadChart()
   }, [loadChart])
+
+  useEffect(() => {
+    if (!awg2Enabled && resetScope === 'amneziawg2') {
+      setResetScope('all')
+    }
+  }, [awg2Enabled, resetScope])
 
   useEffect(() => {
     if (!autoRefresh) return
@@ -680,6 +699,7 @@ export default function TrafficPage() {
                     <SelectItem value="all">Сброс: всё</SelectItem>
                     <SelectItem value="openvpn">Сброс: OpenVPN</SelectItem>
                     <SelectItem value="wireguard">Сброс: WG/AWG</SelectItem>
+                    {awg2Enabled && <SelectItem value="amneziawg2">Сброс: AWG 2.0</SelectItem>}
                   </SelectContent>
                 </Select>
                 <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting}>
