@@ -171,6 +171,34 @@ def test_clear_traffic_limit_endpoint_ok():
     )
 
 
+def test_awg2_unblock_maps_traffic_limit_exceeded_to_409():
+    from fastapi import HTTPException
+
+    from app.services.traffic_limit import (
+        TRAFFIC_LIMIT_EXCEEDED_CODE,
+        TrafficLimitExceededError,
+    )
+
+    db = MagicMock()
+    user = SimpleNamespace(id=7, username="admin")
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    service = MagicMock()
+    service.awg2_unblock.side_effect = TrafficLimitExceededError()
+
+    with patch.object(client_access, "_service", return_value=service):
+        with pytest.raises(HTTPException) as exc_info:
+            client_access.awg2_unblock(
+                client_access.BlockRequest(client_name="Ivan"),
+                request=request,
+                db=db,
+                user=user,
+            )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["error_code"] == TRAFFIC_LIMIT_EXCEEDED_CODE
+    assert "лимита трафика" in exc_info.value.detail["message"]
+
+
 def test_replicate_awg2_set_traffic_limit(db):
     owner = _make_owner(db)
     primary = _make_node(db, name="primary")

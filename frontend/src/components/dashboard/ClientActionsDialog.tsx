@@ -447,7 +447,8 @@ export default function ClientActionsDialog({
             key: 'unblock',
             label: 'Снять блокировку',
             icon: <Unlock size={14} />,
-            hidden: !canManage || !isBlocked || haReplicaReadonly,
+            // Like WG: hide for traffic_limit — operator clears limit instead
+            hidden: !canManage || !['temp', 'permanent'].includes(blockMode) || haReplicaReadonly,
             onClick: () =>
               runAction('unblock', async () => {
                 await awg2Unblock(config.client_name)

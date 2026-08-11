@@ -473,7 +473,15 @@ def awg2_perm_block(payload: BlockRequest, request: Request, db: Session = Depen
 
 @router.post("/amneziawg2/unblock")
 def awg2_unblock(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    result = _service(db).awg2_unblock(payload.client_name, actor=user.username)
+    try:
+        result = _service(db).awg2_unblock(payload.client_name, actor=user.username)
+    except TrafficLimitExceededError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": str(exc), "error_code": exc.error_code},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     log_action(
         db,
         action="awg2_unblock",
