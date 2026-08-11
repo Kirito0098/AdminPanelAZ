@@ -7,7 +7,7 @@ python-multipart==0.0.32
 pydantic-settings==2.14.2
 aiosqlite==0.22.1
 httpx==0.28.1
-cryptography==49.0.0
+cryptography==50.0.0
 qrcode[pil]==8.2
 Pillow==12.3.0
 psutil==7.2.2
