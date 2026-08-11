@@ -437,6 +437,45 @@ MCP: codebase-memory — wg_runtime, access_policy, lookup_geo_local; github —
 
 ---
 
+## Срез 4a — NOC + connection-history + TG
+
+| | |
+|--|--|
+| **Спек** | `docs/superpowers/specs/2026-08-11-az-awg2-noc-traffic-design.md` §4a |
+| **План** | `docs/superpowers/plans/2026-08-11-az-awg2-wave4a.md` |
+| **Режим** | **Subagent-Driven** |
+| **Next** | 4b — traffic collector + limits |
+
+### Промпт
+
+```text
+Реализуй срез AZ-AWG2 4a строго по спеку §4a и плану.
+
+Спек: docs/superpowers/specs/2026-08-11-az-awg2-noc-traffic-design.md
+План: docs/superpowers/plans/2026-08-11-az-awg2-wave4a.md
+
+Правила:
+- Только NOC overview, connection-history, TG NOC text/PNG. Без traffic collector/limits (это 4b).
+- Третий протокол amneziawg2 — не вливать в wireguard_peers / protocol_type=wireguard.
+- Toggle FEATURE_AWG2_ENABLED; not installed / adapter error → пустые peers, без 500.
+- MCP: codebase-memory — monitoring_overview, connection_history, noc_report; github при необходимости.
+- Коммиты — по SDD / явной просьбе.
+
+Выполняй через superpowers:subagent-driven-development — субагент на задачу плана, ревью между задачами.
+```
+
+### Проверка
+
+```bash
+cd /opt/AdminPanelAZ/backend && PYTHONPATH=. .venv/bin/pytest \
+  tests/test_awg2_noc.py tests/test_noc_report_awg2.py \
+  tests/test_connection_history*.py -q -k awg2
+cd /opt/AdminPanelAZ/frontend && npm run build
+# UI: awg2 on → фильтр/KPI/серия AWG 2.0; awg2 off → как pre-4a
+```
+
+---
+
 ## Чеклист «срез закрыт»
 
 - [ ] Все tasks плана `[x]` или явно отложены  
@@ -455,13 +494,15 @@ docs/superpowers/
 ├── specs/
 │   ├── 2026-08-10-az-awg2-epic.md
 │   ├── 2026-08-10-az-awg2-wave1a-design.md … wave3c-design.md
+│   ├── 2026-08-11-az-awg2-noc-traffic-design.md  (4a/4b)
 │   └── …
 └── plans/
-    ├── 2026-08-10-az-awg2-wave1a.md … wave2c.md
+    ├── 2026-08-10-az-awg2-wave1a.md … wave3c.md
+    ├── 2026-08-11-az-awg2-wave4a.md
     ├── 2026-08-10-az-awg2.md          (сниппеты волны 1)
     └── 2026-08-10-az-awg2-wave2.md    (сниппеты волны 2)
 ```
 
 ## Старт прямо сейчас
 
-Скопируй промпт **среза 1a** в новый Agent-чат (режим Agent, не Ask).
+Скопируй промпт **среза 4a** (или следующего незакрытого среза) в новый Agent-чат (режим Agent, не Ask).
