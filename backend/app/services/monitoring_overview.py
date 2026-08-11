@@ -517,6 +517,8 @@ def _aggregate_ha_openvpn_clients(
 def _aggregate_ha_wireguard_peers(
     peers: list[WireGuardPeer],
     ha_lookup: dict[_HaLookupKey, tuple[_AggregationKey, VpnConfigHaInfo]],
+    *,
+    protocol: str = VpnType.wireguard.value,
 ) -> list[WireGuardPeer]:
     grouped: dict[_AggregationKey, list[WireGuardPeer]] = {}
     ha_by_key: dict[_AggregationKey, VpnConfigHaInfo] = {}
@@ -525,7 +527,7 @@ def _aggregate_ha_wireguard_peers(
         agg_key, ha = _aggregation_key_for_client(
             node_id=peer.node_id,
             client_name=client_name,
-            protocol=VpnType.wireguard.value,
+            protocol=protocol,
             ha_lookup=ha_lookup,
         )
         grouped.setdefault(agg_key, []).append(peer)
@@ -557,39 +559,9 @@ def _aggregate_ha_amneziawg2_peers(
     peers: list[WireGuardPeer],
     ha_lookup: dict[_HaLookupKey, tuple[_AggregationKey, VpnConfigHaInfo]],
 ) -> list[WireGuardPeer]:
-    grouped: dict[_AggregationKey, list[WireGuardPeer]] = {}
-    ha_by_key: dict[_AggregationKey, VpnConfigHaInfo] = {}
-    for peer in peers:
-        client_name = (peer.client_name or "").strip() or peer.public_key
-        agg_key, ha = _aggregation_key_for_client(
-            node_id=peer.node_id,
-            client_name=client_name,
-            protocol=VpnType.amneziawg2.value,
-            ha_lookup=ha_lookup,
-        )
-        grouped.setdefault(agg_key, []).append(peer)
-        if ha:
-            ha_by_key[agg_key] = ha
-
-    aggregated: list[WireGuardPeer] = []
-    for agg_key, group_peers in grouped.items():
-        chosen = max(
-            group_peers,
-            key=lambda item: (
-                1 if _wg_is_online(item) else 0,
-                item.transfer_rx + item.transfer_tx,
-            ),
-        )
-        ha = ha_by_key.get(agg_key)
-        updates: dict = {"ha": ha}
-        if ha:
-            updates["active_node_id"] = chosen.node_id
-            updates["active_node_name"] = chosen.node_name
-            updates["ha_nodes"] = _ha_nodes_from_group(group_peers)
-            updates["node_id"] = chosen.node_id
-            updates["node_name"] = chosen.node_name
-        aggregated.append(chosen.model_copy(update=updates))
-    return aggregated
+    return _aggregate_ha_wireguard_peers(
+        peers, ha_lookup, protocol=VpnType.amneziawg2.value
+    )
 
 
 def _annotate_raw_ha_clients(
@@ -624,6 +596,8 @@ def _annotate_raw_ha_clients(
 def _annotate_raw_ha_peers(
     peers: list[WireGuardPeer],
     ha_lookup: dict[_HaLookupKey, tuple[_AggregationKey, VpnConfigHaInfo]],
+    *,
+    protocol: str = VpnType.wireguard.value,
 ) -> list[WireGuardPeer]:
     annotated: list[WireGuardPeer] = []
     for peer in peers:
@@ -631,7 +605,7 @@ def _annotate_raw_ha_peers(
         _agg_key, ha = _aggregation_key_for_client(
             node_id=peer.node_id,
             client_name=client_name,
-            protocol=VpnType.wireguard.value,
+            protocol=protocol,
             ha_lookup=ha_lookup,
         )
         updates: dict = {
@@ -655,30 +629,7 @@ def _annotate_raw_ha_amneziawg2_peers(
     peers: list[WireGuardPeer],
     ha_lookup: dict[_HaLookupKey, tuple[_AggregationKey, VpnConfigHaInfo]],
 ) -> list[WireGuardPeer]:
-    annotated: list[WireGuardPeer] = []
-    for peer in peers:
-        client_name = (peer.client_name or "").strip() or peer.public_key
-        _agg_key, ha = _aggregation_key_for_client(
-            node_id=peer.node_id,
-            client_name=client_name,
-            protocol=VpnType.amneziawg2.value,
-            ha_lookup=ha_lookup,
-        )
-        updates: dict = {
-            "ha": ha,
-            "active_node_id": peer.node_id,
-            "active_node_name": peer.node_name,
-        }
-        if ha and peer.node_id is not None:
-            updates["ha_nodes"] = [
-                HaNodePresence(
-                    node_id=peer.node_id,
-                    node_name=peer.node_name or f"node-{peer.node_id}",
-                    online=True,
-                )
-            ]
-        annotated.append(peer.model_copy(update=updates))
-    return annotated
+    return _annotate_raw_ha_peers(peers, ha_lookup, protocol=VpnType.amneziawg2.value)
 
 
 def build_federated_monitoring_overview(
