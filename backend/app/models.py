@@ -341,6 +341,8 @@ class AmneziaWg2AccessPolicy(Base):
     block_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     block_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     block_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    traffic_limit_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    traffic_limit_period_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

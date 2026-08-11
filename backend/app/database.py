@@ -285,6 +285,8 @@ def _migrate_awg2_access_policy_table() -> None:
                     block_started_at DATETIME,
                     block_days INTEGER,
                     block_until DATETIME,
+                    traffic_limit_bytes BIGINT,
+                    traffic_limit_period_days INTEGER,
                     updated_by VARCHAR(64),
                     updated_at DATETIME,
                     FOREIGN KEY(node_id) REFERENCES nodes (id),
@@ -866,6 +868,10 @@ def run_db_migrations() -> None:
     inspector = inspect(engine)
     migrations = {
         "wg_access_policy": [
+            ("traffic_limit_bytes", "BIGINT"),
+            ("traffic_limit_period_days", "INTEGER"),
+        ],
+        "amneziawg2_access_policies": [
             ("traffic_limit_bytes", "BIGINT"),
             ("traffic_limit_period_days", "INTEGER"),
         ],
