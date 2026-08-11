@@ -56,7 +56,6 @@ import {
 } from '@/lib/configCardViewPrefs'
 import { cn } from '@/lib/utils'
 import type {
-  ClientAccessPolicy,
   ClientPoliciesResponseEntry,
   ConfigTag,
   OpenVpnGroupOption,

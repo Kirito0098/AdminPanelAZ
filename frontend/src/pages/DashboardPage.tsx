@@ -70,7 +70,6 @@ import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { buildClientConnectionMap, type ClientConnectionMap } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
 import type {
-  ClientAccessPolicy,
   ClientTemplate,
   DashboardSummary,
   SelfServiceQuota,
