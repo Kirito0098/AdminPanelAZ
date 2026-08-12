@@ -132,12 +132,15 @@ export default function Configs() {
 
   const filteredConfigs = useMemo(
     () =>
-      configs.filter(
-        (config) =>
-          matchesProtocolFilter(config.vpn_type, protocol) &&
-          matchesSearchQuery(config.client_name, search) &&
-          matchesSearchQuery(config.owner_username || '', search),
-      ),
+      configs.filter((config) => {
+        if (!matchesProtocolFilter(config.vpn_type, protocol)) return false
+        const q = search.trim()
+        if (!q) return true
+        return (
+          matchesSearchQuery(config.client_name, q) ||
+          matchesSearchQuery(config.owner_username || '', q)
+        )
+      }),
     [configs, protocol, search],
   )
 
