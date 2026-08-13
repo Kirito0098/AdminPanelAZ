@@ -28,13 +28,10 @@ import {
   updateRetentionSettings,
 } from '@/api/client'
 import { getVpnServiceLabel } from '@/components/settings/settingsLabels'
-<<<<<<< HEAD
 import { SettingsCollapsible, SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
-=======
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { NodeStatusBadge } from '@/components/NodeSelector'
->>>>>>> feature/server-os-reboot
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -673,7 +670,6 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
             ))}
           </div>
 
-<<<<<<< HEAD
           <Button
             className="w-full"
             variant="destructive"
@@ -686,127 +682,93 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
           </Button>
         </CardContent>
       </Card>
-=======
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {SERVICES.map((s) => (
-                <button
-                  key={s}
+
+      <Card className="border-destructive/40 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base text-destructive">
+            <Power size={18} />
+            Перезагрузка сервера
+          </CardTitle>
+          <CardDescription>
+            Перезагрузка <strong>ОС</strong> выбранного VPN-узла — не путать с перезапуском панели или
+            VPN-службы
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {pendingReboot && (
+            <SettingsAlert variant="danger" title="Перезагрузка ОС запланирована">
+              <div className="space-y-2">
+                <p>
+                  Узел «{pendingReboot.node_name}» будет перезагружен через{' '}
+                  <strong>{rebootCountdownSec} с</strong>.
+                </p>
+                {pendingReboot.warning && (
+                  <p className="text-destructive">{pendingReboot.warning}</p>
+                )}
+                <Button
                   type="button"
-                  onClick={() => setService(s)}
+                  variant="outline"
+                  size="sm"
+                  disabled={rebootCancelling}
+                  onClick={() => void handleCancelReboot()}
+                >
+                  {rebootCancelling ? 'Отмена...' : 'Отменить перезагрузку'}
+                </Button>
+              </div>
+            </SettingsAlert>
+          )}
+
+          <div className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-muted-foreground">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-destructive" />
+            <span>
+              Сервер будет полностью перезагружен. Все службы на узле остановятся на время загрузки ОС.
+            </span>
+          </div>
+
+          {vpnNodes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">VPN-узлы не найдены</p>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {vpnNodes.map((node) => (
+                <button
+                  key={node.id}
+                  type="button"
+                  disabled={!!pendingReboot}
+                  onClick={() => setRebootNodeId(node.id)}
                   className={cn(
-                    'rounded-xl border px-3 py-2.5 text-left text-sm transition-all',
-                    service === s
+                    'rounded-lg border px-3 py-2.5 text-left text-sm transition-all',
+                    rebootNodeId === node.id
                       ? 'border-destructive bg-destructive/10 ring-1 ring-destructive/50'
                       : 'hover:border-muted-foreground/30 hover:bg-muted/40',
+                    pendingReboot && 'opacity-60',
                   )}
                 >
-                  <span className="font-medium">{getVpnServiceLabel(s)}</span>
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{node.name}</span>
+                    <NodeStatusBadge status={node.status} />
+                    {activeNode?.id === node.id && (
+                      <Badge variant="outline" className="text-[10px]">
+                        активный
+                      </Badge>
+                    )}
+                  </span>
                 </button>
               ))}
             </div>
+          )}
 
-            <Button
-              className="w-full"
-              variant="destructive"
-              size="lg"
-              disabled={!!busy}
-              onClick={() => run('restart', `Перезапуск ${service}...`, () => restartService(service))}
-            >
-              <ServerCrash size={18} />
-              {busy === 'restart' ? 'Перезапуск...' : `Перезапустить: ${getVpnServiceLabel(service)}`}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="overflow-hidden border-destructive/40 shadow-sm md:col-span-2">
-          <div className="h-1 bg-gradient-to-r from-destructive/90 to-destructive/30" />
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base text-destructive">
-              <Power size={18} />
-              Перезагрузка сервера
-            </CardTitle>
-            <CardDescription>
-              Перезагрузка <strong>ОС</strong> выбранного VPN-узла — не путать с перезапуском панели или
-              VPN-службы
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {pendingReboot && (
-              <SettingsAlert variant="danger" title="Перезагрузка ОС запланирована">
-                <div className="space-y-2">
-                  <p>
-                    Узел «{pendingReboot.node_name}» будет перезагружен через{' '}
-                    <strong>{rebootCountdownSec} с</strong>.
-                  </p>
-                  {pendingReboot.warning && (
-                    <p className="text-destructive">{pendingReboot.warning}</p>
-                  )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={rebootCancelling}
-                    onClick={() => void handleCancelReboot()}
-                  >
-                    {rebootCancelling ? 'Отмена...' : 'Отменить перезагрузку'}
-                  </Button>
-                </div>
-              </SettingsAlert>
-            )}
-
-            <div className="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs text-muted-foreground">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-destructive" />
-              <span>
-                Сервер будет полностью перезагружен. Все службы на узле остановятся на время загрузки ОС.
-              </span>
-            </div>
-
-            {vpnNodes.length === 0 ? (
-              <p className="text-sm text-muted-foreground">VPN-узлы не найдены</p>
-            ) : (
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {vpnNodes.map((node) => (
-                  <button
-                    key={node.id}
-                    type="button"
-                    disabled={!!pendingReboot}
-                    onClick={() => setRebootNodeId(node.id)}
-                    className={cn(
-                      'rounded-xl border px-3 py-2.5 text-left text-sm transition-all',
-                      rebootNodeId === node.id
-                        ? 'border-destructive bg-destructive/10 ring-1 ring-destructive/50'
-                        : 'hover:border-muted-foreground/30 hover:bg-muted/40',
-                      pendingReboot && 'opacity-60',
-                    )}
-                  >
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{node.name}</span>
-                      <NodeStatusBadge status={node.status} />
-                      {activeNode?.id === node.id && (
-                        <Badge variant="outline" className="text-[10px]">
-                          активный
-                        </Badge>
-                      )}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <Button
-              className="w-full"
-              variant="destructive"
-              size="lg"
-              disabled={!!busy || !!pendingReboot || rebootNodeId == null || rebootScheduling}
-              onClick={handleScheduleReboot}
-            >
-              <Power size={18} />
-              {rebootScheduling ? 'Планирование...' : 'Перезагрузить ОС сервера'}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
->>>>>>> feature/server-os-reboot
+          <Button
+            className="w-full"
+            variant="destructive"
+            size="lg"
+            disabled={!!busy || !!pendingReboot || rebootNodeId == null || rebootScheduling}
+            onClick={handleScheduleReboot}
+          >
+            <Power size={18} />
+            {rebootScheduling ? 'Планирование...' : 'Перезагрузить ОС сервера'}
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   )
 }
