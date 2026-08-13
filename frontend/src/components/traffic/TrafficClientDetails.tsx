@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   BarChart3,
   Clock,
   Gauge,
@@ -78,6 +81,48 @@ function formatLastSeen(value?: string | null) {
   return formatDateTime(value)
 }
 
+type SourceSortKey = 'sessions' | 'last_seen'
+type SourceSortDir = 'asc' | 'desc'
+
+function lastSeenTs(value?: string | null) {
+  if (!value) return 0
+  const ts = Date.parse(value)
+  return Number.isFinite(ts) ? ts : 0
+}
+
+function SourceSortIcon({ active, dir }: { active: boolean; dir: SourceSortDir }) {
+  if (!active) {
+    return <ArrowUpDown size={12} className="opacity-45" aria-hidden />
+  }
+  return dir === 'desc' ? (
+    <ArrowDown size={12} aria-hidden />
+  ) : (
+    <ArrowUp size={12} aria-hidden />
+  )
+}
+
+function compareSources(
+  a: TrafficClientSessions['by_source'][number],
+  b: TrafficClientSessions['by_source'][number],
+  sortKey: SourceSortKey,
+  sortDir: SourceSortDir,
+) {
+  const diff =
+    sortKey === 'sessions'
+      ? a.sessions_count - b.sessions_count
+      : lastSeenTs(a.last_seen_at) - lastSeenTs(b.last_seen_at)
+  if (diff !== 0) return sortDir === 'asc' ? diff : -diff
+  // Stable secondary key so equal primary values stay predictable.
+  if (sortKey === 'sessions') {
+    const byDate = lastSeenTs(b.last_seen_at) - lastSeenTs(a.last_seen_at)
+    if (byDate !== 0) return byDate
+  } else {
+    const bySessions = b.sessions_count - a.sessions_count
+    if (bySessions !== 0) return bySessions
+  }
+  return (a.client_ip || '').localeCompare(b.client_ip || '')
+}
+
 function sessionSummaryHint(sessions: TrafficClientSessions | null) {
   if (!sessions || sessions.total_sessions <= 0) return null
   const { total_sessions, unique_sources } = sessions
@@ -153,6 +198,8 @@ export default function TrafficClientDetails({
   const { isEnabled } = useFeatureModules()
   const showAwg2 = isEnabled('awg2')
   const [showInactiveSources, setShowInactiveSources] = useState(false)
+  const [sourceSortKey, setSourceSortKey] = useState<SourceSortKey>('last_seen')
+  const [sourceSortDir, setSourceSortDir] = useState<SourceSortDir>('desc')
   const [sessions, setSessions] = useState<TrafficClientSessions | null>(null)
   const [sessionsLoading, setSessionsLoading] = useState(false)
 
@@ -160,6 +207,8 @@ export default function TrafficClientDetails({
 
   useEffect(() => {
     setShowInactiveSources(false)
+    setSourceSortKey('last_seen')
+    setSourceSortDir('desc')
     setSessionsLoading(true)
     void getTrafficClientSessions(row.common_name, 1)
       .then(setSessions)
@@ -167,15 +216,31 @@ export default function TrafficClientDetails({
       .finally(() => setSessionsLoading(false))
   }, [row.common_name])
 
+  const toggleSourceSort = (key: SourceSortKey) => {
+    if (key === sourceSortKey) {
+      setSourceSortDir((prev) => (prev === 'desc' ? 'asc' : 'desc'))
+      return
+    }
+    setSourceSortKey(key)
+    setSourceSortDir('desc')
+  }
+
   const sessionHint = useMemo(() => sessionSummaryHint(sessions), [sessions])
 
+  // Active («Сейчас») always first; within each group sort by chosen column.
   const activeSources = useMemo(
-    () => sessions?.by_source.filter((source) => source.is_active) ?? [],
-    [sessions],
+    () =>
+      [...(sessions?.by_source.filter((source) => source.is_active) ?? [])].sort((a, b) =>
+        compareSources(a, b, sourceSortKey, sourceSortDir),
+      ),
+    [sessions, sourceSortKey, sourceSortDir],
   )
   const inactiveSources = useMemo(
-    () => sessions?.by_source.filter((source) => !source.is_active) ?? [],
-    [sessions],
+    () =>
+      [...(sessions?.by_source.filter((source) => !source.is_active) ?? [])].sort((a, b) =>
+        compareSources(a, b, sourceSortKey, sourceSortDir),
+      ),
+    [sessions, sourceSortKey, sourceSortDir],
   )
   const visibleSources = showInactiveSources
     ? [...activeSources, ...inactiveSources]
@@ -438,10 +503,44 @@ export default function TrafficClientDetails({
                 <TableHeader>
                   <TableRow>
                     <TableHead>Адрес клиента</TableHead>
-                    <TableHead className="text-right">Подключений</TableHead>
+                    <TableHead className="text-right">
+                      <button
+                        type="button"
+                        className={
+                          sourceSortKey === 'sessions'
+                            ? 'inline-flex items-center justify-end gap-1 text-foreground underline-offset-2 transition-colors hover:underline'
+                            : 'inline-flex items-center justify-end gap-1 text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline'
+                        }
+                        onClick={() => toggleSourceSort('sessions')}
+                        title="Сортировать по числу подключений"
+                      >
+                        Подключений
+                        <SourceSortIcon
+                          active={sourceSortKey === 'sessions'}
+                          dir={sourceSortDir}
+                        />
+                      </button>
+                    </TableHead>
                     <TableHead className="text-right">Трафик</TableHead>
                     <TableHead>{COL_VPN_IP}</TableHead>
-                    <TableHead>Последний раз</TableHead>
+                    <TableHead>
+                      <button
+                        type="button"
+                        className={
+                          sourceSortKey === 'last_seen'
+                            ? 'inline-flex items-center gap-1 text-foreground underline-offset-2 transition-colors hover:underline'
+                            : 'inline-flex items-center gap-1 text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline'
+                        }
+                        onClick={() => toggleSourceSort('last_seen')}
+                        title="Сортировать по дате"
+                      >
+                        Последний раз
+                        <SourceSortIcon
+                          active={sourceSortKey === 'last_seen'}
+                          dir={sourceSortDir}
+                        />
+                      </button>
+                    </TableHead>
                     <TableHead>Статус</TableHead>
                   </TableRow>
                 </TableHeader>
