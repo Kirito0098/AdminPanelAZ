@@ -72,6 +72,7 @@ sudo systemctl restart adminpanelaz
 | routing | Маршрутизация, CIDR |
 | antizapret_config | Конфиг AntiZapret |
 | warper | AZ-WARP |
+| awg2 | AZ-AWG2 (AmneziaWG 2.0); см. [awg2](../awg2.md) |
 | telegram | Раздел Telegram |
 | edit_files | Редактор файлов |
 | server_monitor | Страница «Сервер» |

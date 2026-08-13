@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   Server,
   Settings,
+  Shield,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
@@ -16,6 +17,7 @@ export interface MiniTabItem {
   shortLabel?: string
   icon: LucideIcon
   end?: boolean
+  featureKey?: string
 }
 
 const USER_TABS: MiniTabItem[] = [
@@ -28,6 +30,7 @@ const ADMIN_TABS: MiniTabItem[] = [
   { to: '/configs', label: 'Конфиги', icon: FileKey },
   { to: '/nodes', label: 'Узлы', icon: Server },
   { to: '/warper', label: 'WARP', icon: Cloud },
+  { to: '/awg2', label: 'AWG 2.0', icon: Shield, featureKey: 'awg2' },
   { to: '/cidr', label: 'CIDR', icon: Database },
   { to: '/settings', label: 'Настройки', shortLabel: 'Настр.', icon: Settings },
 ]
@@ -38,14 +41,22 @@ function hapticSelect() {
 
 interface MiniBottomNavProps {
   isAdmin: boolean
+  features?: Record<string, boolean>
 }
 
-export function miniTabsForRole(isAdmin: boolean): MiniTabItem[] {
-  return isAdmin ? ADMIN_TABS : USER_TABS
+export function miniTabsForRole(
+  isAdmin: boolean,
+  features?: Record<string, boolean>,
+): MiniTabItem[] {
+  const tabs = isAdmin ? ADMIN_TABS : USER_TABS
+  return tabs.filter((tab) => {
+    if (!tab.featureKey) return true
+    return Boolean(features?.[tab.featureKey])
+  })
 }
 
-export default function MiniBottomNav({ isAdmin }: MiniBottomNavProps) {
-  const tabs = miniTabsForRole(isAdmin)
+export default function MiniBottomNav({ isAdmin, features }: MiniBottomNavProps) {
+  const tabs = miniTabsForRole(isAdmin, features)
   const compact = tabs.length > 3
 
   return (

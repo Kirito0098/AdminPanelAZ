@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_password_hash, verify_password
 from app.config import get_settings
 from app.models import (
+    AmneziaWg2AccessPolicy,
     AlertRule,
     AppSetting,
     ClientTemplate,
@@ -270,6 +271,12 @@ def get_node_antizapret_path(db: Session) -> Path:
 
 
 def purge_node_related(db: Session, node_id: int) -> None:
+    # Clear proxy→VPN ownership links before deleting the VPN (or proxy) node.
+    db.query(Node).filter(Node.linked_vpn_node_id == node_id).update(
+        {Node.linked_vpn_node_id: None},
+        synchronize_session=False,
+    )
+
     config_ids = [
         row[0] for row in db.query(VpnConfig.id).filter(VpnConfig.node_id == node_id).all()
     ]
@@ -285,6 +292,7 @@ def purge_node_related(db: Session, node_id: int) -> None:
         UserTrafficStatProtocol,
         WgAccessPolicy,
         OpenVpnAccessPolicy,
+        AmneziaWg2AccessPolicy,
         NodeResourceSample,
         UserTrafficSample,
         ConnectionCountSample,

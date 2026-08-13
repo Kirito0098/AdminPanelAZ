@@ -50,6 +50,19 @@ function buildProfileDownloadFilename(
   if (protocol === 'amneziawg') {
     return `AWG-${profilePrefix}-${safeName}.conf`
   }
+  if (protocol === 'amneziawg2') {
+    const pathName = (file.path.split('/').pop() || '').toLowerCase()
+    if (pathName.endsWith('-am.conf') || pathName.endsWith('.conf')) {
+      return `AWG2-${profilePrefix}-${safeName}.conf`
+    }
+    if (pathName.endsWith('.vpn')) {
+      return `AWG2-${profilePrefix}-${safeName}.vpn`
+    }
+    if (pathName.includes('vpnuri') || pathName.endsWith('.txt')) {
+      return `AWG2-${profilePrefix}-${safeName}-vpnuri.txt`
+    }
+    return file.path.split('/').pop() || `AWG2-${profilePrefix}-${safeName}.conf`
+  }
 
   const fallback = file.path.split('/').pop()
   return fallback || `${profilePrefix}-${safeName}.txt`

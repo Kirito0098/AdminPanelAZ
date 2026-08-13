@@ -105,6 +105,7 @@ def upsert_shadow_config(
         existing.sync_group_id = group.id
         existing.ha_primary_config_id = primary_config.id
         existing.cert_expires_at = primary_config.cert_expires_at
+        existing.expires_at = primary_config.expires_at
         return existing
 
     shadow = VpnConfig(
@@ -114,6 +115,7 @@ def upsert_shadow_config(
         owner_id=primary_config.owner_id,
         cert_expire_days=primary_config.cert_expire_days,
         cert_expires_at=primary_config.cert_expires_at,
+        expires_at=primary_config.expires_at,
         description=primary_config.description,
         sync_group_id=group.id,
         ha_primary_config_id=primary_config.id,
@@ -134,6 +136,8 @@ def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, 
                 primary_adapter,
                 adapter,
                 primary_config.vpn_type,
+                db=db,
+                replica_node=replica_node,
                 client_name=primary_config.client_name,
             )
         except Exception as exc:
@@ -180,6 +184,8 @@ def _handle_client_delete(db: Session, group: NodeSyncGroup, payload: dict[str, 
                 primary_adapter,
                 adapter,
                 shadow.vpn_type,
+                db=db,
+                replica_node=replica_node,
             )
         except Exception as exc:
             logger.warning(

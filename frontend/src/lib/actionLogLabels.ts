@@ -53,6 +53,10 @@ const ACTION_LOG_LABELS: Record<string, string> = {
   wg_traffic_limit_set: 'Установка лимита трафика WireGuard',
   wg_traffic_limit_clear: 'Снятие лимита трафика WireGuard',
 
+  // AmneziaWG 2.0 — клиенты
+  awg2_traffic_limit_set: 'Установка лимита трафика AmneziaWG 2.0',
+  awg2_traffic_limit_clear: 'Снятие лимита трафика AmneziaWG 2.0',
+
   // Уведомления (внутренние коды блокировок)
   temp_block: 'Временная блокировка',
   permanent_block: 'Постоянная блокировка',
@@ -86,6 +90,9 @@ const ACTION_LOG_LABELS: Record<string, string> = {
   settings_user_password_update: 'Изменение пароля пользователя',
   settings_user_role_update: 'Изменение роли пользователя',
   settings_run_doall: 'Перегенерация конфигурации VPN',
+  settings_reboot_schedule: 'Планирование перезагрузки ОС',
+  settings_reboot_cancel: 'Отмена перезагрузки ОС',
+  settings_reboot_execute: 'Перезагрузка ОС сервера',
   settings_recreate_profiles: 'Пересоздание профилей',
   settings_vpn_network_publish: 'Публикация панели (адрес и HTTPS)',
   settings_public_download_toggle: 'Переключение публичного скачивания',

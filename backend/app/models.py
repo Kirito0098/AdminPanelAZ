@@ -17,6 +17,7 @@ class UserRole(str, enum.Enum):
 class VpnType(str, enum.Enum):
     openvpn = "openvpn"
     wireguard = "wireguard"
+    amneziawg2 = "amneziawg2"
 
 
 DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
@@ -135,6 +136,7 @@ class VpnConfig(Base):
     # Validity the certificate was issued for; `cert_expires_at` is the real notAfter (naive UTC).
     cert_expire_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cert_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sync_group_id: Mapped[int | None] = mapped_column(ForeignKey("node_sync_groups.id"), nullable=True, index=True)
     ha_primary_config_id: Mapped[int | None] = mapped_column(ForeignKey("vpn_configs.id"), nullable=True, index=True)
@@ -218,7 +220,10 @@ class NodeSyncGroup(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(128))
+    # OpenVPN host (OPENVPN_HOST); also the legacy single shared domain for badges/DNS.
     shared_domain: Mapped[str] = mapped_column(String(255))
+    # WireGuard/AmneziaWG host (WIREGUARD_HOST). Empty → same as shared_domain.
+    shared_domain_wireguard: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     primary_node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     replica_node_ids: Mapped[str] = mapped_column(Text, default="[]")
     sync_mode: Mapped[str] = mapped_column(String(32), default="manual_full")
@@ -311,6 +316,25 @@ class WgAccessPolicy(Base):
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     client_name: Mapped[str] = mapped_column(String(64), index=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_temp_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_permanent_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    block_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    block_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    block_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    block_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    traffic_limit_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    traffic_limit_period_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AmneziaWg2AccessPolicy(Base):
+    __tablename__ = "amneziawg2_access_policies"
+    __table_args__ = (UniqueConstraint("node_id", "client_name", name="uq_awg2_access_node_client"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    client_name: Mapped[str] = mapped_column(String(64), index=True)
     is_temp_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     is_permanent_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     block_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -417,6 +441,7 @@ class ConnectionCountSample(Base):
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     openvpn_count: Mapped[int] = mapped_column(Integer, default=0)
     wireguard_count: Mapped[int] = mapped_column(Integer, default=0)
+    amneziawg2_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 

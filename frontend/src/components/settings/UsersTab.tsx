@@ -11,6 +11,7 @@ import {
   UserPlus,
   Users,
   EyeOff,
+  X,
 } from 'lucide-react'
 import { ApiError, getConfigs, getUserConfigAccess, getUserVpnVisibilityDefault, setUserConfigAccess, setUserVpnVisibilityDefault, updateUser } from '@/api/client'
 import AppDialog from '@/components/shared/AppDialog'
@@ -44,6 +45,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useNotifications } from '@/context/NotificationContext'
+import { SettingsCollapsible, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { ROLE_HINTS, ROLE_LABELS } from '@/components/settings/settingsLabels'
 import { cn } from '@/lib/utils'
 import type { User as PanelUser, UserRole, VisibleVpnProfilesPolicy, VpnConfig } from '@/types'
@@ -66,99 +68,47 @@ const ROLE_OPTIONS: { id: UserRole; icon: LucideIcon }[] = [
   { id: 'admin', icon: Shield },
 ]
 
-function SectionHeading({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="md:col-span-2">
-      <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-      <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-    </div>
-  )
-}
-
-function MetricPill({
-  icon: Icon,
-  label,
-  value,
-  tone = 'default',
-}: {
-  icon: LucideIcon
-  label: string
-  value: string
-  tone?: 'default' | 'success' | 'muted'
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 shadow-sm backdrop-blur-sm">
-      <div
-        className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-          tone === 'success' && 'bg-primary/15 text-primary',
-          tone === 'muted' && 'bg-muted text-muted-foreground',
-          tone === 'default' && 'bg-muted/80 text-foreground',
-        )}
-      >
-        <Icon size={18} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="truncate text-sm font-semibold">{value}</p>
-      </div>
-    </div>
-  )
-}
-
 function RoleBadge({ role }: { role: UserRole }) {
   return (
     <Badge
       variant={role === 'admin' ? 'default' : 'secondary'}
-      className="shrink-0"
+      className="shrink-0 text-[10px] font-medium"
     >
       {ROLE_LABELS[role] ?? role}
     </Badge>
   )
 }
 
-function UserAvatar({ username }: { username: string }) {
+function StatusBadge({ active }: { active: boolean }) {
+  return (
+    <Badge variant={active ? 'success' : 'destructive'} className="shrink-0 text-[10px] font-medium">
+      {active ? 'Активен' : 'Отключён'}
+    </Badge>
+  )
+}
+
+function UserAvatar({ username, size = 'md' }: { username: string; size?: 'sm' | 'md' }) {
   const letter = (username.trim()[0] || '?').toUpperCase()
   return (
-    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-sm font-semibold text-primary">
+    <div
+      className={cn(
+        'flex shrink-0 items-center justify-center rounded-lg bg-primary/15 font-semibold text-primary',
+        size === 'sm' ? 'h-8 w-8 text-xs' : 'h-9 w-9 text-sm',
+      )}
+    >
       {letter}
     </div>
   )
 }
 
 function UserMetaLine({ user }: { user: PanelUser }) {
+  const bits: string[] = [`ID ${user.id}`]
+  if (user.role === 'user' && user.can_create_configs === false) bits.push('Создание выкл.')
+  if (user.role === 'user' && user.config_quota != null && user.config_quota > 0) {
+    bits.push(`Квота ${user.config_quota}`)
+  }
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-      <span>ID {user.id}</span>
-      {user.telegram_id ? (
-        <span className="font-mono">TG {user.telegram_id}</span>
-      ) : (
-        <span>Telegram не привязан</span>
-      )}
-      {user.role === 'user' && user.can_create_configs === false && (
-        <span>Создание выключено</span>
-      )}
-      {user.role === 'user' && user.config_quota != null && user.config_quota > 0 && (
-        <span>Квота: {user.config_quota}</span>
-      )}
-    </div>
-  )
-}
-
-function UserNameLine({ user, currentUserId }: { user: PanelUser; currentUserId?: number }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="font-medium">{user.username}</span>
-      {user.id === currentUserId && (
-        <Badge variant="default" className="text-[10px]">
-          вы
-        </Badge>
-      )}
-      <RoleBadge role={user.role} />
-      <Badge variant={user.is_active ? 'success' : 'destructive'} className="text-[10px]">
-        {user.is_active ? 'Активен' : 'Отключён'}
-      </Badge>
-    </div>
+    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{bits.join(' · ')}</p>
   )
 }
 
@@ -174,40 +124,50 @@ function UserCard({
   onDelete: () => void
 }) {
   return (
-    <Card className="p-4">
+    <div className="rounded-lg border bg-card px-3 py-3">
       <div className="flex items-start gap-3">
-        <UserAvatar username={user.username} />
+        <UserAvatar username={user.username} size="sm" />
         <div className="min-w-0 flex-1">
-          <UserNameLine user={user} currentUserId={currentUserId} />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-sm font-medium">{user.username}</span>
+            {user.id === currentUserId && (
+              <Badge variant="outline" className="text-[10px]">
+                вы
+              </Badge>
+            )}
+            <RoleBadge role={user.role} />
+            <StatusBadge active={user.is_active} />
+          </div>
           <UserMetaLine user={user} />
+          <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+            {user.telegram_id ? `TG ${user.telegram_id}` : 'Telegram не привязан'}
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-1">
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit} aria-label="Изменить">
+            <Pencil size={14} />
+          </Button>
+          {user.id !== currentUserId ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Ещё">
+                  <MoreHorizontal size={14} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={onDelete}
+                >
+                  <Trash2 size={14} />
+                  Удалить
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={onEdit}>
-          <Pencil size={14} />
-          Изменить
-        </Button>
-        {user.id !== currentUserId ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <MoreHorizontal size={14} />
-                Ещё
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                className="text-destructive focus:text-destructive"
-                onClick={onDelete}
-              >
-                <Trash2 size={14} />
-                Удалить
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
-      </div>
-    </Card>
+    </div>
   )
 }
 
@@ -229,8 +189,12 @@ export default function UsersTab({
   const [draftGroups, setDraftGroups] = useState<string[]>([])
   const [accessLoading, setAccessLoading] = useState(false)
   const [search, setSearch] = useState('')
+  const [userQuery, setUserQuery] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
+  const [policyOpen, setPolicyOpen] = useState(false)
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [activeEditor, setActiveEditor] = useState<PanelUser | null>(null)
+  const [draftRole, setDraftRole] = useState<UserRole>('user')
   const [draftTelegramId, setDraftTelegramId] = useState('')
   const [draftConfigQuota, setDraftConfigQuota] = useState('')
   const [draftCanCreate, setDraftCanCreate] = useState(true)
@@ -276,6 +240,21 @@ export default function UsersTab({
     }),
     [usersList],
   )
+
+  const filteredUsers = useMemo(() => {
+    const q = userQuery.trim().toLowerCase()
+    if (!q) return usersList
+    return usersList.filter((u) => {
+      const tg = (u.telegram_id || '').toLowerCase()
+      const role = (ROLE_LABELS[u.role] || u.role).toLowerCase()
+      return (
+        u.username.toLowerCase().includes(q) ||
+        tg.includes(q) ||
+        role.includes(q) ||
+        String(u.id).includes(q)
+      )
+    })
+  }, [usersList, userQuery])
 
   const clientEntries = useMemo(() => {
     const byName = new Map<
@@ -354,8 +333,21 @@ export default function UsersTab({
     }
   }, [notifyError])
 
+  const loadUserConfigAccess = async (userId: number) => {
+    setAccessLoading(true)
+    try {
+      const data = await getUserConfigAccess(userId)
+      setDraftGroups(data.config_groups)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить доп. доступ')
+    } finally {
+      setAccessLoading(false)
+    }
+  }
+
   const openUserEditor = async (user: PanelUser) => {
     setActiveEditor(user)
+    setDraftRole(user.role)
     setDraftTelegramId(user.telegram_id || '')
     setDraftConfigQuota(
       user.config_quota != null && user.config_quota > 0 ? String(user.config_quota) : '',
@@ -370,15 +362,14 @@ export default function UsersTab({
     setSearch('')
     setOwnerFilter('all')
     if (user.role === 'user') {
-      setAccessLoading(true)
-      try {
-        const data = await getUserConfigAccess(user.id)
-        setDraftGroups(data.config_groups)
-      } catch (err) {
-        notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить доп. доступ')
-      } finally {
-        setAccessLoading(false)
-      }
+      await loadUserConfigAccess(user.id)
+    }
+  }
+
+  const changeDraftRole = (role: UserRole) => {
+    setDraftRole(role)
+    if (role === 'user' && activeEditor && activeEditor.role === 'admin') {
+      void loadUserConfigAccess(activeEditor.id)
     }
   }
 
@@ -406,8 +397,11 @@ export default function UsersTab({
     if (!activeEditor) return
     setSavingUser(true)
     try {
-      const payload: Record<string, unknown> = { telegram_id: draftTelegramId.trim() }
-      if (activeEditor.role === 'user') {
+      const payload: Record<string, unknown> = {
+        telegram_id: draftTelegramId.trim(),
+        role: draftRole,
+      }
+      if (draftRole === 'user') {
         payload.can_create_configs = draftCanCreate
         const raw = draftConfigQuota.trim()
         payload.config_quota = raw === '' ? 0 : Number.parseInt(raw, 10)
@@ -420,7 +414,7 @@ export default function UsersTab({
           : null
       }
       const updated = await updateUser(activeEditor.id, payload)
-      if (activeEditor.role === 'user') {
+      if (draftRole === 'user') {
         await setUserConfigAccess(activeEditor.id, draftGroups)
       }
       setUsersList((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
@@ -435,50 +429,71 @@ export default function UsersTab({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 md:items-start">
-        <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card p-4 md:col-span-2">
-          <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/10 blur-2xl" />
-          <div className="relative grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricPill icon={Users} label="Всего" value={String(stats.total)} tone={stats.total > 0 ? 'default' : 'muted'} />
-            <MetricPill
-              icon={Shield}
-              label="Администраторы"
-              value={String(stats.admins)}
-              tone={stats.admins > 0 ? 'success' : 'muted'}
-            />
-            <MetricPill
-              icon={User}
-              label="Пользователи"
-              value={String(stats.regular)}
-              tone={stats.regular > 0 ? 'default' : 'muted'}
-            />
-            <MetricPill
-              icon={User}
-              label="Активных"
-              value={String(stats.active)}
-              tone={stats.active > 0 ? 'success' : 'muted'}
-            />
-          </div>
-        </div>
+      <SettingsToolbar
+        title="Учётные записи"
+        count={stats.total}
+        meta={`${stats.admins} админ. · ${stats.regular} польз. · ${stats.active} активных`}
+        actions={
+          <>
+            <div className="relative w-full sm:w-64">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={userQuery}
+                onChange={(e) => setUserQuery(e.target.value)}
+                placeholder="Поиск: логин, роль, Telegram…"
+                className="h-9 pl-9"
+                aria-label="Поиск пользователей"
+              />
+              {userQuery ? (
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  onClick={() => setUserQuery('')}
+                  aria-label="Очистить поиск"
+                >
+                  <X size={14} />
+                </button>
+              ) : null}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="h-9 shrink-0 gap-1.5"
+              onClick={() => setCreateOpen((v) => !v)}
+              aria-expanded={createOpen}
+            >
+              <UserPlus size={15} />
+              Добавить
+            </Button>
+          </>
+        }
+      />
 
-        <SectionHeading
-          title="Новая учётная запись"
-          description="Логин, пароль и уровень доступа к панели"
-        />
-
-        <Card className="overflow-hidden shadow-sm md:col-span-2">
-          <div className="h-1 bg-gradient-to-r from-primary/80 to-primary/15" />
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <UserPlus size={18} />
-              Создать пользователя
-            </CardTitle>
-            <CardDescription>Добавьте учётную запись с нужной ролью</CardDescription>
+      {createOpen ? (
+        <Card className="border-primary/25 shadow-sm">
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <UserPlus size={16} />
+                Новый пользователь
+              </CardTitle>
+              <CardDescription className="mt-1">Логин, пароль и роль доступа к панели</CardDescription>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              onClick={() => setCreateOpen(false)}
+              aria-label="Скрыть форму"
+            >
+              <X size={16} />
+            </Button>
           </CardHeader>
           <CardContent>
-            <form noValidate onSubmit={onCreateUser} className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <div className="space-y-2">
+            <form noValidate onSubmit={onCreateUser} className="space-y-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto_auto] lg:items-end">
+                <div className="space-y-1.5">
                   <Label htmlFor="newUsername">Логин</Label>
                   <Input
                     id="newUsername"
@@ -486,9 +501,11 @@ export default function UsersTab({
                     onChange={(e) => onNewUsernameChange(e.target.value)}
                     placeholder="username"
                     autoComplete="off"
+                    className="h-9"
+                    autoFocus
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <Label htmlFor="newPassword">Пароль</Label>
                   <Input
                     id="newPassword"
@@ -496,192 +513,180 @@ export default function UsersTab({
                     value={newPassword}
                     onChange={(e) => onNewPasswordChange(e.target.value)}
                     autoComplete="new-password"
+                    className="h-9"
                   />
                 </div>
-                <div className="flex items-end">
-                  <Button type="submit" className="w-full sm:w-auto">
-                    <UserPlus size={16} />
-                    Добавить
-                  </Button>
+                <div className="space-y-1.5">
+                  <Label htmlFor="newRole">Роль</Label>
+                  <select
+                    id="newRole"
+                    value={newRole}
+                    onChange={(e) => onNewRoleChange(e.target.value as UserRole)}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 sm:min-w-[10rem]"
+                  >
+                    {ROLE_OPTIONS.map(({ id }) => (
+                      <option key={id} value={id}>
+                        {ROLE_LABELS[id]}
+                      </option>
+                    ))}
+                  </select>
                 </div>
+                <Button type="submit" size="sm" className="h-9 gap-1.5">
+                  <UserPlus size={15} />
+                  Создать
+                </Button>
               </div>
-
-              <div className="space-y-2 rounded-xl border bg-muted/20 p-4">
-                <Label>Роль</Label>
-                <div className="flex flex-wrap gap-2">
-                  {ROLE_OPTIONS.map(({ id, icon: Icon }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => onNewRoleChange(id)}
-                      className={cn(
-                        'inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-all',
-                        newRole === id
-                          ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
-                          : 'hover:border-muted-foreground/30 hover:bg-muted/50',
-                      )}
-                    >
-                      <Icon size={14} />
-                      {ROLE_LABELS[id]}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs leading-relaxed text-muted-foreground">{ROLE_HINTS[newRole]}</p>
-              </div>
+              <p className="text-xs text-muted-foreground">{ROLE_HINTS[newRole]}</p>
             </form>
           </CardContent>
         </Card>
+      ) : null}
 
-        <SectionHeading
-          title="Умолчание видимости профилей"
-          description="Какие варианты VPN видят обычные пользователи без персонального исключения"
-        />
-
-        <Card className="overflow-hidden shadow-sm md:col-span-2">
-          <div className="h-1 bg-gradient-to-r from-emerald-500/70 to-emerald-500/15" />
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <EyeOff size={18} />
-              Каталог профилей по умолчанию
-            </CardTitle>
-            <CardDescription>
-              Маршруты AZ/VPN, группы OpenVPN и протоколы для всех пользователей с ролью «Пользователь»
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {defaultPolicyLoading ? (
-              <Spinner label="Загрузка политики..." className="py-6" />
-            ) : (
-              <>
-                <VpnVisibilityPolicyEditor value={defaultPolicy} onChange={setDefaultPolicy} />
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    onClick={() => void saveDefaultVisibility()}
-                    disabled={savingDefaultPolicy}
-                  >
-                    <Save size={16} />
-                    {savingDefaultPolicy ? 'Сохранение...' : 'Сохранить умолчание'}
-                  </Button>
-                  {isVisibleVpnPolicyEmpty(defaultPolicy) && (
-                    <span className="text-xs text-amber-700 dark:text-amber-300">
-                      Пустой каталог — пользователи не увидят профили
-                    </span>
-                  )}
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        <SectionHeading
-          title="Учётные записи"
-          description={
-            usersList.length > 0
-              ? `${usersList.length} пользовател${usersList.length === 1 ? 'ь' : usersList.length < 5 ? 'я' : 'ей'} в системе`
-              : 'Список пуст — создайте первого пользователя'
-          }
-        />
-
-        <Card className="overflow-hidden shadow-sm md:col-span-2">
-          <div className="h-1 bg-gradient-to-r from-sky-500/70 to-sky-500/15" />
-          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Users size={18} />
-                Список пользователей
-              </CardTitle>
-              <CardDescription className="mt-1.5">Редактирование Telegram ID и управление доступом</CardDescription>
-            </div>
-            {usersList.length > 0 && (
-              <Badge variant="secondary" className="shrink-0">
-                {usersList.length}
-              </Badge>
-            )}
-          </CardHeader>
-          <CardContent>
-            {usersList.length === 0 ? (
-              <EmptyState
-                icon={Users}
-                title="Нет пользователей"
-                description="Создайте первую учётную запись с помощью формы выше"
-                className="py-8"
-              />
-            ) : (
-              <ResponsiveDataView
-                mobile={usersList.map((u) => (
-                  <UserCard
-                    key={u.id}
-                    user={u}
-                    currentUserId={currentUserId}
-                    onEdit={() => void openUserEditor(u)}
-                    onDelete={() => onDeleteUser(u.id, u.username)}
-                  />
-                ))}
-                desktop={
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Пользователь</TableHead>
-                        <TableHead>Роль</TableHead>
-                        <TableHead>Telegram</TableHead>
-                        <TableHead className="text-right">Действия</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {usersList.map((u) => (
-                        <TableRow key={u.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-3">
-                              <UserAvatar username={u.username} />
-                              <div className="min-w-0">
-                                <UserNameLine user={u} currentUserId={currentUserId} />
-                                <UserMetaLine user={u} />
+      <Card className="shadow-sm">
+        <CardContent className="p-0 pt-0">
+          {usersList.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title="Нет пользователей"
+              description="Нажмите «Добавить», чтобы создать первую учётную запись"
+              className="py-10"
+            />
+          ) : filteredUsers.length === 0 ? (
+            <EmptyState
+              icon={Search}
+              title="Ничего не найдено"
+              description={`Нет совпадений для «${userQuery.trim()}»`}
+              className="py-10"
+            />
+          ) : (
+            <ResponsiveDataView
+              mobile={filteredUsers.map((u) => (
+                <UserCard
+                  key={u.id}
+                  user={u}
+                  currentUserId={currentUserId}
+                  onEdit={() => void openUserEditor(u)}
+                  onDelete={() => onDeleteUser(u.id, u.username)}
+                />
+              ))}
+              desktop={
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="h-10 pl-4">Пользователь</TableHead>
+                      <TableHead className="h-10">Статус</TableHead>
+                      <TableHead className="h-10">Роль</TableHead>
+                      <TableHead className="h-10">Telegram</TableHead>
+                      <TableHead className="h-10 pr-4 text-right"> </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredUsers.map((u) => (
+                      <TableRow key={u.id} className="group">
+                        <TableCell className="py-2.5 pl-4">
+                          <div className="flex items-center gap-2.5">
+                            <UserAvatar username={u.username} size="sm" />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="truncate text-sm font-medium">{u.username}</span>
+                                {u.id === currentUserId ? (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    вы
+                                  </Badge>
+                                ) : null}
                               </div>
+                              <UserMetaLine user={u} />
                             </div>
-                          </TableCell>
-                          <TableCell>
-                            <RoleBadge role={u.role} />
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {u.telegram_id || '—'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex flex-wrap justify-end gap-1">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="gap-1.5"
-                                onClick={() => void openUserEditor(u)}
-                              >
-                                <Pencil size={14} />
-                                Изменить
-                              </Button>
-                              {u.id !== currentUserId && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
-                                  onClick={() => onDeleteUser(u.id, u.username)}
-                                >
-                                  <Trash2 size={14} />
-                                  Удалить
-                                </Button>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                }
-                mobileClassName="space-y-3"
-                desktopClassName="overflow-x-auto rounded-md border"
-              />
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-2.5">
+                          <StatusBadge active={u.is_active} />
+                        </TableCell>
+                        <TableCell className="py-2.5">
+                          <RoleBadge role={u.role} />
+                        </TableCell>
+                        <TableCell className="py-2.5 font-mono text-xs text-muted-foreground">
+                          {u.telegram_id || '—'}
+                        </TableCell>
+                        <TableCell className="py-2.5 pr-3 text-right">
+                          <div className="flex justify-end gap-0.5 opacity-80 transition-opacity group-hover:opacity-100">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => void openUserEditor(u)}
+                              aria-label={`Изменить ${u.username}`}
+                            >
+                              <Pencil size={14} />
+                            </Button>
+                            {u.id !== currentUserId ? (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    aria-label={`Действия ${u.username}`}
+                                  >
+                                    <MoreHorizontal size={14} />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={() => onDeleteUser(u.id, u.username)}
+                                  >
+                                    <Trash2 size={14} />
+                                    Удалить
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              }
+              mobileClassName="space-y-2 p-3"
+              desktopClassName="overflow-x-auto"
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      <SettingsCollapsible
+        open={policyOpen}
+        onOpenChange={setPolicyOpen}
+        title="Видимость VPN-профилей по умолчанию"
+        description="Что видят обычные пользователи без персонального исключения"
+        icon={<EyeOff size={16} />}
+      >
+        {defaultPolicyLoading ? (
+          <Spinner label="Загрузка политики..." className="py-4" />
+        ) : (
+          <>
+            <VpnVisibilityPolicyEditor value={defaultPolicy} onChange={setDefaultPolicy} />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void saveDefaultVisibility()}
+                disabled={savingDefaultPolicy}
+              >
+                <Save size={15} />
+                {savingDefaultPolicy ? 'Сохранение...' : 'Сохранить умолчание'}
+              </Button>
+              {isVisibleVpnPolicyEmpty(defaultPolicy) && (
+                <span className="text-xs text-amber-700 dark:text-amber-300">
+                  Пустой каталог — пользователи не увидят профили
+                </span>
+              )}
+            </div>
+          </>
+        )}
+      </SettingsCollapsible>
 
       <AppDialog
         open={activeEditor !== null}
@@ -689,7 +694,7 @@ export default function UsersTab({
           if (!open && !savingUser) setActiveEditor(null)
         }}
         title={activeEditor ? `Пользователь: ${activeEditor.username}` : 'Пользователь'}
-        description="Права доступа, квота и видимость VPN-профилей"
+        description="Роль, права доступа, квота и видимость VPN-профилей"
         icon={Users}
         size="xl"
         bodyClassName="px-5 py-4"
@@ -712,13 +717,37 @@ export default function UsersTab({
               <div className="min-w-0">
                 <p className="font-medium leading-tight">{activeEditor.username}</p>
                 <div className="mt-1">
-                  <RoleBadge role={activeEditor.role} />
+                  <RoleBadge role={draftRole} />
                 </div>
               </div>
             </div>
           )}
 
-          {activeEditor?.role === 'user' ? (
+          <div className="space-y-2 rounded-xl border bg-muted/20 p-3">
+            <Label>Роль</Label>
+            <div className="flex flex-wrap gap-2">
+              {ROLE_OPTIONS.map(({ id, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => changeDraftRole(id)}
+                  disabled={savingUser}
+                  className={cn(
+                    'inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-all',
+                    draftRole === id
+                      ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+                      : 'hover:border-muted-foreground/30 hover:bg-muted/50',
+                  )}
+                >
+                  <Icon size={14} />
+                  {ROLE_LABELS[id]}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">{ROLE_HINTS[draftRole]}</p>
+          </div>
+
+          {draftRole === 'user' ? (
             <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
               <div className="space-y-3">
                 <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">

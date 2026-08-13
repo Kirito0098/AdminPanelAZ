@@ -1,5 +1,5 @@
 export type UserRole = 'admin' | 'user'
-export type VpnType = 'openvpn' | 'wireguard'
+export type VpnType = 'openvpn' | 'wireguard' | 'amneziawg2'
 export type NodeStatus = 'online' | 'offline' | 'unknown'
 export type NodeKind = 'vpn' | 'proxy'
 
@@ -48,6 +48,7 @@ export interface NodeHaContext {
   sync_group_id: number
   group_name: string
   shared_domain: string
+  shared_domain_wireguard?: string | null
   role: 'primary' | 'replica'
   primary_node_id: number
   primary_node_name?: string | null
@@ -93,6 +94,7 @@ export interface NodeSyncReplicaVerifyResult {
 export interface NodeSyncVerifyResult {
   ready: boolean
   shared_domain: string
+  shared_domain_wireguard?: string | null
   primary_node_id: number
   replicas: NodeSyncReplicaVerifyResult[]
   summary: string
@@ -112,7 +114,10 @@ export interface NodeSyncGroupMember {
 export interface NodeSyncGroup {
   id: number
   name: string
+  /** OpenVPN host (OPENVPN_HOST). */
   shared_domain: string
+  /** WireGuard/AmneziaWG host (WIREGUARD_HOST). Empty/null → same as shared_domain. */
+  shared_domain_wireguard?: string | null
   primary_node_id: number
   primary_node_name?: string | null
   replica_node_ids: number[]
@@ -230,6 +235,7 @@ export interface ActiveWebSession {
 export interface VpnConfigHaInfo {
   sync_group_id: number
   shared_domain: string
+  shared_domain_wireguard?: string | null
   node_count: number
   sync_status: SyncStatus
   sync_mode: string
@@ -244,6 +250,7 @@ export interface VpnConfig {
   /** Validity the certificate was issued for — not the remaining time. */
   cert_expire_days?: number | null
   cert_expires_at?: string | null
+  expires_at?: string | null
   cert_days_left?: number | null
   description?: string | null
   created_at: string
@@ -338,6 +345,7 @@ export interface MonitoringNodeSummary {
   status: string
   connected_openvpn: number
   connected_wireguard: number
+  connected_amneziawg2?: number
   active_services: number
   total_services: number
   cpu_percent?: number | null
@@ -375,6 +383,7 @@ export interface MonitoringOverview {
   services: MonitoringService[]
   openvpn_clients: OpenVpnClient[]
   wireguard_peers: WireGuardPeer[]
+  amneziawg2_peers?: WireGuardPeer[]
   server_ip?: string | null
   timestamp: string
   node_id?: number | null
@@ -386,6 +395,7 @@ export interface MonitoringOverview {
   nodes_total?: number
   total_connected_openvpn?: number
   total_connected_wireguard?: number
+  total_connected_amneziawg2?: number
   served_from_cache?: boolean
   geoip_mode?: 'local_mmdb' | 'ip_api' | 'none'
   ha_mode?: 'dedupe' | 'raw'
@@ -410,6 +420,7 @@ export interface ConnectionHistoryPoint {
   timestamp: string
   openvpn: number
   wireguard: number
+  amneziawg2?: number
   total: number
 }
 
@@ -736,6 +747,26 @@ export interface TgMiniWarperStatus {
   traffic_rx?: number | null
   singbox_running?: boolean | null
   kresd_patched?: boolean | null
+}
+
+export interface TgMiniAwg2TopTraffic {
+  name: string
+  rx: number
+  tx: number
+}
+
+export interface TgMiniAwg2Status {
+  node_id: number
+  node_name: string
+  node_host: string
+  installed: boolean
+  missing_components: string[]
+  install_command?: string | null
+  online_count: number
+  peer_count: number
+  ifaces_summary: string
+  top_traffic: TgMiniAwg2TopTraffic[]
+  health_error?: string | null
 }
 
 export interface TgMiniCidrPipelineTask {
@@ -1333,6 +1364,12 @@ export interface ClientAccessPolicy {
   traffic_limit_unblock_label?: string | null
 }
 
+export interface ClientPoliciesResponseEntry {
+  openvpn: ClientAccessPolicy
+  wireguard: ClientAccessPolicy
+  amneziawg2?: ClientAccessPolicy
+}
+
 export interface FeatureToggleItem {
   key: string
   env_key: string
@@ -1617,6 +1654,7 @@ export interface TrafficChartData {
   antizapret_bytes: number[]
   openvpn_bytes: number[]
   wireguard_bytes: number[]
+  amneziawg2_bytes?: number[]
   total_vpn: number
   total_antizapret: number
   total: number
@@ -1722,6 +1760,136 @@ export interface WarperHealthResponse {
   warper_script?: boolean | null
   warper_api?: boolean | null
   missing_components?: string[]
+  node_id?: number | null
+  node_name?: string | null
+  node_host?: string | null
+}
+
+export interface Awg2HealthResponse {
+  installed: boolean
+  awg_client?: boolean
+  overlay_dir?: boolean
+  amnezia_dir?: boolean
+  missing_components?: string[]
+  install_command?: string
+  update_command?: string
+  node_id?: number | null
+  node_name?: string | null
+  node_host?: string | null
+}
+
+export type Awg2InstallStreamEvent =
+  | {
+      event: 'start'
+      mode: 'install' | 'update'
+      argv?: string[]
+      mtu?: number | null
+    }
+  | {
+      event: 'log'
+      line?: string
+    }
+  | {
+      event: 'done'
+      return_code?: number | null
+      success: boolean
+    }
+  | {
+      event: 'error'
+      detail?: string
+    }
+
+export interface Awg2StatusResponse {
+  installed: boolean
+  services_env?: {
+    AZ_IFACE?: string | null
+    VPN_IFACE?: string | null
+    AZ_PORT?: string | null
+    VPN_PORT?: string | null
+    AZ_SUBNET?: string | null
+    VPN_SUBNET?: string | null
+  }
+  client_counts?: {
+    antizapret?: number
+    vpn?: number
+  }
+  node_id?: number | null
+  node_name?: string | null
+  node_host?: string | null
+}
+
+export interface Awg2ObfuscationResponse {
+  preset?: string | null
+  template?: string | null
+  mtu?: number | string | null
+  host?: string | null
+  fp?: string | null
+  generated?: string | null
+  params?: Record<string, string>
+  reimport_required?: boolean
+  ha?: {
+    attempted?: boolean
+    errors?: Array<{ node_name?: string | null; error?: string | null }>
+  }
+  output?: string
+  regen_all?: string
+  node_id?: number | null
+  node_name?: string | null
+  node_host?: string | null
+}
+
+export interface Awg2MonitoringResponse {
+  ifaces: Array<{
+    name: string
+    port?: string | null
+    subnet?: string | null
+    peer_count?: number | null
+  }>
+  clients: Array<{
+    name: string
+    iface?: string
+    online: boolean
+    handshake_age_s?: number | null
+    rx?: number | null
+    tx?: number | null
+    pubkey?: string
+  }>
+  stats_available: boolean
+  node_id?: number | null
+  node_name?: string | null
+  node_host?: string | null
+}
+
+export interface Awg2ClientStatsDailyRow {
+  day: string
+  rx: number
+  tx: number
+}
+
+export interface Awg2ClientStatsGeo {
+  city?: string | null
+  country?: string | null
+  isp?: string | null
+}
+
+export interface Awg2ClientStats {
+  name: string
+  online: boolean
+  endpoint?: string | null
+  handshake_age_s?: number | null
+  rx_life?: number | null
+  tx_life?: number | null
+  daily: Awg2ClientStatsDailyRow[]
+  geo: Awg2ClientStatsGeo | null
+}
+
+export interface Awg2RestoreResponse {
+  message: string
+  runtime?: Record<string, unknown>
+  ha?: {
+    attempted?: boolean
+    errors?: Array<{ node_name?: string | null; error?: string | null }>
+  }
   node_id?: number | null
   node_name?: string | null
   node_host?: string | null
@@ -1900,4 +2068,23 @@ export interface SiteDiagnosticsReport {
   steps: SiteDiagnosticsStep[]
   results: SiteDiagnosticsCheck[]
   recommended_commands: string[]
+}
+
+export interface ServerRebootPendingItem {
+  reboot_id: string
+  node_id: number
+  node_name: string
+  scheduled_by: string
+  created_at: string
+  execute_at: string
+  delay_seconds: number
+  warning?: string | null
+}
+
+export interface ServerRebootScheduleResponse extends ServerRebootPendingItem {
+  message: string
+}
+
+export interface ServerRebootPendingResponse {
+  items: ServerRebootPendingItem[]
 }

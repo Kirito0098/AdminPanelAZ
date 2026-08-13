@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { createTgPanelConfig, applyTgClientTemplate, getTgClientTemplates, getTgPanelUsers } from '@/tg-mini/api'
+import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
 import type { ClientTemplate, SelfServiceQuota, User, VpnType } from '@/types'
 
 interface CreateConfigDialogProps {
@@ -29,6 +30,7 @@ interface CreateConfigDialogProps {
   currentUserId?: number
   openvpnEnabled: boolean
   wireguardEnabled: boolean
+  awg2Enabled: boolean
   quota: SelfServiceQuota | null
   onCreated: () => void
 }
@@ -40,19 +42,22 @@ export default function CreateConfigDialog({
   currentUserId,
   openvpnEnabled,
   wireguardEnabled,
+  awg2Enabled,
   quota,
   onCreated,
 }: CreateConfigDialogProps) {
   const defaultVpnType = useMemo((): VpnType => {
     if (openvpnEnabled) return 'openvpn'
     if (wireguardEnabled) return 'wireguard'
+    if (awg2Enabled) return 'amneziawg2'
     return 'openvpn'
-  }, [openvpnEnabled, wireguardEnabled])
+  }, [openvpnEnabled, wireguardEnabled, awg2Enabled])
 
   const [clientName, setClientName] = useState('')
   const [description, setDescription] = useState('')
   const [vpnType, setVpnType] = useState<VpnType>(defaultVpnType)
   const [certDays, setCertDays] = useState('3650')
+  const [ttl, setTtl] = useState<string>('none')
   const [ownerId, setOwnerId] = useState<number | null>(currentUserId ?? null)
   const [users, setUsers] = useState<User[]>([])
   const [templates, setTemplates] = useState<ClientTemplate[]>([])
@@ -63,6 +68,7 @@ export default function CreateConfigDialog({
   useEffect(() => {
     if (!open) return
     setVpnType(defaultVpnType)
+    setTtl('none')
     setOwnerId(currentUserId ?? null)
     setError(null)
   }, [open, defaultVpnType, currentUserId])
@@ -86,6 +92,7 @@ export default function CreateConfigDialog({
     setDescription('')
     setVpnType(defaultVpnType)
     setCertDays('3650')
+    setTtl('none')
     setOwnerId(currentUserId ?? null)
     setError(null)
   }
@@ -150,6 +157,7 @@ export default function CreateConfigDialog({
         cert_expire_days: vpnType === 'openvpn' ? parsedCertDays : undefined,
         description: description.trim() || undefined,
         owner_id: isAdmin && ownerId ? ownerId : undefined,
+        ttl: vpnType === 'amneziawg2' && ttl !== 'none' ? ttl : undefined,
       })
       window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
       onCreated()
@@ -209,7 +217,8 @@ export default function CreateConfigDialog({
                 </SelectTrigger>
                 <SelectContent className="z-[100]">
                   {openvpnEnabled && <SelectItem value="openvpn">OpenVPN</SelectItem>}
-                  {wireguardEnabled && <SelectItem value="wireguard">WireGuard</SelectItem>}
+                  {wireguardEnabled && <SelectItem value="wireguard">WG/AWG 1.5</SelectItem>}
+                  {awg2Enabled && <SelectItem value="amneziawg2">AWG 2.0</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
@@ -226,6 +235,24 @@ export default function CreateConfigDialog({
                   onChange={(e) => setCertDays(e.target.value)}
                   disabled={busy || quotaReached}
                 />
+              </div>
+            )}
+
+            {vpnType === 'amneziawg2' && (
+              <div className="space-y-2">
+                <Label htmlFor="tg-mini-awg2-ttl">TTL</Label>
+                <Select value={ttl} onValueChange={setTtl} disabled={busy || quotaReached}>
+                  <SelectTrigger id="tg-mini-awg2-ttl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="z-[100]">
+                    {AWG2_TTL_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
 

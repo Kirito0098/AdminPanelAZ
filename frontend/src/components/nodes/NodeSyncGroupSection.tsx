@@ -67,6 +67,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { HA_PRIMARY, HA_PUSH_FULL, HA_REPLICA, nodeStatusRu } from '@/lib/uiLabels'
 import HaSyncResultDialog from '@/components/nodes/HaSyncResultDialog'
 import HaVerifyResultDialog from '@/components/nodes/HaVerifyResultDialog'
+import { effectiveHaWireguardDomain, formatHaSharedDomains } from '@/lib/haBadgeLabel'
 import { parseHaSyncTaskResult, type HaSyncResultView } from '@/lib/haSyncSummary'
 import { parseHaVerifyResult, type HaVerifyResultView } from '@/lib/haVerifySummary'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
@@ -304,9 +305,27 @@ function SyncGroupCard({
       ) : null}
       <dl className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
         <div>
-          <dt className="text-xs text-muted-foreground">Домен</dt>
+          <dt className="text-xs text-muted-foreground">Домены</dt>
           <dd className="mt-0.5">
-            <div>{group.shared_domain}</div>
+            {(() => {
+              const ovpn = group.shared_domain.trim()
+              const wg = effectiveHaWireguardDomain(group)
+              if (ovpn === wg) {
+                return <div>{ovpn}</div>
+              }
+              return (
+                <div className="space-y-0.5">
+                  <div>
+                    <span className="text-xs text-muted-foreground">OpenVPN: </span>
+                    {ovpn}
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground">WG/AWG: </span>
+                    {wg}
+                  </div>
+                </div>
+              )
+            })()}
             <button
               type="button"
               onClick={onDns}
@@ -414,6 +433,7 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
 
   const [name, setName] = useState('')
   const [sharedDomain, setSharedDomain] = useState('')
+  const [sharedDomainWireguard, setSharedDomainWireguard] = useState('')
   const [primaryId, setPrimaryId] = useState<string>('')
   const [replicaIds, setReplicaIds] = useState<number[]>([])
   const [syncMode, setSyncMode] = useState('manual_full')
@@ -527,6 +547,7 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
     setEditing(null)
     setName('')
     setSharedDomain('')
+    setSharedDomainWireguard('')
     setPrimaryId(onlineNodes[0] ? String(onlineNodes[0].id) : '')
     setReplicaIds([])
     setSyncMode('manual_full')
@@ -538,6 +559,9 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
     setEditing(group)
     setName(group.name)
     setSharedDomain(group.shared_domain)
+    setSharedDomainWireguard(
+      (group.shared_domain_wireguard || '').trim() || group.shared_domain,
+    )
     setPrimaryId(String(group.primary_node_id))
     setReplicaIds(group.replica_node_ids)
     setSyncMode(group.sync_mode || 'manual_full')
@@ -665,12 +689,12 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
   const runDomainApply = useCallback(
     async (group: NodeSyncGroup) => {
       setActionLoading(group.id)
-      setSetupStage(`Применение домена ${group.shared_domain} на узлах (doall.sh + client.sh 7 + OpenVPN)…`)
+      setSetupStage(`Применение домена ${formatHaSharedDomains(group)} на узлах (doall.sh + client.sh 7 + OpenVPN)…`)
       try {
         const accepted = await applyNodeSyncGroupSharedDomain(group.id)
         const task = await pollToCompletion(accepted.task_id)
         showSyncResult(task)
-        success(`Домен ${group.shared_domain} применён на узлах`)
+        success(`Домен ${formatHaSharedDomains(group)} применён на узлах`)
       } catch (err) {
         notifyError(err instanceof ApiError ? err.message : 'Ошибка применения домена')
       } finally {
@@ -686,14 +710,16 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
     event.preventDefault()
     const primary = Number(primaryId)
     if (!name.trim() || !sharedDomain.trim() || !primary || replicaIds.length === 0) {
-      notifyError('Заполните имя, домен, основной узел и хотя бы одну реплику')
+      notifyError('Заполните имя, домен OpenVPN, основной узел и хотя бы одну реплику')
       return
     }
     setSubmitting(true)
     try {
+      const wireguardTrimmed = sharedDomainWireguard.trim()
       const payload = {
         name: name.trim(),
         shared_domain: sharedDomain.trim(),
+        shared_domain_wireguard: wireguardTrimmed || sharedDomain.trim(),
         primary_node_id: primary,
         replica_node_ids: replicaIds,
         sync_mode: syncMode,
@@ -704,7 +730,10 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
         (editing.primary_node_id !== payload.primary_node_id ||
           JSON.stringify(sortedIds(editing.replica_node_ids)) !==
             JSON.stringify(sortedIds(payload.replica_node_ids)))
-      const domainChanged = editing != null && editing.shared_domain.trim() !== payload.shared_domain
+      const domainChanged =
+        editing != null &&
+        (editing.shared_domain.trim() !== payload.shared_domain ||
+          effectiveHaWireguardDomain(editing) !== payload.shared_domain_wireguard)
 
       let savedGroup: NodeSyncGroup
       if (editing) {
@@ -864,7 +893,7 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
                   <TableHeader>
                     <TableRow>
                       <TableHead>Группа</TableHead>
-                      <TableHead>Домен</TableHead>
+                      <TableHead>Домены</TableHead>
                       <TableHead>{HA_PRIMARY}</TableHead>
                       <TableHead>{HA_REPLICA}</TableHead>
                       <TableHead>Статус</TableHead>
@@ -887,7 +916,25 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
                           ) : null}
                         </TableCell>
                         <TableCell>
-                          <div>{group.shared_domain}</div>
+                          {(() => {
+                            const ovpn = group.shared_domain.trim()
+                            const wg = effectiveHaWireguardDomain(group)
+                            if (ovpn === wg) {
+                              return <div>{ovpn}</div>
+                            }
+                            return (
+                              <div className="space-y-0.5 text-sm">
+                                <div>
+                                  <span className="text-xs text-muted-foreground">OVPN: </span>
+                                  {ovpn}
+                                </div>
+                                <div>
+                                  <span className="text-xs text-muted-foreground">WG/AWG: </span>
+                                  {wg}
+                                </div>
+                              </div>
+                            )
+                          })()}
                           <button
                             type="button"
                             onClick={() => setDnsTarget(group)}
@@ -945,7 +992,7 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
               <DialogDescription>
                 {editing
                   ? 'Узлы в сети, одинаковая версия AntiZapret.'
-                  : 'Основной + реплика, общий домен. DNS-переключение настраивается отдельно.'}
+                  : 'Основной + реплика, отдельные домены для OpenVPN и WG/AWG (как в setup.sh). DNS настраивается отдельно.'}
               </DialogDescription>
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
@@ -961,14 +1008,30 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="sync-domain">Общий домен</Label>
+                  <Label htmlFor="sync-domain">Домен OpenVPN</Label>
                   <Input
                     id="sync-domain"
                     value={sharedDomain}
                     onChange={(e) => setSharedDomain(e.target.value)}
-                    placeholder="vpn.example.com"
+                    placeholder="ovpn.example.com"
                     required
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Пишется в <code className="text-[0.7rem]">OPENVPN_HOST</code> на всех узлах группы.
+                  </p>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="sync-domain-wg">Домен WireGuard / AmneziaWG</Label>
+                  <Input
+                    id="sync-domain-wg"
+                    value={sharedDomainWireguard}
+                    onChange={(e) => setSharedDomainWireguard(e.target.value)}
+                    placeholder={sharedDomain.trim() || 'awg.example.com'}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Пишется в <code className="text-[0.7rem]">WIREGUARD_HOST</code>. Пусто — тот же, что
+                    OpenVPN (как один общий домен).
+                  </p>
                 </div>
                 <div className="grid gap-1.5">
                   <Label>{HA_PRIMARY}</Label>
@@ -1072,7 +1135,10 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
             return (
               <>
                 <ol className="list-decimal space-y-0.5 pl-5">
-                  <li>Запись общего домена в OPENVPN_HOST / WIREGUARD_HOST на всех узлах.</li>
+                  <li>
+                    Запись доменов в OPENVPN_HOST / WIREGUARD_HOST на всех узлах (можно разные, как в
+                    AntiZapret setup.sh).
+                  </li>
                   <li>
                     На реплике VPN/crypto удаляются и заменяются копией с основного (PKI, сертификаты, .ovpn,
                     WireGuard) — без перевыпуска сертификатов.
@@ -1107,10 +1173,10 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Globe size={18} />
-              Настройка DNS для {dnsTarget?.shared_domain}
+              Настройка DNS для {dnsTarget ? formatHaSharedDomains(dnsTarget) : ''}
             </DialogTitle>
             <DialogDescription>
-              Создайте у DNS-провайдера записи для домена на IP всех узлов группы и включите
+              Создайте у DNS-провайдера записи для домена(ов) на IP всех узлов группы и включите
               health-check для переключения, чтобы при падении одного узла трафик уходил на другой.
             </DialogDescription>
           </DialogHeader>
@@ -1155,13 +1221,27 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
                 </div>
               ))}
             </div>
-            <SettingsAlert variant="info" title="Несколько A-записей — так и нужно">
-              На один домен <code>{dnsTarget?.shared_domain}</code> создайте A-запись на{' '}
-              <strong>каждый</strong> IP выше — это нормально и рекомендуется для HA. Для
-              автоматического переключения используйте DNS с проверкой доступности (failover), а не
-              простой round-robin. IP узла — адрес подключения в панели (host). DuckDNS на одно имя
-              обычно держит только один IP; для HA удобнее свой домен или DNS с health-check.
-            </SettingsAlert>
+            {dnsTarget &&
+            dnsTarget.shared_domain.trim() !== effectiveHaWireguardDomain(dnsTarget) ? (
+              <SettingsAlert variant="info" title="Два домена — две серии A-записей">
+                <p className="mb-1">
+                  OpenVPN: <code>{dnsTarget.shared_domain}</code>
+                </p>
+                <p className="mb-1">
+                  WireGuard/AmneziaWG: <code>{effectiveHaWireguardDomain(dnsTarget)}</code>
+                </p>
+                На <strong>каждый</strong> домен создайте A-запись на каждый IP выше. Для
+                автоматического переключения используйте DNS с проверкой доступности (failover).
+              </SettingsAlert>
+            ) : (
+              <SettingsAlert variant="info" title="Несколько A-записей — так и нужно">
+                На один домен <code>{dnsTarget?.shared_domain}</code> создайте A-запись на{' '}
+                <strong>каждый</strong> IP выше — это нормально и рекомендуется для HA. Для
+                автоматического переключения используйте DNS с проверкой доступности (failover), а не
+                простой round-robin. IP узла — адрес подключения в панели (host). DuckDNS на одно имя
+                обычно держит только один IP; для HA удобнее свой домен или DNS с health-check.
+              </SettingsAlert>
+            )}
           </div>
           <DialogFooter>
             <Button type="button" onClick={() => setDnsTarget(null)}>
@@ -1186,7 +1266,7 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
       <ConfirmDialog
         open={Boolean(domainApplyTarget)}
         title="Применить shared domain"
-        description={`Записать ${domainApplyTarget?.shared_domain ?? 'домен'} в setup на всех узлах группы «${domainApplyTarget?.name ?? ''}»?`}
+        description={`Записать ${domainApplyTarget ? formatHaSharedDomains(domainApplyTarget) : 'домен'} в setup на всех узлах группы «${domainApplyTarget?.name ?? ''}»?`}
         confirmLabel="Применить домен"
         onConfirm={() => void handleRunDomainApply()}
         onOpenChange={(open) => {

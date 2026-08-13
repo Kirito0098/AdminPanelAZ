@@ -13,6 +13,7 @@ import { ApiError, getNodes } from '@/api/client'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import { NodeStatusBadge } from '@/components/NodeSelector'
 import ProxyNodePanel, { AZ_PROXY_SH_DOCS_URL } from '@/components/nodes/ProxyNodePanel'
+import ProxyLinkBadge from '@/components/proxy/ProxyLinkBadge'
 import RemoteHostsCard from '@/components/proxy/RemoteHostsCard'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -62,8 +63,9 @@ const QUICK_LINKS = [
 ] as const
 
 export default function ProxyHubView() {
-  const { activeNode, refreshNodes } = useNode()
+  const { activeNode, syncGroups, refreshNodes, refreshSyncGroups } = useNode()
   const { error: notifyError } = useNotifications()
+  const [allNodes, setAllNodes] = useState<Node[]>([])
   const [proxyNodes, setProxyNodes] = useState<Node[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -73,17 +75,19 @@ export default function ProxyHubView() {
     setLoadError(null)
     try {
       const nodes = await getNodes()
+      setAllNodes(nodes)
       setProxyNodes(nodes.filter(isProxyNode))
-      await refreshNodes()
+      await Promise.all([refreshNodes(), refreshSyncGroups()])
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Не удалось загрузить прокси-узлы'
       setLoadError(message)
       notifyError(message)
+      setAllNodes([])
       setProxyNodes([])
     } finally {
       setLoading(false)
     }
-  }, [notifyError, refreshNodes])
+  }, [notifyError, refreshNodes, refreshSyncGroups])
 
   useEffect(() => {
     void load()
@@ -103,7 +107,8 @@ export default function ProxyHubView() {
         title="Прокси"
         description={
           <>
-            Сводка по прокси-узлам и адресам OpenVPN активного VPN. Панель не ставит и не запускает{' '}
+            Сводка по прокси-узлам и адресам OpenVPN активного VPN. У каждого прокси можно указать,
+            к какой HA-группе или серверу он относится. Панель не ставит и не запускает{' '}
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">proxy.sh</code>.
           </>
         }
@@ -172,6 +177,12 @@ export default function ProxyHubView() {
                         <Badge variant="outline" className="text-[10px]">
                           Прокси
                         </Badge>
+                        <ProxyLinkBadge
+                          linkedVpnNodeId={node.linked_vpn_node_id}
+                          nodes={allNodes}
+                          syncGroups={syncGroups}
+                          showUnlinked
+                        />
                         <NodeStatusBadge status={node.status} />
                       </div>
                       <CardDescription className="font-mono text-xs">
@@ -184,7 +195,12 @@ export default function ProxyHubView() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <ProxyNodePanel node={node} onUpdated={load} />
+                  <ProxyNodePanel
+                    node={node}
+                    nodes={allNodes}
+                    syncGroups={syncGroups}
+                    onUpdated={load}
+                  />
                 </CardContent>
               </Card>
             ))}

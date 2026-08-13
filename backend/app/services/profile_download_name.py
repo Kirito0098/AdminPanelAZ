@@ -6,7 +6,7 @@ import re
 from pathlib import PurePosixPath
 
 CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
-AZ_PROFILE_DIR = re.compile(r"/(?:openvpn|wireguard|amneziawg)/antizapret(?:[-/]|$)")
+AZ_PROFILE_DIR = re.compile(r"/(?:(?:openvpn|wireguard|amneziawg)/antizapret|clients/antizapret)(?:[-/]|$)")
 
 
 def sanitize_client_name(client_name: str) -> str:
@@ -18,12 +18,17 @@ def sanitize_client_name(client_name: str) -> str:
 
 def _parse_profile_location(path: str) -> tuple[str, str]:
     parts = PurePosixPath(path).parts
-    if "client" not in parts:
-        return "", ""
-    idx = parts.index("client")
-    if idx + 2 >= len(parts):
-        return "", ""
-    return parts[idx + 1], parts[idx + 2]
+    if "client" in parts:
+        idx = parts.index("client")
+        if idx + 2 >= len(parts):
+            return "", ""
+        return parts[idx + 1], parts[idx + 2]
+    if "clients" in parts:
+        idx = parts.index("clients")
+        if idx + 2 >= len(parts):
+            return "", ""
+        return "amneziawg2", parts[idx + 1]
+    return "", ""
 
 
 def _is_az_profile(*, variant: str, path: str) -> bool:
@@ -60,6 +65,17 @@ def build_profile_download_filename(
         return f"WG-{profile_prefix}-{safe_name}.conf"
     if proto == "amneziawg":
         return f"AWG-{profile_prefix}-{safe_name}.conf"
+    if proto == "amneziawg2":
+        # Primary tunnel profiles are *-am.conf; sidecars (.vpn / vpnuri) keep a distinct name.
+        path_name = PurePosixPath(path).name if path else ""
+        lower_name = path_name.lower()
+        if lower_name.endswith("-am.conf") or lower_name.endswith(".conf"):
+            return f"AWG2-{profile_prefix}-{safe_name}.conf"
+        if lower_name.endswith(".vpn"):
+            return f"AWG2-{profile_prefix}-{safe_name}.vpn"
+        if "vpnuri" in lower_name or lower_name.endswith(".txt"):
+            return f"AWG2-{profile_prefix}-{safe_name}-vpnuri.txt"
+        return path_name or f"AWG2-{profile_prefix}-{safe_name}.conf"
 
     raw = PurePosixPath(path).name if path else f"{profile_prefix}-{safe_name}.txt"
     return raw or f"{profile_prefix}-{safe_name}.txt"

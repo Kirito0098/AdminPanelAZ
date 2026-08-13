@@ -68,6 +68,7 @@ from app.services.profile_files import profile_files_batch_key
 from app.services.panel_publish_info import resolve_public_base_url
 from app.services.qr_download import QrDownloadService
 from app.services.qr_generator import generate_qr_png, prefers_download_link_qr
+from app.services.awg2 import AWG2_INSTALL_CMD, compute_expires_at
 from app.services.security import SecurityService
 from app.services.vpn_profile_visibility import (
     POLICY_GROUP_TO_SETTING,
@@ -208,6 +209,7 @@ def _to_response(
         owner_username=owner.username if owner else None,
         cert_expire_days=config.cert_expire_days,
         cert_expires_at=config.cert_expires_at,
+        expires_at=config.expires_at,
         cert_days_left=days_remaining_until(config.cert_expires_at),
         description=config.description,
         created_at=config.created_at,
@@ -531,6 +533,7 @@ def create_config(
     require_vpn_type(payload.vpn_type.value, service=get_feature_service())
     enforce_can_create_vpn_type(db, current_user, payload.vpn_type)
     adapter = get_active_adapter(db)
+    awg2_expires_at = None
     if payload.vpn_type == VpnType.openvpn:
         adapter.add_openvpn_client(payload.client_name, payload.cert_expire_days or 3650)
         recreate_openvpn_profiles_after_admin_change(
@@ -538,8 +541,35 @@ def create_config(
             client_names=[payload.client_name],
             hosts=load_node_remote_hosts(db, node_id),
         )
-    else:
+    elif payload.vpn_type == VpnType.wireguard:
         adapter.add_wireguard_client(payload.client_name)
+    elif payload.vpn_type == VpnType.amneziawg2:
+        try:
+            health = adapter.get_awg2_health()
+        except HTTPException as exc:
+            if exc.status_code not in {status.HTTP_404_NOT_FOUND} and exc.status_code < 500:
+                raise
+            health = {"installed": False, "install_command": AWG2_INSTALL_CMD}
+        except (ConnectionError, OSError):
+            health = {"installed": False, "install_command": AWG2_INSTALL_CMD}
+        if not health.get("installed"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": "AZ-AWG2 не установлен на узле",
+                    "install_command": health.get("install_command") or AWG2_INSTALL_CMD,
+                },
+            )
+        try:
+            awg2_expires_at = compute_expires_at(payload.ttl)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if payload.ttl:
+            adapter.awg2_add_client(payload.client_name, ttl=payload.ttl)
+        else:
+            adapter.awg2_add_client(payload.client_name)
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неизвестный тип VPN")
 
     config = VpnConfig(
         node_id=node_id,
@@ -547,6 +577,7 @@ def create_config(
         vpn_type=payload.vpn_type,
         owner_id=owner_id,
         cert_expire_days=payload.cert_expire_days,
+        expires_at=awg2_expires_at,
         description=payload.description,
     )
     refresh_config_cert_expiry(config, adapter)
@@ -689,6 +720,8 @@ def delete_config(
     adapter = get_active_adapter(db)
     if config.vpn_type == VpnType.openvpn:
         adapter.delete_openvpn_client(config.client_name)
+    elif config.vpn_type == VpnType.amneziawg2:
+        adapter.awg2_delete_client(config.client_name)
     else:
         adapter.delete_wireguard_client(config.client_name)
 

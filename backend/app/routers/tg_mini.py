@@ -63,7 +63,11 @@ from app.services.panel_publish_info import resolve_public_base_url
 from app.services.qr_download import QrDownloadService
 from app.services.security import SecurityService
 from app.services.telegram import send_tg_message
-from app.services.tg_mini_status import build_cidr_status_payload, build_warper_status_payload
+from app.services.tg_mini_status import (
+    build_awg2_status_payload,
+    build_cidr_status_payload,
+    build_warper_status_payload,
+)
 from app.services.vpn_profile_visibility import (
     EMPTY_CATALOG_MESSAGE,
     filter_profile_files,
@@ -304,6 +308,13 @@ def mini_warper_status(db: Session = Depends(get_db), _: User = Depends(require_
     if not get_feature_service().is_enabled("warper"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Модуль WARPER отключён")
     return build_warper_status_payload(db)
+
+
+@router.get("/awg2/status")
+def mini_awg2_status(db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
+    if not get_feature_service().is_enabled("awg2"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Модуль AZ-AWG2 отключён")
+    return build_awg2_status_payload(db)
 
 
 @router.get("/cidr/status")

@@ -16,7 +16,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
-import { cn } from '@/lib/utils'
 
 const REBUILD_STEPS = [
   { icon: Hammer, label: 'Сборка UI', detail: 'npm run build:all в frontend/' },
@@ -78,10 +77,9 @@ export default function PanelRebuildCard({ className }: Props) {
   }
 
   return (
-    <div className={cn('md:col-span-2', className)}>
+    <div className={className}>
       <ConfirmDialogHost dialogProps={dialogProps} />
-      <Card className="overflow-hidden border-amber-500/30 shadow-sm">
-        <div className="h-1 bg-gradient-to-r from-amber-500/80 to-amber-500/20" />
+      <Card className="border-amber-500/30 shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Rocket size={18} className="text-amber-600 dark:text-amber-400" />

@@ -157,3 +157,27 @@ def test_amneziawg_only_allows_wireguard_create():
         variant="vpn",
         path="/client/wireguard/vpn/x-wg.conf",
     )
+
+
+def test_can_create_amneziawg2():
+    policy = {
+        "routes": ["az", "vpn"],
+        "protocols": ["amneziawg2"],
+        "openvpn_groups": [],
+    }
+    assert can_create_vpn_type(policy, "amneziawg2", {"awg2": True}) is True
+    assert can_create_vpn_type(policy, "amneziawg2", {"awg2": False}) is False
+
+
+def test_protocol_key_from_file_amneziawg2():
+    from app.services.vpn_profile_visibility import protocol_key_from_file
+
+    assert protocol_key_from_file(protocol="amneziawg2", path="") == "amneziawg2"
+    assert (
+        protocol_key_from_file(protocol="", path="/client/antizapret-awg/vpn/x.conf")
+        == "amneziawg2"
+    )
+
+
+def test_full_policy_includes_amneziawg2():
+    assert "amneziawg2" in FULL_POLICY["protocols"]

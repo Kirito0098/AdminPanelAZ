@@ -121,9 +121,15 @@ def fetch_client_sessions(
         if row.is_active:
             bucket["is_active"] = True
 
+    # Newest connections first so «Последний раз» reads chronologically.
     sources = sorted(
         by_ip.values(),
-        key=lambda item: (item["sessions_count"], item["total_bytes"]),
+        key=lambda item: (
+            item["last_seen_at"] is not None,
+            item["last_seen_at"] or datetime.min,
+            int(item["sessions_count"] or 0),
+            int(item["total_bytes"] or 0),
+        ),
         reverse=True,
     )
     for item in sources:

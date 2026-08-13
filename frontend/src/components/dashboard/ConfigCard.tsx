@@ -25,6 +25,7 @@ import type { LucideIcon } from 'lucide-react'
 import type { ClientAccessPolicy, UserRole, VpnConfig } from '@/types'
 import {
   buildAccessMeta,
+  formatAccessExpiryBadge,
   formatCertExpiry,
   formatCreatedAt,
   formatBlockStatus,
@@ -578,6 +579,11 @@ export default function ConfigCard({
                   {tag.name}
                 </Badge>
               ))}
+            {config.expires_at && (
+              <Badge variant={tone === 'expired' ? 'destructive' : 'warning'} className="h-5 px-1.5 text-[10px]">
+                {formatAccessExpiryBadge(config.expires_at)}
+              </Badge>
+            )}
             {fields.tags && config.ha ? (
               <Badge variant="outline" className="gap-1 px-1.5 text-[10px]" title={haBadgeTitle(config.ha)}>
                 {formatHaBadgeLabel(config.ha)}

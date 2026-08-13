@@ -56,17 +56,17 @@ function policyForConfig(policy: ClientAccessPolicy | null) {
 
 async function blockClient(vpnType: VpnType, clientName: string, days: number) {
   if (vpnType === 'openvpn') await tgOpenvpnTempBlock(clientName, days)
-  else await tgWgTempBlock(clientName, days)
+  else if (vpnType === 'wireguard') await tgWgTempBlock(clientName, days)
 }
 
 async function permanentBlockClient(vpnType: VpnType, clientName: string) {
   if (vpnType === 'openvpn') await tgOpenvpnPermanentBlock(clientName)
-  else await tgWgPermanentBlock(clientName)
+  else if (vpnType === 'wireguard') await tgWgPermanentBlock(clientName)
 }
 
 async function unblockClient(vpnType: VpnType, clientName: string) {
   if (vpnType === 'openvpn') await tgOpenvpnUnblock(clientName)
-  else await tgWgUnblock(clientName)
+  else if (vpnType === 'wireguard') await tgWgUnblock(clientName)
 }
 
 function ManageSection({
@@ -121,6 +121,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
 
   const vpnType = config.vpn_type as VpnType
+  const tgBlockSupported = vpnType !== 'amneziawg2'
   const { isBlocked, status: blockStatus } = policyForConfig(policy)
 
   const reloadPolicy = async () => {
@@ -402,7 +403,12 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
             >
               Сейчас: {blockStatus.value}
             </p>
-            {!isBlocked ? (
+            {!tgBlockSupported && (
+              <p className="text-xs text-muted-foreground">
+                Блокировка AWG 2.0 доступна только в веб-панели
+              </p>
+            )}
+            {tgBlockSupported && !isBlocked ? (
               <>
                 <div className="space-y-2">
                   <Label htmlFor="tg-mini-block-days">Временная блокировка (дней)</Label>
@@ -452,7 +458,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
                   </Button>
                 )}
               </>
-            ) : (
+            ) : tgBlockSupported ? (
               <Button
                 type="button"
                 variant="secondary"
@@ -468,7 +474,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
                 )}
                 Разблокировать
               </Button>
-            )}
+            ) : null}
           </div>
         </ManageSection>
       )}

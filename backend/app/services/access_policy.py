@@ -5,7 +5,11 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import Node, OpenVpnAccessPolicy, WgAccessPolicy
+from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, WgAccessPolicy
+from app.services.awg2_runtime import (
+    block_client_runtime as awg2_block_client_runtime,
+    unblock_client_runtime as awg2_unblock_client_runtime,
+)
 from app.services.node_adapter import NodeAdapter
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.openvpn_group import (
@@ -15,6 +19,7 @@ from app.services.openvpn_group import (
     WIREGUARD_PROTOCOL,
 )
 from app.services.traffic_limit import (
+    AMNEZIAWG2_PROTOCOL,
     TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED,
     TrafficLimitExceededError,
     bytes_to_limit_parts,
@@ -460,6 +465,269 @@ class AccessPolicyService:
             return True
         return False
 
+    # ── AmneziaWG2 ───────────────────────────────────────────────────────
+
+    def _get_awg2(self, client_name: str) -> AmneziaWg2AccessPolicy:
+        normalized = client_name.strip().lower()
+        node_id = self._require_node_id()
+        row = (
+            self.db.query(AmneziaWg2AccessPolicy)
+            .filter_by(node_id=node_id, client_name=normalized)
+            .first()
+        )
+        if row is None:
+            row = AmneziaWg2AccessPolicy(node_id=node_id, client_name=normalized)
+            self.db.add(row)
+            self.db.flush()
+        return row
+
+    def _cleanup_awg2_temp_block(self, row: AmneziaWg2AccessPolicy, now: datetime) -> bool:
+        if row.is_temp_blocked and row.block_until and _as_utc(row.block_until) <= now:
+            row.is_temp_blocked = False
+            row.block_until = None
+            row.block_days = None
+            if row.block_reason == "manual_temp":
+                row.block_reason = None
+            row.block_started_at = None
+            return True
+        return False
+
+    def _apply_awg2_client_runtime(self, client_name: str, *, is_blocked: bool) -> dict | None:
+        normalized = client_name.strip().lower()
+        if self._adapter is not None:
+            method_name = "block_awg2_client_runtime" if is_blocked else "unblock_awg2_client_runtime"
+            method = getattr(self._adapter, method_name, None)
+            if callable(method):
+                return method(normalized)
+        if is_blocked:
+            return awg2_block_client_runtime(normalized)
+        return awg2_unblock_client_runtime(normalized)
+
+    def _reapply_all_blocked_awg2_runtime(self, *, exclude_client: str | None = None) -> list[dict]:
+        now = _now()
+        node_id = self._require_node_id()
+        excluded = (exclude_client or "").strip().lower()
+        results: list[dict] = []
+        for row in self.db.query(AmneziaWg2AccessPolicy).filter_by(node_id=node_id).all():
+            if excluded and row.client_name == excluded:
+                continue
+            state = self._awg2_state(row, now)
+            if not state["is_blocked"]:
+                continue
+            results.append(
+                {
+                    "client_name": row.client_name,
+                    "result": self._apply_awg2_client_runtime(row.client_name, is_blocked=True),
+                }
+            )
+        return results
+
+    def _awg2_traffic_state(self, row: AmneziaWg2AccessPolicy | None, *, client_name: str | None = None) -> dict:
+        if row is None:
+            name = (client_name or "").strip().lower()
+            consumed = (
+                self._consumed_bytes(name, period_days=None, protocol_types=AMNEZIAWG2_PROTOCOL) if name else 0
+            )
+            return resolve_traffic_limit_state(
+                traffic_limit_bytes=None,
+                traffic_limit_period_days=None,
+                consumed_bytes=consumed,
+            )
+        consumed = self._consumed_bytes(
+            row.client_name,
+            period_days=row.traffic_limit_period_days,
+            protocol_types=AMNEZIAWG2_PROTOCOL,
+        )
+        return resolve_traffic_limit_state(
+            traffic_limit_bytes=row.traffic_limit_bytes,
+            traffic_limit_period_days=row.traffic_limit_period_days,
+            consumed_bytes=consumed,
+        )
+
+    def _awg2_target_reason(self, state: dict) -> str | None:
+        if not state["is_blocked"]:
+            return None
+        mode = state["block_mode"]
+        if mode == "permanent":
+            return "manual_permanent"
+        if mode == "temp":
+            return "manual_temp"
+        if mode == "traffic_limit":
+            return "traffic_limit"
+        return None
+
+    def _awg2_state(self, row: AmneziaWg2AccessPolicy, now: datetime | None = None) -> dict:
+        now = _as_utc(now) or _now()
+        block_until = _as_utc(row.block_until)
+        temp = bool(row.is_temp_blocked and block_until and block_until > now)
+        perm = bool(row.is_permanent_blocked)
+        traffic_state = self._awg2_traffic_state(row)
+        traffic_exceeded = bool(traffic_state.get("traffic_limit_exceeded"))
+        blocked = temp or perm or traffic_exceeded
+        if perm:
+            block_mode = "permanent"
+        elif temp:
+            block_mode = "temp"
+        elif traffic_exceeded:
+            block_mode = "traffic_limit"
+        else:
+            block_mode = "none"
+        return self._attach_node_context({
+            "is_blocked": blocked,
+            "block_mode": block_mode,
+            "blocked_days_left": (block_until - now).days if temp and block_until else None,
+            "block_duration_days": row.block_days,
+            "block_until": block_until.strftime("%Y-%m-%d %H:%M:%S") if block_until else None,
+            "traffic_limit_exceeded": traffic_exceeded,
+            **self._traffic_human_fields(traffic_state),
+        })
+
+    def reconcile_awg2(
+        self,
+        client_name: str,
+        *,
+        apply_runtime: bool = True,
+        force_runtime: bool = False,
+        traffic_limit_changed: bool = False,
+    ) -> None:
+        normalized = client_name.strip().lower()
+        node_id = self._require_node_id()
+        row = (
+            self.db.query(AmneziaWg2AccessPolicy)
+            .filter_by(node_id=node_id, client_name=normalized)
+            .first()
+        )
+        if row is None:
+            return
+        now = _now()
+        before_blocked = bool(self._awg2_state(row, now)["is_blocked"])
+        before_reason = row.block_reason
+        self._cleanup_awg2_temp_block(row, now)
+        traffic_state = self._awg2_traffic_state(row)
+        if row.block_reason == "traffic_limit" and not traffic_state.get("traffic_limit_exceeded"):
+            row.block_reason = None
+        state = self._awg2_state(row, now)
+        if state["is_blocked"] and state["block_mode"] == "traffic_limit":
+            row.block_reason = "traffic_limit"
+        elif row.block_reason == "traffic_limit" and not state["is_blocked"]:
+            row.block_reason = None
+        if (
+            traffic_limit_changed
+            and not state["traffic_limit_exceeded"]
+            and row.is_permanent_blocked
+            and not row.is_temp_blocked
+        ):
+            row.is_permanent_blocked = False
+            row.block_reason = None
+        state = self._awg2_state(row, now)
+        target_reason = self._awg2_target_reason(state)
+        if row.block_reason != target_reason:
+            row.block_reason = target_reason
+        after_blocked = bool(state["is_blocked"])
+        after_reason = row.block_reason
+        runtime_changed = before_blocked != after_blocked or before_reason != after_reason
+        if apply_runtime and (runtime_changed or force_runtime):
+            self._apply_awg2_client_runtime(normalized, is_blocked=after_blocked)
+            if not after_blocked:
+                self._reapply_all_blocked_awg2_runtime(exclude_client=normalized)
+        self.db.commit()
+
+    def awg2_temp_block(self, client_name: str, days: int, *, actor: str | None = None) -> dict:
+        row = self._get_awg2(client_name)
+        now = _now()
+        row.is_temp_blocked = True
+        row.is_permanent_blocked = False
+        row.block_reason = "manual_temp"
+        row.block_started_at = now
+        row.block_days = days
+        row.block_until = now + timedelta(days=days)
+        row.updated_by = actor
+        self.db.commit()
+        self.reconcile_awg2(client_name, force_runtime=True)
+        return self._awg2_state(row)
+
+    def awg2_permanent_block(self, client_name: str, *, actor: str | None = None) -> dict:
+        row = self._get_awg2(client_name)
+        now = _now()
+        row.is_temp_blocked = False
+        row.is_permanent_blocked = True
+        row.block_reason = "manual_permanent"
+        row.block_started_at = now
+        row.block_days = None
+        row.block_until = None
+        row.updated_by = actor
+        self.db.commit()
+        self.reconcile_awg2(client_name, force_runtime=True)
+        return self._awg2_state(row)
+
+    def awg2_unblock(self, client_name: str, *, actor: str | None = None) -> dict:
+        row = self._get_awg2(client_name)
+        traffic_state = self._awg2_traffic_state(row)
+        if traffic_state.get("traffic_limit_exceeded"):
+            raise TrafficLimitExceededError()
+        row.is_temp_blocked = False
+        row.is_permanent_blocked = False
+        row.block_reason = None
+        row.block_started_at = None
+        row.block_days = None
+        row.block_until = None
+        row.updated_by = actor
+        self.db.commit()
+        self.reconcile_awg2(client_name, force_runtime=True)
+        return self._awg2_state(row)
+
+    def awg2_set_traffic_limit(
+        self,
+        client_name: str,
+        limit_bytes: int,
+        *,
+        period_days: int | None = None,
+        actor: str | None = None,
+    ) -> dict:
+        if int(limit_bytes) < 1:
+            raise ValueError("Лимит трафика должен быть не меньше 1 байта")
+        row = self._get_awg2(client_name)
+        row.traffic_limit_bytes = int(limit_bytes)
+        if period_days is not None:
+            if int(period_days) not in TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED:
+                raise ValueError("Период лимита трафика должен быть 1, 7 или 30 дней.")
+            row.traffic_limit_period_days = int(period_days)
+        else:
+            row.traffic_limit_period_days = None
+        row.updated_by = actor
+        self.db.commit()
+        self.reconcile_awg2(client_name, traffic_limit_changed=True, force_runtime=True)
+        return self._awg2_state(row)
+
+    def awg2_clear_traffic_limit(self, client_name: str, *, actor: str | None = None) -> dict:
+        row = self._get_awg2(client_name)
+        row.traffic_limit_bytes = None
+        row.traffic_limit_period_days = None
+        row.updated_by = actor
+        self.db.commit()
+        self.reconcile_awg2(client_name, traffic_limit_changed=True, force_runtime=True)
+        return self._awg2_state(row)
+
+    def get_awg2_policy(self, client_name: str) -> dict:
+        normalized = client_name.strip().lower()
+        node_id = self._require_node_id()
+        row = (
+            self.db.query(AmneziaWg2AccessPolicy)
+            .filter_by(node_id=node_id, client_name=normalized)
+            .first()
+        )
+        if row is None:
+            traffic_state = self._awg2_traffic_state(None, client_name=normalized)
+            return self._attach_node_context({
+                "is_blocked": False,
+                "block_mode": "none",
+                "blocked_days_left": None,
+                "block_duration_days": None,
+                "block_until": None,
+                **self._traffic_human_fields(traffic_state),
+            })
+        return self._awg2_state(row)
+
     def _apply_wg_client_runtime(self, client_name: str, *, is_blocked: bool) -> dict | None:
         self.wg_runtime_calls += 1
         normalized = client_name.strip().lower()
@@ -682,7 +950,8 @@ class AccessPolicyService:
         for name in client_names:
             ovpn = self.get_openvpn_policy(name)
             wg = self.get_wg_policy(name)
-            result[name] = {"openvpn": ovpn, "wireguard": wg}
+            awg2 = self.get_awg2_policy(name)
+            result[name] = {"openvpn": ovpn, "wireguard": wg, "amneziawg2": awg2}
         return result
 
     def reconcile_all_wg_policies(
@@ -790,6 +1059,7 @@ class AccessPolicyService:
         changed = 0
         wg_rows = self.db.query(WgAccessPolicy).filter_by(node_id=target_node).all()
         ovpn_rows = self.db.query(OpenVpnAccessPolicy).filter_by(node_id=target_node).all()
+        awg2_rows = self.db.query(AmneziaWg2AccessPolicy).filter_by(node_id=target_node).all()
         for row in ovpn_rows:
             if is_node_default_policy_client(row.client_name):
                 continue
@@ -814,11 +1084,23 @@ class AccessPolicyService:
             )
             if after_row and after_row.block_reason != before:
                 changed += 1
+        for row in awg2_rows:
+            if is_node_default_policy_client(row.client_name):
+                continue
+            before = row.block_reason
+            self.reconcile_awg2(row.client_name, apply_runtime=True)
+            after_row = (
+                self.db.query(AmneziaWg2AccessPolicy)
+                .filter_by(node_id=target_node, client_name=row.client_name)
+                .first()
+            )
+            if after_row and after_row.block_reason != before:
+                changed += 1
         return {
             "traffic_limit_reconcile": "ok",
             "changed": changed,
             "node_id": target_node,
-            "clients_total": len(ovpn_rows) + len(wg_rows),
+            "clients_total": len(ovpn_rows) + len(wg_rows) + len(awg2_rows),
             "clients_changed": changed,
             "wg_runtime_calls": self.wg_runtime_calls,
         }

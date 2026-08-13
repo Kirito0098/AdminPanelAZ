@@ -30,13 +30,15 @@ import DiffPanel from '@/components/edit-files/DiffPanel'
 import TransferFilesDialog from '@/components/edit-files/TransferFilesDialog'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import { NodeBadge } from '@/components/NodeSelector'
+import { SettingsCollapsible } from '@/components/settings/SettingsChrome'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import ConfirmDialog, { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
+import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -162,12 +164,6 @@ const GROUP_LABELS: Record<FileGroup, string> = {
   adblock: 'Блокировка рекламы',
 }
 
-const GROUP_HINTS: Record<FileGroup, string> = {
-  hosts: 'Какие сайты пускать или не пускать через VPN',
-  ips: 'Отдельные адреса и диапазоны',
-  adblock: 'Дополнительные правила фильтрации рекламы',
-}
-
 const DEFAULT_FILE_META: FileMeta = {
   description: 'Список настроек VPN',
   hint: 'По одной записи на строку',
@@ -210,6 +206,7 @@ export default function EditFilesPage() {
   const [diskCompareLoading, setDiskCompareLoading] = useState(false)
   const [transferOpen, setTransferOpen] = useState(false)
   const [transferLoading, setTransferLoading] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeReadonly = nodeOffline || haReplicaReadonly
@@ -451,132 +448,98 @@ export default function EditFilesPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <ConfirmDialogHost dialogProps={dialogProps} />
       <HaReplicaBanner />
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <FileEdit size={22} />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-2xl font-bold tracking-tight">Редактор файлов</h2>
-              <NodeBadge name={activeNode?.name} status={activeNode?.status} />
-              {hasUnsavedChanges && (
-                <Badge variant="outline" className="border-amber-500/50 text-amber-600 dark:text-amber-400">
-                  Есть несохранённые правки
-                </Badge>
-              )}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Списки сайтов и IP-адресов для VPN на сервере{' '}
-              <strong className="font-medium text-foreground">{activeNode?.name ?? 'не выбран'}</strong>
-            </p>
-          </div>
-        </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
-          {showTransferButton && (
-            <div className="flex w-full flex-col items-stretch gap-0.5 sm:w-auto sm:items-start">
+      <PageSectionHeader
+        icon={FileEdit}
+        title="Редактор файлов"
+        titleAddon={
+          <>
+            <NodeBadge name={activeNode?.name} status={activeNode?.status} />
+            {hasUnsavedChanges ? (
+              <Badge variant="outline" className="border-amber-500/50 text-amber-600 dark:text-amber-400">
+                Несохранено
+              </Badge>
+            ) : null}
+          </>
+        }
+        description={
+          <>
+            Списки сайтов и IP для VPN · узел{' '}
+            <span className="font-medium text-foreground">{activeNode?.name ?? 'не выбран'}</span>
+          </>
+        }
+        actions={
+          <>
+            {showTransferButton ? (
               <Button
                 variant="outline"
+                size="sm"
                 className="w-full sm:w-auto"
                 onClick={() => setTransferOpen(true)}
                 disabled={nodeReadonly || transferLoading || files.length === 0}
               >
-                <ArrowRightLeft size={16} />
-                <span className="hidden sm:inline">Скопировать на другие серверы</span>
+                <ArrowRightLeft size={15} />
+                <span className="hidden sm:inline">На другие серверы</span>
                 <span className="sm:hidden">На узлы</span>
               </Button>
-              {isHaAutoPrimary && (
-                <span className="px-1 text-[10px] text-muted-foreground">Запасной вариант</span>
-              )}
-            </div>
-          )}
-          <Button
-            variant="outline"
-            className="w-full sm:w-auto"
-            onClick={handleRefresh}
-            disabled={loading || fileLoading}
-            aria-label="Обновить"
-          >
-            <RefreshCw size={16} className={loading || fileLoading ? 'animate-spin' : ''} />
-            <span className="hidden sm:inline">Обновить</span>
-          </Button>
-        </div>
-      </div>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full sm:w-auto"
+              onClick={handleRefresh}
+              disabled={loading || fileLoading}
+              aria-label="Обновить"
+            >
+              <RefreshCw size={15} className={loading || fileLoading ? 'animate-spin' : ''} />
+              Обновить
+            </Button>
+          </>
+        }
+      />
 
-      <details className="group rounded-lg border bg-card text-sm">
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 font-medium [&::-webkit-details-marker]:hidden">
-          <HelpCircle size={16} className="shrink-0 text-primary" />
-          Как пользоваться — 3 простых шага
-          <span className="ml-auto text-xs text-muted-foreground group-open:hidden">Показать</span>
-        </summary>
-        <div className="space-y-3 border-t px-4 py-3 text-muted-foreground">
-          <ol className="space-y-2.5">
-            <li className="flex gap-3">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                1
-              </span>
-              <span>
-                <strong className="text-foreground">Выберите список</strong> слева — сайты, IP-адреса или
-                блокировку рекламы.
-              </span>
-            </li>
-            <li className="flex gap-3">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                2
-              </span>
-              <span>
-                <strong className="text-foreground">Добавьте или уберите записи</strong> — каждый сайт или
-                адрес с новой строки, без запятых.
-              </span>
-            </li>
-            <li className="flex gap-3">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                3
-              </span>
-              <span>
-                <strong className="text-foreground">Нажмите «Сохранить и применить»</strong>, чтобы VPN
-                подхватил изменения. Просто «Сохранить» записывает список, но не обновляет маршруты.
-              </span>
-            </li>
-          </ol>
-          <p className="text-xs">
-            Перед правками нажмите <strong className="text-foreground">Обновить</strong>, чтобы загрузить
-            актуальную версию с сервера.
-          </p>
-        </div>
-      </details>
-
-      {isHaAutoPrimary && (
-        <SettingsAlert variant="info" title="Изменения автоматически копируются на резервный сервер">
-          После сохранения списки синхронизируются с резервным узлом группы «{activeNodeHa.group_name}».
-          Кнопка «Скопировать на другие серверы» нужна только в особых случаях — например, если резервный
-          сервер был недоступен.
-          <details className="mt-2">
-            <summary className="cursor-pointer text-xs hover:text-foreground">Технические подробности</summary>
-            <p className="mt-1 text-xs">
-              Режим HA auto: «Сохранить» и «Сохранить и применить» реплицируют файлы на replica через
-              config_sync. «Сохранить и применить» запускает doall.sh на основном узле; на реплике — при
-              включённом NODE_SYNC_REPLICATE_DOALL (по умолчанию да).
+      <SettingsCollapsible
+        open={helpOpen}
+        onOpenChange={setHelpOpen}
+        title="Справка"
+        description="Как править списки и что делает «Сохранить и применить»"
+        icon={<HelpCircle size={16} />}
+      >
+        <ol className="space-y-2 text-sm text-muted-foreground">
+          <li>
+            <strong className="text-foreground">1.</strong> Выберите список слева — сайты, IP или рекламу.
+          </li>
+          <li>
+            <strong className="text-foreground">2.</strong> Правьте по одной записи на строку, без запятых.
+          </li>
+          <li>
+            <strong className="text-foreground">3.</strong> «Сохранить» — только запись на диск; «Сохранить и
+            применить» — ещё и обновление маршрутов VPN (может занять несколько минут).
+          </li>
+        </ol>
+        <p className="text-xs text-muted-foreground">
+          Работа идёт на сервере «{activeNode?.name ?? 'не выбран'}». Перед правками нажмите «Обновить».
+          {isHaAutoPrimary
+            ? ` В группе «${activeNodeHa.group_name}» списки после сохранения копируются на резерв автоматически.`
+            : null}
+          {!isHaAutoPrimary && showTransferButton
+            ? ` «На другие серверы» переносит списки на узлы ${ALL_NODES_ONLINE_PHRASE.toLowerCase()}.`
+            : null}
+        </p>
+        {isHaAutoPrimary ? (
+          <details className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer hover:text-foreground">HA auto — технические детали</summary>
+            <p className="mt-1">
+              «Сохранить» и «Сохранить и применить» реплицируют файлы на replica через config_sync.
+              «Сохранить и применить» запускает doall.sh на основном узле; на реплике — при включённом
+              NODE_SYNC_REPLICATE_DOALL (по умолчанию да). Кнопка копирования — запасной вариант, если
+              реплика была недоступна.
             </p>
           </details>
-        </SettingsAlert>
-      )}
-
-      <SettingsAlert variant="info" title={`Работа идёт на сервере «${activeNode?.name ?? 'не выбран'}»`}>
-        Списки читаются и сохраняются на выбранном VPN-сервере. Кнопка{' '}
-        <strong>«Сохранить и применить»</strong> обновляет правила маршрутизации — это может занять
-        несколько минут.
-        {!isHaAutoPrimary && showTransferButton && (
-          <>
-            {' '}
-            Кнопка <strong>«Скопировать на другие серверы»</strong> переносит списки на другие узлы
-            {ALL_NODES_ONLINE_PHRASE.toLowerCase()}.
-          </>
-        )}
-      </SettingsAlert>
+        ) : null}
+      </SettingsCollapsible>
 
       {nodeOffline && (
         <SettingsAlert variant="warning" title="Сервер недоступен">
@@ -608,104 +571,104 @@ export default function EditFilesPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
-          <Card className="hidden lg:block">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Что изменить?</CardTitle>
-              <CardDescription>Выберите нужный список</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 p-3">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-start">
+          <aside className="hidden overflow-hidden rounded-lg border bg-card lg:block">
+            <div className="border-b px-3 py-2">
+              <p className="text-xs font-medium text-muted-foreground">Списки</p>
+            </div>
+            <div className="max-h-[min(70vh,40rem)] space-y-3 overflow-y-auto p-2">
               {(Object.keys(GROUP_LABELS) as FileGroup[]).map((group) => {
                 const groupFiles = groupedFiles[group]
                 if (groupFiles.length === 0) return null
                 return (
-                  <div key={group} className="space-y-1">
-                    <div className="px-2">
-                      <p className="text-xs font-medium text-foreground">{GROUP_LABELS[group]}</p>
-                      <p className="text-[11px] leading-snug text-muted-foreground">{GROUP_HINTS[group]}</p>
+                  <div key={group} className="space-y-0.5">
+                    <div className="px-2 pb-1 pt-0.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {GROUP_LABELS[group]}
+                      </p>
                     </div>
                     {groupFiles.map((f) => {
                       const meta = getFileMeta(f.key)
                       const Icon = meta.icon
                       const isActive = activeKey === f.key
+                      const dirty = isActive && hasUnsavedChanges
                       return (
                         <button
                           key={f.key}
                           type="button"
                           onClick={() => selectFile(f.key)}
+                          title={meta.description}
                           className={cn(
-                            'w-full rounded-lg px-3 py-2.5 text-left transition-colors',
+                            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
                             isActive
                               ? 'bg-primary text-primary-foreground'
-                              : 'hover:bg-accent',
+                              : 'hover:bg-muted/70',
                           )}
                         >
-                          <div className="flex items-start gap-2">
-                            <Icon
-                              size={14}
-                              className={cn('mt-0.5 shrink-0', isActive ? 'opacity-90' : 'text-muted-foreground')}
+                          <Icon
+                            size={14}
+                            className={cn('shrink-0', isActive ? 'opacity-90' : 'text-muted-foreground')}
+                          />
+                          <span className="min-w-0 flex-1 truncate font-medium">{f.title}</span>
+                          {dirty ? (
+                            <span
+                              className={cn(
+                                'h-1.5 w-1.5 shrink-0 rounded-full',
+                                isActive ? 'bg-primary-foreground' : 'bg-amber-500',
+                              )}
+                              aria-label="Есть несохранённые правки"
                             />
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium leading-tight">{f.title}</div>
-                              <div
-                                className={cn(
-                                  'mt-0.5 text-xs leading-snug',
-                                  isActive ? 'opacity-80' : 'text-muted-foreground',
-                                )}
-                              >
-                                {meta.description}
-                              </div>
-                            </div>
-                          </div>
+                          ) : null}
                         </button>
                       )
                     })}
                   </div>
                 )
               })}
-            </CardContent>
-          </Card>
+            </div>
+          </aside>
 
-          <Card>
-            <CardHeader className="space-y-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0 space-y-1">
-                  <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-                    <ActiveIcon size={18} className="shrink-0 text-muted-foreground" />
+          <Card className="min-w-0 shadow-sm">
+            <CardHeader className="space-y-3 border-b py-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 space-y-0.5">
+                  <CardTitle className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                    <ActiveIcon size={16} className="shrink-0 text-muted-foreground" />
                     {active?.title ?? 'Редактор'}
-                    {hasUnsavedChanges && (
+                    {hasUnsavedChanges ? (
                       <Badge variant="secondary" className="text-[10px]">
                         изменено
                       </Badge>
-                    )}
+                    ) : null}
                   </CardTitle>
-                  {activeMeta && (
-                    <>
-                      <p className="text-sm text-foreground">{activeMeta.description}</p>
-                      <p className="text-xs text-muted-foreground">{activeMeta.hint}</p>
-                    </>
-                  )}
-                  {active?.filename && (
-                    <details className="text-xs text-muted-foreground">
-                      <summary className="cursor-pointer hover:text-foreground">Имя файла на сервере</summary>
-                      <p className="mt-1 font-mono">{active.filename}</p>
-                    </details>
-                  )}
+                  {activeMeta ? (
+                    <p className="text-xs text-muted-foreground">
+                      {activeMeta.description}
+                      {activeMeta.hint ? ` · ${activeMeta.hint}` : ''}
+                      {active?.filename ? (
+                        <>
+                          {' · '}
+                          <span className="font-mono">{active.filename}</span>
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
                 </div>
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <Badge variant="outline" className="gap-1 tabular-nums">
-                    {stats.lines} {stats.lines === 1 ? 'запись' : stats.lines < 5 ? 'записи' : 'записей'}
+                <div className="flex flex-wrap gap-1.5 text-xs">
+                  <Badge variant="outline" className="tabular-nums">
+                    {stats.lines}{' '}
+                    {stats.lines === 1 ? 'запись' : stats.lines < 5 ? 'записи' : 'записей'}
                   </Badge>
-                  <Badge variant="outline" className="gap-1 tabular-nums">
+                  <Badge variant="outline" className="tabular-nums">
                     {formatBytes(stats.bytes)}
                   </Badge>
                 </div>
               </div>
 
               <div className="lg:hidden">
-                <Label className="mb-1.5 block text-xs text-muted-foreground">Какой список открыть?</Label>
+                <Label className="mb-1.5 block text-xs text-muted-foreground">Список</Label>
                 <Select value={activeKey ?? undefined} onValueChange={selectFile}>
-                  <SelectTrigger className="w-full min-w-0">
+                  <SelectTrigger className="h-9 w-full min-w-0">
                     <SelectValue placeholder="Выберите список" />
                   </SelectTrigger>
                   <SelectContent>
@@ -731,7 +694,7 @@ export default function EditFilesPage() {
               </div>
             </CardHeader>
 
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-3 p-3 sm:p-4">
               {fileLoading ? (
                 <Spinner label="Загрузка списка..." className="py-16" />
               ) : fileError ? (
@@ -748,135 +711,107 @@ export default function EditFilesPage() {
                   }
                   className="py-10"
                 />
-              ) : content.length === 0 ? (
-                <div className="space-y-4">
-                  <EmptyState
-                    icon={FileEdit}
-                    title="Список пока пуст"
-                    description="Здесь пока нет записей. Добавьте сайты или адреса — по одному на строку — и нажмите «Сохранить и применить»."
-                    className="py-8"
-                  />
-                  {isAdmin && (
-                    <Textarea
-                      value={content}
-                      onChange={(e) => setContent(e.target.value)}
-                      placeholder={activeMeta?.placeholder ?? 'Введите значения — по одному на строку'}
-                      className={EDITOR_TEXTAREA_CLASS}
-                      spellCheck={false}
-                    />
-                  )}
-                </div>
               ) : (
                 <Textarea
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   readOnly={!isAdmin}
-                  placeholder={activeMeta?.placeholder}
+                  placeholder={
+                    activeMeta?.placeholder ?? 'Введите значения — по одному на строку'
+                  }
                   className={EDITOR_TEXTAREA_CLASS}
                   spellCheck={false}
                 />
               )}
 
               {!fileLoading && !fileError && (
-                <div className="space-y-3" aria-live="polite">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                <div className="space-y-2" aria-live="polite">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
-                      className="w-full sm:w-auto"
+                      className="h-8"
                       aria-expanded={diffOpen}
                       onClick={() => setDiffOpen((open) => !open)}
                     >
-                      {diffOpen ? (
-                        <>
-                          <span className="hidden sm:inline">Скрыть изменения</span>
-                          <span className="sm:hidden">Скрыть</span>
-                        </>
-                      ) : (
-                        <>
-                          <span className="hidden sm:inline">Показать изменения</span>
-                          <span className="sm:hidden">Изменения</span>
-                        </>
-                      )}
+                      {diffOpen ? 'Скрыть diff' : 'Показать diff'}
                     </Button>
-                    {isAdmin && (
+                    {isAdmin ? (
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
-                        className="w-full sm:w-auto"
+                        className="h-8 gap-1.5"
                         onClick={() => void handleCompareWithDisk()}
                         disabled={diskCompareLoading || nodeReadonly}
                         aria-label="Сравнить с сервером"
                       >
                         {diskCompareLoading ? (
-                          <Loader2 size={16} className="animate-spin" />
+                          <Loader2 size={14} className="animate-spin" />
                         ) : (
-                          <GitCompare size={16} />
+                          <GitCompare size={14} />
                         )}
-                        <span className="hidden sm:inline">Сравнить с сервером</span>
+                        С сервером
                       </Button>
-                    )}
+                    ) : null}
                     <span className="text-xs text-muted-foreground">{diffSummaryText}</span>
                   </div>
-                  {diffOpen && (
-                    <DiffPanel ops={activeDiff.ops} mode={activeDiff.mode} />
-                  )}
+                  {diffOpen ? <DiffPanel ops={activeDiff.ops} mode={activeDiff.mode} /> : null}
                 </div>
               )}
 
-              {isAdmin && !fileLoading && !fileError && (
-                <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                  <p className="max-w-xl text-xs text-muted-foreground">
-                    <strong className="text-foreground">Сохранить</strong> — записать список на сервер без
-                    обновления VPN.{' '}
-                    <strong className="text-foreground">Сохранить и применить</strong> — обновить правила
-                    маршрутизации (может занять несколько минут).
-                    {isHaAutoPrimary && ' На резервный сервер списки скопируются автоматически.'}
+              {isAdmin && !fileLoading && !fileError ? (
+                <div className="sticky bottom-0 z-10 -mx-3 flex flex-col gap-2 border-t bg-card/95 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:-mx-4 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                  <p className="max-w-xl text-[11px] leading-snug text-muted-foreground">
+                    <strong className="text-foreground">Сохранить</strong> — на диск без VPN.{' '}
+                    <strong className="text-foreground">Применить</strong> — ещё и маршруты
+                    {isHaAutoPrimary ? '; на резерв уйдёт автоматически' : ''}.
                   </p>
-                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                     <Button
-                      variant="outline"
+                      variant="ghost"
+                      size="sm"
                       className="w-full sm:w-auto"
                       onClick={handleRevert}
                       disabled={!hasUnsavedChanges || saving || nodeReadonly}
                       aria-label="Отменить правки"
                     >
-                      <RotateCcw size={16} />
-                      <span className="hidden sm:inline">Отменить правки</span>
+                      <RotateCcw size={15} />
+                      Отменить
                     </Button>
                     <Button
                       variant="secondary"
+                      size="sm"
                       className="w-full sm:w-auto"
                       onClick={handleSaveOnly}
                       disabled={!hasUnsavedChanges || saving || nodeReadonly}
                       title="Записать на сервер без обновления VPN"
                       aria-label="Сохранить"
                     >
-                      {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                      <span className="hidden sm:inline">Сохранить</span>
+                      {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                      Сохранить
                     </Button>
                     <Button
+                      size="sm"
                       className="w-full sm:w-auto"
                       onClick={() => setConfirmApply(true)}
                       disabled={!hasUnsavedChanges || saving || nodeReadonly}
                       title="Записать и обновить правила VPN"
                     >
-                      {saving ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
-                      <span className="hidden sm:inline">Сохранить и применить</span>
-                      <span className="sm:hidden">Применить</span>
+                      {saving ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
+                      Сохранить и применить
                     </Button>
                   </div>
                 </div>
-              )}
+              ) : null}
 
-              {!isAdmin && user?.role === 'user' && (
+              {!isAdmin && user?.role === 'user' ? (
                 <SettingsAlert variant="info" title="Только просмотр">
                   Редактировать списки могут только администраторы. Вы можете посмотреть текущее
                   содержимое на сервере {activeNode?.name ?? ''}.
                 </SettingsAlert>
-              )}
+              ) : null}
             </CardContent>
           </Card>
         </div>

@@ -86,7 +86,12 @@ def test_install_root_antizapret_name_does_not_false_positive_vpn_wg():
 )
 def test_real_az_disk_profiles_prefer_download_link(rel: str):
     path = Path("/root/antizapret/client") / rel
-    if not path.is_file():
-        pytest.skip(f"missing sample profile {path}")
-    content = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        if not path.is_file():
+            pytest.skip(f"missing sample profile {path}")
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        # Python 3.13+ propagates PermissionError from Path.is_file(); CI runners
+        # cannot read /root even when a real install tree is absent.
+        pytest.skip(f"sample profile inaccessible {path}: {exc}")
     assert prefers_download_link_qr(path=str(path), content=content)

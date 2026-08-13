@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -33,7 +33,17 @@ from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.profile_files import profile_files_batch_key
 from app.services.server_monitor import ServerMonitorService
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
+from app.services.awg2_runtime import (
+    block_client_runtime as awg2_block_client_runtime,
+    unblock_client_runtime as awg2_unblock_client_runtime,
+)
 from app.services.warper import WarperService, run_warper_action
+from app.services.awg2 import (
+    Awg2ClientNotFoundError,
+    Awg2NotInstalledError,
+    Awg2Service,
+    is_awg2_profile_path,
+)
 
 NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
@@ -125,6 +135,19 @@ class OpenVpnClientRequest(BaseModel):
 
 class WireGuardClientRequest(BaseModel):
     client_name: str = Field(min_length=1, max_length=32)
+
+
+class Awg2ClientRequest(BaseModel):
+    client_name: str = Field(min_length=1, max_length=32)
+    ttl: str | None = None
+
+
+class Awg2ObfuscationApplyRequest(BaseModel):
+    preset: str = Field(min_length=1, max_length=32)
+    template: str = Field(min_length=1, max_length=32)
+    mtu: int | None = None
+    host: str | None = None
+    fp: str | None = None
 
 
 class ProfileFilesClientRequest(BaseModel):
@@ -297,6 +320,31 @@ def delete_wireguard(client_name: str, _: None = Depends(verify_api_key)):
     return {"message": f"Клиент '{client_name}' удалён", "detail": output}
 
 
+@app.get("/clients/amneziawg2")
+def list_awg2_clients(
+    tunnel: str = Query("antizapret"),
+    _: None = Depends(verify_api_key),
+):
+    return {"clients": Awg2Service().list_clients(tunnel)}
+
+
+@app.post("/clients/amneziawg2")
+def add_awg2_client(payload: Awg2ClientRequest, _: None = Depends(verify_api_key)):
+    try:
+        output = Awg2Service().add_client(payload.client_name, ttl=payload.ttl)
+        return {"message": "AmneziaWG2 клиент создан", "detail": output}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.delete("/clients/amneziawg2/{client_name}")
+def delete_awg2_client(client_name: str, _: None = Depends(verify_api_key)):
+    output = Awg2Service().delete_client(client_name)
+    return {"message": f"Клиент '{client_name}' удалён", "detail": output}
+
+
 @app.post("/clients/wireguard/{client_name}/block")
 def block_wireguard(client_name: str, _: None = Depends(verify_api_key)):
     return block_client_runtime(client_name)
@@ -305,6 +353,16 @@ def block_wireguard(client_name: str, _: None = Depends(verify_api_key)):
 @app.post("/clients/wireguard/{client_name}/unblock")
 def unblock_wireguard(client_name: str, _: None = Depends(verify_api_key)):
     return unblock_client_runtime(client_name)
+
+
+@app.post("/clients/amneziawg2/{client_name}/block")
+def block_awg2(client_name: str, _: None = Depends(verify_api_key)):
+    return awg2_block_client_runtime(client_name)
+
+
+@app.post("/clients/amneziawg2/{client_name}/unblock")
+def unblock_awg2(client_name: str, _: None = Depends(verify_api_key)):
+    return awg2_unblock_client_runtime(client_name)
 
 
 @app.get("/wireguard/server-config/{interface}")
@@ -453,9 +511,17 @@ def restart_service(payload: ServiceRestartRequest, _: None = Depends(verify_api
     return {"message": f"Служба {payload.service_name} перезапущена", "detail": output}
 
 
+@app.post("/reboot")
+def reboot_host(_: None = Depends(verify_api_key)):
+    output = service.reboot()
+    return {"message": "Узел перезагружается", "detail": output}
+
+
 @app.get("/profiles/files")
 def profile_files(client_name: str, vpn_type: str, _: None = Depends(verify_api_key)):
     vt = VpnType(vpn_type)
+    if vt == VpnType.amneziawg2:
+        return {"files": Awg2Service().get_profile_files(client_name)}
     return {"files": service.get_profile_files(client_name, vt)}
 
 
@@ -469,18 +535,26 @@ def profile_files_batch(payload: ProfileFilesBatchRequest, _: None = Depends(ver
         except ValueError:
             files_by_client[key] = []
             continue
-        files_by_client[key] = service.get_profile_files(item.client_name, vt)
+        if vt == VpnType.amneziawg2:
+            files_by_client[key] = Awg2Service().get_profile_files(item.client_name)
+        else:
+            files_by_client[key] = service.get_profile_files(item.client_name, vt)
     return {"files_by_client": files_by_client}
 
 
 @app.get("/profiles/download")
 def profile_download(path: str, _: None = Depends(verify_api_key)):
+    if is_awg2_profile_path(path):
+        return {"content": Awg2Service().read_profile_file(path)}
     return {"content": service.read_profile_file(path)}
 
 
 @app.put("/profiles/upload")
 def profile_upload(payload: ProfileUploadRequest, _: None = Depends(verify_api_key)):
-    service.write_profile_file(payload.path, payload.content)
+    if is_awg2_profile_path(payload.path):
+        Awg2Service().write_profile_file(payload.path, payload.content)
+    else:
+        service.write_profile_file(payload.path, payload.content)
     return {"message": "Профиль сохранён"}
 
 
@@ -664,6 +738,183 @@ class WarperCatalogNameRequest(BaseModel):
 @app.get("/warper/health")
 def warper_health(_: None = Depends(verify_api_key)):
     return run_warper_action("health")
+
+
+@app.get("/awg2/health")
+def awg2_health(_: None = Depends(verify_api_key)):
+    return Awg2Service().get_health()
+
+
+@app.get("/awg2/status")
+def awg2_status(_: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().get_status()
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/awg2/backup")
+def awg2_backup(_: None = Depends(verify_api_key)):
+    try:
+        return Response(
+            content=Awg2Service().export_narrow_backup(),
+            media_type="application/gzip",
+            headers={"Content-Disposition": 'attachment; filename="az-awg2-backup.tar.gz"'},
+        )
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/awg2/restore")
+async def awg2_restore(archive: UploadFile = File(...), _: None = Depends(verify_api_key)):
+    try:
+        service = Awg2Service()
+        service.import_narrow_backup(await archive.read())
+        return service.apply_runtime()
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.get("/awg2/state/archive")
+def awg2_export_archive(_: None = Depends(verify_api_key)):
+    try:
+        return Response(content=Awg2Service().export_state_archive(), media_type="application/gzip")
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/awg2/state/archive")
+async def awg2_import_archive(request: Request, _: None = Depends(verify_api_key)):
+    try:
+        data = await request.body()
+        Awg2Service().import_state_archive(data)
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return {"success": True}
+
+
+@app.post("/awg2/runtime/apply")
+def awg2_apply_runtime(_: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().apply_runtime()
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/awg2/expire-check")
+def awg2_expire_check(_: None = Depends(verify_api_key)):
+    try:
+        output = Awg2Service().expire_check()
+        return {"message": "AWG2 expiry check completed", "detail": output}
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.get("/awg2/expiry")
+def awg2_expiry(_: None = Depends(verify_api_key)):
+    expiry = Awg2Service().read_expiry_map()
+    return {"expiry": {name: value.isoformat() for name, value in expiry.items()}}
+
+
+@app.get("/awg2/obfuscation")
+def awg2_get_obfuscation(_: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().get_obfuscation()
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.post("/awg2/obfuscation/regenerate")
+def awg2_regenerate_obfuscation(_: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().regenerate_obfuscation()
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.post("/awg2/obfuscation/apply")
+def awg2_apply_obfuscation(payload: Awg2ObfuscationApplyRequest, _: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().apply_obfuscation(
+            preset=payload.preset,
+            template=payload.template,
+            mtu=payload.mtu,
+            host=payload.host,
+            fp=payload.fp,
+        )
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.get("/awg2/monitoring")
+def awg2_get_monitoring(_: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().get_monitoring()
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.get("/awg2/clients/{client_name}/stats")
+def awg2_get_client_stats(client_name: str, _: None = Depends(verify_api_key)):
+    try:
+        return Awg2Service().get_client_stats(client_name)
+    except Awg2NotInstalledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Awg2ClientNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@app.get("/awg2/install/stream")
+def awg2_install_stream(
+    mode: str = Query(..., pattern="^(install|update)$"),
+    preset: str | None = Query(None),
+    template: str | None = Query(None),
+    mtu: int | None = Query(None),
+    _: None = Depends(verify_api_key),
+):
+    def event_generator():
+        service = Awg2Service()
+        for event in service.iter_install_stream_events(
+            mode,
+            preset=preset,
+            template=template,
+            mtu=mtu,
+        ):
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/warper/status")

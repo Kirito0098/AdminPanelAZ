@@ -223,12 +223,14 @@ export default function SettingsPage() {
       <MobileSettingsSectionPicker value={activeSection} />
 
       <div className="flex flex-col gap-4 orientation-compact-settings-section">
-        <div className="rounded-lg border bg-muted/30 px-4 py-3 orientation-compact-settings-section-header">
-          <h3 className="text-lg font-semibold tracking-tight">{sectionMeta.title}</h3>
-          <p className="text-sm text-muted-foreground">{sectionMeta.description}</p>
-          {sectionMeta.hint && (
-            <p className="mt-2 text-sm text-muted-foreground/90">{sectionMeta.hint}</p>
-          )}
+        <div className="orientation-compact-settings-section-header">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h3 className="text-base font-semibold tracking-tight">{sectionMeta.title}</h3>
+            <p className="text-xs text-muted-foreground">{sectionMeta.description}</p>
+          </div>
+          {sectionMeta.hint ? (
+            <p className="mt-1 text-xs text-muted-foreground/80">{sectionMeta.hint}</p>
+          ) : null}
         </div>
         {renderSection()}
       </div>

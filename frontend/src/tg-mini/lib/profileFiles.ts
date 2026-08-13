@@ -50,3 +50,28 @@ export function profileRouteHint(route: ProfileRoute): string {
     ? 'Только заблокированные сайты и сервисы'
     : 'Весь трафик через VPN-сервер'
 }
+
+/** Short “who is this file for” hint under .conf / .vpn (and similar). */
+export function profileFormatHint(file: TgMiniConfigFile): string | null {
+  const name = (file.download_filename || file.filename || file.path || '').toLowerCase()
+  const protocol = (file.protocol || '').toLowerCase()
+
+  if (name.endsWith('.vpn') || name.includes('vpnuri') || name.endsWith('-vpnuri.txt')) {
+    return 'Формат AmneziaVPN (часто vpn://…) — импорт в приложение AmneziaVPN'
+  }
+
+  if (name.endsWith('.conf')) {
+    if (protocol === 'amneziawg2' || protocol === 'amneziawg' || /awg|amnezia/.test(name)) {
+      return 'Нативный конфиг AmneziaWG — приложение AmneziaWG, awg-quick и т.п.'
+    }
+    if (protocol === 'wireguard' || name.startsWith('wg-')) {
+      return 'Конфиг WireGuard — приложение WireGuard / wg-quick'
+    }
+  }
+
+  if (name.endsWith('.ovpn') || protocol === 'openvpn') {
+    return 'Профиль OpenVPN — приложение OpenVPN Connect'
+  }
+
+  return null
+}

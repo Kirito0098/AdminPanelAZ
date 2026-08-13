@@ -10,6 +10,7 @@ FieldKind = Literal[
     "mon_cpu", "mon_ram", "mon_int", "mon_cd",
     "bk_days", "bk_ret",
     "sec_allow_ip", "sec_tmp_ip",
+    "mnt_reboot",
 ]
 
 _pending: dict[str, "PendingInput"] = {}

@@ -267,6 +267,49 @@ def _migrate_access_policy_node_scope() -> None:
         db.close()
 
 
+def _migrate_awg2_access_policy_table() -> None:
+    inspector = inspect(engine)
+    if "amneziawg2_access_policies" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE amneziawg2_access_policies (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    node_id INTEGER NOT NULL,
+                    client_name VARCHAR(64) NOT NULL,
+                    is_temp_blocked BOOLEAN,
+                    is_permanent_blocked BOOLEAN,
+                    block_reason VARCHAR(32),
+                    block_started_at DATETIME,
+                    block_days INTEGER,
+                    block_until DATETIME,
+                    traffic_limit_bytes BIGINT,
+                    traffic_limit_period_days INTEGER,
+                    updated_by VARCHAR(64),
+                    updated_at DATETIME,
+                    FOREIGN KEY(node_id) REFERENCES nodes (id),
+                    UNIQUE (node_id, client_name)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_amneziawg2_access_policies_node_id "
+                "ON amneziawg2_access_policies (node_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_amneziawg2_access_policies_client_name "
+                "ON amneziawg2_access_policies (client_name)"
+            )
+        )
+    logger.info("DB migration: created amneziawg2_access_policies table")
+
+
 def _migrate_node_resource_sample_table() -> None:
     inspector = inspect(engine)
     if "node_resource_sample" in inspector.get_table_names():
@@ -320,6 +363,7 @@ def _migrate_connection_count_samples_table() -> None:
                     node_id INTEGER NOT NULL,
                     openvpn_count INTEGER DEFAULT 0,
                     wireguard_count INTEGER DEFAULT 0,
+                    amneziawg2_count INTEGER DEFAULT 0,
                     created_at DATETIME,
                     FOREIGN KEY(node_id) REFERENCES nodes (id)
                 )
@@ -345,6 +389,20 @@ def _migrate_connection_count_samples_table() -> None:
             )
         )
     logger.info("DB migration: created connection_count_samples table")
+
+
+def _migrate_connection_count_samples_awg2_column() -> None:
+    inspector = inspect(engine)
+    if "connection_count_samples" not in inspector.get_table_names():
+        return
+    existing = {c["name"] for c in inspector.get_columns("connection_count_samples")}
+    if "amneziawg2_count" in existing:
+        return
+    with engine.begin() as conn:
+        conn.execute(text(
+            "ALTER TABLE connection_count_samples ADD COLUMN amneziawg2_count INTEGER DEFAULT 0"
+        ))
+    logger.info("DB migration: added connection_count_samples.amneziawg2_count")
 
 
 def _migrate_active_web_session_table() -> None:
@@ -600,6 +658,7 @@ def _migrate_node_sync_groups_table() -> None:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name VARCHAR(128) NOT NULL,
                     shared_domain VARCHAR(255) NOT NULL,
+                    shared_domain_wireguard VARCHAR(255),
                     primary_node_id INTEGER NOT NULL REFERENCES nodes(id),
                     replica_node_ids TEXT NOT NULL DEFAULT '[]',
                     sync_mode VARCHAR(32) NOT NULL DEFAULT 'manual_full',
@@ -617,6 +676,26 @@ def _migrate_node_sync_groups_table() -> None:
         )
         conn.execute(text("CREATE INDEX ix_node_sync_groups_primary ON node_sync_groups(primary_node_id)"))
         logger.info("DB migration: created node_sync_groups table")
+
+
+def _migrate_node_sync_groups_wireguard_domain() -> None:
+    """Separate WireGuard/AmneziaWG shared domain (like AntiZapret OPENVPN_HOST / WIREGUARD_HOST)."""
+    inspector = inspect(engine)
+    if "node_sync_groups" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("node_sync_groups")}
+    if "shared_domain_wireguard" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE node_sync_groups ADD COLUMN shared_domain_wireguard VARCHAR(255)"))
+        # Existing groups used one domain for both protocols — keep that behaviour.
+        conn.execute(
+            text(
+                "UPDATE node_sync_groups SET shared_domain_wireguard = shared_domain "
+                "WHERE shared_domain_wireguard IS NULL OR shared_domain_wireguard = ''"
+            )
+        )
+        logger.info("DB migration: added node_sync_groups.shared_domain_wireguard")
 
 
 def _migrate_vpn_configs_ha_links() -> None:
@@ -770,11 +849,14 @@ def run_db_migrations() -> None:
     """Lightweight SQLite migrations for columns added after initial deploy."""
     _migrate_alert_rules_table()
     _migrate_node_sync_groups_table()
+    _migrate_node_sync_groups_wireguard_domain()
     _migrate_vpn_configs_ha_links()
     _migrate_vpn_configs_node_scope()
     _migrate_access_policy_node_scope()
+    _migrate_awg2_access_policy_table()
     _migrate_node_resource_sample_table()
     _migrate_connection_count_samples_table()
+    _migrate_connection_count_samples_awg2_column()
     _migrate_panel_resource_sample_table()
     _migrate_active_web_session_table()
     _migrate_stage2_admin_productivity()
@@ -786,6 +868,10 @@ def run_db_migrations() -> None:
     inspector = inspect(engine)
     migrations = {
         "wg_access_policy": [
+            ("traffic_limit_bytes", "BIGINT"),
+            ("traffic_limit_period_days", "INTEGER"),
+        ],
+        "amneziawg2_access_policies": [
             ("traffic_limit_bytes", "BIGINT"),
             ("traffic_limit_period_days", "INTEGER"),
         ],
@@ -811,6 +897,7 @@ def run_db_migrations() -> None:
         ],
         "vpn_configs": [
             ("cert_expires_at", "DATETIME"),
+            ("expires_at", "DATETIME"),
         ],
         "users": [
             ("totp_secret_encrypted", "VARCHAR(512)"),

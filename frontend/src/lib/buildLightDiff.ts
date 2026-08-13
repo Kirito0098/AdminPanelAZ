@@ -48,25 +48,43 @@ function buildIndexedDiff(baseLines: string[], currentLines: string[]): DiffOp[]
   return ops
 }
 
+/**
+ * Myers shortest-edit-script diff with correct backtracking
+ * (jcoglan / Myers 1986). The previous Map-based port mishandled
+ * reconstruction and produced empty "L0" ops for common cases like
+ * replacing a trailing-newline-only file with real content.
+ */
 function buildMyersDiff(baseLines: string[], currentLines: string[]): DiffOp[] {
   const n = baseLines.length
   const m = currentLines.length
+
+  if (n === 0) {
+    return currentLines.map((text, i) => ({
+      type: 'add' as const,
+      lineNumber: i + 1,
+      text,
+    }))
+  }
+  if (m === 0) {
+    return baseLines.map((text, i) => ({
+      type: 'remove' as const,
+      lineNumber: i + 1,
+      text,
+    }))
+  }
+
   const max = n + m
-  const v = new Map<number, number>()
-  const trace: Map<number, number>[] = []
-  v.set(1, 0)
+  const offset = max
+  const v = new Array<number>(2 * max + 1).fill(0)
+  const trace: number[][] = []
 
-  for (let d = 0; d <= max; d += 1) {
-    trace.push(new Map(v))
+  outer: for (let d = 0; d <= max; d += 1) {
     for (let k = -d; k <= d; k += 2) {
-      const xFromKMinus = v.get(k - 1)
-      const xFromKPlus = v.get(k + 1)
-
       let x: number
-      if (k === -d || (k !== d && (xFromKMinus ?? -Infinity) < (xFromKPlus ?? -Infinity))) {
-        x = xFromKPlus ?? 0
+      if (k === -d || (k !== d && v[k - 1 + offset] < v[k + 1 + offset])) {
+        x = v[k + 1 + offset]
       } else {
-        x = (xFromKMinus ?? 0) + 1
+        x = v[k - 1 + offset] + 1
       }
 
       let y = x - k
@@ -75,61 +93,59 @@ function buildMyersDiff(baseLines: string[], currentLines: string[]): DiffOp[] {
         y += 1
       }
 
-      v.set(k, x)
+      v[k + offset] = x
 
       if (x >= n && y >= m) {
-        const ops: DiffOp[] = []
-        let backX = n
-        let backY = m
-
-        for (let backD = trace.length - 1; backD > 0; backD -= 1) {
-          const prevV = trace[backD - 1]
-          const backK = backX - backY
-          let prevK: number
-
-          if (
-            backK === -backD ||
-            (backK !== backD &&
-              (prevV.get(backK - 1) ?? -Infinity) < (prevV.get(backK + 1) ?? -Infinity))
-          ) {
-            prevK = backK + 1
-          } else {
-            prevK = backK - 1
-          }
-
-          const prevX = prevV.get(prevK) ?? 0
-          const prevY = prevX - prevK
-
-          while (backX > prevX && backY > prevY) {
-            backX -= 1
-            backY -= 1
-          }
-
-          if (backX === prevX && backY > prevY) {
-            backY -= 1
-            ops.push({ type: 'add', lineNumber: backY + 1, text: currentLines[backY] })
-          } else if (backX > prevX && backY === prevY) {
-            backX -= 1
-            ops.push({ type: 'remove', lineNumber: backX + 1, text: baseLines[backX] })
-          }
-        }
-
-        while (backX > 0) {
-          backX -= 1
-          ops.push({ type: 'remove', lineNumber: backX + 1, text: baseLines[backX] })
-        }
-        while (backY > 0) {
-          backY -= 1
-          ops.push({ type: 'add', lineNumber: backY + 1, text: currentLines[backY] })
-        }
-
-        ops.reverse()
-        return ops
+        trace.push(v.slice())
+        break outer
       }
     }
+    trace.push(v.slice())
   }
 
-  return buildIndexedDiff(baseLines, currentLines)
+  const ops: DiffOp[] = []
+  let x = n
+  let y = m
+
+  for (let d = trace.length - 1; d > 0; d -= 1) {
+    const vSnap = trace[d]
+    const k = x - y
+
+    let prevK: number
+    if (k === -d || (k !== d && vSnap[k - 1 + offset] < vSnap[k + 1 + offset])) {
+      prevK = k + 1
+    } else {
+      prevK = k - 1
+    }
+
+    const prevX = vSnap[prevK + offset]
+    const prevY = prevX - prevK
+
+    while (x > prevX && y > prevY) {
+      x -= 1
+      y -= 1
+    }
+
+    if (x === prevX) {
+      ops.push({
+        type: 'add',
+        lineNumber: prevY + 1,
+        text: currentLines[prevY],
+      })
+    } else {
+      ops.push({
+        type: 'remove',
+        lineNumber: prevX + 1,
+        text: baseLines[prevX],
+      })
+    }
+
+    x = prevX
+    y = prevY
+  }
+
+  ops.reverse()
+  return ops
 }
 
 export function buildLightDiff(baseValue: string, currentValue: string): DiffResult {
@@ -159,4 +175,3 @@ export function countDiffOps(ops: DiffOp[]): DiffCounts {
   }
   return { added, removed }
 }
-

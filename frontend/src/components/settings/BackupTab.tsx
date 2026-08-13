@@ -5,9 +5,7 @@ import {
   ArchiveX,
   CalendarClock,
   Check,
-  Database,
   Download,
-  HardDrive,
   LayoutDashboard,
   ListTree,
   RotateCcw,
@@ -16,6 +14,7 @@ import {
   Server,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react'
 import {
   ApiError,
@@ -30,6 +29,11 @@ import {
 } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import {
+  SettingsCollapsible,
+  SettingsMetaLine,
+  SettingsToolbar,
+} from '@/components/settings/SettingsChrome'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
@@ -75,46 +79,6 @@ const ADMIN_PANEL_ALWAYS_INCLUDED = [
 
 const INTERVAL_PRESETS = [1, 3, 7, 14] as const
 const RETENTION_PRESETS = [3, 5, 10] as const
-
-function SectionHeading({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="md:col-span-2">
-      <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-      <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-    </div>
-  )
-}
-
-function MetricPill({
-  icon: Icon,
-  label,
-  value,
-  tone = 'default',
-}: {
-  icon: LucideIcon
-  label: string
-  value: string
-  tone?: 'default' | 'success' | 'muted'
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 shadow-sm backdrop-blur-sm">
-      <div
-        className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-          tone === 'success' && 'bg-primary/15 text-primary',
-          tone === 'muted' && 'bg-muted text-muted-foreground',
-          tone === 'default' && 'bg-muted/80 text-foreground',
-        )}
-      >
-        <Icon size={18} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="truncate text-sm font-semibold">{value}</p>
-      </div>
-    </div>
-  )
-}
 
 function ToggleRow({
   id,
@@ -255,6 +219,8 @@ export default function BackupTab() {
   const [includeAntizapretBackup, setIncludeAntizapretBackup] = useState(false)
   const [loading, setLoading] = useState(true)
   const [savingSettings, setSavingSettings] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [scheduleOpen, setScheduleOpen] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const pendingRestoreRef = useRef(false)
 
@@ -457,42 +423,54 @@ export default function BackupTab() {
       <ConfirmDialogHost dialogProps={dialogProps} />
       <InlineProgressBar active={savingSettings} label="Сохранение настроек..." />
 
-      <div className="grid gap-4 md:grid-cols-2 md:items-start">
-        <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card p-4 md:col-span-2">
-          <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/10 blur-2xl" />
-          <div className="relative grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricPill
-              icon={Archive}
-              label="Копий"
-              value={String(stats.count)}
-              tone={stats.count > 0 ? 'default' : 'muted'}
-            />
-            <MetricPill icon={HardDrive} label="Общий объём" value={stats.totalSize} />
-            <MetricPill
-              icon={CalendarClock}
-              label="Авто-копия"
-              value={stats.auto}
-              tone={(settingsDraft ?? settings)?.auto_backup_enabled ? 'success' : 'muted'}
-            />
-            <MetricPill icon={Database} label="Хранить" value={`${stats.retention} шт.`} />
-          </div>
-        </div>
+      <SettingsToolbar
+        title="Резервные копии"
+        meta={
+          <SettingsMetaLine
+            items={[
+              { label: 'архивов', value: stats.count },
+              { label: 'объём', value: stats.totalSize },
+              { label: 'авто-копия', value: stats.auto },
+              { label: 'хранить', value: `${stats.retention} шт.` },
+            ]}
+          />
+        }
+        actions={
+          <Button
+            type="button"
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={() => setCreateOpen((v) => !v)}
+            aria-expanded={createOpen}
+          >
+            <Archive size={15} />
+            Создать копию
+          </Button>
+        }
+      />
 
-        <SectionHeading
-          title="Создание копии"
-          description="AdminPanel и AntiZapret сохраняются по-разному — см. блоки ниже"
-        />
-
-        <Card className="overflow-hidden shadow-sm md:col-span-2">
-          <div className="h-1 bg-gradient-to-r from-primary/80 to-primary/15" />
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Archive size={18} />
-              Создать резервную копию
-            </CardTitle>
-            <CardDescription>
-              Кнопка «Создать копию» всегда делает архив AdminPanel; опции ниже добавляют данные AntiZapret
-            </CardDescription>
+      {createOpen && (
+        <Card className="border-primary/25 shadow-sm">
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Archive size={16} />
+                Создать резервную копию
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Кнопка «Создать копию» всегда делает архив AdminPanel; опции ниже добавляют данные AntiZapret
+              </CardDescription>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              onClick={() => setCreateOpen(false)}
+              aria-label="Скрыть форму"
+            >
+              <X size={16} />
+            </Button>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -583,270 +561,252 @@ export default function BackupTab() {
             </div>
           </CardContent>
         </Card>
+      )}
 
-        {settingsDraft && (
-          <>
-            <SectionHeading
-              title="Автоматические копии"
-              description="По расписанию: архив AdminPanel на сервере панели и при необходимости отдельный архив на VPN-сервере"
+      <Card className="shadow-sm">
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
+          <div>
+            <CardTitle className="text-base">Архивы AdminPanel</CardTitle>
+            <CardDescription className="mt-1.5">
+              {backups.length > 0
+                ? `${backups.length} файл${backups.length === 1 ? '' : backups.length < 5 ? 'а' : 'ов'} adminpanelaz_*.tar.gz — полные архивы AntiZapret хранятся на VPN-сервере`
+                : 'Только копии панели; архивы AntiZapret создаются на VPN-сервере отдельно'}
+            </CardDescription>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept=".tar.gz,.tgz,application/gzip,application/x-gzip"
+              className="hidden"
+              onChange={(event) => void handleUploadFileSelected(event)}
             />
-
-            <Card className="overflow-hidden shadow-sm md:col-span-2">
-              <div className="h-1 bg-gradient-to-r from-violet-500/70 to-violet-500/15" />
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <CalendarClock size={18} />
-                  Расписание и хранение
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <ToggleRow
-                    id="auto-backup"
-                    label="Авто-копия AdminPanel"
-                    description="База, CIDR и .env панели — файл adminpanelaz_*.tar.gz в списке архивов"
-                    checked={settingsDraft.auto_backup_enabled}
-                    onCheckedChange={(checked) => patchDraft({ auto_backup_enabled: checked })}
-                  />
-                  <ToggleRow
-                    id="backup-az"
-                    label="Плюс полный архив AntiZapret"
-                    description="Дополнительно client.sh 8 на VPN-сервере — отдельный файл, не в списке панели"
-                    checked={settingsDraft.backup_az_enabled}
-                    onCheckedChange={(checked) => patchDraft({ backup_az_enabled: checked })}
-                  />
-                </div>
-
-                {settingsDraft.auto_backup_enabled && (
-                  <div className="grid gap-4 rounded-xl border bg-muted/20 p-4 md:grid-cols-2">
-                    <div className="space-y-3">
-                      <Label className="text-xs text-muted-foreground">Интервал, дней</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {INTERVAL_PRESETS.map((d) => (
-                          <button
-                            key={d}
-                            type="button"
-                            onClick={() => patchDraft({ auto_backup_days: d })}
-                            className={cn(
-                              'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
-                              settingsDraft.auto_backup_days === d
-                                ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
-                                : 'hover:border-muted-foreground/30 hover:bg-muted/50',
-                            )}
-                          >
-                            {d} дн.
-                          </button>
-                        ))}
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => handleUpload(false)}>
+              <Upload size={14} />
+              Загрузить
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
+              onClick={() => handleUpload(true)}
+            >
+              <RotateCcw size={14} />
+              Загрузить и восстановить
+            </Button>
+            {backups.length > 0 && (
+              <Badge variant="secondary" className="shrink-0">
+                {backups.length}
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {backups.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-muted-foreground/20 bg-muted/10 px-4 py-10 text-center">
+              <ArchiveX className="mb-2 h-8 w-8 text-muted-foreground/70" />
+              <p className="text-sm font-medium">Копий пока нет</p>
+              <p className="mt-1 max-w-sm text-xs text-muted-foreground">
+                Создайте первую резервную копию или загрузите ранее скачанный архив adminpanelaz_*.tar.gz
+              </p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                <Button onClick={() => void handleCreate()} variant="outline" className="gap-1.5">
+                  <Archive size={16} />
+                  Создать копию
+                </Button>
+                <Button onClick={() => handleUpload(false)} variant="outline" className="gap-1.5">
+                  <Upload size={16} />
+                  Загрузить архив
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {backups.map((b) => (
+                <li
+                  key={b.file_name}
+                  className="rounded-xl border bg-card/50 p-3 transition-colors hover:bg-muted/30"
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate font-mono text-sm font-medium">{b.file_name}</p>
+                        <Badge variant="outline" className="text-[10px]">
+                          {formatSize(b.size_bytes)}
+                        </Badge>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          id="backup-days"
-                          type="number"
-                          min={1}
-                          max={90}
-                          className="h-9 w-20"
-                          value={settingsDraft.auto_backup_days}
-                          onChange={(e) => patchDraft({ auto_backup_days: Number(e.target.value) })}
-                        />
-                        <span className="text-xs text-muted-foreground">дней</span>
+                      <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(b.created_at)}</p>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {b.components.map((c) => (
+                          <Badge key={c} variant="secondary" className="text-[10px]">
+                            {COMPONENT_LABELS[c] ?? c}
+                          </Badge>
+                        ))}
                       </div>
                     </div>
-
-                    <div className="space-y-3">
-                      <Label className="text-xs text-muted-foreground">Сколько копий хранить</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {RETENTION_PRESETS.map((n) => (
-                          <button
-                            key={n}
-                            type="button"
-                            onClick={() => patchDraft({ retention_count: n })}
-                            className={cn(
-                              'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
-                              settingsDraft.retention_count === n
-                                ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
-                                : 'hover:border-muted-foreground/30 hover:bg-muted/50',
-                            )}
-                          >
-                            {n}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          id="retention"
-                          type="number"
-                          min={1}
-                          max={30}
-                          className="h-9 w-20"
-                          value={settingsDraft.retention_count}
-                          onChange={(e) => patchDraft({ retention_count: Number(e.target.value) })}
-                        />
-                        <span className="text-xs text-muted-foreground">копий</span>
-                      </div>
+                    <div className="flex flex-wrap gap-2 lg:shrink-0">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        title="Скачать"
+                        onClick={async () => {
+                          const res = await downloadBackup(b.file_name)
+                          if (!res.ok) return notifyError('Ошибка скачивания')
+                          const blob = await res.blob()
+                          const a = document.createElement('a')
+                          a.href = URL.createObjectURL(blob)
+                          a.download = b.file_name
+                          a.click()
+                        }}
+                      >
+                        <Download size={14} />
+                        Скачать
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => handleRestore(b.file_name)}
+                      >
+                        <RotateCcw size={14} />
+                        Восстановить
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
+                        onClick={() => handleDelete(b.file_name)}
+                      >
+                        <Trash2 size={14} />
+                        Удалить
+                      </Button>
                     </div>
                   </div>
-                )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
-                <div className="flex justify-end border-t pt-4">
-                  <Button
-                    disabled={!isSettingsDirty || savingSettings}
-                    onClick={() => void saveSettingsDraft()}
-                    className="gap-1.5"
-                  >
-                    <Save size={16} />
-                    {savingSettings ? 'Сохранение...' : 'Сохранить'}
-                  </Button>
+      {settingsDraft && (
+        <SettingsCollapsible
+          open={scheduleOpen}
+          onOpenChange={setScheduleOpen}
+          icon={<CalendarClock size={16} />}
+          title="Автоматические копии"
+          description="Расписание и хранение — архив AdminPanel на сервере панели и при необходимости отдельный архив на VPN-сервере"
+        >
+          <div className="grid gap-4 md:grid-cols-2">
+            <ToggleRow
+              id="auto-backup"
+              label="Авто-копия AdminPanel"
+              description="База, CIDR и .env панели — файл adminpanelaz_*.tar.gz в списке архивов"
+              checked={settingsDraft.auto_backup_enabled}
+              onCheckedChange={(checked) => patchDraft({ auto_backup_enabled: checked })}
+            />
+            <ToggleRow
+              id="backup-az"
+              label="Плюс полный архив AntiZapret"
+              description="Дополнительно client.sh 8 на VPN-сервере — отдельный файл, не в списке панели"
+              checked={settingsDraft.backup_az_enabled}
+              onCheckedChange={(checked) => patchDraft({ backup_az_enabled: checked })}
+            />
+          </div>
+
+          {settingsDraft.auto_backup_enabled && (
+            <div className="grid gap-4 rounded-xl border bg-muted/20 p-4 md:grid-cols-2">
+              <div className="space-y-3">
+                <Label className="text-xs text-muted-foreground">Интервал, дней</Label>
+                <div className="flex flex-wrap gap-2">
+                  {INTERVAL_PRESETS.map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => patchDraft({ auto_backup_days: d })}
+                      className={cn(
+                        'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
+                        settingsDraft.auto_backup_days === d
+                          ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+                          : 'hover:border-muted-foreground/30 hover:bg-muted/50',
+                      )}
+                    >
+                      {d} дн.
+                    </button>
+                  ))}
                 </div>
-              </CardContent>
-            </Card>
-          </>
-        )}
-
-        <SectionHeading
-          title="Архивы AdminPanel"
-          description={
-            backups.length > 0
-              ? `${backups.length} файл${backups.length === 1 ? '' : backups.length < 5 ? 'а' : 'ов'} adminpanelaz_*.tar.gz — полные архивы AntiZapret хранятся на VPN-сервере`
-              : 'Только копии панели; архивы AntiZapret создаются на VPN-сервере отдельно'
-          }
-        />
-
-        <Card className="overflow-hidden shadow-sm md:col-span-2">
-          <div className="h-1 bg-gradient-to-r from-sky-500/70 to-sky-500/15" />
-          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-            <div>
-              <CardTitle className="text-base">Сохранённые копии</CardTitle>
-              <CardDescription className="mt-1.5">
-                Скачивание, загрузка с компьютера, восстановление и удаление архивов
-              </CardDescription>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
-              <input
-                ref={uploadInputRef}
-                type="file"
-                accept=".tar.gz,.tgz,application/gzip,application/x-gzip"
-                className="hidden"
-                onChange={(event) => void handleUploadFileSelected(event)}
-              />
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => handleUpload(false)}>
-                <Upload size={14} />
-                Загрузить
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
-                onClick={() => handleUpload(true)}
-              >
-                <RotateCcw size={14} />
-                Загрузить и восстановить
-              </Button>
-              {backups.length > 0 && (
-                <Badge variant="secondary" className="shrink-0">
-                  {backups.length}
-                </Badge>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            {backups.length === 0 ? (
-              <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-muted-foreground/20 bg-muted/10 px-4 py-10 text-center">
-                <ArchiveX className="mb-2 h-8 w-8 text-muted-foreground/70" />
-                <p className="text-sm font-medium">Копий пока нет</p>
-                <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-                  Создайте первую резервную копию или загрузите ранее скачанный архив adminpanelaz_*.tar.gz
-                </p>
-                <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  <Button onClick={() => void handleCreate()} variant="outline" className="gap-1.5">
-                    <Archive size={16} />
-                    Создать копию
-                  </Button>
-                  <Button onClick={() => handleUpload(false)} variant="outline" className="gap-1.5">
-                    <Upload size={16} />
-                    Загрузить архив
-                  </Button>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="backup-days"
+                    type="number"
+                    min={1}
+                    max={90}
+                    className="h-9 w-20"
+                    value={settingsDraft.auto_backup_days}
+                    onChange={(e) => patchDraft({ auto_backup_days: Number(e.target.value) })}
+                  />
+                  <span className="text-xs text-muted-foreground">дней</span>
                 </div>
               </div>
-            ) : (
-              <ul className="space-y-2">
-                {backups.map((b) => (
-                  <li
-                    key={b.file_name}
-                    className="rounded-xl border bg-card/50 p-3 transition-colors hover:bg-muted/30"
-                  >
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="truncate font-mono text-sm font-medium">{b.file_name}</p>
-                          <Badge variant="outline" className="text-[10px]">
-                            {formatSize(b.size_bytes)}
-                          </Badge>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(b.created_at)}</p>
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {b.components.map((c) => (
-                            <Badge key={c} variant="secondary" className="text-[10px]">
-                              {COMPONENT_LABELS[c] ?? c}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2 lg:shrink-0">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="gap-1.5"
-                          title="Скачать"
-                          onClick={async () => {
-                            const res = await downloadBackup(b.file_name)
-                            if (!res.ok) return notifyError('Ошибка скачивания')
-                            const blob = await res.blob()
-                            const a = document.createElement('a')
-                            a.href = URL.createObjectURL(blob)
-                            a.download = b.file_name
-                            a.click()
-                          }}
-                        >
-                          <Download size={14} />
-                          Скачать
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="gap-1.5"
-                          onClick={() => handleRestore(b.file_name)}
-                        >
-                          <RotateCcw size={14} />
-                          Восстановить
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
-                          onClick={() => handleDelete(b.file_name)}
-                        >
-                          <Trash2 size={14} />
-                          Удалить
-                        </Button>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
 
-        <SettingsAlert variant="info" title="Что восстанавливается откуда" className="md:col-span-2">
-          <strong>AdminPanel</strong> — «Восстановить» в списке или «Загрузить и восстановить» для архива с
-          компьютера (после переустановки): база, CIDR, .env и при наличии списки маршрутизации.{' '}
-          <strong>AntiZapret</strong> — полный архив VPN восстанавливается на VPN-сервере (не через этот список).
-        </SettingsAlert>
+              <div className="space-y-3">
+                <Label className="text-xs text-muted-foreground">Сколько копий хранить</Label>
+                <div className="flex flex-wrap gap-2">
+                  {RETENTION_PRESETS.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => patchDraft({ retention_count: n })}
+                      className={cn(
+                        'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
+                        settingsDraft.retention_count === n
+                          ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+                          : 'hover:border-muted-foreground/30 hover:bg-muted/50',
+                      )}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="retention"
+                    type="number"
+                    min={1}
+                    max={30}
+                    className="h-9 w-20"
+                    value={settingsDraft.retention_count}
+                    onChange={(e) => patchDraft({ retention_count: Number(e.target.value) })}
+                  />
+                  <span className="text-xs text-muted-foreground">копий</span>
+                </div>
+              </div>
+            </div>
+          )}
 
-        <SettingsAlert variant="danger" title="Перед восстановлением AdminPanel" className="md:col-span-2">
-          Текущие данные панели будут заменены содержимым выбранного архива. После восстановления перезапустите панель.
-        </SettingsAlert>
-      </div>
+          <div className="flex justify-end">
+            <Button
+              disabled={!isSettingsDirty || savingSettings}
+              onClick={() => void saveSettingsDraft()}
+              className="gap-1.5"
+            >
+              <Save size={16} />
+              {savingSettings ? 'Сохранение...' : 'Сохранить'}
+            </Button>
+          </div>
+        </SettingsCollapsible>
+      )}
+
+      <SettingsAlert variant="info" title="Что восстанавливается откуда">
+        <strong>AdminPanel</strong> — «Восстановить» в списке или «Загрузить и восстановить» для архива с
+        компьютера (после переустановки): база, CIDR, .env и при наличии списки маршрутизации.{' '}
+        <strong>AntiZapret</strong> — полный архив VPN восстанавливается на VPN-сервере (не через этот список).
+      </SettingsAlert>
+
+      <SettingsAlert variant="danger" title="Перед восстановлением AdminPanel">
+        Текущие данные панели будут заменены содержимым выбранного архива. После восстановления перезапустите панель.
+      </SettingsAlert>
     </div>
   )
 }

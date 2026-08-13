@@ -82,6 +82,29 @@ router = APIRouter(prefix="/nodes", tags=["nodes"])
 settings = get_settings()
 
 
+def _validate_linked_vpn_node_id(
+    db: Session,
+    *,
+    linked_vpn_node_id: int | None,
+    node_kind: str,
+) -> int | None:
+    """Proxy-only optional FK to a VPN node (HA membership resolved in UI)."""
+    if linked_vpn_node_id is None:
+        return None
+    if node_kind != NODE_KIND_PROXY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="linked_vpn_node_id можно задать только для прокси-узла",
+        )
+    linked = db.query(Node).filter(Node.id == linked_vpn_node_id).first()
+    if not linked or (getattr(linked, "node_kind", None) or NODE_KIND_VPN) != NODE_KIND_VPN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="linked_vpn_node_id должен ссылаться на существующий VPN-узел",
+        )
+    return linked_vpn_node_id
+
+
 @router.post("/update-roll")
 def rolling_node_update(
     payload: NodeUpdateRollRequest,
@@ -195,14 +218,11 @@ def create_node(
     else:
         port = VPN_DEFAULT_PORT
 
-    linked_vpn_node_id = payload.linked_vpn_node_id
-    if linked_vpn_node_id is not None:
-        linked = db.query(Node).filter(Node.id == linked_vpn_node_id).first()
-        if not linked or (getattr(linked, "node_kind", None) or NODE_KIND_VPN) != NODE_KIND_VPN:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="linked_vpn_node_id должен ссылаться на существующий VPN-узел",
-            )
+    linked_vpn_node_id = _validate_linked_vpn_node_id(
+        db,
+        linked_vpn_node_id=payload.linked_vpn_node_id,
+        node_kind=kind,
+    )
 
     key_hash, key_encrypted = store_api_key("", payload.api_key)
     node = Node(
@@ -291,6 +311,9 @@ def update_node(
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
 
+    kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+    updates = payload.model_dump(exclude_unset=True)
+
     if payload.name is not None:
         node.name = payload.name.strip()
     if not node.is_local:
@@ -302,6 +325,16 @@ def update_node(
             key_hash, key_encrypted = store_api_key("", payload.api_key)
             node.api_key_hash = key_hash
             node.api_key_encrypted = key_encrypted
+
+    if "linked_vpn_node_id" in updates:
+        node.linked_vpn_node_id = _validate_linked_vpn_node_id(
+            db,
+            linked_vpn_node_id=updates["linked_vpn_node_id"],
+            node_kind=kind,
+        )
+    if "destination_ip" in updates and kind == NODE_KIND_PROXY:
+        dest = updates["destination_ip"]
+        node.destination_ip = dest.strip() if isinstance(dest, str) and dest.strip() else None
 
     db.commit()
     db.refresh(node)

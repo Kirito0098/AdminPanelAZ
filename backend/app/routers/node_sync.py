@@ -26,6 +26,8 @@ from app.services.background_tasks import background_task_service
 from app.services.env_file import EnvFileService
 from app.services.node_sync.groups import (
     apply_group_fields,
+    effective_openvpn_domain,
+    effective_wireguard_domain,
     group_to_dict,
     is_auto_sync_enabled,
     parse_replica_node_ids,
@@ -48,11 +50,21 @@ def _to_response(group: NodeSyncGroup, db: Session) -> NodeSyncGroupResponse:
     return NodeSyncGroupResponse(**group_to_dict(group, db))
 
 
-def _reject_shared_domain_panel_conflict(shared_domain: str | None) -> None:
+def _reject_shared_domains_panel_conflict(*domains: str | None) -> None:
     panel_domain = EnvFileService(_ENV_FILE).get_env_value("DOMAIN", "")
-    conflict = shared_domain_conflicts_with_panel_domain(shared_domain, panel_domain)
-    if conflict:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=conflict)
+    for domain in domains:
+        if domain is None:
+            continue
+        conflict = shared_domain_conflicts_with_panel_domain(domain, panel_domain)
+        if conflict:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=conflict)
+
+
+def _normalize_wireguard_domain(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    stripped = raw.strip()
+    return stripped or None
 
 
 @router.get("", response_model=list[NodeSyncGroupResponse])
@@ -73,10 +85,13 @@ def create_sync_group(
         replica_node_ids=payload.replica_node_ids,
     )
     raise_if_preflight_errors(errors)
-    _reject_shared_domain_panel_conflict(payload.shared_domain)
+    openvpn_domain = payload.shared_domain.strip()
+    wireguard_domain = _normalize_wireguard_domain(payload.shared_domain_wireguard)
+    _reject_shared_domains_panel_conflict(openvpn_domain, wireguard_domain or openvpn_domain)
     group = NodeSyncGroup(
         name=payload.name.strip(),
-        shared_domain=payload.shared_domain.strip(),
+        shared_domain=openvpn_domain,
+        shared_domain_wireguard=wireguard_domain or openvpn_domain,
         primary_node_id=payload.primary_node_id,
         replica_node_ids=json.dumps(sorted(set(payload.replica_node_ids))),
         sync_mode=payload.sync_mode or "manual_full",
@@ -129,13 +144,22 @@ def update_sync_group(
     )
     raise_if_preflight_errors(errors)
     if payload.shared_domain is not None:
-        _reject_shared_domain_panel_conflict(payload.shared_domain)
+        _reject_shared_domains_panel_conflict(payload.shared_domain)
+    if payload.shared_domain_wireguard is not None:
+        wg = _normalize_wireguard_domain(payload.shared_domain_wireguard)
+        ovpn = (
+            payload.shared_domain.strip()
+            if payload.shared_domain is not None
+            else effective_openvpn_domain(group)
+        )
+        _reject_shared_domains_panel_conflict(wg or ovpn)
 
     previous_sync_mode = group.sync_mode
     apply_group_fields(
         group,
         name=payload.name,
         shared_domain=payload.shared_domain,
+        shared_domain_wireguard=payload.shared_domain_wireguard,
         primary_node_id=payload.primary_node_id,
         replica_node_ids=payload.replica_node_ids,
         sync_mode=payload.sync_mode,
@@ -286,7 +310,10 @@ def apply_shared_domain_endpoint(
         exclude_group_id=group.id,
     )
     raise_if_preflight_errors(errors)
-    _reject_shared_domain_panel_conflict(group.shared_domain)
+    _reject_shared_domains_panel_conflict(
+        effective_openvpn_domain(group),
+        effective_wireguard_domain(group),
+    )
 
     group.sync_status = SyncStatus.pending
     group.last_sync_error = None

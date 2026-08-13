@@ -20,6 +20,7 @@ import type {
   TgMiniQrLink,
   TgMiniSettings,
   TgMiniWarperStatus,
+  TgMiniAwg2Status,
   TgMiniCidrStatus,
   User,
   VpnConfig,
@@ -209,6 +210,10 @@ export async function getTgWarperStatus(): Promise<TgMiniWarperStatus> {
   return tgFetch<TgMiniWarperStatus>('/warper/status')
 }
 
+export async function getTgAwg2Status(): Promise<TgMiniAwg2Status> {
+  return tgFetch<TgMiniAwg2Status>('/awg2/status')
+}
+
 export async function getTgCidrStatus(): Promise<TgMiniCidrStatus> {
   return tgFetch<TgMiniCidrStatus>('/cidr/status')
 }
@@ -231,6 +236,7 @@ export async function createTgPanelConfig(data: {
   cert_expire_days?: number
   description?: string
   owner_id?: number
+  ttl?: string
 }): Promise<VpnConfig> {
   return panelApiFetch<VpnConfig>('/configs', {
     method: 'POST',
@@ -275,12 +281,14 @@ export async function getTgClientPolicy(
   vpnType: VpnType,
 ): Promise<ClientAccessPolicy | null> {
   const params = new URLSearchParams({ clients: clientName })
-  const data = await panelApiFetch<
-    Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
-  >(`/client-access/policies?${params.toString()}`)
+  const data = await panelApiFetch<Record<string, import('../types').ClientPoliciesResponseEntry>>(
+    `/client-access/policies?${params.toString()}`,
+  )
   const entry = data[clientName]
   if (!entry) return null
-  return vpnType === 'openvpn' ? entry.openvpn : entry.wireguard
+  if (vpnType === 'openvpn') return entry.openvpn
+  if (vpnType === 'amneziawg2') return entry.amneziawg2 ?? null
+  return entry.wireguard
 }
 
 async function postClientAccess(path: string, clientName: string, extra?: Record<string, unknown>) {

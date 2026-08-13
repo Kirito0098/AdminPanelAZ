@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models import Node, OpenVpnAccessPolicy, VpnType, WgAccessPolicy
+from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, VpnType, WgAccessPolicy
 
 _OVPN_POLICY_FIELDS = (
     "is_temp_blocked",
@@ -19,6 +19,15 @@ _OVPN_POLICY_FIELDS = (
 )
 
 _WG_POLICY_FIELDS = _OVPN_POLICY_FIELDS + ("expires_at",)
+_AWG2_POLICY_FIELDS = (
+    "is_temp_blocked",
+    "is_permanent_blocked",
+    "block_reason",
+    "block_started_at",
+    "block_days",
+    "block_until",
+    "updated_by",
+)
 
 
 def _copy_policy_row(source, target, fields: tuple[str, ...]) -> None:
@@ -28,7 +37,7 @@ def _copy_policy_row(source, target, fields: tuple[str, ...]) -> None:
 
 def _copy_policies_for_model(
     db: Session,
-    model: type[OpenVpnAccessPolicy] | type[WgAccessPolicy],
+    model: type[OpenVpnAccessPolicy] | type[WgAccessPolicy] | type[AmneziaWg2AccessPolicy],
     *,
     source_node_id: int,
     target_node_id: int,
@@ -53,7 +62,7 @@ def _copy_policies_for_model(
 
 
 def copy_access_policies_from_node(db: Session, source_node: Node, target_node: Node) -> int:
-    """Copy OpenVPN/WG access policies from source node to target node (upsert by client_name)."""
+    """Copy OpenVPN/WG/AWG2 access policies from source node to target node (upsert by client_name)."""
     source_id = source_node.id
     target_id = target_node.id
     copied = _copy_policies_for_model(
@@ -70,6 +79,13 @@ def copy_access_policies_from_node(db: Session, source_node: Node, target_node: 
         target_node_id=target_id,
         fields=_WG_POLICY_FIELDS,
     )
+    copied += _copy_policies_for_model(
+        db,
+        AmneziaWg2AccessPolicy,
+        source_node_id=source_id,
+        target_node_id=target_id,
+        fields=_AWG2_POLICY_FIELDS,
+    )
     db.commit()
     return copied
 
@@ -82,7 +98,7 @@ def copy_single_client_policy(
     *,
     vpn_type,
 ) -> int:
-    """Copy OVPN or WG access policy for one client from source to target (upsert)."""
+    """Copy OVPN, WG, or AWG2 access policy for one client from source to target (upsert)."""
     copied = 0
     if vpn_type == VpnType.openvpn:
         source = (
@@ -102,6 +118,28 @@ def copy_single_client_policy(
             db.add(target)
             copied = 1
         _copy_policy_row(source, target, _OVPN_POLICY_FIELDS)
+        db.flush()
+        return copied
+
+    if vpn_type == VpnType.amneziawg2:
+        normalized = client_name.strip().lower()
+        source = (
+            db.query(AmneziaWg2AccessPolicy)
+            .filter_by(node_id=source_node.id, client_name=normalized)
+            .first()
+        )
+        if source is None:
+            return 0
+        target = (
+            db.query(AmneziaWg2AccessPolicy)
+            .filter_by(node_id=target_node.id, client_name=normalized)
+            .first()
+        )
+        if target is None:
+            target = AmneziaWg2AccessPolicy(node_id=target_node.id, client_name=normalized)
+            db.add(target)
+            copied = 1
+        _copy_policy_row(source, target, _AWG2_POLICY_FIELDS)
         db.flush()
         return copied
 

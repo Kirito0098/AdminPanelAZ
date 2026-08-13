@@ -1,13 +1,18 @@
 import io
 import tarfile
+from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-from app.models import VpnType
+from app.database import Base
+from app.models import AmneziaWg2AccessPolicy, Node, NodeStatus, VpnType
 from app.services.antizapret import AntiZapretService
+from app.services import awg2
 from app.services.node_sync import vpn_state_sync
 from app.services.openvpn_pki import ProfileValidationResult
 from app.services.node_sync.replicate import (
@@ -16,6 +21,37 @@ from app.services.node_sync.replicate import (
     _handle_client_delete,
     _handle_client_renew_cert,
 )
+
+
+@pytest.fixture()
+def db():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    try:
+        yield session
+    finally:
+        session.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def _make_node(db, *, name: str = "node-1") -> Node:
+    node = Node(
+        name=name,
+        host="127.0.0.1",
+        port=9100,
+        api_key_hash="",
+        api_key_encrypted="",
+        status=NodeStatus.online,
+        is_local=True,
+        node_metadata="{}",
+    )
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+    return node
 
 
 def test_sync_wireguard_state_from_primary_copies_configs_profiles_and_applies_runtime():
@@ -157,6 +193,129 @@ def test_sync_wireguard_state_continues_when_runtime_apply_fails():
     replica.import_wireguard_client_profiles_archive.assert_called_once()
 
 
+def test_sync_amneziawg2_requires_replica_installed():
+    primary = MagicMock()
+    replica = MagicMock()
+    replica.get_awg2_health.return_value = {
+        "installed": False,
+        "install_command": awg2.AWG2_INSTALL_CMD,
+    }
+
+    with pytest.raises(Exception) as exc:
+        vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica)
+
+    assert "install" in str(exc.value).lower() or awg2.AWG2_INSTALL_CMD in str(exc.value)
+
+
+def test_sync_amneziawg2_exports_imports_applies():
+    primary = MagicMock()
+    replica = MagicMock()
+    replica.get_awg2_health.return_value = {"installed": True}
+    primary.export_awg2_state_archive.return_value = b"fake-tar"
+    replica.apply_awg2_runtime.return_value = {"success": True}
+
+    vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica)
+
+    replica.import_awg2_state_archive.assert_called_once_with(b"fake-tar")
+    replica.apply_awg2_runtime.assert_called_once()
+
+
+def test_crypto_import_does_not_delete_awg2_policy_rows(db):
+    replica_node = _make_node(db, name="replica")
+    row = AmneziaWg2AccessPolicy(
+        node_id=replica_node.id,
+        client_name="ivan",
+        is_temp_blocked=True,
+        block_reason="manual_temp",
+        block_started_at=datetime.utcnow(),
+        block_days=3,
+        block_until=datetime.utcnow() + timedelta(days=3),
+        updated_by="admin",
+    )
+    db.add(row)
+    db.commit()
+
+    primary = MagicMock()
+    replica = MagicMock()
+    replica.get_awg2_health.return_value = {"installed": True}
+    primary.export_awg2_state_archive.return_value = b"fake-tar"
+    replica.apply_awg2_runtime.return_value = {"success": True}
+
+    with patch(
+        "app.services.node_sync.vpn_state_sync.AccessPolicyService._reapply_all_blocked_awg2_runtime",
+        return_value=[],
+    ):
+        vpn_state_sync.sync_amneziawg2_state_from_primary(
+            primary,
+            replica,
+            db=db,
+            replica_node=replica_node,
+        )
+
+    rows = db.query(AmneziaWg2AccessPolicy).filter_by(node_id=replica_node.id).all()
+    assert len(rows) == 1
+    assert rows[0].client_name == "ivan"
+    assert rows[0].is_temp_blocked is True
+
+
+def test_post_import_reapply_blocked_awg2_peers(db):
+    replica_node = _make_node(db, name="replica")
+    db.add_all(
+        [
+            AmneziaWg2AccessPolicy(
+                node_id=replica_node.id,
+                client_name="blocked-temp",
+                is_temp_blocked=True,
+                block_reason="manual_temp",
+                block_started_at=datetime.utcnow(),
+                block_days=2,
+                block_until=datetime.utcnow() + timedelta(days=2),
+            ),
+            AmneziaWg2AccessPolicy(
+                node_id=replica_node.id,
+                client_name="blocked-perm",
+                is_permanent_blocked=True,
+                block_reason="manual_permanent",
+                block_started_at=datetime.utcnow(),
+            ),
+            AmneziaWg2AccessPolicy(
+                node_id=replica_node.id,
+                client_name="open",
+            ),
+        ]
+    )
+    db.commit()
+
+    primary = MagicMock()
+    replica = MagicMock()
+    replica.get_awg2_health.return_value = {"installed": True}
+    primary.export_awg2_state_archive.return_value = b"fake-tar"
+    replica.apply_awg2_runtime.return_value = {"success": True}
+
+    vpn_state_sync.sync_amneziawg2_state_from_primary(
+        primary,
+        replica,
+        db=db,
+        replica_node=replica_node,
+    )
+
+    replica.block_awg2_client_runtime.assert_has_calls(
+        [call("blocked-temp"), call("blocked-perm")],
+        any_order=True,
+    )
+    assert replica.block_awg2_client_runtime.call_count == 2
+
+
+def test_sync_vpn_crypto_routes_amneziawg2():
+    primary = MagicMock()
+    replica = MagicMock()
+
+    with patch("app.services.node_sync.vpn_state_sync.sync_amneziawg2_state_from_primary") as sync_awg:
+        vpn_state_sync.sync_vpn_crypto_from_primary(primary, replica, VpnType.amneziawg2)
+
+    sync_awg.assert_called_once_with(primary, replica, db=None, replica_node=None)
+
+
 def test_antizapret_wireguard_server_config_roundtrip(tmp_path, monkeypatch):
     wg_dir = tmp_path / "wireguard"
     wg_dir.mkdir()
@@ -190,10 +349,10 @@ def test_antizapret_export_easyrsa3_archive_contains_pki_files(tmp_path, monkeyp
     assert "easyrsa3/pki/index.txt" in names
 
 
-def test_handle_client_create_uses_crypto_sync(monkeypatch):
+def test_handle_client_create_passes_replica_context_for_awg2_crypto_sync(monkeypatch):
     primary_config = MagicMock()
     primary_config.client_name = "alice"
-    primary_config.vpn_type = VpnType.wireguard
+    primary_config.vpn_type = VpnType.amneziawg2
     primary_config.id = 10
     primary_config.owner_id = 1
     primary_config.cert_expire_days = None
@@ -229,10 +388,11 @@ def test_handle_client_create_uses_crypto_sync(monkeypatch):
     sync_mock.assert_called_once_with(
         primary_adapter,
         replica_adapter,
-        VpnType.wireguard,
+        VpnType.amneziawg2,
+        db=db,
+        replica_node=replica_node,
         client_name="alice",
     )
-    replica_adapter.add_wireguard_client.assert_not_called()
     assert len(result.successes) == 1
     assert result.successes[0]["node_id"] == 2
     assert result.errors == []
@@ -323,6 +483,8 @@ def test_handle_client_delete_syncs_crypto_from_primary(monkeypatch):
         primary_adapter,
         replica_adapter,
         VpnType.wireguard,
+        db=db,
+        replica_node=replica_node,
     )
     replica_adapter.delete_wireguard_client.assert_not_called()
     assert result.successes == [{"node_id": 4, "config_id": 40}]

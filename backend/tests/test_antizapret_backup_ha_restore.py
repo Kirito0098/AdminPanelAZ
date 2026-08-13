@@ -61,6 +61,16 @@ def test_restore_backup_for_ha_replica_skips_client_sh_7(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "_restart_legacy_services", MagicMock())
     monkeypatch.setattr(service, "_run_doall_sh", lambda: "")
 
+    # Production extracts under /root; keep the test off that path for non-root CI.
+    def _extract_to_tmp(archive_path: Path) -> Path:
+        out = tmp_path / "extract_out"
+        out.mkdir()
+        with tarfile.open(archive_path, "r:gz") as tar:
+            tar.extractall(path=str(out), filter="data")
+        return out
+
+    monkeypatch.setattr(service, "_extract_archive", _extract_to_tmp)
+
     easyrsa_dst = tmp_path / "dst_easyrsa3"
     wg_dst = tmp_path / "dst_wg"
     monkeypatch.setattr(service, "_copy_tree", lambda src, dst: easyrsa_dst.mkdir(parents=True, exist_ok=True))

@@ -1,4 +1,7 @@
 import {
+  awg2PermanentBlock,
+  awg2TempBlock,
+  awg2Unblock,
   ApiError,
   bulkConfigOp,
   createConfigTag,
@@ -53,7 +56,7 @@ import {
 } from '@/lib/configCardViewPrefs'
 import { cn } from '@/lib/utils'
 import type {
-  ClientAccessPolicy,
+  ClientPoliciesResponseEntry,
   ConfigTag,
   OpenVpnGroupOption,
   User,
@@ -66,7 +69,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 interface ConfigCardsSectionProps {
   configs: VpnConfig[]
-  policies: Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
+  policies: Record<string, ClientPoliciesResponseEntry>
   userRole: UserRole
   currentUserId?: number
   ownerCandidates?: User[]
@@ -79,7 +82,7 @@ interface ConfigCardsSectionProps {
   onNotifyError: (msg: string) => void
 }
 
-const TAB_ORDER: ProtocolTab[] = ['openvpn', 'amneziawg', 'wireguard']
+const TAB_ORDER: ProtocolTab[] = ['openvpn', 'amneziawg2', 'amneziawg', 'wireguard']
 
 type ConfirmAction = 'delete' | 'block' | 'unblock' | null
 type BulkAction = 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert' | 'change_owner' | null
@@ -93,6 +96,7 @@ function useVisibleTabs(visibilityPolicy: VisibleVpnProfilesPolicy | null, userR
       if (tab === 'openvpn' && visibilityPolicy.openvpn_groups.length === 0) return false
     }
     if (tab === 'openvpn') return isEnabled('openvpn')
+    if (tab === 'amneziawg2') return isEnabled('awg2')
     if (tab === 'amneziawg') return isEnabled('amneziawg')
     return isEnabled('wireguard')
   })
@@ -286,6 +290,7 @@ export default function ConfigCardsSection({
     try {
       const name = confirmTarget.client_name
       const isOvpn = confirmTarget.vpn_type === 'openvpn'
+      const isAwg2 = confirmTarget.vpn_type === 'amneziawg2'
 
       if (confirmAction === 'delete') {
         await deleteConfig(confirmTarget.id)
@@ -299,6 +304,8 @@ export default function ConfigCardsSection({
       if (confirmAction === 'unblock') {
         if (isOvpn) {
           await openvpnUnblock(name)
+        } else if (isAwg2) {
+          await awg2Unblock(name)
         } else {
           await wgUnblock(name)
         }
@@ -316,10 +323,12 @@ export default function ConfigCardsSection({
         }
         if (days >= 3650) {
           if (isOvpn) await openvpnPermanentBlock(name)
+          else if (isAwg2) await awg2PermanentBlock(name)
           else await wgPermanentBlock(name)
           onNotifySuccess('Клиент заблокирован до ручной разблокировки')
         } else {
           if (isOvpn) await openvpnTempBlock(name, days)
+          else if (isAwg2) await awg2TempBlock(name, days)
           else await wgTempBlock(name, days)
           onNotifySuccess(`Клиент заблокирован на ${days} дн.`)
         }
@@ -505,6 +514,14 @@ export default function ConfigCardsSection({
                     OpenVPN
                     <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                       {tabCounts.openvpn}
+                    </Badge>
+                  </TabsTrigger>
+                )}
+                {visibleTabs.includes('amneziawg2') && (
+                  <TabsTrigger value="amneziawg2" className="gap-1.5 data-[state=active]:shadow-sm">
+                    AmneziaWG 2.0
+                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                      {tabCounts.amneziawg2}
                     </Badge>
                   </TabsTrigger>
                 )}

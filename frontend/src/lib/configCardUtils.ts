@@ -1,9 +1,9 @@
-import type { ClientAccessPolicy, OpenVpnClient, VpnConfig, WireGuardPeer } from '@/types'
+import type { ClientAccessPolicy, ClientPoliciesResponseEntry, OpenVpnClient, VpnConfig, WireGuardPeer } from '@/types'
 import { formatDate } from '@/lib/datetime'
 import { getProfileDownloadFilename } from '@/lib/profileDownloadName'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 
-export type ProtocolTab = 'openvpn' | 'wireguard' | 'amneziawg'
+export type ProtocolTab = 'openvpn' | 'wireguard' | 'amneziawg' | 'amneziawg2'
 export type ClientFilter = 'all' | 'active' | 'expiring' | 'expired'
 export type ClientPresenceFilter = 'all' | 'online' | 'offline' | 'blocked'
 
@@ -27,6 +27,7 @@ export function isVpnProfile(file: ProfileFile): boolean {
 function profileProtocolForTab(tab: ProtocolTab): ProfileFile['protocol'] {
   if (tab === 'openvpn') return 'openvpn'
   if (tab === 'amneziawg') return 'amneziawg'
+  if (tab === 'amneziawg2') return 'amneziawg2'
   return 'wireguard'
 }
 
@@ -48,35 +49,52 @@ export function hasVpnProfiles(config: VpnConfig, tab?: ProtocolTab): boolean {
   return files.some(isVpnProfile)
 }
 
+function preferPrimaryConf(files: ProfileFile[]): ProfileFile | undefined {
+  if (!files.length) return undefined
+  return (
+    files.find((file) => file.path.toLowerCase().endsWith('-am.conf')) ||
+    files.find((file) => file.path.toLowerCase().endsWith('.conf')) ||
+    files[0]
+  )
+}
+
 export function pickAzFile(config: VpnConfig, tab?: ProtocolTab): ProfileFile | undefined {
   const files = tab ? profileFilesForTab(config, tab) : config.profile_files
-  return files.find(isAzProfile)
+  return preferPrimaryConf(files.filter(isAzProfile))
 }
 
 export function pickVpnFile(config: VpnConfig, tab?: ProtocolTab): ProfileFile | undefined {
   const files = tab ? profileFilesForTab(config, tab) : config.profile_files
-  return files.find(isVpnProfile)
+  return preferPrimaryConf(files.filter(isVpnProfile))
 }
 
 export function protocolLabel(tab: ProtocolTab): string {
   if (tab === 'openvpn') return 'OpenVPN'
   if (tab === 'amneziawg') return 'AmneziaWG'
+  if (tab === 'amneziawg2') return 'AmneziaWG 2.0'
   return 'WireGuard'
 }
 
-function hasProtocolProfiles(config: VpnConfig, protocol: 'amneziawg' | 'wireguard' | 'openvpn'): boolean {
+function hasProtocolProfiles(
+  config: VpnConfig,
+  protocol: 'amneziawg' | 'amneziawg2' | 'wireguard' | 'openvpn',
+): boolean {
   if (!config.profile_files?.length) return false
   return config.profile_files.some((file) => file.protocol === protocol)
 }
 
 export function configMatchesTab(config: VpnConfig, tab: ProtocolTab): boolean {
+  if (tab === 'amneziawg2') {
+    return config.vpn_type === 'amneziawg2' || hasProtocolProfiles(config, 'amneziawg2')
+  }
+  if (config.vpn_type === 'amneziawg2') return false
   if (tab === 'openvpn') return config.vpn_type === 'openvpn'
   if (!config.profile_files?.length) return config.vpn_type === 'wireguard'
   if (tab === 'amneziawg') return hasProtocolProfiles(config, 'amneziawg')
   return hasProtocolProfiles(config, 'wireguard')
 }
 
-function parseAccessExpiresAt(value?: string | null): Date | null {
+export function parseAccessExpiresAt(value?: string | null): Date | null {
   if (!value) return null
   const raw = value.trim()
   if (!raw) return null
@@ -89,7 +107,7 @@ function parseAccessExpiresAt(value?: string | null): Date | null {
   return Number.isNaN(parsed) ? null : new Date(parsed)
 }
 
-function formatAccessRemaining(accessExpiresAt?: string | null): string | null {
+export function formatAccessRemaining(accessExpiresAt?: string | null): string | null {
   const expiresAt = parseAccessExpiresAt(accessExpiresAt)
   if (!expiresAt) return null
 
@@ -112,6 +130,13 @@ function formatDateShort(value?: string | null): string {
   const d = parseAccessExpiresAt(value)
   if (!d) return value.split(' ')[0] || value
   return formatDate(d, undefined, value.split(' ')[0] || value)
+}
+
+export function formatAccessExpiryBadge(accessExpiresAt?: string | null): string | null {
+  if (!accessExpiresAt) return null
+  const remaining = formatAccessRemaining(accessExpiresAt)
+  if (!remaining) return null
+  return remaining === 'срок истёк' ? 'истёк' : `истекает ${remaining}`
 }
 
 /** Backend sends naive UTC timestamps; without a zone suffix Date.parse would read them as local. */
@@ -183,14 +208,15 @@ export function buildAccessMeta(
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
   const isBlocked = policy?.is_blocked ?? false
   let tone: 'active' | 'expiring' | 'expired' = 'active'
+  const accessExpiresAt = policy?.expires_at ?? config.expires_at
   const displayed =
     tab === 'openvpn' ? resolveDisplayedTraffic(policy, openvpnGroup) : resolveDisplayedTraffic(policy, null)
 
   if (config.vpn_type === 'openvpn') {
     lines.push({ text: `Сертификат: ${formatCertExpiry(config)}` })
-  } else if (policy?.expires_at) {
-    lines.push({ text: `Отключение: ${formatDateShort(policy.expires_at)}` })
-    const remaining = formatAccessRemaining(policy.expires_at)
+  } else if (accessExpiresAt) {
+    lines.push({ text: `Отключение: ${formatDateShort(accessExpiresAt)}` })
+    const remaining = formatAccessRemaining(accessExpiresAt)
     lines.push({ text: `Осталось: ${remaining || 'неизвестно'}` })
   } else {
     lines.push({ text: 'Отключение: не ограничено' })
@@ -247,8 +273,16 @@ export function buildAccessMeta(
     tone = 'expiring'
   } else if (policy?.access_days_left != null && policy.access_days_left <= 30) {
     tone = 'expiring'
-  } else if (policy?.expires_at && formatAccessRemaining(policy.expires_at) === 'срок истёк') {
-    tone = 'expired'
+  } else if (accessExpiresAt) {
+    const expiresAt = parseAccessExpiresAt(accessExpiresAt)
+    if (formatAccessRemaining(accessExpiresAt) === 'срок истёк') {
+      tone = 'expired'
+    } else if (expiresAt) {
+      const remainingDays = (expiresAt.getTime() - Date.now()) / 86400000
+      if (remainingDays <= 30) {
+        tone = 'expiring'
+      }
+    }
   }
 
   return { lines, tone }
@@ -310,11 +344,13 @@ export function matchesPresenceFilter(
 
 export function getPolicyForConfig(
   config: VpnConfig,
-  policies: Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>,
+  policies: Record<string, ClientPoliciesResponseEntry>,
 ): ClientAccessPolicy | undefined {
   const entry = policies[config.client_name]
   if (!entry) return undefined
-  return config.vpn_type === 'openvpn' ? entry.openvpn : entry.wireguard
+  if (config.vpn_type === 'openvpn') return entry.openvpn
+  if (config.vpn_type === 'amneziawg2') return entry.amneziawg2 ?? entry.wireguard
+  return entry.wireguard
 }
 
 export type ConfigStatusVariant = 'success' | 'destructive' | 'warning' | 'secondary'
@@ -352,7 +388,7 @@ export function getDownloadFilename(config: VpnConfig, file: ProfileFile): strin
 
 export function getProtocolBadgeVariant(tab: ProtocolTab): 'default' | 'secondary' | 'outline' {
   if (tab === 'openvpn') return 'default'
-  if (tab === 'amneziawg') return 'secondary'
+  if (tab === 'amneziawg' || tab === 'amneziawg2') return 'secondary'
   return 'outline'
 }
 

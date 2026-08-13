@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   BarChart3,
   Clock,
   Gauge,
@@ -18,6 +21,7 @@ import {
   YAxis,
 } from 'recharts'
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
+import { MONITORING_PROTOCOL_COLORS } from '@/components/monitoring/monitoringChartTheme'
 import { getTrafficClientSessions } from '@/api/client'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import EmptyState from '@/components/ui/EmptyState'
@@ -40,6 +44,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { PercentBar } from '@/components/ui/percent-bar'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { formatDateTime } from '@/lib/datetime'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { COL_VPN_IP } from '@/lib/uiLabels'
@@ -59,6 +64,7 @@ function getProtocolLabel(protocol: string) {
   const p = protocol.toLowerCase()
   if (p === 'wireguard') return 'WireGuard'
   if (p === 'openvpn') return 'OpenVPN'
+  if (p === 'amneziawg2') return 'AWG 2.0'
   return protocol
 }
 
@@ -66,12 +72,55 @@ function getProtocolVariant(protocol: string): 'default' | 'secondary' | 'outlin
   const p = protocol.toLowerCase()
   if (p === 'openvpn') return 'default'
   if (p === 'wireguard') return 'secondary'
+  if (p === 'amneziawg2') return 'outline'
   return 'outline'
 }
 
 function formatLastSeen(value?: string | null) {
   if (!value) return '—'
   return formatDateTime(value)
+}
+
+type SourceSortKey = 'sessions' | 'last_seen'
+type SourceSortDir = 'asc' | 'desc'
+
+function lastSeenTs(value?: string | null) {
+  if (!value) return 0
+  const ts = Date.parse(value)
+  return Number.isFinite(ts) ? ts : 0
+}
+
+function SourceSortIcon({ active, dir }: { active: boolean; dir: SourceSortDir }) {
+  if (!active) {
+    return <ArrowUpDown size={12} className="opacity-45" aria-hidden />
+  }
+  return dir === 'desc' ? (
+    <ArrowDown size={12} aria-hidden />
+  ) : (
+    <ArrowUp size={12} aria-hidden />
+  )
+}
+
+function compareSources(
+  a: TrafficClientSessions['by_source'][number],
+  b: TrafficClientSessions['by_source'][number],
+  sortKey: SourceSortKey,
+  sortDir: SourceSortDir,
+) {
+  const diff =
+    sortKey === 'sessions'
+      ? a.sessions_count - b.sessions_count
+      : lastSeenTs(a.last_seen_at) - lastSeenTs(b.last_seen_at)
+  if (diff !== 0) return sortDir === 'asc' ? diff : -diff
+  // Stable secondary key so equal primary values stay predictable.
+  if (sortKey === 'sessions') {
+    const byDate = lastSeenTs(b.last_seen_at) - lastSeenTs(a.last_seen_at)
+    if (byDate !== 0) return byDate
+  } else {
+    const bySessions = b.sessions_count - a.sessions_count
+    if (bySessions !== 0) return bySessions
+  }
+  return (a.client_ip || '').localeCompare(b.client_ip || '')
 }
 
 function sessionSummaryHint(sessions: TrafficClientSessions | null) {
@@ -146,7 +195,11 @@ export default function TrafficClientDetails({
   policy,
   policyLoading = false,
 }: TrafficClientDetailsProps) {
+  const { isEnabled } = useFeatureModules()
+  const showAwg2 = isEnabled('awg2')
   const [showInactiveSources, setShowInactiveSources] = useState(false)
+  const [sourceSortKey, setSourceSortKey] = useState<SourceSortKey>('last_seen')
+  const [sourceSortDir, setSourceSortDir] = useState<SourceSortDir>('desc')
   const [sessions, setSessions] = useState<TrafficClientSessions | null>(null)
   const [sessionsLoading, setSessionsLoading] = useState(false)
 
@@ -154,6 +207,8 @@ export default function TrafficClientDetails({
 
   useEffect(() => {
     setShowInactiveSources(false)
+    setSourceSortKey('last_seen')
+    setSourceSortDir('desc')
     setSessionsLoading(true)
     void getTrafficClientSessions(row.common_name, 1)
       .then(setSessions)
@@ -161,15 +216,31 @@ export default function TrafficClientDetails({
       .finally(() => setSessionsLoading(false))
   }, [row.common_name])
 
+  const toggleSourceSort = (key: SourceSortKey) => {
+    if (key === sourceSortKey) {
+      setSourceSortDir((prev) => (prev === 'desc' ? 'asc' : 'desc'))
+      return
+    }
+    setSourceSortKey(key)
+    setSourceSortDir('desc')
+  }
+
   const sessionHint = useMemo(() => sessionSummaryHint(sessions), [sessions])
 
+  // Active («Сейчас») always first; within each group sort by chosen column.
   const activeSources = useMemo(
-    () => sessions?.by_source.filter((source) => source.is_active) ?? [],
-    [sessions],
+    () =>
+      [...(sessions?.by_source.filter((source) => source.is_active) ?? [])].sort((a, b) =>
+        compareSources(a, b, sourceSortKey, sourceSortDir),
+      ),
+    [sessions, sourceSortKey, sourceSortDir],
   )
   const inactiveSources = useMemo(
-    () => sessions?.by_source.filter((source) => !source.is_active) ?? [],
-    [sessions],
+    () =>
+      [...(sessions?.by_source.filter((source) => !source.is_active) ?? [])].sort((a, b) =>
+        compareSources(a, b, sourceSortKey, sourceSortDir),
+      ),
+    [sessions, sourceSortKey, sourceSortDir],
   )
   const visibleSources = showInactiveSources
     ? [...activeSources, ...inactiveSources]
@@ -212,8 +283,21 @@ export default function TrafficClientDetails({
       label,
       vpn: chartData.vpn_bytes?.[i] ?? 0,
       antizapret: chartData.antizapret_bytes?.[i] ?? 0,
+      openvpn: chartData.openvpn_bytes?.[i] ?? 0,
+      wireguard: chartData.wireguard_bytes?.[i] ?? 0,
+      amneziawg2: chartData.amneziawg2_bytes?.[i] ?? 0,
       total: (chartData.vpn_bytes?.[i] ?? 0) + (chartData.antizapret_bytes?.[i] ?? 0),
     })) ?? []
+
+  const showProtocolSeries = showAwg2
+
+  const SERIES_LABELS: Record<string, string> = {
+    vpn: 'VPN',
+    antizapret: 'AntiZapret',
+    openvpn: 'OpenVPN',
+    wireguard: 'WireGuard',
+    amneziawg2: 'AWG 2.0',
+  }
 
   const limitPercent =
     policy?.traffic_limit_bytes && policy.traffic_limit_bytes > 0
@@ -419,10 +503,44 @@ export default function TrafficClientDetails({
                 <TableHeader>
                   <TableRow>
                     <TableHead>Адрес клиента</TableHead>
-                    <TableHead className="text-right">Подключений</TableHead>
+                    <TableHead className="text-right">
+                      <button
+                        type="button"
+                        className={
+                          sourceSortKey === 'sessions'
+                            ? 'inline-flex items-center justify-end gap-1 text-foreground underline-offset-2 transition-colors hover:underline'
+                            : 'inline-flex items-center justify-end gap-1 text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline'
+                        }
+                        onClick={() => toggleSourceSort('sessions')}
+                        title="Сортировать по числу подключений"
+                      >
+                        Подключений
+                        <SourceSortIcon
+                          active={sourceSortKey === 'sessions'}
+                          dir={sourceSortDir}
+                        />
+                      </button>
+                    </TableHead>
                     <TableHead className="text-right">Трафик</TableHead>
                     <TableHead>{COL_VPN_IP}</TableHead>
-                    <TableHead>Последний раз</TableHead>
+                    <TableHead>
+                      <button
+                        type="button"
+                        className={
+                          sourceSortKey === 'last_seen'
+                            ? 'inline-flex items-center gap-1 text-foreground underline-offset-2 transition-colors hover:underline'
+                            : 'inline-flex items-center gap-1 text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline'
+                        }
+                        onClick={() => toggleSourceSort('last_seen')}
+                        title="Сортировать по дате"
+                      >
+                        Последний раз
+                        <SourceSortIcon
+                          active={sourceSortKey === 'last_seen'}
+                          dir={sourceSortDir}
+                        />
+                      </button>
+                    </TableHead>
                     <TableHead>Статус</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -476,14 +594,33 @@ export default function TrafficClientDetails({
               {({ width, height }) => (
                 <AreaChart width={width} height={height} data={chartPoints} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                   <defs>
-                    <linearGradient id={`focusTrafficVpn_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={CHART_VPN} stopOpacity={0.35} />
-                      <stop offset="95%" stopColor={CHART_VPN} stopOpacity={0.02} />
-                    </linearGradient>
-                    <linearGradient id={`focusTrafficAz_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={CHART_ANTIZAPRET} stopOpacity={0.35} />
-                      <stop offset="95%" stopColor={CHART_ANTIZAPRET} stopOpacity={0.02} />
-                    </linearGradient>
+                    {showProtocolSeries ? (
+                      <>
+                        <linearGradient id={`focusTrafficOvpn_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={MONITORING_PROTOCOL_COLORS.openvpn} stopOpacity={0.35} />
+                          <stop offset="95%" stopColor={MONITORING_PROTOCOL_COLORS.openvpn} stopOpacity={0.02} />
+                        </linearGradient>
+                        <linearGradient id={`focusTrafficWg_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={MONITORING_PROTOCOL_COLORS.wireguard} stopOpacity={0.35} />
+                          <stop offset="95%" stopColor={MONITORING_PROTOCOL_COLORS.wireguard} stopOpacity={0.02} />
+                        </linearGradient>
+                        <linearGradient id={`focusTrafficAwg2_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={MONITORING_PROTOCOL_COLORS.amneziawg2} stopOpacity={0.35} />
+                          <stop offset="95%" stopColor={MONITORING_PROTOCOL_COLORS.amneziawg2} stopOpacity={0.02} />
+                        </linearGradient>
+                      </>
+                    ) : (
+                      <>
+                        <linearGradient id={`focusTrafficVpn_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={CHART_VPN} stopOpacity={0.35} />
+                          <stop offset="95%" stopColor={CHART_VPN} stopOpacity={0.02} />
+                        </linearGradient>
+                        <linearGradient id={`focusTrafficAz_${chartIdSuffix}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={CHART_ANTIZAPRET} stopOpacity={0.35} />
+                          <stop offset="95%" stopColor={CHART_ANTIZAPRET} stopOpacity={0.02} />
+                        </linearGradient>
+                      </>
+                    )}
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
                   <XAxis
@@ -503,29 +640,63 @@ export default function TrafficClientDetails({
                   <Tooltip
                     formatter={(v: number, name: string) => [
                       formatBytes(v),
-                      name === 'vpn' ? 'VPN' : 'AntiZapret',
+                      SERIES_LABELS[name] ?? name,
                     ]}
                     labelFormatter={(label) => `Период: ${label}`}
                   />
-                  <Legend formatter={(value) => (value === 'vpn' ? 'VPN' : 'AntiZapret')} />
-                  <Area
-                    type="monotone"
-                    dataKey="vpn"
-                    stackId="1"
-                    stroke={CHART_VPN}
-                    fill={`url(#focusTrafficVpn_${chartIdSuffix})`}
-                    strokeWidth={2}
-                    name="vpn"
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="antizapret"
-                    stackId="1"
-                    stroke={CHART_ANTIZAPRET}
-                    fill={`url(#focusTrafficAz_${chartIdSuffix})`}
-                    strokeWidth={2}
-                    name="antizapret"
-                  />
+                  <Legend formatter={(value) => SERIES_LABELS[value] ?? value} />
+                  {showProtocolSeries ? (
+                    <>
+                      <Area
+                        type="monotone"
+                        dataKey="openvpn"
+                        stackId="proto"
+                        stroke={MONITORING_PROTOCOL_COLORS.openvpn}
+                        fill={`url(#focusTrafficOvpn_${chartIdSuffix})`}
+                        strokeWidth={2}
+                        name="openvpn"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="wireguard"
+                        stackId="proto"
+                        stroke={MONITORING_PROTOCOL_COLORS.wireguard}
+                        fill={`url(#focusTrafficWg_${chartIdSuffix})`}
+                        strokeWidth={2}
+                        name="wireguard"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="amneziawg2"
+                        stackId="proto"
+                        stroke={MONITORING_PROTOCOL_COLORS.amneziawg2}
+                        fill={`url(#focusTrafficAwg2_${chartIdSuffix})`}
+                        strokeWidth={2}
+                        name="amneziawg2"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <Area
+                        type="monotone"
+                        dataKey="vpn"
+                        stackId="1"
+                        stroke={CHART_VPN}
+                        fill={`url(#focusTrafficVpn_${chartIdSuffix})`}
+                        strokeWidth={2}
+                        name="vpn"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="antizapret"
+                        stackId="1"
+                        stroke={CHART_ANTIZAPRET}
+                        fill={`url(#focusTrafficAz_${chartIdSuffix})`}
+                        strokeWidth={2}
+                        name="antizapret"
+                      />
+                    </>
+                  )}
                 </AreaChart>
               )}
             </ChartResponsive>

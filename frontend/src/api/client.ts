@@ -317,6 +317,7 @@ export async function createConfig(data: {
   client_name: string
   vpn_type: import('../types').VpnType
   cert_expire_days?: number
+  ttl?: string
   description?: string
   owner_id?: number
 }) {
@@ -753,6 +754,7 @@ export async function getNodeSyncGroups() {
 export async function createNodeSyncGroup(data: {
   name: string
   shared_domain: string
+  shared_domain_wireguard?: string | null
   primary_node_id: number
   replica_node_ids: number[]
   sync_mode?: string
@@ -768,6 +770,7 @@ export async function updateNodeSyncGroup(
   data: Partial<{
     name: string
     shared_domain: string
+    shared_domain_wireguard: string | null
     primary_node_id: number
     replica_node_ids: number[]
     sync_mode: string
@@ -1257,7 +1260,7 @@ export async function getTrafficClientSessions(client: string, limit = 30) {
   return apiFetch<import('../types').TrafficClientSessions>(`/traffic/client-sessions?${params}`)
 }
 
-export async function resetTraffic(scope: 'all' | 'openvpn' | 'wireguard' = 'all') {
+export async function resetTraffic(scope: 'all' | 'openvpn' | 'wireguard' | 'amneziawg2' = 'all') {
   return apiFetch('/traffic/reset', { method: 'POST', body: JSON.stringify({ scope }) })
 }
 
@@ -1420,7 +1423,7 @@ export async function transferEditFiles(payload: {
 
 export async function getClientPolicies(clients: string) {
   const params = new URLSearchParams({ clients })
-  return apiFetch<Record<string, { openvpn: import('../types').ClientAccessPolicy; wireguard: import('../types').ClientAccessPolicy }>>(
+  return apiFetch<Record<string, import('../types').ClientPoliciesResponseEntry>>(
     `/client-access/policies?${params}`,
   )
 }
@@ -1474,6 +1477,27 @@ export async function wgPermanentBlock(clientName: string) {
   })
 }
 
+export async function awg2TempBlock(clientName: string, days: number) {
+  return apiFetch('/client-access/amneziawg2/temp-block', {
+    method: 'POST',
+    body: JSON.stringify({ client_name: clientName, days }),
+  })
+}
+
+export async function awg2Unblock(clientName: string) {
+  return apiFetch('/client-access/amneziawg2/unblock', {
+    method: 'POST',
+    body: JSON.stringify({ client_name: clientName }),
+  })
+}
+
+export async function awg2PermanentBlock(clientName: string) {
+  return apiFetch('/client-access/amneziawg2/permanent-block', {
+    method: 'POST',
+    body: JSON.stringify({ client_name: clientName }),
+  })
+}
+
 export async function openvpnSetTrafficLimit(
   clientName: string,
   limitValue: number,
@@ -1517,6 +1541,30 @@ export async function wgSetTrafficLimit(
 
 export async function wgClearTrafficLimit(clientName: string) {
   return apiFetch('/client-access/wireguard/clear-traffic-limit', {
+    method: 'POST',
+    body: JSON.stringify({ client_name: clientName }),
+  })
+}
+
+export async function awg2SetTrafficLimit(
+  clientName: string,
+  limitValue: number,
+  limitUnit = 'MB',
+  limitPeriodDays?: number | null,
+) {
+  return apiFetch('/client-access/amneziawg2/set-traffic-limit', {
+    method: 'POST',
+    body: JSON.stringify({
+      client_name: clientName,
+      limit_value: limitValue,
+      limit_unit: limitUnit,
+      limit_period_days: limitPeriodDays ?? null,
+    }),
+  })
+}
+
+export async function awg2ClearTrafficLimit(clientName: string) {
+  return apiFetch('/client-access/amneziawg2/clear-traffic-limit', {
     method: 'POST',
     body: JSON.stringify({ client_name: clientName }),
   })
@@ -1602,6 +1650,87 @@ export async function updateAntizapretSettings(updates: Record<string, string | 
 
 export async function getWarperHealth() {
   return apiFetch<import('../types').WarperHealthResponse>('/warper/health')
+}
+
+export async function getAwg2Health() {
+  return apiFetch<import('../types').Awg2HealthResponse>('/awg2/health')
+}
+
+export async function getAwg2Status() {
+  return apiFetch<import('../types').Awg2StatusResponse>('/awg2/status')
+}
+
+export async function getAwg2Obfuscation() {
+  return apiFetch<import('../types').Awg2ObfuscationResponse>('/awg2/obfuscation')
+}
+
+export async function regenerateAwg2Obfuscation() {
+  return apiFetch<import('../types').Awg2ObfuscationResponse>('/awg2/obfuscation/regenerate', {
+    method: 'POST',
+  })
+}
+
+export async function applyAwg2Obfuscation(payload: {
+  preset: string
+  template: string
+  mtu?: number | null
+  host?: string | null
+  fp?: string | null
+}) {
+  return apiFetch<import('../types').Awg2ObfuscationResponse>('/awg2/obfuscation/apply', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function getAwg2Monitoring() {
+  return apiFetch<import('../types').Awg2MonitoringResponse>('/awg2/monitoring')
+}
+
+export async function getAwg2ClientStats(clientName: string) {
+  return apiFetch<import('../types').Awg2ClientStats>(`/awg2/clients/${encodeURIComponent(clientName)}/stats`)
+}
+
+export function openAwg2InstallStream(
+  options: {
+    mode: 'install' | 'update'
+    preset?: string
+    template?: string
+    mtu?: number | null
+  },
+  onEvent: (event: import('../types').Awg2InstallStreamEvent) => void,
+  onError?: (message: string) => void,
+): EventSource | null {
+  const token = getToken()
+  if (!token) return null
+  const params = new URLSearchParams({
+    token,
+    mode: options.mode,
+  })
+  if (options.preset?.trim()) params.set('preset', options.preset.trim())
+  if (options.template?.trim()) params.set('template', options.template.trim())
+  if (options.mtu != null && Number.isFinite(options.mtu)) params.set('mtu', String(options.mtu))
+  const source = new EventSource(`${API_BASE}/awg2/install/stream?${params.toString()}`)
+  source.onmessage = (event) => {
+    try {
+      onEvent(JSON.parse(event.data) as import('../types').Awg2InstallStreamEvent)
+    } catch {
+      onError?.('Ошибка разбора потока установки AZ-AWG2')
+    }
+  }
+  source.onerror = () => {
+    onError?.('Соединение с потоком установки прервано')
+  }
+  return source
+}
+
+export async function restoreAwg2Backup(file: File) {
+  const form = new FormData()
+  form.append('archive', file)
+  return apiFetch<import('../types').Awg2RestoreResponse>('/awg2/restore', {
+    method: 'POST',
+    body: form,
+  })
 }
 
 export async function getWarperStatus() {
@@ -1894,6 +2023,24 @@ export async function restartPanel() {
   return apiFetch<{ message: string }>('/system/restart', { method: 'POST' })
 }
 
+export async function scheduleServerReboot(nodeId: number, confirm: 'REBOOT') {
+  return apiFetch<import('../types').ServerRebootScheduleResponse>('/settings/reboot', {
+    method: 'POST',
+    body: JSON.stringify({ node_id: nodeId, confirm }),
+  })
+}
+
+export async function cancelServerReboot(rebootId: string) {
+  return apiFetch<import('../types').ServerRebootPendingItem>(
+    `/settings/reboot/${rebootId}/cancel`,
+    { method: 'POST' },
+  )
+}
+
+export async function getPendingServerReboots() {
+  return apiFetch<import('../types').ServerRebootPendingResponse>('/settings/reboot/pending')
+}
+
 export async function rebuildPanel() {
   return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/system/rebuild', { method: 'POST' })
 }
@@ -1951,6 +2098,31 @@ export function downloadBackup(fileName: string) {
   const token = getToken()
   const url = `${API_BASE}/backups/${encodeURIComponent(fileName)}/download`
   return fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+}
+
+export async function downloadAwg2Backup(retry = true): Promise<Response> {
+  const headers = new Headers()
+  const token = getToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const sessionId = getWebSessionId()
+  if (sessionId) headers.set('X-Web-Session-Id', sessionId)
+
+  const response = await fetch(`${API_BASE}/awg2/backup`, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+  })
+  if (response.status === 401 && retry) {
+    const newToken = await refreshAccessToken()
+    if (newToken) {
+      return downloadAwg2Backup(false)
+    }
+    localStorage.removeItem('token')
+  }
+  if (!response.ok) {
+    throw await parseApiError(response, 'Ошибка скачивания бэкапа AZ-AWG2')
+  }
+  return response
 }
 
 export type QrContentMode = 'profile' | 'download-link'

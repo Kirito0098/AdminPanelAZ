@@ -15,6 +15,11 @@ import {
   Zap,
 } from 'lucide-react'
 import {
+  awg2ClearTrafficLimit,
+  awg2PermanentBlock,
+  awg2SetTrafficLimit,
+  awg2TempBlock,
+  awg2Unblock,
   ApiError,
   createOneTimeLink,
   deleteConfig,
@@ -203,6 +208,7 @@ export default function ClientActionsDialog({
   const vpnFile = pickVpnFile(config, tab)
   const azFile = pickAzFile(config, tab)
   const isOpenVpn = config.vpn_type === 'openvpn'
+  const isAwg2 = config.vpn_type === 'amneziawg2'
   const isBlocked = policy?.is_blocked ?? false
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
   const wgExpired = Boolean(policy?.expired) || blockMode === 'expired'
@@ -419,7 +425,67 @@ export default function ClientActionsDialog({
             ),
         },
       ]
-    : [
+    : isAwg2
+      ? [
+          {
+            key: 'temp-block',
+            label: 'Временная блокировка',
+            icon: <Ban size={14} />,
+            hidden: !canManage || haReplicaReadonly,
+            onClick: () =>
+              askNumber(
+                'Временная блокировка',
+                `Укажите срок блокировки для клиента «${config.client_name}»`,
+                '7',
+                async (days) => {
+                  await awg2TempBlock(config.client_name, days)
+                  onNotifySuccess('Клиент временно заблокирован')
+                },
+              ),
+          },
+          {
+            key: 'unblock',
+            label: 'Снять блокировку',
+            icon: <Unlock size={14} />,
+            // Like WG: hide for traffic_limit — operator clears limit instead
+            hidden: !canManage || !['temp', 'permanent'].includes(blockMode) || haReplicaReadonly,
+            onClick: () =>
+              runAction('unblock', async () => {
+                await awg2Unblock(config.client_name)
+                onNotifySuccess('Блокировка снята')
+              }),
+          },
+          {
+            key: 'traffic-limit',
+            label: 'Лимит трафика',
+            icon: <Gauge size={14} />,
+            hidden: !canManage || haReplicaReadonly,
+            onClick: () => {
+              setLimitValue('10')
+              setLimitUnit('GB')
+              setLimitPeriodDays('7')
+              setPromptTitle('Лимит трафика')
+              setPromptMessage(`Укажите лимит для клиента «${config.client_name}»`)
+              setPromptMode('traffic-limit')
+            },
+          },
+          {
+            key: 'clear-traffic-limit',
+            label: 'Снять лимит трафика',
+            icon: <Gauge size={14} />,
+            hidden: !canManage || !hasTrafficLimit || haReplicaReadonly,
+            onClick: () =>
+              askConfirm(
+                'Снять лимит трафика',
+                `Снять лимит трафика для «${config.client_name}»?`,
+                async () => {
+                  await awg2ClearTrafficLimit(config.client_name)
+                  onNotifySuccess('Лимит трафика снят')
+                },
+              ),
+          },
+        ]
+      : [
         {
           key: 'temp-block',
           label: 'Временная блокировка',
@@ -488,7 +554,7 @@ export default function ClientActionsDialog({
               },
             ),
         },
-      ]
+        ]
 
   const dangerActions: ActionItem[] = [
     {
@@ -504,6 +570,8 @@ export default function ClientActionsDialog({
           async () => {
             if (isOpenVpn) {
               await openvpnPermanentBlock(config.client_name)
+            } else if (isAwg2) {
+              await awg2PermanentBlock(config.client_name)
             } else {
               await wgPermanentBlock(config.client_name)
             }
@@ -914,6 +982,8 @@ export default function ClientActionsDialog({
               void runAction('traffic-limit', async () => {
                 if (isOpenVpn) {
                   await openvpnSetTrafficLimit(config.client_name, value, limitUnit, period)
+                } else if (isAwg2) {
+                  await awg2SetTrafficLimit(config.client_name, value, limitUnit, period)
                 } else {
                   await wgSetTrafficLimit(config.client_name, value, limitUnit, period)
                 }

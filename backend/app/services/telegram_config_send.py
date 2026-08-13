@@ -97,6 +97,8 @@ def send_config_files_to_chat(
             protocol=last_file_item.get("protocol", ""),
             platform=install_platform,
             client_name=config.client_name,
+            filename=last_file_item.get("download_filename") or last_file_item.get("filename"),
+            path=last_file_item.get("path"),
         )
         if instruction:
             if not send_tg_message(bot_token, str(chat_id), instruction, run_async=run_async):

@@ -18,7 +18,7 @@ from app.services.telegram_profile_ui import is_az_profile
 SETTING_VISIBLE_VPN_PROFILES_DEFAULT = "user_visible_vpn_profiles_default"
 
 ROUTES = frozenset({"az", "vpn"})
-PROTOCOLS = frozenset({"openvpn", "wireguard", "amneziawg"})
+PROTOCOLS = frozenset({"openvpn", "wireguard", "amneziawg", "amneziawg2"})
 OPENVPN_GROUPS = frozenset({"udp_tcp", "udp", "tcp"})
 
 # Policy openvpn_groups key ↔ stored GROUP_* preference key
@@ -178,6 +178,7 @@ def intersect_policy_with_features(
     openvpn_enabled: bool = True,
     wireguard_enabled: bool = True,
     amneziawg_enabled: bool = True,
+    amneziawg2_enabled: bool = True,
 ) -> dict[str, list[str]]:
     protocols = list(policy.get("protocols") or [])
     allowed: list[str] = []
@@ -187,6 +188,8 @@ def intersect_policy_with_features(
         elif key == "wireguard" and wireguard_enabled:
             allowed.append(key)
         elif key == "amneziawg" and amneziawg_enabled:
+            allowed.append(key)
+        elif key == "amneziawg2" and amneziawg2_enabled:
             allowed.append(key)
     result = copy_policy(policy)
     result["protocols"] = allowed
@@ -204,6 +207,7 @@ def feature_flags_from_service(service: Any | None = None) -> dict[str, bool]:
         "openvpn": bool(service.is_enabled("openvpn")),
         "wireguard": bool(service.is_enabled("wireguard")),
         "amneziawg": bool(service.is_enabled("amneziawg")),
+        "awg2": bool(service.is_enabled("awg2")),
     }
 
 
@@ -220,6 +224,7 @@ def resolve_effective_visible_vpn_profiles(
         openvpn_enabled=flags.get("openvpn", True),
         wireguard_enabled=flags.get("wireguard", True),
         amneziawg_enabled=flags.get("amneziawg", True),
+        amneziawg2_enabled=flags.get("awg2", flags.get("amneziawg2", True)),
     )
 
 
@@ -228,6 +233,8 @@ def protocol_key_from_file(*, protocol: str, path: str = "") -> str | None:
     if value in PROTOCOLS:
         return value
     lowered = f"{path}".replace("\\", "/").lower()
+    if "/antizapret-awg/" in lowered or value == "amneziawg2":
+        return "amneziawg2"
     if "/amneziawg/" in lowered or lowered.endswith("-am.conf"):
         return "amneziawg"
     if "/wireguard/" in lowered or lowered.endswith("-wg.conf"):
@@ -298,12 +305,13 @@ def can_create_vpn_type(
     vpn_type: VpnType | str,
     feature_flags: Mapping[str, bool] | None = None,
 ) -> bool:
-    flags = feature_flags or {"openvpn": True, "wireguard": True, "amneziawg": True}
+    flags = feature_flags or {"openvpn": True, "wireguard": True, "amneziawg": True, "awg2": True}
     effective = intersect_policy_with_features(
         policy,
         openvpn_enabled=flags.get("openvpn", True),
         wireguard_enabled=flags.get("wireguard", True),
         amneziawg_enabled=flags.get("amneziawg", True),
+        amneziawg2_enabled=flags.get("awg2", flags.get("amneziawg2", True)),
     )
     protocols = set(effective.get("protocols") or [])
     vt = vpn_type.value if isinstance(vpn_type, VpnType) else str(vpn_type).lower()
@@ -311,6 +319,8 @@ def can_create_vpn_type(
         return "openvpn" in protocols and bool(effective.get("openvpn_groups"))
     if vt == VpnType.wireguard.value:
         return "wireguard" in protocols or "amneziawg" in protocols
+    if vt == VpnType.amneziawg2.value:
+        return "amneziawg2" in protocols and flags.get("awg2", flags.get("amneziawg2", True))
     return False
 
 

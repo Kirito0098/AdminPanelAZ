@@ -3,12 +3,10 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Ban,
   Clock,
-  Globe,
   LogOut,
   Monitor,
   Network,
   Plus,
-  Radar,
   Save,
   Shield,
   ShieldAlert,
@@ -37,6 +35,7 @@ import {
 } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import SecretsRotationWizard from '@/components/settings/SecretsRotationWizard'
+import { SettingsCollapsible, SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -57,21 +56,6 @@ import { formatDateTime } from '@/lib/datetime'
 import { LABEL_LAST_SEEN } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import type { ActiveWebSession, AuditStreamSettings, EventWebhookSettings, ScannerBan, SecuritySettings } from '@/types'
-
-function SectionHeading({
-  title,
-  description,
-}: {
-  title: string
-  description: string
-}) {
-  return (
-    <div className="md:col-span-2">
-      <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-      <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-    </div>
-  )
-}
 
 function ToggleRow({
   id,
@@ -107,38 +91,6 @@ function ToggleRow({
   )
 }
 
-function MetricPill({
-  icon: Icon,
-  label,
-  value,
-  tone = 'default',
-}: {
-  icon: LucideIcon
-  label: string
-  value: string
-  tone?: 'default' | 'success' | 'warning' | 'muted'
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 shadow-sm backdrop-blur-sm">
-      <div
-        className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-          tone === 'success' && 'bg-primary/15 text-primary',
-          tone === 'warning' && 'bg-destructive/15 text-destructive',
-          tone === 'muted' && 'bg-muted text-muted-foreground',
-          tone === 'default' && 'bg-muted/80 text-foreground',
-        )}
-      >
-        <Icon size={18} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="truncate text-sm font-semibold">{value}</p>
-      </div>
-    </div>
-  )
-}
-
 function ListRow({
   children,
   action,
@@ -147,7 +99,7 @@ function ListRow({
   action?: ReactNode
 }) {
   return (
-    <li className="flex items-center justify-between gap-3 rounded-xl border bg-card/50 px-3 py-2.5 transition-colors hover:bg-muted/30">
+    <li className="flex items-center justify-between gap-3 rounded-lg border bg-card/50 px-3 py-2 transition-colors hover:bg-muted/30">
       <div className="min-w-0 flex-1">{children}</div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </li>
@@ -208,6 +160,7 @@ export default function SecurityTab() {
   const [auditSyslogHost, setAuditSyslogHost] = useState('')
   const [savingAuditStream, setSavingAuditStream] = useState(false)
   const [testingAuditStream, setTestingAuditStream] = useState(false)
+  const [integrationsOpen, setIntegrationsOpen] = useState(false)
 
   const load = async () => {
     try {
@@ -349,55 +302,32 @@ export default function SecurityTab() {
   if (!settings) return null
 
   return (
-    <div className="flex flex-col gap-4 orientation-compact-settings-tab">
+    <div className="space-y-4">
       <InlineProgressBar active={saving} label="Сохранение настроек..." />
 
-      <div className="grid gap-4 md:grid-cols-2 md:items-start">
-        <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card p-4 md:col-span-2">
-          <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/10 blur-2xl" />
-          <div className="relative grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricPill
-              icon={Network}
-              label="Ограничение по IP"
-              value={ipRestrictionActive ? 'Включено' : 'Выключено'}
-              tone={ipRestrictionActive ? 'success' : 'muted'}
-            />
-            <MetricPill
-              icon={Radar}
-              label="Блокировка сканеров"
-              value={settings.block_scanners ? 'Активна' : 'Выключена'}
-              tone={settings.block_scanners ? 'success' : 'muted'}
-            />
-            <MetricPill
-              icon={Ban}
-              label="Заблокировано"
-              value={bans.length === 0 ? 'Никого' : `${bans.length} адр.`}
-              tone={bans.length > 0 ? 'warning' : 'muted'}
-            />
-            <MetricPill
-              icon={Globe}
-              label="Ваш IP"
-              value={clientIp ?? 'не определён'}
-              tone={clientIp ? 'default' : 'muted'}
-            />
-          </div>
-        </div>
+      <SettingsToolbar
+        title="Защита входа"
+        meta={
+          <SettingsMetaLine
+            items={[
+              { label: 'сессий', value: sessions.length },
+              { label: 'банов', value: bans.length },
+              { label: 'IP-ограничение', value: ipRestrictionActive ? 'вкл' : 'выкл' },
+              { label: 'антисканер', value: settings.block_scanners ? 'вкл' : 'выкл' },
+            ]}
+          />
+        }
+      />
 
-        {ipListEmpty && (
-          <SettingsAlert variant="warning" title="Список разрешённых адресов пуст" className="md:col-span-2">
-            При включённом ограничении без адресов в списке вход в панель будет недоступен. Добавьте свой IP или
-            временный доступ ниже.
-          </SettingsAlert>
-        )}
+      {ipListEmpty && (
+        <SettingsAlert variant="warning" title="Список разрешённых адресов пуст">
+          При включённом ограничении без адресов в списке вход в панель будет недоступен. Добавьте свой IP или
+          временный доступ ниже.
+        </SettingsAlert>
+      )}
 
-        <SectionHeading
-          title="Доступ к панели"
-          description="Кто может открыть панель и как выдать временный доступ"
-        />
-
-        <div className="grid gap-4 md:col-span-2 md:grid-cols-2 md:items-stretch">
-        <Card className="flex h-full flex-col overflow-hidden shadow-sm">
-          <div className="h-1 bg-gradient-to-r from-primary/80 to-primary/15" />
+      <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
+        <Card className="flex h-full flex-col shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Network size={18} />
@@ -463,8 +393,7 @@ export default function SecurityTab() {
           </CardContent>
         </Card>
 
-        <Card className="flex h-full flex-col overflow-hidden shadow-sm">
-          <div className="h-1 bg-gradient-to-r from-amber-500/70 to-amber-500/15" />
+        <Card className="flex h-full flex-col shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Clock size={18} />
@@ -569,130 +498,118 @@ export default function SecurityTab() {
             )}
           </CardContent>
         </Card>
-        </div>
+      </div>
 
-        <SectionHeading
-          title="Защита от атак"
-          description="Автоблокировка сканеров и злоумышленников на странице отказа"
-        />
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ShieldAlert size={18} />
+            Защита от перебора и сканирования
+          </CardTitle>
+          <CardDescription>
+            Автоматически блокируйте подозрительные подключения и злоумышленников, застрявших на странице отказа
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <ToggleRow
+              id="block-scanners"
+              label="Автоматически блокировать подозрительные подключения"
+              description="Сканеры портов и множественные неудачные попытки входа"
+              checked={settings.block_scanners}
+              onCheckedChange={(checked) => saveWithSettingsPatch({ block_scanners: checked })}
+            />
 
-        <Card className="overflow-hidden shadow-sm md:col-span-2">
-          <div className="h-1 bg-gradient-to-r from-violet-500/70 to-violet-500/15" />
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <ShieldAlert size={18} />
-              Защита от перебора и сканирования
-            </CardTitle>
-            <CardDescription>
-              Автоматически блокируйте подозрительные подключения и злоумышленников, застрявших на странице отказа
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            {settings.ip_restriction_enabled && (
               <ToggleRow
-                id="block-scanners"
-                label="Автоматически блокировать подозрительные подключения"
-                description="Сканеры портов и множественные неудачные попытки входа"
-                checked={settings.block_scanners}
-                onCheckedChange={(checked) => saveWithSettingsPatch({ block_scanners: checked })}
+                id="block-dwell"
+                label="Блокировать «зависших» на странице отказа"
+                description="Полезно против ботов, которые долго остаются на закрытой панели"
+                checked={settings.block_ip_blocked_dwell}
+                onCheckedChange={(checked) => saveWithSettingsPatch({ block_ip_blocked_dwell: checked })}
               />
-
-              {settings.ip_restriction_enabled && (
-                <ToggleRow
-                  id="block-dwell"
-                  label="Блокировать «зависших» на странице отказа"
-                  description="Полезно против ботов, которые долго остаются на закрытой панели"
-                  checked={settings.block_ip_blocked_dwell}
-                  onCheckedChange={(checked) => saveWithSettingsPatch({ block_ip_blocked_dwell: checked })}
-                />
-              )}
-            </div>
-
-            {settings.block_scanners && (
-              <div className="grid grid-cols-1 gap-3 rounded-xl border bg-muted/20 p-4 sm:grid-cols-2 md:grid-cols-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="scanner-max" className="text-xs">
-                    Неудачных попыток
-                  </Label>
-                  <Input
-                    id="scanner-max"
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={settings.scanner_max_attempts}
-                    onChange={(e) => setSettings({ ...settings, scanner_max_attempts: Number(e.target.value) })}
-                  />
-                  <p className="text-[11px] text-muted-foreground">До блокировки</p>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="scanner-ban" className="text-xs">
-                    Блокировка, сек
-                  </Label>
-                  <Input
-                    id="scanner-ban"
-                    type="number"
-                    min={60}
-                    max={86400}
-                    value={settings.scanner_ban_seconds}
-                    onChange={(e) => setSettings({ ...settings, scanner_ban_seconds: Number(e.target.value) })}
-                  />
-                  <p className="text-[11px] text-muted-foreground">
-                    {formatRemainingSeconds(settings.scanner_ban_seconds)}
-                  </p>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="scanner-window" className="text-xs">
-                    Окно, сек
-                  </Label>
-                  <Input
-                    id="scanner-window"
-                    type="number"
-                    min={10}
-                    max={3600}
-                    value={settings.scanner_window_seconds}
-                    onChange={(e) => setSettings({ ...settings, scanner_window_seconds: Number(e.target.value) })}
-                  />
-                  <p className="text-[11px] text-muted-foreground">Период подсчёта</p>
-                </div>
-              </div>
             )}
+          </div>
 
-            {settings.block_ip_blocked_dwell && settings.ip_restriction_enabled && (
-              <div className="max-w-sm space-y-1.5 rounded-xl border bg-muted/20 p-4">
-                <Label htmlFor="dwell-seconds" className="text-xs">
-                  Макс. время на странице блокировки, сек
+          {settings.block_scanners && (
+            <div className="grid grid-cols-1 gap-3 rounded-xl border bg-muted/20 p-4 sm:grid-cols-2 md:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="scanner-max" className="text-xs">
+                  Неудачных попыток
                 </Label>
                 <Input
-                  id="dwell-seconds"
+                  id="scanner-max"
                   type="number"
-                  min={30}
-                  max={3600}
-                  value={settings.ip_blocked_dwell_seconds}
-                  onChange={(e) => setSettings({ ...settings, ip_blocked_dwell_seconds: Number(e.target.value) })}
+                  min={1}
+                  max={20}
+                  value={settings.scanner_max_attempts}
+                  onChange={(e) => setSettings({ ...settings, scanner_max_attempts: Number(e.target.value) })}
                 />
-                <p className="text-[11px] text-muted-foreground">Сколько можно «висеть» на странице отказа</p>
+                <p className="text-[11px] text-muted-foreground">До блокировки</p>
               </div>
-            )}
-
-            {scannerDetailsVisible && (
-              <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:justify-end">
-                <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
-                  <Save size={16} />
-                  {saving ? 'Сохранение...' : 'Сохранить'}
-                </Button>
+              <div className="space-y-1.5">
+                <Label htmlFor="scanner-ban" className="text-xs">
+                  Блокировка, сек
+                </Label>
+                <Input
+                  id="scanner-ban"
+                  type="number"
+                  min={60}
+                  max={86400}
+                  value={settings.scanner_ban_seconds}
+                  onChange={(e) => setSettings({ ...settings, scanner_ban_seconds: Number(e.target.value) })}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  {formatRemainingSeconds(settings.scanner_ban_seconds)}
+                </p>
               </div>
-            )}
-          </CardContent>
-        </Card>
+              <div className="space-y-1.5">
+                <Label htmlFor="scanner-window" className="text-xs">
+                  Окно, сек
+                </Label>
+                <Input
+                  id="scanner-window"
+                  type="number"
+                  min={10}
+                  max={3600}
+                  value={settings.scanner_window_seconds}
+                  onChange={(e) => setSettings({ ...settings, scanner_window_seconds: Number(e.target.value) })}
+                />
+                <p className="text-[11px] text-muted-foreground">Период подсчёта</p>
+              </div>
+            </div>
+          )}
 
-        <SectionHeading
-          title="Активность"
-          description="Открытые сессии и адреса, которые сейчас заблокированы"
-        />
+          {settings.block_ip_blocked_dwell && settings.ip_restriction_enabled && (
+            <div className="max-w-sm space-y-1.5 rounded-xl border bg-muted/20 p-4">
+              <Label htmlFor="dwell-seconds" className="text-xs">
+                Макс. время на странице блокировки, сек
+              </Label>
+              <Input
+                id="dwell-seconds"
+                type="number"
+                min={30}
+                max={3600}
+                value={settings.ip_blocked_dwell_seconds}
+                onChange={(e) => setSettings({ ...settings, ip_blocked_dwell_seconds: Number(e.target.value) })}
+              />
+              <p className="text-[11px] text-muted-foreground">Сколько можно «висеть» на странице отказа</p>
+            </div>
+          )}
 
-        <div className="grid gap-4 md:col-span-2 md:grid-cols-2 md:items-stretch">
-        <Card className="flex h-full flex-col overflow-hidden shadow-sm">
-          <div className="h-1 bg-gradient-to-r from-sky-500/70 to-sky-500/15" />
+          {scannerDetailsVisible && (
+            <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:justify-end">
+              <Button onClick={save} disabled={saving} className="w-full sm:w-auto">
+                <Save size={16} />
+                {saving ? 'Сохранение...' : 'Сохранить'}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
+        <Card className="flex h-full flex-col shadow-sm">
           <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -763,13 +680,7 @@ export default function SecurityTab() {
           </CardContent>
         </Card>
 
-        <Card className="flex h-full flex-col overflow-hidden shadow-sm">
-          <div
-            className={cn(
-              'h-1 bg-gradient-to-r',
-              bans.length > 0 ? 'from-destructive/80 to-destructive/15' : 'from-muted-foreground/30 to-muted/10',
-            )}
-          />
+        <Card className="flex h-full flex-col shadow-sm">
           <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -827,14 +738,15 @@ export default function SecurityTab() {
         </Card>
         </div>
 
-        <SectionHeading
-          title="Интеграции"
-          description="Уведомления и пересылка журнала во внешние системы"
-        />
-
-        <div className="grid gap-4 md:col-span-2 md:grid-cols-2 md:items-stretch">
-        <Card className="flex h-full flex-col overflow-hidden shadow-sm">
-          <div className="h-1 bg-gradient-to-r from-emerald-500/70 to-emerald-500/15" />
+      <SettingsCollapsible
+        open={integrationsOpen}
+        onOpenChange={setIntegrationsOpen}
+        title="Интеграции"
+        description="Уведомления и пересылка журнала во внешние системы"
+        icon={<Webhook size={16} />}
+      >
+      <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
+        <Card className="flex h-full flex-col shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Webhook size={18} />
@@ -938,8 +850,7 @@ export default function SecurityTab() {
           </CardContent>
         </Card>
 
-        <Card className="flex h-full flex-col overflow-hidden shadow-sm">
-          <div className="h-1 bg-gradient-to-r from-cyan-500/70 to-cyan-500/15" />
+        <Card className="flex h-full flex-col shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Shield size={18} />
@@ -1104,12 +1015,10 @@ export default function SecurityTab() {
             </Button>
           </CardContent>
         </Card>
-        </div>
-
-        <div className="md:col-span-2">
-          <SecretsRotationWizard />
-        </div>
       </div>
+      </SettingsCollapsible>
+
+      <SecretsRotationWizard />
     </div>
   )
 }

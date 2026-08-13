@@ -1,4 +1,4 @@
-"""Read-only warper/CIDR status payloads for TG Mini App and bot."""
+"""Read-only warper/CIDR/AWG2 status payloads for TG Mini App and bot."""
 
 from __future__ import annotations
 
@@ -10,6 +10,95 @@ from sqlalchemy.orm import Session
 from app.services.cidr.cidr_tasks import find_any_active_pipeline_task
 from app.services.cidr.pipeline.deploy import list_compile_artifacts
 from app.services.node_manager import get_active_adapter, get_active_node
+
+
+def _awg2_ifaces_summary(ifaces: list[Any]) -> str:
+    parts: list[str] = []
+    for iface in ifaces:
+        if not isinstance(iface, dict):
+            continue
+        name = str(iface.get("name") or "").strip()
+        if not name:
+            continue
+        peer_count = iface.get("peer_count")
+        if isinstance(peer_count, (int, float)):
+            parts.append(f"{name}:{int(peer_count)}")
+        else:
+            parts.append(name)
+    return ", ".join(parts) if parts else "—"
+
+
+def _awg2_top_traffic(clients: list[Any], *, limit: int = 3) -> list[dict[str, Any]]:
+    ranked: list[tuple[int, dict[str, Any]]] = []
+    for client in clients:
+        if not isinstance(client, dict):
+            continue
+        name = str(client.get("name") or "").strip()
+        if not name:
+            continue
+        rx = int(client["rx"]) if isinstance(client.get("rx"), (int, float)) else 0
+        tx = int(client["tx"]) if isinstance(client.get("tx"), (int, float)) else 0
+        ranked.append((rx + tx, {"name": name, "rx": rx, "tx": tx}))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [row for _, row in ranked[:limit]]
+
+
+def build_awg2_status_payload(db: Session) -> dict:
+    """Health + short monitoring overview for bot `/awg2` and Mini App."""
+    node = get_active_node(db)
+    adapter = get_active_adapter(db)
+
+    health: dict[str, Any] = {
+        "installed": False,
+        "missing_components": [],
+        "install_command": None,
+        "health_error": None,
+    }
+    try:
+        fetched = adapter.get_awg2_health()
+        if isinstance(fetched, dict):
+            health.update(fetched)
+    except Exception as exc:  # noqa: BLE001
+        health["health_error"] = str(exc)
+
+    installed = bool(health.get("installed"))
+    missing = health.get("missing_components")
+    missing_components = [str(x) for x in missing] if isinstance(missing, list) else []
+    install_command = health.get("install_command")
+    if not isinstance(install_command, str) or not install_command.strip():
+        install_command = None
+
+    online_count = 0
+    peer_count = 0
+    ifaces_summary = "—"
+    top_traffic: list[dict[str, Any]] = []
+
+    if installed and not health.get("health_error"):
+        try:
+            monitoring = adapter.get_awg2_monitoring()
+            if isinstance(monitoring, dict):
+                ifaces = monitoring.get("ifaces") if isinstance(monitoring.get("ifaces"), list) else []
+                clients = monitoring.get("clients") if isinstance(monitoring.get("clients"), list) else []
+                ifaces_summary = _awg2_ifaces_summary(ifaces)
+                peer_count = len(clients)
+                online_count = sum(1 for c in clients if isinstance(c, dict) and c.get("online") is True)
+                top_traffic = _awg2_top_traffic(clients)
+        except Exception:  # noqa: BLE001 — best-effort; health still useful
+            pass
+
+    return {
+        "node_id": node.id,
+        "node_name": node.name,
+        "node_host": node.host,
+        "installed": installed,
+        "missing_components": missing_components,
+        "install_command": install_command,
+        "online_count": online_count,
+        "peer_count": peer_count,
+        "ifaces_summary": ifaces_summary,
+        "top_traffic": top_traffic,
+        "health_error": health.get("health_error"),
+    }
 
 
 def _warper_fake_subnet(status_data: dict[str, Any]) -> str | None:

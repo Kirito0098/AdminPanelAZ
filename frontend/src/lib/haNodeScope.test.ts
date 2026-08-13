@@ -76,6 +76,7 @@ describe('isHaGroupScopePath', () => {
     expect(isHaGroupScopePath('/logs')).toBe(false)
     expect(isHaGroupScopePath('/server-monitor')).toBe(false)
     expect(isHaGroupScopePath('/warper')).toBe(false)
+    expect(isHaGroupScopePath('/awg2')).toBe(false)
     expect(isHaGroupScopePath('/monitoring')).toBe(false)
     expect(isHaGroupScopePath('/nodes')).toBe(false)
   })

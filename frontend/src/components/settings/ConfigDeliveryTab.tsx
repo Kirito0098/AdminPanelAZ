@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import type { LucideIcon } from 'lucide-react'
 import { ClipboardList, Download, QrCode, Router, Save, Shield, Timer } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ApiError, getSecuritySettings, updateSecuritySettings } from '@/api/client'
 import RouteResultsPanel from '@/components/settings/RouteResultsPanel'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import { SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,15 +20,6 @@ import type { SecuritySettings } from '@/types'
 
 const MAX_DOWNLOAD_OPTIONS = [1, 3, 5] as const
 const TTL_PRESETS_MIN = [15, 60, 240] as const
-
-function SectionHeading({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="md:col-span-2">
-      <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-      <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-    </div>
-  )
-}
 
 function ToggleRow({
   id,
@@ -60,38 +51,6 @@ function ToggleRow({
         {description && <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>}
       </div>
       <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
-    </div>
-  )
-}
-
-function MetricPill({
-  icon: Icon,
-  label,
-  value,
-  tone = 'default',
-}: {
-  icon: LucideIcon
-  label: string
-  value: string
-  tone?: 'default' | 'success' | 'warning' | 'muted'
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 shadow-sm backdrop-blur-sm">
-      <div
-        className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-          tone === 'success' && 'bg-primary/15 text-primary',
-          tone === 'warning' && 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-          tone === 'muted' && 'bg-muted text-muted-foreground',
-          tone === 'default' && 'bg-muted/80 text-foreground',
-        )}
-      >
-        <Icon size={18} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="truncate text-sm font-semibold">{value}</p>
-      </div>
     </div>
   )
 }
@@ -170,66 +129,41 @@ export default function ConfigDeliveryTab() {
     <div className="space-y-4">
       <InlineProgressBar active={saving} label="Сохранение настроек..." />
 
-      <div className="grid gap-4 md:grid-cols-2 md:items-start">
-        <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card p-4 md:col-span-2">
-          <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-primary/10 blur-2xl" />
-          <div
-            className={cn(
-              'relative grid grid-cols-1 gap-3',
-              openvpnEnabled && qrDownloadsEnabled
-                ? 'sm:grid-cols-2 lg:grid-cols-3'
-                : 'sm:grid-cols-2',
-            )}
-          >
-            {openvpnEnabled && (
-              <MetricPill
-                icon={Download}
-                label="Роутеры"
-                value={settings.public_download_enabled ? 'Без входа' : 'Только из панели'}
-                tone={settings.public_download_enabled ? 'warning' : 'muted'}
-              />
-            )}
-            {qrDownloadsEnabled && (
-              <>
-                <MetricPill
-                  icon={Timer}
-                  label="Срок ссылки QR"
-                  value={formatTtlMinutes(settings.qr_download_ttl_seconds)}
-                  tone="success"
-                />
-                <MetricPill
-                  icon={QrCode}
-                  label="Лимит скачиваний"
-                  value={`до ${settings.qr_download_max_downloads} раз`}
-                  tone="default"
-                />
-              </>
-            )}
-          </div>
-        </div>
-
-        {(openvpnEnabled || qrDownloadsEnabled) && (
-          <SectionHeading
-            title="Выдача VPN-профилей"
-            description={
-              bothSections
-                ? 'Файлы маршрутов для роутеров и временные QR-ссылки на профили'
-                : openvpnEnabled
-                  ? 'Готовые конфиги маршрутизации для домашних роутеров'
-                  : 'Временные ссылки и QR-коды для передачи профиля клиенту'
-            }
+      <SettingsToolbar
+        title="Выдача VPN-профилей"
+        meta={
+          <SettingsMetaLine
+            items={[
+              ...(openvpnEnabled
+                ? [{ label: 'роутеры', value: settings.public_download_enabled ? 'без входа' : 'только из панели' }]
+                : []),
+              ...(qrDownloadsEnabled
+                ? [
+                    { label: 'срок ссылки QR', value: formatTtlMinutes(settings.qr_download_ttl_seconds) },
+                    { label: 'лимит скачиваний', value: `до ${settings.qr_download_max_downloads} раз` },
+                  ]
+                : []),
+            ]}
           />
-        )}
+        }
+      />
 
-        <div
-          className={cn(
-            'grid gap-4',
-            bothSections ? 'md:col-span-2 md:grid-cols-2 md:items-stretch' : 'md:col-span-2',
-          )}
-        >
+      <p className="text-xs text-muted-foreground">
+        {bothSections
+          ? 'Файлы маршрутов для роутеров и временные QR-ссылки на профили'
+          : openvpnEnabled
+            ? 'Готовые конфиги маршрутизации для домашних роутеров'
+            : 'Временные ссылки и QR-коды для передачи профиля клиенту'}
+      </p>
+
+      <div
+        className={cn(
+          'grid gap-4',
+          bothSections ? 'md:grid-cols-2 md:items-stretch' : undefined,
+        )}
+      >
         {openvpnEnabled && (
-            <Card className="flex h-full flex-col overflow-hidden shadow-sm">
-              <div className="h-1 bg-gradient-to-r from-sky-500/70 to-sky-500/15" />
+            <Card className="flex h-full flex-col shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Router size={18} />
@@ -260,8 +194,7 @@ export default function ConfigDeliveryTab() {
         )}
 
         {qrDownloadsEnabled && (
-            <Card className="flex h-full flex-col overflow-hidden shadow-sm">
-              <div className="h-1 bg-gradient-to-r from-violet-500/70 to-violet-500/15" />
+            <Card className="flex h-full flex-col shadow-sm">
               <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
                 <div>
                   <CardTitle className="flex items-center gap-2 text-base">
@@ -378,7 +311,6 @@ export default function ConfigDeliveryTab() {
             </Card>
         )}
         </div>
-      </div>
     </div>
   )
 }

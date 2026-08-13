@@ -67,6 +67,7 @@ const NAV_GROUPS: NavGroupDef[] = [
       { to: '/antizapret', label: 'Конфиг AntiZapret', icon: Settings2, end: false, adminOnly: true, featureKey: 'antizapret_config' },
       { to: '/proxy', label: 'Прокси', icon: Network, end: false, adminOnly: true, featureKey: 'proxy_nodes' },
       { to: '/warper', label: 'AZ-WARP', icon: Globe, end: false, adminOnly: true, featureKey: 'warper' },
+      { to: '/awg2', label: 'AZ-AWG2', icon: Shield, end: false, adminOnly: true, featureKey: 'awg2' },
       { to: '/telegram', label: 'Telegram', icon: Send, end: false, adminOnly: true, featureKey: 'telegram' },
       { to: '/edit-files', label: 'Редактор файлов', icon: FileText, end: false, adminOnly: true, featureKey: 'edit_files' },
     ],

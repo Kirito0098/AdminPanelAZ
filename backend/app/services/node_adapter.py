@@ -23,7 +23,12 @@ from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.server_monitor import get_server_monitor
 from app.services.node_remote_cache import get_cached_monitoring_overview, monitoring_overview_cache_key
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
+from app.services.awg2_runtime import (
+    block_client_runtime as awg2_block_client_runtime,
+    unblock_client_runtime as awg2_unblock_client_runtime,
+)
 from app.services.warper import WarperService, build_ip_ranges_text_from_items, build_user_domains_text_from_items
+from app.services.awg2 import Awg2Service, is_awg2_profile_path
 
 _settings = get_settings()
 
@@ -51,6 +56,24 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def list_wireguard_clients(self) -> list[str]: ...
+
+    @abstractmethod
+    def awg2_add_client(self, client_name: str, ttl: str | None = None) -> str: ...
+
+    @abstractmethod
+    def awg2_delete_client(self, client_name: str) -> str: ...
+
+    @abstractmethod
+    def awg2_list_clients(self, tunnel: str = "antizapret") -> list[str]: ...
+
+    @abstractmethod
+    def list_amneziawg2_clients(self) -> list[str]: ...
+
+    @abstractmethod
+    def awg2_expire_check(self) -> str: ...
+
+    @abstractmethod
+    def awg2_expiry_map(self) -> dict[str, datetime]: ...
 
     @abstractmethod
     def recreate_profiles(self) -> str: ...
@@ -111,6 +134,9 @@ class NodeAdapter(ABC):
     def restart_service(self, service_name: str) -> str: ...
 
     @abstractmethod
+    def reboot(self) -> str: ...
+
+    @abstractmethod
     def get_routing_overview(self) -> dict: ...
 
     @abstractmethod
@@ -167,6 +193,12 @@ class NodeAdapter(ABC):
     def unblock_wireguard_client_runtime(self, client_name: str) -> dict: ...
 
     @abstractmethod
+    def block_awg2_client_runtime(self, client_name: str) -> dict: ...
+
+    @abstractmethod
+    def unblock_awg2_client_runtime(self, client_name: str) -> dict: ...
+
+    @abstractmethod
     def disconnect_openvpn_client(self, client_name: str) -> dict: ...
 
     @abstractmethod
@@ -189,6 +221,60 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def get_warper_health(self) -> dict: ...
+
+    @abstractmethod
+    def get_awg2_health(self) -> dict: ...
+
+    @abstractmethod
+    def get_awg2_status(self) -> dict: ...
+
+    @abstractmethod
+    def export_awg2_state_archive(self) -> bytes: ...
+
+    @abstractmethod
+    def import_awg2_state_archive(self, data: bytes) -> None: ...
+
+    @abstractmethod
+    def apply_awg2_runtime(self) -> dict: ...
+
+    @abstractmethod
+    def export_awg2_backup(self) -> bytes: ...
+
+    @abstractmethod
+    def restore_awg2_backup(self, data: bytes, archive_name: str = "az-awg2-backup.tar.gz") -> dict: ...
+
+    @abstractmethod
+    def get_awg2_obfuscation(self) -> dict: ...
+
+    @abstractmethod
+    def awg2_obfuscation_regenerate(self) -> dict: ...
+
+    @abstractmethod
+    def awg2_obfuscation_apply(
+        self,
+        *,
+        preset: str,
+        template: str,
+        mtu: int | None = None,
+        host: str | None = None,
+        fp: str | None = None,
+    ) -> dict: ...
+
+    @abstractmethod
+    def get_awg2_monitoring(self) -> dict: ...
+
+    @abstractmethod
+    def get_awg2_client_stats(self, client_name: str) -> dict: ...
+
+    @abstractmethod
+    def awg2_iter_install_stream(
+        self,
+        mode: str,
+        *,
+        preset: str | None = None,
+        template: str | None = None,
+        mtu: int | None = None,
+    ): ...
 
     @abstractmethod
     def get_warper_status(self) -> dict: ...
@@ -318,9 +404,15 @@ class NodeAdapter(ABC):
 
 
 class LocalNodeAdapter(NodeAdapter):
-    def __init__(self, service: AntiZapretService | None = None, warper: WarperService | None = None):
+    def __init__(
+        self,
+        service: AntiZapretService | None = None,
+        warper: WarperService | None = None,
+        awg2: Awg2Service | None = None,
+    ):
         self._service = service or AntiZapretService()
         self._warper = warper or WarperService()
+        self._awg2 = awg2 or Awg2Service()
         self._cidr = CidrRoutingService(self._service.base_path, get_cidr_list_dir())
         self._monitor = get_server_monitor()
 
@@ -344,6 +436,26 @@ class LocalNodeAdapter(NodeAdapter):
 
     def list_wireguard_clients(self) -> list[str]:
         return self._service.list_wireguard_clients()
+
+    def awg2_add_client(self, client_name: str, ttl: str | None = None) -> str:
+        if ttl is None:
+            return self._awg2.add_client(client_name)
+        return self._awg2.add_client(client_name, ttl=ttl)
+
+    def awg2_delete_client(self, client_name: str) -> str:
+        return self._awg2.delete_client(client_name)
+
+    def awg2_list_clients(self, tunnel: str = "antizapret") -> list[str]:
+        return self._awg2.list_clients(tunnel)
+
+    def list_amneziawg2_clients(self) -> list[str]:
+        return self._awg2.list_all_client_names()
+
+    def awg2_expire_check(self) -> str:
+        return self._awg2.expire_check()
+
+    def awg2_expiry_map(self) -> dict[str, datetime]:
+        return self._awg2.read_expiry_map()
 
     def recreate_profiles(self) -> str:
         return self._service.recreate_profiles()
@@ -416,12 +528,19 @@ class LocalNodeAdapter(NodeAdapter):
         return self._service.get_config_file_fingerprints()
 
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]:
+        if vpn_type == VpnType.amneziawg2:
+            return self._awg2.get_profile_files(client_name)
         return self._service.get_profile_files(client_name, vpn_type)
 
     def read_profile_file(self, path: str) -> str:
+        if is_awg2_profile_path(path):
+            return self._awg2.read_profile_file(path)
         return self._service.read_profile_file(path)
 
     def write_profile_file(self, path: str, content: str) -> None:
+        if is_awg2_profile_path(path):
+            self._awg2.write_profile_file(path, content)
+            return
         self._service.write_profile_file(path, content)
 
     def export_wireguard_client_profiles_archive(self) -> bytes:
@@ -429,6 +548,67 @@ class LocalNodeAdapter(NodeAdapter):
 
     def import_wireguard_client_profiles_archive(self, data: bytes) -> None:
         self._service.import_wireguard_client_profiles_archive(data)
+
+    def export_awg2_state_archive(self) -> bytes:
+        return self._awg2.export_state_archive()
+
+    def import_awg2_state_archive(self, data: bytes) -> None:
+        self._awg2.import_state_archive(data)
+
+    def apply_awg2_runtime(self) -> dict:
+        return self._awg2.apply_runtime()
+
+    def export_awg2_backup(self) -> bytes:
+        return self._awg2.export_narrow_backup()
+
+    def restore_awg2_backup(self, data: bytes, archive_name: str = "az-awg2-backup.tar.gz") -> dict:
+        _ = archive_name
+        self._awg2.import_narrow_backup(data)
+        return self._awg2.apply_runtime()
+
+    def get_awg2_obfuscation(self) -> dict:
+        return self._awg2.get_obfuscation()
+
+    def awg2_obfuscation_regenerate(self) -> dict:
+        return self._awg2.regenerate_obfuscation()
+
+    def awg2_obfuscation_apply(
+        self,
+        *,
+        preset: str,
+        template: str,
+        mtu: int | None = None,
+        host: str | None = None,
+        fp: str | None = None,
+    ) -> dict:
+        return self._awg2.apply_obfuscation(
+            preset=preset,
+            template=template,
+            mtu=mtu,
+            host=host,
+            fp=fp,
+        )
+
+    def get_awg2_monitoring(self) -> dict:
+        return self._awg2.get_monitoring()
+
+    def get_awg2_client_stats(self, client_name: str) -> dict:
+        return self._awg2.get_client_stats(client_name)
+
+    def awg2_iter_install_stream(
+        self,
+        mode: str,
+        *,
+        preset: str | None = None,
+        template: str | None = None,
+        mtu: int | None = None,
+    ):
+        return self._awg2.iter_install_stream_events(
+            mode,
+            preset=preset,
+            template=template,
+            mtu=mtu,
+        )
 
     def read_easyrsa_index(self) -> str:
         return self._service.read_easyrsa_index()
@@ -481,6 +661,9 @@ class LocalNodeAdapter(NodeAdapter):
 
     def restart_service(self, service_name: str) -> str:
         return self._service.restart_service(service_name)
+
+    def reboot(self) -> str:
+        return self._service.reboot()
 
     def get_routing_overview(self) -> dict:
         return self._cidr.get_overview()
@@ -538,6 +721,12 @@ class LocalNodeAdapter(NodeAdapter):
     def unblock_wireguard_client_runtime(self, client_name: str) -> dict:
         return unblock_client_runtime(client_name)
 
+    def block_awg2_client_runtime(self, client_name: str) -> dict:
+        return awg2_block_client_runtime(client_name)
+
+    def unblock_awg2_client_runtime(self, client_name: str) -> dict:
+        return awg2_unblock_client_runtime(client_name)
+
     def disconnect_openvpn_client(self, client_name: str) -> dict:
         return openvpn_management_service.disconnect_client(client_name)
 
@@ -575,6 +764,12 @@ class LocalNodeAdapter(NodeAdapter):
 
     def get_warper_health(self) -> dict:
         return self._warper.get_health()
+
+    def get_awg2_health(self) -> dict:
+        return self._awg2.get_health()
+
+    def get_awg2_status(self) -> dict:
+        return self._awg2.get_status()
 
     def get_warper_status(self) -> dict:
         return self._warper.get_status()
@@ -932,6 +1127,39 @@ class RemoteNodeAdapter(NodeAdapter):
         data = self._request("GET", "/clients/wireguard")
         return data.get("clients", [])
 
+    def awg2_add_client(self, client_name: str, ttl: str | None = None) -> str:
+        payload: dict[str, str] = {"client_name": client_name}
+        if ttl is not None:
+            payload["ttl"] = ttl
+        data = self._request("POST", "/clients/amneziawg2", json=payload)
+        return data.get("message", "ok")
+
+    def awg2_delete_client(self, client_name: str) -> str:
+        data = self._request("DELETE", f"/clients/amneziawg2/{client_name}")
+        return data.get("message", "ok")
+
+    def awg2_list_clients(self, tunnel: str = "antizapret") -> list[str]:
+        data = self._request("GET", "/clients/amneziawg2", params={"tunnel": tunnel})
+        return data.get("clients", [])
+
+    def list_amneziawg2_clients(self) -> list[str]:
+        names = set(self.awg2_list_clients("antizapret")) | set(self.awg2_list_clients("vpn"))
+        return sorted(names)
+
+    def awg2_expire_check(self) -> str:
+        data = self._request("POST", "/awg2/expire-check", timeout=120.0)
+        return data.get("detail") or data.get("message", "ok")
+
+    def awg2_expiry_map(self) -> dict[str, datetime]:
+        data = self._request("GET", "/awg2/expiry", timeout=60.0)
+        result: dict[str, datetime] = {}
+        for name, raw in (data.get("expiry") or {}).items():
+            try:
+                result[name] = datetime.fromisoformat(str(raw))
+            except ValueError:
+                continue
+        return result
+
     def recreate_profiles(self) -> str:
         data = self._request("POST", "/configs/recreate-profiles", timeout=300.0)
         return data.get("detail") or data.get("message", "ok")
@@ -1154,6 +1382,10 @@ class RemoteNodeAdapter(NodeAdapter):
         data = self._request("POST", "/services/restart", json={"service_name": service_name})
         return data.get("detail") or data.get("message", "ok")
 
+    def reboot(self) -> str:
+        data = self._request("POST", "/reboot")
+        return data.get("detail") or data.get("message", "ok")
+
     def get_routing_overview(self) -> dict:
         return self._request("GET", "/routing/overview")
 
@@ -1229,6 +1461,12 @@ class RemoteNodeAdapter(NodeAdapter):
     def unblock_wireguard_client_runtime(self, client_name: str) -> dict:
         return self._request("POST", f"/clients/wireguard/{client_name}/unblock", timeout=30.0)
 
+    def block_awg2_client_runtime(self, client_name: str) -> dict:
+        return self._request("POST", f"/clients/amneziawg2/{client_name}/block", timeout=30.0)
+
+    def unblock_awg2_client_runtime(self, client_name: str) -> dict:
+        return self._request("POST", f"/clients/amneziawg2/{client_name}/unblock", timeout=30.0)
+
     def disconnect_openvpn_client(self, client_name: str) -> dict:
         return self._request(
             "POST",
@@ -1262,6 +1500,110 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def get_warper_health(self) -> dict:
         return self._request("GET", "/warper/health")
+
+    def get_awg2_health(self) -> dict:
+        return self._request("GET", "/awg2/health")
+
+    def get_awg2_status(self) -> dict:
+        return self._request("GET", "/awg2/status")
+
+    def export_awg2_state_archive(self) -> bytes:
+        return self._request_bytes("GET", "/awg2/state/archive", timeout=120.0)
+
+    def import_awg2_state_archive(self, data: bytes) -> None:
+        self._request(
+            "POST",
+            "/awg2/state/archive",
+            content=data,
+            timeout=120.0,
+        )
+
+    def apply_awg2_runtime(self) -> dict:
+        return self._request("POST", "/awg2/runtime/apply", timeout=60.0)
+
+    def export_awg2_backup(self) -> bytes:
+        return self._request_bytes("POST", "/awg2/backup", timeout=120.0)
+
+    def restore_awg2_backup(self, data: bytes, archive_name: str = "az-awg2-backup.tar.gz") -> dict:
+        return self._request(
+            "POST",
+            "/awg2/restore",
+            files={"archive": (archive_name, data, "application/gzip")},
+            timeout=120.0,
+        )
+
+    def get_awg2_obfuscation(self) -> dict:
+        return self._request("GET", "/awg2/obfuscation", timeout=60.0)
+
+    def awg2_obfuscation_regenerate(self) -> dict:
+        return self._request("POST", "/awg2/obfuscation/regenerate", timeout=180.0)
+
+    def awg2_obfuscation_apply(
+        self,
+        *,
+        preset: str,
+        template: str,
+        mtu: int | None = None,
+        host: str | None = None,
+        fp: str | None = None,
+    ) -> dict:
+        payload: dict = {"preset": preset, "template": template}
+        if mtu is not None:
+            payload["mtu"] = mtu
+        if host is not None:
+            payload["host"] = host
+        if fp is not None:
+            payload["fp"] = fp
+        return self._request(
+            "POST",
+            "/awg2/obfuscation/apply",
+            json=payload,
+            timeout=180.0,
+        )
+
+    def get_awg2_monitoring(self) -> dict:
+        return self._request("GET", "/awg2/monitoring", timeout=60.0)
+
+    def get_awg2_client_stats(self, client_name: str) -> dict:
+        return self._request("GET", f"/awg2/clients/{client_name}/stats", timeout=60.0)
+
+    def awg2_iter_install_stream(
+        self,
+        mode: str,
+        *,
+        preset: str | None = None,
+        template: str | None = None,
+        mtu: int | None = None,
+    ):
+        import json
+
+        params: dict[str, str] = {"mode": mode}
+        if preset is not None:
+            params["preset"] = preset
+        if template is not None:
+            params["template"] = template
+        if mtu is not None:
+            params["mtu"] = str(mtu)
+
+        with httpx.stream(
+            "GET",
+            f"{self.base_url}/awg2/install/stream",
+            headers=self._headers(),
+            params=params,
+            timeout=httpx.Timeout(660.0, connect=30.0),
+            **self._client_kwargs(),
+        ) as response:
+            if response.status_code >= 400:
+                detail = response.read().decode("utf-8", errors="replace")
+                yield {"event": "error", "detail": detail or f"HTTP {response.status_code}"}
+                return
+            for line in response.iter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                try:
+                    yield json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
 
     def get_warper_status(self) -> dict:
         return self._request("GET", "/warper/status")

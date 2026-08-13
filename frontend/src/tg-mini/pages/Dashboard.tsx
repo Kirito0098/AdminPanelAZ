@@ -154,14 +154,14 @@ export default function Dashboard() {
   }, [load])
 
   const filteredOpenVpn = useMemo(() => {
-    if (!data || protocol === 'wireguard') return []
+    if (!data || (protocol !== 'all' && protocol !== 'openvpn')) return []
     return data.openvpn_clients.filter((client) =>
       matchesSearchQuery(String(client.common_name || ''), search),
     )
   }, [data, protocol, search])
 
   const filteredWireguard = useMemo(() => {
-    if (!data || protocol === 'openvpn') return []
+    if (!data || (protocol !== 'all' && protocol !== 'wireguard')) return []
     return data.wireguard_peers.filter((peer) => {
       const label = peer.client_name || peer.public_key
       return matchesSearchQuery(label, search)
@@ -230,7 +230,7 @@ export default function Dashboard() {
           accent="cyan"
         />
         <MetricCard
-          label="WG / AWG онлайн"
+          label="WG/AWG 1.5 онлайн"
           value={String(data.connected_wireguard)}
           sub={`из ${totalWireguardPeers} пиров`}
           icon={Radio}
@@ -325,7 +325,7 @@ export default function Dashboard() {
                 <Card>
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between gap-2">
-                      <CardTitle className="text-base">WG / AWG</CardTitle>
+                      <CardTitle className="text-base">WG/AWG 1.5</CardTitle>
                       <Badge variant={filteredWireguard.length > 0 ? 'success' : 'secondary'}>
                         {filteredWireguard.length}
                       </Badge>
@@ -333,7 +333,7 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent className="space-y-2">
                     {filteredWireguard.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">Нет совпадений в WG / AWG</p>
+                      <p className="text-sm text-muted-foreground">Нет совпадений в WG/AWG 1.5</p>
                     ) : (
                       filteredWireguard.map((peer) => (
                         <div key={peer.public_key} className="tg-mini-list-item tg-mini-list-item-stack">

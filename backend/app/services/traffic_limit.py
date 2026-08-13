@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
+AMNEZIAWG2_PROTOCOL = frozenset({"amneziawg2"})
+
 TRAFFIC_LIMIT_EXCEEDED_MESSAGE = (
     "Клиент отключён по превышению лимита трафика. "
     "Для разблокировки увеличьте лимит, снимите его или очистите статистику трафика."

@@ -177,6 +177,95 @@ def test_set_active_node_id_rejects_proxy(db):
     assert get_active_node_id_raw(db) in (None, "")
 
 
+def test_create_proxy_with_linked_vpn(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    vpn = _add_node(db, name="vpn-link", kind="vpn")
+    monkeypatch.setattr(nodes_router, "is_proxy_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "validate_node_host", lambda host: host)
+    monkeypatch.setattr(nodes_router, "store_api_key", lambda _h, key: ("hash", "enc"))
+    monkeypatch.setattr(nodes_router, "check_node_health", lambda *a, **k: {"status": "online"})
+    monkeypatch.setattr(nodes_router, "update_node_from_health", lambda *a, **k: None)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+
+    admin = SimpleNamespace(id=1, username="admin")
+    request = MagicMock()
+    payload = NodeCreate(
+        name="proxy-linked",
+        host="1.2.3.4",
+        api_key="secret-key-1",
+        node_kind="proxy",
+        linked_vpn_node_id=vpn.id,
+    )
+    resp = nodes_router.create_node(payload, request, admin=admin, db=db)
+    assert resp.linked_vpn_node_id == vpn.id
+
+
+def test_create_proxy_rejects_linked_proxy(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    other_proxy = _add_node(db, name="proxy-other", kind="proxy", port=9101)
+    monkeypatch.setattr(nodes_router, "is_proxy_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "validate_node_host", lambda host: host)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+
+    admin = SimpleNamespace(id=1, username="admin")
+    request = MagicMock()
+    payload = NodeCreate(
+        name="proxy-bad-link",
+        host="1.2.3.4",
+        api_key="secret-key-1",
+        node_kind="proxy",
+        linked_vpn_node_id=other_proxy.id,
+    )
+    with pytest.raises(HTTPException) as exc:
+        nodes_router.create_node(payload, request, admin=admin, db=db)
+    assert exc.value.status_code == 400
+
+
+def test_update_proxy_linked_vpn_and_clear(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+    from app.schemas import NodeUpdate
+
+    vpn = _add_node(db, name="vpn-upd", kind="vpn")
+    proxy = _add_node(db, name="proxy-upd", kind="proxy", port=9101)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    admin = SimpleNamespace(id=1, username="admin")
+    request = MagicMock()
+
+    linked = nodes_router.update_node(
+        proxy.id,
+        NodeUpdate(linked_vpn_node_id=vpn.id),
+        request,
+        admin=admin,
+        db=db,
+    )
+    assert linked.linked_vpn_node_id == vpn.id
+
+    cleared = nodes_router.update_node(
+        proxy.id,
+        NodeUpdate(linked_vpn_node_id=None),
+        request,
+        admin=admin,
+        db=db,
+    )
+    assert cleared.linked_vpn_node_id is None
+
+
+def test_purge_clears_proxy_links(db):
+    from app.services.node_manager import purge_node_related
+
+    vpn = _add_node(db, name="vpn-purge", kind="vpn")
+    proxy = _add_node(db, name="proxy-purge", kind="proxy", port=9101)
+    proxy.linked_vpn_node_id = vpn.id
+    db.commit()
+
+    purge_node_related(db, vpn.id)
+    db.commit()
+    db.refresh(proxy)
+    assert proxy.linked_vpn_node_id is None
+
+
 def test_set_active_node_id_allows_vpn(db):
     vpn = _add_node(db, name="vpn-guard", kind="vpn")
     set_active_node_id(db, vpn.id)

@@ -7,8 +7,12 @@ import logging
 import tarfile
 
 from fastapi import HTTPException
+from sqlalchemy.orm import Session
 
-from app.models import VpnType
+from app.config import get_settings
+from app.models import Node, VpnType
+from app.services.awg2 import AWG2_INSTALL_CMD
+from app.services.access_policy import AccessPolicyService
 from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
 from app.services.openvpn_pki import validate_all_openvpn_profiles
 
@@ -224,11 +228,51 @@ def sync_openvpn_pki_from_primary(
         raise HTTPException(status_code=500, detail=detail)
 
 
+def _reapply_blocked_awg2_policies(db: Session, replica_node: Node, replica_adapter) -> None:
+    AccessPolicyService(
+        db,
+        antizapret_path=get_settings().antizapret_path,
+        node_id=replica_node.id,
+        node_name=replica_node.name,
+        adapter=replica_adapter,
+    )._reapply_all_blocked_awg2_runtime()
+
+
+def sync_amneziawg2_state_from_primary(
+    primary_adapter,
+    replica_adapter,
+    *,
+    db: Session | None = None,
+    replica_node: Node | None = None,
+) -> None:
+    """Copy AZ-AWG2 state archive from primary to replica and apply runtime."""
+    health = replica_adapter.get_awg2_health()
+    if not health.get("installed"):
+        cmd = health.get("install_command") or AWG2_INSTALL_CMD
+        raise RuntimeError(f"AZ-AWG2 не установлен на replica. Установите: {cmd}")
+
+    archive = primary_adapter.export_awg2_state_archive()
+    if not archive:
+        raise RuntimeError("Пустой архив состояния AZ-AWG2 с primary")
+
+    replica_adapter.import_awg2_state_archive(archive)
+    runtime = replica_adapter.apply_awg2_runtime()
+    if not runtime.get("success"):
+        logger.warning(
+            "HA AWG2 runtime apply partial: %s",
+            runtime.get("errors") or [],
+        )
+    if db is not None and replica_node is not None:
+        _reapply_blocked_awg2_policies(db, replica_node, replica_adapter)
+
+
 def sync_vpn_crypto_from_primary(
     primary_adapter,
     replica_adapter,
     vpn_type: VpnType,
     *,
+    db: Session | None = None,
+    replica_node: Node | None = None,
     client_name: str | None = None,
     openvpn_multihome: bool = False,
 ) -> None:
@@ -238,6 +282,14 @@ def sync_vpn_crypto_from_primary(
             primary_adapter,
             replica_adapter,
             openvpn_multihome=openvpn_multihome,
+        )
+        return
+    if vpn_type == VpnType.amneziawg2:
+        sync_amneziawg2_state_from_primary(
+            primary_adapter,
+            replica_adapter,
+            db=db,
+            replica_node=replica_node,
         )
         return
     sync_wireguard_state_from_primary(
@@ -251,6 +303,8 @@ def sync_all_vpn_crypto_from_primary(
     primary_adapter,
     replica_adapter,
     *,
+    db: Session | None = None,
+    replica_node: Node | None = None,
     openvpn_multihome: bool = False,
 ) -> None:
     """Copy both WireGuard and OpenVPN crypto state from primary to replica."""
@@ -260,6 +314,16 @@ def sync_all_vpn_crypto_from_primary(
         replica_adapter,
         openvpn_multihome=openvpn_multihome,
     )
+    try:
+        if primary_adapter.get_awg2_health().get("installed"):
+            sync_amneziawg2_state_from_primary(
+                primary_adapter,
+                replica_adapter,
+                db=db,
+                replica_node=replica_node,
+            )
+    except Exception as exc:
+        logger.warning("HA full crypto: AWG2 sync skipped/failed: %s", exc)
 
 
 def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str, object]:
@@ -282,6 +346,8 @@ def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str,
                 primary_adapter,
                 adapter,
                 primary_config.vpn_type,
+                db=db,
+                replica_node=replica_node,
                 client_name=client_name,
                 openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
             )
@@ -336,6 +402,8 @@ def heal_crypto_drift(db, group) -> dict[str, object]:
             sync_all_vpn_crypto_from_primary(
                 primary_adapter,
                 get_adapter_for_node(replica_node),
+                db=db,
+                replica_node=replica_node,
                 openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
             )
         except Exception as exc:

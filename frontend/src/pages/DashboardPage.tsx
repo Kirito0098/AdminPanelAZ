@@ -24,6 +24,7 @@ import {
   getConfigQuota,
   getConfigs,
   getDashboardSummary,
+  getAwg2Health,
   getEffectiveVisibleVpnProfiles,
   getMonitoring,
   getUsers,
@@ -35,6 +36,7 @@ import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
 import MetricCard from '@/components/noc/MetricCard'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
+import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
@@ -68,7 +70,6 @@ import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { buildClientConnectionMap, type ClientConnectionMap } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
 import type {
-  ClientAccessPolicy,
   ClientTemplate,
   DashboardSummary,
   SelfServiceQuota,
@@ -94,6 +95,12 @@ export default function DashboardPage() {
       visibilityPolicy == null ||
       visibilityPolicy.protocols.includes('wireguard') ||
       visibilityPolicy.protocols.includes('amneziawg'))
+  const awg2ToggleOn = isEnabled('awg2')
+  const awg2Visible =
+    awg2ToggleOn &&
+    (user?.role === 'admin' ||
+      visibilityPolicy == null ||
+      visibilityPolicy.protocols.includes('amneziawg2'))
   const { activeNode } = useNode()
   const haReplicaReadonly = useHaReplicaReadonly()
   const { success, error: notifyError, warning: notifyWarning } = useNotifications()
@@ -110,9 +117,11 @@ export default function DashboardPage() {
   const [clientName, setClientName] = useState('')
   const [vpnType, setVpnType] = useState<VpnType>('openvpn')
   const [certDays, setCertDays] = useState(3650)
+  const [awg2Ttl, setAwg2Ttl] = useState('none')
   const [description, setDescription] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [awg2Installed, setAwg2Installed] = useState(false)
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [qrPreview, setQrPreview] = useState<{
     url: string
@@ -120,18 +129,17 @@ export default function DashboardPage() {
     contentMode: import('../api/client').QrContentMode
     downloadUrl?: string
   } | null>(null)
-  const [policies, setPolicies] = useState<
-    Record<string, { openvpn: ClientAccessPolicy; wireguard: ClientAccessPolicy }>
-  >({})
+  const [policies, setPolicies] = useState<Record<string, import('../types').ClientPoliciesResponseEntry>>({})
   const [connectionMap, setConnectionMap] = useState<ClientConnectionMap | null>(null)
   const [panelUsers, setPanelUsers] = useState<User[]>([])
   const [ownerId, setOwnerId] = useState<number | null>(null)
   const [templates, setTemplates] = useState<ClientTemplate[]>([])
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
   const isAdmin = user?.role === 'admin'
+  const awg2CreateEnabled = awg2Visible && awg2Installed
   // Hide create when can_create is false (flag off or quota exhausted) — including unlimited quota.
   const createBlocked = !isAdmin && quota != null && !quota.can_create
-  const canCreateClient = (openvpnEnabled || wireguardEnabled) && !createBlocked
+  const canCreateClient = (openvpnEnabled || wireguardEnabled || awg2CreateEnabled) && !createBlocked
   const quotaReached = createBlocked && quota != null && !quota.unlimited
   const createDisabledByAdmin = createBlocked && quota != null && quota.unlimited
 
@@ -142,9 +150,33 @@ export default function DashboardPage() {
   }, [user?.id])
 
   useEffect(() => {
+    if (!awg2ToggleOn) {
+      setAwg2Installed(false)
+      return
+    }
+    // Health is admin-only; users with visibility rely on backend 409 if layer missing.
+    if (!isAdmin) {
+      setAwg2Installed(true)
+      return
+    }
+    let cancelled = false
+    void getAwg2Health()
+      .then((health) => {
+        if (!cancelled) setAwg2Installed(Boolean(health.installed))
+      })
+      .catch(() => {
+        if (!cancelled) setAwg2Installed(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [awg2ToggleOn, isAdmin, activeNode?.id])
+
+  useEffect(() => {
     if (openvpnEnabled) setVpnType('openvpn')
     else if (wireguardEnabled) setVpnType('wireguard')
-  }, [openvpnEnabled, wireguardEnabled])
+    else if (awg2CreateEnabled) setVpnType('amneziawg2')
+  }, [openvpnEnabled, wireguardEnabled, awg2CreateEnabled])
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
@@ -254,6 +286,7 @@ export default function DashboardPage() {
     setDescription('')
     setVpnType('openvpn')
     setCertDays(3650)
+    setAwg2Ttl('none')
     setOwnerId(user?.id ?? null)
   }
 
@@ -287,6 +320,7 @@ export default function DashboardPage() {
           client_name: name,
           vpn_type: vpnType,
           cert_expire_days: vpnType === 'openvpn' ? certDays : undefined,
+          ttl: vpnType === 'amneziawg2' && awg2Ttl !== 'none' ? awg2Ttl : undefined,
           description: description || undefined,
           owner_id: isAdmin && ownerId ? ownerId : undefined,
         })
@@ -646,6 +680,7 @@ export default function DashboardPage() {
                 <SelectContent>
                   {openvpnEnabled && <SelectItem value="openvpn">OpenVPN</SelectItem>}
                   {wireguardEnabled && <SelectItem value="wireguard">WireGuard / AmneziaWG</SelectItem>}
+                  {awg2CreateEnabled && <SelectItem value="amneziawg2">AmneziaWG 2.0</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
@@ -660,6 +695,23 @@ export default function DashboardPage() {
                   value={certDays}
                   onChange={(e) => setCertDays(Number(e.target.value))}
                 />
+              </div>
+            )}
+            {vpnType === 'amneziawg2' && (
+              <div className="space-y-2">
+                <Label htmlFor="awg2Ttl">TTL</Label>
+                <Select value={awg2Ttl} onValueChange={setAwg2Ttl}>
+                  <SelectTrigger id="awg2Ttl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AWG2_TTL_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
             <div className="space-y-2">

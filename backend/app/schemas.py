@@ -252,6 +252,7 @@ class VpnConfigCreate(BaseModel):
     client_name: str = Field(min_length=1, max_length=32, pattern=r"^[a-zA-Z0-9_-]+$")
     vpn_type: VpnType
     cert_expire_days: int | None = Field(default=3650, ge=1, le=3650)
+    ttl: str | None = None
     description: str | None = None
     owner_id: int | None = None
 
@@ -265,6 +266,7 @@ class VpnConfigUpdate(BaseModel):
 class VpnConfigHaInfo(BaseModel):
     sync_group_id: int
     shared_domain: str
+    shared_domain_wireguard: str | None = None
     node_count: int
     sync_status: SyncStatus
     sync_mode: str
@@ -278,6 +280,7 @@ class VpnConfigResponse(BaseModel):
     owner_username: str | None = None
     cert_expire_days: int | None
     cert_expires_at: datetime | None = None
+    expires_at: datetime | None = None
     cert_days_left: int | None = None
     description: str | None
     created_at: datetime
@@ -468,6 +471,7 @@ class MonitoringNodeSummary(BaseModel):
     status: str
     connected_openvpn: int = 0
     connected_wireguard: int = 0
+    connected_amneziawg2: int = 0
     active_services: int = 0
     total_services: int = 0
     cpu_percent: float | None = None
@@ -508,12 +512,14 @@ class GlobalDashboardSummary(BaseModel):
     nodes_total: int = 0
     total_connected_openvpn: int = 0
     total_connected_wireguard: int = 0
+    total_connected_amneziawg2: int = 0
 
 
 class MonitoringOverview(BaseModel):
     services: list[MonitoringService]
     openvpn_clients: list[OpenVpnClient]
     wireguard_peers: list[WireGuardPeer]
+    amneziawg2_peers: list[WireGuardPeer] = Field(default_factory=list)
     server_ip: str | None = None
     timestamp: datetime
     node_id: int | None = None
@@ -525,6 +531,7 @@ class MonitoringOverview(BaseModel):
     nodes_total: int = 0
     total_connected_openvpn: int = 0
     total_connected_wireguard: int = 0
+    total_connected_amneziawg2: int = 0
     served_from_cache: bool = False
     geoip_mode: Literal["local_mmdb", "ip_api", "none"] = "ip_api"
     ha_mode: Literal["dedupe", "raw"] = "dedupe"
@@ -549,6 +556,7 @@ class ConnectionHistoryPoint(BaseModel):
     timestamp: datetime
     openvpn: int
     wireguard: int
+    amneziawg2: int = 0
     total: int
 
 
@@ -1133,6 +1141,30 @@ class ServiceRestartRequest(BaseModel):
     service_name: str
 
 
+class ServerRebootRequest(BaseModel):
+    node_id: int
+    confirm: str
+
+
+class ServerRebootPendingItem(BaseModel):
+    reboot_id: str
+    node_id: int
+    node_name: str
+    scheduled_by: str
+    created_at: datetime
+    execute_at: datetime
+    delay_seconds: int
+    warning: str | None = None
+
+
+class ServerRebootScheduleResponse(ServerRebootPendingItem):
+    message: str = "Перезагрузка ОС запланирована"
+
+
+class ServerRebootPendingResponse(BaseModel):
+    items: list[ServerRebootPendingItem]
+
+
 class MessageResponse(BaseModel):
     message: str
     detail: Any | None = None
@@ -1234,6 +1266,7 @@ class NodeHaContext(BaseModel):
     sync_group_id: int
     group_name: str
     shared_domain: str
+    shared_domain_wireguard: str | None = None
     role: str
     primary_node_id: int
     primary_node_name: str | None = None
@@ -1268,6 +1301,8 @@ class NodeUpdateResult(BaseModel):
 class NodeSyncGroupCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     shared_domain: str = Field(min_length=1, max_length=255)
+    # Empty / omitted → same as shared_domain (OPENVPN_HOST) for WIREGUARD_HOST.
+    shared_domain_wireguard: str | None = Field(default=None, max_length=255)
     primary_node_id: int = Field(ge=1)
     replica_node_ids: list[int] = Field(min_length=1)
     sync_mode: str = Field(default="manual_full", max_length=32)
@@ -1276,6 +1311,7 @@ class NodeSyncGroupCreate(BaseModel):
 class NodeSyncGroupUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
     shared_domain: str | None = Field(default=None, min_length=1, max_length=255)
+    shared_domain_wireguard: str | None = Field(default=None, max_length=255)
     primary_node_id: int | None = Field(default=None, ge=1)
     replica_node_ids: list[int] | None = None
     sync_mode: str | None = Field(default=None, max_length=32)
@@ -1302,6 +1338,7 @@ class NodeSyncReplicaVerifyResult(BaseModel):
 class NodeSyncVerifyResponse(BaseModel):
     ready: bool
     shared_domain: str
+    shared_domain_wireguard: str | None = None
     primary_node_id: int
     replicas: list[NodeSyncReplicaVerifyResult] = []
     summary: str = ""
@@ -1321,6 +1358,7 @@ class NodeSyncGroupResponse(BaseModel):
     id: int
     name: str
     shared_domain: str
+    shared_domain_wireguard: str | None = None
     primary_node_id: int
     primary_node_name: str | None = None
     replica_node_ids: list[int] = []
@@ -1739,3 +1777,11 @@ class TrafficClientSessionsResponse(BaseModel):
     node_name: str | None = None
     ha_aggregated: bool = False
     nodes: list[TrafficSessionNodeSummary] | None = None
+
+
+class Awg2ObfuscationApply(BaseModel):
+    preset: Literal["router", "low", "medium", "high", "paranoid"]
+    template: Literal["quic", "tls", "web", "voip", "dns", "mixed"]
+    mtu: int | None = Field(default=None, ge=576, le=1500)
+    host: str | None = Field(default=None, max_length=253)
+    fp: Literal["chrome", "firefox", "safari"] | None = None

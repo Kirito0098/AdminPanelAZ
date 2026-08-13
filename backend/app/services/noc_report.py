@@ -16,6 +16,7 @@ from app.models import (
     AlertRule,
     AppSetting,
     CidrDbRefreshLog,
+    ConnectionCountSample,
     Node,
     NodeStatus,
     OpenVpnAccessPolicy,
@@ -25,6 +26,7 @@ from app.models import (
     WgAccessPolicy,
 )
 from app.services.feature_guards import get_feature_service
+from app.services.feature_toggles import is_awg2_enabled
 from app.services.node_compare_metrics import get_traffic_totals_by_node
 from app.services.notify_time import format_notify_when, resolve_notify_timezone
 from app.services.resource_metrics import get_latest_samples_by_node, get_resource_stats_by_node
@@ -193,6 +195,106 @@ def _session_stats_by_node(
     return by_node, fleet_peaks
 
 
+def _awg2_stats_from_connection_samples(
+    samples: list,
+    *,
+    since: datetime,
+    until: datetime,
+) -> tuple[dict[int, dict[str, float | int]], dict[str, int]]:
+    """Average/peak AWG2 connection counts from ConnectionCountSample rows.
+
+    Fleet peak is the max over time of the sum of per-node counts (carry-forward
+    sweep as samples arrive).
+    """
+    since_n = _to_naive_utc(since)
+    until_n = _to_naive_utc(until)
+    if until_n <= since_n:
+        return {}, {"amneziawg2_peak": 0}
+
+    filtered: list = []
+    for sample in samples:
+        created = getattr(sample, "created_at", None)
+        if created is None:
+            continue
+        created_n = _to_naive_utc(created) if isinstance(created, datetime) else created
+        if created_n < since_n or created_n >= until_n:
+            continue
+        filtered.append(sample)
+
+    if not filtered:
+        return {}, {"amneziawg2_peak": 0}
+
+    counts_by_node: dict[int, list[int]] = defaultdict(list)
+    for sample in filtered:
+        node_id = int(sample.node_id)
+        counts_by_node[node_id].append(max(0, int(getattr(sample, "amneziawg2_count", 0) or 0)))
+
+    by_node: dict[int, dict[str, float | int]] = {}
+    for node_id, values in counts_by_node.items():
+        by_node[node_id] = {
+            "amneziawg2": round(sum(values) / len(values), 1),
+            "amneziawg2_peak": max(values) if values else 0,
+        }
+
+    # Fleet peak: max over time of sum(amneziawg2_count across nodes)
+    ordered = sorted(
+        filtered,
+        key=lambda s: _to_naive_utc(s.created_at) if isinstance(s.created_at, datetime) else s.created_at,
+    )
+    current: dict[int, int] = {}
+    fleet_peak = 0
+    for sample in ordered:
+        node_id = int(sample.node_id)
+        current[node_id] = max(0, int(getattr(sample, "amneziawg2_count", 0) or 0))
+        fleet_peak = max(fleet_peak, sum(current.values()))
+
+    return by_node, {"amneziawg2_peak": int(fleet_peak)}
+
+
+def _latest_awg2_counts_by_node(db: Session) -> dict[int, int]:
+    """Latest amneziawg2_count per node from connection samples."""
+    subq = (
+        db.query(
+            ConnectionCountSample.node_id,
+            func.max(ConnectionCountSample.created_at).label("max_created"),
+        )
+        .group_by(ConnectionCountSample.node_id)
+        .subquery()
+    )
+    rows = (
+        db.query(ConnectionCountSample)
+        .join(
+            subq,
+            (ConnectionCountSample.node_id == subq.c.node_id)
+            & (ConnectionCountSample.created_at == subq.c.max_created),
+        )
+        .all()
+    )
+    return {
+        int(sample.node_id): max(0, int(getattr(sample, "amneziawg2_count", 0) or 0))
+        for sample in rows
+    }
+
+
+def _query_awg2_connection_samples(
+    db: Session,
+    *,
+    since: datetime,
+    until: datetime,
+) -> list[ConnectionCountSample]:
+    since_n = _to_naive_utc(since)
+    until_n = _to_naive_utc(until)
+    return (
+        db.query(ConnectionCountSample)
+        .filter(
+            ConnectionCountSample.created_at >= since_n,
+            ConnectionCountSample.created_at < until_n,
+        )
+        .order_by(ConnectionCountSample.created_at.asc())
+        .all()
+    )
+
+
 def _format_session_count(value: float | int | None) -> str:
     if value is None:
         return "0"
@@ -208,6 +310,8 @@ def build_noc_summary(db: Session) -> dict:
     nodes = db.query(Node).order_by(Node.id.asc()).all()
     latest_metrics = get_latest_samples_by_node(db)
     traffic_totals = get_traffic_totals_by_node(db)
+    awg2_enabled = is_awg2_enabled(db)
+    awg2_latest = _latest_awg2_counts_by_node(db) if awg2_enabled else {}
 
     active_rows = (
         db.query(
@@ -235,6 +339,7 @@ def build_noc_summary(db: Session) -> dict:
     node_lines: list[dict] = []
     nodes_online = 0
     total_traffic = 0
+    total_awg2 = 0
     for node in nodes:
         if node.status == NodeStatus.online:
             nodes_online += 1
@@ -242,6 +347,8 @@ def build_noc_summary(db: Session) -> dict:
         sample = latest_metrics.get(node.id)
         traffic = int(traffic_totals.get(node.id) or 0)
         total_traffic += traffic
+        awg2_count = int(awg2_latest.get(node.id) or 0) if awg2_enabled else 0
+        total_awg2 += awg2_count
         node_lines.append(
             {
                 "node_id": node.id,
@@ -249,6 +356,7 @@ def build_noc_summary(db: Session) -> dict:
                 "status": node.status.value if hasattr(node.status, "value") else str(node.status),
                 "openvpn": sessions["openvpn"],
                 "wireguard": sessions["wireguard"],
+                "amneziawg2": awg2_count,
                 "cpu_percent": round(sample.cpu_percent, 1) if sample else None,
                 "memory_percent": round(sample.memory_percent, 1) if sample else None,
                 "traffic_bytes": traffic,
@@ -261,7 +369,9 @@ def build_noc_summary(db: Session) -> dict:
         "nodes_online": nodes_online,
         "total_openvpn": total_ovpn,
         "total_wireguard": total_wg,
+        "total_amneziawg2": total_awg2,
         "total_traffic_bytes": total_traffic,
+        "awg2_enabled": awg2_enabled,
         "nodes": node_lines,
     }
 
@@ -472,6 +582,37 @@ def _enrich_summary_with_period_session_averages(
     summary["total_wireguard_peak"] = int(fleet_peaks.get("wireguard_peak") or 0)
 
 
+def _enrich_summary_with_period_awg2_averages(
+    summary: dict,
+    *,
+    stats_by_node: dict[int, dict[str, float | int]],
+    fleet_peaks: dict[str, int],
+    enabled: bool,
+) -> None:
+    summary["awg2_enabled"] = bool(enabled)
+    if not enabled:
+        for node in summary.get("nodes") or []:
+            node["amneziawg2"] = 0
+            node["amneziawg2_peak"] = 0
+        summary["total_amneziawg2"] = 0
+        summary["total_amneziawg2_peak"] = 0
+        return
+
+    total_awg2 = 0.0
+    for node in summary.get("nodes") or []:
+        node_id = int(node.get("node_id") or 0)
+        stats = stats_by_node.get(node_id) or {
+            "amneziawg2": 0.0,
+            "amneziawg2_peak": 0,
+        }
+        node["amneziawg2"] = stats.get("amneziawg2", 0.0)
+        node["amneziawg2_peak"] = int(stats.get("amneziawg2_peak") or 0)
+        total_awg2 += float(node["amneziawg2"])
+
+    summary["total_amneziawg2"] = round(total_awg2, 1)
+    summary["total_amneziawg2_peak"] = int(fleet_peaks.get("amneziawg2_peak") or 0)
+
+
 def build_noc_report_data(
     db: Session,
     *,
@@ -508,6 +649,21 @@ def build_noc_report_data(
         summary,
         stats_by_node=session_stats_by_node,
         fleet_peaks=session_fleet_peaks,
+    )
+
+    awg2_enabled = bool(summary.get("awg2_enabled"))
+    if awg2_enabled:
+        awg2_samples = _query_awg2_connection_samples(db, since=since, until=until)
+        awg2_stats_by_node, awg2_fleet_peaks = _awg2_stats_from_connection_samples(
+            awg2_samples, since=since, until=until
+        )
+    else:
+        awg2_stats_by_node, awg2_fleet_peaks = {}, {"amneziawg2_peak": 0}
+    _enrich_summary_with_period_awg2_averages(
+        summary,
+        stats_by_node=awg2_stats_by_node,
+        fleet_peaks=awg2_fleet_peaks,
+        enabled=awg2_enabled,
     )
 
     if top_clients_limit is None:
@@ -564,14 +720,24 @@ def format_noc_report_message(
         lines.append(f"📅 Период: {_format_period_window(since, until, period=period)}")
     lines.append("")
     lines.append(f"Узлы: <b>{summary['nodes_online']}/{summary['nodes_total']}</b> online")
-    lines.append(
-        f"Сессии, {average_label}: OVPN <b>{_format_session_count(summary['total_openvpn'])}</b>"
-        f" · WG <b>{_format_session_count(summary['total_wireguard'])}</b>"
-    )
-    lines.append(
-        f"Макс. одновременно, {peak_label}: OVPN <b>{summary.get('total_openvpn_peak', 0)}</b>"
-        f" · WG <b>{summary.get('total_wireguard_peak', 0)}</b>"
-    )
+    awg2_enabled = bool(summary.get("awg2_enabled"))
+    session_avg_parts = [
+        f"OVPN <b>{_format_session_count(summary['total_openvpn'])}</b>",
+        f"WG <b>{_format_session_count(summary['total_wireguard'])}</b>",
+    ]
+    session_peak_parts = [
+        f"OVPN <b>{summary.get('total_openvpn_peak', 0)}</b>",
+        f"WG <b>{summary.get('total_wireguard_peak', 0)}</b>",
+    ]
+    if awg2_enabled:
+        session_avg_parts.append(
+            f"AWG2 <b>{_format_session_count(summary.get('total_amneziawg2', 0))}</b>"
+        )
+        session_peak_parts.append(
+            f"AWG2 <b>{summary.get('total_amneziawg2_peak', 0)}</b>"
+        )
+    lines.append(f"Сессии, {average_label}: {' · '.join(session_avg_parts)}")
+    lines.append(f"Макс. одновременно, {peak_label}: {' · '.join(session_peak_parts)}")
 
     period_traffic_label = human_bytes(summary.get("period_traffic_bytes"))
     if period_traffic_label:
@@ -661,6 +827,11 @@ def format_noc_report_message(
             f"OVPN {_format_session_count(node.get('openvpn', 0))} (макс. {node.get('openvpn_peak', 0)})",
             f"WG {_format_session_count(node.get('wireguard', 0))} (макс. {node.get('wireguard_peak', 0)})",
         ]
+        if awg2_enabled:
+            parts.append(
+                f"AWG2 {_format_session_count(node.get('amneziawg2', 0))}"
+                f" (макс. {node.get('amneziawg2_peak', 0)})"
+            )
         if node.get("cpu_percent") is not None:
             cpu_peak = node.get("cpu_peak")
             if cpu_peak is not None:

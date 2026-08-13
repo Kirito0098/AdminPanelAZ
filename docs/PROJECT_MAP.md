@@ -85,6 +85,7 @@
 │   ├── routing-cidr.md
 │   ├── antizapret-config.md
 │   ├── warper.md
+│   ├── awg2.md
 │   ├── edit-files.md
 │   ├── logs.md
 │   ├── server-monitor.md
@@ -126,6 +127,7 @@
 | `/antizapret` | `AntizapretConfigPage` | [`antizapret-config.md`](antizapret-config.md) |
 | `/proxy` | `ProxyHubPage` | [`proxy-nodes.md`](proxy-nodes.md) |
 | `/warper` | `WarperPage` | [`warper.md`](warper.md) |
+| `/awg2` | `Awg2Page` | [`awg2.md`](awg2.md) |
 | `/telegram` | `TelegramPage` | [`Telegram.md`](Telegram.md) |
 | `/edit-files` | `EditFilesPage` | [`edit-files.md`](edit-files.md) |
 | `/logs` | `LogsPage` | [`logs.md`](logs.md) |
@@ -163,6 +165,7 @@
 | `/antizapret` | `AntizapretConfigPage` (`AntizapretConfigTab`: секция «Адреса подключения» / список remote OpenVPN) | `antizapret_config` | [antizapret-config](antizapret-config.md) | Конфиг AntiZapret (admin); multi-remote OpenVPN per-node |
 | `/proxy` | `ProxyHubPage` (`ProxyHubView`: прокси-узлы + `RemoteHostsCard` + ссылки) | `proxy_nodes` | [proxy-nodes](proxy-nodes.md) | Сводка прокси (admin); DESTINATION / remote / NOC links |
 | `/warper` | `WarperPage` | `warper` | [warper](warper.md) | AZ-WARP / Cloudflare WARP |
+| `/awg2` | `Awg2Page` | `awg2` | [awg2](awg2.md) | AZ-AWG2: health, клиенты, обфускация, мониторинг `amneziawg2` |
 | `/telegram` | `TelegramPage` | `telegram` | [Telegram](Telegram.md) | Настройки бота и Mini App |
 | `/edit-files` | `EditFilesPage` | `edit_files` | [edit-files](edit-files.md) | Редактор файлов AntiZapret |
 | `/logs` | `LogsPage` | `logs_dashboard` / `action_logs` | [logs](logs.md) | Журналы |
@@ -190,6 +193,7 @@
 | `traffic` | Сбор и отображение трафика |
 | `routing`, `cidr_db` | CIDR-провайдеры, pipeline, deploy |
 | `warper` | AZ-WARP |
+| `awg2` | AZ-AWG2 (клиенты `amneziawg2`, обфускация, мониторинг, Dashboard, docs) |
 | `edit_files` | Редактор конфигов AntiZapret |
 | `backups`, `maintenance`, `system` | Бэкапы, обслуживание, обновления |
 | `settings`, `security` | Настройки панели, IP whitelist, firewall |
@@ -247,6 +251,7 @@
 ### Прочее
 - `backup_manager.py`, `backup_scheduler.py`
 - `warper.py` — AZ-WARP
+- `awg2.py` — AZ-AWG2 detect/health/status, клиенты `awg-client`, obfuscation, monitoring (`awg_stats` / dump)
 - `background_tasks.py` — long-running задачи с polling
 - `admin_notify.py` — уведомления админам в Telegram
 
@@ -258,7 +263,7 @@
 |--------|------------|
 | `User`, `RefreshToken`, `ActiveWebSession` | Пользователи, сессии; у `User` личные NOC-поля: `noc_daily_time`, `noc_weekly_dow`, `noc_weekly_time` (+ `timezone` / `last_client_timezone`) |
 | `VpnConfig` | Привязка клиента к узлу и владельцу |
-| `Node` | Узел: `node_kind` ∈ {`vpn`,`proxy`} (default `vpn`); local/remote, API key, mTLS; `openvpn_remote_hosts` — JSON remote OpenVPN (VPN); `openvpn_multihome` — bool, multi-IP OpenVPN reply (VPN, node-local); у proxy — `destination_ip` (кэш DESTINATION); `linked_vpn_node_id` (опц. FK на VPN-узел в API create/update, **UI нет** — задел волны 1) |
+| `Node` | Узел: `node_kind` ∈ {`vpn`,`proxy`} (default `vpn`); local/remote, API key, mTLS; `openvpn_remote_hosts` — JSON remote OpenVPN (VPN); `openvpn_multihome` — bool, multi-IP OpenVPN reply (VPN, node-local); у proxy — `destination_ip` (кэш DESTINATION); `linked_vpn_node_id` (опц. FK на VPN-узел; UI «Привязан к» HA-группа/сервер) |
 | `WgAccessPolicy`, `OpenVpnAccessPolicy` | Блокировки, лимиты трафика |
 | `TrafficSessionState`, `UserTrafficStatProtocol`, `UserTrafficSample` | Трафик |
 | `NodeResourceSample`, `PanelResourceSample` | Метрики ресурсов |

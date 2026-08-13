@@ -14,12 +14,18 @@ def _make_node(node_id: int, name: str) -> MagicMock:
     return node
 
 
-def _make_group(*, primary_id: int = 1, domain: str = "vpn.example.com") -> MagicMock:
+def _make_group(
+    *,
+    primary_id: int = 1,
+    domain: str = "vpn.example.com",
+    wireguard_domain: str | None = None,
+) -> MagicMock:
     group = MagicMock()
     group.id = 10
     group.primary_node_id = primary_id
     group.replica_node_ids = [2]
     group.shared_domain = domain
+    group.shared_domain_wireguard = wireguard_domain
     return group
 
 
@@ -164,3 +170,50 @@ def test_apply_shared_domain_records_error_when_copy_fails():
 
     assert result["success"] is False
     assert any("copy failed" in str(item.get("error")) for item in result["errors"])
+
+
+def test_apply_shared_domain_writes_separate_openvpn_and_wireguard_hosts():
+    group = _make_group(domain="ovpn.example.com", wireguard_domain="awg.example.com")
+    primary = _make_node(1, "primary")
+    replica = _make_node(2, "replica")
+    db = MagicMock()
+
+    primary_adapter = _adapter()
+    replica_adapter = _adapter()
+    adapters = {1: primary_adapter, 2: replica_adapter}
+
+    with patch.object(shared_domain, "get_member_nodes", return_value=[primary, replica]):
+        with patch.object(
+            shared_domain, "get_adapter_for_node", side_effect=lambda node: adapters[node.id]
+        ):
+            with patch.object(shared_domain, "copy_openvpn_profiles_from_primary"):
+                with patch.object(
+                    shared_domain,
+                    "restart_all_openvpn_servers",
+                    return_value={"restarted": [], "failed": [], "skipped": [], "success": True},
+                ):
+                    result = shared_domain.apply_shared_domain_to_members(db, group, run_apply=False)
+
+    assert result["success"] is True
+    assert result["openvpn_host"] == "ovpn.example.com"
+    assert result["wireguard_host"] == "awg.example.com"
+    expected = {"openvpn_host": "ovpn.example.com", "wireguard_host": "awg.example.com"}
+    primary_adapter.update_antizapret_settings.assert_called_with(expected)
+    replica_adapter.update_antizapret_settings.assert_called_with(expected)
+
+
+def test_apply_shared_domain_falls_back_wireguard_to_openvpn_when_empty():
+    group = _make_group(domain="vpn.example.com", wireguard_domain="")
+    primary = _make_node(1, "primary")
+    db = MagicMock()
+    primary_adapter = _adapter()
+
+    with patch.object(shared_domain, "get_member_nodes", return_value=[primary]):
+        with patch.object(shared_domain, "get_adapter_for_node", return_value=primary_adapter):
+            result = shared_domain.apply_shared_domain_to_members(db, group, run_apply=False)
+
+    assert result["success"] is True
+    assert result["wireguard_host"] == "vpn.example.com"
+    primary_adapter.update_antizapret_settings.assert_called_once_with(
+        {"openvpn_host": "vpn.example.com", "wireguard_host": "vpn.example.com"}
+    )

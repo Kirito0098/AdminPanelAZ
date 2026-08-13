@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
-  Cpu,
   Gauge,
   Leaf,
-  Puzzle,
   RefreshCw,
   Rocket,
   Save,
   Server,
-  ToggleLeft,
 } from 'lucide-react'
 import {
   ApiError,
@@ -23,6 +20,7 @@ import {
 } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import PanelRestartCard from '@/components/settings/PanelRestartCard'
+import { SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -45,24 +43,10 @@ import type { FeatureToggleItem, ResourceProfileImpact, ResourceProfileItem } fr
 const RESTART_BANNER_KEY = 'featureTogglesPendingRestart'
 const RESTART_BANNER_AT_KEY = 'featureTogglesPendingRestartAt'
 
-const PROFILE_META: Record<string, { icon: LucideIcon; stripe: string }> = {
-  minimal: {
-    icon: Leaf,
-    stripe: 'from-emerald-500/70 to-emerald-500/15',
-  },
-  standard: {
-    icon: Gauge,
-    stripe: 'from-primary/80 to-primary/15',
-  },
-  full: {
-    icon: Rocket,
-    stripe: 'from-violet-500/70 to-violet-500/15',
-  },
-}
-
-const GROUP_STRIPE: Record<string, string> = {
-  background: 'from-sky-500/70 to-sky-500/15',
-  app_module: 'from-violet-500/70 to-violet-500/15',
+const PROFILE_META: Record<string, { icon: LucideIcon }> = {
+  minimal: { icon: Leaf },
+  standard: { icon: Gauge },
+  full: { icon: Rocket },
 }
 
 function stripPresetRamLine(description: string): string {
@@ -86,47 +70,6 @@ function workerLabel(key: string): string {
     resource_monitor: 'Монитор CPU/RAM',
   }
   return labels[key] || key
-}
-
-function SectionHeading({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="md:col-span-2">
-      <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-      <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-    </div>
-  )
-}
-
-function MetricPill({
-  icon: Icon,
-  label,
-  value,
-  tone = 'default',
-}: {
-  icon: LucideIcon
-  label: string
-  value: string
-  tone?: 'default' | 'success' | 'muted' | 'warning'
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 shadow-sm backdrop-blur-sm">
-      <div
-        className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-          tone === 'success' && 'bg-primary/15 text-primary',
-          tone === 'warning' && 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-          tone === 'muted' && 'bg-muted text-muted-foreground',
-          tone === 'default' && 'bg-muted/80 text-foreground',
-        )}
-      >
-        <Icon size={18} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="truncate text-sm font-semibold">{value}</p>
-      </div>
-    </div>
-  )
 }
 
 function impactBadgeClass(level: string) {
@@ -228,10 +171,7 @@ function ProfileCard({
   ramSummary: PanelResourceSummary | null
   onApply: () => void
 }) {
-  const meta = PROFILE_META[profile.key] ?? {
-    icon: Server,
-    stripe: 'from-muted to-muted/15',
-  }
+  const meta = PROFILE_META[profile.key] ?? { icon: Server }
   const Icon = meta.icon
   const workers = profile.workers_disabled ?? []
   const liveCopy =
@@ -252,7 +192,6 @@ function ProfileCard({
         current ? 'border-primary/40 bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'bg-card/50 hover:border-primary/30',
       )}
     >
-      <div className={cn('h-1 shrink-0 bg-gradient-to-r', meta.stripe)} />
       <div className="flex flex-1 flex-col p-3">
         <div className="mb-2 flex shrink-0 items-start justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -480,64 +419,54 @@ export default function FeatureTogglesTab() {
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 md:items-start">
-      <div className="md:col-span-2">
-        <InlineProgressBar active={saving || applyingProfile !== null} label="Сохранение..." />
-      </div>
+    <div className="space-y-4">
+      <InlineProgressBar active={saving || applyingProfile !== null} label="Сохранение..." />
 
-      <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/5 via-card to-card p-4 md:col-span-2">
-        <div className="pointer-events-none absolute -left-6 top-0 h-28 w-28 rounded-full bg-emerald-500/10 blur-2xl" />
-        <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-violet-500/10 blur-2xl" />
-        <div className="relative space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <Puzzle size={18} className="text-primary" />
-                Разделы и фоновые задачи
-              </div>
-              <p className="max-w-2xl text-sm text-muted-foreground">
-                Замер только стека AdminPanelAZ: панель, node agent и VPN-сервисы локальной ноды
-                (OpenVPN, <code className="text-xs">ANTIZAPRET_PATH</code>). Другие проекты на VDS не учитываются.
-              </p>
-            </div>
-            <div className="flex shrink-0 flex-wrap gap-2">
-              <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => { void load(); void loadPanelRam() }} disabled={saving}>
-                <RefreshCw size={14} />
-                Обновить
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                className="gap-1.5"
-                onClick={() => void save()}
-                disabled={!dirty || saving}
-              >
-                <Save size={14} />
-                {saving ? 'Сохранение...' : 'Сохранить'}
-              </Button>
-            </div>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricPill
-              icon={PROFILE_META[currentProfile]?.icon ?? Gauge}
-              label="Профиль"
-              value={profileLabel}
-              tone={currentProfile === 'minimal' ? 'success' : 'default'}
-            />
-            <MetricPill icon={ToggleLeft} label="Включено" value={String(enabledCount)} tone="success" />
-            <MetricPill icon={Cpu} label="Всего модулей" value={String(items.length)} />
-            <MetricPill
-              icon={Server}
-              label="Выключено"
-              value={String(items.length - enabledCount)}
-              tone={items.length - enabledCount > 0 ? 'muted' : 'default'}
-            />
-          </div>
-        </div>
-      </div>
+      <SettingsToolbar
+        title="Разделы панели"
+        meta={
+          <SettingsMetaLine
+            items={[
+              { label: 'вкл.', value: enabledCount },
+              { label: 'всего модулей', value: items.length },
+              { label: 'профиль', value: profileLabel },
+            ]}
+          />
+        }
+        actions={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5"
+              onClick={() => { void load(); void loadPanelRam() }}
+              disabled={saving}
+            >
+              <RefreshCw size={14} />
+              Обновить
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-9 gap-1.5"
+              onClick={() => void save()}
+              disabled={!dirty || saving}
+            >
+              <Save size={14} />
+              {saving ? 'Сохранение...' : 'Сохранить'}
+            </Button>
+          </>
+        }
+      />
+
+      <p className="text-xs text-muted-foreground">
+        Замер только стека AdminPanelAZ: панель, node agent и VPN-сервисы локальной ноды
+        (OpenVPN, <code className="text-xs">ANTIZAPRET_PATH</code>). Другие проекты на VDS не учитываются.
+      </p>
 
       {pendingRestart && (
-        <div className="space-y-3 md:col-span-2">
+        <div className="space-y-3">
           <SettingsAlert variant="warning" title="Перезапустите панель">
             Изменения записаны в <code className="text-xs">backend/.env</code>. Фоновые задачи (трафик, CIDR, метрики)
             подхватятся только после перезапуска сервиса панели.
@@ -551,15 +480,9 @@ export default function FeatureTogglesTab() {
         </div>
       )}
 
-      <SectionHeading
-        title="Профили ресурсов"
-        description="Замер: AdminPanelAZ + локальная нода (agent + OpenVPN/AntiZapret на этом сервере)"
-      />
-
-      <Card className="overflow-hidden shadow-sm md:col-span-2">
-        <div className="h-1 bg-gradient-to-r from-emerald-500/70 via-primary/50 to-violet-500/70" />
+      <Card className="shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Режим экономии</CardTitle>
+          <CardTitle className="text-base">Профили ресурсов</CardTitle>
           <CardDescription>
             Minimal и Standard экономят RAM панели (меньше collectors); VPN на том же хосте почти не меняется.
             Цифры — живой замер на карточке текущего профиля.
@@ -589,46 +512,40 @@ export default function FeatureTogglesTab() {
       </Card>
 
       {grouped.map(([group, groupItems]) => (
-        <div key={group} className="contents">
-          <SectionHeading
-            title={groupItems[0]?.group_meta?.label || group}
-            description={groupItems[0]?.group_meta?.description || ''}
-          />
-          <Card className="overflow-hidden shadow-sm md:col-span-2">
-            <div className={cn('h-1 bg-gradient-to-r', GROUP_STRIPE[group] ?? 'from-muted to-muted/15')} />
-            <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-              <div>
-                <CardTitle className="text-base">
-                  {groupItems[0]?.group_meta?.badge || 'Модули'}
-                </CardTitle>
-                <CardDescription className="mt-1.5">
-                  {group === 'app_module'
+        <Card key={group} className="shadow-sm">
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
+            <div>
+              <CardTitle className="text-base">
+                {groupItems[0]?.group_meta?.badge || 'Модули'}
+              </CardTitle>
+              <CardDescription className="mt-1.5">
+                {groupItems[0]?.group_meta?.description ||
+                  (group === 'app_module'
                     ? 'Скрывают пункты меню и страницы панели'
-                    : 'Работают в фоне — разделы в интерфейсе остаются'}
-                </CardDescription>
-              </div>
-              <Badge variant="secondary" className="shrink-0">
-                {groupItems.filter((i) => draft[i.key]).length} / {groupItems.length} вкл.
-              </Badge>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {groupItems.map((item) => (
-                  <ModuleToggleCard
-                    key={item.key}
-                    item={item}
-                    enabled={draft[item.key] ?? false}
-                    onChange={(checked) => setDraft((prev) => ({ ...prev, [item.key]: checked }))}
-                  />
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+                    : 'Работают в фоне — разделы в интерфейсе остаются')}
+              </CardDescription>
+            </div>
+            <Badge variant="secondary" className="shrink-0">
+              {groupItems.filter((i) => draft[i.key]).length} / {groupItems.length} вкл.
+            </Badge>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {groupItems.map((item) => (
+                <ModuleToggleCard
+                  key={item.key}
+                  item={item}
+                  enabled={draft[item.key] ?? false}
+                  onChange={(checked) => setDraft((prev) => ({ ...prev, [item.key]: checked }))}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       ))}
 
       {dirty && (
-        <div className="sticky bottom-2 z-10 flex flex-col-reverse gap-2 pb-safe sm:flex-row sm:justify-end md:col-span-2">
+        <div className="sticky bottom-2 z-10 flex flex-col-reverse gap-2 pb-safe sm:flex-row sm:justify-end">
           <Button type="button" className="gap-1.5 shadow-lg" onClick={() => void save()} disabled={saving}>
             <Save size={16} />
             {saving ? 'Сохранение...' : 'Сохранить изменения'}

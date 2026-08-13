@@ -2,8 +2,10 @@
 # Плейсхолдеры: __ACCESS_PATH__, __BACKEND_PORT__
 # Подключение: include snippets/adminpanelaz-__DOMAIN_SLUG__.conf; в server { } вашего домена
 
+# Relative Location keeps non-standard ports (e.g. :8443). Absolute $scheme://$host
+# drops the port because nginx $host never includes it — breaks Enter on /az-panel.
 location = __ACCESS_PATH__ {
-    return 301 $scheme://$host__ACCESS_PATH__/;
+    return 301 __ACCESS_PATH__/;
 }
 
 # Telegram Mini App — без X-Frame-Options (WebView Telegram блокируется SAMEORIGIN)
