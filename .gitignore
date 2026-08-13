@@ -93,6 +93,7 @@ scripts/capture-readme-screenshots.mjs
 
 # --- Agent SDD scratch (ledgers / briefs / reviews; not for repo) ---
 .superpowers/
+docs/superpowers/
 
 # --- Local implementation plans (owner-only; not for public repo) ---
 docs/plans/
