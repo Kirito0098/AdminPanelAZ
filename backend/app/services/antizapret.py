@@ -459,6 +459,28 @@ class AntiZapretService:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=output.strip() or "Ошибка перезапуска")
         return output.strip() or "ok"
 
+    def reboot(self) -> str:
+        try:
+            result = subprocess.run(
+                ["systemctl", "reboot", "--no-wall"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Таймаут команды reboot",
+            ) from exc
+        output = ((result.stdout or "") + (result.stderr or "")).strip()
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=output or "Ошибка reboot",
+            )
+        return output or "reboot issued"
+
     def list_openvpn_server_confs(self) -> list[str]:
         from app.services.openvpn_multihome import OPENVPN_SERVER_CONF_NAMES
 

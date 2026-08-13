@@ -35,7 +35,11 @@ const USER_COMMANDS: CommandRow[] = [
 ]
 
 const ADMIN_COMMANDS: CommandRow[] = [
-  { command: '/settings', description: 'Настройки панели через inline-меню в чате', access: 'admin' },
+  {
+    command: '/settings',
+    description: 'Настройки панели через inline-меню в чате; перезагрузка ОС — в разделе Обслуживание',
+    access: 'admin',
+  },
   { command: '/nodes', description: 'VPN-узлы: статус, health, переключение активного', access: 'admin' },
   { command: '/cidr', description: 'Статус CIDR pipeline (если модуль маршрутизации включён)', access: 'admin' },
   { command: '/warper', description: 'Статус AZ-WARP (если модуль включён)', access: 'admin' },

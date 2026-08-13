@@ -25,6 +25,9 @@ SETTINGS_CHANGE_LABELS: dict[str, str] = {
     "settings_antifilter_refresh": "Обновление AntiFilter",
     "settings_run_doall": "Перегенерация конфигурации VPN (doall.sh)",
     "settings_vpn_network_publish": "Публикация панели (адрес и HTTPS)",
+    "settings_reboot_schedule": "Планирование перезагрузки ОС",
+    "settings_reboot_cancel": "Отмена перезагрузки ОС",
+    "settings_reboot_execute": "Перезагрузка ОС сервера",
 }
 
 _ROLE_LABELS_RU = {
@@ -156,6 +159,18 @@ def user_action_tg_action_line(
 
     if key == "settings_run_doall":
         return "Запущена перегенерация конфигурации VPN (doall.sh)"
+
+    if key == "settings_reboot_schedule":
+        node = target_value or "узел"
+        return f"Запланирована перезагрузка ОС узла {node}"
+
+    if key == "settings_reboot_cancel":
+        node = target_value or "узел"
+        return f"Отменена перезагрузка ОС узла {node}"
+
+    if key == "settings_reboot_execute":
+        node = target_value or "узел"
+        return f"Выполнена перезагрузка ОС узла {node}"
 
     humanized = _humanize_raw_details_for_tg(details_value)
     if humanized:

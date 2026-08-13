@@ -111,6 +111,9 @@ class NodeAdapter(ABC):
     def restart_service(self, service_name: str) -> str: ...
 
     @abstractmethod
+    def reboot(self) -> str: ...
+
+    @abstractmethod
     def get_routing_overview(self) -> dict: ...
 
     @abstractmethod
@@ -481,6 +484,9 @@ class LocalNodeAdapter(NodeAdapter):
 
     def restart_service(self, service_name: str) -> str:
         return self._service.restart_service(service_name)
+
+    def reboot(self) -> str:
+        return self._service.reboot()
 
     def get_routing_overview(self) -> dict:
         return self._cidr.get_overview()
@@ -1152,6 +1158,10 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def restart_service(self, service_name: str) -> str:
         data = self._request("POST", "/services/restart", json={"service_name": service_name})
+        return data.get("detail") or data.get("message", "ok")
+
+    def reboot(self) -> str:
+        data = self._request("POST", "/reboot")
         return data.get("detail") or data.get("message", "ok")
 
     def get_routing_overview(self) -> dict:

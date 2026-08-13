@@ -1133,6 +1133,30 @@ class ServiceRestartRequest(BaseModel):
     service_name: str
 
 
+class ServerRebootRequest(BaseModel):
+    node_id: int
+    confirm: str
+
+
+class ServerRebootPendingItem(BaseModel):
+    reboot_id: str
+    node_id: int
+    node_name: str
+    scheduled_by: str
+    created_at: datetime
+    execute_at: datetime
+    delay_seconds: int
+    warning: str | None = None
+
+
+class ServerRebootScheduleResponse(ServerRebootPendingItem):
+    message: str = "Перезагрузка ОС запланирована"
+
+
+class ServerRebootPendingResponse(BaseModel):
+    items: list[ServerRebootPendingItem]
+
+
 class MessageResponse(BaseModel):
     message: str
     detail: Any | None = None

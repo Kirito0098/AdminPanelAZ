@@ -453,6 +453,12 @@ def restart_service(payload: ServiceRestartRequest, _: None = Depends(verify_api
     return {"message": f"Служба {payload.service_name} перезапущена", "detail": output}
 
 
+@app.post("/reboot")
+def reboot_host(_: None = Depends(verify_api_key)):
+    output = service.reboot()
+    return {"message": "Узел перезагружается", "detail": output}
+
+
 @app.get("/profiles/files")
 def profile_files(client_name: str, vpn_type: str, _: None = Depends(verify_api_key)):
     vt = VpnType(vpn_type)

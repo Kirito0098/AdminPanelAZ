@@ -1901,3 +1901,22 @@ export interface SiteDiagnosticsReport {
   results: SiteDiagnosticsCheck[]
   recommended_commands: string[]
 }
+
+export interface ServerRebootPendingItem {
+  reboot_id: string
+  node_id: number
+  node_name: string
+  scheduled_by: string
+  created_at: string
+  execute_at: string
+  delay_seconds: number
+  warning?: string | null
+}
+
+export interface ServerRebootScheduleResponse extends ServerRebootPendingItem {
+  message: string
+}
+
+export interface ServerRebootPendingResponse {
+  items: ServerRebootPendingItem[]
+}
