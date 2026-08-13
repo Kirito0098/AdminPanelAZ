@@ -34,6 +34,8 @@ import NodeUpdateDialog from '@/components/NodeUpdateDialog'
 import NodeOfflineNotifyCard from '@/components/nodes/NodeOfflineNotifyCard'
 import ProxyNodePanel, { AZ_PROXY_SH_DOCS_URL } from '@/components/nodes/ProxyNodePanel'
 import NodeSyncGroupSection from '@/components/nodes/NodeSyncGroupSection'
+import ProxyLinkBadge from '@/components/proxy/ProxyLinkBadge'
+import ProxyLinkSelect from '@/components/proxy/ProxyLinkSelect'
 import { NodeBadge, NodeStatusBadge, statusLabels } from '@/components/NodeSelector'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -83,6 +85,12 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { formatDateTime } from '@/lib/datetime'
 import { findNodeHaMembership, nodeDeleteBlockedMessage, nodeHaDeleteBlockedHint } from '@/lib/nodeHa'
+import {
+  PROXY_LINK_NONE,
+  linkedVpnNodeIdFromSelectorValue,
+  proxyLinkSelectorOptions,
+  resolveProxyLinkSelectorValue,
+} from '@/lib/proxyLinkTarget'
 import { cn } from '@/lib/utils'
 import type { Node, NodeKind, NodeMtlsStatus, NodeSyncGroup } from '@/types'
 import { Navigate } from 'react-router-dom'
@@ -345,6 +353,8 @@ type NodeCardProps = {
   node: Node
   isActive: boolean
   showProxyUi: boolean
+  nodes: Node[]
+  syncGroups: NodeSyncGroup[]
   healthLoading: boolean
   activateLoading: boolean
   selected?: boolean
@@ -365,6 +375,8 @@ function NodeCard({
   node,
   isActive,
   showProxyUi,
+  nodes,
+  syncGroups,
   healthLoading,
   activateLoading,
   selected = false,
@@ -408,6 +420,14 @@ function NodeCard({
                   Прокси
                 </Badge>
               )}
+              {showProxyAffordance && (
+                <ProxyLinkBadge
+                  linkedVpnNodeId={node.linked_vpn_node_id}
+                  nodes={nodes}
+                  syncGroups={syncGroups}
+                  showUnlinked
+                />
+              )}
               {isActive && (
                 <Badge variant="default" className="text-[10px]">
                   <Check size={10} />
@@ -450,7 +470,14 @@ function NodeCard({
         {node.status === 'offline' && meta.lastError && (
           <NodeConnectionErrorAlert node={node} lastError={meta.lastError} />
         )}
-        {showProxyAffordance && <ProxyNodePanel node={node} onUpdated={onProxyUpdated} />}
+        {showProxyAffordance && (
+          <ProxyNodePanel
+            node={node}
+            nodes={nodes}
+            syncGroups={syncGroups}
+            onUpdated={onProxyUpdated}
+          />
+        )}
         <NodeActions
           node={node}
           isActive={isActive}
@@ -651,6 +678,7 @@ export default function NodesPage() {
   const [port, setPort] = useState(VPN_DEFAULT_PORT)
   const [nodeKind, setNodeKind] = useState<NodeKind>('vpn')
   const [apiKey, setApiKey] = useState('')
+  const [linkSelectorValue, setLinkSelectorValue] = useState(PROXY_LINK_NONE)
   const [submitting, setSubmitting] = useState(false)
   const [healthLoading, setHealthLoading] = useState<number | null>(null)
   const [activateLoading, setActivateLoading] = useState<number | null>(null)
@@ -713,6 +741,7 @@ export default function NodesPage() {
     setPort(VPN_DEFAULT_PORT)
     setNodeKind('vpn')
     setApiKey('')
+    setLinkSelectorValue(PROXY_LINK_NONE)
   }
 
   const openCreate = () => {
@@ -723,6 +752,9 @@ export default function NodesPage() {
   const handleNodeKindChange = (kind: NodeKind) => {
     setNodeKind(kind)
     setPort(kind === 'proxy' ? PROXY_DEFAULT_PORT : VPN_DEFAULT_PORT)
+    if (kind !== 'proxy') {
+      setLinkSelectorValue(PROXY_LINK_NONE)
+    }
   }
 
   const openEdit = (node: Node) => {
@@ -732,6 +764,11 @@ export default function NodesPage() {
     setPort(node.port)
     setNodeKind(isProxyNode(node) ? 'proxy' : 'vpn')
     setApiKey('')
+    setLinkSelectorValue(
+      isProxyNode(node)
+        ? resolveProxyLinkSelectorValue(node.linked_vpn_node_id, nodes, syncGroups)
+        : PROXY_LINK_NONE,
+    )
     setShowDialog(true)
   }
 
@@ -769,9 +806,22 @@ export default function NodesPage() {
 
     setSubmitting(true)
     try {
+      const isProxyForm =
+        (editing && isProxyNode(editing)) || (!editing && proxyNodesEnabled && nodeKind === 'proxy')
+      const linkedVpnNodeId = isProxyForm
+        ? linkedVpnNodeIdFromSelectorValue(linkSelectorValue, proxyLinkSelectorOptions(nodes, syncGroups))
+        : undefined
+
       if (editing) {
-        const payload: Record<string, string | number> = { name: trimmedName, host: trimmedHost, port }
+        const payload: {
+          name: string
+          host: string
+          port: number
+          api_key?: string
+          linked_vpn_node_id?: number | null
+        } = { name: trimmedName, host: trimmedHost, port }
         if (apiKey) payload.api_key = apiKey
+        if (isProxyForm) payload.linked_vpn_node_id = linkedVpnNodeId ?? null
         await updateNode(editing.id, payload)
         closeDialog()
         await load()
@@ -785,6 +835,7 @@ export default function NodesPage() {
           port,
           api_key: apiKey,
           node_kind: kind,
+          ...(kind === 'proxy' ? { linked_vpn_node_id: linkedVpnNodeId ?? null } : {}),
         })
         closeDialog()
         await load()
@@ -1308,6 +1359,8 @@ export default function NodesPage() {
                     node={node}
                     isActive={activeNode?.id === node.id}
                     showProxyUi={proxyNodesEnabled}
+                    nodes={nodes}
+                    syncGroups={syncGroups}
                     healthLoading={healthLoading === node.id}
                     activateLoading={activateLoading === node.id}
                     selected={selectedNodeIds.includes(node.id)}
@@ -1386,6 +1439,14 @@ export default function NodesPage() {
                                   Прокси
                                 </Badge>
                               )}
+                              {showProxyAffordance && (
+                                <ProxyLinkBadge
+                                  linkedVpnNodeId={node.linked_vpn_node_id}
+                                  nodes={nodes}
+                                  syncGroups={syncGroups}
+                                  showUnlinked
+                                />
+                              )}
                               {isActive && (
                                 <Badge variant="default" className="text-[10px]">
                                   <Check size={10} />
@@ -1450,7 +1511,12 @@ export default function NodesPage() {
                         {showProxyAffordance && (
                           <TableRow>
                             <TableCell colSpan={10} className="bg-muted/20 py-3">
-                              <ProxyNodePanel node={node} onUpdated={load} />
+                              <ProxyNodePanel
+                                node={node}
+                                nodes={nodes}
+                                syncGroups={syncGroups}
+                                onUpdated={load}
+                              />
                             </TableCell>
                           </TableRow>
                         )}
@@ -1587,6 +1653,17 @@ export default function NodesPage() {
                     <p className="text-xs text-muted-foreground">Секретный ключ для аутентификации агента</p>
                   )}
                 </div>
+                {((editing && isProxyNode(editing)) ||
+                  (!editing && proxyNodesEnabled && nodeKind === 'proxy')) && (
+                  <ProxyLinkSelect
+                    value={linkSelectorValue}
+                    onChange={setLinkSelectorValue}
+                    nodes={nodes}
+                    syncGroups={syncGroups}
+                    disabled={submitting}
+                    orphanNodeId={editing?.linked_vpn_node_id ?? null}
+                  />
+                )}
               </div>
             </div>
 
