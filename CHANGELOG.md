@@ -46,6 +46,7 @@
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 > **Кратко:** opt-in модуль **AmneziaWG 2.0 (AZ-AWG2)** волны 1–4b (install SSE, клиенты/TTL, HA crypto-sync, обфускация, мониторинг, Telegram/Mini, access + deep stats, **NOC/history/TG**, **traffic + limits**); отдельные shared-домены OpenVPN и WG в HA; вкладка **OpenVPN панели** (remotes + multihome); единый denser chrome Настроек / Edit Files / Users; фикс nginx `ACCESS_PATH` на нестандартном порту и light-diff Myers.
 
 ### ✨ Added
@@ -79,6 +80,11 @@
 - **AZ-AWG2** — shell/toggle/health, client lifecycle, HA crypto-sync, obfuscation, monitoring, install SSE / TTL / backup, Telegram, access policy + runtime block/unblock, deep client stats, replica reapply после sync, NOC peers/history/TG, traffic collector/`amneziawg2` scopes + limits API (`test_awg2_*.py`, `test_awg2_noc.py`, `test_noc_report_awg2.py`, `test_traffic_awg2_*.py`, `test_awg2_traffic_limit*.py`, `test_vpn_state_sync.py`, `test_node_adapter_parity.py`, `haNodeScope.test.ts`).
 - **HA shared domain WG** — отдельные `shared_domain` / `shared_domain_wireguard` (`test_node_sync_shared_domain.py`, `haBadgeLabel.test.ts`).
 - **light-diff** — пустые файлы и Myers reconstruction (`buildLightDiff.test.ts`).
+=======
+### ✨ Added
+
+- Перезагрузка ОС VPN-узла из Настройки → Обслуживание и Telegram `/settings` → Обслуживание (фраза `REBOOT`, задержка 15 с, отмена)
+>>>>>>> feature/server-os-reboot
 
 ---
 

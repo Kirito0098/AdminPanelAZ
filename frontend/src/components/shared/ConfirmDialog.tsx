@@ -1,8 +1,10 @@
-import type { FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { Loader2 } from 'lucide-react'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Dialog,
   DialogContent,
@@ -34,6 +36,8 @@ export interface ConfirmDialogProps {
   loading?: boolean
   /** Only «Понятно» — for informational warnings without a confirm action. */
   confirmHidden?: boolean
+  confirmPhrase?: string
+  confirmPhraseLabel?: string
   onConfirm: () => void | Promise<void>
   children?: React.ReactNode
   className?: string
@@ -51,10 +55,23 @@ export default function ConfirmDialog({
   destructive = false,
   loading = false,
   confirmHidden = false,
+  confirmPhrase,
+  confirmPhraseLabel,
   onConfirm,
   children,
   className,
 }: ConfirmDialogProps) {
+  const [phraseValue, setPhraseValue] = useState('')
+
+  useEffect(() => {
+    if (open) setPhraseValue('')
+  }, [open])
+
+  const phraseRequired = confirmPhrase != null && confirmPhrase.length > 0
+  const phraseOk = !phraseRequired || phraseValue === confirmPhrase
+  const phraseLabel =
+    confirmPhraseLabel ?? (confirmPhrase ? `Введите ${confirmPhrase} для подтверждения` : undefined)
+
   const handleOpenChange = (next: boolean) => {
     if (!next && loading) return
     onOpenChange(next)
@@ -62,7 +79,7 @@ export default function ConfirmDialog({
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
-    if (loading) return
+    if (loading || !phraseOk) return
     void onConfirm()
   }
 
@@ -90,6 +107,20 @@ export default function ConfirmDialog({
 
           {children}
 
+          {phraseRequired && phraseLabel && (
+            <div className="space-y-2">
+              <Label htmlFor="confirm-phrase">{phraseLabel}</Label>
+              <Input
+                id="confirm-phrase"
+                value={phraseValue}
+                onChange={(e) => setPhraseValue(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                disabled={loading}
+              />
+            </div>
+          )}
+
           <DialogFooter>
             {confirmHidden ? (
               <Button type="button" onClick={() => handleOpenChange(false)}>
@@ -108,7 +139,7 @@ export default function ConfirmDialog({
                 <Button
                   type="submit"
                   variant={destructive ? 'destructive' : 'default'}
-                  disabled={loading}
+                  disabled={loading || !phraseOk}
                 >
                   {loading ? (
                     <>

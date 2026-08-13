@@ -2023,6 +2023,24 @@ export async function restartPanel() {
   return apiFetch<{ message: string }>('/system/restart', { method: 'POST' })
 }
 
+export async function scheduleServerReboot(nodeId: number, confirm: 'REBOOT') {
+  return apiFetch<import('../types').ServerRebootScheduleResponse>('/settings/reboot', {
+    method: 'POST',
+    body: JSON.stringify({ node_id: nodeId, confirm }),
+  })
+}
+
+export async function cancelServerReboot(rebootId: string) {
+  return apiFetch<import('../types').ServerRebootPendingItem>(
+    `/settings/reboot/${rebootId}/cancel`,
+    { method: 'POST' },
+  )
+}
+
+export async function getPendingServerReboots() {
+  return apiFetch<import('../types').ServerRebootPendingResponse>('/settings/reboot/pending')
+}
+
 export async function rebuildPanel() {
   return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/system/rebuild', { method: 'POST' })
 }

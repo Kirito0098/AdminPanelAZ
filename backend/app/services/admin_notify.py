@@ -102,6 +102,9 @@ SETTINGS_CHANGE_NOTIFY = frozenset({
     "settings_antifilter_refresh",
     "settings_run_doall",
     "settings_vpn_network_publish",
+    "settings_reboot_schedule",
+    "settings_reboot_cancel",
+    "settings_reboot_execute",
 })
 
 SETTINGS_TG_TITLES = {
@@ -125,10 +128,16 @@ SETTINGS_TG_TITLES = {
     "settings_antifilter_refresh": "AntiFilter",
     "settings_run_doall": "Применение изменений",
     "settings_vpn_network_publish": "Публикация панели",
+    "settings_reboot_schedule": "Перезагрузка ОС (план)",
+    "settings_reboot_cancel": "Перезагрузка ОС (отмена)",
+    "settings_reboot_execute": "Перезагрузка ОС",
 }
 
 SETTINGS_ACTION_EVENTS = frozenset({
     "settings_restart_service",
+    "settings_reboot_schedule",
+    "settings_reboot_cancel",
+    "settings_reboot_execute",
     "settings_backup_create",
     "settings_backup_restore",
     "settings_backup_upload",
