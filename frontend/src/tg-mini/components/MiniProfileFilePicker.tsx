@@ -1,6 +1,7 @@
 import { Check, FileKey } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
+  profileFormatHint,
   profileRouteForFile,
   profileRouteHint,
   profileRouteLabel,
@@ -18,6 +19,17 @@ function fileExtension(file: TgMiniConfigFile): string {
   const name = fileLabel(file)
   const dot = name.lastIndexOf('.')
   return dot >= 0 ? name.slice(dot + 1).toUpperCase() : 'CFG'
+}
+
+function fileOptionMeta(
+  file: TgMiniConfigFile,
+  route: ProfileRoute,
+  showRouteTabs: boolean,
+): string | null {
+  const formatHint = profileFormatHint(file)
+  if (formatHint) return formatHint
+  if (!showRouteTabs) return profileRouteLabel(route)
+  return null
 }
 
 function defaultRoute(files: TgMiniConfigFile[], selectedPath: string): ProfileRoute {
@@ -49,6 +61,10 @@ export default function MiniProfileFilePicker({
   }, [files, selectedPath])
 
   const routeFiles = route === 'antizapret' ? antizapret : vpn
+  const showFormatLegend = useMemo(() => {
+    const exts = new Set(routeFiles.map((file) => fileExtension(file).toLowerCase()))
+    return exts.has('conf') && exts.has('vpn')
+  }, [routeFiles])
 
   const handleRouteChange = (nextRoute: ProfileRoute) => {
     setRoute(nextRoute)
@@ -98,9 +114,21 @@ export default function MiniProfileFilePicker({
         <p className="tg-mini-route-hint">{profileRouteHint(route)}</p>
       )}
 
+      {showFormatLegend && (
+        <p className="tg-mini-format-legend">
+          <span>
+            <strong>.conf</strong> — AmneziaWG / awg-quick
+          </span>
+          <span>
+            <strong>.vpn</strong> — AmneziaVPN (vpn://…)
+          </span>
+        </p>
+      )}
+
       <div className="tg-mini-file-list" role="listbox" aria-label="Файлы профиля">
         {routeFiles.map((file) => {
           const active = file.path === selectedPath
+          const meta = fileOptionMeta(file, route, showRouteTabs)
           return (
             <button
               key={file.path}
@@ -115,9 +143,7 @@ export default function MiniProfileFilePicker({
               </span>
               <span className="tg-mini-file-option-body">
                 <span className="tg-mini-file-option-name">{fileLabel(file)}</span>
-                {!showRouteTabs && (
-                  <span className="tg-mini-file-option-meta">{profileRouteLabel(route)}</span>
-                )}
+                {meta && <span className="tg-mini-file-option-meta">{meta}</span>}
               </span>
               {active && <Check size={18} className="tg-mini-file-option-check" aria-hidden />}
             </button>

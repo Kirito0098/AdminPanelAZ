@@ -1,7 +1,7 @@
 export function vpnTypeLabel(vpnType: string): string {
   if (vpnType === 'openvpn') return 'OpenVPN'
-  if (vpnType === 'wireguard') return 'WireGuard'
-  if (vpnType === 'amneziawg2') return 'AmneziaWG 2.0'
+  if (vpnType === 'wireguard') return 'WG/AWG 1.5'
+  if (vpnType === 'amneziawg2') return 'AWG 2.0'
   return vpnType
 }
 

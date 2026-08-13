@@ -19,8 +19,8 @@ interface MiniListToolbarProps {
 const PROTOCOL_OPTIONS: Array<{ value: ProtocolFilter; label: string }> = [
   { value: 'all', label: 'Все' },
   { value: 'openvpn', label: 'OpenVPN' },
-  { value: 'wireguard', label: 'WG / AWG' },
-  { value: 'amneziawg2', label: 'AWG2' },
+  { value: 'wireguard', label: 'WG/AWG 1.5' },
+  { value: 'amneziawg2', label: 'AWG 2.0' },
 ]
 
 export function matchesSearchQuery(value: string, query: string): boolean {

@@ -217,8 +217,8 @@ export default function CreateConfigDialog({
                 </SelectTrigger>
                 <SelectContent className="z-[100]">
                   {openvpnEnabled && <SelectItem value="openvpn">OpenVPN</SelectItem>}
-                  {wireguardEnabled && <SelectItem value="wireguard">WireGuard</SelectItem>}
-                  {awg2Enabled && <SelectItem value="amneziawg2">AmneziaWG 2.0</SelectItem>}
+                  {wireguardEnabled && <SelectItem value="wireguard">WG/AWG 1.5</SelectItem>}
+                  {awg2Enabled && <SelectItem value="amneziawg2">AWG 2.0</SelectItem>}
                 </SelectContent>
               </Select>
             </div>

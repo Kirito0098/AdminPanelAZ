@@ -405,7 +405,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
             </p>
             {!tgBlockSupported && (
               <p className="text-xs text-muted-foreground">
-                Блокировка AWG2 доступна только в веб-панели
+                Блокировка AWG 2.0 доступна только в веб-панели
               </p>
             )}
             {tgBlockSupported && !isBlocked ? (
