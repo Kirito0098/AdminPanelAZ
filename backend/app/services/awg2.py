@@ -869,6 +869,14 @@ class Awg2Service:
                 outputs.append(self._run_awg_client(*args))
                 created.append(tunnel)
         except Exception:
+            # awg-client may leave a conf/peer behind if it fails after writing
+            # (e.g. legacy awg-export QR overflow). Roll those back too.
+            for tunnel in AWG2_TUNNELS:
+                if tunnel in created:
+                    continue
+                conf = AWG2_CLIENT_DIR / tunnel / f"{tunnel}-{name}-am.conf"
+                if conf.is_file():
+                    created.append(tunnel)
             for tunnel in reversed(created):
                 try:
                     self._run_awg_client("del", name, tunnel)

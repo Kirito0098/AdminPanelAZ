@@ -88,6 +88,46 @@ def test_add_client_runs_both_tunnels_and_rolls_back(tmp_path: Path):
     assert any(c[-3:] == ["del", "ivan", "antizapret"] for c in calls)
 
 
+def test_add_client_rolls_back_orphan_conf_when_first_tunnel_fails(tmp_path: Path):
+    """If awg-client writes conf then dies (e.g. QR overflow), still delete it."""
+    bin_path = tmp_path / "awg-client"
+    bin_path.write_text("#!/bin/sh\n")
+    bin_path.chmod(0o755)
+    overlay = tmp_path / "overlay"
+    clients = overlay / "clients"
+    (clients / "antizapret").mkdir(parents=True)
+    amnezia = tmp_path / "amnezia"
+    amnezia.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = "ok"
+        result.stderr = ""
+        if "add" in cmd and "antizapret" in cmd:
+            (clients / "antizapret" / "antizapret-ivan-am.conf").write_text("[Interface]\n")
+            result.returncode = 1
+            result.stderr = "DataOverflowError"
+        return result
+
+    with (
+        patch.object(awg2, "AWG2_CLIENT_BIN", bin_path),
+        patch.object(awg2, "AWG2_OVERLAY_DIR", overlay),
+        patch.object(awg2, "AWG2_CLIENT_DIR", clients),
+        patch.object(awg2, "AWG2_AMNEZIA_DIR", amnezia),
+        patch.object(awg2, "AWG2_CLIENT_LOCK", tmp_path / "lock"),
+        patch("app.services.awg2.subprocess.run", side_effect=fake_run),
+    ):
+        svc = awg2.Awg2Service()
+        with pytest.raises(RuntimeError, match="DataOverflowError"):
+            svc.add_client("ivan")
+
+    assert any(c[-3:] == ["del", "ivan", "antizapret"] for c in calls)
+    assert not any(c[-3:] == ["add", "ivan", "vpn"] for c in calls)
+
+
 def test_get_profile_files_from_client_dir(tmp_path: Path):
     clients = tmp_path / "clients"
     for tunnel in ("antizapret", "vpn"):
