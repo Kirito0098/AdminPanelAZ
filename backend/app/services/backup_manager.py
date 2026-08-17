@@ -211,33 +211,30 @@ class BackupManager:
             "summary": metadata["summary"],
         }
 
-    def restore_backup(self, file_name: str) -> dict:
+    def load_restore_payload(self, file_name: str) -> dict:
         archive_path = self._resolve_archive(file_name)
         restored: list[str] = []
         restored_configs: dict[str, str] = {}
+        files: dict[str, bytes] = {}
 
         with tarfile.open(archive_path, "r:gz") as tar:
             members = {m.name: m for m in tar.getmembers()}
             if "data/adminpanel.db" in members:
-                self.db_path.parent.mkdir(parents=True, exist_ok=True)
                 extracted = tar.extractfile(members["data/adminpanel.db"])
                 if extracted:
-                    self.db_path.write_bytes(extracted.read())
-                    remove_sqlite_sidecars(self.db_path)
+                    files["db"] = extracted.read()
                     restored.append("db")
 
             if "data/cidr/cidr.db" in members and self.cidr_db_path is not None:
-                self.cidr_db_path.parent.mkdir(parents=True, exist_ok=True)
                 extracted = tar.extractfile(members["data/cidr/cidr.db"])
                 if extracted:
-                    self.cidr_db_path.write_bytes(extracted.read())
-                    remove_sqlite_sidecars(self.cidr_db_path)
+                    files["cidr_db"] = extracted.read()
                     restored.append("cidr_db")
 
             if "env/.env" in members:
                 extracted = tar.extractfile(members["env/.env"])
                 if extracted:
-                    self.env_path.write_bytes(extracted.read())
+                    files["env"] = extracted.read()
                     restored.append("env")
 
             for filename in self.CONFIG_FILES:
@@ -252,8 +249,38 @@ class BackupManager:
                 restored.append("configs")
 
         if not restored:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Архив не содержит данных для восстановления")
-        return {"restored": restored, "file_name": file_name, "configs": restored_configs}
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Архив не содержит данных для восстановления",
+            )
+        return {
+            "restored": restored,
+            "file_name": file_name,
+            "configs": restored_configs,
+            "_files": files,
+        }
+
+    def apply_restore_payload(self, payload: dict) -> dict:
+        files = payload.get("_files") or {}
+        if "db" in files:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.db_path.write_bytes(files["db"])
+            remove_sqlite_sidecars(self.db_path)
+        if "cidr_db" in files and self.cidr_db_path is not None:
+            self.cidr_db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.cidr_db_path.write_bytes(files["cidr_db"])
+            remove_sqlite_sidecars(self.cidr_db_path)
+        if "env" in files:
+            self.env_path.parent.mkdir(parents=True, exist_ok=True)
+            self.env_path.write_bytes(files["env"])
+        return {
+            "restored": list(payload.get("restored") or []),
+            "file_name": payload.get("file_name"),
+            "configs": dict(payload.get("configs") or {}),
+        }
+
+    def restore_backup(self, file_name: str) -> dict:
+        return self.apply_restore_payload(self.load_restore_payload(file_name))
 
     def delete_backup(self, file_name: str) -> None:
         archive_path = self._resolve_archive(file_name)

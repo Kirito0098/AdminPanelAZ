@@ -26,6 +26,7 @@ from app.services.node_sync.verify import verify_sync_group
 from app.services.node_sync.vpn_state_sync import (
     copy_openvpn_profiles_from_primary,
     prune_replica_vpn_clients,
+    sync_amneziawg2_state_from_primary,
 )
 from app.services.openvpn_pki import validate_all_openvpn_profiles
 from app.services.policy_import import copy_access_policies_from_node
@@ -208,6 +209,22 @@ def run_push_full(
                         for entry in wg_errors
                     )
                     or "WireGuard runtime apply failed"
+                )
+
+            awg2_health = None
+            getter = getattr(primary_adapter, "get_awg2_health", None)
+            if callable(getter):
+                try:
+                    awg2_health = getter()
+                except Exception as exc:
+                    logger.warning("Push full: AWG2 health on primary failed: %s", exc)
+            if isinstance(awg2_health, dict) and awg2_health.get("installed"):
+                progress(percent, f"Синхронизация AZ-AWG2 на {replica_name}…")
+                sync_amneziawg2_state_from_primary(
+                    primary_adapter,
+                    replica_adapter,
+                    db=db,
+                    replica_node=replica_node,
                 )
 
             restored.append({"node_id": replica_id, "node_name": replica_name, "result": result})

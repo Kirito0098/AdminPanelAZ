@@ -7,7 +7,7 @@
 ## MVP (этап 5.1–5.3)
 
 - **Sync Group** — primary + 1+ replica, shared domains (`shared_domain` → `OPENVPN_HOST`, `shared_domain_wireguard` → `WIREGUARD_HOST`; пустой WG-домен = тот же, что OpenVPN)
-- **Push full** — `client.sh 8` на primary → transfer → **HA restore** на replica (`?ha_replica=true`): **wipe-and-replace** VPN/crypto (PKI `easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG) — **без `client.sh 7`**. Каталог `config/` — **merge** (как раньше). Дополнительно копирует непустые `OPENVPN_HOST` / `WIREGUARD_HOST` из `setup` primary на каждую replica **перед** restore. После restore — **байт-копия `.ovpn`** с primary, **prune** VPN-клиентов only-on-replica, restart OpenVPN + apply WireGuard runtime. Ошибки copy/prune/restart → `sync_status=failed` (не warning).
+- **Push full** — `client.sh 8` на primary → transfer → **HA restore** на replica (`?ha_replica=true`): **wipe-and-replace** VPN/crypto (PKI `easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG) — **без `client.sh 7`**. Каталог `config/` — **merge** (как раньше). Дополнительно копирует непустые `OPENVPN_HOST` / `WIREGUARD_HOST` из `setup` primary на каждую replica **перед** restore. После restore — **байт-копия `.ovpn`** с primary, **prune** VPN-клиентов only-on-replica, restart OpenVPN + apply WireGuard runtime. Если на primary установлен слой AZ-AWG2 — overlay копируется на replica (`sync_amneziawg2_state_from_primary`). Ошибки copy/prune/restart/AWG2 → `sync_status=failed` (не warning).
 - **Verify** — списки OVPN/WG клиентов + checksums PKI/WG/config/**`.ovpn`** + **read-only проверка сертификатов в `.ovpn`**
 
 ### OpenVPN-профили и HA

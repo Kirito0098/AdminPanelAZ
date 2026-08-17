@@ -93,12 +93,19 @@ async def run_backup_scheduler_loop(
                         if token and chat_ids:
                             backup_path = str(manager.get_backup_path(result["file_name"]))
                             for chat_id in chat_ids:
-                                send_tg_document(
+                                sent = send_tg_document(
                                     token,
                                     chat_id,
                                     backup_path,
                                     caption=f"Авто-бэкап: {result['file_name']}",
+                                    run_async=False,
                                 )
+                                if not sent:
+                                    logger.warning(
+                                        "Auto-backup Telegram send failed: chat_id=%s file=%s",
+                                        chat_id,
+                                        backup_path,
+                                    )
                 if _get_setting(db, "backup_az_enabled", "true") == "true":
                     try:
                         adapter = get_active_adapter(db)
@@ -113,12 +120,19 @@ async def run_backup_scheduler_loop(
                                 )
                                 if token and chat_ids and az_result.get("archive_path"):
                                     for chat_id in chat_ids:
-                                        send_tg_document(
+                                        sent = send_tg_document(
                                             token,
                                             chat_id,
                                             az_result["archive_path"],
                                             caption=f"Авто-бэкап AntiZapret: {az_result.get('archive_name', '')}",
+                                            run_async=False,
                                         )
+                                        if not sent:
+                                            logger.warning(
+                                                "Auto AntiZapret backup Telegram send failed: chat_id=%s file=%s",
+                                                chat_id,
+                                                az_result["archive_path"],
+                                            )
                     except Exception as exc:
                         logger.warning("Auto AntiZapret backup (client.sh 8) failed: %s", exc)
                 db.commit()

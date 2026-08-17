@@ -182,6 +182,119 @@ def test_push_full_uses_ha_restore_and_prune():
     assert result["success"] is True
 
 
+def _run_single_replica_push(*, primary_adapter, replica_adapter, awg2_sync=None):
+    group = _make_group(replica_ids=[2])
+    primary = _make_node(1, "primary-1")
+    replica = _make_node(2, "replica-1")
+    admin = MagicMock()
+    db = MagicMock()
+    db.get.side_effect = lambda model, node_id: {1: primary, 2: replica}.get(node_id)
+    db.query.return_value.filter.return_value.first.return_value = admin
+
+    extra = {}
+    if awg2_sync is not None:
+        extra["sync"] = patch.object(push_full, "sync_amneziawg2_state_from_primary", awg2_sync)
+
+    with patch.object(push_full, "validate_sync_group_payload", return_value=[]):
+        with patch.object(push_full, "parse_replica_node_ids", return_value=[2]):
+            with patch.object(
+                push_full,
+                "get_adapter_for_node",
+                side_effect=lambda node: primary_adapter if node.id == 1 else replica_adapter,
+            ):
+                with patch.object(push_full, "read_primary_host_settings", return_value={}):
+                    with patch.object(push_full, "copy_openvpn_profiles_from_primary"):
+                        with patch.object(
+                            push_full,
+                            "validate_all_openvpn_profiles",
+                            return_value=_ready_profile_validation(),
+                        ):
+                            with patch.object(
+                                push_full,
+                                "prune_replica_vpn_clients",
+                                MagicMock(return_value={"success": True, "removed_ovpn": [], "removed_wg": [], "errors": []}),
+                            ):
+                                with patch.object(
+                                    push_full,
+                                    "restart_all_openvpn_servers",
+                                    return_value={"restarted": [], "failed": [], "skipped": [], "success": True},
+                                ):
+                                    with patch.object(push_full, "import_clients_from_disk"):
+                                        with patch.object(push_full, "copy_access_policies_from_node"):
+                                            with patch.object(push_full, "collect_traffic_snapshot_for_node"):
+                                                with patch.object(push_full, "is_auto_sync_enabled", return_value=False):
+                                                    with patch.object(push_full, "link_primary_configs_to_group"):
+                                                        if awg2_sync is not None:
+                                                            with extra["sync"]:
+                                                                return push_full.run_push_full(db, group, auto_verify=False)
+                                                        return push_full.run_push_full(db, group, auto_verify=False)
+
+
+def test_push_full_syncs_awg2_when_primary_has_layer():
+    primary_adapter = MagicMock()
+    primary_adapter.create_antizapret_backup.return_value = {
+        "archive_name": "backup.tar.gz",
+        "archive_path": "/tmp/backup.tar.gz",
+    }
+    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
+    primary_adapter.get_awg2_health.return_value = {"installed": True}
+    replica_adapter = _successful_replica_adapter()
+    sync = MagicMock()
+
+    result = _run_single_replica_push(
+        primary_adapter=primary_adapter,
+        replica_adapter=replica_adapter,
+        awg2_sync=sync,
+    )
+
+    assert result["success"] is True
+    sync.assert_called_once()
+    assert sync.call_args.args[0] is primary_adapter
+    assert sync.call_args.args[1] is replica_adapter
+
+
+def test_push_full_skips_awg2_when_layer_missing():
+    primary_adapter = MagicMock()
+    primary_adapter.create_antizapret_backup.return_value = {
+        "archive_name": "backup.tar.gz",
+        "archive_path": "/tmp/backup.tar.gz",
+    }
+    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
+    primary_adapter.get_awg2_health.return_value = {"installed": False}
+    replica_adapter = _successful_replica_adapter()
+    sync = MagicMock()
+
+    result = _run_single_replica_push(
+        primary_adapter=primary_adapter,
+        replica_adapter=replica_adapter,
+        awg2_sync=sync,
+    )
+
+    assert result["success"] is True
+    sync.assert_not_called()
+
+
+def test_push_full_fails_replica_when_awg2_sync_raises():
+    primary_adapter = MagicMock()
+    primary_adapter.create_antizapret_backup.return_value = {
+        "archive_name": "backup.tar.gz",
+        "archive_path": "/tmp/backup.tar.gz",
+    }
+    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
+    primary_adapter.get_awg2_health.return_value = {"installed": True}
+    replica_adapter = _successful_replica_adapter()
+
+    result = _run_single_replica_push(
+        primary_adapter=primary_adapter,
+        replica_adapter=replica_adapter,
+        awg2_sync=MagicMock(side_effect=RuntimeError("awg2 overlay sync failed")),
+    )
+
+    assert result["success"] is False
+    assert result["failed"][0]["node_id"] == 2
+    assert "awg2 overlay sync failed" in result["failed"][0]["error"]
+
+
 def test_push_full_fails_when_profile_copy_raises():
     group = _make_group(replica_ids=[2])
     primary = _make_node(1, "primary-1")

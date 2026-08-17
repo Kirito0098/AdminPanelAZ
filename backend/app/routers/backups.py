@@ -64,7 +64,6 @@ def _schedule_panel_restart_after_restore() -> None:
 
 
 def _restore_response(restore_result: dict) -> MessageResponse:
-    _schedule_panel_restart_after_restore()
     return MessageResponse(
         message=RESTORE_RESTART_MESSAGE,
         detail={**restore_result, "restart_scheduled": True},
@@ -186,12 +185,20 @@ def _create_backup_with_optional_telegram(
         bot_token, chat_ids = tg
         archive_path = manager.get_backup_path(result["file_name"])
         for chat_id in chat_ids:
-            send_tg_document(
+            sent = send_tg_document(
                 bot_token,
                 chat_id,
                 str(archive_path),
                 caption=f"{panel_caption_prefix}: {result['file_name']}",
+                run_async=False,
             )
+            if not sent:
+                if send_to_telegram:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="Не удалось отправить архив в Telegram",
+                    )
+                logger.warning("Не удалось отправить архив в Telegram: chat_id=%s file=%s", chat_id, archive_path)
 
     if include_antizapret_backup:
         try:
@@ -200,12 +207,24 @@ def _create_backup_with_optional_telegram(
             if tg and az_result.get("archive_path"):
                 archive_name = az_result.get("archive_name") or Path(az_result["archive_path"]).name
                 for chat_id in tg[1]:
-                    send_tg_document(
+                    sent = send_tg_document(
                         tg[0],
                         chat_id,
                         az_result["archive_path"],
                         caption=f"{az_caption_prefix}: {archive_name}",
+                        run_async=False,
                     )
+                    if not sent:
+                        if send_to_telegram:
+                            raise HTTPException(
+                                status_code=status.HTTP_502_BAD_GATEWAY,
+                                detail="Не удалось отправить архив AntiZapret в Telegram",
+                            )
+                        logger.warning(
+                            "Не удалось отправить архив AntiZapret в Telegram: chat_id=%s file=%s",
+                            chat_id,
+                            az_result["archive_path"],
+                        )
         except Exception as exc:
             if send_to_telegram:
                 raise
@@ -279,8 +298,6 @@ async def upload_backup(
         tmp_path.unlink(missing_ok=True)
 
     if restore:
-        restore_result = manager.restore_backup(result["file_name"])
-        _write_restored_configs(db, restore_result.get("configs") or {})
         if settings.audit_log_enabled:
             log_action(
                 db,
@@ -297,7 +314,7 @@ async def upload_backup(
             subject_name=result["file_name"],
             client_timezone=get_client_timezone_from_request(request),
         )
-        _schedule_panel_restart_after_restore()
+        _restore_panel_and_restart(manager, result["file_name"], db)
         return BackupEntry(**result)
 
     admin_notify_service.send_settings_change(
@@ -322,6 +339,15 @@ def _write_restored_configs(db: Session, configs: dict[str, str]) -> None:
         logger.warning("Could not restore AntiZapret routing lists: %s", exc)
 
 
+def _restore_panel_and_restart(manager: BackupManager, file_name: str, db: Session) -> dict:
+    payload = manager.load_restore_payload(file_name)
+    _write_restored_configs(db, payload.get("configs") or {})
+    _dispose_db_engines()
+    result = manager.apply_restore_payload(payload)
+    _schedule_panel_restart_after_restore()
+    return result
+
+
 @router.post("/restore", response_model=MessageResponse)
 def restore_backup(
     payload: BackupRestoreRequest,
@@ -329,9 +355,7 @@ def restore_backup(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    result = _get_backup_manager().restore_backup(payload.file_name)
-    configs = result.pop("configs", {}) or {}
-    _write_restored_configs(db, configs)
+    manager = _get_backup_manager()
     if settings.audit_log_enabled:
         log_action(
             db,
@@ -348,6 +372,8 @@ def restore_backup(
         subject_name=payload.file_name,
         client_timezone=get_client_timezone_from_request(request),
     )
+    result = _restore_panel_and_restart(manager, payload.file_name, db)
+    result.pop("configs", None)
     return _restore_response(result)
 
 

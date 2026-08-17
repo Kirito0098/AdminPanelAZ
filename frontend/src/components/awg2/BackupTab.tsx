@@ -110,9 +110,9 @@ export default function BackupTab({ onRestored }: BackupTabProps) {
 
       <SettingsAlert variant="warning" title="Не замена полному backup">
         Это узкий backup слоя AZ-AWG2. Он не заменяет штатный `awg-backup`, общий backup AntiZapret или
-        backup самой панели. Полная HA-синхронизация (Push full) тоже не покрывает overlay AWG2 —
-        для реплик используйте этот restore на primary (панель сама попытается синхронизировать слой).
-        OpenVPN, системные env и прочие данные вне AWG2 сюда не входят.
+        backup самой панели. Полная HA-синхронизация (Push full) копирует overlay AWG2, если слой
+        установлен на primary; иначе используйте этот restore — панель сама попытается синхронизировать
+        реплики. OpenVPN, системные env и прочие данные вне AWG2 сюда не входят.
       </SettingsAlert>
 
       <SettingsAlert variant="info" title="Когда использовать">

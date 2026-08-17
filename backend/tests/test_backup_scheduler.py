@@ -69,3 +69,12 @@ def test_cli_include_configs_reads_antizapret_home(tmp_path: Path, monkeypatch):
     assert contents is not None
     assert contents["include-hosts.txt"] == "foo.example\n"
     assert module._load_config_contents(False) is None
+
+
+def test_backup_telegram_sends_synchronously():
+    create_src = inspect.getsource(backup_scheduler.run_backup_scheduler_loop)
+    from app.routers import backups as backups_mod
+
+    router_src = inspect.getsource(backups_mod._create_backup_with_optional_telegram)
+    assert "run_async=False" in create_src
+    assert "run_async=False" in router_src

@@ -120,3 +120,26 @@ def test_restore_backup_returns_config_contents(tmp_path: Path):
     restored = mgr.restore_backup(created["file_name"])
     assert "configs" in restored["restored"]
     assert restored["configs"]["include-hosts.txt"] == "example.com\n"
+
+
+def test_load_restore_payload_does_not_write_db_until_apply(tmp_path: Path):
+    mgr = _manager(tmp_path)
+    conn = sqlite3.connect(mgr.db_path)
+    conn.execute("CREATE TABLE t(x INTEGER)")
+    conn.execute("INSERT INTO t VALUES (9)")
+    conn.commit()
+    conn.close()
+    created = mgr.create_backup()
+    archive = tmp_path / "backups" / created["file_name"]
+    with tarfile.open(archive, "r:gz") as tar:
+        extracted = tar.extractfile("data/adminpanel.db")
+        assert extracted is not None
+        archived_db = extracted.read()
+    mgr.db_path.write_bytes(b"CHANGED-LIVE-DB")
+    payload = mgr.load_restore_payload(created["file_name"])
+    assert mgr.db_path.read_bytes() == b"CHANGED-LIVE-DB"
+    applied = mgr.apply_restore_payload(payload)
+    assert "db" in applied["restored"]
+    assert mgr.db_path.read_bytes() == archived_db
+    rows = sqlite3.connect(mgr.db_path).execute("SELECT x FROM t").fetchall()
+    assert rows == [(9,)]
