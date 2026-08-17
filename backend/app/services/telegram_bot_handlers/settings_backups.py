@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from app.schemas import BackupCreateRequest, BackupRestoreRequest, BackupSettingsUpdate
+from app.services.feature_guards import get_feature_service
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext, inline_button, inline_keyboard
 from app.services.telegram_bot_handlers import settings_fsm
@@ -76,10 +77,16 @@ def _format_backup_menu(settings, backups) -> str:
         f"(каждые <code>{settings.auto_backup_days}</code> дн.)",
         f"TG при бэкапе: <b>{_on_off(settings.telegram_on_backup)}</b>",
         f"AZ-бэкап: <b>{_on_off(settings.backup_az_enabled)}</b>",
-        f"Хранить копий: <code>{settings.retention_count}</code>",
-        "",
-        f"Архивов на сервере: <b>{len(backups)}</b>",
     ]
+    if get_feature_service().is_enabled("awg2"):
+        lines.append(f"AWG2-слой: <b>{_on_off(settings.backup_awg2_enabled)}</b>")
+    lines.extend(
+        [
+            f"Хранить копий: <code>{settings.retention_count}</code>",
+            "",
+            f"Архивов на сервере: <b>{len(backups)}</b>",
+        ]
+    )
     if backups:
         lines.append("\nПоследние:")
         for entry in backups[:3]:
@@ -110,6 +117,19 @@ def _backup_main_keyboard(settings) -> dict:
                 callback_data=f"st:bk:az:{0 if az else 1}",
             ),
         ],
+    ]
+    if get_feature_service().is_enabled("awg2"):
+        awg2 = settings.backup_awg2_enabled
+        rows.append(
+            [
+                inline_button(
+                    f"🧩 AWG2: {_on_off(awg2)}",
+                    callback_data=f"st:bk:awg2:{0 if awg2 else 1}",
+                )
+            ]
+        )
+    rows.extend(
+        [
         [
             inline_button("✏️ Интервал, дн.", callback_data="st:bk:ask:days"),
             inline_button("✏️ Хранить", callback_data="st:bk:ask:ret"),
@@ -123,7 +143,8 @@ def _backup_main_keyboard(settings) -> dict:
             inline_button("🔄 Обновить", callback_data="st:bk"),
         ],
         [inline_button("◀️ Настройки", callback_data="st:root")],
-    ]
+        ]
+    )
     return inline_keyboard(rows)
 
 
@@ -240,6 +261,16 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
             await handle_settings_backups(ctx, message_id=message_id)
             return
 
+        if rest.startswith("awg2:"):
+            enabled = rest.endswith(":1")
+            _apply_backup_settings_patch(
+                ctx,
+                BackupSettingsUpdate(backup_awg2_enabled=enabled),
+                log_details=f"field=backup_awg2_enabled; value={enabled}",
+            )
+            await handle_settings_backups(ctx, message_id=message_id)
+            return
+
         if rest.startswith("ask:"):
             key = rest.split(":", 1)[1]
             field = _ASK_CALLBACKS.get(key)
@@ -293,7 +324,10 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
 
             backup_settings = _get_backup_settings(ctx)
             result = test_backup_telegram(
-                BackupTestTelegramRequest(include_antizapret_backup=backup_settings.backup_az_enabled),
+                BackupTestTelegramRequest(
+                    include_antizapret_backup=backup_settings.backup_az_enabled,
+                    include_awg2_backup=backup_settings.backup_awg2_enabled,
+                ),
                 db=ctx.db,
                 admin=ctx.user,
             )

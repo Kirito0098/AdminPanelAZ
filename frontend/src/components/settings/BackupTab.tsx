@@ -12,6 +12,7 @@ import {
   Save,
   Send,
   Server,
+  Shield,
   Trash2,
   Upload,
   X,
@@ -44,6 +45,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useProgress } from '@/context/ProgressContext'
 import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
@@ -63,10 +65,11 @@ const COMPONENT_LABELS: Record<string, string> = {
   database: 'База AdminPanel',
   antizapret_lists: 'Списки AntiZapret',
   antizapret_backup: 'Архив AntiZapret',
+  awg2: 'Слой AZ-AWG2',
 }
 
 const RESTORE_WARNING =
-  'Текущие настройки и данные панели будут перезаписаны. После восстановления панель будет автоматически перезапущена — страница станет недоступна на несколько секунд.'
+  'Текущие настройки и данные панели будут перезаписаны. Если в архиве есть слой AZ-AWG2, он тоже будет восстановлен на VPN-узле. После восстановления панель будет автоматически перезапущена — страница станет недоступна на несколько секунд.'
 
 const RESTORE_SUCCESS_MESSAGE =
   'Восстановление выполнено. Панель будет перезапущена через несколько секунд.'
@@ -212,11 +215,14 @@ export default function BackupTab() {
   const { success, error: notifyError } = useNotifications()
   const { withInline } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
+  const { isEnabled } = useFeatureModules()
+  const awg2Enabled = isEnabled('awg2')
   const [backups, setBackups] = useState<BackupEntry[]>([])
   const [settings, setSettings] = useState<BackupSettings | null>(null)
   const [settingsDraft, setSettingsDraft] = useState<BackupSettings | null>(null)
   const [includeConfigs, setIncludeConfigs] = useState(false)
   const [includeAntizapretBackup, setIncludeAntizapretBackup] = useState(false)
+  const [includeAwg2Backup, setIncludeAwg2Backup] = useState(false)
   const [loading, setLoading] = useState(true)
   const [savingSettings, setSavingSettings] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
@@ -248,6 +254,7 @@ export default function BackupTab() {
       settings.telegram_on_backup !== settingsDraft.telegram_on_backup ||
       settings.auto_backup_enabled !== settingsDraft.auto_backup_enabled ||
       settings.backup_az_enabled !== settingsDraft.backup_az_enabled ||
+      settings.backup_awg2_enabled !== settingsDraft.backup_awg2_enabled ||
       settings.auto_backup_days !== settingsDraft.auto_backup_days ||
       settings.retention_count !== settingsDraft.retention_count
     )
@@ -261,6 +268,7 @@ export default function BackupTab() {
         telegram_on_backup: settingsDraft.telegram_on_backup,
         auto_backup_enabled: settingsDraft.auto_backup_enabled,
         backup_az_enabled: settingsDraft.backup_az_enabled,
+        backup_awg2_enabled: settingsDraft.backup_awg2_enabled,
         auto_backup_days: settingsDraft.auto_backup_days,
         retention_count: settingsDraft.retention_count,
       })
@@ -286,17 +294,21 @@ export default function BackupTab() {
   }, [backups, settings, settingsDraft])
 
   const telegramDeliveryPlan = useMemo(() => {
-    const files = ['adminpanelaz_*.tar.gz — AdminPanel (всегда)']
+    const files = [
+      includeAwg2Backup
+        ? 'adminpanelaz_*.tar.gz — AdminPanel + слой AZ-AWG2'
+        : 'adminpanelaz_*.tar.gz — AdminPanel (всегда)',
+    ]
     if (includeAntizapretBackup) {
       files.push('backup-*.tar.gz — AntiZapret (отдельный файл в том же чате)')
     }
     return files
-  }, [includeAntizapretBackup])
+  }, [includeAntizapretBackup, includeAwg2Backup])
 
   const handleSendTelegram = async () => {
     try {
       await withInline(async () => {
-        await createBackup(includeConfigs, includeAntizapretBackup, true)
+        await createBackup(includeConfigs, includeAntizapretBackup, true, includeAwg2Backup)
         await load()
       }, 'Создание и отправка в Telegram...')
       success(
@@ -312,7 +324,7 @@ export default function BackupTab() {
   const handleCreate = async () => {
     try {
       await withInline(async () => {
-        await createBackup(includeConfigs, includeAntizapretBackup)
+        await createBackup(includeConfigs, includeAntizapretBackup, false, includeAwg2Backup)
         await load()
       }, 'Создание копии...')
       success('Резервная копия создана')
@@ -458,7 +470,8 @@ export default function BackupTab() {
                 Создать резервную копию
               </CardTitle>
               <CardDescription className="mt-1">
-                Кнопка «Создать копию» всегда делает архив AdminPanel; опции ниже добавляют данные AntiZapret
+                Кнопка «Создать копию» всегда делает архив AdminPanel; опции ниже добавляют списки AntiZapret,
+                слой AZ-AWG2 и отдельный архив VPN
               </CardDescription>
             </div>
             <Button
@@ -489,6 +502,15 @@ export default function BackupTab() {
                     checked={includeConfigs}
                     onChange={setIncludeConfigs}
                   />
+                  {awg2Enabled && (
+                    <OptionCard
+                      icon={Shield}
+                      label="Добавить слой AZ-AWG2"
+                      description="Узкий overlay AmneziaWG 2.0 в тот же архив AdminPanel, если слой установлен на VPN-узле"
+                      checked={includeAwg2Backup}
+                      onChange={setIncludeAwg2Backup}
+                    />
+                  )}
                 </div>
               </BackupScopeBlock>
 
@@ -702,7 +724,11 @@ export default function BackupTab() {
             <ToggleRow
               id="auto-backup"
               label="Авто-копия AdminPanel"
-              description="База, CIDR, .env и при доступности списки AntiZapret — файл adminpanelaz_*.tar.gz"
+              description={
+                awg2Enabled
+                  ? 'База, CIDR, .env, при доступности списки AntiZapret и слой AZ-AWG2 — файл adminpanelaz_*.tar.gz'
+                  : 'База, CIDR, .env и при доступности списки AntiZapret — файл adminpanelaz_*.tar.gz'
+              }
               checked={settingsDraft.auto_backup_enabled}
               onCheckedChange={(checked) => patchDraft({ auto_backup_enabled: checked })}
             />
@@ -713,6 +739,15 @@ export default function BackupTab() {
               checked={settingsDraft.backup_az_enabled}
               onCheckedChange={(checked) => patchDraft({ backup_az_enabled: checked })}
             />
+            {awg2Enabled && (
+              <ToggleRow
+                id="backup-awg2"
+                label="Плюс слой AZ-AWG2"
+                description="Если слой установлен — overlay попадает в adminpanelaz_*.tar.gz, как списки маршрутизации"
+                checked={settingsDraft.backup_awg2_enabled}
+                onCheckedChange={(checked) => patchDraft({ backup_awg2_enabled: checked })}
+              />
+            )}
           </div>
 
           {settingsDraft.auto_backup_enabled && (
@@ -800,7 +835,7 @@ export default function BackupTab() {
 
       <SettingsAlert variant="info" title="Что восстанавливается откуда">
         <strong>AdminPanel</strong> — «Восстановить» в списке или «Загрузить и восстановить» для архива с
-        компьютера (после переустановки): база, CIDR, .env и при наличии списки маршрутизации.{' '}
+        компьютера (после переустановки): база, CIDR, .env и при наличии списки маршрутизации и слой AZ-AWG2.{' '}
         <strong>AntiZapret</strong> — полный архив VPN восстанавливается на VPN-сервере (не через этот список).
       </SettingsAlert>
 

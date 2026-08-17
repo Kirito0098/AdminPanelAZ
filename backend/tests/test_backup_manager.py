@@ -122,6 +122,34 @@ def test_restore_backup_returns_config_contents(tmp_path: Path):
     assert restored["configs"]["include-hosts.txt"] == "example.com\n"
 
 
+def test_create_backup_packs_awg2_overlay(tmp_path: Path):
+    result = _manager(tmp_path).create_backup(awg2_archive=b"narrow-awg2-bytes")
+    with tarfile.open(tmp_path / "backups" / result["file_name"], "r:gz") as tar:
+        extracted = tar.extractfile(BackupManager.AWG2_ARCHIVE_MEMBER)
+        assert extracted is not None
+        assert extracted.read() == b"narrow-awg2-bytes"
+    assert "awg2" in result["components"]
+
+
+def test_load_restore_payload_keeps_awg2_bytes_without_writing_live_files(tmp_path: Path):
+    mgr = _manager(tmp_path)
+    created = mgr.create_backup(awg2_archive=b"overlay-payload")
+    payload = mgr.load_restore_payload(created["file_name"])
+    assert "awg2" in payload["restored"]
+    assert payload["_files"]["awg2"] == b"overlay-payload"
+    assert not (tmp_path / "az-awg2-backup.tar.gz").exists()
+    applied = mgr.apply_restore_payload(payload)
+    assert "awg2" in applied["restored"]
+    assert not (tmp_path / "az-awg2-backup.tar.gz").exists()
+
+
+def test_inspect_backup_archive_lists_awg2_component(tmp_path: Path):
+    mgr = _manager(tmp_path)
+    created = mgr.create_backup(awg2_archive=b"overlay-payload")
+    inspected = mgr.inspect_backup_archive(tmp_path / "backups" / created["file_name"])
+    assert "awg2" in inspected["components"]
+
+
 def test_load_restore_payload_does_not_write_db_until_apply(tmp_path: Path):
     mgr = _manager(tmp_path)
     conn = sqlite3.connect(mgr.db_path)

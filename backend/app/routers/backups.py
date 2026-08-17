@@ -27,6 +27,7 @@ from app.schemas import (
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
 from app.services.backup_manager import BackupManager
+from app.services.backup_scheduler import collect_awg2_backup_archive
 from app.services.node_manager import get_active_adapter
 from app.services.node_update import resolve_repo_root
 from app.services.notify_time import get_client_timezone_from_request
@@ -108,6 +109,7 @@ def get_backup_settings(db: Session = Depends(get_db), _: User = Depends(require
         auto_backup_days=int(_get_setting(db, "backup_auto_days", "7") or "7"),
         telegram_on_backup=_get_setting(db, "backup_telegram_enabled", "false") == "true",
         backup_az_enabled=_get_setting(db, "backup_az_enabled", "true") == "true",
+        backup_awg2_enabled=_get_setting(db, "backup_awg2_enabled", "true") == "true",
         retention_count=int(_get_setting(db, "backup_retention", "5") or "5"),
     )
 
@@ -126,6 +128,8 @@ def update_backup_settings(
         _set_setting(db, "backup_telegram_enabled", "true" if payload.telegram_on_backup else "false")
     if payload.backup_az_enabled is not None:
         _set_setting(db, "backup_az_enabled", "true" if payload.backup_az_enabled else "false")
+    if payload.backup_awg2_enabled is not None:
+        _set_setting(db, "backup_awg2_enabled", "true" if payload.backup_awg2_enabled else "false")
     if payload.retention_count is not None:
         _set_setting(db, "backup_retention", str(payload.retention_count))
     db.commit()
@@ -134,6 +138,7 @@ def update_backup_settings(
         auto_backup_days=int(_get_setting(db, "backup_auto_days", "7") or "7"),
         telegram_on_backup=_get_setting(db, "backup_telegram_enabled", "false") == "true",
         backup_az_enabled=_get_setting(db, "backup_az_enabled", "true") == "true",
+        backup_awg2_enabled=_get_setting(db, "backup_awg2_enabled", "true") == "true",
         retention_count=int(_get_setting(db, "backup_retention", "5") or "5"),
     )
 
@@ -151,6 +156,7 @@ def _create_backup_with_optional_telegram(
     *,
     include_configs: bool,
     include_antizapret_backup: bool,
+    include_awg2_backup: bool,
     send_to_telegram: bool,
     panel_caption_prefix: str,
     az_caption_prefix: str,
@@ -164,10 +170,20 @@ def _create_backup_with_optional_telegram(
             for fname in BackupManager.CONFIG_FILES
         }
 
+    awg2_archive = None
+    if include_awg2_backup:
+        try:
+            awg2_archive = collect_awg2_backup_archive(db)
+        except Exception as exc:
+            if send_to_telegram:
+                raise
+            logger.warning("AZ-AWG2 overlay backup failed: %s", exc)
+
     result = manager.create_backup(
         include_configs=include_configs,
         config_contents=config_contents,
         retention=int(_get_setting(db, "backup_retention", "5") or "5"),
+        awg2_archive=awg2_archive,
     )
 
     send_tg = send_to_telegram or _get_setting(db, "backup_telegram_enabled", "false") == "true"
@@ -244,6 +260,7 @@ def create_backup(
         db,
         include_configs=payload.include_configs,
         include_antizapret_backup=payload.include_antizapret_backup,
+        include_awg2_backup=payload.include_awg2_backup,
         send_to_telegram=payload.send_to_telegram,
         panel_caption_prefix="Бэкап AdminPanelAZ",
         az_caption_prefix="Бэкап AntiZapret",
@@ -339,9 +356,32 @@ def _write_restored_configs(db: Session, configs: dict[str, str]) -> None:
         logger.warning("Could not restore AntiZapret routing lists: %s", exc)
 
 
+def _restore_awg2_overlay(db: Session, payload: dict) -> None:
+    data = (payload.get("_files") or {}).get("awg2")
+    if not data:
+        return
+    try:
+        adapter = get_active_adapter(db)
+        runtime = adapter.restore_awg2_backup(data)
+        if runtime.get("success") is False:
+            logger.warning(
+                "AZ-AWG2 runtime apply after panel restore failed: %s",
+                runtime.get("errors") or [],
+            )
+            return
+        from app.routers.awg2 import _ha_sync_awg2_from_active
+
+        ha = _ha_sync_awg2_from_active(db)
+        if ha.get("errors"):
+            logger.warning("AZ-AWG2 HA sync after panel restore: %s", ha["errors"])
+    except Exception as exc:
+        logger.warning("Could not restore AZ-AWG2 overlay from panel backup: %s", exc)
+
+
 def _restore_panel_and_restart(manager: BackupManager, file_name: str, db: Session) -> dict:
     payload = manager.load_restore_payload(file_name)
     _write_restored_configs(db, payload.get("configs") or {})
+    _restore_awg2_overlay(db, payload)
     _dispose_db_engines()
     result = manager.apply_restore_payload(payload)
     _schedule_panel_restart_after_restore()
@@ -411,6 +451,7 @@ def test_backup_telegram(
         )
 
     include_az = bool(payload.include_antizapret_backup)
+    include_awg2 = bool(payload.include_awg2_backup)
     include_configs = bool(payload.include_configs)
 
     def _task(progress_updater=None):
@@ -424,6 +465,7 @@ def test_backup_telegram(
                 task_db,
                 include_configs=include_configs,
                 include_antizapret_backup=include_az,
+                include_awg2_backup=include_awg2,
                 send_to_telegram=True,
                 panel_caption_prefix="Тест бэкапа AdminPanelAZ",
                 az_caption_prefix="Тест бэкапа AntiZapret",

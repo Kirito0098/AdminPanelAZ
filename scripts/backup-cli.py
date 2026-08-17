@@ -104,6 +104,18 @@ def _load_config_contents(include: bool) -> dict[str, str] | None:
     return contents or None
 
 
+def _load_awg2_archive(include: bool) -> bytes | None:
+    if not include:
+        return None
+    try:
+        from app.services.awg2 import Awg2Service
+
+        return Awg2Service().export_narrow_backup()
+    except Exception as exc:
+        print(f"WARN: слой AZ-AWG2 пропущен: {exc}", file=sys.stderr)
+        return None
+
+
 def cmd_create(args: argparse.Namespace) -> int:
     install_dir = os.path.abspath(args.install_dir)
     manager = _build_manager(install_dir)
@@ -113,6 +125,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         result = manager.create_backup(
             include_configs=args.include_configs,
             config_contents=_load_config_contents(args.include_configs),
+            awg2_archive=_load_awg2_archive(args.include_awg2),
         )
         print(result.get("file_path", result.get("file_name", "")))
         return 0
@@ -156,6 +169,11 @@ def main(argv: list[str] | None = None) -> int:
         "--include-configs",
         action="store_true",
         help="Включить списки маршрутизации AntiZapret ($ANTIZAPRET_HOME/config)",
+    )
+    create_parser.add_argument(
+        "--include-awg2",
+        action="store_true",
+        help="Включить узкий архив слоя AZ-AWG2, если слой установлен",
     )
     create_parser.add_argument(
         "--keep-running",

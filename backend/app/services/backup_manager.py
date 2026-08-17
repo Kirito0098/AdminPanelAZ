@@ -36,6 +36,7 @@ class BackupManager:
         "exclude-ips.txt",
         "allow-ips.txt",
     )
+    AWG2_ARCHIVE_MEMBER = "awg2/az-awg2-backup.tar.gz"
 
     def __init__(
         self,
@@ -82,6 +83,7 @@ class BackupManager:
         include_configs: bool = False,
         config_contents: dict[str, str] | None = None,
         retention: int = 5,
+        awg2_archive: bytes | None = None,
     ) -> dict:
         self.backup_root.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
@@ -122,6 +124,16 @@ class BackupManager:
                     components.append("configs")
                     summary_parts.append(f"CONFIGS:{len(config_contents)}")
 
+            if awg2_archive:
+                tmp = self.backup_root / ".tmp_az-awg2-backup.tar.gz"
+                try:
+                    tmp.write_bytes(awg2_archive)
+                    tar.add(tmp, arcname=self.AWG2_ARCHIVE_MEMBER)
+                finally:
+                    tmp.unlink(missing_ok=True)
+                components.append("awg2")
+                summary_parts.append("AWG2:1")
+
         metadata = {
             "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "components": components,
@@ -161,6 +173,8 @@ class BackupManager:
             components.append("env")
         if any(name.startswith("antizapret/config/") for name in member_names):
             components.append("configs")
+        if self.AWG2_ARCHIVE_MEMBER in member_names:
+            components.append("awg2")
 
         if not components:
             raise HTTPException(
@@ -247,6 +261,12 @@ class BackupManager:
                 restored_configs[filename] = extracted.read().decode("utf-8")
             if restored_configs:
                 restored.append("configs")
+
+            if self.AWG2_ARCHIVE_MEMBER in members:
+                extracted = tar.extractfile(members[self.AWG2_ARCHIVE_MEMBER])
+                if extracted:
+                    files["awg2"] = extracted.read()
+                    restored.append("awg2")
 
         if not restored:
             raise HTTPException(

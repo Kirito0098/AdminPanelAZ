@@ -843,12 +843,14 @@ export async function createBackup(
   includeConfigs = false,
   includeAntizapretBackup = false,
   sendToTelegram = false,
+  includeAwg2Backup = false,
 ) {
   return apiFetch<import('../types').BackupEntry>('/backups/create', {
     method: 'POST',
     body: JSON.stringify({
       include_configs: includeConfigs,
       include_antizapret_backup: includeAntizapretBackup,
+      include_awg2_backup: includeAwg2Backup,
       send_to_telegram: sendToTelegram,
     }),
   })

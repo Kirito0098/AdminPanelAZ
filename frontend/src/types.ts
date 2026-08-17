@@ -489,6 +489,7 @@ export interface BackupSettings {
   auto_backup_days: number
   telegram_on_backup: boolean
   backup_az_enabled: boolean
+  backup_awg2_enabled: boolean
   retention_count: number
 }
 

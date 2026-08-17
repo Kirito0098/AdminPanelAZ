@@ -9,6 +9,7 @@ from app.database import SessionLocal
 from app.models import AppSetting
 from app.services.backup_manager import BackupManager
 from app.services.cidr.pipeline.file_pipeline import _prune_runtime_backups
+from app.services.feature_guards import get_feature_service
 from app.services.feature_toggles import FeatureToggleService
 from app.services.node_manager import get_active_adapter
 from app.services.telegram import send_tg_document
@@ -46,6 +47,20 @@ def collect_backup_config_contents(db) -> dict[str, str] | None:
         return None
 
 
+def collect_awg2_backup_archive(db) -> bytes | None:
+    if not get_feature_service().is_enabled("awg2"):
+        return None
+    try:
+        adapter = get_active_adapter(db)
+        health = adapter.get_awg2_health()
+        if not isinstance(health, dict) or not health.get("installed"):
+            return None
+        return adapter.export_awg2_backup()
+    except Exception as exc:
+        logger.warning("Could not export AZ-AWG2 overlay for backup: %s", exc)
+        return None
+
+
 async def run_backup_scheduler_loop(
     app_root: Path,
     backup_root: Path,
@@ -73,10 +88,14 @@ async def run_backup_scheduler_loop(
                 )
                 retention = int(_get_setting(db, "backup_retention", "5") or "5")
                 config_contents = collect_backup_config_contents(db)
+                awg2_archive = None
+                if _get_setting(db, "backup_awg2_enabled", "true") == "true":
+                    awg2_archive = collect_awg2_backup_archive(db)
                 result = manager.create_backup(
                     include_configs=bool(config_contents),
                     config_contents=config_contents,
                     retention=retention,
+                    awg2_archive=awg2_archive,
                 )
                 row = db.query(AppSetting).filter(AppSetting.key == "backup_auto_last_run").first()
                 now_str = datetime.now(timezone.utc).isoformat()
