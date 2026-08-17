@@ -223,6 +223,7 @@ async def handle_chosen_inline_result(ctx: BotContext, chosen: dict[str, Any]) -
         return
     config_id = int(parts[1])
 
+    from app.services.telegram import send_tg_message
     from app.services.telegram_bot_handlers.configs import _get_accessible_config
     from app.services.telegram_config_send import send_config_for_user
 
@@ -236,12 +237,19 @@ async def handle_chosen_inline_result(ctx: BotContext, chosen: dict[str, Any]) -
         return
 
     path = parts[2] if len(parts) > 2 and parts[2] else None
-    send_config_for_user(
+    sent, err = send_config_for_user(
         ctx.db,
         config,
         ctx.user,
         bot_token=ctx.bot_token,
         path=path,
         chat_id_override=chat_id,
-        run_async=True,
+        run_async=False,
     )
+    if err or sent == 0:
+        send_tg_message(
+            ctx.bot_token,
+            str(chat_id),
+            err or "Не удалось отправить конфиг в Telegram",
+            run_async=False,
+        )

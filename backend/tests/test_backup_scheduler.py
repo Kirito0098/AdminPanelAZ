@@ -51,11 +51,11 @@ def test_collect_backup_config_contents_reads_adapter(monkeypatch):
     assert set(contents) == set(BackupManager.CONFIG_FILES)
 
 
-def test_cli_include_configs_reads_antizapret_home(tmp_path: Path, monkeypatch):
+def test_cli_include_configs_reads_antizapret_path_env(tmp_path: Path, monkeypatch):
     config_dir = tmp_path / "az" / "config"
     config_dir.mkdir(parents=True)
     (config_dir / "include-hosts.txt").write_text("foo.example\n", encoding="utf-8")
-    monkeypatch.setenv("ANTIZAPRET_HOME", str(tmp_path / "az"))
+    monkeypatch.setenv("ANTIZAPRET_PATH", str(tmp_path / "az"))
 
     import importlib.util
 
@@ -69,6 +69,31 @@ def test_cli_include_configs_reads_antizapret_home(tmp_path: Path, monkeypatch):
     assert contents is not None
     assert contents["include-hosts.txt"] == "foo.example\n"
     assert module._load_config_contents(False) is None
+
+
+def test_cli_include_configs_reads_antizapret_path_from_install_env(tmp_path: Path, monkeypatch):
+    install_dir = tmp_path / "panel"
+    config_dir = install_dir / "antizapret" / "config"
+    config_dir.mkdir(parents=True)
+    (install_dir / "backend").mkdir(parents=True)
+    (install_dir / "backend" / ".env").write_text(
+        f"ANTIZAPRET_PATH={install_dir / 'antizapret'}\n",
+        encoding="utf-8",
+    )
+    (config_dir / "include-hosts.txt").write_text("bar.example\n", encoding="utf-8")
+
+    import importlib.util
+
+    cli_path = Path(__file__).resolve().parents[2] / "scripts" / "backup-cli.py"
+    spec = importlib.util.spec_from_file_location("backup_cli_configs_install_env", cli_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.delenv("ANTIZAPRET_PATH", raising=False)
+
+    contents = module._load_config_contents(True, install_dir=str(install_dir))
+    assert contents is not None
+    assert contents["include-hosts.txt"] == "bar.example\n"
 
 
 def test_collect_awg2_backup_archive_skips_when_layer_missing(monkeypatch):

@@ -56,6 +56,9 @@
 - **API restore панели** — SQLite-движки закрываются до записи `adminpanel.db` / `cidr.db`; CLI по-прежнему stop → restore → start.
 - **HA Push full** — если на primary установлен слой AZ-AWG2, overlay копируется на replica (`sync_amneziawg2_state_from_primary`); ошибка синка валит эту replica.
 - **Слой AZ-AWG2 в бэкапе панели** — create / авто-бэкап / CLI `--include-awg2` пакуют узкий overlay в `adminpanelaz_*.tar.gz`, если слой установлен; restore пишет его через адаптер до перезапуска (как списки маршрутизации). Если слоя нет — шаг пропускается.
+- **CLI restore** — из архива панели накатывает списки AntiZapret и слой AZ-AWG2 (best-effort; ошибка overlay не откатывает sqlite). Для HA-реплик нужен Push full.
+- **Вкладка backup AZ-AWG2** — только скачивание overlay; restore слоя через backup панели.
+- **Telegram document/photo** — по умолчанию ждут конец upload; inline-выдача конфига показывает ошибку в чате.
 
 - **Выдача AmneziaWG / WireGuard** — `Endpoint` больше не берётся из списка OpenVPN remote. При скачивании/QR/Telegram подставляется `WIREGUARD_HOST` из setup AntiZapret (как `client.sh` у GubernievS). Список «Адреса подключения» по умолчанию патчит только `.ovpn`. Чтобы первый адрес (прокси) попал и в AWG — галочка «Также для AmneziaWG / WireGuard» (пишет `WIREGUARD_HOST`, нужен `proxy.sh` с форвардом UDP 52443/52080).
 

@@ -17,6 +17,7 @@ if str(BACKEND) not in sys.path:
 from fastapi import HTTPException  # noqa: E402
 
 from app.services.backup_manager import BackupManager  # noqa: E402
+from app.services.backup_overlays import apply_backup_overlays  # noqa: E402
 
 
 def _default_install_dir() -> str:
@@ -92,10 +93,19 @@ def _service_control(action: str, *, install_dir: str, allow_failure: bool = Fal
         raise RuntimeError(f"{' '.join(cmd)}: {detail}")
 
 
-def _load_config_contents(include: bool) -> dict[str, str] | None:
+def _resolve_antizapret_root(install_dir: str | os.PathLike[str] | None = None) -> Path:
+    env_value = os.environ.get("ANTIZAPRET_PATH", "").strip()
+    if env_value:
+        return Path(env_value)
+    root = Path(install_dir or _default_install_dir()).resolve()
+    env_path = root / "backend" / ".env"
+    return Path(_env_value(env_path, "ANTIZAPRET_PATH", "/root/antizapret"))
+
+
+def _load_config_contents(include: bool, *, install_dir: str | os.PathLike[str] | None = None) -> dict[str, str] | None:
     if not include:
         return None
-    az_root = Path(os.environ.get("ANTIZAPRET_HOME", "/root/antizapret")) / "config"
+    az_root = _resolve_antizapret_root(install_dir) / "config"
     contents: dict[str, str] = {}
     for filename in BackupManager.CONFIG_FILES:
         path = az_root / filename
@@ -124,7 +134,7 @@ def cmd_create(args: argparse.Namespace) -> int:
     try:
         result = manager.create_backup(
             include_configs=args.include_configs,
-            config_contents=_load_config_contents(args.include_configs),
+            config_contents=_load_config_contents(args.include_configs, install_dir=install_dir),
             awg2_archive=_load_awg2_archive(args.include_awg2),
         )
         print(result.get("file_path", result.get("file_name", "")))
@@ -140,10 +150,17 @@ def cmd_create(args: argparse.Namespace) -> int:
 def cmd_restore(args: argparse.Namespace) -> int:
     install_dir = os.path.abspath(args.install_dir)
     manager = _build_manager(install_dir)
+    config_root = _resolve_antizapret_root(install_dir) / "config"
     _service_control("stop", install_dir=install_dir, allow_failure=True)
     try:
-        result = manager.restore_backup(args.backup_name)
+        payload = manager.load_restore_payload(args.backup_name)
+        result = manager.apply_restore_payload(payload)
+        apply_backup_overlays(payload, mode="local", config_root=config_root)
         print(result.get("file_name", ""))
+        if payload.get("configs"):
+            print("Для списков AntiZapret выполните Применение, иначе маршрутизация останется устаревшей.")
+        if payload.get("configs") or (payload.get("_files") or {}).get("awg2"):
+            print("Если есть HA-реплики, выполните Push full.")
         return 0
     except HTTPException as exc:
         print(f"ERROR: {exc.detail}", file=sys.stderr)
@@ -168,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     create_parser.add_argument(
         "--include-configs",
         action="store_true",
-        help="Включить списки маршрутизации AntiZapret ($ANTIZAPRET_HOME/config)",
+        help="Включить списки маршрутизации AntiZapret ($ANTIZAPRET_PATH/config)",
     )
     create_parser.add_argument(
         "--include-awg2",

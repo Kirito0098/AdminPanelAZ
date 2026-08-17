@@ -51,7 +51,7 @@ def send_tg_document(
     *,
     filename: str | None = None,
     content_type: str = "application/gzip",
-    run_async: bool = True,
+    run_async: bool = False,
     timeout_seconds: int = 120,
 ) -> bool:
     if not _outbound_enabled():
@@ -116,7 +116,7 @@ def send_tg_photo(
     caption: str = "",
     *,
     filename: str | None = None,
-    run_async: bool = True,
+    run_async: bool = False,
     timeout_seconds: int = 120,
 ) -> bool:
     if not _outbound_enabled():

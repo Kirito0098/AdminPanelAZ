@@ -27,6 +27,7 @@ from app.schemas import (
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
 from app.services.backup_manager import BackupManager
+from app.services.backup_overlays import apply_backup_overlays
 from app.services.backup_scheduler import collect_awg2_backup_archive
 from app.services.node_manager import get_active_adapter
 from app.services.node_update import resolve_repo_root
@@ -40,6 +41,10 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 MAX_BACKUP_UPLOAD_BYTES = 200 * 1024 * 1024
 RESTORE_RESTART_MESSAGE = "Восстановление выполнено. Панель будет перезапущена через несколько секунд."
+RESTORE_APPLY_HINT = (
+    "Если восстановлены списки AntiZapret, выполните Применение, "
+    "иначе маршрутизация может остаться устаревшей."
+)
 
 
 def _project_root() -> Path:
@@ -65,9 +70,12 @@ def _schedule_panel_restart_after_restore() -> None:
 
 
 def _restore_response(restore_result: dict) -> MessageResponse:
+    detail = {**restore_result, "restart_scheduled": True}
+    if "configs" in (restore_result.get("restored") or []):
+        detail["hint"] = RESTORE_APPLY_HINT
     return MessageResponse(
         message=RESTORE_RESTART_MESSAGE,
-        detail={**restore_result, "restart_scheduled": True},
+        detail=detail,
     )
 
 
@@ -345,43 +353,9 @@ async def upload_backup(
     return BackupEntry(**result)
 
 
-def _write_restored_configs(db: Session, configs: dict[str, str]) -> None:
-    if not configs:
-        return
-    try:
-        adapter = get_active_adapter(db)
-        for filename, content in configs.items():
-            adapter.write_config_file(filename, content)
-    except Exception as exc:
-        logger.warning("Could not restore AntiZapret routing lists: %s", exc)
-
-
-def _restore_awg2_overlay(db: Session, payload: dict) -> None:
-    data = (payload.get("_files") or {}).get("awg2")
-    if not data:
-        return
-    try:
-        adapter = get_active_adapter(db)
-        runtime = adapter.restore_awg2_backup(data)
-        if runtime.get("success") is False:
-            logger.warning(
-                "AZ-AWG2 runtime apply after panel restore failed: %s",
-                runtime.get("errors") or [],
-            )
-            return
-        from app.routers.awg2 import _ha_sync_awg2_from_active
-
-        ha = _ha_sync_awg2_from_active(db)
-        if ha.get("errors"):
-            logger.warning("AZ-AWG2 HA sync after panel restore: %s", ha["errors"])
-    except Exception as exc:
-        logger.warning("Could not restore AZ-AWG2 overlay from panel backup: %s", exc)
-
-
 def _restore_panel_and_restart(manager: BackupManager, file_name: str, db: Session) -> dict:
     payload = manager.load_restore_payload(file_name)
-    _write_restored_configs(db, payload.get("configs") or {})
-    _restore_awg2_overlay(db, payload)
+    apply_backup_overlays(payload, mode="adapter", db=db)
     _dispose_db_engines()
     result = manager.apply_restore_payload(payload)
     _schedule_panel_restart_after_restore()
