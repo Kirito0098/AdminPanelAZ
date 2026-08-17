@@ -47,20 +47,44 @@
 
 ## [Unreleased]
 
+> **Кратко:** round-trip бэкапа панели после split `cidr.db` (WAL-safe sqlite, retention, `*.json`); узкий слой **AZ-AWG2** в `adminpanelaz_*.tar.gz`; CLI restore накатывает списки AntiZapret и overlay; вкладка `/awg2` Backup только скачивает; Telegram document/photo ждут upload; Endpoint AWG/WG из `WIREGUARD_HOST`.
+
+### ✨ Added
+
+- **Слой AZ-AWG2 в бэкапе панели** — тот же узкий overlay, что `POST /api/awg2/backup` (`awg2/az-awg2-backup.tar.gz` внутри `adminpanelaz_*.tar.gz`), не полный VPN-архив и не третье вложение в Telegram:
+  - создание копии: галочка в UI, если модуль `awg2` включён;
+  - авто-бэкап: `backup_awg2_enabled`;
+  - CLI: `--include-awg2`;
+  - если слой не установлен — шаг пропускается, архив панели всё равно создаётся;
+  - API restore пишет overlay через активный адаптер до dispose SQLite (как списки маршрутизации), затем best-effort HA-sync.
+
+### 🔄 Changed
+
+- **CLI restore** — `stop` → load → sqlite/`.env` → local overlays → `start` в `finally` (в том числе при ошибке sqlite). Overlay best-effort: ошибка списков/AWG2 не откатывает БД и не меняет код выхода. CLI **не** делает Push full — печатает подсказку. Списки пишутся в `$ANTIZAPRET_PATH/config` (env, иначе `backend/.env` относительно `--install-dir`, иначе `/root/antizapret`); `--install-dir` — корень панели, не дерево AntiZapret.
+- **HA Push full** — если на primary установлен слой AZ-AWG2, overlay копируется на replica (`sync_amneziawg2_state_from_primary`); ошибка синка валит эту replica.
+- **Вкладка Backup на `/awg2`** — только скачивание узкого overlay. Restore слоя — через Настройки → Бэкапы, если архив панели содержит компонент AWG2. `POST /api/awg2/restore` и node-agent `/awg2/restore` сохранены (HA / аварийный overlay без архива панели).
+- **Telegram document/photo** — `send_tg_document` / `send_tg_photo` по умолчанию ждут конец upload (`run_async=False`). Inline-выдача конфига показывает ошибку в чате (или «Не удалось отправить конфиг в Telegram»). `send_tg_message` по-прежнему может уходить асинхронно.
+- **Restore списков AntiZapret** — файлы пишутся, `apply_config_changes` не вызывается (панель сразу перезапускается). API кладёт `detail.hint` про Применение; CLI печатает ту же мысль в stdout.
+
+### 🗑️ Removed
+
+- Кнопка «Загрузить и восстановить» на вкладке Backup `/awg2` (file input, `handleRestore`, `onRestored`). Клиентский `restoreAwg2Backup` в API-слое оставлен.
+
 ### 🐛 Fixed
 
 - **Бэкапы панели** — авто-бэкап и `backup-cli.py` снова включают `cidr.db` (после выделения CIDR из `adminpanel.db`); restore CLI/API пишет CIDR; имя метаданных `*.json` вместо `*.tar.json`; retention из настроек реально ограничивает число копий (в т.ч. пресет 10); SQLite копируется через `sqlite3.backup` (WAL); списки маршрутизации пакуются в авто-бэкапе/CLI и восстанавливаются через адаптер.
 - **AntiZapret restore** — архив `client.sh 8` распаковывается во временный каталог, не в `/root`.
-- **AZ-AWG2 restore** — если `apply_runtime` не удался, API отвечает 500 (без ложного успеха и без HA-sync).
+- **AZ-AWG2 restore (узкий API)** — если `apply_runtime` не удался, `POST /api/awg2/restore` отвечает 500 (без ложного успеха и без HA-sync). Overlay из архива панели в CLI/API: `success is False` — warning, sqlite не откатывается.
 - **Telegram-доставка бэкапа** — create / авто-бэкап / тест отправляют документ синхронно (`run_async=False`); явная отправка отвечает ошибкой, если upload не удался.
-- **API restore панели** — SQLite-движки закрываются до записи `adminpanel.db` / `cidr.db`; CLI по-прежнему stop → restore → start.
-- **HA Push full** — если на primary установлен слой AZ-AWG2, overlay копируется на replica (`sync_amneziawg2_state_from_primary`); ошибка синка валит эту replica.
-- **Слой AZ-AWG2 в бэкапе панели** — create / авто-бэкап / CLI `--include-awg2` пакуют узкий overlay в `adminpanelaz_*.tar.gz`, если слой установлен; restore пишет его через адаптер до перезапуска (как списки маршрутизации). Если слоя нет — шаг пропускается.
-- **CLI restore** — из архива панели накатывает списки AntiZapret и слой AZ-AWG2 (best-effort; ошибка overlay не откатывает sqlite). Для HA-реплик нужен Push full.
-- **Вкладка backup AZ-AWG2** — только скачивание overlay; restore слоя через backup панели.
-- **Telegram document/photo** — по умолчанию ждут конец upload; inline-выдача конфига показывает ошибку в чате.
-
+- **API restore панели** — SQLite-движки закрываются до записи `adminpanel.db` / `cidr.db` (`apply_backup_overlays` → dispose → apply sqlite → restart).
+- **CLI списки AntiZapret** — читает/пишет `$ANTIZAPRET_PATH` (как installer / `.env` / node agent), а не несуществующий `ANTIZAPRET_HOME`.
 - **Выдача AmneziaWG / WireGuard** — `Endpoint` больше не берётся из списка OpenVPN remote. При скачивании/QR/Telegram подставляется `WIREGUARD_HOST` из setup AntiZapret (как `client.sh` у GubernievS). Список «Адреса подключения» по умолчанию патчит только `.ovpn`. Чтобы первый адрес (прокси) попал и в AWG — галочка «Также для AmneziaWG / WireGuard» (пишет `WIREGUARD_HOST`, нужен `proxy.sh` с форвардом UDP 52443/52080).
+
+### 🧪 Tests
+
+- **Бэкапы / overlay** — `apply_backup_overlays` (local + adapter), порядок API restore, CLI restore (sqlite затем local, start при ошибке), scheduler/`--include-configs` через `ANTIZAPRET_PATH` (`test_backup_overlays.py`, `test_backup_cli.py`, `test_backups_restore_order.py`, `test_backup_manager.py`, `test_backup_scheduler.py`).
+- **Telegram files** — default sync document/photo; inline chosen-result пишет ошибку в чат (`test_telegram_send_document.py`, `test_telegram_inline_chosen.py`).
+- **AWG2 backup API** — узкий download/restore и adapter parity без регрессии (`test_awg2_backup.py`, `test_node_adapter_parity.py`).
 
 ---
 
