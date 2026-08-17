@@ -122,6 +122,12 @@ function RemoteHostsListBody({
 
       <ul className="list-disc space-y-1.5 pl-5 text-xs leading-relaxed text-muted-foreground">
         <li>Порядок сверху вниз — порядок попыток OpenVPN.</li>
+        <li>
+          <span className="font-medium text-foreground">Первый адрес — слот входа.</span> Если есть
+          российский прокси (proxy.sh) — ставьте его первым: OpenVPN идёт сюда первым, при
+          сохранении адрес пишется в OPENVPN_HOST, кнопка allow-ips берёт только его. Остальные
+          строки — запасные remote только для OpenVPN.
+        </li>
         <li>Адресов сколько нужно (до {MAX_REMOTE_HOSTS}); схема у каждого админа своя.</li>
         <li>
           Российский прокси ставится отдельно скриптом AntiZapret (
@@ -138,13 +144,13 @@ function RemoteHostsListBody({
         <li>Один proxy.sh направляет на один зарубежный сервер.</li>
         <li>Список хранится в панели и не пропадает при обновлении AntiZapret.</li>
         <li>
-          IP прокси обычно добавляют в allow-ips.txt на VPN-сервере (кнопка ниже — только первый
-          адрес списка; панель не ставит proxy.sh).
+          IP прокси должен быть в allow-ips.txt на VPN-сервере (кнопка ниже — только первый адрес;
+          панель не ставит proxy.sh).
         </li>
         <li>
           AmneziaWG/WireGuard по умолчанию берут хост из WIREGUARD_HOST (как client.sh). Первый
-          адрес списка попадает в их Endpoint только если включить галочку ниже — и только если
-          на прокси форвардятся UDP 52443/52080 (как в proxy.sh).
+          адрес (слот прокси) попадает в их Endpoint только если включить галочку ниже — и только
+          если на прокси форвардятся UDP 52443/52080 (как в proxy.sh).
         </li>
         <li>
           Трафик считается на зарубежном VPN, куда подключились; прокси в статистике панели
@@ -160,14 +166,21 @@ function RemoteHostsListBody({
         )}
         {remoteHosts.map((host, index) => (
           <div key={`remote-host-${index}`} className="flex items-center gap-2">
-            <span className="w-5 shrink-0 text-center font-mono text-[10px] text-muted-foreground">
+            <span className="flex w-14 shrink-0 flex-col items-center justify-center gap-0.5 text-center font-mono text-[10px] text-muted-foreground">
               {index + 1}
+              {index === 0 && (
+                <span className="font-sans font-medium leading-none text-foreground">вход</span>
+              )}
             </span>
             <Input
               value={host}
               disabled={listDisabled}
-              placeholder="IP или домен"
-              aria-label={`Адрес ${index + 1}`}
+              placeholder={index === 0 ? 'IP или домен прокси (вход)' : 'Запасной remote OpenVPN'}
+              aria-label={
+                index === 0
+                  ? 'Первый адрес — слот входа / прокси'
+                  : `Запасной адрес OpenVPN ${index + 1}`
+              }
               onChange={(e) => {
                 const updated = [...remoteHosts]
                 updated[index] = e.target.value
@@ -224,8 +237,9 @@ function RemoteHostsListBody({
         <span>
           <span className="font-medium">Также для AmneziaWG / WireGuard</span>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Как шаг 4 в README AntiZapret: первый адрес пишется в WIREGUARD_HOST и в Endpoint
-            новых -am.conf / -wg.conf. Нужен proxy.sh с форвардом портов 52443 и 52080.
+            Как шаг 4 в README AntiZapret: первый адрес (слот входа / прокси) пишется в
+            WIREGUARD_HOST и в Endpoint новых -am.conf / -wg.conf. Нужен proxy.sh с форвардом
+            портов 52443 и 52080.
           </span>
         </span>
       </label>
@@ -489,7 +503,8 @@ export default function RemoteHostsCard({
             <div className="min-w-0">
               <CardTitle className="text-base">Адреса подключения</CardTitle>
               <CardDescription className="mt-1">
-                Список remote OpenVPN для активного VPN-узла. Нельзя совпадать с доменом панели.
+                Список remote OpenVPN для активного VPN-узла. Первый адрес — слот входа (прокси,
+                если он есть). Нельзя совпадать с доменом панели.
               </CardDescription>
             </div>
           </div>

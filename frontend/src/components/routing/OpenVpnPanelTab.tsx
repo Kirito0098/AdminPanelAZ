@@ -260,7 +260,8 @@ export default function OpenVpnPanelTab({
               <CardTitle className="text-base">Список remote OpenVPN</CardTitle>
               <CardDescription className="mt-1">
                 Упорядоченный список адресов в клиентских .ovpn. Хранится в БД панели на активном
-                узле. Первый адрес при сохранении пишется в OPENVPN_HOST.
+                узле. Первый адрес — слот входа (прокси, если он есть): при сохранении пишется в
+                OPENVPN_HOST.
               </CardDescription>
             </div>
           </div>
