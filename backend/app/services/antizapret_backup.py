@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tarfile
+import tempfile
 from pathlib import Path
 
 from app.services.node_sync.fingerprints import collect_antizapret_fingerprints, collect_config_file_fingerprints, CONFIG_FINGERPRINT_EXCLUDE
@@ -126,7 +127,7 @@ class AntizapretBackupService:
         )
 
     def _extract_archive(self, archive: Path) -> Path:
-        extract_root = Path("/root")
+        extract_root = Path(tempfile.mkdtemp(prefix="az-backup-"))
         with tarfile.open(archive, "r:gz") as tar:
             tar.extractall(path=str(extract_root), filter="data")
         return extract_root
@@ -206,6 +207,10 @@ class AntizapretBackupService:
                 shutil.copy2(item, dst / item.name)
 
     def _cleanup_extract_artifacts(self, extract_root: Path, archive_name: str) -> None:
+        resolved = extract_root.resolve()
+        if resolved != Path("/root") and extract_root.exists():
+            shutil.rmtree(extract_root, ignore_errors=True)
+            return
         for name in ("easyrsa3", "wireguard", "config", "knot-resolver", "custom"):
             path = extract_root / name
             if path.exists():

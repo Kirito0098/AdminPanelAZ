@@ -139,6 +139,13 @@ async def awg2_restore(
         )
     except Exception as exc:  # noqa: BLE001
         raise _map_awg2_exc(exc) from exc
+    if runtime.get("success") is False:
+        errors = runtime.get("errors") or []
+        detail = "; ".join(
+            str(entry.get("stderr") or entry.get("error") or entry)
+            for entry in errors
+        ) or "AZ-AWG2 runtime apply failed"
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
     ha = _ha_sync_awg2_from_active(db)
     return {
         "message": "AZ-AWG2 восстановлен из бэкапа",

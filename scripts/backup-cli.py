@@ -37,14 +37,31 @@ def _env_value(env_path: Path, key: str, default: str) -> str:
     return default
 
 
+def _sqlite_path_from_env(env_path: Path, key: str, default: Path, backend_root: Path) -> Path:
+    raw = _env_value(env_path, key, "")
+    if raw.startswith("sqlite:///"):
+        file_path = Path(raw.replace("sqlite:///", "", 1))
+        if not file_path.is_absolute():
+            file_path = backend_root / file_path
+        return file_path.resolve()
+    return default.resolve()
+
+
 def _build_manager(install_dir: str) -> BackupManager:
     root = Path(install_dir).resolve()
-    env_path = root / "backend" / ".env"
+    backend = root / "backend"
+    env_path = backend / ".env"
     backup_root = Path(_env_value(env_path, "BACKUP_ROOT", "/var/backups/adminpanelaz"))
     return BackupManager(
         app_root=root,
         backup_root=backup_root,
-        db_path=root / "backend" / "data" / "adminpanel.db",
+        db_path=_sqlite_path_from_env(env_path, "DATABASE_URL", backend / "data" / "adminpanel.db", backend),
+        cidr_db_path=_sqlite_path_from_env(
+            env_path,
+            "CIDR_DATABASE_URL",
+            backend / "data" / "cidr" / "cidr.db",
+            backend,
+        ),
         env_path=env_path,
     )
 
@@ -75,13 +92,28 @@ def _service_control(action: str, *, install_dir: str, allow_failure: bool = Fal
         raise RuntimeError(f"{' '.join(cmd)}: {detail}")
 
 
+def _load_config_contents(include: bool) -> dict[str, str] | None:
+    if not include:
+        return None
+    az_root = Path(os.environ.get("ANTIZAPRET_HOME", "/root/antizapret")) / "config"
+    contents: dict[str, str] = {}
+    for filename in BackupManager.CONFIG_FILES:
+        path = az_root / filename
+        if path.is_file():
+            contents[filename] = path.read_text(encoding="utf-8")
+    return contents or None
+
+
 def cmd_create(args: argparse.Namespace) -> int:
     install_dir = os.path.abspath(args.install_dir)
     manager = _build_manager(install_dir)
     if not args.keep_running:
         _service_control("stop", install_dir=install_dir, allow_failure=True)
     try:
-        result = manager.create_backup(include_configs=args.include_configs)
+        result = manager.create_backup(
+            include_configs=args.include_configs,
+            config_contents=_load_config_contents(args.include_configs),
+        )
         print(result.get("file_path", result.get("file_name", "")))
         return 0
     except Exception as exc:
@@ -123,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     create_parser.add_argument(
         "--include-configs",
         action="store_true",
-        help="Включить файлы маршрутизации из data/cidr",
+        help="Включить списки маршрутизации AntiZapret ($ANTIZAPRET_HOME/config)",
     )
     create_parser.add_argument(
         "--keep-running",

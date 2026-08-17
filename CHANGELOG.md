@@ -49,6 +49,10 @@
 
 ### 🐛 Fixed
 
+- **Бэкапы панели** — авто-бэкап и `backup-cli.py` снова включают `cidr.db` (после выделения CIDR из `adminpanel.db`); restore CLI/API пишет CIDR; имя метаданных `*.json` вместо `*.tar.json`; retention из настроек реально ограничивает число копий (в т.ч. пресет 10); SQLite копируется через `sqlite3.backup` (WAL); списки маршрутизации пакуются в авто-бэкапе/CLI и восстанавливаются через адаптер.
+- **AntiZapret restore** — архив `client.sh 8` распаковывается во временный каталог, не в `/root`.
+- **AZ-AWG2 restore** — если `apply_runtime` не удался, API отвечает 500 (без ложного успеха и без HA-sync). Push full по-прежнему не заменяет overlay AWG2 — это отражено в UI вкладки backup.
+
 - **Выдача AmneziaWG / WireGuard** — `Endpoint` больше не берётся из списка OpenVPN remote. При скачивании/QR/Telegram подставляется `WIREGUARD_HOST` из setup AntiZapret (как `client.sh` у GubernievS). Список «Адреса подключения» по умолчанию патчит только `.ovpn`. Чтобы первый адрес (прокси) попал и в AWG — галочка «Также для AmneziaWG / WireGuard» (пишет `WIREGUARD_HOST`, нужен `proxy.sh` с форвардом UDP 52443/52080).
 
 ---

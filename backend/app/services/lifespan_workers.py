@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from app.config import get_settings
+from app.cidr_database import resolve_cidr_db_path
 from app.services.backup_scheduler import run_backup_scheduler_loop, run_runtime_backup_cleanup_loop
 from app.services.awg2_expire_worker import run_awg2_expire_loop
 from app.services.cert_sync_worker import run_cert_sync_loop
@@ -106,6 +107,7 @@ def spawn_background_tasks(
                 backup_root=Path(settings.backup_root),
                 db_path=db_path,
                 env_path=env_path,
+                cidr_db_path=resolve_cidr_db_path(),
             )
         )
     if plan.get("runtime_backup_cleanup"):

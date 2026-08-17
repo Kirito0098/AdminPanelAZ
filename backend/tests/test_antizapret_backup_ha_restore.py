@@ -1,5 +1,8 @@
 """Tests for HA replica restore (wipe + replace, no client.sh 7)."""
 
+import io
+import shutil
+import tarfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -80,3 +83,32 @@ def test_restore_backup_for_ha_replica_skips_client_sh_7(tmp_path, monkeypatch):
 
     wipe_mock.assert_called_once()
     assert result.get("ha_replica") is True
+
+
+def test_extract_archive_uses_temp_dir_not_root(tmp_path, monkeypatch):
+    archive = tmp_path / "backup.tar.gz"
+    payload = b"V\n"
+    with tarfile.open(archive, "w:gz") as tar:
+        info = tarfile.TarInfo(name="easyrsa3/pki/index.txt")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+
+    captured: dict[str, str] = {}
+    original_extractall = tarfile.TarFile.extractall
+
+    def wrapped(self, path=".", **kwargs):
+        captured["path"] = str(path)
+        if Path(path).resolve() == Path("/root"):
+            return None
+        return original_extractall(self, path=path, **kwargs)
+
+    monkeypatch.setattr(tarfile.TarFile, "extractall", wrapped)
+    service = AntizapretBackupService(install_dir=tmp_path / "az")
+    extract_root = service._extract_archive(archive)
+    try:
+        assert Path(captured["path"]).resolve() != Path("/root")
+        assert extract_root.resolve() != Path("/root")
+        assert (extract_root / "easyrsa3" / "pki" / "index.txt").read_bytes() == payload
+    finally:
+        if extract_root.resolve() != Path("/root"):
+            shutil.rmtree(extract_root, ignore_errors=True)

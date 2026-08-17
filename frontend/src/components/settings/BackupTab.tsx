@@ -702,7 +702,7 @@ export default function BackupTab() {
             <ToggleRow
               id="auto-backup"
               label="Авто-копия AdminPanel"
-              description="База, CIDR и .env панели — файл adminpanelaz_*.tar.gz в списке архивов"
+              description="База, CIDR, .env и при доступности списки AntiZapret — файл adminpanelaz_*.tar.gz"
               checked={settingsDraft.auto_backup_enabled}
               onCheckedChange={(checked) => patchDraft({ auto_backup_enabled: checked })}
             />
@@ -805,7 +805,8 @@ export default function BackupTab() {
       </SettingsAlert>
 
       <SettingsAlert variant="danger" title="Перед восстановлением AdminPanel">
-        Текущие данные панели будут заменены содержимым выбранного архива. После восстановления перезапустите панель.
+        Текущие данные панели будут заменены содержимым выбранного архива. После восстановления панель
+        перезапустится сама через несколько секунд.
       </SettingsAlert>
     </div>
   )

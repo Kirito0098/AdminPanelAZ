@@ -168,6 +168,7 @@ def _create_backup_with_optional_telegram(
     result = manager.create_backup(
         include_configs=include_configs,
         config_contents=config_contents,
+        retention=int(_get_setting(db, "backup_retention", "5") or "5"),
     )
 
     send_tg = send_to_telegram or _get_setting(db, "backup_telegram_enabled", "false") == "true"
@@ -278,7 +279,8 @@ async def upload_backup(
         tmp_path.unlink(missing_ok=True)
 
     if restore:
-        manager.restore_backup(result["file_name"])
+        restore_result = manager.restore_backup(result["file_name"])
+        _write_restored_configs(db, restore_result.get("configs") or {})
         if settings.audit_log_enabled:
             log_action(
                 db,
@@ -309,6 +311,17 @@ async def upload_backup(
     return BackupEntry(**result)
 
 
+def _write_restored_configs(db: Session, configs: dict[str, str]) -> None:
+    if not configs:
+        return
+    try:
+        adapter = get_active_adapter(db)
+        for filename, content in configs.items():
+            adapter.write_config_file(filename, content)
+    except Exception as exc:
+        logger.warning("Could not restore AntiZapret routing lists: %s", exc)
+
+
 @router.post("/restore", response_model=MessageResponse)
 def restore_backup(
     payload: BackupRestoreRequest,
@@ -317,6 +330,8 @@ def restore_backup(
     admin: User = Depends(require_admin),
 ):
     result = _get_backup_manager().restore_backup(payload.file_name)
+    configs = result.pop("configs", {}) or {}
+    _write_restored_configs(db, configs)
     if settings.audit_log_enabled:
         log_action(
             db,

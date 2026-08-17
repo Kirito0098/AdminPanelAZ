@@ -49,8 +49,18 @@ export default function BackupTab({ onRestored }: BackupTabProps) {
     setLastRestoreMessage(null)
     try {
       const result = await withInline(async () => restoreAwg2Backup(file), 'Восстановление AWG2 бэкапа...')
-      setLastRestoreMessage(result.message)
-      success(result.message)
+      const haErrors = result.ha?.errors ?? []
+      if (haErrors.length > 0) {
+        const detail = haErrors
+          .map((entry) => entry.node_name || entry.error || 'replica')
+          .join(', ')
+        const message = `${result.message}. HA: ${detail}`
+        setLastRestoreMessage(message)
+        notifyError(`Файлы восстановлены, синхронизация HA с ошибками: ${detail}`)
+      } else {
+        setLastRestoreMessage(result.message)
+        success(result.message)
+      }
       onRestored?.()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка восстановления бэкапа AZ-AWG2')
@@ -100,7 +110,9 @@ export default function BackupTab({ onRestored }: BackupTabProps) {
 
       <SettingsAlert variant="warning" title="Не замена полному backup">
         Это узкий backup слоя AZ-AWG2. Он не заменяет штатный `awg-backup`, общий backup AntiZapret или
-        backup самой панели. OpenVPN, системные env и прочие данные вне AWG2 сюда не входят.
+        backup самой панели. Полная HA-синхронизация (Push full) тоже не покрывает overlay AWG2 —
+        для реплик используйте этот restore на primary (панель сама попытается синхронизировать слой).
+        OpenVPN, системные env и прочие данные вне AWG2 сюда не входят.
       </SettingsAlert>
 
       <SettingsAlert variant="info" title="Когда использовать">

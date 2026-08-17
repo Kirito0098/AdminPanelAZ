@@ -2,7 +2,9 @@ import glob
 import json
 import os
 import shutil
+import sqlite3
 import tarfile
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +18,14 @@ def remove_sqlite_sidecars(db_path: Path) -> None:
             Path(f"{db_path}{suffix}").unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def backup_meta_path(archive_path: Path) -> Path:
+    """Sidecar JSON next to a .tar.gz archive (not Path.with_suffix, which yields .tar.json)."""
+    name = archive_path.name
+    if name.endswith(".tar.gz"):
+        return archive_path.with_name(name[: -len(".tar.gz")] + ".json")
+    return archive_path.with_suffix(".json")
 
 
 class BackupManager:
@@ -66,9 +76,15 @@ class BackupManager:
             })
         return result
 
-    def create_backup(self, *, include_configs: bool = False, config_contents: dict[str, str] | None = None) -> dict:
+    def create_backup(
+        self,
+        *,
+        include_configs: bool = False,
+        config_contents: dict[str, str] | None = None,
+        retention: int = 5,
+    ) -> dict:
         self.backup_root.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
         archive_name = f"adminpanelaz_{timestamp}.tar.gz"
         archive_path = self.backup_root / archive_name
 
@@ -77,12 +93,12 @@ class BackupManager:
 
         with tarfile.open(archive_path, "w:gz") as tar:
             if self.db_path.exists():
-                tar.add(self.db_path, arcname="data/adminpanel.db")
+                self._add_sqlite_snapshot(tar, self.db_path, "data/adminpanel.db")
                 components.append("db")
                 summary_parts.append("DB:1")
 
             if self.cidr_db_path is not None and self.cidr_db_path.exists():
-                tar.add(self.cidr_db_path, arcname="data/cidr/cidr.db")
+                self._add_sqlite_snapshot(tar, self.cidr_db_path, "data/cidr/cidr.db")
                 components.append("cidr_db")
                 summary_parts.append("CIDR_DB:1")
 
@@ -111,10 +127,10 @@ class BackupManager:
             "components": components,
             "summary": ",".join(summary_parts),
         }
-        meta_path = archive_path.with_suffix(".json")
+        meta_path = backup_meta_path(archive_path)
         meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        self._enforce_retention(5)
+        self._enforce_retention(max(1, int(retention)))
         return {
             "file_name": archive_name,
             "file_path": str(archive_path),
@@ -172,7 +188,7 @@ class BackupManager:
             target_path = self.backup_root / target_name
 
         shutil.move(str(source), str(target_path))
-        meta_path = target_path.with_suffix(".json")
+        meta_path = backup_meta_path(target_path)
         meta_path.write_text(
             json.dumps(
                 {
@@ -198,6 +214,7 @@ class BackupManager:
     def restore_backup(self, file_name: str) -> dict:
         archive_path = self._resolve_archive(file_name)
         restored: list[str] = []
+        restored_configs: dict[str, str] = {}
 
         with tarfile.open(archive_path, "r:gz") as tar:
             members = {m.name: m for m in tar.getmembers()}
@@ -223,15 +240,26 @@ class BackupManager:
                     self.env_path.write_bytes(extracted.read())
                     restored.append("env")
 
+            for filename in self.CONFIG_FILES:
+                member_name = f"antizapret/config/{filename}"
+                if member_name not in members:
+                    continue
+                extracted = tar.extractfile(members[member_name])
+                if not extracted:
+                    continue
+                restored_configs[filename] = extracted.read().decode("utf-8")
+            if restored_configs:
+                restored.append("configs")
+
         if not restored:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Архив не содержит данных для восстановления")
-        return {"restored": restored, "file_name": file_name}
+        return {"restored": restored, "file_name": file_name, "configs": restored_configs}
 
     def delete_backup(self, file_name: str) -> None:
         archive_path = self._resolve_archive(file_name)
         archive_path.unlink(missing_ok=True)
-        meta_path = archive_path.with_suffix(".json")
-        meta_path.unlink(missing_ok=True)
+        backup_meta_path(archive_path).unlink(missing_ok=True)
+        archive_path.with_suffix(".json").unlink(missing_ok=True)
 
     def get_backup_path(self, file_name: str) -> Path:
         return self._resolve_archive(file_name)
@@ -260,6 +288,26 @@ class BackupManager:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         return f"adminpanelaz_{stamp}_upload.tar.gz"
 
+    def _add_sqlite_snapshot(self, tar: tarfile.TarFile, db_path: Path, arcname: str) -> None:
+        fd, tmp_name = tempfile.mkstemp(prefix="adminpanelaz-bak-", suffix=".db")
+        os.close(fd)
+        tmp = Path(tmp_name)
+        try:
+            src = sqlite3.connect(f"file:{db_path.resolve().as_posix()}?mode=ro", uri=True)
+            try:
+                dst = sqlite3.connect(str(tmp))
+                try:
+                    src.backup(dst)
+                finally:
+                    dst.close()
+            finally:
+                src.close()
+            tar.add(tmp, arcname=arcname)
+        finally:
+            tmp.unlink(missing_ok=True)
+            Path(f"{tmp}-wal").unlink(missing_ok=True)
+            Path(f"{tmp}-shm").unlink(missing_ok=True)
+
     def _validate_tar_members(self, tar: tarfile.TarFile) -> None:
         for member in tar.getmembers():
             name = member.name.replace("\\", "/")
@@ -270,12 +318,12 @@ class BackupManager:
                 )
 
     def _read_metadata(self, archive_path: Path) -> dict:
-        meta_path = archive_path.with_suffix(".json")
-        if meta_path.exists():
-            try:
-                return json.loads(meta_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                pass
+        for meta_path in (backup_meta_path(archive_path), archive_path.with_suffix(".json")):
+            if meta_path.exists():
+                try:
+                    return json.loads(meta_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    continue
         return {}
 
     def _enforce_retention(self, count: int) -> None:
@@ -287,8 +335,8 @@ class BackupManager:
         for old in archives[count:]:
             try:
                 os.remove(old)
-                meta = old.replace(".tar.gz", ".json")
-                if os.path.exists(meta):
-                    os.remove(meta)
+                old_path = Path(old)
+                backup_meta_path(old_path).unlink(missing_ok=True)
+                old_path.with_suffix(".json").unlink(missing_ok=True)
             except OSError:
                 pass

@@ -34,7 +34,25 @@ def _should_run(last_run_key: str, interval_days: int, db) -> bool:
     return elapsed >= interval_days * 86400
 
 
-async def run_backup_scheduler_loop(app_root: Path, backup_root: Path, db_path: Path, env_path: Path):
+def collect_backup_config_contents(db) -> dict[str, str] | None:
+    try:
+        adapter = get_active_adapter(db)
+        return {
+            fname: adapter.read_config_file(fname)
+            for fname in BackupManager.CONFIG_FILES
+        }
+    except Exception as exc:
+        logger.warning("Could not read AntiZapret lists for auto-backup: %s", exc)
+        return None
+
+
+async def run_backup_scheduler_loop(
+    app_root: Path,
+    backup_root: Path,
+    db_path: Path,
+    env_path: Path,
+    cidr_db_path: Path | None = None,
+):
     """Background loop: check every hour if auto-backup should run."""
     while True:
         try:
@@ -51,21 +69,21 @@ async def run_backup_scheduler_loop(app_root: Path, backup_root: Path, db_path: 
                     backup_root=backup_root,
                     db_path=db_path,
                     env_path=env_path,
+                    cidr_db_path=cidr_db_path,
                 )
-                result = manager.create_backup(include_configs=True)
+                retention = int(_get_setting(db, "backup_retention", "5") or "5")
+                config_contents = collect_backup_config_contents(db)
+                result = manager.create_backup(
+                    include_configs=bool(config_contents),
+                    config_contents=config_contents,
+                    retention=retention,
+                )
                 row = db.query(AppSetting).filter(AppSetting.key == "backup_auto_last_run").first()
                 now_str = datetime.now(timezone.utc).isoformat()
                 if row:
                     row.value = now_str
                 else:
                     db.add(AppSetting(key="backup_auto_last_run", value=now_str))
-                retention = int(_get_setting(db, "backup_retention", "5") or "5")
-                backups = manager.list_backups()
-                for old in backups[retention:]:
-                    try:
-                        manager.delete_backup(old["file_name"])
-                    except Exception:
-                        pass
                 if _get_setting(db, "backup_telegram_enabled", "false") == "true":
                     from app.services.feature_guards import get_feature_service
 
