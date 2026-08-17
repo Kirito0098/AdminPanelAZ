@@ -197,9 +197,9 @@ export type OpenVpnPanelTabProps = {
   disabled?: boolean
   remotesEpoch: number
   remoteHostsDirty: boolean
-  onSavedHostsChange: (hosts: string[]) => void
+  onSavedHostsChange: (hosts: string[], applyToWireguard?: boolean) => void
   onDirtyChange: (dirty: boolean) => void
-  onHostsPersisted: (hosts: string[]) => void
+  onHostsPersisted: (hosts: string[], applyToWireguard?: boolean) => void
 }
 
 /** Доработки панели: список remote OpenVPN и multihome (не из AntiZapret setup). */

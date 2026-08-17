@@ -257,6 +257,8 @@ class Node(Base):
     )
     node_metadata: Mapped[str] = mapped_column(Text, default="{}")
     openvpn_remote_hosts: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # When True, saving remotes also writes hosts[0] to WIREGUARD_HOST (GubernievS proxy.sh).
+    wireguard_use_first_remote: Mapped[bool] = mapped_column(Boolean, default=False)
     openvpn_multihome: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

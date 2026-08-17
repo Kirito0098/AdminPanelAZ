@@ -606,7 +606,10 @@ def get_remote_hosts(node_id: int, _: User = Depends(require_admin), db: Session
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
-    return NodeRemoteHostsResponse(hosts=parse_hosts_json(node.openvpn_remote_hosts))
+    return NodeRemoteHostsResponse(
+        hosts=parse_hosts_json(node.openvpn_remote_hosts),
+        apply_to_wireguard=bool(node.wireguard_use_first_remote),
+    )
 
 
 @router.put("/{node_id}/remote-hosts", response_model=NodeRemoteHostsResponse)
@@ -625,11 +628,16 @@ def put_remote_hosts(
     except RemoteHostsError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     node.openvpn_remote_hosts = hosts_to_json(hosts) if hosts else None
+    node.wireguard_use_first_remote = bool(payload.apply_to_wireguard)
     node.updated_at = datetime.utcnow()
     db.add(node)
     db.commit()
     db.refresh(node)
-    warnings = sync_openvpn_host_from_remotes(lambda: get_adapter_for_node(node), hosts)
+    warnings = sync_openvpn_host_from_remotes(
+        lambda: get_adapter_for_node(node),
+        hosts,
+        apply_to_wireguard=bool(payload.apply_to_wireguard),
+    )
     if settings.audit_log_enabled:
         log_action(
             db,
@@ -639,7 +647,11 @@ def put_remote_hosts(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"node_id={node_id} hosts={hosts}",
         )
-    return NodeRemoteHostsResponse(hosts=hosts, warnings=warnings)
+    return NodeRemoteHostsResponse(
+        hosts=hosts,
+        warnings=warnings,
+        apply_to_wireguard=bool(node.wireguard_use_first_remote),
+    )
 
 
 @router.post(

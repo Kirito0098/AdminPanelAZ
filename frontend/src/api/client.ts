@@ -617,10 +617,14 @@ export async function getNodeRemoteHosts(nodeId: number) {
   return apiFetch<import('../types').NodeRemoteHostsResponse>(`/nodes/${nodeId}/remote-hosts`)
 }
 
-export async function putNodeRemoteHosts(nodeId: number, hosts: string[]) {
+export async function putNodeRemoteHosts(
+  nodeId: number,
+  hosts: string[],
+  applyToWireguard = false,
+) {
   return apiFetch<import('../types').NodeRemoteHostsResponse>(`/nodes/${nodeId}/remote-hosts`, {
     method: 'PUT',
-    body: JSON.stringify({ hosts }),
+    body: JSON.stringify({ hosts, apply_to_wireguard: applyToWireguard }),
   })
 }
 

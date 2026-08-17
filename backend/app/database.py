@@ -931,6 +931,7 @@ def run_db_migrations() -> None:
     _migrate_user_telegram_backfill()
     _migrate_nodes_mtls_enabled()
     _migrate_nodes_openvpn_remote_hosts()
+    _migrate_nodes_wireguard_use_first_remote()
     _migrate_nodes_openvpn_multihome()
     _migrate_nodes_proxy_fields()
     _seed_client_templates_for_nodes()
@@ -997,6 +998,19 @@ def _migrate_nodes_openvpn_remote_hosts() -> None:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE nodes ADD COLUMN openvpn_remote_hosts TEXT"))
         logger.info("DB migration: added nodes.openvpn_remote_hosts")
+
+
+def _migrate_nodes_wireguard_use_first_remote() -> None:
+    """Opt-in: first OpenVPN remote also becomes WIREGUARD_HOST (proxy.sh)."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "wireguard_use_first_remote" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE nodes ADD COLUMN wireguard_use_first_remote INTEGER DEFAULT 0"))
+        logger.info("DB migration: added nodes.wireguard_use_first_remote")
 
 
 def _migrate_nodes_openvpn_multihome() -> None:

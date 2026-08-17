@@ -82,8 +82,17 @@ def hosts_to_json(hosts: list[str]) -> str:
     return json.dumps(list(hosts), ensure_ascii=False)
 
 
-def sync_openvpn_host_from_remotes(adapter_factory, hosts: list[str]) -> list[str]:
-    """Best-effort OPENVPN_HOST=hosts[0].
+def sync_openvpn_host_from_remotes(
+    adapter_factory,
+    hosts: list[str],
+    *,
+    apply_to_wireguard: bool = False,
+) -> list[str]:
+    """Best-effort OPENVPN_HOST=hosts[0], optionally WIREGUARD_HOST too.
+
+    ``apply_to_wireguard`` is the GubernievS proxy.sh step: the same client-facing
+    proxy IP goes into AWG/WG Endpoint. Default off — OpenVPN remotes must not
+    silently rewrite AmneziaWG.
 
     ``adapter_factory`` is a zero-arg callable that returns a node adapter.
     Empty list must not call the factory or touch settings. Adapter resolve
@@ -91,13 +100,17 @@ def sync_openvpn_host_from_remotes(adapter_factory, hosts: list[str]) -> list[st
     """
     if not hosts:
         return []
+    updates: dict[str, str] = {"openvpn_host": hosts[0]}
+    if apply_to_wireguard:
+        updates["wireguard_host"] = hosts[0]
     try:
         adapter = adapter_factory()
-        adapter.update_antizapret_settings({"openvpn_host": hosts[0]})
+        adapter.update_antizapret_settings(updates)
         return []
     except Exception as exc:  # noqa: BLE001 — best-effort; list already saved
         detail = getattr(exc, "detail", None) or str(exc)
-        return [f"Не удалось обновить OPENVPN_HOST: {detail}"]
+        keys = "OPENVPN_HOST / WIREGUARD_HOST" if apply_to_wireguard else "OPENVPN_HOST"
+        return [f"Не удалось обновить {keys}: {detail}"]
 
 
 def append_host_to_allow_ips(content: str, host: str) -> tuple[str, bool]:

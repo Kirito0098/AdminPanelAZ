@@ -48,6 +48,21 @@ def test_sync_sets_first_host():
     adapter.update_antizapret_settings.assert_called_once_with({"openvpn_host": "1.2.3.4"})
 
 
+def test_sync_apply_to_wireguard_sets_both_hosts():
+    adapter = MagicMock()
+    assert (
+        sync_openvpn_host_from_remotes(
+            lambda: adapter,
+            ["proxy.example", "vpn.example.com"],
+            apply_to_wireguard=True,
+        )
+        == []
+    )
+    adapter.update_antizapret_settings.assert_called_once_with(
+        {"openvpn_host": "proxy.example", "wireguard_host": "proxy.example"}
+    )
+
+
 def test_sync_adapter_resolve_failure_yields_warning():
     """Missing remote API key (HTTP 503 from get_adapter_for_node) must not escape as 503."""
 

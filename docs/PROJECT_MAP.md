@@ -222,8 +222,8 @@
 - `antizapret.py`, `openvpn_management.py`, `wg_runtime.py` — работа с VPN на узле
 - `openvpn_remote_hosts.py` — validate / normalize / `apply_openvpn_remote_hosts` (патч multi-remote в `.ovpn`); `append_host_to_allow_ips`
 - `openvpn_multihome.py` — `apply_multihome_to_conf` (директива `multihome` в OpenVPN server conf; restore через панель)
-- `wireguard_endpoint.py` — `apply_wireguard_endpoint_host` (патч `Endpoint` → `hosts[0]` при выдаче WG/AWG)
-- `profile_delivery.py` — `read_profile_file_for_delivery` (`.ovpn` multi-remote + WG Endpoint на download / QR / Telegram / public redeem; public — hosts активного узла); `patch_openvpn_profiles_on_node` (после успешного `recreate_profiles` / `client.sh 7` из панели — multi-remote на диск)
+- `wireguard_endpoint.py` — `apply_wireguard_endpoint_host` (патч `Endpoint` → `WIREGUARD_HOST` при выдаче WG/AWG)
+- `profile_delivery.py` — `read_profile_file_for_delivery` (`.ovpn` multi-remote; WG/AWG Endpoint из setup `WIREGUARD_HOST`, не из OpenVPN-списка); `patch_openvpn_profiles_on_node` (после успешного `recreate_profiles` / `client.sh 7` из панели — multi-remote на диск)
 - `profile_files.py`, `qr_generator.py` — конфиги и QR
 
 ### Мониторинг и трафик

@@ -401,6 +401,7 @@ function ConnectionAddressesCard({
   disabled,
   onDraftChange,
   savedRemoteHosts,
+  applyFirstRemoteToWireguard,
   onOpenPanelTab,
 }: {
   section: GroupedSection
@@ -409,6 +410,7 @@ function ConnectionAddressesCard({
   disabled: boolean
   onDraftChange: (key: string, value: string) => void
   savedRemoteHosts: string[]
+  applyFirstRemoteToWireguard: boolean
   onOpenPanelTab: () => void
 }) {
   const SectionIcon = section.icon
@@ -416,6 +418,7 @@ function ConnectionAddressesCard({
   const wireguardField = section.fields.find((field) => field.key === 'wireguard_host')
   const syncedOpenvpnHost = firstNonEmptyRemoteHost(savedRemoteHosts)
   const listSynced = Boolean(syncedOpenvpnHost)
+  const wireguardSynced = listSynced && applyFirstRemoteToWireguard
 
   return (
     <Card id={`section-${section.title}`} className="flex h-full flex-col overflow-hidden">
@@ -496,7 +499,7 @@ function ConnectionAddressesCard({
             <div
               className={cn(
                 'space-y-2 px-4 py-4 sm:px-5',
-                dirtySet.has('wireguard_host') && 'bg-amber-500/5',
+                !wireguardSynced && dirtySet.has('wireguard_host') && 'bg-amber-500/5',
               )}
             >
               <div className="space-y-1">
@@ -504,7 +507,7 @@ function ConnectionAddressesCard({
                   <Label htmlFor={wireguardField.html_id || wireguardField.key}>
                     {fieldDisplay(wireguardField).title}
                   </Label>
-                  {dirtySet.has('wireguard_host') && (
+                  {!wireguardSynced && dirtySet.has('wireguard_host') && (
                     <Badge
                       variant="outline"
                       className="border-amber-500/40 px-1.5 py-0 text-[10px] text-amber-700 dark:text-amber-300"
@@ -512,9 +515,16 @@ function ConnectionAddressesCard({
                       изменено
                     </Badge>
                   )}
+                  {wireguardSynced && (
+                    <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                      из списка
+                    </Badge>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {fieldDisplay(wireguardField).description}
+                  {wireguardSynced
+                    ? 'Первый адрес списка remote при сохранении записывается в WIREGUARD_HOST (прокси для AWG/WG). Поле setup здесь только для просмотра.'
+                    : fieldDisplay(wireguardField).description}
                 </p>
                 <p className="font-mono text-[10px] text-muted-foreground/70">
                   {wireguardField.param_label || wireguardField.env}
@@ -522,13 +532,16 @@ function ConnectionAddressesCard({
               </div>
               <Input
                 id={wireguardField.html_id || wireguardField.key}
-                value={draft.wireguard_host ?? ''}
-                disabled={disabled}
+                value={wireguardSynced ? (syncedOpenvpnHost ?? '') : (draft.wireguard_host ?? '')}
+                disabled={disabled || wireguardSynced}
+                readOnly={wireguardSynced}
                 placeholder={wireguardField.env}
                 onChange={(e) => onDraftChange('wireguard_host', e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                Несколько адресов пока только для OpenVPN.
+                {wireguardSynced
+                  ? 'Галочка «Также для AmneziaWG / WireGuard» на вкладке OpenVPN (панель).'
+                  : 'Несколько адресов пока только для OpenVPN. Для прокси GubernievS включите галочку на вкладке OpenVPN (панель).'}
               </p>
             </div>
           )}
@@ -608,6 +621,7 @@ export default function AntizapretConfigTab() {
   const [nodeName, setNodeName] = useState<string | null>(null)
   const [httpsPublicPort, setHttpsPublicPort] = useState('443')
   const [savedRemoteHosts, setSavedRemoteHosts] = useState<string[]>([])
+  const [applyFirstRemoteToWireguard, setApplyFirstRemoteToWireguard] = useState(false)
   const [remoteHostsDirty, setRemoteHostsDirty] = useState(false)
   const [remotesEpoch, setRemotesEpoch] = useState(0)
 
@@ -655,15 +669,29 @@ export default function AntizapretConfigTab() {
     void load()
   }, [load, activeNode?.id])
 
-  const handleSavedHostsChange = useCallback((hosts: string[]) => {
+  const handleSavedHostsChange = useCallback((hosts: string[], applyToWireguard?: boolean) => {
     setSavedRemoteHosts(hosts)
+    if (applyToWireguard != null) {
+      setApplyFirstRemoteToWireguard(applyToWireguard)
+    }
   }, [])
 
-  const handleHostsPersisted = useCallback((hosts: string[]) => {
+  const handleHostsPersisted = useCallback((hosts: string[], applyToWireguard?: boolean) => {
     const first = firstNonEmptyRemoteHost(hosts)
     if (first != null) {
-      setDraft((prev) => ({ ...prev, openvpn_host: first }))
-      setSaved((prev) => ({ ...prev, openvpn_host: first }))
+      setDraft((prev) => ({
+        ...prev,
+        openvpn_host: first,
+        ...(applyToWireguard ? { wireguard_host: first } : {}),
+      }))
+      setSaved((prev) => ({
+        ...prev,
+        openvpn_host: first,
+        ...(applyToWireguard ? { wireguard_host: first } : {}),
+      }))
+    }
+    if (applyToWireguard != null) {
+      setApplyFirstRemoteToWireguard(applyToWireguard)
     }
   }, [])
 
@@ -734,6 +762,7 @@ export default function AntizapretConfigTab() {
           disabled={controlsDisabled}
           onDraftChange={handleDraftChange}
           savedRemoteHosts={savedRemoteHosts}
+          applyFirstRemoteToWireguard={applyFirstRemoteToWireguard}
           onOpenPanelTab={() => setPageTab('openvpn-panel')}
         />
       )

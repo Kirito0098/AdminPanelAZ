@@ -65,13 +65,28 @@ def patch_openvpn_profiles_on_node(adapter, hosts: list[str]) -> dict:
     return {"patched": patched, "warnings": warnings}
 
 
+def wireguard_host_from_adapter(adapter) -> str:
+    """Live WIREGUARD_HOST from AntiZapret setup on the node (client.sh source)."""
+    try:
+        raw = adapter.get_antizapret_settings()
+    except Exception:  # noqa: BLE001 — delivery must still return the file
+        return ""
+    if not isinstance(raw, dict):
+        return ""
+    host = raw.get("wireguard_host")
+    if not isinstance(host, str):
+        return ""
+    return host.strip()
+
+
 def read_profile_file_for_delivery(adapter, path: str, hosts: list[str]) -> str:
     raw = adapter.read_profile_file(path)
     name = PurePosixPath(path.replace("\\", "/")).name
     if name.lower().endswith(".ovpn"):
         return apply_openvpn_remote_hosts(raw, hosts)
-    if hosts:
-        proto = protocol_key_from_file(protocol="", path=path)
-        if proto in ("wireguard", "amneziawg"):
-            return apply_wireguard_endpoint_host(raw, hosts[0])
+    proto = protocol_key_from_file(protocol="", path=path)
+    if proto in ("wireguard", "amneziawg"):
+        # GubernievS: Endpoint host is WIREGUARD_HOST, never the OpenVPN remote list.
+        # Proxy for AWG is opt-in (remotes save with apply_to_wireguard writes WIREGUARD_HOST).
+        return apply_wireguard_endpoint_host(raw, wireguard_host_from_adapter(adapter))
     return raw

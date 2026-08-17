@@ -125,11 +125,13 @@ class NodeMtlsStatusResponse(BaseModel):
 
 class NodeRemoteHostsBody(BaseModel):
     hosts: list[str] = Field(default_factory=list)
+    apply_to_wireguard: bool = False
 
 
 class NodeRemoteHostsResponse(BaseModel):
     hosts: list[str]
     warnings: list[str] = Field(default_factory=list)
+    apply_to_wireguard: bool = False
 
 
 class NodeAllowFirstRemoteHostResponse(BaseModel):

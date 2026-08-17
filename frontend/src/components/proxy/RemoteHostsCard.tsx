@@ -8,6 +8,7 @@ import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { useNotifications } from '@/context/NotificationContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
@@ -29,11 +30,11 @@ export type RemoteHostsCardProps = {
   className?: string
   id?: string
   /** Fired after successful load or save with the persisted hosts list. */
-  onSavedHostsChange?: (hosts: string[]) => void
+  onSavedHostsChange?: (hosts: string[], applyToWireguard?: boolean) => void
   /** Fired when draft vs saved dirty state changes. */
   onDirtyChange?: (dirty: boolean) => void
-  /** Fired only after a successful save (for syncing OPENVPN_HOST in AntiZapret). */
-  onHostsPersisted?: (hosts: string[]) => void
+  /** Fired only after a successful save (for syncing OPENVPN_HOST / optional WIREGUARD_HOST). */
+  onHostsPersisted?: (hosts: string[], applyToWireguard?: boolean) => void
 }
 
 function RemoteHostsListBody({
@@ -41,12 +42,14 @@ function RemoteHostsListBody({
   disabled,
   remoteHosts,
   savedRemoteHosts,
+  applyToWireguard,
   remoteHostsDirty,
   remoteHostsSaving,
   remoteHostsLoadError,
   allowFirstBusy,
   onRetry,
   onRemoteHostsChange,
+  onApplyToWireguardChange,
   onSave,
   onAllowFirst,
 }: {
@@ -54,12 +57,14 @@ function RemoteHostsListBody({
   disabled: boolean
   remoteHosts: string[]
   savedRemoteHosts: string[]
+  applyToWireguard: boolean
   remoteHostsDirty: boolean
   remoteHostsSaving: boolean
   remoteHostsLoadError: string | null
   allowFirstBusy: boolean
   onRetry: () => void
   onRemoteHostsChange: (hosts: string[]) => void
+  onApplyToWireguardChange: (value: boolean) => void
   onSave: () => void
   onAllowFirst: () => void
 }) {
@@ -137,6 +142,11 @@ function RemoteHostsListBody({
           адрес списка; панель не ставит proxy.sh).
         </li>
         <li>
+          AmneziaWG/WireGuard по умолчанию берут хост из WIREGUARD_HOST (как client.sh). Первый
+          адрес списка попадает в их Endpoint только если включить галочку ниже — и только если
+          на прокси форвардятся UDP 52443/52080 (как в proxy.sh).
+        </li>
+        <li>
           Трафик считается на зарубежном VPN, куда подключились; прокси в статистике панели
           отдельно не учитывается.
         </li>
@@ -203,6 +213,23 @@ function RemoteHostsListBody({
         ))}
       </div>
 
+      <label className="flex items-start gap-2 rounded-lg border bg-muted/30 px-3 py-2.5 text-sm">
+        <Checkbox
+          className="mt-0.5"
+          checked={applyToWireguard}
+          disabled={listDisabled}
+          onCheckedChange={onApplyToWireguardChange}
+          aria-label="Подставлять первый адрес в Endpoint AmneziaWG и WireGuard"
+        />
+        <span>
+          <span className="font-medium">Также для AmneziaWG / WireGuard</span>
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            Как шаг 4 в README AntiZapret: первый адрес пишется в WIREGUARD_HOST и в Endpoint
+            новых -am.conf / -wg.conf. Нужен proxy.sh с форвардом портов 52443 и 52080.
+          </span>
+        </span>
+      </label>
+
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         <Button
           type="button"
@@ -261,6 +288,8 @@ export default function RemoteHostsCard({
 
   const [remoteHosts, setRemoteHosts] = useState<string[]>([])
   const [savedRemoteHosts, setSavedRemoteHosts] = useState<string[]>([])
+  const [applyToWireguard, setApplyToWireguard] = useState(false)
+  const [savedApplyToWireguard, setSavedApplyToWireguard] = useState(false)
   const [remoteHostsSaving, setRemoteHostsSaving] = useState(false)
   const [allowFirstBusy, setAllowFirstBusy] = useState(false)
   const [remoteHostsLoadError, setRemoteHostsLoadError] = useState<string | null>(null)
@@ -282,8 +311,15 @@ export default function RemoteHostsCard({
   const remoteHostsDirty = useMemo(
     () =>
       remoteHostsLoadError == null &&
-      JSON.stringify(remoteHosts) !== JSON.stringify(savedRemoteHosts),
-    [remoteHosts, savedRemoteHosts, remoteHostsLoadError],
+      (JSON.stringify(remoteHosts) !== JSON.stringify(savedRemoteHosts) ||
+        applyToWireguard !== savedApplyToWireguard),
+    [
+      remoteHosts,
+      savedRemoteHosts,
+      applyToWireguard,
+      savedApplyToWireguard,
+      remoteHostsLoadError,
+    ],
   )
 
   useEffect(() => {
@@ -295,16 +331,21 @@ export default function RemoteHostsCard({
       if (loadedNodeIdRef.current !== idToLoad) {
         setRemoteHosts([])
         setSavedRemoteHosts([])
+        setApplyToWireguard(false)
+        setSavedApplyToWireguard(false)
         loadedNodeIdRef.current = null
         onSavedHostsChangeRef.current?.([])
       }
       try {
         const hostsResp = await getNodeRemoteHosts(idToLoad)
+        const applyWg = Boolean(hostsResp.apply_to_wireguard)
         setRemoteHosts(hostsResp.hosts)
         setSavedRemoteHosts(hostsResp.hosts)
+        setApplyToWireguard(applyWg)
+        setSavedApplyToWireguard(applyWg)
         loadedNodeIdRef.current = idToLoad
         setRemoteHostsLoadError(null)
-        onSavedHostsChangeRef.current?.(hostsResp.hosts)
+        onSavedHostsChangeRef.current?.(hostsResp.hosts, applyWg)
         return true
       } catch (err) {
         const message =
@@ -314,6 +355,8 @@ export default function RemoteHostsCard({
         if (loadedNodeIdRef.current !== idToLoad) {
           setRemoteHosts([])
           setSavedRemoteHosts([])
+          setApplyToWireguard(false)
+          setSavedApplyToWireguard(false)
           onSavedHostsChangeRef.current?.([])
         }
         return false
@@ -326,6 +369,8 @@ export default function RemoteHostsCard({
     if (nodeId == null) {
       setRemoteHosts([])
       setSavedRemoteHosts([])
+      setApplyToWireguard(false)
+      setSavedApplyToWireguard(false)
       loadedNodeIdRef.current = null
       setRemoteHostsLoadError(null)
       onSavedHostsChangeRef.current?.([])
@@ -345,13 +390,16 @@ export default function RemoteHostsCard({
     }
     setRemoteHostsSaving(true)
     try {
-      const result = await putNodeRemoteHosts(nodeId, remoteHosts)
+      const result = await putNodeRemoteHosts(nodeId, remoteHosts, applyToWireguard)
+      const applyWg = Boolean(result.apply_to_wireguard)
       setRemoteHosts(result.hosts)
       setSavedRemoteHosts(result.hosts)
+      setApplyToWireguard(applyWg)
+      setSavedApplyToWireguard(applyWg)
       loadedNodeIdRef.current = nodeId
       setRemoteHostsLoadError(null)
-      onSavedHostsChangeRef.current?.(result.hosts)
-      onHostsPersistedRef.current?.(result.hosts)
+      onSavedHostsChangeRef.current?.(result.hosts, applyWg)
+      onHostsPersistedRef.current?.(result.hosts, applyWg)
       success('Адреса подключения сохранены')
       for (const w of result.warnings ?? []) {
         notifyWarning(w)
@@ -361,7 +409,7 @@ export default function RemoteHostsCard({
     } finally {
       setRemoteHostsSaving(false)
     }
-  }, [nodeId, remoteHosts, remoteHostsLoadError, notifyError, notifyWarning, success])
+  }, [nodeId, remoteHosts, applyToWireguard, remoteHostsLoadError, notifyError, notifyWarning, success])
 
   const allowFirst = useCallback(async () => {
     if (nodeId == null) {
@@ -408,6 +456,7 @@ export default function RemoteHostsCard({
     disabled: controlsDisabled,
     remoteHosts,
     savedRemoteHosts,
+    applyToWireguard,
     remoteHostsDirty,
     remoteHostsSaving,
     remoteHostsLoadError,
@@ -416,6 +465,7 @@ export default function RemoteHostsCard({
       if (nodeId != null) void loadRemoteHosts(nodeId)
     },
     onRemoteHostsChange: setRemoteHosts,
+    onApplyToWireguardChange: setApplyToWireguard,
     onSave: () => void saveRemoteHosts(),
     onAllowFirst: () => void allowFirst(),
   }

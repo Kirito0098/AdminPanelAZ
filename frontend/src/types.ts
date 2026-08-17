@@ -1727,6 +1727,7 @@ export interface AntizapretSettingField {
 export interface NodeRemoteHostsResponse {
   hosts: string[]
   warnings?: string[]
+  apply_to_wireguard?: boolean
 }
 
 export interface NodeOpenVpnMultihomeResponse {
