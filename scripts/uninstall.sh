@@ -243,6 +243,11 @@ remove_nginx_site_if_present() {
     rm -f /etc/ssl/certs/adminpanelaz.crt /etc/ssl/private/adminpanelaz.key
     log "Удалён самоподписанный сертификат adminpanelaz"
   fi
+
+  if [[ -f /etc/nginx/snippets/cloudflare-realip.conf ]]; then
+    rm -f /etc/nginx/snippets/cloudflare-realip.conf
+    log "Удалён snippet Cloudflare realip: /etc/nginx/snippets/cloudflare-realip.conf"
+  fi
 }
 
 remove_firewall_rules() {

@@ -66,6 +66,9 @@ function cspNoncePlaceholderPost(): Plugin {
   }
 }
 
+// Load-bearing for ACCESS_PATH: keep the entry bundle immediately before </body>
+// so window.__PANEL_ACCESS_PATH__ (injected in <head> at serve time) is defined
+// before panelBase reads it at module-eval time.
 function tgMiniMoveScriptToBody(): Plugin {
   return {
     name: 'tg-mini-move-script-to-body',

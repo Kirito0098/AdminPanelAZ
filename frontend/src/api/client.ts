@@ -928,6 +928,26 @@ export async function runDdnsUpdate() {
   })
 }
 
+export async function getCloudflareProxySettings() {
+  return apiFetch<import('../types').CloudflareProxySettings>('/settings/cloudflare-proxy')
+}
+
+export async function updateCloudflareProxySettings(
+  data: import('../types').CloudflareProxySettingsUpdatePayload,
+) {
+  return apiFetch<import('../types').CloudflareProxySettings>('/settings/cloudflare-proxy', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function refreshCloudflareProxy(force = false) {
+  return apiFetch<import('../types').CloudflareProxyRefreshResponse>('/settings/cloudflare-proxy/refresh', {
+    method: 'POST',
+    body: JSON.stringify({ force }),
+  })
+}
+
 export async function getTelegramSettings() {
   return apiFetch<import('../types').TelegramSettings>('/settings/telegram')
 }

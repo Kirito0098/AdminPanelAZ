@@ -82,3 +82,7 @@ def should_start_alert_rules_worker() -> bool:
 
 def should_start_awg2_expire() -> bool:
     return get_feature_service().is_enabled("awg2")
+
+
+def should_start_cloudflare_ips_scheduler() -> bool:
+    return True

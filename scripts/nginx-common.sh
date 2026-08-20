@@ -257,15 +257,98 @@ nginx_access_path_suffix() {
 nginx_render_subpath_template() {
   local access_path="$1"
   local backend_port="$2"
-  sed \
+  local out
+  out="$(sed \
     -e "s|__ACCESS_PATH__|${access_path}|g" \
     -e "s|__BACKEND_PORT__|${backend_port}|g" \
-    "$NGINX_TEMPLATE_DIR/adminpanelaz-subpath.conf.template"
+    "$NGINX_TEMPLATE_DIR/adminpanelaz-subpath.conf.template")"
+  if ! nginx_cloudflare_proxy_enabled; then
+    out="$(printf '%s\n' "$out" | sed '/include snippets\/cloudflare-realip.conf;/d')"
+  fi
+  printf '%s\n' "$out"
+}
+
+nginx_snippets_dir() {
+  printf '%s' "${NGINX_SNIPPETS_DIR:-/etc/nginx/snippets}"
+}
+
+nginx_cloudflare_proxy_enabled() {
+  local v="${CLOUDFLARE_PROXY_ENABLED:-true}"
+  case "${v,,}" in
+    true|1|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+nginx_webhook_realip_include_line() {
+  if nginx_cloudflare_proxy_enabled; then
+    printf '        include snippets/cloudflare-realip.conf;\n'
+  else
+    printf ''
+  fi
+}
+
+nginx_ensure_cloudflare_realip_snippet() {
+  local src dest dir bak_dir
+  src="${NGINX_TEMPLATE_DIR}/cloudflare-realip.conf"
+  dir="$(nginx_snippets_dir)"
+  dest="${dir}/cloudflare-realip.conf"
+  bak_dir="${NGINX_BACKUPS_DIR:-/etc/nginx/backups}"
+  [[ -f "$src" ]] || nginx_die "Нет шаблона Cloudflare realip: ${src}"
+  mkdir -p "$dir" "$bak_dir"
+  if [[ -f "$dest" ]] && ! cmp -s "$src" "$dest"; then
+    cp "$dest" "${bak_dir}/cloudflare-realip.conf.$(date +%Y%m%d%H%M%S).bak"
+  fi
+  cp "$src" "$dest"
+  nginx_log "Snippet Cloudflare realip: ${dest}"
+}
+
+nginx_cloudflare_realip_apply() {
+  local new_file="$1"
+  local dir dest bak_dir tmp latest
+  [[ -f "$new_file" ]] || nginx_die "Файл не найден: $new_file"
+  [[ "$(id -u)" -eq 0 ]] || nginx_die "Запустите от root"
+
+  dir="$(nginx_snippets_dir)"
+  dest="${dir}/cloudflare-realip.conf"
+  bak_dir="${NGINX_BACKUPS_DIR:-/etc/nginx/backups}"
+  mkdir -p "$dir" "$bak_dir"
+
+  if [[ -f "$dest" ]]; then
+    cp "$dest" "${bak_dir}/cloudflare-realip.conf.$(date +%Y%m%d%H%M%S).bak"
+  fi
+  tmp="${dest}.tmp.$$"
+  cp "$new_file" "$tmp"
+  mv "$tmp" "$dest"
+
+  if ! nginx -t; then
+    latest="$(ls -1t "${bak_dir}"/cloudflare-realip.conf.*.bak 2>/dev/null | head -1 || true)"
+    if [[ -n "$latest" ]]; then
+      cp "$latest" "$dest"
+    fi
+    nginx_die "nginx -t не прошёл — восстановлен предыдущий cloudflare-realip.conf"
+  fi
+  systemctl reload nginx || nginx_die "Не удалось reload nginx"
+  nginx_log "Cloudflare realip snippet обновлён: ${dest}"
 }
 
 nginx_root_panel_location_blocks() {
   local backend_port="$1"
   cat <<EOF
+    # Telegram Bot API webhook: Cloudflare real client IP only here
+    location ^~ /api/telegram/webhook/ {
+$(nginx_webhook_realip_include_line)
+
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
     # Telegram Mini App — без X-Frame-Options (WebView Telegram блокируется SAMEORIGIN)
     location ^~ /api/tg-mini {
         proxy_pass http://127.0.0.1:${backend_port};
@@ -445,6 +528,7 @@ nginx_install_subpath_snippet() {
   local snippet_name snippet_path content
   snippet_name="$(nginx_subpath_snippet_basename "$domain" "$access_path")"
   snippet_path="/etc/nginx/snippets/${snippet_name}.conf"
+  nginx_ensure_cloudflare_realip_snippet
   mkdir -p /etc/nginx/snippets /etc/nginx/backups
   content="$(nginx_render_subpath_template "$access_path" "$backend_port")"
   printf '%s\n' "$content" >"$snippet_path"
@@ -567,6 +651,7 @@ nginx_render_template() {
   local https_port="${6:-443}"
   local http_port="${7:-80}"
   local https_redirect_suffix access_path panel_blocks rendered
+  nginx_ensure_cloudflare_realip_snippet
   https_redirect_suffix="$(nginx_https_redirect_suffix "$https_port")"
   access_path="$(nginx_normalize_access_path "${ACCESS_PATH:-}")"
   panel_blocks="$(nginx_panel_location_blocks "$access_path" "$backend_port")"
@@ -799,6 +884,7 @@ nginx_install_dedicated_panel_vhost() {
   local http_port="${6:-80}"
   local conf
 
+  nginx_ensure_cloudflare_realip_snippet
   conf="$(nginx_render_template \
     "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
     "$domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")"

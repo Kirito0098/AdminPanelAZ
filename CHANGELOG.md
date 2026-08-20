@@ -47,8 +47,23 @@
 
 ## [Unreleased]
 
+### ✨ Added
+
+- **Cloudflare proxy UI** — toggle proxy-mode для Telegram webhook realip, автообновление CIDR (scheduler), кнопка «Обновить сейчас», статус last success/error.
+
+### 🔄 Changed
+
+- **nginx webhook** — `include cloudflare-realip.conf` только при `CLOUDFLARE_PROXY_ENABLED=true` (default true).
+
 ### 🐛 Fixed
 
+- **Cloudflare snippet** — backup перед overwrite; `# snapshot: date`; `uninstall --remove-nginx` удаляет snippet.
+- **Telegram Mini App + ACCESS_PATH** — `GET …/tg-mini` инжектит
+  `window.__PANEL_ACCESS_PATH__`, чтобы API ходило на `{ACCESS_PATH}/api/...`
+  (GitHub #4).
+- **Telegram webhook за Cloudflare proxy** — nginx ставит `cloudflare-realip.conf` и
+  отдельный location только для `/api/telegram/webhook/` (и с `ACCESS_PATH`), чтобы
+  allowlist видел IP Telegram, а не edge CF. Существующие установки: `nginx-repair`.
 - **Выдача AmneziaWG / WireGuard** — `Endpoint` больше не берётся из списка OpenVPN remote. При скачивании/QR/Telegram подставляется `WIREGUARD_HOST` из setup AntiZapret (как `client.sh` у GubernievS). Список «Адреса подключения» по умолчанию патчит только `.ovpn`. Чтобы первый адрес (прокси) попал и в AWG — галочка «Также для AmneziaWG / WireGuard» (пишет `WIREGUARD_HOST`, нужен `proxy.sh` с форвардом UDP 52443/52080).
 
 ---
