@@ -123,3 +123,4 @@ jobs:
         run: |
           ./scripts/test-backend-health-check.sh
           ./scripts/test-install-publish-modes.sh
+          ./scripts/test-nginx-telegram-webhook-realip.sh
