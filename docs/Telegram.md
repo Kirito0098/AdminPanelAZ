@@ -183,6 +183,26 @@ Mini App запускайте только из Telegram-клиента по HTT
 
 Проверьте, что на узле установлен AntiZapret и исполняемый `client.sh`; для remote-узла — доступность node agent и API key.
 
+### Telegram-бот не отвечает за Cloudflare (proxy / orange-cloud)
+
+Webhook бота проверяет, что запрос пришёл с IP Telegram. За Cloudflare в режиме
+прокси nginx без `real_ip` передаёт в панель IP edge Cloudflare → webhook отвечает
+403, команды и кнопки «молчат».
+
+AdminPanelAZ ставит snippet `cloudflare-realip.conf` и отдельный location только для
+`/api/telegram/webhook/` (или `{ACCESS_PATH}/api/telegram/webhook/`), чтобы
+`X-Real-IP` стал адресом Telegram. Остальная панель не переключается на
+`CF-Connecting-IP`.
+
+После обновления панели на уже опубликованном сервере выполните:
+
+```bash
+sudo ./scripts/nginx-repair.sh
+```
+
+Рекомендация: ограничьте доступ к origin (порты 80/443) сетями Cloudflare, чтобы
+нельзя было обойти proxy и подделать заголовки.
+
 ---
 
 ## Связанные разделы

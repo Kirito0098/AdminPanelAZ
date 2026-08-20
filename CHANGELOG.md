@@ -49,6 +49,9 @@
 
 ### 🐛 Fixed
 
+- **Telegram webhook за Cloudflare proxy** — nginx ставит `cloudflare-realip.conf` и
+  отдельный location только для `/api/telegram/webhook/` (и с `ACCESS_PATH`), чтобы
+  allowlist видел IP Telegram, а не edge CF. Существующие установки: `nginx-repair`.
 - **Выдача AmneziaWG / WireGuard** — `Endpoint` больше не берётся из списка OpenVPN remote. При скачивании/QR/Telegram подставляется `WIREGUARD_HOST` из setup AntiZapret (как `client.sh` у GubernievS). Список «Адреса подключения» по умолчанию патчит только `.ovpn`. Чтобы первый адрес (прокси) попал и в AWG — галочка «Также для AmneziaWG / WireGuard» (пишет `WIREGUARD_HOST`, нужен `proxy.sh` с форвардом UDP 52443/52080).
 
 ---

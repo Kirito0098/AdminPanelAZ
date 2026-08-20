@@ -69,6 +69,11 @@
 
 При смене пути обновите в BotFather URL Mini App и webhook Telegram (`/panel/api/tg-mini`, `/panel/api/telegram/webhook/...`).
 
+Если домен панели за Cloudflare в режиме **Proxied** (orange-cloud), после
+`nginx-setup` / `nginx-repair` webhook Telegram получает реальный IP через
+snippet Cloudflare — см. раздел в [`docs/Telegram.md`](../Telegram.md)
+«Telegram-бот не отвечает за Cloudflare».
+
 ### Совместно со StatusOpenVPN на одном домене
 
 [StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) занимает `https://ваш-домен/status/`. Если оба сервиса поставят **отдельный** nginx-сайт на один домен — конфиги конфликтуют.
