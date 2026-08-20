@@ -263,9 +263,38 @@ nginx_render_subpath_template() {
     "$NGINX_TEMPLATE_DIR/adminpanelaz-subpath.conf.template"
 }
 
+nginx_snippets_dir() {
+  printf '%s' "${NGINX_SNIPPETS_DIR:-/etc/nginx/snippets}"
+}
+
+nginx_ensure_cloudflare_realip_snippet() {
+  local src dest dir
+  src="${NGINX_TEMPLATE_DIR}/cloudflare-realip.conf"
+  dir="$(nginx_snippets_dir)"
+  dest="${dir}/cloudflare-realip.conf"
+  [[ -f "$src" ]] || nginx_die "Нет шаблона Cloudflare realip: ${src}"
+  mkdir -p "$dir"
+  cp "$src" "$dest"
+  nginx_log "Snippet Cloudflare realip: ${dest}"
+}
+
 nginx_root_panel_location_blocks() {
   local backend_port="$1"
   cat <<EOF
+    # Telegram Bot API webhook: Cloudflare real client IP only here
+    location ^~ /api/telegram/webhook/ {
+        include snippets/cloudflare-realip.conf;
+
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
     # Telegram Mini App — без X-Frame-Options (WebView Telegram блокируется SAMEORIGIN)
     location ^~ /api/tg-mini {
         proxy_pass http://127.0.0.1:${backend_port};
@@ -445,6 +474,7 @@ nginx_install_subpath_snippet() {
   local snippet_name snippet_path content
   snippet_name="$(nginx_subpath_snippet_basename "$domain" "$access_path")"
   snippet_path="/etc/nginx/snippets/${snippet_name}.conf"
+  nginx_ensure_cloudflare_realip_snippet
   mkdir -p /etc/nginx/snippets /etc/nginx/backups
   content="$(nginx_render_subpath_template "$access_path" "$backend_port")"
   printf '%s\n' "$content" >"$snippet_path"
@@ -799,6 +829,7 @@ nginx_install_dedicated_panel_vhost() {
   local http_port="${6:-80}"
   local conf
 
+  nginx_ensure_cloudflare_realip_snippet
   conf="$(nginx_render_template \
     "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
     "$domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")"
