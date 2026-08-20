@@ -257,14 +257,35 @@ nginx_access_path_suffix() {
 nginx_render_subpath_template() {
   local access_path="$1"
   local backend_port="$2"
-  sed \
+  local out
+  out="$(sed \
     -e "s|__ACCESS_PATH__|${access_path}|g" \
     -e "s|__BACKEND_PORT__|${backend_port}|g" \
-    "$NGINX_TEMPLATE_DIR/adminpanelaz-subpath.conf.template"
+    "$NGINX_TEMPLATE_DIR/adminpanelaz-subpath.conf.template")"
+  if ! nginx_cloudflare_proxy_enabled; then
+    out="$(printf '%s\n' "$out" | sed '/include snippets\/cloudflare-realip.conf;/d')"
+  fi
+  printf '%s\n' "$out"
 }
 
 nginx_snippets_dir() {
   printf '%s' "${NGINX_SNIPPETS_DIR:-/etc/nginx/snippets}"
+}
+
+nginx_cloudflare_proxy_enabled() {
+  local v="${CLOUDFLARE_PROXY_ENABLED:-true}"
+  case "${v,,}" in
+    true|1|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+nginx_webhook_realip_include_line() {
+  if nginx_cloudflare_proxy_enabled; then
+    printf '        include snippets/cloudflare-realip.conf;\n'
+  else
+    printf ''
+  fi
 }
 
 nginx_ensure_cloudflare_realip_snippet() {
@@ -316,7 +337,7 @@ nginx_root_panel_location_blocks() {
   cat <<EOF
     # Telegram Bot API webhook: Cloudflare real client IP only here
     location ^~ /api/telegram/webhook/ {
-        include snippets/cloudflare-realip.conf;
+$(nginx_webhook_realip_include_line)
 
         proxy_pass http://127.0.0.1:${backend_port};
         proxy_http_version 1.1;

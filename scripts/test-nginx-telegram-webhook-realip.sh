@@ -63,6 +63,7 @@ fi
 assert_file_contains "$TMP/snippets/cloudflare-realip.conf" "real_ip_header CF-Connecting-IP;" "ensure replaced stale snippet"
 
 echo "[test] root panel location blocks"
+export CLOUDFLARE_PROXY_ENABLED=true
 ROOT_BLOCKS="$(nginx_root_panel_location_blocks 8000)"
 assert_contains "$ROOT_BLOCKS" "location ^~ /api/telegram/webhook/" "root webhook location"
 assert_contains "$ROOT_BLOCKS" "include snippets/cloudflare-realip.conf;" "root include realip"
@@ -79,6 +80,7 @@ else
 fi
 
 echo "[test] subpath template render"
+export CLOUDFLARE_PROXY_ENABLED=true
 SUB_BLOCKS="$(nginx_render_subpath_template /panel 8000)"
 assert_contains "$SUB_BLOCKS" "location ^~ /panel/api/telegram/webhook/" "subpath webhook location"
 assert_contains "$SUB_BLOCKS" "include snippets/cloudflare-realip.conf;" "subpath include realip"
@@ -91,6 +93,37 @@ else
   fail=$((fail + 1))
   echo "  FAIL subpath webhook before tg-mini (wh=$SUB_WH_LINE tg=$SUB_TG_LINE)" >&2
 fi
+
+echo "[test] include present when CLOUDFLARE_PROXY_ENABLED=true"
+export CLOUDFLARE_PROXY_ENABLED=true
+ROOT_BLOCKS="$(nginx_root_panel_location_blocks 8000)"
+assert_contains "$ROOT_BLOCKS" "include snippets/cloudflare-realip.conf;" "enabled root include"
+SUB_BLOCKS="$(nginx_render_subpath_template /panel 8000)"
+assert_contains "$SUB_BLOCKS" "include snippets/cloudflare-realip.conf;" "enabled subpath include"
+
+echo "[test] include absent when CLOUDFLARE_PROXY_ENABLED=false"
+export CLOUDFLARE_PROXY_ENABLED=false
+ROOT_BLOCKS="$(nginx_root_panel_location_blocks 8000)"
+if printf '%s' "$ROOT_BLOCKS" | grep -qF "include snippets/cloudflare-realip.conf;"; then
+  fail=$((fail + 1))
+  echo "  FAIL disabled root still has include" >&2
+else
+  pass=$((pass + 1))
+  echo "  OK  disabled root omits include"
+fi
+SUB_BLOCKS="$(nginx_render_subpath_template /panel 8000)"
+if printf '%s' "$SUB_BLOCKS" | grep -qF "include snippets/cloudflare-realip.conf;"; then
+  fail=$((fail + 1))
+  echo "  FAIL disabled subpath still has include" >&2
+else
+  pass=$((pass + 1))
+  echo "  OK  disabled subpath omits include"
+fi
+
+echo "[test] ensure snippet still runs when proxy disabled"
+export CLOUDFLARE_PROXY_ENABLED=false
+nginx_ensure_cloudflare_realip_snippet
+assert_file_contains "$TMP/snippets/cloudflare-realip.conf" "real_ip_header CF-Connecting-IP;" "ensure snippet when disabled"
 
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]
