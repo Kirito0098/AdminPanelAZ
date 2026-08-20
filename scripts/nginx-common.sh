@@ -10,7 +10,8 @@ nginx_common_init() {
 }
 
 nginx_log() {
-  echo "[nginx-setup] $*"
+  # stderr: callers often capture stdout (e.g. conf="$(nginx_render_template …)")
+  echo "[nginx-setup] $*" >&2
 }
 
 nginx_warn() {
