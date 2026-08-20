@@ -186,15 +186,35 @@ Mini App запускайте только из Telegram-клиента по HTT
 ### Telegram-бот не отвечает за Cloudflare (proxy / orange-cloud)
 
 Webhook бота проверяет, что запрос пришёл с IP Telegram. За Cloudflare в режиме
-прокси nginx без `real_ip` передаёт в панель IP edge Cloudflare → webhook отвечает
-403, команды и кнопки «молчат».
+прокси (orange-cloud) nginx без `real_ip` передаёт в панель IP edge Cloudflare →
+webhook отвечает 403, команды и кнопки «молчат».
 
 AdminPanelAZ ставит snippet `cloudflare-realip.conf` и отдельный location только для
 `/api/telegram/webhook/` (или `{ACCESS_PATH}/api/telegram/webhook/`), чтобы
 `X-Real-IP` стал адресом Telegram. Остальная панель не переключается на
 `CF-Connecting-IP`.
 
-После обновления панели на уже опубликованном сервере выполните:
+#### Управление в панели
+
+**Настройки → Адрес сайта и HTTPS** → блок **Cloudflare proxy-mode** (под мастером
+публикации):
+
+| Элемент | Назначение |
+| --- | --- |
+| **Cloudflare proxy-mode** | Включите, если домен панели за Cloudflare с оранжевым облаком. Без Cloudflare оставьте выключенным — nginx не подключает `cloudflare-realip.conf`. |
+| **Автообновление списков IP Cloudflare** | Планировщик панели периодически скачивает актуальные CIDR Cloudflare и обновляет snippet (по умолчанию раз в 7 дней, интервал 1–90). |
+| **Обновить сейчас** | Ручное обновление CIDR; доступно только при включённом proxy-mode. |
+| Статус | Время последнего успешного обновления, hash snippet и текст последней ошибки (если была). |
+
+Переключатели сохраняются сразу; при смене **proxy-mode** панель перегенерирует nginx
+(`nginx-repair`).
+
+> **Важно:** если домен за Cloudflare в режиме Proxied, а **Cloudflare proxy-mode**
+> **выключен**, webhook снова получает IP edge Cloudflare → бот не отвечает (403).
+> Либо включите proxy-mode, либо переведите DNS-запись в режим DNS only (серое
+> облако).
+
+После обновления панели на уже опубликованном сервере (без UI) выполните:
 
 ```bash
 sudo ./scripts/nginx-repair.sh
