@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { ApiError, getBackgroundTask, getBackgroundTaskForApiBase, getVpnNetworkDomainSsl, getVpnNetworkPortStatus, getVpnNetworkSettings, publishVpnNetwork } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
+import CloudflareProxyCard from '@/components/settings/CloudflareProxyCard'
 import PublishAccessWizard from '@/components/settings/PublishAccessWizard'
 import PublishAwaitDialog, { type PublishAwaitDialogState } from '@/components/settings/PublishAwaitDialog'
 import DdnsSettingsCard from '@/components/settings/DdnsSettingsCard'
@@ -690,6 +691,8 @@ export default function VpnNetworkTab() {
           }
         }}
       />
+
+      <CloudflareProxyCard />
 
       <SettingsCollapsible
         open={ddnsOpen}

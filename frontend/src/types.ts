@@ -924,6 +924,32 @@ export interface DdnsActionResponse {
   settings: DdnsSettings
 }
 
+export interface CloudflareProxySettings {
+  enabled: boolean
+  auto_update: boolean
+  interval_days: number
+  last_success_at: string | null
+  last_hash: string | null
+  last_error: string | null
+}
+
+export interface CloudflareProxySettingsUpdatePayload {
+  enabled?: boolean
+  auto_update?: boolean
+  interval_days?: number
+}
+
+export interface CloudflareProxyRefreshResponse {
+  success: boolean
+  applied: boolean
+  forced: boolean
+  changed: boolean
+  hash: string | null
+  message: string | null
+  error: string | null
+  state: CloudflareProxySettings
+}
+
 export interface CidrProviderInfo {
   filename: string
   name: string
