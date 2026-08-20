@@ -53,6 +53,9 @@ ensure_env_defaults() {
     _ensure_env_default "ADMIN_PANEL_AZ_SERVICE_NAME" "adminpanelaz"
     # Публикация (nginx-setup.sh задаёт DOMAIN, BEHIND_NGINX, TRUSTED_PROXY_IPS)
     _ensure_env_default "BEHIND_NGINX" "false"
+    _ensure_env_default "CLOUDFLARE_PROXY_ENABLED" "true"
+    _ensure_env_default "CLOUDFLARE_IPS_AUTO_UPDATE" "false"
+    _ensure_env_default "CLOUDFLARE_IPS_UPDATE_INTERVAL_DAYS" "7"
     _ensure_env_default "APP_ENV" "development"
     _ensure_env_default "AUTH_RATE_LIMIT_ENABLED" "true"
     _ensure_env_default "API_RATE_LIMIT_ENABLED" "true"
