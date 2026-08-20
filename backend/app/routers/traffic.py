@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import AppSetting, TrafficSessionState, User
+from app.models import AppSetting, User
 from app.schemas import (
     MessageResponse,
     TrafficClientSessionsResponse,
@@ -17,9 +17,13 @@ from app.schemas import (
     TrafficNeverConnectedSummary,
     TrafficOverview,
 )
-from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node
+from app.services.node_manager import get_active_adapter, get_active_node
 from app.models import Node
 from app.services.config_access import accessible_client_names
+from app.services.traffic.active_clients import (
+    db_active_traffic_client_names,
+    live_active_names_for_node,
+)
 from app.services.traffic.chart import fetch_traffic_chart
 from app.services.traffic.collector import TrafficCollectorService
 from app.services.traffic.ha_aggregate import resolve_traffic_scope
@@ -32,7 +36,6 @@ from app.services.traffic.maintenance import (
 )
 from app.services.antizapret_settings import is_openvpn_verbose_log_enabled
 from app.services.node_adapter import LocalNodeAdapter
-from app.services.wireguard_status import wireguard_peer_is_online
 
 router = APIRouter(prefix="/traffic", tags=["traffic"])
 settings = get_settings()
@@ -70,38 +73,9 @@ def _set_setting(db: Session, key: str, value: str) -> None:
         db.add(AppSetting(key=key, value=value))
 
 
-def _db_active_traffic_client_names(db: Session, node_id: int) -> set[str]:
-    rows = (
-        db.query(TrafficSessionState.common_name)
-        .filter(TrafficSessionState.node_id == node_id, TrafficSessionState.is_active.is_(True))
-        .distinct()
-        .all()
-    )
-    return {name for (name,) in rows if name}
-
-
-def _live_active_names_for_node(db: Session, node: Node) -> set[str]:
-    active_names: set[str] = set()
-    try:
-        adapter = get_adapter_for_node(node)
-        ovpn = adapter.parse_openvpn_status()
-        wg = adapter.parse_wireguard_status()
-        active_names = {c.common_name for c in ovpn}
-        active_names.update(
-            p.client_name for p in wg if p.client_name and wireguard_peer_is_online(p)
-        )
-    except Exception:
-        active_names = set()
-
-    if not active_names:
-        active_names = _db_active_traffic_client_names(db, node.id)
-
-    return active_names
-
-
 def _active_traffic_client_names(db: Session, node_id: int) -> set[str]:
     node = db.get(Node, node_id) or get_active_node(db)
-    return _live_active_names_for_node(db, node)
+    return live_active_names_for_node(db, node)
 
 
 def _active_names_by_node(db: Session, node_ids: list[int], *, live: bool) -> dict[int, set[str]]:
@@ -111,10 +85,10 @@ def _active_names_by_node(db: Session, node_ids: list[int], *, live: bool) -> di
         if live:
             node = db.get(Node, node_id)
             result[node_id] = (
-                _live_active_names_for_node(db, node) if node else _db_active_traffic_client_names(db, node_id)
+                live_active_names_for_node(db, node) if node else db_active_traffic_client_names(db, node_id)
             )
         else:
-            result[node_id] = _db_active_traffic_client_names(db, node_id)
+            result[node_id] = db_active_traffic_client_names(db, node_id)
     return result
 
 

@@ -8,6 +8,7 @@ from app.services.config_access import accessible_client_names
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext, is_admin, unlinked_message
 from app.services.telegram_bot_handlers.ui import nav_footer_keyboard, send_or_edit
+from app.services.traffic.active_clients import live_active_names_for_node
 from app.services.traffic.collector import TrafficCollectorService
 from app.services.traffic_limit import human_bytes
 from app.services import telegram_bot_i18n as i18n
@@ -71,7 +72,8 @@ async def handle_traffic(ctx: BotContext, *, page: int = 0, message_id: int | No
 
     node = get_active_node(ctx.db)
     collector = TrafficCollectorService(ctx.db, node.id)
-    rows, _summary = collector.get_summary(set(), settings.traffic_db_stale_seconds)
+    active_names = live_active_names_for_node(ctx.db, node)
+    rows, _summary = collector.get_summary(active_names, settings.traffic_db_stale_seconds)
 
     if is_admin(ctx.user):
         clients = _aggregate_clients(rows)
