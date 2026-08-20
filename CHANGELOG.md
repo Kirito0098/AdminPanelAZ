@@ -49,6 +49,9 @@
 
 ### 🐛 Fixed
 
+- **Telegram Mini App + ACCESS_PATH** — `GET …/tg-mini` инжектит
+  `window.__PANEL_ACCESS_PATH__`, чтобы API ходило на `{ACCESS_PATH}/api/...`
+  (GitHub #4).
 - **Telegram webhook за Cloudflare proxy** — nginx ставит `cloudflare-realip.conf` и
   отдельный location только для `/api/telegram/webhook/` (и с `ACCESS_PATH`), чтобы
   allowlist видел IP Telegram, а не edge CF. Существующие установки: `nginx-repair`.

@@ -349,6 +349,11 @@ def mini_app_page(request: Request):
     base_path = request.url.path.rstrip("/")
     html = index_path.read_text(encoding="utf-8")
     html = html.replace('"./assets/', f'"{base_path}/assets/')
+    from app.services.panel_paths import panel_access_path_script
+
+    runtime_config = panel_access_path_script(settings)
+    if runtime_config and "</head>" in html:
+        html = html.replace("</head>", f"    {runtime_config}\n  </head>", 1)
     nonce = get_request_csp_nonce(request)
     if not nonce:
         from app.middleware.http_security import generate_csp_nonce
