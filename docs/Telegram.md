@@ -196,8 +196,7 @@ AdminPanelAZ ставит snippet `cloudflare-realip.conf` и отдельный
 
 #### Управление в панели
 
-**Настройки → Адрес сайта и HTTPS** → блок **Cloudflare proxy-mode** (под мастером
-публикации):
+**Настройки → Cloudflare**:
 
 | Элемент | Назначение |
 | --- | --- |

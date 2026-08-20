@@ -45,8 +45,13 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   },
   vpn_network: {
     title: 'Адрес сайта и HTTPS',
-    description: 'Как панель открывается в браузере: домен, защищённое соединение и прокси',
+    description: 'Как панель открывается в браузере: домен и защищённое соединение',
     hint: 'Настройте, если панель должна открываться по вашему домену с замочком HTTPS.',
+  },
+  cloudflare: {
+    title: 'Cloudflare',
+    description: 'Proxy-mode для Telegram webhook за Cloudflare Proxied',
+    hint: 'Нужно, если домен панели за Cloudflare с оранжевым облаком. Без Cloudflare раздел можно не трогать.',
   },
   modules: {
     title: 'Разделы панели',

@@ -49,6 +49,7 @@
 | Раздача конфигов | [razdacha-konfigov.md](nastrojki/razdacha-konfigov.md) |
 | Обслуживание | [obsluzhivanie.md](nastrojki/obsluzhivanie.md) |
 | Адрес сайта и HTTPS | [set-i-publikaciya.md](nastrojki/set-i-publikaciya.md) |
+| Cloudflare (proxy-mode) | [set-i-publikaciya.md](nastrojki/set-i-publikaciya.md) / [Telegram.md](Telegram.md) |
 | Резервные копии | [rezervnye-kopii.md](nastrojki/rezervnye-kopii.md) |
 | Мониторинг и алерты | [monitoring-i-alerty.md](nastrojki/monitoring-i-alerty.md) |
 | Модули | [moduli.md](nastrojki/moduli.md) |
