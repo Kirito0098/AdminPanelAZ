@@ -1105,6 +1105,36 @@ class VpnNetworkPortStatusResponse(BaseModel):
     listener: str | None = None
 
 
+class CloudflareProxySettingsResponse(BaseModel):
+    enabled: bool = False
+    auto_update: bool = False
+    interval_days: int = 7
+    last_success_at: str | None = None
+    last_hash: str | None = None
+    last_error: str | None = None
+
+
+class CloudflareProxySettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    auto_update: bool | None = None
+    interval_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class CloudflareProxyRefreshRequest(BaseModel):
+    force: bool = False
+
+
+class CloudflareProxyRefreshResponse(BaseModel):
+    success: bool
+    applied: bool = False
+    forced: bool = False
+    changed: bool = False
+    hash: str | None = None
+    message: str | None = None
+    error: str | None = None
+    state: CloudflareProxySettingsResponse
+
+
 class DdnsSettingsResponse(BaseModel):
     provider: str = "none"
     domain: str = ""

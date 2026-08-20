@@ -31,6 +31,7 @@ _TRUE_VALUES = {"1", "true", "yes", "on"}
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 _APPLY_SCRIPT = _PROJECT_ROOT / "scripts" / "nginx-cloudflare-realip-apply.sh"
+_REPAIR_SCRIPT = _PROJECT_ROOT / "scripts" / "nginx-repair.sh"
 
 
 def _env_default_enabled() -> bool:
@@ -215,3 +216,30 @@ def refresh_cloudflare_ips(db: Session, *, force: bool = False) -> dict:
             "error": error,
             "state": get_cloudflare_proxy_state(db),
         }
+
+
+def regenerate_panel_nginx_for_cloudflare_proxy() -> tuple[str, str]:
+    domain = _env_service().get_env_value("DOMAIN", "").strip()
+    if not domain:
+        raise RuntimeError("DOMAIN is required to regenerate nginx")
+    if not _REPAIR_SCRIPT.is_file():
+        raise RuntimeError(f"Panel nginx repair script not found: {_REPAIR_SCRIPT}")
+
+    run_env = os.environ.copy()
+    run_env["DOMAIN"] = domain
+    run_env["ENV_FILE"] = str(_ENV_FILE)
+    result = subprocess.run(
+        ["sudo", "-n", "bash", str(_REPAIR_SCRIPT), "--non-interactive"],
+        cwd=str(_PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=600,
+        env=run_env,
+    )
+    stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
+    if result.returncode != 0:
+        message = stderr or stdout or "unknown error"
+        raise RuntimeError(f"Cloudflare nginx regeneration failed with exit code {result.returncode}: {message}")
+    return stdout, stderr
