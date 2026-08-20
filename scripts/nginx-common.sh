@@ -597,6 +597,7 @@ nginx_render_template() {
   local https_port="${6:-443}"
   local http_port="${7:-80}"
   local https_redirect_suffix access_path panel_blocks rendered
+  nginx_ensure_cloudflare_realip_snippet
   https_redirect_suffix="$(nginx_https_redirect_suffix "$https_port")"
   access_path="$(nginx_normalize_access_path "${ACCESS_PATH:-}")"
   panel_blocks="$(nginx_panel_location_blocks "$access_path" "$backend_port")"
