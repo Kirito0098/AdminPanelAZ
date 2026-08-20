@@ -13,7 +13,7 @@ import PublishAccessWizard from '@/components/settings/PublishAccessWizard'
 import PublishAwaitDialog, { type PublishAwaitDialogState } from '@/components/settings/PublishAwaitDialog'
 import DdnsSettingsCard from '@/components/settings/DdnsSettingsCard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
-import { SettingsCollapsible, SettingsPanel, SettingsToolbar } from '@/components/settings/SettingsChrome'
+import { SettingsCollapsible } from '@/components/settings/SettingsChrome'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -139,6 +139,7 @@ export default function VpnNetworkTab() {
   const [publishAwait, setPublishAwait] = useState<PublishAwaitDialogState | null>(null)
   const [ddnsOpen, setDdnsOpen] = useState(false)
   const [manualSetupOpen, setManualSetupOpen] = useState(false)
+  const [currentAccessOpen, setCurrentAccessOpen] = useState(false)
   const [domainSslStatus, setDomainSslStatus] = useState<VpnNetworkDomainSslStatus | null>(null)
   const [portStatuses, setPortStatuses] = useState<Record<string, VpnNetworkPortStatus | null>>({})
   const userPickedModeRef = useRef(false)
@@ -606,18 +607,17 @@ export default function VpnNetworkTab() {
         </TabsList>
 
         <TabsContent value="publish" className="mt-0 space-y-4 focus-visible:outline-none">
-          <SettingsToolbar
+          <SettingsCollapsible
+            open={currentAccessOpen}
+            onOpenChange={setCurrentAccessOpen}
             title="Текущий доступ"
-            meta="Как панель открывается сейчас и по каким адресам"
-            actions={
-              <div className="flex items-center gap-2">
-                <Badge variant={modeBadgeVariant(settings)}>{modeLabel}</Badge>
-                <span className="text-sm font-medium">{settings.mode_title}</span>
-              </div>
+            description={
+              settings.primary_urls[0]
+                ? `${settings.mode_title} · ${settings.primary_urls[0].url}`
+                : settings.mode_title
             }
-          />
-
-          <SettingsPanel>
+            icon={<Badge variant={modeBadgeVariant(settings)}>{modeLabel}</Badge>}
+          >
             <div className="grid gap-6 lg:grid-cols-[1fr_minmax(240px,300px)]">
               <ul className="space-y-2">
                 {settings.bullet_points.map((point) => (
@@ -662,7 +662,7 @@ export default function VpnNetworkTab() {
                 )}
               </aside>
             </div>
-          </SettingsPanel>
+          </SettingsCollapsible>
 
           <PublishAccessWizard
             settings={settings}
