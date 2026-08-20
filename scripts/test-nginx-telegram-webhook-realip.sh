@@ -42,11 +42,25 @@ assert_file_contains "$SNIPPET_SRC" "real_ip_header CF-Connecting-IP;" "real_ip_
 assert_file_contains "$SNIPPET_SRC" "real_ip_recursive on;" "real_ip_recursive"
 assert_file_contains "$SNIPPET_SRC" "set_real_ip_from 173.245.48.0/20;" "sample CF IPv4"
 assert_file_contains "$SNIPPET_SRC" "set_real_ip_from 2400:cb00::/32;" "sample CF IPv6"
+assert_file_contains "$SNIPPET_SRC" "# snapshot: 2026-08-20" "snapshot date"
 
 echo "[test] ensure snippet copies into override dir"
 export NGINX_SNIPPETS_DIR="$TMP/snippets"
+export NGINX_BACKUPS_DIR="$TMP/backups"
 nginx_ensure_cloudflare_realip_snippet
 assert_file_contains "$TMP/snippets/cloudflare-realip.conf" "real_ip_header CF-Connecting-IP;" "copied snippet"
+
+echo "[test] ensure backs up when replacing different content"
+printf '# stale snippet\n' >"$TMP/snippets/cloudflare-realip.conf"
+nginx_ensure_cloudflare_realip_snippet
+if compgen -G "$TMP/backups/cloudflare-realip.conf.*.bak" >/dev/null; then
+  pass=$((pass + 1))
+  echo "  OK  ensure backup created"
+else
+  fail=$((fail + 1))
+  echo "  FAIL ensure backup created" >&2
+fi
+assert_file_contains "$TMP/snippets/cloudflare-realip.conf" "real_ip_header CF-Connecting-IP;" "ensure replaced stale snippet"
 
 echo "[test] root panel location blocks"
 ROOT_BLOCKS="$(nginx_root_panel_location_blocks 8000)"

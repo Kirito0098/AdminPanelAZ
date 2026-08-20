@@ -268,14 +268,47 @@ nginx_snippets_dir() {
 }
 
 nginx_ensure_cloudflare_realip_snippet() {
-  local src dest dir
+  local src dest dir bak_dir
   src="${NGINX_TEMPLATE_DIR}/cloudflare-realip.conf"
   dir="$(nginx_snippets_dir)"
   dest="${dir}/cloudflare-realip.conf"
+  bak_dir="${NGINX_BACKUPS_DIR:-/etc/nginx/backups}"
   [[ -f "$src" ]] || nginx_die "Нет шаблона Cloudflare realip: ${src}"
-  mkdir -p "$dir"
+  mkdir -p "$dir" "$bak_dir"
+  if [[ -f "$dest" ]] && ! cmp -s "$src" "$dest"; then
+    cp "$dest" "${bak_dir}/cloudflare-realip.conf.$(date +%Y%m%d%H%M%S).bak"
+  fi
   cp "$src" "$dest"
   nginx_log "Snippet Cloudflare realip: ${dest}"
+}
+
+nginx_cloudflare_realip_apply() {
+  local new_file="$1"
+  local dir dest bak_dir tmp latest
+  [[ -f "$new_file" ]] || nginx_die "Файл не найден: $new_file"
+  [[ "$(id -u)" -eq 0 ]] || nginx_die "Запустите от root"
+
+  dir="$(nginx_snippets_dir)"
+  dest="${dir}/cloudflare-realip.conf"
+  bak_dir="${NGINX_BACKUPS_DIR:-/etc/nginx/backups}"
+  mkdir -p "$dir" "$bak_dir"
+
+  if [[ -f "$dest" ]]; then
+    cp "$dest" "${bak_dir}/cloudflare-realip.conf.$(date +%Y%m%d%H%M%S).bak"
+  fi
+  tmp="${dest}.tmp.$$"
+  cp "$new_file" "$tmp"
+  mv "$tmp" "$dest"
+
+  if ! nginx -t; then
+    latest="$(ls -1t "${bak_dir}"/cloudflare-realip.conf.*.bak 2>/dev/null | head -1 || true)"
+    if [[ -n "$latest" ]]; then
+      cp "$latest" "$dest"
+    fi
+    nginx_die "nginx -t не прошёл — восстановлен предыдущий cloudflare-realip.conf"
+  fi
+  systemctl reload nginx || nginx_die "Не удалось reload nginx"
+  nginx_log "Cloudflare realip snippet обновлён: ${dest}"
 }
 
 nginx_root_panel_location_blocks() {
