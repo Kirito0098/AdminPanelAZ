@@ -90,6 +90,7 @@ def test_refresh_noop_when_hash_matches(db):
     assert result["success"] is True
     assert result["applied"] is False
     assert result["changed"] is False
+    assert result["message"] == "Списки IP Cloudflare не изменились; применение пропущено."
     assert run_mock.call_count == 0
     state = cps.get_cloudflare_proxy_state(db)
     assert state["last_hash"] == "hash-123"
@@ -108,6 +109,7 @@ def test_refresh_updates_status_on_apply_failure(db):
         result = cps.refresh_cloudflare_ips(db)
 
     assert result["success"] is False
+    assert "Не удалось применить списки IP Cloudflare" in result["error"]
     assert "nginx -t failed" in result["error"]
     run_mock.assert_called_once()
     state = cps.get_cloudflare_proxy_state(db)
@@ -128,6 +130,7 @@ def test_refresh_applies_changed_hash_and_updates_status(db):
     assert result["success"] is True
     assert result["applied"] is True
     assert result["changed"] is True
+    assert result["message"].startswith("Списки IP Cloudflare успешно обновлены.")
     run_mock.assert_called_once()
     args = run_mock.call_args.args[0]
     assert args[:3] == ["sudo", "-n", "bash"]

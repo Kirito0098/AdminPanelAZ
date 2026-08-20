@@ -940,19 +940,26 @@ def update_cloudflare_proxy_settings(
     _: User = Depends(require_admin),
 ):
     before = cloudflare_proxy_settings_service.get_cloudflare_proxy_state(db)
+    enabled_changing = payload.enabled is not None and payload.enabled != before["enabled"]
     state = cloudflare_proxy_settings_service.set_cloudflare_proxy_flags(
         db,
         enabled=payload.enabled,
         auto_update=payload.auto_update,
         interval_days=payload.interval_days,
     )
-    if payload.enabled is not None and payload.enabled != before["enabled"]:
+    if enabled_changing:
         try:
             cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy()
         except Exception as exc:
+            cloudflare_proxy_settings_service.set_cloudflare_proxy_flags(
+                db,
+                enabled=before["enabled"],
+                auto_update=before["auto_update"],
+                interval_days=before["interval_days"],
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=str(exc),
+                detail=f"Не удалось перегенерировать конфигурацию nginx: {exc}",
             ) from exc
     return CloudflareProxySettingsResponse(**state)
 

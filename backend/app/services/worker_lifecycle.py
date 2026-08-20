@@ -85,4 +85,4 @@ def should_start_awg2_expire() -> bool:
 
 
 def should_start_cloudflare_ips_scheduler() -> bool:
-    return get_settings().cloudflare_proxy_enabled
+    return True

@@ -152,7 +152,7 @@ def _run_apply_script(new_file: Path) -> tuple[str, str]:
     if result.returncode != 0:
         message = stderr or stdout or "unknown error"
         raise RuntimeError(
-            f"Cloudflare apply failed with exit code {result.returncode}: {message}"
+            f"Не удалось применить списки IP Cloudflare (код выхода {result.returncode}): {message}"
         )
     return stdout, stderr
 
@@ -181,7 +181,7 @@ def refresh_cloudflare_ips(db: Session, *, force: bool = False) -> dict:
                 "forced": force,
                 "changed": False,
                 "hash": content_hash,
-                "message": "Cloudflare IPs are unchanged; apply skipped.",
+                "message": "Списки IP Cloudflare не изменились; применение пропущено.",
                 "state": get_cloudflare_proxy_state(db),
             }
 
@@ -191,7 +191,7 @@ def refresh_cloudflare_ips(db: Session, *, force: bool = False) -> dict:
             stdout, stderr = _run_apply_script(new_file)
 
         _mark_success(db, content_hash=content_hash)
-        message = "Cloudflare IPs refreshed successfully."
+        message = "Списки IP Cloudflare успешно обновлены."
         if stdout:
             message = f"{message} {stdout}".strip()
         if stderr:
@@ -221,9 +221,9 @@ def refresh_cloudflare_ips(db: Session, *, force: bool = False) -> dict:
 def regenerate_panel_nginx_for_cloudflare_proxy() -> tuple[str, str]:
     domain = _env_service().get_env_value("DOMAIN", "").strip()
     if not domain:
-        raise RuntimeError("DOMAIN is required to regenerate nginx")
+        raise RuntimeError("Для перегенерации nginx требуется переменная DOMAIN")
     if not _REPAIR_SCRIPT.is_file():
-        raise RuntimeError(f"Panel nginx repair script not found: {_REPAIR_SCRIPT}")
+        raise RuntimeError(f"Скрипт перегенерации nginx панели не найден: {_REPAIR_SCRIPT}")
 
     run_env = os.environ.copy()
     run_env["DOMAIN"] = domain
@@ -241,5 +241,7 @@ def regenerate_panel_nginx_for_cloudflare_proxy() -> tuple[str, str]:
     stderr = (result.stderr or "").strip()
     if result.returncode != 0:
         message = stderr or stdout or "unknown error"
-        raise RuntimeError(f"Cloudflare nginx regeneration failed with exit code {result.returncode}: {message}")
+        raise RuntimeError(
+            f"Не удалось перегенерировать nginx для Cloudflare (код выхода {result.returncode}): {message}"
+        )
     return stdout, stderr

@@ -122,6 +122,25 @@ def test_patch_cloudflare_proxy_skips_regeneration_when_enabled_unchanged(client
     regen.assert_not_called()
 
 
+def test_patch_cloudflare_proxy_reverts_flags_when_regeneration_fails(client, db, tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(cps, "_ENV_FILE", tmp_path / ".env")
+
+    with patch(
+        "app.routers.maintenance.cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy",
+        side_effect=RuntimeError("nginx -t failed"),
+    ) as regen:
+        resp = client.patch(
+            "/api/settings/cloudflare-proxy",
+            json={"enabled": False},
+        )
+
+    assert resp.status_code == 500
+    assert "Не удалось перегенерировать конфигурацию nginx" in resp.json()["detail"]
+    assert "nginx -t failed" in resp.json()["detail"]
+    regen.assert_called_once()
+    assert _setting_value(db, cps.SETTING_CLOUDFLARE_PROXY_ENABLED) == "true"
+
+
 def test_refresh_cloudflare_proxy_forwards_force_flag(client):
     result = {
         "success": True,

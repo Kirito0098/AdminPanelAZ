@@ -80,16 +80,16 @@ def test_should_run_treats_invalid_timestamp_as_due():
 
 
 @pytest.mark.parametrize(
-    ("env_value", "expected"),
+    ("env_value",),
     [
-        ("true", True),
-        ("false", False),
+        ("true",),
+        ("false",),
     ],
 )
-def test_should_start_cloudflare_ips_scheduler(monkeypatch, env_value, expected):
+def test_should_start_cloudflare_ips_scheduler(monkeypatch, env_value):
     monkeypatch.setenv("CLOUDFLARE_PROXY_ENABLED", env_value)
     get_settings.cache_clear()
     try:
-        assert should_start_cloudflare_ips_scheduler() is expected
+        assert should_start_cloudflare_ips_scheduler() is True
     finally:
         get_settings.cache_clear()

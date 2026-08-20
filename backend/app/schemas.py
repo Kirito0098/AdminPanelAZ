@@ -1117,7 +1117,7 @@ class CloudflareProxySettingsResponse(BaseModel):
 class CloudflareProxySettingsUpdate(BaseModel):
     enabled: bool | None = None
     auto_update: bool | None = None
-    interval_days: int | None = Field(default=None, ge=1, le=3650)
+    interval_days: int | None = Field(default=None, ge=1, le=90)
 
 
 class CloudflareProxyRefreshRequest(BaseModel):
