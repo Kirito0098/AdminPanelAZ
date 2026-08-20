@@ -6,10 +6,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.auth import require_admin
 from app.config import get_settings
 from app.database import Base, get_db
+import app.models  # noqa: F401 — register ORM models on Base.metadata
 from app.models import AppSetting, User
 from app.routers import maintenance as maintenance_router
 from app.services import cloudflare_proxy_settings as cps
@@ -28,7 +30,11 @@ def _reset_settings_cache(monkeypatch):
 
 @pytest.fixture()
 def db():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
@@ -45,7 +51,14 @@ def client(db):
     app = FastAPI()
     app.include_router(maintenance_router.router, prefix="/api")
     app.dependency_overrides[require_admin] = lambda: MagicMock(spec=User, username="admin", id=1)
-    app.dependency_overrides[get_db] = lambda: db
+
+    def _override_get_db():
+        try:
+            yield db
+        finally:
+            pass
+
+    app.dependency_overrides[get_db] = _override_get_db
     with TestClient(app) as c:
         yield c
 
