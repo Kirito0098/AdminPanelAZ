@@ -49,11 +49,11 @@
 
 ### ✨ Added
 
-- **Cloudflare proxy UI** — отдельная вкладка **Настройки → Cloudflare**: toggle proxy-mode для Telegram webhook realip, автообновление CIDR (scheduler), кнопка «Обновить сейчас», статус last success/error.
+- **Cloudflare proxy UI** — внутри **Настройки → Адрес сайта и HTTPS** вкладка **Cloudflare**: toggle proxy-mode для Telegram webhook realip, автообновление CIDR (scheduler), кнопка «Обновить сейчас», статус last success/error.
 
 ### 🔄 Changed
 
-- **Настройки** — Cloudflare proxy-mode вынесен из «Адрес сайта и HTTPS» в отдельный пункт меню «Cloudflare» (тот же feature toggle `vpn_network`).
+- **Адрес сайта и HTTPS** — внутренние вкладки **Публикация** и **Cloudflare** (без отдельного пункта в боковом меню).
 - **nginx webhook** — `include cloudflare-realip.conf` только при `CLOUDFLARE_PROXY_ENABLED=true` (default true).
 
 ### 🐛 Fixed

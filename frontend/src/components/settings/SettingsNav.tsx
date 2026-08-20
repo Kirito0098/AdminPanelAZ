@@ -2,7 +2,6 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
   Archive,
-  Cloud,
   Download,
   FlaskConical,
   Globe,
@@ -25,7 +24,6 @@ export type SettingsSection =
   | 'backup'
   | 'monitoring'
   | 'vpn_network'
-  | 'cloudflare'
   | 'modules'
   | 'updates'
   | 'panel_ops'
@@ -103,7 +101,6 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
     adminOnly: true,
     items: [
       navItem('vpn_network', Globe, { settingsTab: 'vpn_network' }),
-      navItem('cloudflare', Cloud, { settingsTab: 'vpn_network' }),
       navItem('backup', Archive, { settingsTab: 'backup' }),
       navItem('monitoring', Activity, { settingsTab: 'monitoring' }),
     ],

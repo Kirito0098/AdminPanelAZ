@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Cloud,
   ExternalLink,
   Globe2,
   Terminal,
 } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { ApiError, getBackgroundTask, getBackgroundTaskForApiBase, getVpnNetworkDomainSsl, getVpnNetworkPortStatus, getVpnNetworkSettings, publishVpnNetwork } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
+import CloudflareProxyCard from '@/components/settings/CloudflareProxyCard'
 import PublishAccessWizard from '@/components/settings/PublishAccessWizard'
 import PublishAwaitDialog, { type PublishAwaitDialogState } from '@/components/settings/PublishAwaitDialog'
 import DdnsSettingsCard from '@/components/settings/DdnsSettingsCard'
@@ -13,6 +16,7 @@ import SettingsAlert from '@/components/settings/SettingsAlert'
 import { SettingsCollapsible, SettingsPanel, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
@@ -99,6 +103,26 @@ export default function VpnNetworkTab() {
   const { error: notifyError } = useNotifications()
   const { trackBackgroundTask, backgroundTaskPolling } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeInnerTab = useMemo(() => {
+    const raw = searchParams.get('tab')
+    return raw === 'cloudflare' ? 'cloudflare' : 'publish'
+  }, [searchParams])
+  const setActiveInnerTab = useCallback(
+    (value: string) => {
+      const next = value === 'cloudflare' ? 'cloudflare' : 'publish'
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev)
+          if (next === 'publish') params.delete('tab')
+          else params.set('tab', next)
+          return params
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
   const [settings, setSettings] = useState<VpnNetworkSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -569,156 +593,175 @@ export default function VpnNetworkTab() {
       <PublishAwaitDialog state={publishAwait} onDismiss={() => setPublishAwait(null)} />
       <ConfirmDialogHost dialogProps={dialogProps} />
 
-      <SettingsToolbar
-        title="Текущий доступ"
-        meta="Как панель открывается сейчас и по каким адресам"
-        actions={
-          <div className="flex items-center gap-2">
-            <Badge variant={modeBadgeVariant(settings)}>{modeLabel}</Badge>
-            <span className="text-sm font-medium">{settings.mode_title}</span>
-          </div>
-        }
-      />
+      <Tabs value={activeInnerTab} onValueChange={setActiveInnerTab} className="space-y-4">
+        <TabsList className="flex h-auto w-full flex-wrap gap-1 bg-muted/50 p-1 sm:inline-flex sm:w-auto">
+          <TabsTrigger value="publish" className="gap-1.5">
+            <Globe2 size={16} />
+            Публикация
+          </TabsTrigger>
+          <TabsTrigger value="cloudflare" className="gap-1.5">
+            <Cloud size={16} />
+            Cloudflare
+          </TabsTrigger>
+        </TabsList>
 
-      <SettingsPanel>
-        <div className="grid gap-6 lg:grid-cols-[1fr_minmax(240px,300px)]">
-          <ul className="space-y-2">
-            {settings.bullet_points.map((point) => (
-              <li
-                key={point}
-                className="flex gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-sm text-muted-foreground"
-              >
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-                <span>{point}</span>
-              </li>
-            ))}
-          </ul>
-          <aside className="space-y-4 rounded-xl border bg-muted/20 p-4">
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Внутренний адрес
-              </p>
-              <code className="mt-1.5 block break-all rounded-lg bg-card/80 px-2.5 py-2 font-mono text-xs">
-                {settings.internal_url}
-              </code>
-            </div>
-            {settings.primary_urls.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Откройте в браузере
-                </p>
-                {settings.primary_urls.map((row) => (
-                  <a
-                    key={row.url}
-                    href={row.url}
-                    className="flex flex-col gap-0.5 rounded-lg border bg-card/60 px-3 py-2 transition-colors hover:border-primary/30 hover:bg-primary/5"
-                    title={row.label}
-                  >
-                    <span className="text-[11px] text-muted-foreground">{row.label}</span>
-                    <span className="flex items-center gap-1 break-all font-mono text-xs text-primary">
-                      {row.url}
-                      <ExternalLink size={12} className="shrink-0" />
-                    </span>
-                  </a>
-                ))}
+        <TabsContent value="publish" className="mt-0 space-y-4 focus-visible:outline-none">
+          <SettingsToolbar
+            title="Текущий доступ"
+            meta="Как панель открывается сейчас и по каким адресам"
+            actions={
+              <div className="flex items-center gap-2">
+                <Badge variant={modeBadgeVariant(settings)}>{modeLabel}</Badge>
+                <span className="text-sm font-medium">{settings.mode_title}</span>
               </div>
-            )}
-          </aside>
-        </div>
-      </SettingsPanel>
+            }
+          />
 
-      <PublishAccessWizard
-        settings={settings}
-        publishModes={orderedPublishModes}
-        selectedMode={selectedMode}
-        onSelectMode={(modeKey) => {
-          userPickedModeRef.current = true
-          if (!modeKey.startsWith('nginx_') && selectedMode.startsWith('nginx_')) {
-            setAccessPath('')
-          }
-          suppressSslAutofillRef.current = false
-          setSelectedMode(modeKey)
-        }}
-        selectedModeInfo={selectedModeInfo}
-        backendPort={backendPort}
-        onBackendPortChange={setBackendPort}
-        domain={domain}
-        onDomainChange={setDomain}
-        email={email}
-        onEmailChange={setEmail}
-        httpsPublicPort={httpsPublicPort}
-        onHttpsPublicPortChange={setHttpsPublicPort}
-        httpAcmePort={httpAcmePort}
-        onHttpAcmePortChange={setHttpAcmePort}
-        sslCert={sslCert}
-        onSslCertChange={(value) => {
-          suppressSslAutofillRef.current = true
-          setSslCert(value)
-        }}
-        sslKey={sslKey}
-        onSslKeyChange={(value) => {
-          suppressSslAutofillRef.current = true
-          setSslKey(value)
-        }}
-        accessPath={accessPath}
-        onAccessPathChange={setAccessPath}
-        onAccessPathBlur={() => setAccessPath((value) => normalizeAccessPathInput(value))}
-        nginxSubpathIntegrate={nginxSubpathIntegrate}
-        onIntegrateChange={setNginxSubpathIntegrate}
-        portStatuses={portStatuses}
-        domainSslStatus={domainSslStatus}
-        previewAccessUrl={previewAccessUrl}
-        uvicornWarnings={uvicornWarnings}
-        publishing={backgroundTaskPolling}
-        onPublish={handlePublish}
-        showUvicornHttpsPort={showUvicornHttpsPort}
-        showLetsEncryptEmail={showLetsEncryptEmail}
-        showSslPaths={showSslPaths}
-        showNginxPorts={showNginxPorts}
-        showAccessPathField={showAccessPathField}
-        showStatusOpenVpnIntegrate={showStatusOpenVpnIntegrate}
-        showGenericSubpathIntegrate={showGenericSubpathIntegrate}
-        showOptionalDomain={showOptionalDomain}
-        selfsignedDomainHint={selfsignedDomainHint}
-        onPickSslSuggestion={(cert, key) => {
-          setSslCert(cert)
-          setSslKey(key)
-          const item = settings.ssl_cert_suggestions?.find((entry) => entry.cert === cert)
-          if (item) {
-            const suggestedDomain = domainFromSslSuggestion(item)
-            if (suggestedDomain) setDomain(suggestedDomain)
-          }
-        }}
-      />
+          <SettingsPanel>
+            <div className="grid gap-6 lg:grid-cols-[1fr_minmax(240px,300px)]">
+              <ul className="space-y-2">
+                {settings.bullet_points.map((point) => (
+                  <li
+                    key={point}
+                    className="flex gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-sm text-muted-foreground"
+                  >
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+                    <span>{point}</span>
+                  </li>
+                ))}
+              </ul>
+              <aside className="space-y-4 rounded-xl border bg-muted/20 p-4">
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Внутренний адрес
+                  </p>
+                  <code className="mt-1.5 block break-all rounded-lg bg-card/80 px-2.5 py-2 font-mono text-xs">
+                    {settings.internal_url}
+                  </code>
+                </div>
+                {settings.primary_urls.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Откройте в браузере
+                    </p>
+                    {settings.primary_urls.map((row) => (
+                      <a
+                        key={row.url}
+                        href={row.url}
+                        className="flex flex-col gap-0.5 rounded-lg border bg-card/60 px-3 py-2 transition-colors hover:border-primary/30 hover:bg-primary/5"
+                        title={row.label}
+                      >
+                        <span className="text-[11px] text-muted-foreground">{row.label}</span>
+                        <span className="flex items-center gap-1 break-all font-mono text-xs text-primary">
+                          {row.url}
+                          <ExternalLink size={12} className="shrink-0" />
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </aside>
+            </div>
+          </SettingsPanel>
 
-      <SettingsCollapsible
-        open={ddnsOpen}
-        onOpenChange={setDdnsOpen}
-        title="Динамический DNS"
-        description="Бесплатный адрес DuckDNS / No-IP, если нет своего домена"
-        icon={<Globe2 size={16} />}
-      >
-        <DdnsSettingsCard
-          onSuggestDomain={(fqdn) => {
-            setDomain((current) => (current.trim() ? current : fqdn))
-          }}
-        />
-      </SettingsCollapsible>
+          <PublishAccessWizard
+            settings={settings}
+            publishModes={orderedPublishModes}
+            selectedMode={selectedMode}
+            onSelectMode={(modeKey) => {
+              userPickedModeRef.current = true
+              if (!modeKey.startsWith('nginx_') && selectedMode.startsWith('nginx_')) {
+                setAccessPath('')
+              }
+              suppressSslAutofillRef.current = false
+              setSelectedMode(modeKey)
+            }}
+            selectedModeInfo={selectedModeInfo}
+            backendPort={backendPort}
+            onBackendPortChange={setBackendPort}
+            domain={domain}
+            onDomainChange={setDomain}
+            email={email}
+            onEmailChange={setEmail}
+            httpsPublicPort={httpsPublicPort}
+            onHttpsPublicPortChange={setHttpsPublicPort}
+            httpAcmePort={httpAcmePort}
+            onHttpAcmePortChange={setHttpAcmePort}
+            sslCert={sslCert}
+            onSslCertChange={(value) => {
+              suppressSslAutofillRef.current = true
+              setSslCert(value)
+            }}
+            sslKey={sslKey}
+            onSslKeyChange={(value) => {
+              suppressSslAutofillRef.current = true
+              setSslKey(value)
+            }}
+            accessPath={accessPath}
+            onAccessPathChange={setAccessPath}
+            onAccessPathBlur={() => setAccessPath((value) => normalizeAccessPathInput(value))}
+            nginxSubpathIntegrate={nginxSubpathIntegrate}
+            onIntegrateChange={setNginxSubpathIntegrate}
+            portStatuses={portStatuses}
+            domainSslStatus={domainSslStatus}
+            previewAccessUrl={previewAccessUrl}
+            uvicornWarnings={uvicornWarnings}
+            publishing={backgroundTaskPolling}
+            onPublish={handlePublish}
+            showUvicornHttpsPort={showUvicornHttpsPort}
+            showLetsEncryptEmail={showLetsEncryptEmail}
+            showSslPaths={showSslPaths}
+            showNginxPorts={showNginxPorts}
+            showAccessPathField={showAccessPathField}
+            showStatusOpenVpnIntegrate={showStatusOpenVpnIntegrate}
+            showGenericSubpathIntegrate={showGenericSubpathIntegrate}
+            showOptionalDomain={showOptionalDomain}
+            selfsignedDomainHint={selfsignedDomainHint}
+            onPickSslSuggestion={(cert, key) => {
+              setSslCert(cert)
+              setSslKey(key)
+              const item = settings.ssl_cert_suggestions?.find((entry) => entry.cert === cert)
+              if (item) {
+                const suggestedDomain = domainFromSslSuggestion(item)
+                if (suggestedDomain) setDomain(suggestedDomain)
+              }
+            }}
+          />
 
-      <SettingsCollapsible
-        open={manualSetupOpen}
-        onOpenChange={setManualSetupOpen}
-        title="Ручная настройка"
-        description="Если мастер не подходит — команда для терминала на сервере"
-        icon={<Terminal size={16} />}
-      >
-        <code className="block rounded-xl border bg-muted/30 px-4 py-3 font-mono text-xs leading-relaxed">
-          sudo ./{settings.nginx_setup_hint}
-        </code>
-        <p className="text-sm text-muted-foreground">
-          Подробная инструкция — в файле README на сервере, раздел про Nginx и HTTPS.
-        </p>
-      </SettingsCollapsible>
+          <SettingsCollapsible
+            open={ddnsOpen}
+            onOpenChange={setDdnsOpen}
+            title="Динамический DNS"
+            description="Бесплатный адрес DuckDNS / No-IP, если нет своего домена"
+            icon={<Globe2 size={16} />}
+          >
+            <DdnsSettingsCard
+              onSuggestDomain={(fqdn) => {
+                setDomain((current) => (current.trim() ? current : fqdn))
+              }}
+            />
+          </SettingsCollapsible>
+
+          <SettingsCollapsible
+            open={manualSetupOpen}
+            onOpenChange={setManualSetupOpen}
+            title="Ручная настройка"
+            description="Если мастер не подходит — команда для терминала на сервере"
+            icon={<Terminal size={16} />}
+          >
+            <code className="block rounded-xl border bg-muted/30 px-4 py-3 font-mono text-xs leading-relaxed">
+              sudo ./{settings.nginx_setup_hint}
+            </code>
+            <p className="text-sm text-muted-foreground">
+              Подробная инструкция — в файле README на сервере, раздел про Nginx и HTTPS.
+            </p>
+          </SettingsCollapsible>
+        </TabsContent>
+
+        <TabsContent value="cloudflare" className="mt-0 focus-visible:outline-none">
+          <CloudflareProxyCard />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

@@ -70,10 +70,11 @@
 При смене пути обновите в BotFather URL Mini App и webhook Telegram (`/panel/api/tg-mini`, `/panel/api/telegram/webhook/...`).
 
 Если домен панели за Cloudflare в режиме **Proxied** (orange-cloud), откройте
-**Настройки → Cloudflare** (переключатель proxy-mode, автообновление CIDR, кнопка
-«Обновить сейчас», статус последнего обновления). Без Cloudflare proxy-mode можно
-выключить; за orange-cloud при выключенном режиме Telegram webhook не увидит IP
-Telegram — см. [`docs/Telegram.md`](../Telegram.md) («Telegram-бот не отвечает за Cloudflare»).
+**Настройки → Адрес сайта и HTTPS → Cloudflare** (переключатель proxy-mode,
+автообновление CIDR, кнопка «Обновить сейчас», статус последнего обновления).
+Без Cloudflare proxy-mode можно выключить; за orange-cloud при выключенном режиме
+Telegram webhook не увидит IP Telegram — см. [`docs/Telegram.md`](../Telegram.md)
+(«Telegram-бот не отвечает за Cloudflare»).
 
 ### Совместно со StatusOpenVPN на одном домене
 

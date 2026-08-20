@@ -24,7 +24,6 @@ import PanelOpsTab from '@/components/settings/PanelOpsTab'
 import RunbookTab from '@/components/settings/RunbookTab'
 import UpdatesTab from '@/components/settings/UpdatesTab'
 import UsersTab from '@/components/settings/UsersTab'
-import CloudflareTab from '@/components/settings/CloudflareTab'
 import VpnNetworkTab from '@/components/settings/VpnNetworkTab'
 import { NodeBadge } from '@/components/NodeSelector'
 import { useAuth } from '@/context/AuthContext'
@@ -146,6 +145,10 @@ export default function SettingsPage() {
     }
   }
 
+  if (sectionParam === 'cloudflare') {
+    return <Navigate to="/settings/vpn_network?tab=cloudflare" replace />
+  }
+
   if (!activeSection) {
     return <Navigate to={`/settings/${defaultSection}`} replace />
   }
@@ -201,8 +204,6 @@ export default function SettingsPage() {
         return <RunbookTab />
       case 'vpn_network':
         return <VpnNetworkTab />
-      case 'cloudflare':
-        return <CloudflareTab />
       default:
         return null
     }

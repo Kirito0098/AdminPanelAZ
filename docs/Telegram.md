@@ -196,7 +196,7 @@ AdminPanelAZ ставит snippet `cloudflare-realip.conf` и отдельный
 
 #### Управление в панели
 
-**Настройки → Cloudflare**:
+**Настройки → Адрес сайта и HTTPS → Cloudflare**:
 
 | Элемент | Назначение |
 | --- | --- |
