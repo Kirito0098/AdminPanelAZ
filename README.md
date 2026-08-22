@@ -29,6 +29,7 @@
 ## 🚀 Быстрый старт
 
 **Требования:** Ubuntu 24.04+ или Debian 13+, root / sudo, доступ в интернет.
+После полного `apt upgrade` (новое ядро) сначала **перезагрузите сервер**, затем запускайте `install.sh` — установщик сам предупредит, если reboot ещё не сделан.
 AntiZapret ставится **отдельно** на VPN-сервер — см. [AntiZapret-VPN](https://github.com/GubernievS/AntiZapret-VPN).
 
 **Python:** установщик сам выбирает runtime через `scripts/python-runtime.sh` — на **Ubuntu 24.04** это **3.12**, на **Debian 13** — **3.13**.

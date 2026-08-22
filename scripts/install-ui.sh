@@ -294,6 +294,7 @@ AdminPanelAZ — веб-панель управления AntiZapret VPN.
   INSTALL_FROM_GIT    URL репозитория (по умолчанию — основной репозиторий AdminPanelAZ)
   INSTALL_TARGET      Каталог установки при клонировании (по умолчанию /opt/AdminPanelAZ)
   INSTALL_USER        Пользователь systemd-сервисов (по умолчанию root)
+  INSTALL_SKIP_REBOOT_CHECK=1  Не останавливаться, если система просит reboot после apt upgrade
 
 ================================================================
   УСТАНОВКА БЕЗ ТЕРМИНАЛА (CI / автоматизация)

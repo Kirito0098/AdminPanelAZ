@@ -99,6 +99,8 @@ source "$ROOT_DIR/scripts/python-runtime.sh"
 ui_init
 # shellcheck source=scripts/install-port-check.sh
 source "$ROOT_DIR/scripts/install-port-check.sh"
+# shellcheck source=scripts/install-reboot-check.sh
+source "$ROOT_DIR/scripts/install-reboot-check.sh"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 VENV_DIR="$BACKEND_DIR/.venv"
@@ -2137,6 +2139,11 @@ main() {
   parse_args "$@"
   validate_install_flags
   require_root "$@"
+
+  if [[ "$ACTION" != "uninstall" && "$ACTION" != "purge-all" ]]; then
+    install_set_step "Проверка reboot после обновлений"
+    check_reboot_required
+  fi
 
   if [[ "$ACTION" == "uninstall" ]]; then
     run_uninstall_action

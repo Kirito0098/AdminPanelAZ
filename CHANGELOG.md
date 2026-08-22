@@ -50,6 +50,7 @@
 ### ✨ Added
 
 - **Cloudflare proxy UI** — внутри **Настройки → Адрес сайта и HTTPS** вкладка **Cloudflare**: toggle proxy-mode для Telegram webhook realip, автообновление CIDR (scheduler), кнопка «Обновить сейчас», статус last success/error.
+- **Установщик: reboot после обновлений** — `install.sh` проверяет `/var/run/reboot-required` и новое ядро в `/boot` до мастера. Интерактивно предлагает reboot или отложить установку; `-y` / `--non-interactive` только предупреждает. Пропуск: `INSTALL_SKIP_REBOOT_CHECK=1`.
 
 ### 🔄 Changed
 
@@ -66,6 +67,10 @@
   отдельный location только для `/api/telegram/webhook/` (и с `ACCESS_PATH`), чтобы
   allowlist видел IP Telegram, а не edge CF. Существующие установки: `nginx-repair`.
 - **Выдача AmneziaWG / WireGuard** — `Endpoint` больше не берётся из списка OpenVPN remote. При скачивании/QR/Telegram подставляется `WIREGUARD_HOST` из setup AntiZapret (как `client.sh` у GubernievS). Список «Адреса подключения» по умолчанию патчит только `.ovpn`. Чтобы первый адрес (прокси) попал и в AWG — галочка «Также для AmneziaWG / WireGuard» (пишет `WIREGUARD_HOST`, нужен `proxy.sh` с форвардом UDP 52443/52080).
+
+### 🧪 Tests
+
+- **`scripts/test-install-reboot-check.sh`** — маркер `reboot-required`, список пакетов, новое ядро, контейнер, skip / non-interactive.
 
 ---
 

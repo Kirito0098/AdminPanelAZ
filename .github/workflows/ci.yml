@@ -124,3 +124,4 @@ jobs:
           ./scripts/test-backend-health-check.sh
           ./scripts/test-install-publish-modes.sh
           ./scripts/test-nginx-telegram-webhook-realip.sh
+          ./scripts/test-install-reboot-check.sh
