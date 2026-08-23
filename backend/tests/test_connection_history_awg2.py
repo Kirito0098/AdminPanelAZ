@@ -65,3 +65,20 @@ def test_collect_samples_awg2_zero_when_toggle_off(monkeypatch):
     monkeypatch.setattr(ch, "persist_connection_sample", MagicMock())
     ch.collect_connection_samples(db)
     fetch.assert_not_called()
+
+
+def test_collect_samples_skips_proxy_nodes(monkeypatch):
+    proxy = SimpleNamespace(id=2, name="VK", status="online", node_kind="proxy")
+    db = MagicMock()
+    db.query.return_value.order_by.return_value.all.return_value = [proxy]
+    get_adapter = MagicMock(side_effect=AssertionError("vpn adapter"))
+    persist = MagicMock()
+    monkeypatch.setattr(ch, "get_adapter_for_node", get_adapter)
+    monkeypatch.setattr(ch, "persist_connection_sample", persist)
+    monkeypatch.setattr(ch, "is_awg2_enabled", lambda _db: False)
+
+    written = ch.collect_connection_samples(db)
+
+    get_adapter.assert_not_called()
+    persist.assert_not_called()
+    assert written == 0

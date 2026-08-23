@@ -318,3 +318,84 @@ def test_build_overview_agent_failure_still_marks_via_proxy(monkeypatch):
     assert overview.openvpn_clients[0].client_ip == PROXY_IP
     assert overview.wireguard_peers[0].via_proxy is True
     assert overview.wireguard_peers[0].proxy_resolved is False
+
+
+def _online_proxy_node(**kwargs):
+    defaults = dict(
+        id=9,
+        name="VK",
+        host=PROXY_IP,
+        node_kind="proxy",
+        status=SimpleNamespace(value="online"),
+        destination_ip="1.2.3.4",
+    )
+    defaults.update(kwargs)
+    return SimpleNamespace(**defaults)
+
+
+def test_collect_uses_proxy_adapter_not_vpn(monkeypatch):
+    proxy = _online_proxy_node()
+    db = MagicMock()
+    db.query.return_value.order_by.return_value.all.return_value = [proxy]
+    monkeypatch.setattr(mo, "get_latest_samples_by_node", lambda _db: {})
+    monkeypatch.setattr(mo, "get_traffic_totals_by_node", lambda _db: {})
+
+    vpn_adapter = MagicMock()
+    monkeypatch.setattr(mo, "get_adapter_for_node", vpn_adapter)
+
+    proxy_adapter = MagicMock()
+    proxy_adapter.health.return_value = {"ok": True, "version": "0.1.0"}
+    proxy_adapter.proxy_status.return_value = {"installed": True, "destination_ip": "1.2.3.4"}
+    monkeypatch.setattr(mo, "get_proxy_adapter", lambda _n: proxy_adapter)
+
+    payloads = mo._collect_nodes_monitoring_data(db)
+
+    vpn_adapter.assert_not_called()
+    assert payloads[0]["error"] is None
+    assert payloads[0]["services"][0].name == "proxy_agent"
+    assert payloads[0]["services"][0].active is True
+    assert "DESTINATION=1.2.3.4" in (payloads[0]["services"][0].description or "")
+
+    summary = mo._build_node_summary(payloads[0])
+    assert summary.health_score == 100
+    assert summary.health_level == "ok"
+    assert summary.error is None
+
+
+def test_collect_proxy_health_failure_sets_error(monkeypatch):
+    proxy = _online_proxy_node()
+    db = MagicMock()
+    db.query.return_value.order_by.return_value.all.return_value = [proxy]
+    monkeypatch.setattr(mo, "get_latest_samples_by_node", lambda _db: {})
+    monkeypatch.setattr(mo, "get_traffic_totals_by_node", lambda _db: {})
+    monkeypatch.setattr(mo, "get_adapter_for_node", MagicMock(side_effect=AssertionError("vpn")))
+
+    proxy_adapter = MagicMock()
+    proxy_adapter.health.side_effect = RuntimeError("timeout")
+    monkeypatch.setattr(mo, "get_proxy_adapter", lambda _n: proxy_adapter)
+
+    payloads = mo._collect_nodes_monitoring_data(db)
+    assert payloads[0]["error"] == "timeout"
+    summary = mo._build_node_summary(payloads[0])
+    assert summary.health_score == 60
+    assert summary.health_level == "warn"
+
+
+def test_overview_for_proxy_node_skips_vpn_adapter(monkeypatch):
+    proxy = _online_proxy_node()
+    vpn_adapter = MagicMock()
+    monkeypatch.setattr(mo, "get_adapter_for_node", vpn_adapter)
+    proxy_adapter = MagicMock()
+    proxy_adapter.health.return_value = {"ok": True, "version": "0.1.0"}
+    proxy_adapter.proxy_status.return_value = {"destination_ip": "8.8.8.8"}
+    monkeypatch.setattr(mo, "get_proxy_adapter", lambda _n: proxy_adapter)
+    monkeypatch.setattr(mo, "resolve_geoip_mode", lambda: "none")
+
+    overview = mo.build_monitoring_overview_for_node(MagicMock(), proxy)
+
+    vpn_adapter.assert_not_called()
+    assert overview.openvpn_clients == []
+    assert overview.wireguard_peers == []
+    assert overview.services[0].name == "proxy_agent"
+    assert overview.services[0].active is True
+    assert overview.server_ip == PROXY_IP

@@ -6,7 +6,7 @@ import logging
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node
-from app.services.node_manager import get_adapter_for_node
+from app.services.node_manager import _is_vpn_node, get_adapter_for_node
 from app.services.admin_notify import admin_notify_service
 from app.services.resource_metrics import persist_sample, purge_old_samples
 
@@ -31,6 +31,8 @@ def _collect_all_nodes():
     try:
         nodes = db.query(Node).all()
         for node in nodes:
+            if not _is_vpn_node(node):
+                continue
             try:
                 adapter = get_adapter_for_node(node)
                 metrics = adapter.get_server_metrics()

@@ -11,7 +11,7 @@ from app.config import get_settings
 from app.models import ConnectionCountSample, Node, NodeStatus
 from app.services.awg2_noc import fetch_awg2_peers_for_adapter
 from app.services.feature_toggles import is_awg2_enabled
-from app.services.node_manager import get_active_node, get_adapter_for_node
+from app.services.node_manager import _is_vpn_node, get_active_node, get_adapter_for_node
 from app.services.wireguard_status import wireguard_peer_is_online
 
 settings = get_settings()
@@ -59,6 +59,8 @@ def collect_connection_samples(db: Session) -> int:
     awg2_enabled = is_awg2_enabled(db)
     written = 0
     for node in nodes:
+        if not _is_vpn_node(node):
+            continue
         status = node.status.value if hasattr(node.status, "value") else str(node.status)
         if status != NodeStatus.online.value and status != "online":
             persist_connection_sample(

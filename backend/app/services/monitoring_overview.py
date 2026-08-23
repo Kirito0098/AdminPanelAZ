@@ -23,7 +23,13 @@ from app.services.feature_toggles import is_awg2_enabled, is_proxy_nodes_enabled
 from app.services.node_sync.groups import build_ha_metadata
 from app.services.ip_geo import is_local_geoip_loaded, lookup_ips_geo, parse_client_endpoint
 from app.services.node_health_score import compute_node_health_score
-from app.services.node_manager import NODE_KIND_PROXY, get_active_node, get_adapter_for_node, get_proxy_adapter
+from app.services.node_manager import (
+    NODE_KIND_PROXY,
+    _is_vpn_node,
+    get_active_node,
+    get_adapter_for_node,
+    get_proxy_adapter,
+)
 from app.services.node_compare_metrics import extract_cidr_routes_count, get_traffic_totals_by_node
 from app.services.proxy_noc_enrich import get_mappings_for_proxy, match_client_ip, normalize_proxy_host
 from app.services.resource_metrics import get_latest_samples_by_node
@@ -40,6 +46,42 @@ def resolve_geoip_mode() -> Literal["local_mmdb", "ip_api", "none"]:
 
 def _node_status_value(node: Node) -> str:
     return node.status.value if hasattr(node.status, "value") else str(node.status)
+
+
+def _exc_message(exc: BaseException) -> str:
+    detail = getattr(exc, "detail", None)
+    if detail is not None:
+        return str(detail)
+    return str(exc)
+
+
+def _probe_proxy_node(node: Node) -> tuple[list[MonitoringService], str | None, str | None]:
+    """Health + optional DESTINATION for a proxy node. Never uses the VPN adapter."""
+    adapter = get_proxy_adapter(node)
+    health = adapter.health()
+    ok = bool(health.get("ok", True))
+    version = health.get("version")
+    dest = getattr(node, "destination_ip", None)
+    try:
+        status = adapter.proxy_status()
+        dest = status.get("destination_ip") or dest
+    except Exception:
+        pass
+    bits: list[str] = []
+    if version:
+        bits.append(str(version))
+    if dest:
+        bits.append(f"DESTINATION={dest}")
+    services = [
+        MonitoringService(
+            name="proxy_agent",
+            status="active" if ok else "inactive",
+            active=ok,
+            description="; ".join(bits) or None,
+        )
+    ]
+    error = None if ok else "proxy_agent health failed"
+    return services, error, getattr(node, "host", None)
 
 
 def _load_awg2_peers_for_node(db: Session, adapter: Any) -> list[WireGuardPeer]:
@@ -70,22 +112,28 @@ def _collect_nodes_monitoring_data(db: Session) -> list[dict]:
             "cidr_routes_count": None,
         }
         try:
-            adapter = get_adapter_for_node(node)
-            ovpn_clients, _ = adapter.get_openvpn_status_snapshot()
-            wireguard_peers = adapter.parse_wireguard_status()
-            amneziawg2_peers = _load_awg2_peers_for_node(db, adapter)
-            payload.update(
-                {
-                    "ovpn_clients": ovpn_clients,
-                    "wireguard_peers": wireguard_peers,
-                    "amneziawg2_peers": amneziawg2_peers,
-                    "services": adapter.get_service_status(),
-                    "server_ip": adapter.get_server_ip(),
-                    "cidr_routes_count": extract_cidr_routes_count(adapter),
-                }
-            )
+            if not _is_vpn_node(node):
+                services, error, server_ip = _probe_proxy_node(node)
+                payload["services"] = services
+                payload["error"] = error
+                payload["server_ip"] = server_ip
+            else:
+                adapter = get_adapter_for_node(node)
+                ovpn_clients, _ = adapter.get_openvpn_status_snapshot()
+                wireguard_peers = adapter.parse_wireguard_status()
+                amneziawg2_peers = _load_awg2_peers_for_node(db, adapter)
+                payload.update(
+                    {
+                        "ovpn_clients": ovpn_clients,
+                        "wireguard_peers": wireguard_peers,
+                        "amneziawg2_peers": amneziawg2_peers,
+                        "services": adapter.get_service_status(),
+                        "server_ip": adapter.get_server_ip(),
+                        "cidr_routes_count": extract_cidr_routes_count(adapter),
+                    }
+                )
         except Exception as exc:
-            payload["error"] = str(exc)
+            payload["error"] = _exc_message(exc)
         node_payloads.append(payload)
 
     return node_payloads
@@ -346,6 +394,41 @@ def enrich_wireguard_peers(
 
 
 def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOverview:
+    if not _is_vpn_node(node):
+        try:
+            services, _error, server_ip = _probe_proxy_node(node)
+        except Exception as exc:
+            services = [
+                MonitoringService(
+                    name="proxy_agent",
+                    status="inactive",
+                    active=False,
+                    description=_exc_message(exc),
+                )
+            ]
+            server_ip = getattr(node, "host", None)
+        return MonitoringOverview(
+            scope="node",
+            services=services,
+            openvpn_clients=[],
+            wireguard_peers=[],
+            amneziawg2_peers=[],
+            server_ip=server_ip,
+            timestamp=datetime.utcnow(),
+            node_id=node.id,
+            node_name=node.name,
+            openvpn_data_source="none",
+            nodes_summary=[],
+            nodes_online=1 if node.status == NodeStatus.online else 0,
+            nodes_total=1,
+            total_connected_openvpn=0,
+            total_connected_wireguard=0,
+            total_connected_amneziawg2=0,
+            served_from_cache=False,
+            geoip_mode=resolve_geoip_mode(),
+            ha_mode="dedupe",
+        )
+
     adapter = get_adapter_for_node(node)
     ovpn_clients, openvpn_data_source = adapter.get_openvpn_status_snapshot()
     wireguard_peers = adapter.parse_wireguard_status()

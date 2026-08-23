@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.models import Node, TrafficSessionState
-from app.services.node_manager import get_adapter_for_node
+from app.services.node_manager import _is_vpn_node, get_adapter_for_node
 from app.services.wireguard_status import wireguard_peer_is_online
 
 
@@ -21,6 +21,9 @@ def db_active_traffic_client_names(db: Session, node_id: int) -> set[str]:
 
 def live_active_names_for_node(db: Session, node: Node) -> set[str]:
     """Live OVPN/WG/AWG2 online names, with DB session fallback if probe is empty."""
+    if not _is_vpn_node(node):
+        return db_active_traffic_client_names(db, node.id)
+
     active_names: set[str] = set()
     try:
         adapter = get_adapter_for_node(node)

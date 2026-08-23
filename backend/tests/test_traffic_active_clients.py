@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from app.schemas import OpenVpnClient, WireGuardPeer
 from app.services.traffic import active_clients as active_mod
@@ -74,6 +75,21 @@ def test_live_active_names_falls_back_to_db_when_probe_empty(monkeypatch):
     )
 
     names = active_mod.live_active_names_for_node(SimpleNamespace(), node)
+    assert names == {"FromDB"}
+
+
+def test_live_active_names_skips_proxy_adapter(monkeypatch):
+    node = SimpleNamespace(id=3, name="VK", node_kind="proxy")
+    get_adapter = MagicMock(side_effect=AssertionError("vpn adapter"))
+    monkeypatch.setattr(active_mod, "get_adapter_for_node", get_adapter)
+    monkeypatch.setattr(
+        active_mod,
+        "db_active_traffic_client_names",
+        lambda _db, node_id: {"FromDB"} if node_id == 3 else set(),
+    )
+
+    names = active_mod.live_active_names_for_node(SimpleNamespace(), node)
+    get_adapter.assert_not_called()
     assert names == {"FromDB"}
 
 
