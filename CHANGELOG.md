@@ -68,7 +68,7 @@
   отдельный location только для `/api/telegram/webhook/` (и с `ACCESS_PATH`), чтобы
   allowlist видел IP Telegram, а не edge CF. Существующие установки: `nginx-repair`.
 - **Выдача AmneziaWG / WireGuard** — `Endpoint` больше не берётся из списка OpenVPN remote. При скачивании/QR/Telegram подставляется `WIREGUARD_HOST` из setup AntiZapret (как `client.sh` у GubernievS). Список «Адреса подключения» по умолчанию патчит только `.ovpn`. Чтобы первый адрес (прокси) попал и в AWG — галочка «Также для AmneziaWG / WireGuard» (пишет `WIREGUARD_HOST`, нужен `proxy.sh` с форвардом UDP 52443/52080).
-- **NOC ложные аварии на прокси (vpsville / VK / CLOUD)** — «ошибка 400» и health 60 при живом сервере. Панель опрашивала прокси как VPN. Сводка узлов для `node_kind=proxy` ходит в `proxy_agent` (`/health`, DESTINATION), а не в OpenVPN/WireGuard.
+- **NOC ложные аварии на прокси-узлах** — «ошибка 400» и health 60 при живом сервере. Панель опрашивала прокси как VPN. Сводка узлов для `node_kind=proxy` ходит в `proxy_agent` (`/health`, DESTINATION), а не в OpenVPN/WireGuard.
 - **Остальные VPN-воркеры не трогают прокси** — лимиты трафика, политики WG, сертификаты OpenVPN, напоминания, geo-подсказка сервера, выкладка CIDR на «все online», копирование файлов AntiZapret, rolling update, снимок трафика, истечение AmneziaWG2. Иначе те же ложные 400 могли появиться в логах и задачах, не только в NOC.
 
 ### 🧪 Tests
