@@ -67,10 +67,12 @@
   отдельный location только для `/api/telegram/webhook/` (и с `ACCESS_PATH`), чтобы
   allowlist видел IP Telegram, а не edge CF. Существующие установки: `nginx-repair`.
 - **Выдача AmneziaWG / WireGuard** — `Endpoint` больше не берётся из списка OpenVPN remote. При скачивании/QR/Telegram подставляется `WIREGUARD_HOST` из setup AntiZapret (как `client.sh` у GubernievS). Список «Адреса подключения» по умолчанию патчит только `.ovpn`. Чтобы первый адрес (прокси) попал и в AWG — галочка «Также для AmneziaWG / WireGuard» (пишет `WIREGUARD_HOST`, нужен `proxy.sh` с форвардом UDP 52443/52080).
+- **NOC / прокси-узлы** — сводка узлов больше не дергает VPN-адаптер (`get_adapter_for_node`) для `node_kind=proxy`. Для vpsville / VK / CLOUD и остальных прокси идёт `get_proxy_adapter` (`/health`, DESTINATION). Иначе на каждом опросе был ложный `400: Прокси-узел не поддерживает VPN-операции`, `health_score=60` и инциденты `node_error` + `node_unhealthy` при живом `proxy_agent`. Воркеры метрик, трафика и истории подключений прокси пропускают.
 
 ### 🧪 Tests
 
 - **`scripts/test-install-reboot-check.sh`** — маркер `reboot-required`, список пакетов, новое ядро, контейнер, skip / non-interactive.
+- **Прокси в мониторинге** — `_collect_nodes_monitoring_data` не вызывает VPN-адаптер; health 100 при живом `proxy_agent`; overview для прокси без OpenVPN/WG; сбор трафика и connection history пропускает `node_kind=proxy`.
 
 ---
 
