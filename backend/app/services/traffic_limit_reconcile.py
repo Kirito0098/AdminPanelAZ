@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import Node
 from app.services.access_policy import AccessPolicyService
-from app.services.node_manager import get_adapter_for_node, node_metadata_dict
+from app.services.node_manager import _is_vpn_node, get_adapter_for_node, node_metadata_dict
 from app.services.traffic_limit_notify import traffic_limit_notify_service
 
 logger = logging.getLogger(__name__)
@@ -19,12 +19,16 @@ def reconcile_traffic_limit_policies(db: Session, *, node_id: int | None = None)
     if node_id is None:
         total_changed = 0
         for node in db.query(Node).all():
+            if not _is_vpn_node(node):
+                continue
             result = _reconcile_for_node(db, node)
             total_changed += int(result.get("changed") or 0)
         return {"traffic_limit_reconcile": "ok", "changed": total_changed, "node_id": None}
 
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
+        return {"traffic_limit_reconcile": "skipped", "changed": 0, "node_id": node_id}
+    if not _is_vpn_node(node):
         return {"traffic_limit_reconcile": "skipped", "changed": 0, "node_id": node_id}
     return _reconcile_for_node(db, node)
 

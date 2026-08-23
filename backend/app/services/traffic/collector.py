@@ -562,10 +562,10 @@ class TrafficCollectorService:
 
 def collect_traffic_snapshot_for_node(db: Session, node_id: int) -> dict:
     """Fetch live status from node adapter and persist traffic snapshot (best-effort)."""
-    from app.services.node_manager import get_adapter_for_node
+    from app.services.node_manager import _is_vpn_node, get_adapter_for_node
 
     node = db.get(Node, node_id)
-    if node is None:
+    if node is None or not _is_vpn_node(node):
         return {"samples_added": 0, "active_sessions": 0, "skipped": True}
 
     adapter = get_adapter_for_node(node)

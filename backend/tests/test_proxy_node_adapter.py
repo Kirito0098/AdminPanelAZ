@@ -73,6 +73,10 @@ def test_get_proxy_adapter_rejects_vpn(db):
     with pytest.raises(HTTPException) as exc:
         get_proxy_adapter(node)
     assert exc.value.status_code == 400
+    detail = str(exc.value.detail)
+    assert "get_proxy_adapter" not in detail
+    assert "VPN" in detail or "node_agent" in detail
+    assert "прокси" in detail.lower()
 
 
 def test_get_adapter_for_node_rejects_proxy(db):
@@ -80,7 +84,11 @@ def test_get_adapter_for_node_rejects_proxy(db):
     with pytest.raises(HTTPException) as exc:
         get_adapter_for_node(node)
     assert exc.value.status_code == 400
-    assert "прокси" in str(exc.value.detail).lower() or "VPN" in str(exc.value.detail)
+    detail = str(exc.value.detail)
+    assert "get_proxy_adapter" not in detail
+    assert "прокси" in detail.lower()
+    assert "OpenVPN" in detail or "WireGuard" in detail
+    assert node.name in detail
 
 
 def test_get_proxy_status_toggle_off(db, monkeypatch):

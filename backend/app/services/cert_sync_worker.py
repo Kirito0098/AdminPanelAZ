@@ -8,7 +8,7 @@ import logging
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node, VpnConfig, VpnType
-from app.services.node_manager import get_adapter_for_node
+from app.services.node_manager import _is_vpn_node, get_adapter_for_node
 from app.services.openvpn_cert import resolve_openvpn_cert_not_after, to_naive_utc
 from app.services.openvpn_pki import load_cert_expiry_map
 
@@ -73,6 +73,8 @@ def sync_cert_expiry(db) -> int:
     """Refresh cert_expires_at for OpenVPN configs on every node (local + remote). Returns update count."""
     updated = 0
     for node in db.query(Node).all():
+        if not _is_vpn_node(node):
+            continue
         try:
             count = _sync_node(db, node)
             updated += count

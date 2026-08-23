@@ -67,12 +67,12 @@
   отдельный location только для `/api/telegram/webhook/` (и с `ACCESS_PATH`), чтобы
   allowlist видел IP Telegram, а не edge CF. Существующие установки: `nginx-repair`.
 - **Выдача AmneziaWG / WireGuard** — `Endpoint` больше не берётся из списка OpenVPN remote. При скачивании/QR/Telegram подставляется `WIREGUARD_HOST` из setup AntiZapret (как `client.sh` у GubernievS). Список «Адреса подключения» по умолчанию патчит только `.ovpn`. Чтобы первый адрес (прокси) попал и в AWG — галочка «Также для AmneziaWG / WireGuard» (пишет `WIREGUARD_HOST`, нужен `proxy.sh` с форвардом UDP 52443/52080).
-- **NOC / прокси-узлы** — сводка узлов больше не дергает VPN-адаптер (`get_adapter_for_node`) для `node_kind=proxy`. Для vpsville / VK / CLOUD и остальных прокси идёт `get_proxy_adapter` (`/health`, DESTINATION). Иначе на каждом опросе был ложный `400: Прокси-узел не поддерживает VPN-операции`, `health_score=60` и инциденты `node_error` + `node_unhealthy` при живом `proxy_agent`. Воркеры метрик, трафика и истории подключений прокси пропускают.
+- **NOC и прокси (vpsville / VK / CLOUD)** — ложные аварии «ошибка узла 400» и «нездоров 60». Это не падение сервера: панель спрашивала прокси как VPN (OpenVPN/WireGuard), а это российский вход (`proxy_agent`). Теперь для прокси проверяется только его агент (жив ли, куда шлёт DESTINATION). VPN-воркеры (трафик, метрики, CIDR, политики, сертификаты, напоминания) прокси больше не трогают. Если кто-то всё же вызовет VPN-операцию на прокси, текст будет по-русски: «это прокси-узел, а не VPN-сервер» — без внутреннего `get_proxy_adapter`. В ленте инцидентов: «Ошибка прокси-узла» / «Прокси-узел нездоров».
 
 ### 🧪 Tests
 
 - **`scripts/test-install-reboot-check.sh`** — маркер `reboot-required`, список пакетов, новое ядро, контейнер, skip / non-interactive.
-- **Прокси в мониторинге** — `_collect_nodes_monitoring_data` не вызывает VPN-адаптер; health 100 при живом `proxy_agent`; overview для прокси без OpenVPN/WG; сбор трафика и connection history пропускает `node_kind=proxy`.
+- **Прокси ≠ VPN** — мониторинг не зовёт VPN-адаптер; health 100 при живом `proxy_agent`; воркеры трафика/лимитов/политик/сертификатов/CIDR/напоминаний и geo-hint пропускают `node_kind=proxy`; 400 больше не содержит `get_proxy_adapter`.
 
 ---
 

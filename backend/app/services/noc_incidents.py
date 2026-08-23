@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models import AlertRule, AlertRuleMetric, CidrDbRefreshLog, Node, NodeStatus
 from app.schemas import NocIncidentItem, NocIncidentsResponse
 from app.services.alert_rules import format_rule_condition
+from app.services.node_manager import _is_vpn_node
 from app.services.monitoring_overview import build_global_dashboard_summary, build_monitoring_overview
 
 _CIDR_OK_STATUSES = frozenset({"ok", "success"})
@@ -91,12 +92,13 @@ def build_noc_incidents(db: Session, *, limit: int = 20) -> NocIncidentsResponse
                 )
             )
         if error:
+            role = "прокси-узла" if not _is_vpn_node(node) else "VPN-узла"
             items.append(
                 NocIncidentItem(
                     id=f"node_error:{node.id}",
                     kind="node_error",
                     severity="danger",
-                    title=f"Ошибка узла: {node.name}",
+                    title=f"Ошибка {role}: {node.name}",
                     detail=str(error)[:240],
                     at=now,
                     href="/nodes",
@@ -106,12 +108,13 @@ def build_noc_incidents(db: Session, *, limit: int = 20) -> NocIncidentsResponse
             score = getattr(summary, "health_score", None)
             level = getattr(summary, "health_level", None)
             if level and level != "ok" and status in {NodeStatus.online.value, "online"}:
+                role_nom = "Прокси-узел" if not _is_vpn_node(node) else "VPN-узел"
                 items.append(
                     NocIncidentItem(
                         id=f"node_unhealthy:{node.id}",
                         kind="node_unhealthy",
                         severity="danger" if level == "critical" else "warning",
-                        title=f"Узел нездоров: {node.name}",
+                        title=f"{role_nom} нездоров: {node.name}",
                         detail=f"health_score={score} level={level}",
                         at=now,
                         href="/nodes",

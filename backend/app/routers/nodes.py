@@ -449,7 +449,10 @@ def _require_proxy_node(node_id: int, db: Session) -> Node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
     kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
     if kind != NODE_KIND_PROXY:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не является прокси")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"«{node.name}» — VPN-узел, не прокси. DESTINATION и mappings здесь недоступны.",
+        )
     return node
 
 

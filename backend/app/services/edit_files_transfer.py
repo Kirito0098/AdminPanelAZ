@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.models import Node
 from app.services.cidr.pipeline.orchestrator import resolve_deploy_targets
 from app.services.file_editor import EDITABLE_FILES
-from app.services.node_manager import get_active_node, get_adapter_for_node
+from app.services.node_manager import _is_vpn_node, get_active_node, get_adapter_for_node
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,20 @@ def run_edit_files_transfer(
                     "transferred_files": [],
                     "failed": [],
                     "error": "Совпадает с исходным узлом",
+                }
+            )
+            nodes_skipped += 1
+            continue
+
+        if not _is_vpn_node(node):
+            per_node.append(
+                {
+                    "node_id": node.id,
+                    "node_name": node.name,
+                    "status": "skipped",
+                    "transferred_files": [],
+                    "failed": [],
+                    "error": "Прокси-узел: файлы AntiZapret на него не копируются",
                 }
             )
             nodes_skipped += 1

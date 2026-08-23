@@ -11,7 +11,7 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node
 from app.services.access_policy import AccessPolicyService
-from app.services.node_manager import get_adapter_for_node, node_metadata_dict
+from app.services.node_manager import _is_vpn_node, get_adapter_for_node, node_metadata_dict
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -25,6 +25,8 @@ def reconcile_wg_policies_for_all_nodes(db: Session, *, sync_all_runtime: bool =
     total_wg_runtime_calls = 0
     total_clients_changed = 0
     for node in db.query(Node).all():
+        if not _is_vpn_node(node):
+            continue
         result = _reconcile_for_node(db, node, sync_all_runtime=sync_all_runtime)
         if result.get("wg_policy_reconcile") == "ok":
             nodes_processed += 1

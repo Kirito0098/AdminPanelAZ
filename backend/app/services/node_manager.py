@@ -141,7 +141,29 @@ def get_active_node_id(db: Session) -> int | None:
 
 
 def _is_vpn_node(node: Node) -> bool:
-    return (getattr(node, "node_kind", None) or "vpn") == "vpn"
+    return (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower() == NODE_KIND_VPN
+
+
+def list_vpn_nodes(db: Session) -> list[Node]:
+    """All nodes that speak node_agent (OpenVPN/WG). Excludes proxy_agent cards."""
+    return [node for node in db.query(Node).order_by(Node.id.asc()).all() if _is_vpn_node(node)]
+
+
+def proxy_is_not_vpn_message(node: Node) -> str:
+    name = getattr(node, "name", None) or "без имени"
+    return (
+        f"«{name}» — прокси-узел (российский вход, proxy_agent), а не VPN-сервер. "
+        "OpenVPN и WireGuard на нём не запускаются. "
+        "Статус и DESTINATION смотрите в карточке прокси."
+    )
+
+
+def vpn_is_not_proxy_message(node: Node) -> str:
+    name = getattr(node, "name", None) or "без имени"
+    return (
+        f"«{name}» — VPN-узел (node_agent), а не прокси. "
+        "DESTINATION и таблица прокси-подключений доступны только у прокси-узлов."
+    )
 
 
 def set_active_node_id(db: Session, node_id: int) -> None:
@@ -150,7 +172,7 @@ def set_active_node_id(db: Session, node_id: int) -> None:
     if node is not None and not _is_vpn_node(node):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Прокси-узел нельзя сделать активным для VPN",
+            detail="Прокси-узел нельзя сделать активным для VPN: у него нет OpenVPN/WireGuard.",
         )
     _set_setting(db, ACTIVE_NODE_KEY, str(node_id))
 
@@ -211,7 +233,7 @@ def get_proxy_adapter(node: Node, api_key_override: str | None = None) -> ProxyN
     if _node_kind(node) != NODE_KIND_PROXY:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Узел не является прокси",
+            detail=vpn_is_not_proxy_message(node),
         )
     if node.is_local:
         raise HTTPException(
@@ -236,7 +258,7 @@ def get_adapter_for_node(node: Node) -> NodeAdapter:
     if _node_kind(node) == NODE_KIND_PROXY:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Прокси-узел не поддерживает VPN-операции; используйте get_proxy_adapter",
+            detail=proxy_is_not_vpn_message(node),
         )
     if node.is_local:
         meta = node_metadata_dict(node)

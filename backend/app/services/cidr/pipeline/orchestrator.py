@@ -16,7 +16,7 @@ from app.services.cidr.pipeline.db_pipeline import update_cidr_files_from_db
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.cidr.pipeline.file_pipeline import rollback_from_runtime_backup
 from app.services.node_adapter import NodeAdapter, RemoteNodeAdapter
-from app.services.node_manager import get_active_node, get_adapter_for_node
+from app.services.node_manager import _is_vpn_node, get_active_node, get_adapter_for_node
 from app.services.openvpn_remote_hosts import parse_hosts_json
 from app.services.profile_delivery import patch_openvpn_profiles_on_node
 
@@ -113,9 +113,25 @@ def resolve_deploy_targets(
     """Resolve nodes to deploy to; offline/missing nodes are returned as skipped entries."""
     skipped: list[dict[str, Any]] = []
 
+    def _skip_proxy(node: Node) -> dict[str, Any]:
+        return {
+            "node_id": node.id,
+            "node_name": node.name,
+            "status": "skipped",
+            "pushed_files": [],
+            "failed": [],
+            "error": "Прокси-узел: списки CIDR и файлы AntiZapret сюда не применяются",
+        }
+
     if all_online:
         nodes = db.query(Node).filter(Node.status == NodeStatus.online).order_by(Node.id).all()
-        return nodes, skipped
+        vpn_nodes: list[Node] = []
+        for node in nodes:
+            if _is_vpn_node(node):
+                vpn_nodes.append(node)
+            else:
+                skipped.append(_skip_proxy(node))
+        return vpn_nodes, skipped
 
     requested_ids: list[int] = []
     if target_node_ids:
@@ -139,6 +155,9 @@ def resolve_deploy_targets(
                     "error": f"Узел {node_id} не найден",
                 }
             )
+            continue
+        if not _is_vpn_node(node):
+            skipped.append(_skip_proxy(node))
             continue
         if node.status != NodeStatus.online:
             skipped.append(

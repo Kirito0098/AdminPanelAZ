@@ -14,7 +14,7 @@ from app.routers.maintenance import _get_setting
 from app.services.access_policy import AccessPolicyService
 from app.services.admin_notify import admin_notify_service
 from app.services.feature_guards import get_feature_service
-from app.services.node_manager import get_adapter_for_node, node_metadata_dict
+from app.services.node_manager import _is_vpn_node, get_adapter_for_node, node_metadata_dict
 from app.services.openvpn_cert import days_remaining_until
 from app.services.self_service import record_reminder_sent, reminder_recently_sent, self_service_reminder_enabled
 from app.services.telegram import send_tg_message
@@ -142,6 +142,8 @@ def process_user_reminders(db: Session) -> int:
     nodes = db.query(Node).all()
     settings = get_settings()
     for node in nodes:
+        if not _is_vpn_node(node):
+            continue
         try:
             adapter = get_adapter_for_node(node)
             meta = node_metadata_dict(node)

@@ -173,7 +173,8 @@ def test_set_active_node_id_rejects_proxy(db):
     with pytest.raises(HTTPException) as exc:
         set_active_node_id(db, proxy.id)
     assert exc.value.status_code == 400
-    assert exc.value.detail == "Прокси-узел нельзя сделать активным для VPN"
+    assert "Прокси-узел нельзя сделать активным для VPN" in str(exc.value.detail)
+    assert "OpenVPN" in str(exc.value.detail) or "WireGuard" in str(exc.value.detail)
     assert get_active_node_id_raw(db) in (None, "")
 
 

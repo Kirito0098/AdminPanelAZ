@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.models import Node, NodeStatus
 from app.schemas import GeoRoutingHintResponse, GeoRoutingNodeHint
 from app.services.ip_geo import lookup_ip_geo, lookup_ips_geo
-from app.services.node_manager import get_adapter_for_node
+from app.services.node_manager import _is_vpn_node, get_adapter_for_node
 
 
 def _normalize_client_ip(raw: str | None) -> str | None:
@@ -42,6 +42,8 @@ def build_geo_routing_hint(db: Session, *, client_ip: str | None = None) -> GeoR
     node_payloads: list[dict] = []
 
     for node in nodes:
+        if not _is_vpn_node(node):
+            continue
         server_ip = None
         if node.status == NodeStatus.online:
             try:
