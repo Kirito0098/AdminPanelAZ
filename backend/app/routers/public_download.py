@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -8,6 +7,7 @@ from app.database import get_db
 from app.models import AppSetting
 from app.constants.public_routes import PUBLIC_ROUTE_ROUTERS
 from app.services.action_log import log_action
+from app.services.file_download import attachment_response
 from app.services.feature_guards import require_openvpn_and_security
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_manager import get_active_adapter, get_active_node
@@ -45,7 +45,7 @@ def qr_download_get(token: str, db: Session = Depends(get_db)):
     hosts = load_node_remote_hosts(db, node.id)
     content = read_profile_file_for_delivery(get_active_adapter(db), row.file_path, hosts)
     filename = row.config_name
-    return PlainTextResponse(content, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    return attachment_response(content, filename)
 
 
 @router.post("/qr-download/{token}")
@@ -56,7 +56,7 @@ def qr_download_post(token: str, payload: PinRequest, request: Request, db: Sess
     node = get_active_node(db)
     hosts = load_node_remote_hosts(db, node.id)
     content = read_profile_file_for_delivery(get_active_adapter(db), row.file_path, hosts)
-    return PlainTextResponse(content, headers={"Content-Disposition": f'attachment; filename="{row.config_name}"'})
+    return attachment_response(content, row.config_name)
 
 
 @router.get("/route-download/{router}")
@@ -90,7 +90,4 @@ def public_route_download(router: str, request: Request, db: Session = Depends(g
             remote_addr=client_ip,
             details=f"channel=public router={router} file={filename}",
         )
-    return PlainTextResponse(
-        content,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return attachment_response(content, filename)

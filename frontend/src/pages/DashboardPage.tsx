@@ -34,6 +34,7 @@ import {
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
+import { triggerFileDownload } from '@/lib/triggerFileDownload'
 import MetricCard from '@/components/noc/MetricCard'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
@@ -375,12 +376,7 @@ export default function DashboardPage() {
         const blob = await res.blob()
         downloadName =
           parseContentDispositionFilename(res.headers.get('Content-Disposition')) ?? filename
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = downloadName
-        a.click()
-        URL.revokeObjectURL(url)
+        triggerFileDownload(blob, downloadName)
       }, 'Скачивание файла...')
       success(`Файл «${downloadName}» скачан`)
     } catch {

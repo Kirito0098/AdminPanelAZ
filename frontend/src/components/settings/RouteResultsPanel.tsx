@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useNotifications } from '@/context/NotificationContext'
 import { publicApiUrl } from '@/lib/panelBase'
+import { triggerFileDownload } from '@/lib/triggerFileDownload'
 import { cn } from '@/lib/utils'
 import type { RouteResultFileEntry } from '@/types'
 
@@ -122,13 +123,7 @@ export default function RouteResultsPanel({ showPublicLinks = false }: RouteResu
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null)
 
   const triggerDownload = (content: string, filename: string) => {
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(url)
+    triggerFileDownload(content, filename)
   }
 
   const downloadFile = async (key: string) => {

@@ -70,11 +70,13 @@
 - **Выдача AmneziaWG / WireGuard** — `Endpoint` больше не берётся из списка OpenVPN remote. При скачивании/QR/Telegram подставляется `WIREGUARD_HOST` из setup AntiZapret (как `client.sh` у GubernievS). Список «Адреса подключения» по умолчанию патчит только `.ovpn`. Чтобы первый адрес (прокси) попал и в AWG — галочка «Также для AmneziaWG / WireGuard» (пишет `WIREGUARD_HOST`, нужен `proxy.sh` с форвардом UDP 52443/52080).
 - **NOC ложные аварии на прокси-узлах** — «ошибка 400» и health 60 при живом сервере. Панель опрашивала прокси как VPN. Сводка узлов для `node_kind=proxy` ходит в `proxy_agent` (`/health`, DESTINATION), а не в OpenVPN/WireGuard.
 - **Остальные VPN-воркеры не трогают прокси** — лимиты трафика, политики WG, сертификаты OpenVPN, напоминания, geo-подсказка сервера, выкладка CIDR на «все online», копирование файлов AntiZapret, rolling update, снимок трафика, истечение AmneziaWG2. Иначе те же ложные 400 могли появиться в логах и задачах, не только в NOC.
+- **Скачивание профилей как `.txt`** — Safari / iOS / часть Chromium сохраняли `.ovpn` и `.conf` как `.txt`, потому что ответ был `text/plain` + `nosniff`. Теперь `application/octet-stream` и RFC 5987 `filename*`; CORS отдаёт `Content-Disposition`.
 
 ### 🧪 Tests
 
 - **`scripts/test-install-reboot-check.sh`** — маркер `reboot-required`, список пакетов, новое ядро, контейнер, skip / non-interactive.
 - **Прокси ≠ VPN** — мониторинг не зовёт VPN-адаптер; health 100 при живом `proxy_agent`; 400 без `get_proxy_adapter`; воркеры трафика/лимитов/политик/сертификатов/CIDR/напоминаний и geo-hint пропускают `node_kind=proxy`.
+- **Имя файла при скачивании** — `test_file_download.py`: `application/octet-stream` и RFC 5987 `filename*`.
 
 ---
 
