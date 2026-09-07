@@ -13,11 +13,13 @@ def should_start_traffic_collector() -> bool:
 
 
 def should_start_cert_sync() -> bool:
-    return get_settings().cert_sync_enabled
+    # Always spawn — loop re-checks CERT_SYNC_ENABLED / openvpn each tick.
+    return True
 
 
 def should_start_node_health() -> bool:
-    return get_settings().node_health_sync_enabled
+    # Always spawn — loop re-checks NODE_HEALTH_SYNC_ENABLED each tick.
+    return True
 
 
 def should_start_resource_metrics() -> bool:
@@ -44,8 +46,8 @@ def should_start_cidr_scheduler() -> bool:
 
 
 def should_start_wg_policy_sync() -> bool:
-    settings = get_settings()
-    return settings.wg_policy_sync_enabled and get_feature_service().is_enabled("wg_policy_sync")
+    # Always spawn — loop re-checks wg_policy_sync toggle each tick.
+    return True
 
 
 def should_start_node_sync_reconcile() -> bool:
@@ -53,8 +55,8 @@ def should_start_node_sync_reconcile() -> bool:
 
 
 def should_start_nightly_idle_restart() -> bool:
-    settings = get_settings()
-    return settings.nightly_idle_restart_enabled and get_feature_service().is_enabled("nightly_idle_restart")
+    # Always spawn — loop re-checks settings + nightly_idle_restart toggle each tick.
+    return True
 
 
 def should_start_key_rotation() -> bool:
@@ -81,8 +83,8 @@ def should_start_noc_report_scheduler() -> bool:
 
 
 def should_start_alert_rules_worker() -> bool:
-    settings = get_settings()
-    return settings.alert_rules_enabled and get_feature_service().is_enabled("telegram")
+    # Always spawn — loop re-checks alert_rules_enabled + telegram each tick.
+    return True
 
 
 def should_start_awg2_expire() -> bool:

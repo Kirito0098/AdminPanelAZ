@@ -51,11 +51,21 @@ def _already_ran_this_minute(db: Session, now: datetime) -> bool:
         return False
 
 
-def run_nightly_idle_restart_once() -> dict:
+def _is_nightly_idle_restart_enabled() -> bool:
+    """Runtime gate — settings + nightly_idle_restart toggle can flip without restart."""
     settings = get_settings()
     if not settings.nightly_idle_restart_enabled:
+        return False
+    from app.services.feature_guards import get_feature_service
+
+    return get_feature_service().is_enabled("nightly_idle_restart")
+
+
+def run_nightly_idle_restart_once() -> dict:
+    if not _is_nightly_idle_restart_enabled():
         return {"status": "disabled"}
 
+    settings = get_settings()
     now = datetime.now(timezone.utc)
     if not cron_matches_now(settings.nightly_idle_restart_cron, now):
         return {"status": "skipped", "reason": "cron_mismatch"}
@@ -95,13 +105,13 @@ def run_nightly_idle_restart_once() -> dict:
 
 
 async def run_nightly_idle_restart_loop() -> None:
-    settings = get_settings()
-    if not settings.nightly_idle_restart_enabled:
-        return
-
+    """Nightly idle restart — re-checks enable flags each minute (no startup-only exit)."""
     while True:
         try:
             await asyncio.sleep(60)
+            if not _is_nightly_idle_restart_enabled():
+                logger.debug("nightly_idle_restart skipped — disabled")
+                continue
             result = await asyncio.to_thread(run_nightly_idle_restart_once)
             if result.get("status") == "restarted":
                 logger.info("Nightly idle restart worker: %s", result)
