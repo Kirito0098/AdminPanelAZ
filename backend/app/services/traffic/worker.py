@@ -13,23 +13,36 @@ from app.services.node_manager import _is_vpn_node, get_adapter_for_node
 from app.services.traffic.collector import TrafficCollectorService, build_status_rows
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
+
+
+def _is_traffic_sync_enabled() -> bool:
+    """Runtime gate — TRAFFIC_SYNC_ENABLED / traffic_sync can flip without restart."""
+    from app.services.feature_guards import get_feature_service
+
+    return get_feature_service().is_enabled("traffic_sync")
 
 
 async def run_traffic_collector_loop():
+    settings = get_settings()
     if not settings.traffic_sync_enabled:
         return
 
     while True:
+        settings = get_settings()
+        interval = max(5, int(settings.traffic_sync_interval_seconds or 60))
         try:
-            await asyncio.to_thread(_collect_all_nodes)
+            if not _is_traffic_sync_enabled():
+                logger.debug("traffic_collector skipped — traffic_sync disabled")
+            else:
+                await asyncio.to_thread(_collect_all_nodes)
         except Exception as exc:
             logger.warning("Traffic collector error: %s", exc)
-        await asyncio.sleep(settings.traffic_sync_interval_seconds)
+        await asyncio.sleep(interval)
 
 
 def _collect_all_nodes():
     started = time.perf_counter()
+    settings = get_settings()
     db = SessionLocal()
     total_wg_runtime_calls = 0
     nodes_processed = 0

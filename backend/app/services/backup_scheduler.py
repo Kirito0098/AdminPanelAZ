@@ -17,6 +17,13 @@ from app.services.telegram_recipients import get_setting_chat_ids
 logger = logging.getLogger(__name__)
 
 
+def _is_backups_enabled() -> bool:
+    """Runtime gate — FEATURE_BACKUPS_ENABLED / backups can flip without restart."""
+    from app.services.feature_guards import get_feature_service
+
+    return get_feature_service().is_enabled("backups")
+
+
 def _get_setting(db, key: str, default: str = "") -> str:
     row = db.query(AppSetting).filter(AppSetting.key == key).first()
     return row.value if row else default
@@ -39,6 +46,9 @@ async def run_backup_scheduler_loop(app_root: Path, backup_root: Path, db_path: 
     while True:
         try:
             await asyncio.sleep(3600)
+            if not _is_backups_enabled():
+                logger.debug("backup_scheduler skipped — backups disabled")
+                continue
             db = SessionLocal()
             try:
                 if _get_setting(db, "backup_auto_enabled", "false") != "true":

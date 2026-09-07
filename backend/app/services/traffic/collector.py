@@ -562,6 +562,8 @@ class TrafficCollectorService:
 
 def collect_traffic_snapshot_for_node(db: Session, node_id: int) -> dict:
     """Fetch live status from node adapter and persist traffic snapshot (best-effort)."""
+    from app.services.awg2_noc import fetch_awg2_peers_for_adapter
+    from app.services.feature_toggles import is_awg2_enabled
     from app.services.node_manager import _is_vpn_node, get_adapter_for_node
 
     node = db.get(Node, node_id)
@@ -569,7 +571,12 @@ def collect_traffic_snapshot_for_node(db: Session, node_id: int) -> dict:
         return {"samples_added": 0, "active_sessions": 0, "skipped": True}
 
     adapter = get_adapter_for_node(node)
-    status_rows = build_status_rows(adapter.parse_openvpn_status(), adapter.parse_wireguard_status())
+    awg2_peers = fetch_awg2_peers_for_adapter(adapter) if is_awg2_enabled(db) else []
+    status_rows = build_status_rows(
+        adapter.parse_openvpn_status(),
+        adapter.parse_wireguard_status(),
+        awg2_peers,
+    )
     collector = TrafficCollectorService(db, node_id)
     result = collector.persist_snapshot(status_rows)
     result["skipped"] = False

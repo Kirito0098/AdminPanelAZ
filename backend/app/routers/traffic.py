@@ -1,4 +1,5 @@
 from datetime import datetime
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -102,15 +103,42 @@ def _filter_client_names(names: set[str], allowed: set[str] | None) -> set[str]:
     return {name for name in names if name in allowed}
 
 
+_OPENVPN_LOG_TTL_SECONDS = 30.0
+_openvpn_log_cache: tuple[float, bool] | None = None
+
+
 def _openvpn_verbose_log_enabled(db: Session) -> bool:
+    """Whether OpenVPN verbose .log files are enabled on the active node.
+
+    Cached briefly — TrafficPage loads cleanup schedule on every node switch and
+    the probe may hit local FS or a remote node-agent round-trip.
+    """
+    global _openvpn_log_cache
+    now = time.monotonic()
+    if _openvpn_log_cache is not None:
+        cached_at, cached_ok = _openvpn_log_cache
+        if now - cached_at < _OPENVPN_LOG_TTL_SECONDS:
+            return cached_ok
+
+    enabled = False
     try:
         adapter = get_active_adapter(db)
         if isinstance(adapter, LocalNodeAdapter):
-            return is_openvpn_verbose_log_enabled(adapter._service.base_path / "setup")
-        data = adapter._request("GET", "/traffic/setup-openvpn-log")
-        return bool(data.get("enabled"))
+            enabled = is_openvpn_verbose_log_enabled(adapter._service.base_path / "setup")
+        else:
+            data = adapter._request("GET", "/traffic/setup-openvpn-log")
+            enabled = bool(data.get("enabled"))
     except Exception:
-        return False
+        enabled = False
+
+    _openvpn_log_cache = (now, enabled)
+    return enabled
+
+
+def clear_openvpn_log_enabled_cache() -> None:
+    """Test helper — drop TTL cache for OpenVPN verbose-log probe."""
+    global _openvpn_log_cache
+    _openvpn_log_cache = None
 
 
 @router.get("/active-clients")

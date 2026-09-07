@@ -21,6 +21,7 @@ class _Adapter:
 
 
 def test_live_active_names_includes_ovpn_and_online_wg(monkeypatch):
+    active_mod.clear_live_active_names_cache()
     now = datetime.utcnow()
     node = SimpleNamespace(id=1, name="local")
     adapter = _Adapter(
@@ -61,6 +62,7 @@ def test_live_active_names_includes_ovpn_and_online_wg(monkeypatch):
 
 
 def test_live_active_names_falls_back_to_db_when_probe_empty(monkeypatch):
+    active_mod.clear_live_active_names_cache()
     node = SimpleNamespace(id=7, name="local")
     adapter = _Adapter()
     monkeypatch.setattr(active_mod, "get_adapter_for_node", lambda _n: adapter)
@@ -79,6 +81,7 @@ def test_live_active_names_falls_back_to_db_when_probe_empty(monkeypatch):
 
 
 def test_live_active_names_skips_proxy_adapter(monkeypatch):
+    active_mod.clear_live_active_names_cache()
     node = SimpleNamespace(id=3, name="VK", node_kind="proxy")
     get_adapter = MagicMock(side_effect=AssertionError("vpn adapter"))
     monkeypatch.setattr(active_mod, "get_adapter_for_node", get_adapter)
@@ -91,6 +94,49 @@ def test_live_active_names_skips_proxy_adapter(monkeypatch):
     names = active_mod.live_active_names_for_node(SimpleNamespace(), node)
     get_adapter.assert_not_called()
     assert names == {"FromDB"}
+
+
+def test_live_active_names_ttl_cache_skips_second_probe(monkeypatch):
+    active_mod.clear_live_active_names_cache()
+    node = SimpleNamespace(id=11, name="local")
+    adapter = _Adapter(
+        ovpn=[
+            OpenVpnClient(
+                common_name="Cached",
+                real_address="1.1.1.1:1",
+                virtual_address="10.0.0.2",
+                bytes_received=1,
+                bytes_sent=2,
+                connected_since="now",
+                connected_since_ts=1,
+            )
+        ],
+    )
+    parse_calls = {"n": 0}
+    real_parse = adapter.parse_openvpn_status
+
+    def counting_parse():
+        parse_calls["n"] += 1
+        return real_parse()
+
+    adapter.parse_openvpn_status = counting_parse
+    monkeypatch.setattr(active_mod, "get_adapter_for_node", lambda _n: adapter)
+    monkeypatch.setattr(
+        "app.services.feature_toggles.is_awg2_enabled",
+        lambda _db: False,
+    )
+
+    first = active_mod.live_active_names_for_node(SimpleNamespace(), node)
+    second = active_mod.live_active_names_for_node(SimpleNamespace(), node)
+    assert first == {"Cached"}
+    assert second == {"Cached"}
+    assert parse_calls["n"] == 1
+
+    bypass = active_mod.live_active_names_for_node(
+        SimpleNamespace(), node, ttl_seconds=0
+    )
+    assert bypass == {"Cached"}
+    assert parse_calls["n"] == 2
 
 
 def test_telegram_traffic_summary_uses_active_names(monkeypatch):

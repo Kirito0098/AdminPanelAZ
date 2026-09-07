@@ -7,8 +7,9 @@ from app.services.feature_guards import get_feature_service
 
 
 def should_start_traffic_collector() -> bool:
-    settings = get_settings()
-    return settings.traffic_sync_enabled and get_feature_service().is_enabled("traffic_sync")
+    # Settings gate only — feature toggle is re-checked each collect loop tick
+    # so TRAFFIC_SYNC / traffic_sync can flip without process restart.
+    return get_settings().traffic_sync_enabled
 
 
 def should_start_cert_sync() -> bool:
@@ -28,11 +29,13 @@ def should_start_panel_resource_metrics() -> bool:
 
 
 def should_start_backup_scheduler() -> bool:
-    return get_feature_service().is_enabled("backups")
+    # Always spawn when lifecycle is on — loop re-checks backups toggle each hour.
+    return True
 
 
 def should_start_runtime_backup_cleanup() -> bool:
-    return get_feature_service().is_enabled("runtime_backup_cleanup")
+    # Always spawn — loop re-checks runtime_backup_cleanup toggle each hour.
+    return True
 
 
 def should_start_cidr_scheduler() -> bool:
