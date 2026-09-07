@@ -638,10 +638,10 @@ export default function TrafficClientDetails({
                     width={64}
                   />
                   <Tooltip
-                    formatter={(v: number, name: string) => [
-                      formatBytes(v),
-                      SERIES_LABELS[name] ?? name,
-                    ]}
+                    formatter={(v, name) => {
+                      const key = String(name)
+                      return [formatBytes(Number(v ?? 0)), SERIES_LABELS[key] ?? key]
+                    }}
                     labelFormatter={(label) => `Период: ${label}`}
                   />
                   <Legend formatter={(value) => SERIES_LABELS[value] ?? value} />

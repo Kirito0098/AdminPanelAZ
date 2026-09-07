@@ -61,7 +61,7 @@ export function AppProgress({
       )}
       {isDeterminate ? (
         <div className="flex items-center gap-3">
-          <Progress value={clampedValue} className={cn('flex-1', size === 'sm' && 'h-1.5')} />
+          <Progress value={clampedValue ?? 0} className={cn('flex-1', size === 'sm' && 'h-1.5')} />
           {!label && showPercent && (
             <span className="shrink-0 text-sm font-medium tabular-nums text-muted-foreground">
               {clampedValue}%
@@ -111,7 +111,7 @@ export function InlineProgressBar({ active, label, value }: InlineProgressBarPro
           <p className="truncate text-sm font-medium text-foreground">{statusLabel}</p>
           <div className="mt-2">
             {isDeterminate ? (
-              <Progress value={clampedValue} className="h-1.5" />
+              <Progress value={clampedValue ?? 0} className="h-1.5" />
             ) : (
               <IndeterminateBar size="sm" />
             )}

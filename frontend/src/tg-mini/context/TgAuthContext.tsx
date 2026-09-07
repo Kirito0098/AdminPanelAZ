@@ -97,6 +97,10 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
     void authenticate()
   }, [authenticate])
 
+  const refreshSettings = useCallback(async () => {
+    await loadSettings()
+  }, [loadSettings])
+
   const value = useMemo(
     () => ({
       status,
@@ -105,10 +109,10 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
       features,
       isAdmin: settings?.role === 'admin',
       retryAuth: authenticate,
-      refreshSettings: loadSettings,
+      refreshSettings,
       refreshFeatures,
     }),
-    [authenticate, error, features, loadSettings, refreshFeatures, settings, status],
+    [authenticate, error, features, refreshFeatures, refreshSettings, settings, status],
   )
 
   return <TgAuthContext.Provider value={value}>{children}</TgAuthContext.Provider>

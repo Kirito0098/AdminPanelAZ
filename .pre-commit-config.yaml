@@ -33,6 +33,13 @@ repos:
         files: ^frontend/.*\.(ts|tsx)$
         pass_filenames: false
 
+      - id: frontend-typecheck
+        name: tsc (frontend)
+        entry: bash -c 'cd "$(git rev-parse --show-toplevel)/frontend" && npm run typecheck'
+        language: system
+        files: ^frontend/.*\.(ts|tsx)$
+        pass_filenames: false
+
       - id: bandit
         name: bandit
         entry: bash -c 'cd "$(git rev-parse --show-toplevel)" && bandit -c backend/bandit.yaml -r backend/app backend/node_agent -ll'

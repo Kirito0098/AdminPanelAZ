@@ -14,7 +14,7 @@ import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useNotifications } from '@/context/NotificationContext'
-import type { Node, WarperDoctorItem, WarperHealthResponse } from '@/types'
+import type { Node, WarperDoctorItem, WarperDoctorStatus, WarperHealthResponse } from '@/types'
 import { formatNodeLabel } from './utils'
 
 interface DoctorSectionProps {
@@ -24,7 +24,7 @@ interface DoctorSectionProps {
   hideTitle?: boolean
 }
 
-type DoctorStatus = WarperDoctorItem['status']
+type DoctorStatus = WarperDoctorStatus
 
 const STATUS_META: Record<
   DoctorStatus,

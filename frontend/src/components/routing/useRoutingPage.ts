@@ -257,7 +257,7 @@ export function useRoutingPage() {
   }, [data?.providers, selectedProviderFiles])
 
   const resolveSelectedProviderPayload = useCallback(
-    (files: string[] | null | undefined): string[] | null | undefined => {
+    (files?: string[] | null): string[] | null | undefined => {
       const allCount = data?.providers.length ?? 0
       const targets = files ?? selectedProviderFiles ?? []
       if (targets.length === 0) {
@@ -345,7 +345,7 @@ export function useRoutingPage() {
   }
 
   const refreshOneProvider = async (filename: string) => {
-    setSelectedProviderFiles((prev) => [...new Set([...prev, filename])])
+    setSelectedProviderFiles((prev) => [...new Set([...(prev ?? []), filename])])
     await runRefreshCidrDb([filename])
   }
 

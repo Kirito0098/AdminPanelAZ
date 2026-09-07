@@ -62,7 +62,7 @@ export function getIngestKind(taskType: string | undefined | null): IngestKind |
 export function getPipelineStage(taskType: string | undefined | null): PipelineStage | null {
   const normalized = String(taskType || '').trim()
   if (!normalized) return null
-  for (const [stage, types] of Object.entries(STAGE_TASK_TYPES) as [PipelineStage, readonly string[]][]) {
+  for (const [stage, types] of Object.entries(STAGE_TASK_TYPES) as unknown as [PipelineStage, readonly string[]][]) {
     if (types.includes(normalized)) return stage
   }
   return null

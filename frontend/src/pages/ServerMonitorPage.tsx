@@ -619,8 +619,8 @@ export default function ServerMonitorPage() {
                     />
                     <Tooltip
                       cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }}
-                      formatter={(value: number, name: string) => [
-                        `${Number(value).toFixed(2)} Mbps`,
+                      formatter={(value, name) => [
+                        `${Number(value ?? 0).toFixed(2)} Mbps`,
                         name === 'rx' ? 'Приём (RX)' : 'Передача (TX)',
                       ]}
                       labelFormatter={(label) => `Период: ${label}`}

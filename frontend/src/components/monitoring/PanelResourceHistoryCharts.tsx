@@ -411,13 +411,14 @@ export default function PanelResourceHistoryCharts({
                             width={44}
                           />
                           <Tooltip
-                            formatter={(value: number, name: string) => {
+                            formatter={(value, name) => {
                               const labels: Record<string, string> = {
                                 hostCpu: 'CPU',
                                 hostMemory: 'RAM',
                                 hostDisk: 'Диск',
                               }
-                              return [`${Number(value).toFixed(1)}%`, labels[name] ?? name]
+                              const key = String(name)
+                              return [`${Number(value ?? 0).toFixed(1)}%`, labels[key] ?? key]
                             }}
                             labelFormatter={(label) => `Время: ${label}`}
                           />
@@ -477,7 +478,7 @@ export default function PanelResourceHistoryCharts({
                         />
                         <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" width={44} />
                         <Tooltip
-                          formatter={(value: number) => [`${Number(value).toFixed(1)}%`, 'CPU']}
+                          formatter={(value) => [`${Number(value ?? 0).toFixed(1)}%`, 'CPU']}
                           labelFormatter={(label) => `Время: ${label}`}
                         />
                         <Area
@@ -518,7 +519,7 @@ export default function PanelResourceHistoryCharts({
                         />
                         <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="MB" width={52} />
                         <Tooltip
-                          formatter={(value: number, name: string) => {
+                          formatter={(value, name) => {
                             const labels: Record<string, string> = {
                               memory: 'Backend',
                               nginx: 'Nginx',
@@ -526,7 +527,8 @@ export default function PanelResourceHistoryCharts({
                               vite: 'Vite dev',
                               total: 'Итого',
                             }
-                            return [`${Number(value).toFixed(0)} MB`, labels[name] ?? name]
+                            const key = String(name)
+                            return [`${Number(value ?? 0).toFixed(0)} MB`, labels[key] ?? key]
                           }}
                           labelFormatter={(label) => `Время: ${label}`}
                         />
@@ -617,7 +619,7 @@ export default function PanelResourceHistoryCharts({
                           width={36}
                         />
                         <Tooltip
-                          formatter={(value: number) => [value, 'Workers']}
+                          formatter={(value) => [Number(value ?? 0), 'Workers']}
                           labelFormatter={(label) => `Время: ${label}`}
                         />
                         <Line

@@ -33,8 +33,8 @@ function chartLegend(value: string) {
   return value === 'tx' ? 'Исходящий ↑' : 'Входящий ↓'
 }
 
-function chartTooltip(value: number, name: string) {
-  return [formatBytes(Number(value)), name === 'tx' ? 'Исходящий ↑' : 'Входящий ↓']
+function chartTooltip(value: unknown, name: unknown) {
+  return [formatBytes(Number(value ?? 0)), name === 'tx' ? 'Исходящий ↑' : 'Входящий ↓']
 }
 
 export default function WarperTrafficChart({ points, embedded = false }: WarperTrafficChartProps) {

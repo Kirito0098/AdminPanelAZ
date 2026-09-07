@@ -190,13 +190,14 @@ export default function ResourceHistoryCharts({
                     />
                     <Tooltip
                       cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }}
-                      formatter={(value: number, name: string) => {
+                      formatter={(value, name) => {
                         const labels: Record<string, string> = {
                           cpu: 'CPU',
                           memory: 'RAM',
                           disk: 'Диск',
                         }
-                        return [`${Number(value).toFixed(1)}%`, labels[name] ?? name]
+                        const key = String(name)
+                        return [`${Number(value ?? 0).toFixed(1)}%`, labels[key] ?? key]
                       }}
                       labelFormatter={(label) => `Время: ${label}`}
                     />
@@ -254,7 +255,7 @@ export default function ResourceHistoryCharts({
                       <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={44} />
                       <Tooltip
                         cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }}
-                        formatter={(value: number) => [Number(value).toFixed(2), 'Load 1m']}
+                        formatter={(value) => [Number(value ?? 0).toFixed(2), 'Load 1m']}
                         labelFormatter={(label) => `Время: ${label}`}
                       />
                       <Line

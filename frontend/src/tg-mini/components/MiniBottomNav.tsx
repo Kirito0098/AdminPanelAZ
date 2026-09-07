@@ -36,7 +36,7 @@ const ADMIN_TABS: MiniTabItem[] = [
 ]
 
 function hapticSelect() {
-  window.Telegram?.WebApp.HapticFeedback?.selectionChanged()
+  window.Telegram?.WebApp.HapticFeedback?.selectionChanged?.()
 }
 
 interface MiniBottomNavProps {

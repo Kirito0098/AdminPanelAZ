@@ -11,7 +11,7 @@ export async function registerPasskey(optionsPayload: Record<string, unknown>) {
     throw new Error('Passkey session expired')
   }
   const credential = await startRegistration({
-    optionsJSON: options as PublicKeyCredentialCreationOptionsJSON,
+    optionsJSON: options as unknown as PublicKeyCredentialCreationOptionsJSON,
   })
   return { sessionKey, credential }
 }
@@ -22,7 +22,7 @@ export async function authenticatePasskey(optionsPayload: Record<string, unknown
     throw new Error('Passkey session expired')
   }
   const credential = await startAuthentication({
-    optionsJSON: options as PublicKeyCredentialRequestOptionsJSON,
+    optionsJSON: options as unknown as PublicKeyCredentialRequestOptionsJSON,
   })
   return { sessionKey, credential }
 }

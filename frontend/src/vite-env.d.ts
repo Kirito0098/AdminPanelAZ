@@ -16,8 +16,13 @@ interface TelegramWebApp {
   close: () => void
   openLink: (url: string) => void
   shareUrl?: (url: string, text?: string) => void
+  MainButton?: {
+    isVisible?: boolean
+  }
+  onEvent: (eventType: string, callback: () => void) => void
   HapticFeedback?: {
     notificationOccurred: (type: 'error' | 'success' | 'warning') => void
+    selectionChanged?: () => void
   }
   initData: string
   initDataUnsafe: Record<string, unknown>

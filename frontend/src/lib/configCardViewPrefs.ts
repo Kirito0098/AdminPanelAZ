@@ -172,6 +172,7 @@ const accentButtonClasses: Record<Exclude<CardButtonAccent, 'default'>, string> 
   amber: 'border-amber-500/40 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400',
   emerald: 'border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400',
   red: 'border-destructive/40 text-destructive hover:bg-destructive/10',
+  custom: 'border-[color:var(--card-accent-border)] text-[color:var(--card-accent)]',
 }
 
 const accentBadgeClasses: Record<Exclude<CardButtonAccent, 'default'>, string> = {
@@ -179,6 +180,7 @@ const accentBadgeClasses: Record<Exclude<CardButtonAccent, 'default'>, string> =
   amber: 'border-amber-500/35 bg-amber-500/10 text-amber-600 dark:text-amber-400',
   emerald: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
   red: 'border-destructive/35 bg-destructive/10 text-destructive',
+  custom: 'border-[color:var(--card-accent-badge-border)] bg-[color:var(--card-accent-bg)] text-[color:var(--card-accent)]',
 }
 
 const CUSTOM_ACCENT_HOVER_CLASS = 'hover:[background-color:var(--card-accent-bg)]'

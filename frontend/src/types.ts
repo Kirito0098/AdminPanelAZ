@@ -1223,6 +1223,7 @@ export interface CidrPipelineTask {
   progress_percent: number
   progress_stage: string
   error?: string | null
+  output?: string | null
   result?: {
     deploy?: CidrDeployResult
     per_node?: CidrDeployPerNodeResult[]

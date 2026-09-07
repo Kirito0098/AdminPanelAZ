@@ -122,14 +122,15 @@ function GeoDonutCard({ title, description, icon, slices, total }: GeoDonutCardP
                   </Pie>
                   <Tooltip
                     {...monitoringChartTooltipProps}
-                    formatter={(value: number, _name, item) => {
-                      const percent = total > 0 ? Math.round((value / total) * 100) : 0
+                    formatter={(value, _name, item) => {
+                      const n = Number(value ?? 0)
+                      const percent = total > 0 ? Math.round((n / total) * 100) : 0
                       const slice = item.payload as GeoPieSlice
                       if (slice.breakdown?.length) {
                         const detail = slice.breakdown.map((b) => `${b.name} (${b.value})`).join(', ')
-                        return [`${value} (${percent}%) — ${detail}`, slice.name]
+                        return [`${n} (${percent}%) — ${detail}`, slice.name]
                       }
-                      return [`${value} (${percent}%)`, slice.name]
+                      return [`${n} (${percent}%)`, slice.name]
                     }}
                   />
                 </PieChart>
