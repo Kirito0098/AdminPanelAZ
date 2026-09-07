@@ -44,11 +44,12 @@ def peers_from_awg2_monitoring(payload: dict) -> list[WireGuardPeer]:
 
 
 def fetch_awg2_peers_for_adapter(adapter: Any) -> list[WireGuardPeer]:
-    """Fetch AWG2 peers from a node adapter; return [] on missing/errors."""
+    """Fetch AWG2 peers from a node adapter; return [] on missing/errors.
+
+    Monitoring already calls `_ensure_installed()` — skip a separate health
+    round-trip on every NOC/traffic/history tick.
+    """
     try:
-        health = adapter.get_awg2_health()
-        if not health or not health.get("installed"):
-            return []
         return peers_from_awg2_monitoring(adapter.get_awg2_monitoring())
     except Exception:
         return []

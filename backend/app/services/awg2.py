@@ -1002,26 +1002,60 @@ class Awg2Service:
         }
 
     def get_monitoring(self) -> dict[str, Any]:
-        """Iface summary + clients overview (stats.db) or live dump fallback."""
+        """Iface summary + clients overview.
+
+        Prefer stats.db (then awg_stats overview) so NOC/traffic ticks avoid
+        unconditional `awg show … dump` subprocesses. Live dumps are fallback only.
+        """
         _ensure_installed()
         env = _read_services_env()
         iface_specs = [
             ("antizapret", env.get("AZ_IFACE"), env.get("AZ_PORT"), env.get("AZ_SUBNET")),
             ("vpn", env.get("VPN_IFACE"), env.get("VPN_PORT"), env.get("VPN_SUBNET")),
         ]
+
+        clients: list[dict[str, Any]] = []
+        stats_available = False
+        stats_db = _stats_db_path()
+        if stats_db.is_file():
+            clients = _clients_from_stats_db(stats_db)
+            if not clients:
+                clients = _parse_overview_tsv(self._run_stats_overview())
+            if clients:
+                stats_available = True
+
         dump_by_iface: dict[str, str] = {}
+        if not clients:
+            for _tunnel, name, _port, _subnet in iface_specs:
+                if name:
+                    dump_by_iface[name] = self._awg_show_dump(name)
+            names = _load_peer_names()
+            now = int(time.time())
+            for iface_name, dump_text in dump_by_iface.items():
+                clients.extend(
+                    _parse_awg_dump(dump_text, iface=iface_name, names=names, now=now)
+                )
+            stats_available = False
+
+        peer_counts: dict[str, int] = {}
+        for client in clients:
+            iface = client.get("iface")
+            if isinstance(iface, str) and iface:
+                peer_counts[iface] = peer_counts.get(iface, 0) + 1
+
         ifaces: list[dict[str, Any]] = []
         for _tunnel, name, port, subnet in iface_specs:
             if not name:
                 continue
-            dump_text = self._awg_show_dump(name)
-            dump_by_iface[name] = dump_text
-            peer_count = 0
-            for i, line in enumerate(dump_text.splitlines()):
-                if i == 0:
-                    continue
-                if len(line.split("\t")) >= 8:
-                    peer_count += 1
+            if name in dump_by_iface:
+                peer_count = 0
+                for i, line in enumerate(dump_by_iface[name].splitlines()):
+                    if i == 0:
+                        continue
+                    if len(line.split("\t")) >= 8:
+                        peer_count += 1
+            else:
+                peer_count = peer_counts.get(name, 0)
             ifaces.append(
                 {
                     "name": name,
@@ -1030,28 +1064,6 @@ class Awg2Service:
                     "peer_count": peer_count,
                 }
             )
-
-        stats_db = _stats_db_path()
-        stats_file_present = stats_db.is_file()
-        clients: list[dict[str, Any]] = []
-        stats_available = False
-
-        if stats_file_present:
-            overview_text = self._run_stats_overview()
-            clients = _parse_overview_tsv(overview_text)
-            if not clients:
-                clients = _clients_from_stats_db(stats_db)
-            if clients:
-                stats_available = True
-
-        if not clients:
-            names = _load_peer_names()
-            now = int(time.time())
-            for iface_name, dump_text in dump_by_iface.items():
-                clients.extend(
-                    _parse_awg_dump(dump_text, iface=iface_name, names=names, now=now)
-                )
-            stats_available = False
 
         return {
             "ifaces": ifaces,

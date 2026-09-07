@@ -137,6 +137,11 @@ def run_awg2_expire_once(db_session_factory: Callable[[], Session] = SessionLoca
 async def run_awg2_expire_loop() -> None:
     while True:
         try:
+            if not _is_awg2_module_enabled():
+                logger.info("awg2_expire: skipped (module disabled)")
+                await asyncio.sleep(AWG2_EXPIRE_INTERVAL_SECONDS)
+                continue
+
             result = await asyncio.to_thread(run_awg2_expire_once, SessionLocal)
             if result["deleted_cli"] or result["deleted_db"] or result["expiry_refreshed"]:
                 logger.info(
@@ -150,3 +155,10 @@ async def run_awg2_expire_loop() -> None:
         except Exception:
             logger.exception("awg2_expire failed")
         await asyncio.sleep(AWG2_EXPIRE_INTERVAL_SECONDS)
+
+
+def _is_awg2_module_enabled() -> bool:
+    """Runtime gate — startup also checks this, but toggles can change without restart."""
+    from app.services.feature_toggles import is_awg2_enabled
+
+    return is_awg2_enabled()

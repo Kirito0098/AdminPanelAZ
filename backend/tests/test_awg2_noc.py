@@ -39,16 +39,8 @@ def test_awg2_client_stale_not_online():
     assert not wireguard_peer_is_online(peer)
 
 
-def test_fetch_skips_when_not_installed():
+def test_fetch_skips_health_and_uses_monitoring():
     adapter = MagicMock()
-    adapter.get_awg2_health.return_value = {"installed": False}
-    assert fetch_awg2_peers_for_adapter(adapter) == []
-    adapter.get_awg2_monitoring.assert_not_called()
-
-
-def test_fetch_returns_peers_when_installed():
-    adapter = MagicMock()
-    adapter.get_awg2_health.return_value = {"installed": True}
     adapter.get_awg2_monitoring.return_value = {
         "clients": [
             {
@@ -65,9 +57,18 @@ def test_fetch_returns_peers_when_installed():
     }
     peers = fetch_awg2_peers_for_adapter(adapter)
     assert len(peers) == 1 and peers[0].client_name == "a"
+    adapter.get_awg2_health.assert_not_called()
+    adapter.get_awg2_monitoring.assert_called_once_with()
+
+
+def test_fetch_returns_empty_when_not_installed():
+    adapter = MagicMock()
+    adapter.get_awg2_monitoring.side_effect = RuntimeError("not installed")
+    assert fetch_awg2_peers_for_adapter(adapter) == []
+    adapter.get_awg2_health.assert_not_called()
 
 
 def test_fetch_swallows_adapter_errors():
     adapter = MagicMock()
-    adapter.get_awg2_health.side_effect = RuntimeError("down")
+    adapter.get_awg2_monitoring.side_effect = RuntimeError("down")
     assert fetch_awg2_peers_for_adapter(adapter) == []
