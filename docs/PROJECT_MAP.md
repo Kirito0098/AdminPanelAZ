@@ -62,20 +62,21 @@
 │   │   ├── schemas.py           # Pydantic-схемы API
 │   │   ├── database.py          # engine, миграции основной БД
 │   │   ├── cidr_database.py     # engine CIDR БД
-│   │   ├── routers/             # HTTP API (26 роутеров)
-│   │   ├── services/            # бизнес-логика (~140 файлов)
+│   │   ├── routers/             # HTTP API (33 роутера)
+│   │   ├── services/            # бизнес-логика (~160+ файлов + подпакеты)
 │   │   ├── middleware/          # rate limit, security, sessions
 │   │   └── static/tg_mini/      # собранный Mini App
 │   └── proxy_agent/             # агент прокси-узла (:9101)
 ├── frontend/
 │   ├── src/
-│   │   ├── App.tsx              # маршруты веб-панели
+│   │   ├── App.tsx              # маршруты веб-панели (lazy routes + ErrorBoundary)
 │   │   ├── pages/               # страницы
 │   │   ├── components/          # UI по доменам
 │   │   ├── context/             # Auth, Theme, Nodes, Features…
-│   │   ├── api/client.ts        # единый HTTP-клиент (~1200 строк)
+│   │   ├── hooks/               # shared hooks (visibility poll, confirm, …)
+│   │   ├── api/client.ts        # единый HTTP-клиент (~2200 строк)
 │   │   └── tg-mini/             # Mini App (отдельное SPA)
-│   └── vite.config.ts           # две сборки: default + tg-mini
+│   └── vite.config.ts           # две сборки: default + tg-mini; vitest
 ├── scripts/                     # firewall, install-wizard, uninstall
 ├── docs/
 │   ├── README.md                # оглавление пользовательских руководств

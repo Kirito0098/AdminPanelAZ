@@ -53,6 +53,7 @@ import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { formatDateTime } from '@/lib/datetime'
 import { actionLogDetailsLabel } from '@/lib/actionLogDetails'
 import { actionLogLabel } from '@/lib/actionLogLabels'
@@ -703,11 +704,8 @@ export default function LogsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- remount on node / tab deep-link only
   }, [activeNode?.id, initialLogTab])
 
-  useEffect(() => {
-    if (!autoRefresh) return
-
-    const tick = setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) return
+  useIntervalWhenVisible(
+    () => {
       setCountdown((c) => {
         if (c <= 1) {
           void load(false, false)
@@ -715,20 +713,16 @@ export default function LogsPage() {
         }
         return c - 1
       })
-    }, 1000)
-
-    const onVisible = () => {
-      if (document.hidden) return
-      setCountdown(REFRESH_INTERVAL)
-      void load(false, false)
-    }
-    document.addEventListener('visibilitychange', onVisible)
-
-    return () => {
-      clearInterval(tick)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [autoRefresh, load])
+    },
+    1000,
+    {
+      enabled: autoRefresh,
+      onBecomeVisible: () => {
+        setCountdown(REFRESH_INTERVAL)
+        void load(false, false)
+      },
+    },
+  )
 
   const skipTabFetchRef = useRef(true)
   useEffect(() => {

@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import * as api from '@/api/client'
 import { useAuth } from '@/context/AuthContext'
+import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import type { Node, NodeHaContext, NodeSyncGroup } from '@/types'
 
 interface NodeContextValue {
@@ -105,28 +106,22 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
     void refreshSyncGroups()
   }, [refreshSyncGroups])
 
-  useEffect(() => {
-    if (!user) return
-
-    const interval = window.setInterval(() => {
-      if (document.visibilityState !== 'visible') return
+  useIntervalWhenVisible(
+    () => {
       void refresh()
-      if (user.role === 'admin') {
+      if (user?.role === 'admin') {
         void refreshNodes().catch(() => {})
         void refreshSyncGroups()
       }
-    }, 45_000)
-
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void refresh()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-
-    return () => {
-      window.clearInterval(interval)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [user, refresh, refreshNodes, refreshSyncGroups])
+    },
+    45_000,
+    {
+      enabled: Boolean(user),
+      onBecomeVisible: () => {
+        void refresh()
+      },
+    },
+  )
 
   const value = useMemo(
     () => ({

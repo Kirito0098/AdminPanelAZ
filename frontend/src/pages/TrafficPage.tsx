@@ -67,6 +67,7 @@ import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
@@ -513,11 +514,8 @@ export default function TrafficPage() {
     }
   }, [awg2Enabled, resetScope])
 
-  useEffect(() => {
-    if (!autoRefresh) return
-
-    const tick = setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) return
+  useIntervalWhenVisible(
+    () => {
       setCountdown((c) => {
         if (c <= 1) {
           load()
@@ -525,20 +523,16 @@ export default function TrafficPage() {
         }
         return c - 1
       })
-    }, 1000)
-
-    const onVisible = () => {
-      if (document.hidden) return
-      setCountdown(REFRESH_INTERVAL)
-      void load()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-
-    return () => {
-      clearInterval(tick)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [autoRefresh, load])
+    },
+    1000,
+    {
+      enabled: autoRefresh,
+      onBecomeVisible: () => {
+        setCountdown(REFRESH_INTERVAL)
+        void load()
+      },
+    },
+  )
 
   const summary = data?.summary
   const nodeOffline = activeNode?.status === 'offline'

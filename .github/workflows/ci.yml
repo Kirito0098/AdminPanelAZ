@@ -91,6 +91,10 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+      - name: Unit tests
+        working-directory: frontend
+        run: npm test
+
       - name: Build frontend (panel + tg-mini)
         working-directory: frontend
         run: npm run build:all

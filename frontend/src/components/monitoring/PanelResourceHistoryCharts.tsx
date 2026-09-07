@@ -19,6 +19,7 @@ import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useNotifications } from '@/context/NotificationContext'
+import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { formatDate, formatDateTime, formatTime } from '@/lib/datetime'
 import type { PanelResourceCurrent, PanelResourceHistory, PanelResourceHistoryPoint } from '@/types'
 
@@ -146,23 +147,18 @@ export default function PanelResourceHistoryCharts({
     loadHistory()
   }, [period])
 
-  useEffect(() => {
-    const refresh = () => {
-      if (typeof document !== 'undefined' && document.hidden) return
+  useIntervalWhenVisible(
+    () => {
       void loadCurrent()
-    }
-    refresh()
-    const timer = window.setInterval(refresh, 60_000)
-    const onVisible = () => {
-      if (document.hidden) return
-      void loadCurrent()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [])
+    },
+    60_000,
+    {
+      runOnMount: true,
+      onBecomeVisible: () => {
+        void loadCurrent()
+      },
+    },
+  )
 
   const chartData = useMemo(() => buildChartRows(history?.points ?? [], period), [history?.points, period])
   const latest = history?.points?.length ? history.points[history.points.length - 1] : null

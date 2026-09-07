@@ -86,6 +86,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useConnectionRates } from '@/hooks/useConnectionRates'
+import { isDocumentHidden } from '@/hooks/useIntervalWhenVisible'
 import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
@@ -427,20 +428,20 @@ export default function MonitoringPage() {
         haMode,
       )
       tick = setInterval(() => {
-        if (typeof document !== 'undefined' && document.hidden) return
+        if (isDocumentHidden()) return
         setCountdown((c) => (c <= 1 ? REFRESH_INTERVAL : c - 1))
       }, 1000)
     }
 
     const onVisibility = () => {
-      if (document.hidden) {
+      if (isDocumentHidden()) {
         disconnect()
         return
       }
       connect()
     }
 
-    if (typeof document === 'undefined' || !document.hidden) {
+    if (typeof document === 'undefined' || !isDocumentHidden()) {
       connect()
     }
     document.addEventListener('visibilitychange', onVisibility)

@@ -20,6 +20,7 @@ import {
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { usePipelineTaskPoll } from '@/components/routing/usePipelineTaskPoll'
 import type {
   AntifilterStatus,
@@ -277,11 +278,8 @@ export function useRoutingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeNode?.id])
 
-  useEffect(() => {
-    if (!autoRefresh) return
-
-    const tick = setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) return
+  useIntervalWhenVisible(
+    () => {
       setCountdown((c) => {
         if (c <= 1) {
           load()
@@ -289,20 +287,16 @@ export function useRoutingPage() {
         }
         return c - 1
       })
-    }, 1000)
-
-    const onVisible = () => {
-      if (document.hidden) return
-      setCountdown(REFRESH_INTERVAL)
-      void load()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-
-    return () => {
-      clearInterval(tick)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [autoRefresh, load])
+    },
+    1000,
+    {
+      enabled: autoRefresh,
+      onBecomeVisible: () => {
+        setCountdown(REFRESH_INTERVAL)
+        void load()
+      },
+    },
+  )
 
   const withPipelineAction = async (
     fn: () => Promise<{ task_id: string; message: string }>,

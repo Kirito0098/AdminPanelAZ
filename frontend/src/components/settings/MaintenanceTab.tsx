@@ -43,6 +43,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useNode } from '@/context/NodeContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { cn } from '@/lib/utils'
 import type { AppSettings, GeoIpStatus, Node, RetentionSettings, ServerRebootPendingItem } from '@/types'
 
@@ -215,29 +216,30 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
       .catch(() => {})
   }, [])
 
-  useEffect(() => {
-    if (!pendingReboot) return
-    const poll = () => {
-      if (typeof document !== 'undefined' && document.hidden) return
+  useIntervalWhenVisible(
+    () => {
       void getPendingServerReboots()
         .then((resp) => {
-          const item = resp.items.find((i) => i.reboot_id === pendingReboot.reboot_id)
+          const item = resp.items.find((i) => i.reboot_id === pendingReboot?.reboot_id)
           setPendingReboot(item ?? null)
         })
         .catch(() => {})
-    }
-    poll()
-    const id = window.setInterval(poll, 1000)
-    const onVisible = () => {
-      if (document.hidden) return
-      poll()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      window.clearInterval(id)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [pendingReboot?.reboot_id])
+    },
+    1000,
+    {
+      enabled: Boolean(pendingReboot),
+      runOnMount: true,
+      restartKey: pendingReboot?.reboot_id ?? null,
+      onBecomeVisible: () => {
+        void getPendingServerReboots()
+          .then((resp) => {
+            const item = resp.items.find((i) => i.reboot_id === pendingReboot?.reboot_id)
+            setPendingReboot(item ?? null)
+          })
+          .catch(() => {})
+      },
+    },
+  )
 
   useEffect(() => {
     if (!pendingReboot) {

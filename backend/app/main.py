@@ -120,7 +120,7 @@ def seed_database():
                     )
             db.commit()
         except Exception:
-            pass
+            logger.exception("Failed to seed VPN clients from local adapter")
     finally:
         db.close()
 
@@ -151,7 +151,7 @@ async def lifespan(_: FastAPI):
         if recovered:
             logger.info("Recovered %d stale background task(s) after restart", recovered)
     except Exception:
-        pass
+        logger.exception("Failed to recover stale background tasks on startup")
     try:
         from app.services.cidr.pipeline.list_migration import migrate_legacy_cidr_list_dir
 
@@ -170,7 +170,7 @@ async def lifespan(_: FastAPI):
     try:
         ip_restriction_service.sync_firewall()
     except Exception:
-        pass
+        logger.exception("Failed to sync IP restriction firewall on startup")
     try:
         from app.database import SessionLocal
 
@@ -180,7 +180,7 @@ async def lifespan(_: FastAPI):
         finally:
             startup_db.close()
     except Exception:
-        pass
+        logger.exception("Failed to sync whitelist port firewall on startup")
     yield
     await cancel_background_tasks(background_tasks)
 

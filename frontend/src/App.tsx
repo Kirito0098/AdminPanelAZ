@@ -1,9 +1,12 @@
+import { lazy, Suspense, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { routerBasename } from './lib/panelBase'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import RouteProgress from './components/RouteProgress'
 import FeatureGuardRoute from './components/FeatureGuardRoute'
+import ErrorBoundary from './components/ErrorBoundary'
+import Spinner from './components/ui/Spinner'
 import { AuthProvider } from './context/AuthContext'
 import { FeatureModulesProvider } from './context/FeatureModulesContext'
 import { NodeProvider } from './context/NodeContext'
@@ -11,21 +14,38 @@ import { NotificationProvider } from './context/NotificationContext'
 import { ProgressProvider } from './context/ProgressContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { TimezoneProvider } from './context/TimezoneContext'
-import DashboardPage from './pages/DashboardPage'
 import LoginPage from './pages/LoginPage'
-import MonitoringPage from './pages/MonitoringPage'
-import NodesPage from './pages/NodesPage'
-import RoutingPage from './pages/RoutingPage'
-import AntizapretConfigPage from './pages/AntizapretConfigPage'
-import ProxyHubPage from './pages/ProxyHubPage'
-import WarperPage from './pages/WarperPage'
-import Awg2Page from './pages/Awg2Page'
-import TelegramPage from './pages/TelegramPage'
-import SettingsPage from './pages/SettingsPage'
-import TrafficPage from './pages/TrafficPage'
-import EditFilesPage from './pages/EditFilesPage'
-import LogsPage from './pages/LogsPage'
-import ServerMonitorPage from './pages/ServerMonitorPage'
+
+const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const MonitoringPage = lazy(() => import('./pages/MonitoringPage'))
+const NodesPage = lazy(() => import('./pages/NodesPage'))
+const RoutingPage = lazy(() => import('./pages/RoutingPage'))
+const AntizapretConfigPage = lazy(() => import('./pages/AntizapretConfigPage'))
+const ProxyHubPage = lazy(() => import('./pages/ProxyHubPage'))
+const WarperPage = lazy(() => import('./pages/WarperPage'))
+const Awg2Page = lazy(() => import('./pages/Awg2Page'))
+const TelegramPage = lazy(() => import('./pages/TelegramPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
+const TrafficPage = lazy(() => import('./pages/TrafficPage'))
+const EditFilesPage = lazy(() => import('./pages/EditFilesPage'))
+const LogsPage = lazy(() => import('./pages/LogsPage'))
+const ServerMonitorPage = lazy(() => import('./pages/ServerMonitorPage'))
+
+function PageFallback() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center">
+      <Spinner label="Загрузка…" />
+    </div>
+  )
+}
+
+function LazyPage({ children }: { children: ReactNode }) {
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<PageFallback />}>{children}</Suspense>
+    </ErrorBoundary>
+  )
+}
 
 export default function App() {
   return (
@@ -48,20 +68,20 @@ export default function App() {
                     </ProtectedRoute>
                   }
                 >
-                  <Route index element={<DashboardPage />} />
-                  <Route path="monitoring" element={<FeatureGuardRoute feature="logs_dashboard"><MonitoringPage /></FeatureGuardRoute>} />
-                  <Route path="traffic" element={<FeatureGuardRoute feature="traffic_sync"><TrafficPage /></FeatureGuardRoute>} />
-                  <Route path="routing" element={<FeatureGuardRoute feature="routing"><RoutingPage /></FeatureGuardRoute>} />
-                  <Route path="antizapret" element={<FeatureGuardRoute feature="antizapret_config"><AntizapretConfigPage /></FeatureGuardRoute>} />
-                  <Route path="proxy" element={<FeatureGuardRoute feature="proxy_nodes"><ProxyHubPage /></FeatureGuardRoute>} />
-                  <Route path="warper" element={<FeatureGuardRoute feature="warper"><WarperPage /></FeatureGuardRoute>} />
-                  <Route path="awg2" element={<FeatureGuardRoute feature="awg2"><Awg2Page /></FeatureGuardRoute>} />
-                  <Route path="telegram" element={<FeatureGuardRoute feature="telegram"><TelegramPage /></FeatureGuardRoute>} />
-                  <Route path="edit-files" element={<FeatureGuardRoute feature="edit_files"><EditFilesPage /></FeatureGuardRoute>} />
-                  <Route path="logs" element={<FeatureGuardRoute anyOf={['logs_dashboard', 'action_logs']}><LogsPage /></FeatureGuardRoute>} />
-                  <Route path="server-monitor" element={<FeatureGuardRoute feature="server_monitor"><ServerMonitorPage /></FeatureGuardRoute>} />
-                  <Route path="nodes" element={<NodesPage />} />
-                  <Route path="settings/:section?" element={<SettingsPage />} />
+                  <Route index element={<LazyPage><DashboardPage /></LazyPage>} />
+                  <Route path="monitoring" element={<LazyPage><FeatureGuardRoute feature="logs_dashboard"><MonitoringPage /></FeatureGuardRoute></LazyPage>} />
+                  <Route path="traffic" element={<LazyPage><FeatureGuardRoute feature="traffic_sync"><TrafficPage /></FeatureGuardRoute></LazyPage>} />
+                  <Route path="routing" element={<LazyPage><FeatureGuardRoute feature="routing"><RoutingPage /></FeatureGuardRoute></LazyPage>} />
+                  <Route path="antizapret" element={<LazyPage><FeatureGuardRoute feature="antizapret_config"><AntizapretConfigPage /></FeatureGuardRoute></LazyPage>} />
+                  <Route path="proxy" element={<LazyPage><FeatureGuardRoute feature="proxy_nodes"><ProxyHubPage /></FeatureGuardRoute></LazyPage>} />
+                  <Route path="warper" element={<LazyPage><FeatureGuardRoute feature="warper"><WarperPage /></FeatureGuardRoute></LazyPage>} />
+                  <Route path="awg2" element={<LazyPage><FeatureGuardRoute feature="awg2"><Awg2Page /></FeatureGuardRoute></LazyPage>} />
+                  <Route path="telegram" element={<LazyPage><FeatureGuardRoute feature="telegram"><TelegramPage /></FeatureGuardRoute></LazyPage>} />
+                  <Route path="edit-files" element={<LazyPage><FeatureGuardRoute feature="edit_files"><EditFilesPage /></FeatureGuardRoute></LazyPage>} />
+                  <Route path="logs" element={<LazyPage><FeatureGuardRoute anyOf={['logs_dashboard', 'action_logs']}><LogsPage /></FeatureGuardRoute></LazyPage>} />
+                  <Route path="server-monitor" element={<LazyPage><FeatureGuardRoute feature="server_monitor"><ServerMonitorPage /></FeatureGuardRoute></LazyPage>} />
+                  <Route path="nodes" element={<LazyPage><NodesPage /></LazyPage>} />
+                  <Route path="settings/:section?" element={<LazyPage><SettingsPage /></LazyPage>} />
                 </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
