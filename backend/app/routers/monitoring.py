@@ -3,7 +3,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from jose import JWTError, jwt
+import jwt
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
@@ -152,7 +152,7 @@ def _user_from_access_token(token: str, db: Session) -> User:
         username: str | None = payload.get("sub")
         if username is None:
             raise credentials_exception
-    except JWTError as exc:
+    except jwt.PyJWTError as exc:
         raise credentials_exception from exc
 
     user = db.query(User).filter(User.username == username).first()

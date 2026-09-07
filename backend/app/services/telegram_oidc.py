@@ -10,7 +10,8 @@ import time
 from typing import Any
 
 import httpx
-from jose import jwt, jwk
+import jwt
+from jwt import PyJWKClient
 
 OIDC_ISSUER = "https://oauth.telegram.org"
 OIDC_AUTH_URL = f"{OIDC_ISSUER}/auth"
@@ -21,8 +22,8 @@ OIDC_STATE_TTL = 600
 
 _oauth_store: dict[str, dict[str, Any]] = {}
 _oauth_lock = threading.Lock()
-_jwks_cache: dict[str, Any] | None = None
-_jwks_cache_at: float = 0.0
+_jwks_client: PyJWKClient | None = None
+_jwks_client_lock = threading.Lock()
 
 
 def _cleanup_oauth_store() -> None:
@@ -76,32 +77,27 @@ def build_authorization_url(*, client_id: str, redirect_uri: str, state: str, co
     return f"{OIDC_AUTH_URL}?{query}"
 
 
-def _get_jwks() -> dict[str, Any]:
-    global _jwks_cache, _jwks_cache_at
-    if _jwks_cache and time.time() - _jwks_cache_at < 3600:
-        return _jwks_cache
-    resp = httpx.get(OIDC_JWKS_URL, timeout=10.0)
-    resp.raise_for_status()
-    _jwks_cache = resp.json()
-    _jwks_cache_at = time.time()
-    return _jwks_cache
-
-
-def _signing_key(id_token: str) -> Any:
-    header = jwt.get_unverified_header(id_token)
-    kid = header.get("kid")
-    alg = header.get("alg", "RS256")
-    for jwk_dict in _get_jwks().get("keys", []):
-        if jwk_dict.get("kid") == kid:
-            return jwk.construct(jwk_dict), alg
-    raise ValueError("Ключ подписи Telegram OIDC не найден")
+def _get_jwks_client() -> PyJWKClient:
+    global _jwks_client
+    if _jwks_client is not None:
+        return _jwks_client
+    with _jwks_client_lock:
+        if _jwks_client is None:
+            # lifespan=3600 matches the previous 1h JWKS cache.
+            _jwks_client = PyJWKClient(OIDC_JWKS_URL, cache_keys=True, lifespan=3600, timeout=10)
+        return _jwks_client
 
 
 def verify_id_token(id_token: str, *, client_id: str) -> dict[str, Any]:
-    key, alg = _signing_key(id_token)
+    header = jwt.get_unverified_header(id_token)
+    alg = header.get("alg", "RS256")
+    try:
+        signing_key = _get_jwks_client().get_signing_key_from_jwt(id_token)
+    except jwt.PyJWKClientError as exc:
+        raise ValueError("Ключ подписи Telegram OIDC не найден") from exc
     return jwt.decode(
         id_token,
-        key,
+        signing_key.key,
         algorithms=[alg],
         audience=client_id,
         issuer=OIDC_ISSUER,

@@ -2,7 +2,7 @@ import asyncio
 import json
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
-from jose import JWTError, jwt
+import jwt
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
@@ -74,7 +74,7 @@ async def monitor_ws(websocket: WebSocket):
         if not username:
             await websocket.close(code=1008)
             return
-    except JWTError:
+    except jwt.PyJWTError:
         await websocket.close(code=1008)
         return
     iface = (websocket.query_params.get("iface") or "eth0").strip() or "eth0"

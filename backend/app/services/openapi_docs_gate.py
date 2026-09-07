@@ -7,7 +7,7 @@ import ipaddress
 from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from jose import JWTError, jwt
+import jwt
 
 from app.auth import decode_access_token_username
 from app.config import get_settings
@@ -47,7 +47,7 @@ def _is_admin_token(token: str, db: Session) -> bool:
         if payload.get("role") == UserRole.admin.value:
             return True
         username = payload.get("sub")
-    except JWTError:
+    except jwt.PyJWTError:
         username = decode_access_token_username(token)
     else:
         if not username:

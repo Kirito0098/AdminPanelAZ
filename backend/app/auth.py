@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+import jwt
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -59,7 +59,7 @@ def decode_2fa_pending_token(token: str) -> str:
         if not username:
             raise credentials_exception
         return username
-    except JWTError as exc:
+    except jwt.PyJWTError as exc:
         raise credentials_exception from exc
 
 
@@ -79,7 +79,7 @@ def decode_access_token_username(token: str) -> str | None:
             return None
         username: str | None = payload.get("sub")
         return username
-    except JWTError:
+    except jwt.PyJWTError:
         return None
 
 
@@ -96,7 +96,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         username: str | None = payload.get("sub")
         if username is None:
             raise credentials_exception
-    except JWTError as exc:
+    except jwt.PyJWTError as exc:
         raise credentials_exception from exc
 
     user = db.query(User).filter(User.username == username).first()
