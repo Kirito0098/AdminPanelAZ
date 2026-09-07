@@ -3,6 +3,7 @@ import { ApiError } from '@/api/client'
 import { applyThemeClass, normalizeTheme } from '@/lib/theme'
 import {
   clearTgToken,
+  getTgFeatureModules,
   getTgSettings,
   getTgToken,
   refreshTgSessionFromInitData,
@@ -17,9 +18,11 @@ interface TgAuthContextValue {
   status: AuthStatus
   error: string | null
   settings: TgMiniSettings | null
+  features: Record<string, boolean>
   isAdmin: boolean
   retryAuth: () => Promise<void>
   refreshSettings: () => Promise<void>
+  refreshFeatures: () => Promise<void>
 }
 
 const TgAuthContext = createContext<TgAuthContextValue | null>(null)
@@ -28,6 +31,7 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading')
   const [error, setError] = useState<string | null>(null)
   const [settings, setSettings] = useState<TgMiniSettings | null>(null)
+  const [features, setFeatures] = useState<Record<string, boolean>>({})
 
   const loadSettings = useCallback(async (opts?: { retry?: boolean }) => {
     const data = await getTgSettings({ retry: opts?.retry ?? true })
@@ -36,12 +40,22 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
     return data
   }, [])
 
+  const refreshFeatures = useCallback(async () => {
+    try {
+      const data = await getTgFeatureModules()
+      setFeatures(data.features || {})
+    } catch {
+      setFeatures({})
+    }
+  }, [])
+
   const authenticate = useCallback(async () => {
     const tg = getTelegramWebApp()
     const initData = await waitForTelegramInitData(tg)
     if (!initData) {
       setStatus('no-telegram')
       setError(TG_MINI_NO_INIT_DATA)
+      setFeatures({})
       return
     }
 
@@ -54,6 +68,7 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
       if (getTgToken()) {
         try {
           await loadSettings({ retry: false })
+          await refreshFeatures()
           setStatus('authenticated')
           return
         } catch (err) {
@@ -66,14 +81,16 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
 
       await refreshTgSessionFromInitData(initData)
       await loadSettings({ retry: false })
+      await refreshFeatures()
       setStatus('authenticated')
     } catch (err) {
       clearTgToken()
       const message = err instanceof ApiError ? err.message : 'Ошибка авторизации'
       setError(message)
+      setFeatures({})
       setStatus('error')
     }
-  }, [loadSettings])
+  }, [loadSettings, refreshFeatures])
 
   useEffect(() => {
     initTelegramWebApp()
@@ -85,11 +102,13 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
       status,
       error,
       settings,
+      features,
       isAdmin: settings?.role === 'admin',
       retryAuth: authenticate,
       refreshSettings: loadSettings,
+      refreshFeatures,
     }),
-    [authenticate, error, loadSettings, settings, status],
+    [authenticate, error, features, loadSettings, refreshFeatures, settings, status],
   )
 
   return <TgAuthContext.Provider value={value}>{children}</TgAuthContext.Provider>

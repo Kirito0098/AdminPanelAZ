@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
@@ -10,6 +12,37 @@ from app.services.feature_toggles import (
     FEATURE_TOGGLES,
     FeatureToggleService,
 )
+
+_FEATURE_SERVICE: FeatureToggleService | None = None
+_FEATURE_SERVICE_PATH: Path | None = None
+
+
+def _panel_env_path() -> Path:
+    return Path(__file__).resolve().parents[2] / ".env"
+
+
+def get_feature_service() -> FeatureToggleService:
+    """Return a process-local FeatureToggleService for the panel ``.env``.
+
+    Reuses one instance so the parsed-env cache survives across middleware and
+    notify checks. Still patchable in tests via ``monkeypatch.setattr``.
+    """
+    global _FEATURE_SERVICE, _FEATURE_SERVICE_PATH
+
+    env_path = _panel_env_path()
+    if _FEATURE_SERVICE is None or _FEATURE_SERVICE_PATH != env_path:
+        _FEATURE_SERVICE = FeatureToggleService(env_path)
+        _FEATURE_SERVICE_PATH = env_path
+    return _FEATURE_SERVICE
+
+
+def reset_feature_service_cache() -> None:
+    """Drop the singleton (tests / after relocating the env path)."""
+    global _FEATURE_SERVICE, _FEATURE_SERVICE_PATH
+    if _FEATURE_SERVICE is not None:
+        _FEATURE_SERVICE._invalidate_env_map()
+    _FEATURE_SERVICE = None
+    _FEATURE_SERVICE_PATH = None
 
 ALWAYS_ALLOWED_PREFIXES = (
     "/api/health",
@@ -214,10 +247,3 @@ def require_openvpn_and_security(*, service: FeatureToggleService | None = None)
         raise HTTPException(status_code=403, detail=module_disabled_message("security"))
     if not svc.is_enabled("openvpn"):
         raise HTTPException(status_code=403, detail=module_disabled_message("openvpn"))
-
-
-def get_feature_service() -> FeatureToggleService:
-    from pathlib import Path
-
-    env_path = Path(__file__).resolve().parents[2] / ".env"
-    return FeatureToggleService(env_path)

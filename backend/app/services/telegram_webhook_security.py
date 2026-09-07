@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import ipaddress
 
 from app.services.rate_limit.backends import MemoryRateLimitBackend
@@ -13,9 +14,21 @@ _TELEGRAM_CIDRS = (
     ipaddress.ip_network("91.108.4.0/22"),
 )
 
+# https://core.telegram.org/bots/api#setwebhook — secret_token header name
+TELEGRAM_SECRET_TOKEN_HEADER = "X-Telegram-Bot-Api-Secret-Token"
+
 _webhook_limiter = SlidingWindowLimiter(MemoryRateLimitBackend())
 _WEBHOOK_MAX_REQUESTS = 30
 _WEBHOOK_WINDOW_SECONDS = 1.0
+
+
+def secrets_match(provided: str | None, expected: str | None) -> bool:
+    """Constant-time compare for webhook URL/header secrets."""
+    left = (provided or "").encode("utf-8")
+    right = (expected or "").encode("utf-8")
+    if len(left) != len(right):
+        return False
+    return hmac.compare_digest(left, right)
 
 
 def get_telegram_webhook_client_ip(request) -> str:

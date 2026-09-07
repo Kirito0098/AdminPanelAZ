@@ -19,7 +19,6 @@ import {
   getTgConfigFiles,
   getTgConfigQuota,
   getTgConfigs,
-  getTgFeatureModules,
   getTgQrLink,
   sendTgConfig,
 } from '@/tg-mini/api'
@@ -46,12 +45,9 @@ function ownerLabel(config: TgMiniConfig): string | null {
 }
 
 export default function Configs() {
-  const { isAdmin, settings } = useTgAuth()
+  const { isAdmin, settings, features } = useTgAuth()
   const [configs, setConfigs] = useState<TgMiniConfig[]>([])
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
-  const [openvpnEnabled, setOpenvpnEnabled] = useState(true)
-  const [wireguardEnabled, setWireguardEnabled] = useState(true)
-  const [awg2Enabled, setAwg2Enabled] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -87,34 +83,30 @@ export default function Configs() {
     }
   }, [])
 
-  useEffect(() => {
-    void getTgFeatureModules()
-      .then((data) => {
-        const policy = settings?.visible_vpn_profiles
-        const allowOpenvpn =
-          Boolean(data.features.openvpn) &&
-          (isAdmin ||
-            !policy ||
-            (policy.protocols.includes('openvpn') && policy.openvpn_groups.length > 0))
-        const allowWireguard =
-          (Boolean(data.features.wireguard) || Boolean(data.features.amneziawg)) &&
-          (isAdmin ||
-            !policy ||
-            policy.protocols.includes('wireguard') ||
-            policy.protocols.includes('amneziawg'))
-        const allowAwg2 =
-          Boolean(data.features.awg2) &&
-          (isAdmin || !policy || policy.protocols.includes('amneziawg2'))
-        setOpenvpnEnabled(allowOpenvpn)
-        setWireguardEnabled(allowWireguard)
-        setAwg2Enabled(allowAwg2)
-      })
-      .catch(() => {
-        setOpenvpnEnabled(true)
-        setWireguardEnabled(true)
-        setAwg2Enabled(false)
-      })
-  }, [isAdmin, settings?.visible_vpn_profiles])
+  const { openvpnEnabled, wireguardEnabled, awg2Enabled } = useMemo(() => {
+    const policy = settings?.visible_vpn_profiles
+    // Missing keys (features fetch failed) keep default-on VPN modules available;
+    // awg2 stays opt-in (default off).
+    const allowOpenvpn =
+      Boolean(features.openvpn ?? true) &&
+      (isAdmin ||
+        !policy ||
+        (policy.protocols.includes('openvpn') && policy.openvpn_groups.length > 0))
+    const allowWireguard =
+      (Boolean(features.wireguard ?? true) || Boolean(features.amneziawg ?? true)) &&
+      (isAdmin ||
+        !policy ||
+        policy.protocols.includes('wireguard') ||
+        policy.protocols.includes('amneziawg'))
+    const allowAwg2 =
+      Boolean(features.awg2) &&
+      (isAdmin || !policy || policy.protocols.includes('amneziawg2'))
+    return {
+      openvpnEnabled: allowOpenvpn,
+      wireguardEnabled: allowWireguard,
+      awg2Enabled: allowAwg2,
+    }
+  }, [features, isAdmin, settings?.visible_vpn_profiles])
 
   useEffect(() => {
     void load()

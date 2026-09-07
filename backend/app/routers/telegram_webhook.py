@@ -8,18 +8,22 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
+from app.config import get_settings
 from app.database import get_db
 from app.models import User
-from app.routers.maintenance import _get_setting, _telegram_settings_response
+from app.routers.maintenance import _get_setting
 from app.schemas import TelegramBotInfoResponse, TelegramLinkCodeResponse
-from app.services.feature_guards import get_feature_service
+from app.services.feature_guards import get_feature_service, module_disabled_message
+from app.services.panel_publish_info import resolve_request_url_root
 from app.services.rate_limit.sliding_window import RateLimitExceeded
 from app.services.telegram_bot import telegram_bot_service
 from app.services.telegram_link import create_link_code
 from app.services.telegram_webhook_security import (
+    TELEGRAM_SECRET_TOKEN_HEADER,
     consume_webhook_rate_limit,
     get_telegram_webhook_client_ip,
     is_telegram_ip,
+    secrets_match,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,7 +33,19 @@ router = APIRouter(prefix="/telegram", tags=["telegram-bot"])
 
 def _ensure_telegram_module() -> None:
     if not get_feature_service().is_enabled("telegram"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Модуль Telegram отключён")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("telegram"),
+        )
+
+
+def _mini_app_url(request: Request) -> str:
+    """Build Mini App URL without loading the full Telegram settings DTO."""
+    root = resolve_request_url_root(
+        request,
+        behind_nginx=get_settings().behind_nginx,
+    ).rstrip("/")
+    return f"{root}/api/tg-mini"
 
 
 def _bot_info(db: Session) -> TelegramBotInfoResponse:
@@ -52,7 +68,13 @@ async def telegram_webhook(
         return {"ok": True}
 
     expected = _get_setting(db, "telegram_webhook_secret")
-    if not expected or secret != expected:
+    header_secret = (request.headers.get(TELEGRAM_SECRET_TOKEN_HEADER) or "").strip()
+    # URL path secret (legacy) + header secret_token from setWebhook (Telegram docs).
+    if (
+        not expected
+        or not secrets_match(secret, expected)
+        or not secrets_match(header_secret, expected)
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     client_ip = get_telegram_webhook_client_ip(request)
@@ -70,8 +92,11 @@ async def telegram_webhook(
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON") from exc
 
-    settings = _telegram_settings_response(db, request)
-    await telegram_bot_service.handle_update(db, update, mini_app_url=settings.mini_app_url)
+    await telegram_bot_service.handle_update(
+        db,
+        update,
+        mini_app_url=_mini_app_url(request),
+    )
     return {"ok": True}
 
 
@@ -90,8 +115,7 @@ def telegram_link_code(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not get_feature_service().is_enabled("telegram"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Модуль Telegram отключён")
+    _ensure_telegram_module()
     if not _get_setting(db, "telegram_bot_token"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
     code, ttl = create_link_code(db, current_user)

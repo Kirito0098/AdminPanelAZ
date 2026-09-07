@@ -1,5 +1,8 @@
 """Feature toggle registry (ported from AdminAntizapret 1.9.0)."""
 
+from __future__ import annotations
+
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
@@ -589,22 +592,71 @@ def _parse_bool(raw: str | None, *, default: bool) -> bool:
 
 
 class FeatureToggleService:
+    """Env-backed feature toggles with a per-instance parsed-.env cache.
+
+    Cache is keyed by file mtime so external writers (install scripts, manual
+    edits) are picked up without re-reading the file on every ``is_enabled``
+    call. Writes through this service invalidate immediately.
+    """
+
     def __init__(self, env_path: Path):
-        self.env = EnvFileService(env_path)
+        self.env_path = Path(env_path)
+        self.env = EnvFileService(self.env_path)
+        self._env_map_cache: dict[str, str] | None = None
+        self._env_map_mtime: float | None = None
+
+    def _invalidate_env_map(self) -> None:
+        self._env_map_cache = None
+        self._env_map_mtime = None
+
+    def _env_map(self) -> dict[str, str]:
+        path = self.env_path
+        try:
+            mtime = path.stat().st_mtime if path.exists() else None
+        except OSError:
+            mtime = None
+        if self._env_map_cache is not None and self._env_map_mtime == mtime:
+            return self._env_map_cache
+
+        values: dict[str, str] = {}
+        if path.exists():
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                text = ""
+            for raw in text.splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                values[key.strip()] = value.strip()
+
+        self._env_map_cache = values
+        self._env_map_mtime = mtime
+        return values
+
+    def _raw_env(self, key: str, default: str = "") -> str:
+        values = self._env_map()
+        if key in values:
+            return values[key]
+        return os.getenv(key, default)
 
     def is_enabled(self, key: str) -> bool:
         definition = FEATURE_TOGGLE_BY_KEY.get(key)
         if definition is None:
             return True
-        raw = self.env.get_env_value(definition.env_key, "")
+        raw = self._raw_env(definition.env_key, "")
         if not raw:
             return definition.default
         return _parse_bool(raw, default=definition.default)
 
     def get_feature_states(self) -> dict[str, bool]:
+        # One map load for all toggles (avoids N full-file scans).
+        self._env_map()
         return {definition.key: self.is_enabled(definition.key) for definition in FEATURE_TOGGLES}
 
     def get_app_module_states(self) -> dict[str, bool]:
+        self._env_map()
         return {
             definition.key: self.is_enabled(definition.key)
             for definition in FEATURE_TOGGLES
@@ -612,6 +664,7 @@ class FeatureToggleService:
         }
 
     def list_toggles(self) -> dict:
+        self._env_map()
         items = []
         enabled_count = 0
         for definition in FEATURE_TOGGLES:
@@ -639,10 +692,11 @@ class FeatureToggleService:
             if definition is None:
                 raise ValueError(f"Неизвестный модуль: {key}")
             self.env.set_env_value(definition.env_key, "true" if enabled else "false")
+        self._invalidate_env_map()
         return self.list_toggles()
 
     def get_resource_profile(self) -> str:
-        raw = (self.env.get_env_value("RESOURCE_PROFILE", "") or "").strip().lower()
+        raw = (self._raw_env("RESOURCE_PROFILE", "") or "").strip().lower()
         if raw in VALID_RESOURCE_PROFILES:
             return raw
         return "standard"
@@ -679,6 +733,7 @@ class FeatureToggleService:
             if definition is None:
                 continue
             self.env.set_env_value(definition.env_key, "true" if enabled else "false")
+        self._invalidate_env_map()
         return {
             "profile": normalized,
             "requires_restart": True,
