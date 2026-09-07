@@ -51,6 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [applyTheme])
 
   const silentRefresh = useCallback(async () => {
+    if (typeof document !== 'undefined' && document.hidden) return
     try {
       const response = await fetch(`${API_BASE}/auth/refresh`, {
         method: 'POST',
@@ -80,8 +81,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return
     }
     refreshTimer.current = setInterval(silentRefresh, REFRESH_INTERVAL_MS)
+    const onVisible = () => {
+      if (document.hidden) return
+      void silentRefresh()
+    }
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       if (refreshTimer.current) clearInterval(refreshTimer.current)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [user, silentRefresh])
 

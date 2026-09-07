@@ -83,7 +83,10 @@ def update_security(
     admin: User = Depends(require_admin),
 ):
     service = SecurityService()
-    result = service.update_settings(db, payload.model_dump(exclude_none=True))
+    try:
+        result = service.update_settings(db, payload.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     service.sync_whitelist_port_firewall(db)
     if settings.audit_log_enabled:
         changed = ", ".join(payload.model_dump(exclude_none=True).keys())

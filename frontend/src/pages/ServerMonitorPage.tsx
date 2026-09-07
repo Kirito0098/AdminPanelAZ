@@ -330,31 +330,58 @@ export default function ServerMonitorPage() {
     const token = localStorage.getItem('token')
     if (!token) return
 
-    setWsConnected(false)
-    const wsUrl = `${API_BASE.replace('/api', '')}/api/server-monitor/ws?token=${token}&iface=${encodeURIComponent(iface)}`.replace(
-      'http',
-      'ws',
-    )
-    const ws = new WebSocket(wsUrl)
-    wsRef.current = ws
+    let ws: WebSocket | null = null
 
-    ws.onopen = () => setWsConnected(true)
-    ws.onclose = () => setWsConnected(false)
-    ws.onerror = () => setWsConnected(false)
-    ws.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data)
-        setLiveCpu(data.cpu_percent)
-        setLiveRam(data.memory_percent)
-        if (data.bandwidth) {
-          setLiveBw({ rx: data.bandwidth.rx_mbps_latest, tx: data.bandwidth.tx_mbps_latest })
+    const disconnect = () => {
+      ws?.close()
+      ws = null
+      wsRef.current = null
+      setWsConnected(false)
+    }
+
+    const connect = () => {
+      disconnect()
+      const wsUrl = `${API_BASE.replace('/api', '')}/api/server-monitor/ws?token=${token}&iface=${encodeURIComponent(iface)}`.replace(
+        'http',
+        'ws',
+      )
+      ws = new WebSocket(wsUrl)
+      wsRef.current = ws
+
+      ws.onopen = () => setWsConnected(true)
+      ws.onclose = () => setWsConnected(false)
+      ws.onerror = () => setWsConnected(false)
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data)
+          setLiveCpu(data.cpu_percent)
+          setLiveRam(data.memory_percent)
+          if (data.bandwidth) {
+            setLiveBw({ rx: data.bandwidth.rx_mbps_latest, tx: data.bandwidth.tx_mbps_latest })
+          }
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
       }
     }
 
-    return () => ws.close()
+    const onVisibility = () => {
+      if (document.hidden) {
+        disconnect()
+        return
+      }
+      connect()
+    }
+
+    if (typeof document === 'undefined' || !document.hidden) {
+      connect()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      disconnect()
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [user?.role, iface, activeNode?.id])
 
   const handleRefresh = async () => {

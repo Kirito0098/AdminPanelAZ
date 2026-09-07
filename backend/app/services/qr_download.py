@@ -1,6 +1,7 @@
 """One-time download tokens for VPN profiles (ported from AdminAntizapret)."""
 
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -16,6 +17,14 @@ def _hash_token(token: str) -> str:
 
 def _hash_pin(pin: str) -> str:
     return hashlib.sha256(pin.encode("utf-8")).hexdigest()
+
+
+def _pins_match(provided: str | None, expected_hash: str | None) -> bool:
+    if not expected_hash:
+        return True
+    if not provided:
+        return False
+    return hmac.compare_digest(_hash_pin(provided), expected_hash)
 
 
 class QrDownloadService:
@@ -70,18 +79,35 @@ class QrDownloadService:
             "pin_required": bool(self.pin_hash),
         }
 
-    def redeem_token(self, token: str, *, pin: str | None = None, remote_addr: str | None = None) -> QrDownloadToken:
-        now = datetime.now(timezone.utc)
+    def peek_token(self, token: str) -> QrDownloadToken:
         row = self.db.query(QrDownloadToken).filter_by(token_hash=_hash_token(token)).first()
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ссылка недействительна")
+        return row
+
+    def redeem_token(self, token: str, *, pin: str | None = None, remote_addr: str | None = None) -> QrDownloadToken:
+        now = datetime.now(timezone.utc)
+        row = self.peek_token(token)
         if row.expires_at.replace(tzinfo=timezone.utc) < now:
             raise HTTPException(status_code=status.HTTP_410_GONE, detail="Ссылка истекла")
         if row.download_count >= row.max_downloads:
             raise HTTPException(status_code=status.HTTP_410_GONE, detail="Лимит скачиваний исчерпан")
-        if row.pin_hash:
-            if not pin or _hash_pin(pin) != row.pin_hash:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Неверный PIN")
+
+        # Token PIN if set; otherwise fall back to current global PIN (protects older unpinned links
+        # after an admin enables a global PIN).
+        required_hash = row.pin_hash or self.pin_hash
+        if required_hash and not _pins_match(pin, required_hash):
+            self.db.add(
+                QrDownloadAuditLog(
+                    token_id=row.id,
+                    event_type="pin_failed",
+                    remote_addr=remote_addr,
+                    details="bad_pin",
+                )
+            )
+            self.db.commit()
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Неверный PIN")
+
         row.download_count += 1
         if row.download_count >= row.max_downloads:
             row.used_at = now

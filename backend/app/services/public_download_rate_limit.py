@@ -28,8 +28,7 @@ class PublicDownloadRateLimitService:
         return self._limiter
 
     def consume(self, client_ip: str) -> None:
-        if not get_settings().api_rate_limit_enabled:
-            return
+        # Always on for public surfaces — independent of general API rate limiting.
         self._get_limiter().consume(
             client_ip,
             _PUBLIC_DL_LIMIT,

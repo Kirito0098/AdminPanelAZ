@@ -139,7 +139,10 @@ class SecurityService:
             val = int(payload["qr_download_max_downloads"])
             _set(db, "qr_download_max_downloads", str(val if val in (1, 3, 5) else 1))
         if "qr_download_pin" in payload:
-            _set(db, "qr_download_pin", (payload["qr_download_pin"] or "").strip())
+            pin = (payload["qr_download_pin"] or "").strip()
+            if pin and len(pin) < 4:
+                raise ValueError("PIN для QR-ссылок должен быть не короче 4 символов")
+            _set(db, "qr_download_pin", pin)
         if "public_download_enabled" in payload:
             set_public_download_enabled(db, bool(payload["public_download_enabled"]))
         if "whitelist_firewall" in payload:

@@ -28,6 +28,7 @@ import SettingsAlert from '@/components/settings/SettingsAlert'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
+import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -553,17 +554,18 @@ export default function NodeSyncGroupSection({
 
   const hasAutoGroups = useMemo(() => groups.some((g) => g.sync_mode === 'auto'), [groups])
 
-  useEffect(() => {
-    if (!hasAutoGroups || nodes.length < 2) return
-
-    const poll = () => {
-      if (document.visibilityState !== 'visible') return
+  useIntervalWhenVisible(
+    () => {
       void pollAutoGroups()
-    }
-
-    const interval = window.setInterval(poll, AUTO_SYNC_POLL_MS)
-    return () => window.clearInterval(interval)
-  }, [hasAutoGroups, nodes.length, pollAutoGroups])
+    },
+    AUTO_SYNC_POLL_MS,
+    {
+      enabled: hasAutoGroups && nodes.length >= 2,
+      onBecomeVisible: () => {
+        void pollAutoGroups()
+      },
+    },
+  )
 
   const openCreate = () => {
     setEditing(null)

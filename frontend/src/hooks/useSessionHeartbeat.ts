@@ -1,21 +1,45 @@
-import { useEffect } from 'react'
+import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { getWebSessionId } from '@/lib/webSession'
 
 import { apiBase as API_BASE } from '@/lib/panelBase'
 const HEARTBEAT_INTERVAL_MS = 60_000
 
 export function useSessionHeartbeat(enabled: boolean, onRevoked?: () => void) {
-  useEffect(() => {
-    if (!enabled) return
-
-    const sendHeartbeat = async () => {
-      if (document.visibilityState !== 'visible') return
+  useIntervalWhenVisible(
+    () => {
       const token = localStorage.getItem('token')
       const sessionId = getWebSessionId()
       if (!token || !sessionId) return
 
-      try {
-        const resp = await fetch(`${API_BASE}/session-heartbeat`, {
+      void (async () => {
+        try {
+          const resp = await fetch(`${API_BASE}/session-heartbeat`, {
+            method: 'GET',
+            cache: 'no-store',
+            credentials: 'include',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'X-Web-Session-Id': sessionId,
+            },
+          })
+          if (resp.ok) {
+            const data = (await resp.json()) as { revoked?: boolean }
+            if (data.revoked) onRevoked?.()
+          }
+        } catch {
+          /* ignore background heartbeat errors */
+        }
+      })()
+    },
+    HEARTBEAT_INTERVAL_MS,
+    {
+      enabled,
+      runOnMount: true,
+      onBecomeVisible: () => {
+        const token = localStorage.getItem('token')
+        const sessionId = getWebSessionId()
+        if (!token || !sessionId) return
+        void fetch(`${API_BASE}/session-heartbeat`, {
           method: 'GET',
           cache: 'no-store',
           credentials: 'include',
@@ -24,17 +48,13 @@ export function useSessionHeartbeat(enabled: boolean, onRevoked?: () => void) {
             'X-Web-Session-Id': sessionId,
           },
         })
-        if (resp.ok) {
-          const data = (await resp.json()) as { revoked?: boolean }
-          if (data.revoked) onRevoked?.()
-        }
-      } catch {
-        /* ignore background heartbeat errors */
-      }
-    }
-
-    sendHeartbeat()
-    const timer = window.setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS)
-    return () => window.clearInterval(timer)
-  }, [enabled, onRevoked])
+          .then(async (resp) => {
+            if (!resp.ok) return
+            const data = (await resp.json()) as { revoked?: boolean }
+            if (data.revoked) onRevoked?.()
+          })
+          .catch(() => {})
+      },
+    },
+  )
 }

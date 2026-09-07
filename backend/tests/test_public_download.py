@@ -86,16 +86,41 @@ def test_route_download_rate_limit_propagates(client):
     assert resp.json()["detail"] == "too many"
 
 
-def test_qr_download_get_requires_pin_when_configured(client):
-    pin_row = MagicMock()
-    pin_row.value = "1234"
-    db = MagicMock()
-    db.query.return_value.filter.return_value.first.return_value = pin_row
-    client.app.dependency_overrides[get_db] = lambda: db
+def test_qr_download_get_requires_pin_when_token_has_pin(client):
+    peeked = MagicMock()
+    peeked.pin_hash = "abc"
+    with (
+        patch("app.routers.public_download.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_download.public_download_rate_limit_service") as rl,
+        patch("app.routers.public_download._qr_settings", return_value={"ttl_seconds": 60, "max_downloads": 1, "pin": ""}),
+        patch("app.routers.public_download.QrDownloadService") as Svc,
+        patch("app.routers.public_download._global_pin_set", return_value=False),
+    ):
+        ip_svc.get_client_ip.return_value = "203.0.113.1"
+        Svc.return_value.peek_token.return_value = peeked
+        resp = client.get("/api/public/qr-download/tok-abc")
 
-    resp = client.get("/api/public/qr-download/tok-abc")
     assert resp.status_code == 428
     assert "PIN" in resp.json()["detail"]
+    rl.consume.assert_called_once_with("203.0.113.1")
+
+
+def test_qr_download_get_requires_pin_when_global_pin_set(client):
+    peeked = MagicMock()
+    peeked.pin_hash = None
+    with (
+        patch("app.routers.public_download.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_download.public_download_rate_limit_service"),
+        patch("app.routers.public_download._qr_settings", return_value={"ttl_seconds": 60, "max_downloads": 1, "pin": "1234"}),
+        patch("app.routers.public_download.QrDownloadService") as Svc,
+        patch("app.routers.public_download._global_pin_set", return_value=True),
+    ):
+        ip_svc.get_client_ip.return_value = "203.0.113.2"
+        Svc.return_value.peek_token.return_value = peeked
+        resp = client.get("/api/public/qr-download/tok-old")
+
+    assert resp.status_code == 428
+    Svc.return_value.redeem_token.assert_not_called()
 
 
 def test_qr_download_post_redeems_with_pin(client):
@@ -107,6 +132,8 @@ def test_qr_download_post_redeems_with_pin(client):
     adapter = MagicMock()
 
     with (
+        patch("app.routers.public_download.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_download.public_download_rate_limit_service") as rl,
         patch("app.routers.public_download._qr_settings", return_value={"ttl_seconds": 60, "max_downloads": 1, "pin": "9999"}),
         patch("app.routers.public_download.QrDownloadService") as Svc,
         patch("app.routers.public_download.get_active_node", return_value=node),
@@ -114,11 +141,13 @@ def test_qr_download_post_redeems_with_pin(client):
         patch("app.routers.public_download.read_profile_file_for_delivery", return_value="client\n"),
         patch("app.routers.public_download.get_active_adapter", return_value=adapter),
     ):
+        ip_svc.get_client_ip.return_value = "198.51.100.9"
         Svc.return_value.redeem_token.return_value = row
         resp = client.post("/api/public/qr-download/tok-xyz", json={"pin": "9999"})
 
     assert resp.status_code == 200
     assert resp.content == b"client\n"
-    Svc.return_value.redeem_token.assert_called_once()
+    rl.consume.assert_called_once_with("198.51.100.9")
     kwargs = Svc.return_value.redeem_token.call_args.kwargs
     assert kwargs.get("pin") == "9999"
+    assert kwargs.get("remote_addr") == "198.51.100.9"

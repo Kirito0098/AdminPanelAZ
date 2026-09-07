@@ -35,12 +35,23 @@ def _qr_settings(db: Session) -> dict:
     }
 
 
+def _global_pin_set(db: Session) -> bool:
+    pin_row = db.query(AppSetting).filter(AppSetting.key == "qr_download_pin").first()
+    return bool(pin_row and pin_row.value)
+
+
 @router.get("/qr-download/{token}")
-def qr_download_get(token: str, db: Session = Depends(get_db)):
-    svc = db.query(AppSetting).filter(AppSetting.key == "qr_download_pin").first()
-    if svc and svc.value:
+def qr_download_get(token: str, request: Request, db: Session = Depends(get_db)):
+    client_ip = ip_restriction_service.get_client_ip(request)
+    public_download_rate_limit_service.consume(client_ip)
+
+    cfg = _qr_settings(db)
+    svc = QrDownloadService(db, **cfg)
+    row = svc.peek_token(token)
+    if row.pin_hash or _global_pin_set(db):
         raise HTTPException(status_code=428, detail="Требуется PIN")
-    row = QrDownloadService(db, **_qr_settings(db)).redeem_token(token, remote_addr="")
+
+    row = svc.redeem_token(token, remote_addr=client_ip)
     node = get_active_node(db)
     hosts = load_node_remote_hosts(db, node.id)
     content = read_profile_file_for_delivery(get_active_adapter(db), row.file_path, hosts)
@@ -50,9 +61,12 @@ def qr_download_get(token: str, db: Session = Depends(get_db)):
 
 @router.post("/qr-download/{token}")
 def qr_download_post(token: str, payload: PinRequest, request: Request, db: Session = Depends(get_db)):
+    client_ip = ip_restriction_service.get_client_ip(request)
+    public_download_rate_limit_service.consume(client_ip)
+
     cfg = _qr_settings(db)
     svc = QrDownloadService(db, **cfg)
-    row = svc.redeem_token(token, pin=payload.pin or None, remote_addr=request.client.host if request.client else None)
+    row = svc.redeem_token(token, pin=payload.pin or None, remote_addr=client_ip)
     node = get_active_node(db)
     hosts = load_node_remote_hosts(db, node.id)
     content = read_profile_file_for_delivery(get_active_adapter(db), row.file_path, hosts)

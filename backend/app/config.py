@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         "style-src 'self'; "
         "style-src-attr 'unsafe-inline'; "
         "img-src 'self' data: blob:; "
-        "connect-src 'self' ws: wss:; "
+        "connect-src 'self'; "
         "frame-src 'self' https://oauth.telegram.org; "
         "frame-ancestors 'self'; "
         "base-uri 'self'; "
@@ -184,7 +184,7 @@ class Settings(BaseSettings):
     )
     alert_rules_enabled: bool = True
     alert_rules_check_interval_seconds: int = 60
-    openapi_docs_enabled: bool = True
+    openapi_docs_enabled: bool = False
     openapi_docs_allowed_ips: str = ""
     config_csv_import_async_threshold: int = 100
     event_webhook_timeout_seconds: float = 5.0

@@ -282,7 +282,14 @@ def _issue_token_pair(
 
 
 def _clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie(key=settings.refresh_token_cookie_name, path=auth_cookie_path(settings))
+    secure = settings.refresh_token_cookie_secure or settings.is_production or settings.enforce_https
+    response.delete_cookie(
+        key=settings.refresh_token_cookie_name,
+        path=auth_cookie_path(settings),
+        httponly=True,
+        secure=secure,
+        samesite=settings.refresh_token_cookie_samesite,
+    )
 
 
 def _login_with_checks(

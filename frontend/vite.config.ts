@@ -126,7 +126,16 @@ export default defineConfig(({ mode }) => {
                 assetFileNames: 'assets/tg-mini-[hash][extname]',
               },
             }
-          : {}),
+          : {
+              output: {
+                manualChunks(id) {
+                  if (id.includes('node_modules/recharts') || id.includes('node_modules/victory-vendor')) {
+                    return 'recharts'
+                  }
+                  return undefined
+                },
+              },
+            }),
       },
     },
     server: {
