@@ -401,25 +401,53 @@ export default function MonitoringPage() {
   useEffect(() => {
     if (!autoRefresh) return
 
-    const source = openMonitoringStream(
-      (payload) => {
-        setData(payload)
-        setLoadError(null)
-        setCountdown(REFRESH_INTERVAL)
-        void refreshIncidents()
-      },
-      () => {},
-      scope,
-      haMode,
-    )
+    let source: EventSource | null = null
+    let tick: ReturnType<typeof setInterval> | undefined
 
-    const tick = setInterval(() => {
-      setCountdown((c) => (c <= 1 ? REFRESH_INTERVAL : c - 1))
-    }, 1000)
+    const disconnect = () => {
+      source?.close()
+      source = null
+      if (tick !== undefined) {
+        clearInterval(tick)
+        tick = undefined
+      }
+    }
+
+    const connect = () => {
+      disconnect()
+      source = openMonitoringStream(
+        (payload) => {
+          setData(payload)
+          setLoadError(null)
+          setCountdown(REFRESH_INTERVAL)
+          void refreshIncidents()
+        },
+        () => {},
+        scope,
+        haMode,
+      )
+      tick = setInterval(() => {
+        if (typeof document !== 'undefined' && document.hidden) return
+        setCountdown((c) => (c <= 1 ? REFRESH_INTERVAL : c - 1))
+      }, 1000)
+    }
+
+    const onVisibility = () => {
+      if (document.hidden) {
+        disconnect()
+        return
+      }
+      connect()
+    }
+
+    if (typeof document === 'undefined' || !document.hidden) {
+      connect()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
 
     return () => {
-      source?.close()
-      clearInterval(tick)
+      disconnect()
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [autoRefresh, scope, haMode, activeNode?.id, refreshIncidents])
 

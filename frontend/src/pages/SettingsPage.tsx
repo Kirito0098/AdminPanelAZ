@@ -33,6 +33,10 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useTheme } from '@/context/ThemeContext'
+import {
+  settingsSectionNeedsNodeSettings,
+  settingsSectionNeedsUsers,
+} from '@/lib/settingsPageLoads'
 import type { AppSettings, User, UserRole } from '@/types'
 
 export default function SettingsPage() {
@@ -62,24 +66,48 @@ export default function SettingsPage() {
     return sectionParam
   }, [sectionParam, isAdmin, isSettingsTabEnabled, isEnabled])
 
-  const load = async () => {
-    startGlobal()
-    try {
-      const s = await getSettings()
-      setSettings(s)
-      if (isAdmin) {
-        setUsers(await getUsers())
+  // GET /settings reads active-node config files — only maintenance uses the parent payload.
+  // Users are panel-wide. Personal and other tabs self-fetch; skip reloads on node switch.
+  useEffect(() => {
+    if (!settingsSectionNeedsNodeSettings(activeSection)) return
+    let cancelled = false
+    const loadNodeSettings = async () => {
+      startGlobal()
+      try {
+        const s = await getSettings()
+        if (!cancelled) setSettings(s)
+      } catch (err) {
+        if (!cancelled) {
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки настроек')
+        }
+      } finally {
+        doneGlobal()
       }
-    } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки настроек')
-    } finally {
-      doneGlobal()
     }
-  }
+    void loadNodeSettings()
+    return () => {
+      cancelled = true
+    }
+  }, [activeSection, activeNode?.id, user?.role, startGlobal, doneGlobal, notifyError])
 
   useEffect(() => {
-    load()
-  }, [user?.role, activeNode?.id])
+    if (!settingsSectionNeedsUsers(activeSection, isAdmin)) return
+    let cancelled = false
+    const loadUsersList = async () => {
+      try {
+        const list = await getUsers()
+        if (!cancelled) setUsers(list)
+      } catch (err) {
+        if (!cancelled) {
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки пользователей')
+        }
+      }
+    }
+    void loadUsersList()
+    return () => {
+      cancelled = true
+    }
+  }, [activeSection, isAdmin, user?.role, notifyError])
 
   const handleCreateUser = async (e: FormEvent) => {
     e.preventDefault()

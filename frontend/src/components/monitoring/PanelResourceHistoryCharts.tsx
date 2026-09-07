@@ -147,9 +147,21 @@ export default function PanelResourceHistoryCharts({
   }, [period])
 
   useEffect(() => {
-    loadCurrent()
-    const timer = window.setInterval(loadCurrent, 60_000)
-    return () => window.clearInterval(timer)
+    const refresh = () => {
+      if (typeof document !== 'undefined' && document.hidden) return
+      void loadCurrent()
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 60_000)
+    const onVisible = () => {
+      if (document.hidden) return
+      void loadCurrent()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [])
 
   const chartData = useMemo(() => buildChartRows(history?.points ?? [], period), [history?.points, period])

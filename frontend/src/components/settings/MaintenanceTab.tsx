@@ -218,6 +218,7 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
   useEffect(() => {
     if (!pendingReboot) return
     const poll = () => {
+      if (typeof document !== 'undefined' && document.hidden) return
       void getPendingServerReboots()
         .then((resp) => {
           const item = resp.items.find((i) => i.reboot_id === pendingReboot.reboot_id)
@@ -227,7 +228,15 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
     }
     poll()
     const id = window.setInterval(poll, 1000)
-    return () => window.clearInterval(id)
+    const onVisible = () => {
+      if (document.hidden) return
+      poll()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [pendingReboot?.reboot_id])
 
   useEffect(() => {
