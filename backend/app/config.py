@@ -94,7 +94,8 @@ class Settings(BaseSettings):
     monitor_sustained_seconds: int = 180
     traffic_db_stale_seconds: int = 600
     monitoring_overview_cache_ttl_seconds: int = 45
-    # SSE push cadence for /monitoring/stream (fresh fetch each tick; keep ≤ cache TTL for rates).
+    # SSE push cadence for /monitoring/stream. Stream uses a short coalesce TTL (< interval)
+    # so concurrent clients share builds while Mbps deltas stay meaningful.
     monitoring_stream_interval_seconds: int = 10
     cert_sync_enabled: bool = True
     # Full PKI scan for all nodes; keep rare — renew/create refresh the row immediately.

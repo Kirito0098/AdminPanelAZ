@@ -27,7 +27,7 @@ from app.services.connection_history import VALID_PERIODS as CONNECTION_VALID_PE
 from app.services.connection_history import query_connection_history
 from app.services.monitoring_overview import (
     build_federated_monitoring_overview,
-    build_monitoring_overview,
+    build_monitoring_overview_for_node,
 )
 from app.services.noc_incidents import build_noc_incidents
 from app.services.node_manager import get_active_adapter, get_active_node
@@ -46,7 +46,23 @@ _settings = get_settings()
 
 
 def _monitoring_cache_ttl() -> int:
-    return max(0, int(_settings.monitoring_overview_cache_ttl_seconds))
+    return max(0, int(get_settings().monitoring_overview_cache_ttl_seconds))
+
+
+def _stream_interval_seconds() -> int:
+    return max(5, int(get_settings().monitoring_stream_interval_seconds))
+
+
+def _stream_coalesce_ttl(interval: int) -> int:
+    """Short TTL so concurrent SSE clients share one build without freezing Mbps rates.
+
+    Keep strictly below the stream interval so each tick can miss the previous entry
+    and still pick up fresh counters for client-side deltas.
+    """
+    cache_ttl = _monitoring_cache_ttl()
+    if cache_ttl <= 0:
+        return 0
+    return min(cache_ttl, max(1, int(interval) - 1))
 
 
 def _mark_cache_hit(overview: MonitoringOverview, served_from_cache: bool) -> MonitoringOverview:
@@ -61,22 +77,36 @@ def _federated_cache_key(ha_mode: str) -> str:
     return FEDERATED_OVERVIEW_CACHE_KEY
 
 
+def _node_overview_cache_key(node_id: int) -> str:
+    return f"node:overview:{int(node_id)}"
+
+
 def _build_monitoring_overview(
     db: Session,
     scope: str = "node",
     *,
     ha_mode: str = "dedupe",
     bypass_cache: bool = False,
+    cache_ttl: int | None = None,
+    cache_key_prefix: str = "",
 ) -> MonitoringOverview:
+    """Build overview; optional ``cache_key_prefix`` isolates SSE coalesce from REST TTL."""
+    ttl = 0 if bypass_cache else (cache_ttl if cache_ttl is not None else _monitoring_cache_ttl())
+    prefix = cache_key_prefix or ""
     if scope == "all":
-        ttl = 0 if bypass_cache else _monitoring_cache_ttl()
         overview, from_cache = get_cached_monitoring_overview(
-            _federated_cache_key(ha_mode),
+            f"{prefix}{_federated_cache_key(ha_mode)}",
             ttl,
             lambda: build_federated_monitoring_overview(db, ha_mode=ha_mode),  # type: ignore[arg-type]
         )
-        return _mark_cache_hit(overview, from_cache and not bypass_cache)
-    return build_monitoring_overview(db)
+        return _mark_cache_hit(overview, from_cache and ttl > 0)
+    node = get_active_node(db)
+    overview, from_cache = get_cached_monitoring_overview(
+        f"{prefix}{_node_overview_cache_key(node.id)}",
+        ttl,
+        lambda: build_monitoring_overview_for_node(db, node),
+    )
+    return _mark_cache_hit(overview, from_cache and ttl > 0)
 
 
 @router.get("/overview", response_model=MonitoringOverview)
@@ -146,17 +176,22 @@ async def monitoring_stream(
     finally:
         db.close()
 
-    interval = max(5, int(_settings.monitoring_stream_interval_seconds))
-
     async def event_generator():
         while True:
             if await request.is_disconnected():
                 break
+            # Re-read each tick so env/settings changes apply without reconnect.
+            tick_interval = _stream_interval_seconds()
+            coalesce_ttl = _stream_coalesce_ttl(tick_interval)
             db = SessionLocal()
             try:
-                # Always fresh snapshots so client-side Mbps deltas are meaningful.
+                # Coalesce concurrent SSE clients on a dedicated key (not REST 45s TTL).
                 overview = _build_monitoring_overview(
-                    db, scope=scope, ha_mode=ha_mode, bypass_cache=True
+                    db,
+                    scope=scope,
+                    ha_mode=ha_mode,
+                    cache_ttl=coalesce_ttl,
+                    cache_key_prefix="sse:",
                 )
                 payload = overview.model_dump(mode="json")
                 yield f"data: {json.dumps(payload, default=str)}\n\n"
@@ -164,7 +199,7 @@ async def monitoring_stream(
                 yield f"event: error\ndata: {json.dumps({'detail': str(exc)}, default=str)}\n\n"
             finally:
                 db.close()
-            await asyncio.sleep(interval)
+            await asyncio.sleep(tick_interval)
 
     return StreamingResponse(
         event_generator(),

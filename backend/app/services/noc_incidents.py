@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.models import AlertRule, AlertRuleMetric, CidrDbRefreshLog, Node, NodeStatus
 from app.schemas import NocIncidentItem, NocIncidentsResponse
 from app.services.alert_rules import format_rule_condition
-from app.services.node_manager import _is_vpn_node
-from app.services.monitoring_overview import build_global_dashboard_summary, build_monitoring_overview
+from app.services.monitoring_overview import _build_node_summary, _collect_nodes_monitoring_data
+from app.services.node_manager import _is_vpn_node, get_active_node
 
 _CIDR_OK_STATUSES = frozenset({"ok", "success"})
 _ALERT_WINDOW_DAYS = 7
@@ -68,11 +68,14 @@ def build_noc_incidents(db: Session, *, limit: int = 20) -> NocIncidentsResponse
         )
 
     nodes = db.query(Node).order_by(Node.id.asc()).all()
+    payloads: list[dict] = []
     summary_by_id: dict[int, object] = {}
     try:
-        global_summary = build_global_dashboard_summary(db)
-        summary_by_id = {n.node_id: n for n in global_summary.nodes_summary}
+        # One collect for node health + active-node services (was global summary + overview).
+        payloads = _collect_nodes_monitoring_data(db)
+        summary_by_id = {payload["node"].id: _build_node_summary(payload) for payload in payloads}
     except Exception:
+        payloads = []
         summary_by_id = {}
 
     for node in nodes:
@@ -122,21 +125,25 @@ def build_noc_incidents(db: Session, *, limit: int = 20) -> NocIncidentsResponse
                 )
 
     try:
-        overview = build_monitoring_overview(db)
-        for service in overview.services:
-            if service.active:
-                continue
-            items.append(
-                NocIncidentItem(
-                    id=f"service_down:{overview.node_id}:{service.name}",
-                    kind="service_down",
-                    severity="warning",
-                    title=f"Служба неактивна: {service.name}",
-                    detail=f"node={overview.node_name} status={service.status}",
-                    at=now,
-                    href="/logs",
+        active = get_active_node(db)
+        active_payload = next((p for p in payloads if p["node"].id == active.id), None)
+        if active_payload is not None:
+            for service in active_payload.get("services") or []:
+                if getattr(service, "active", False):
+                    continue
+                name = getattr(service, "name", None) or "unknown"
+                status = getattr(service, "status", None) or "inactive"
+                items.append(
+                    NocIncidentItem(
+                        id=f"service_down:{active.id}:{name}",
+                        kind="service_down",
+                        severity="warning",
+                        title=f"Служба неактивна: {name}",
+                        detail=f"node={active.name} status={status}",
+                        at=now,
+                        href="/logs",
+                    )
                 )
-            )
     except Exception:
         pass
 

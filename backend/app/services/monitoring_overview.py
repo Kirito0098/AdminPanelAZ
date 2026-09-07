@@ -153,7 +153,7 @@ def _collect_nodes_monitoring_data(db: Session) -> list[dict]:
                         "amneziawg2_peers": amneziawg2_peers,
                         "services": adapter.get_service_status(),
                         "server_ip": adapter.get_server_ip(),
-                        "cidr_routes_count": extract_cidr_routes_count(adapter),
+                        "cidr_routes_count": extract_cidr_routes_count(adapter, node_id=node.id),
                     }
                 )
         except Exception as exc:

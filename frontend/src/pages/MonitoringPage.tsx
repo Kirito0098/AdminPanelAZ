@@ -99,6 +99,8 @@ import type {
 } from '@/types'
 
 const REFRESH_INTERVAL = 10
+/** Incidents rebuild probes nodes; refresh far less often than SSE overview. */
+const INCIDENTS_REFRESH_INTERVAL_MS = 60_000
 const STORAGE_PREFIX = 'noc-monitoring'
 
 type MonitoringScope = 'node' | 'all'
@@ -258,8 +260,15 @@ export default function MonitoringPage() {
   const [resourceHistory, setResourceHistory] = useState<ResourceHistory | null>(null)
   const [resourceLoading, setResourceLoading] = useState(false)
   const loadRef = useRef<(opts?: { initial?: boolean; manual?: boolean }) => Promise<void>>()
+  const lastIncidentsAtRef = useRef(0)
 
-  const refreshIncidents = useCallback(async () => {
+  const refreshIncidents = useCallback(async (opts: { force?: boolean } = {}) => {
+    const { force = false } = opts
+    const now = Date.now()
+    if (!force && now - lastIncidentsAtRef.current < INCIDENTS_REFRESH_INTERVAL_MS) {
+      return
+    }
+    lastIncidentsAtRef.current = now
     try {
       const resp = await getNocIncidents(20)
       setIncidents(resp.items)
@@ -291,7 +300,7 @@ export default function MonitoringPage() {
       try {
         setData(await getMonitoring(scope, haMode))
         setLoadError(null)
-        void refreshIncidents()
+        void refreshIncidents({ force: true })
         if (manual) success('Данные мониторинга обновлены')
         setCountdown(REFRESH_INTERVAL)
       } catch (err) {
