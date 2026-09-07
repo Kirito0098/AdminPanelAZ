@@ -41,8 +41,8 @@ def should_start_runtime_backup_cleanup() -> bool:
 
 
 def should_start_cidr_scheduler() -> bool:
-    settings = get_settings()
-    return settings.cidr_db_refresh_enabled and get_feature_service().is_enabled("routing")
+    # Always spawn — loop re-checks cidr_db_refresh + routing each tick.
+    return True
 
 
 def should_start_wg_policy_sync() -> bool:
@@ -51,7 +51,8 @@ def should_start_wg_policy_sync() -> bool:
 
 
 def should_start_node_sync_reconcile() -> bool:
-    return get_settings().node_sync_reconcile_enabled
+    # Always spawn — loop re-checks NODE_SYNC_RECONCILE_ENABLED each tick.
+    return True
 
 
 def should_start_nightly_idle_restart() -> bool:
@@ -60,11 +61,13 @@ def should_start_nightly_idle_restart() -> bool:
 
 
 def should_start_key_rotation() -> bool:
-    return get_settings().node_api_key_rotation_days > 0
+    # Always spawn — loop re-checks node_api_key_rotation_days each tick.
+    return True
 
 
 def should_start_user_reminders() -> bool:
-    return get_settings().self_service_reminder_enabled
+    # Always spawn — loop re-checks SELF_SERVICE_REMINDER_ENABLED each tick.
+    return True
 
 
 def should_start_retention() -> bool:
@@ -78,8 +81,8 @@ def should_start_resource_monitor() -> bool:
 
 
 def should_start_noc_report_scheduler() -> bool:
-    settings = get_settings()
-    return settings.noc_report_enabled and get_feature_service().is_enabled("telegram")
+    # Always spawn — loop re-checks noc_report + telegram each tick.
+    return True
 
 
 def should_start_alert_rules_worker() -> bool:
@@ -88,7 +91,8 @@ def should_start_alert_rules_worker() -> bool:
 
 
 def should_start_awg2_expire() -> bool:
-    return get_feature_service().is_enabled("awg2")
+    # Always spawn — loop re-checks awg2 module each tick.
+    return True
 
 
 def should_start_cloudflare_ips_scheduler() -> bool:

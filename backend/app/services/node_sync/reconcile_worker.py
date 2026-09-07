@@ -249,12 +249,19 @@ def _notify_drift(drift_groups: list[dict]) -> None:
 
 
 async def run_node_sync_reconcile_loop() -> None:
-    if not settings.node_sync_reconcile_enabled:
-        return
-
+    """Reconcile loop — re-checks NODE_SYNC_RECONCILE_ENABLED each tick."""
     while True:
+        loop_settings = get_settings()
+        interval = max(60, int(loop_settings.node_sync_reconcile_interval_seconds or 600))
         try:
-            await asyncio.to_thread(reconcile_sync_groups_safe)
+            if not loop_settings.node_sync_reconcile_enabled:
+                logger.debug(
+                    "node_sync_reconcile skipped — NODE_SYNC_RECONCILE_ENABLED disabled"
+                )
+            else:
+                await asyncio.to_thread(reconcile_sync_groups_safe)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             logger.warning("Node sync reconcile loop error: %s", exc)
-        await asyncio.sleep(settings.node_sync_reconcile_interval_seconds)
+        await asyncio.sleep(interval)

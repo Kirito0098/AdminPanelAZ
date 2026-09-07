@@ -22,6 +22,13 @@ from app.services.noc_schedule import (
 logger = logging.getLogger(__name__)
 
 
+def _is_telegram_enabled() -> bool:
+    """Runtime gate — telegram module can flip without restart."""
+    from app.services.feature_guards import get_feature_service
+
+    return get_feature_service().is_enabled("telegram")
+
+
 def _last_run_key(period: str, user_id: int) -> str:
     return f"noc_report_{period}_last_run:{user_id}"
 
@@ -139,14 +146,19 @@ def run_noc_report_scheduler_tick(now: datetime | None = None) -> list[dict]:
 
 
 async def run_noc_report_scheduler_loop() -> None:
-    settings = get_settings()
-    if not settings.noc_report_enabled:
-        return
-
-    interval = max(30, int(settings.noc_report_check_interval_seconds or 60))
+    """NOC report loop — re-checks noc_report + telegram each tick."""
     while True:
         try:
+            settings = get_settings()
+            interval = max(30, int(settings.noc_report_check_interval_seconds or 60))
             await asyncio.sleep(interval)
+            settings = get_settings()
+            if not settings.noc_report_enabled:
+                logger.debug("noc_report_scheduler skipped — NOC_REPORT_ENABLED disabled")
+                continue
+            if not _is_telegram_enabled():
+                logger.debug("noc_report_scheduler skipped — telegram module disabled")
+                continue
             results = await asyncio.to_thread(run_noc_report_scheduler_tick)
             for result in results:
                 if result.get("status") == "sent":

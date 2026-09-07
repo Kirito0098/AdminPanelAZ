@@ -72,11 +72,14 @@ def _nodes_due_for_rotation(db: Session) -> list[Node]:
 
 
 async def run_node_key_rotation_loop() -> None:
+    """Key rotation loop — re-checks node_api_key_rotation_days each tick."""
     while True:
         settings = get_settings()
-        interval = max(3600, settings.node_api_key_rotation_check_hours * 3600)
+        interval = max(3600, int(settings.node_api_key_rotation_check_hours or 24) * 3600)
         await asyncio.sleep(interval)
+        settings = get_settings()
         if settings.node_api_key_rotation_days <= 0:
+            logger.debug("node_key_rotation skipped — rotation days disabled")
             continue
         db = SessionLocal()
         try:

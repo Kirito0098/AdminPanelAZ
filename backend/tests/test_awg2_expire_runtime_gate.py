@@ -51,3 +51,14 @@ def test_is_awg2_module_enabled_delegates(monkeypatch):
         lambda db=None: True,
     )
     assert worker._is_awg2_module_enabled() is True
+
+
+def test_should_start_awg2_expire_always_true(monkeypatch):
+    from app.services import worker_lifecycle as lifecycle
+
+    monkeypatch.setattr(
+        lifecycle,
+        "get_feature_service",
+        lambda: type("F", (), {"is_enabled": staticmethod(lambda _k: False)})(),
+    )
+    assert lifecycle.should_start_awg2_expire() is True
