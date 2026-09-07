@@ -74,7 +74,7 @@
 │   │   ├── components/          # UI по доменам
 │   │   ├── context/             # Auth, Theme, Nodes, Features…
 │   │   ├── hooks/               # shared hooks (visibility poll, confirm, …)
-│   │   ├── api/client.ts        # единый HTTP-клиент (~2200 строк)
+│   │   ├── api/                 # HTTP-клиент по доменам (barrel: client.ts)
 │   │   └── tg-mini/             # Mini App (отдельное SPA)
 │   └── vite.config.ts           # две сборки: default + tg-mini; vitest
 ├── scripts/                     # firewall, install-wizard, uninstall
@@ -179,7 +179,7 @@
 
 **Навигация:** `frontend/src/components/Layout.tsx` — sidebar, feature guards.
 
-**API-клиент:** `frontend/src/api/client.ts` → базовый URL `/api`, Bearer token + refresh cookie.
+**API-клиент:** `frontend/src/api/` (barrel `client.ts`) → базовый URL `/api`, Bearer token + refresh cookie.
 
 ---
 
