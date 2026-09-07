@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 from app.services.cidr.constants import IP_FILES
+from app.services.cidr.line_counts import count_nonempty_lines, remember_line_count
 
 
 class IpManager:
@@ -46,14 +47,7 @@ class IpManager:
         return states
 
     def _count_cidrs(self, path: Path) -> int:
-        if not path.exists():
-            return 0
-        count = 0
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#"):
-                count += 1
-        return count
+        return count_nonempty_lines(path)
 
     def enable_file(self, fname: str) -> int:
         source = self.list_dir / fname
@@ -61,13 +55,16 @@ class IpManager:
             raise FileNotFoundError(fname)
 
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, self._masked_include_path(fname))
+        target = self._masked_include_path(fname)
+        shutil.copyfile(source, target)
 
         legacy = self._legacy_masked_path(fname)
         if legacy.exists():
             legacy.unlink(missing_ok=True)
 
-        return self._count_cidrs(source)
+        count = self._count_cidrs(source)
+        remember_line_count(target, count)
+        return count
 
     def disable_file(self, fname: str) -> int:
         removed = 0

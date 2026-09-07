@@ -7,6 +7,11 @@ from fastapi import HTTPException, status
 
 from app.services.cidr.constants import IP_FILES, RESULT_FILES, ROUTE_CONFIG_FILES
 from app.services.cidr.ip_manager import IpManager
+from app.services.cidr.line_counts import (
+    count_nonempty_lines,
+    count_nonempty_lines_in_text,
+    remember_line_count,
+)
 
 CIDR_PATTERN = re.compile(
     r"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}/(?:[0-9]|[12][0-9]|3[0-2])\b"
@@ -23,13 +28,7 @@ class CidrRoutingService:
         self.list_dir.mkdir(parents=True, exist_ok=True)
 
     def _count_lines(self, path: Path) -> int:
-        if not path.exists():
-            return 0
-        return sum(
-            1
-            for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
-            if line.strip() and not line.strip().startswith("#")
-        )
+        return count_nonempty_lines(path)
 
     def _count_config_routes(self) -> dict:
         total = 0
@@ -79,11 +78,16 @@ class CidrRoutingService:
             ap_path = self.ip_manager._masked_include_path(filename)
             if ap_path.exists():
                 content = ap_path.read_text(encoding="utf-8", errors="replace")
+                count = count_nonempty_lines_in_text(content)
+                remember_line_count(ap_path, count)
             else:
                 content = ""
+                count = 0
         else:
             content = path.read_text(encoding="utf-8", errors="replace")
-        return {"filename": filename, "content": content, "cidr_count": self._count_lines(path)}
+            count = count_nonempty_lines_in_text(content)
+            remember_line_count(path, count)
+        return {"filename": filename, "content": content, "cidr_count": count}
 
     def save_provider_content(self, filename: str, content: str) -> dict:
         if filename not in IP_FILES:
@@ -91,7 +95,9 @@ class CidrRoutingService:
         path = self.list_dir / filename
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        return {"filename": filename, "cidr_count": self._count_lines(path)}
+        count = count_nonempty_lines_in_text(content)
+        remember_line_count(path, count)
+        return {"filename": filename, "cidr_count": count}
 
     def set_provider_enabled(self, filename: str, enabled: bool) -> dict:
         if filename not in IP_FILES:
@@ -116,7 +122,10 @@ class CidrRoutingService:
         fname = ROUTE_CONFIG_FILES[file_key]
         path = self.config_dir / fname
         content = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
-        return {"file_key": file_key, "filename": fname, "content": content, "line_count": self._count_lines(path)}
+        count = count_nonempty_lines_in_text(content)
+        if path.exists():
+            remember_line_count(path, count)
+        return {"file_key": file_key, "filename": fname, "content": content, "line_count": count}
 
     def write_route_file(self, file_key: str, content: str) -> dict:
         if file_key not in ROUTE_CONFIG_FILES:
@@ -125,7 +134,9 @@ class CidrRoutingService:
         path = self.config_dir / fname
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        return {"file_key": file_key, "filename": fname, "line_count": self._count_lines(path)}
+        count = count_nonempty_lines_in_text(content)
+        remember_line_count(path, count)
+        return {"file_key": file_key, "filename": fname, "line_count": count}
 
     def get_result_files(self) -> dict:
         files = []
@@ -147,4 +158,6 @@ class CidrRoutingService:
         if not path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл ещё не сгенерирован (запустите doall.sh)")
         content = path.read_text(encoding="utf-8", errors="replace")
-        return {"key": key, "filename": fname, "content": content, "line_count": self._count_lines(path)}
+        count = count_nonempty_lines_in_text(content)
+        remember_line_count(path, count)
+        return {"key": key, "filename": fname, "content": content, "line_count": count}

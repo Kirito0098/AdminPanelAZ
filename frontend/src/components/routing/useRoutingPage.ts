@@ -90,8 +90,10 @@ export function useRoutingPage() {
   const [customWizardLoading, setCustomWizardLoading] = useState(false)
   const trackedTaskIdRef = useRef<string | null>(null)
   const pipelinePollingRef = useRef(false)
-  const loadRef = useRef<(opts?: { initial?: boolean; manual?: boolean }) => Promise<void>>(async () => {})
-  const loadPipelineMetaRef = useRef<() => Promise<void>>(async () => {})
+  const loadRef = useRef<(opts?: { initial?: boolean; manual?: boolean; fullMeta?: boolean }) => Promise<void>>(
+    async () => {},
+  )
+  const loadPipelineMetaRef = useRef<(opts?: { light?: boolean }) => Promise<void>>(async () => {})
   const rateLimitNotifiedRef = useRef(false)
 
   useEffect(() => {
@@ -136,7 +138,7 @@ export function useRoutingPage() {
             if (stamp) setRecentRollbackStamp(stamp)
             pendingRollbackStampRef.current = null
           }
-          void loadRef.current()
+          void loadRef.current({ fullMeta: true })
         },
         onError: (task, message) => {
           trackedTaskIdRef.current = null
@@ -170,7 +172,11 @@ export function useRoutingPage() {
         const summary = await getCidrDbStatusSummary()
         setCidrDb((prev) =>
           prev
-            ? { ...prev, total_cidrs: summary.total_cidrs ?? prev.total_cidrs }
+            ? {
+                ...prev,
+                total_cidrs: summary.total_cidrs ?? prev.total_cidrs,
+                active_task: summary.active_task ?? prev.active_task,
+              }
             : prev,
         )
         if (summary.active_task) {
@@ -199,17 +205,12 @@ export function useRoutingPage() {
     }
   }, [resumeActivePipelineTask, syncPipelineTask])
 
-  useEffect(() => {
-    if (!pipelinePolling) return
-    const timer = window.setInterval(() => {
-      void loadPipelineMetaRef.current({ light: true })
-    }, 10000)
-    return () => window.clearInterval(timer)
-  }, [pipelinePolling])
+  // Pipeline progress comes from usePipelineTaskPoll (5s). Do not dual-poll
+  // /cidr-db/status/summary every 10s while a task is already tracked.
 
   const load = useCallback(
-    async (opts: { initial?: boolean; manual?: boolean } = {}) => {
-      const { initial = false, manual = false } = opts
+    async (opts: { initial?: boolean; manual?: boolean; fullMeta?: boolean } = {}) => {
+      const { initial = false, manual = false, fullMeta = false } = opts
       if (initial) {
         setLoading(true)
         startGlobal()
@@ -217,8 +218,14 @@ export function useRoutingPage() {
         setRefreshing(true)
       }
       try {
-        setData(await getRoutingOverview())
-        await loadPipelineMeta()
+        // Auto-refresh: light CIDR meta only (summary). Full ASN/artifacts status
+        // on initial load, manual refresh, and after pipeline completion.
+        const wantFullMeta = fullMeta || initial || manual
+        const [overview] = await Promise.all([
+          getRoutingOverview(),
+          loadPipelineMeta(wantFullMeta ? {} : { light: true }),
+        ])
+        setData(overview)
         setCountdown(REFRESH_INTERVAL)
         if (manual) success('Данные маршрутизации обновлены')
       } catch (err) {

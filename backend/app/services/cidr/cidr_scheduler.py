@@ -255,11 +255,22 @@ def run_nightly_cidr_pipeline(db: Session, settings: Settings) -> dict[str, Any]
     return summary
 
 
+def _is_routing_module_enabled() -> bool:
+    """Runtime gate — startup also checks this, but toggles can change without restart."""
+    from app.services.feature_guards import get_feature_service
+
+    return get_feature_service().is_enabled("routing")
+
+
+def _scheduler_may_run(settings: Settings) -> bool:
+    return bool(settings.cidr_db_refresh_enabled) and _is_routing_module_enabled()
+
+
 async def run_cidr_db_scheduler_loop() -> None:
     while True:
         try:
             settings = get_settings()
-            if not settings.cidr_db_refresh_enabled:
+            if not _scheduler_may_run(settings):
                 await asyncio.sleep(3600)
                 continue
 
@@ -276,7 +287,13 @@ async def run_cidr_db_scheduler_loop() -> None:
             await asyncio.sleep(delay)
 
             settings = get_settings()
-            if not settings.cidr_db_refresh_enabled:
+            if not _scheduler_may_run(settings):
+                logger.info(
+                    "CIDR DB scheduler: skipped after wait "
+                    "(cidr_db_refresh_enabled=%s routing=%s)",
+                    settings.cidr_db_refresh_enabled,
+                    _is_routing_module_enabled(),
+                )
                 continue
 
             db = SessionLocal()
