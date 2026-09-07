@@ -226,9 +226,9 @@ export default function ProxyNodePanel({
             </p>
           </div>
 
-          {(node.destination_ip || status?.destination_ip) && (
+          {(status?.destination_ip || node.destination_ip) && (
             <p className="font-mono text-[11px] text-muted-foreground">
-              Кэш панели: {node.destination_ip ?? status?.destination_ip ?? '—'}
+              Кэш панели: {status?.destination_ip ?? node.destination_ip ?? '—'}
             </p>
           )}
         </>

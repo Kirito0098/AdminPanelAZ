@@ -9,7 +9,7 @@ import {
   Server,
   Settings2,
 } from 'lucide-react'
-import { ApiError, getNodes } from '@/api/client'
+import { ApiError } from '@/api/client'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import { NodeStatusBadge } from '@/components/NodeSelector'
 import ProxyNodePanel, { AZ_PROXY_SH_DOCS_URL } from '@/components/nodes/ProxyNodePanel'
@@ -63,35 +63,42 @@ const QUICK_LINKS = [
 ] as const
 
 export default function ProxyHubView() {
-  const { activeNode, syncGroups, refreshNodes, refreshSyncGroups } = useNode()
+  const { activeNode, nodes, syncGroups, refreshNodes, refreshSyncGroups } = useNode()
   const { error: notifyError } = useNotifications()
-  const [allNodes, setAllNodes] = useState<Node[]>([])
-  const [proxyNodes, setProxyNodes] = useState<Node[]>([])
-  const [loading, setLoading] = useState(true)
+  const [bootstrapped, setBootstrapped] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  const proxyNodes = useMemo(() => nodes.filter(isProxyNode), [nodes])
+
   const load = useCallback(async () => {
-    setLoading(true)
+    setRefreshing(true)
     setLoadError(null)
     try {
-      const nodes = await getNodes()
-      setAllNodes(nodes)
-      setProxyNodes(nodes.filter(isProxyNode))
       await Promise.all([refreshNodes(), refreshSyncGroups()])
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Не удалось загрузить прокси-узлы'
       setLoadError(message)
       notifyError(message)
-      setAllNodes([])
-      setProxyNodes([])
     } finally {
-      setLoading(false)
+      setRefreshing(false)
+      setBootstrapped(true)
     }
   }, [notifyError, refreshNodes, refreshSyncGroups])
 
   useEffect(() => {
     void load()
-  }, [load])
+    // Mount bootstrap only — manual refresh uses load(); panel updates use refreshNodes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handlePanelUpdated = useCallback(async () => {
+    try {
+      await refreshNodes()
+    } catch {
+      // Best-effort; panel already showed its own success/error toast.
+    }
+  }, [refreshNodes])
 
   const activeNodeLabel = useMemo(() => {
     if (!activeNode) return null
@@ -114,7 +121,7 @@ export default function ProxyHubView() {
         }
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
+            <Button type="button" variant="secondary" size="sm" onClick={() => void load()} disabled={refreshing}>
               <RefreshCw className="mr-1.5 h-4 w-4" />
               Обновить
             </Button>
@@ -137,12 +144,12 @@ export default function ProxyHubView() {
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold tracking-tight">Прокси-узлы</h3>
-          {!loading && (
+          {bootstrapped && !loadError && (
             <Badge variant="secondary">{proxyNodes.length}</Badge>
           )}
         </div>
 
-        {loading ? (
+        {!bootstrapped ? (
           <Spinner label="Загрузка прокси-узлов..." className="py-8" />
         ) : loadError ? (
           <div className="space-y-3">
@@ -179,7 +186,7 @@ export default function ProxyHubView() {
                         </Badge>
                         <ProxyLinkBadge
                           linkedVpnNodeId={node.linked_vpn_node_id}
-                          nodes={allNodes}
+                          nodes={nodes}
                           syncGroups={syncGroups}
                           showUnlinked
                         />
@@ -197,9 +204,9 @@ export default function ProxyHubView() {
                 <CardContent>
                   <ProxyNodePanel
                     node={node}
-                    nodes={allNodes}
+                    nodes={nodes}
                     syncGroups={syncGroups}
-                    onUpdated={load}
+                    onUpdated={handlePanelUpdated}
                   />
                 </CardContent>
               </Card>

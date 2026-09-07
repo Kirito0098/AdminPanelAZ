@@ -14,6 +14,7 @@ from app.models import Node, User
 from app.services.action_log import log_action
 from app.services.node_adapter import RemoteNodeAdapter
 from app.services.node_manager import (
+    NODE_KIND_PROXY,
     check_node_health,
     get_api_key_plain,
     node_metadata_dict,
@@ -29,6 +30,10 @@ _MTLS_HEALTH_ATTEMPTS = 12
 _MTLS_HEALTH_DELAY_SECONDS = 2.0
 
 
+def _node_kind(node: Node) -> str:
+    return (getattr(node, "node_kind", None) or "vpn").strip().lower()
+
+
 def _wait_for_mtls_health(node: Node) -> dict:
     """Poll HTTPS health after node agent restart (mTLS bootstrap)."""
     last: dict = {"status": "offline", "error": "Таймаут ожидания node agent по HTTPS"}
@@ -41,11 +46,41 @@ def _wait_for_mtls_health(node: Node) -> dict:
     return last
 
 
+def _enable_proxy_mtls_flag(db: Session, node: Node, actor: User) -> Node:
+    """Flag-only mTLS for proxy nodes — certs are installed manually on proxy_agent.
+
+    See docs/proxy-agent.md. Panel still needs CA/client materials to speak HTTPS.
+    """
+    ensure_panel_mtls_materials()
+    meta = node_metadata_dict(node)
+    meta["mtls_flag_only_at"] = datetime.utcnow().isoformat() + "Z"
+    node.node_metadata = json.dumps(meta)
+    node.mtls_enabled = True
+    node.updated_at = datetime.utcnow()
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+
+    settings = get_settings()
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_mtls_enable",
+            user_id=actor.id,
+            username=actor.username,
+            details=f"name={node.name}, id={node.id}, kind=proxy, flag_only=1",
+        )
+    return node
+
+
 def enable_mtls(db: Session, node: Node, actor: User) -> Node:
     if node.is_local:
         raise ValueError("Локальный узел не поддерживает mTLS")
     if node.mtls_enabled:
         raise ValueError("mTLS уже включён для этого узла")
+
+    if _node_kind(node) == NODE_KIND_PROXY:
+        return _enable_proxy_mtls_flag(db, node, actor)
 
     api_key = get_api_key_plain(node)
     if not api_key:

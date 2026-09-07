@@ -334,6 +334,7 @@ def _online_proxy_node(**kwargs):
 
 
 def test_collect_uses_proxy_adapter_not_vpn(monkeypatch):
+    monkeypatch.setattr(mo, "is_proxy_nodes_enabled", lambda _db: True)
     proxy = _online_proxy_node()
     db = MagicMock()
     db.query.return_value.order_by.return_value.all.return_value = [proxy]
@@ -345,12 +346,13 @@ def test_collect_uses_proxy_adapter_not_vpn(monkeypatch):
 
     proxy_adapter = MagicMock()
     proxy_adapter.health.return_value = {"ok": True, "version": "0.1.0"}
-    proxy_adapter.proxy_status.return_value = {"installed": True, "destination_ip": "1.2.3.4"}
     monkeypatch.setattr(mo, "get_proxy_adapter", lambda _n: proxy_adapter)
 
     payloads = mo._collect_nodes_monitoring_data(db)
 
     vpn_adapter.assert_not_called()
+    proxy_adapter.proxy_status.assert_not_called()
+    proxy_adapter.health.assert_called_once()
     assert payloads[0]["error"] is None
     assert payloads[0]["services"][0].name == "proxy_agent"
     assert payloads[0]["services"][0].active is True
@@ -362,7 +364,28 @@ def test_collect_uses_proxy_adapter_not_vpn(monkeypatch):
     assert summary.error is None
 
 
+def test_collect_skips_proxy_probe_when_module_off(monkeypatch):
+    monkeypatch.setattr(mo, "is_proxy_nodes_enabled", lambda _db: False)
+    proxy = _online_proxy_node()
+    db = MagicMock()
+    db.query.return_value.order_by.return_value.all.return_value = [proxy]
+    monkeypatch.setattr(mo, "get_latest_samples_by_node", lambda _db: {})
+    monkeypatch.setattr(mo, "get_traffic_totals_by_node", lambda _db: {})
+    get_proxy = MagicMock()
+    monkeypatch.setattr(mo, "get_proxy_adapter", get_proxy)
+    monkeypatch.setattr(mo, "get_adapter_for_node", MagicMock(side_effect=AssertionError("vpn")))
+
+    payloads = mo._collect_nodes_monitoring_data(db)
+
+    get_proxy.assert_not_called()
+    assert payloads[0]["error"] is None
+    assert payloads[0]["services"][0].active is False
+    assert "модуль proxy_nodes выключен" in (payloads[0]["services"][0].description or "")
+    assert "DESTINATION=1.2.3.4" in (payloads[0]["services"][0].description or "")
+
+
 def test_collect_proxy_health_failure_sets_error(monkeypatch):
+    monkeypatch.setattr(mo, "is_proxy_nodes_enabled", lambda _db: True)
     proxy = _online_proxy_node()
     db = MagicMock()
     db.query.return_value.order_by.return_value.all.return_value = [proxy]
@@ -382,20 +405,39 @@ def test_collect_proxy_health_failure_sets_error(monkeypatch):
 
 
 def test_overview_for_proxy_node_skips_vpn_adapter(monkeypatch):
+    monkeypatch.setattr(mo, "is_proxy_nodes_enabled", lambda _db: True)
     proxy = _online_proxy_node()
     vpn_adapter = MagicMock()
     monkeypatch.setattr(mo, "get_adapter_for_node", vpn_adapter)
     proxy_adapter = MagicMock()
     proxy_adapter.health.return_value = {"ok": True, "version": "0.1.0"}
-    proxy_adapter.proxy_status.return_value = {"destination_ip": "8.8.8.8"}
     monkeypatch.setattr(mo, "get_proxy_adapter", lambda _n: proxy_adapter)
     monkeypatch.setattr(mo, "resolve_geoip_mode", lambda: "none")
 
     overview = mo.build_monitoring_overview_for_node(MagicMock(), proxy)
 
     vpn_adapter.assert_not_called()
+    proxy_adapter.proxy_status.assert_not_called()
+    proxy_adapter.health.assert_called_once()
     assert overview.openvpn_clients == []
     assert overview.wireguard_peers == []
     assert overview.services[0].name == "proxy_agent"
     assert overview.services[0].active is True
+    assert "DESTINATION=1.2.3.4" in (overview.services[0].description or "")
+    assert overview.server_ip == PROXY_IP
+
+
+def test_overview_for_proxy_node_module_off_no_adapter(monkeypatch):
+    monkeypatch.setattr(mo, "is_proxy_nodes_enabled", lambda _db: False)
+    proxy = _online_proxy_node()
+    get_proxy = MagicMock()
+    monkeypatch.setattr(mo, "get_proxy_adapter", get_proxy)
+    monkeypatch.setattr(mo, "get_adapter_for_node", MagicMock(side_effect=AssertionError("vpn")))
+    monkeypatch.setattr(mo, "resolve_geoip_mode", lambda: "none")
+
+    overview = mo.build_monitoring_overview_for_node(MagicMock(), proxy)
+
+    get_proxy.assert_not_called()
+    assert overview.services[0].active is False
+    assert "модуль proxy_nodes выключен" in (overview.services[0].description or "")
     assert overview.server_ip == PROXY_IP

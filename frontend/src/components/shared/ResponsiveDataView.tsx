@@ -1,18 +1,13 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 export type ResponsiveBreakpoint = 'md' | 'lg' | 'xl'
 
-const MOBILE_ONLY_CLASS: Record<ResponsiveBreakpoint, string> = {
-  md: 'md:hidden',
-  lg: 'lg:hidden',
-  xl: 'xl:hidden',
-}
-
-const DESKTOP_ONLY_CLASS: Record<ResponsiveBreakpoint, string> = {
-  md: 'hidden md:block',
-  lg: 'hidden lg:block',
-  xl: 'hidden xl:block',
+/** Tailwind default min-widths for `md` / `lg` / `xl`. */
+const MIN_WIDTH_PX: Record<ResponsiveBreakpoint, number> = {
+  md: 768,
+  lg: 1024,
+  xl: 1280,
 }
 
 export interface ResponsiveDataViewProps {
@@ -27,9 +22,27 @@ export interface ResponsiveDataViewProps {
   className?: string
 }
 
+function useMinWidth(breakpoint: ResponsiveBreakpoint): boolean {
+  const query = `(min-width: ${MIN_WIDTH_PX[breakpoint]}px)`
+  const [matches, setMatches] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(query).matches,
+  )
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(query)
+    const onChange = () => setMatches(mediaQuery.matches)
+    onChange()
+    mediaQuery.addEventListener('change', onChange)
+    return () => mediaQuery.removeEventListener('change', onChange)
+  }, [query])
+
+  return matches
+}
+
 /**
- * Renders separate mobile and desktop data layouts without duplicating breakpoint class names.
- * Uses Tailwind `hidden` / responsive `block` utilities (no runtime matchMedia).
+ * Renders either the mobile or desktop data layout for the active breakpoint.
+ * Only one tree is mounted so effects (e.g. ProxyNodePanel status fetch) do not
+ * run twice via CSS-only dual DOM.
  */
 export default function ResponsiveDataView({
   breakpoint = 'lg',
@@ -39,10 +52,15 @@ export default function ResponsiveDataView({
   desktopClassName,
   className,
 }: ResponsiveDataViewProps) {
+  const isDesktop = useMinWidth(breakpoint)
+
   return (
     <div className={className}>
-      <div className={cn(MOBILE_ONLY_CLASS[breakpoint], mobileClassName)}>{mobile}</div>
-      <div className={cn(DESKTOP_ONLY_CLASS[breakpoint], desktopClassName)}>{desktop}</div>
+      {isDesktop ? (
+        <div className={cn(desktopClassName)}>{desktop}</div>
+      ) : (
+        <div className={cn(mobileClassName)}>{mobile}</div>
+      )}
     </div>
   )
 }

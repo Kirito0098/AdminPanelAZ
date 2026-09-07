@@ -312,6 +312,13 @@ def update_node(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
 
     kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+    # /api/nodes is ALWAYS_ALLOWED — block mutating proxy cards when module is off.
+    if kind == NODE_KIND_PROXY and not is_proxy_nodes_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("proxy_nodes"),
+        )
+
     updates = payload.model_dump(exclude_unset=True)
 
     if payload.name is not None:
@@ -334,7 +341,18 @@ def update_node(
         )
     if "destination_ip" in updates and kind == NODE_KIND_PROXY:
         dest = updates["destination_ip"]
-        node.destination_ip = dest.strip() if isinstance(dest, str) and dest.strip() else None
+        if dest is None or (isinstance(dest, str) and not dest.strip()):
+            node.destination_ip = None
+        else:
+            try:
+                from proxy_agent.iptables_dest import validate_destination_ip
+
+                node.destination_ip = validate_destination_ip(str(dest))
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc) or "DESTINATION должен быть IPv4-адресом",
+                ) from exc
 
     db.commit()
     db.refresh(node)
@@ -475,9 +493,11 @@ def get_proxy_status(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    """Fetch status from proxy_agent and sync cached destination_ip (same as PUT)."""
     node = _require_proxy_node(node_id, db)
     adapter = get_proxy_adapter(node)
     payload = adapter.proxy_status()
+    _sync_destination_ip(node, payload, db)
     return ProxyStatusResponse(
         installed=bool(payload.get("installed")),
         destination_ip=payload.get("destination_ip"),
@@ -492,15 +512,7 @@ def refresh_proxy_status(
     db: Session = Depends(get_db),
 ):
     """Refresh status from proxy_agent and sync cached destination_ip."""
-    node = _require_proxy_node(node_id, db)
-    adapter = get_proxy_adapter(node)
-    payload = adapter.proxy_status()
-    _sync_destination_ip(node, payload, db)
-    return ProxyStatusResponse(
-        installed=bool(payload.get("installed")),
-        destination_ip=payload.get("destination_ip"),
-        detail=payload.get("detail"),
-    )
+    return get_proxy_status(node_id, _, db)
 
 
 @router.put("/{node_id}/proxy/destination", response_model=ProxyStatusResponse)
@@ -512,12 +524,22 @@ def put_proxy_destination(
     db: Session = Depends(get_db),
 ):
     node = _require_proxy_node(node_id, db)
+    try:
+        from proxy_agent.iptables_dest import validate_destination_ip
+
+        destination_ip = validate_destination_ip(payload.destination_ip)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc) or "DESTINATION должен быть IPv4-адресом",
+        ) from exc
+
     adapter = get_proxy_adapter(node)
-    status_payload = adapter.set_destination(payload.destination_ip.strip())
+    status_payload = adapter.set_destination(destination_ip)
     _sync_destination_ip(node, status_payload, db)
     # Always persist requested IP on success (agent may return same status shape).
-    if getattr(node, "destination_ip", None) != payload.destination_ip.strip():
-        node.destination_ip = payload.destination_ip.strip()
+    if getattr(node, "destination_ip", None) != destination_ip:
+        node.destination_ip = destination_ip
         node.updated_at = datetime.utcnow()
         db.add(node)
         db.commit()
@@ -529,7 +551,7 @@ def put_proxy_destination(
             user_id=admin.id,
             username=admin.username,
             remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"node_id={node_id} destination_ip={payload.destination_ip.strip()}",
+            details=f"node_id={node_id} destination_ip={destination_ip}",
         )
     return ProxyStatusResponse(
         installed=bool(status_payload.get("installed")),
@@ -562,6 +584,7 @@ def enable_node_mtls(
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
     try:
         node = enable_mtls(db, node, admin)
     except ValueError as exc:
@@ -573,8 +596,13 @@ def enable_node_mtls(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Не удалось включить mTLS на узле: {exc}",
         ) from exc
+    message = (
+        "Флаг mTLS отмечен — сертификаты на proxy_agent настройте вручную (docs/proxy-agent.md)"
+        if kind == NODE_KIND_PROXY
+        else "mTLS успешно включён"
+    )
     return NodeMtlsEnableResponse(
-        message="mTLS успешно включён",
+        message=message,
         node_id=node.id,
         mtls_enabled=True,
     )
@@ -589,17 +617,19 @@ def disable_node_mtls(
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
     try:
         node = disable_mtls(db, node)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    agent_name = "proxy_agent" if kind == NODE_KIND_PROXY else "Node agent"
     return NodeMtlsDisableResponse(
         message="Флаг mTLS в панели сброшен",
         node_id=node.id,
         mtls_enabled=False,
         warning=(
-            "Node agent по-прежнему работает с mTLS. Для полного отключения настройте узел вручную "
-            "или переустановите node agent без mTLS."
+            f"{agent_name} по-прежнему может работать с mTLS. Для полного отключения настройте "
+            "узел вручную или переустановите агент без mTLS."
         ),
     )
 

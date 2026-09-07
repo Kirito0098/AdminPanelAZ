@@ -53,8 +53,9 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
     }
     try {
       setNodes(await api.getNodes())
-    } catch {
+    } catch (err) {
       setNodes([])
+      throw err
     }
   }, [user])
 
@@ -78,7 +79,10 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
       const data = await api.activateNode(id)
       setActiveNode(data.node)
       setActiveNodeHa(data.ha ?? null)
-      await Promise.all([refreshNodes(), refreshSyncGroups()])
+      await Promise.all([
+        refreshNodes().catch(() => {}),
+        refreshSyncGroups(),
+      ])
     },
     [refreshNodes, refreshSyncGroups],
   )
@@ -88,11 +92,11 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
   }, [refresh])
 
   useEffect(() => {
-    refreshNodes()
+    void refreshNodes().catch(() => {})
   }, [refreshNodes])
 
   useEffect(() => {
-    refreshSyncGroups()
+    void refreshSyncGroups()
   }, [refreshSyncGroups])
 
   useEffect(() => {
@@ -101,7 +105,7 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
     const interval = window.setInterval(() => {
       void refresh()
       if (user.role === 'admin') {
-        void refreshNodes()
+        void refreshNodes().catch(() => {})
         void refreshSyncGroups()
       }
     }, 45_000)

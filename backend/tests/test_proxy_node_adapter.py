@@ -131,6 +131,48 @@ def test_get_proxy_status_ok(db, monkeypatch):
     assert resp.detail == "not found"
 
 
+def test_get_proxy_status_syncs_destination(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    node = _add_node(db)
+    assert node.destination_ip is None
+    admin = SimpleNamespace(id=1, username="admin")
+    monkeypatch.setattr(nodes_router, "is_proxy_nodes_enabled", lambda _db: True)
+    adapter = MagicMock()
+    adapter.proxy_status.return_value = {
+        "installed": True,
+        "destination_ip": "9.9.9.9",
+        "detail": None,
+    }
+    monkeypatch.setattr(nodes_router, "get_proxy_adapter", lambda _n: adapter)
+    resp = nodes_router.get_proxy_status(node.id, admin, db)
+    assert resp.destination_ip == "9.9.9.9"
+    db.refresh(node)
+    assert node.destination_ip == "9.9.9.9"
+
+
+def test_put_proxy_destination_rejects_bad_ip(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    node = _add_node(db)
+    monkeypatch.setattr(nodes_router, "is_proxy_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    adapter = MagicMock()
+    monkeypatch.setattr(nodes_router, "get_proxy_adapter", lambda _n: adapter)
+    admin = SimpleNamespace(id=1, username="admin")
+    request = MagicMock()
+    with pytest.raises(HTTPException) as exc:
+        nodes_router.put_proxy_destination(
+            node.id,
+            ProxyDestinationBody(destination_ip="not-an-ip"),
+            request,
+            admin,
+            db,
+        )
+    assert exc.value.status_code == 400
+    adapter.set_destination.assert_not_called()
+
+
 def test_put_proxy_destination_syncs_node(db, monkeypatch):
     from app.routers import nodes as nodes_router
 
@@ -205,3 +247,43 @@ def test_check_node_health_uses_proxy_adapter(db, monkeypatch):
     assert health["status"] == "online"
     assert health["ok"] is True
     adapter.health.assert_called_once()
+
+
+def test_enable_mtls_proxy_flag_only(db, monkeypatch):
+    from app.services import node_mtls_provision as provision
+
+    node = _add_node(db)
+    actor = SimpleNamespace(id=1, username="admin")
+    ensure = MagicMock()
+    monkeypatch.setattr(provision, "ensure_panel_mtls_materials", ensure)
+    monkeypatch.setattr(provision, "get_settings", lambda: SimpleNamespace(audit_log_enabled=False))
+    provision_adapter = MagicMock()
+    monkeypatch.setattr(provision, "RemoteNodeAdapter", provision_adapter)
+
+    result = provision.enable_mtls(db, node, actor)
+
+    ensure.assert_called_once()
+    provision_adapter.assert_not_called()
+    db.refresh(result)
+    assert result.mtls_enabled is True
+    assert "mtls_flag_only_at" in (result.node_metadata or "")
+
+
+def test_enable_mtls_proxy_already_enabled(db, monkeypatch):
+    from app.services import node_mtls_provision as provision
+
+    node = _add_node(db)
+    node.mtls_enabled = True
+    db.commit()
+    actor = SimpleNamespace(id=1, username="admin")
+    with pytest.raises(ValueError, match="уже включён"):
+        provision.enable_mtls(db, node, actor)
+
+
+def test_proxy_adapter_ssl_hint_mentions_mark_mtls():
+    adapter = ProxyNodeAdapter("10.0.0.9", 9101, "k" * 32, mtls_enabled=False)
+    hint = adapter._format_ssl_error("ssl wrong version number")
+    assert hint is not None
+    assert "Отметьте mTLS" in hint
+    assert "proxy-agent.md" in hint
+    assert "Включите mTLS" not in hint

@@ -147,13 +147,15 @@ function MtlsCaStatusAlert({ status }: { status: NodeMtlsStatus }) {
   }
   return (
     <SettingsAlert variant="info" title="mTLS: CA ещё не создан">
-      При первом «Включить mTLS» на удалённом узле панель автоматически создаст CA и сертификаты в{' '}
-      <code className="text-xs">{status.mtls_dir}</code>.
+      При первом «Включить mTLS» на VPN-узле или «Отметить mTLS» на прокси панель создаст CA и
+      сертификаты в <code className="text-xs">{status.mtls_dir}</code>. Для proxy_agent сертификаты
+      агента ставятся вручную (docs/proxy-agent.md).
     </SettingsAlert>
   )
 }
 
 function NodeConnectionErrorAlert({ node, lastError }: { node: Node; lastError: string }) {
+  const isProxy = isProxyNode(node)
   if (isWrongVersionSslError(lastError)) {
     return (
       <SettingsAlert variant="warning" title="Несовпадение протокола (SSL)">
@@ -162,6 +164,12 @@ function NodeConnectionErrorAlert({ node, lastError }: { node: Node; lastError: 
             Панель подключается по HTTPS, а узел отвечает по HTTP. Временно отключите глобальный{' '}
             <code className="text-xs">NODE_AGENT_MTLS_ENABLED</code> в <code className="text-xs">.env</code>{' '}
             или сбросьте флаг mTLS для узла вручную.
+          </>
+        ) : isProxy ? (
+          <>
+            Узел отвечает по HTTPS (mTLS), а панель — по HTTP. Нажмите{' '}
+            <strong>«Отметить mTLS»</strong> в меню узла после ручной настройки сертификатов
+            proxy_agent (docs/proxy-agent.md).
           </>
         ) : (
           <>
@@ -291,18 +299,18 @@ function NodeActions({
       )}
       {!node.is_local && (
         <>
-          {!isProxy && !node.mtls_enabled && (
+          {!node.mtls_enabled && (
             <Button
               variant={compact ? 'ghost' : 'outline'}
               size={btnSize}
-              title="Включить mTLS"
+              title={isProxy ? 'Отметить mTLS (сертификаты вручную)' : 'Включить mTLS'}
               onClick={onEnableMtls}
             >
               <Shield size={iconSize} />
-              {!compact && 'Включить mTLS'}
+              {!compact && (isProxy ? 'Отметить mTLS' : 'Включить mTLS')}
             </Button>
           )}
-          {!isProxy && node.mtls_enabled && (
+          {node.mtls_enabled && (
             <Button
               variant={compact ? 'ghost' : 'outline'}
               size={btnSize}
@@ -415,9 +423,14 @@ function NodeCard({
               )}
               <Server size={16} className="shrink-0 text-muted-foreground" />
               <span className="truncate">{node.name}</span>
-              {showProxyAffordance && (
+              {isProxy && (
                 <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-800 dark:text-amber-100">
                   Прокси
+                </Badge>
+              )}
+              {isProxy && !showProxyUi && (
+                <Badge variant="secondary" className="text-[10px]">
+                  модуль выкл
                 </Badge>
               )}
               {showProxyAffordance && (
@@ -1431,12 +1444,17 @@ export default function NodesPage() {
                           <TableCell className="font-medium">
                             <div className="flex flex-wrap items-center gap-2">
                               {node.name}
-                              {showProxyAffordance && (
+                              {isProxy && (
                                 <Badge
                                   variant="outline"
                                   className="border-amber-500/40 text-[10px] text-amber-800 dark:text-amber-100"
                                 >
                                   Прокси
+                                </Badge>
+                              )}
+                              {isProxy && !proxyNodesEnabled && (
+                                <Badge variant="secondary" className="text-[10px]">
+                                  модуль выкл
                                 </Badge>
                               )}
                               {showProxyAffordance && (
@@ -1702,7 +1720,9 @@ export default function NodesPage() {
             : confirmAction === 'rotate-key'
               ? 'Ротация API-ключа?'
               : confirmAction === 'enable-mtls'
-                ? 'Включить mTLS?'
+                ? confirmTarget && isProxyNode(confirmTarget)
+                  ? 'Отметить mTLS?'
+                  : 'Включить mTLS?'
                 : confirmAction === 'disable-mtls'
                   ? 'Сбросить mTLS в панели?'
                   : confirmAction === 'restart-agent'
@@ -1731,18 +1751,27 @@ export default function NodesPage() {
                     'Будет сгенерирован новый API-ключ. Обновите его в конфигурации node agent на сервере, иначе связь с панелью прервётся.',
                 }
               : confirmAction === 'enable-mtls'
-                ? {
-                    variant: 'warning',
-                    title: 'Перезапуск node agent',
-                    children:
-                      'Будет сгенерирован сертификат, node agent перезапустится ~5–30 сек. Связь может кратковременно прерваться.',
-                  }
+                ? confirmTarget && isProxyNode(confirmTarget)
+                  ? {
+                      variant: 'info',
+                      title: 'Только флаг в панели',
+                      children:
+                        'Панель начнёт ходить к proxy_agent по HTTPS. Сертификаты на RU-прокси ставятся вручную (docs/proxy-agent.md) — панель их не provision’ит.',
+                    }
+                  : {
+                      variant: 'warning',
+                      title: 'Перезапуск node agent',
+                      children:
+                        'Будет сгенерирован сертификат, node agent перезапустится ~5–30 сек. Связь может кратковременно прерваться.',
+                    }
                 : confirmAction === 'disable-mtls'
                   ? {
                       variant: 'warning',
                       title: 'Только флаг в панели',
                       children:
-                        'Сбрасывается флаг mTLS в базе панели. Node agent может продолжать работать с mTLS — для полного отключения настройте узел вручную.',
+                        confirmTarget && isProxyNode(confirmTarget)
+                          ? 'Сбрасывается флаг mTLS в базе панели. proxy_agent может продолжать работать с mTLS — для полного отключения настройте узел вручную.'
+                          : 'Сбрасывается флаг mTLS в базе панели. Node agent может продолжать работать с mTLS — для полного отключения настройте узел вручную.',
                     }
                   : confirmAction === 'restart-agent'
                     ? {
@@ -1759,7 +1788,9 @@ export default function NodesPage() {
             : confirmAction === 'rotate-key'
               ? 'Сгенерировать ключ'
               : confirmAction === 'enable-mtls'
-                ? 'Включить mTLS'
+                ? confirmTarget && isProxyNode(confirmTarget)
+                  ? 'Отметить mTLS'
+                  : 'Включить mTLS'
                 : confirmAction === 'disable-mtls'
                   ? 'Сбросить mTLS'
                   : confirmAction === 'restart-agent'

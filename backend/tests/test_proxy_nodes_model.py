@@ -230,6 +230,7 @@ def test_update_proxy_linked_vpn_and_clear(db, monkeypatch):
 
     vpn = _add_node(db, name="vpn-upd", kind="vpn")
     proxy = _add_node(db, name="proxy-upd", kind="proxy", port=9101)
+    monkeypatch.setattr(nodes_router, "is_proxy_nodes_enabled", lambda _db: True)
     monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
     admin = SimpleNamespace(id=1, username="admin")
     request = MagicMock()
@@ -251,6 +252,48 @@ def test_update_proxy_linked_vpn_and_clear(db, monkeypatch):
         db=db,
     )
     assert cleared.linked_vpn_node_id is None
+
+
+def test_update_proxy_blocked_when_module_off(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+    from app.schemas import NodeUpdate
+
+    proxy = _add_node(db, name="proxy-off", kind="proxy", port=9101)
+    monkeypatch.setattr(nodes_router, "is_proxy_nodes_enabled", lambda _db: False)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    admin = SimpleNamespace(id=1, username="admin")
+    request = MagicMock()
+
+    with pytest.raises(HTTPException) as exc:
+        nodes_router.update_node(
+            proxy.id,
+            NodeUpdate(name="renamed"),
+            request,
+            admin=admin,
+            db=db,
+        )
+    assert exc.value.status_code == 403
+
+
+def test_update_proxy_rejects_bad_destination(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+    from app.schemas import NodeUpdate
+
+    proxy = _add_node(db, name="proxy-bad-dest", kind="proxy", port=9101)
+    monkeypatch.setattr(nodes_router, "is_proxy_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    admin = SimpleNamespace(id=1, username="admin")
+    request = MagicMock()
+
+    with pytest.raises(HTTPException) as exc:
+        nodes_router.update_node(
+            proxy.id,
+            NodeUpdate(destination_ip="not-an-ip"),
+            request,
+            admin=admin,
+            db=db,
+        )
+    assert exc.value.status_code == 400
 
 
 def test_purge_clears_proxy_links(db):

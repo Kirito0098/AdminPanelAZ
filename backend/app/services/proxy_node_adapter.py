@@ -60,21 +60,25 @@ class ProxyNodeAdapter:
         return kwargs
 
     def _format_ssl_error(self, msg: str) -> str | None:
+        mark_hint = (
+            "Отметьте mTLS для прокси-узла на странице «Узлы» "
+            "(сертификаты proxy_agent — вручную, см. docs/proxy-agent.md)."
+        )
         if "wrong version number" in msg or "wrong_version_number" in msg:
             if self._mtls_enabled:
                 return (
                     "Ошибка SSL (WRONG_VERSION_NUMBER): proxy_agent, вероятно, отвечает по HTTP, "
-                    "а панель подключается по HTTPS. Отключите mTLS для узла или настройте "
+                    "а панель подключается по HTTPS. Сбросьте флаг mTLS для узла или настройте "
                     "HTTPS на proxy_agent."
                 )
             return (
                 "Ошибка SSL (WRONG_VERSION_NUMBER): proxy_agent, вероятно, отвечает по HTTPS (mTLS), "
-                "а панель подключается по HTTP. Включите mTLS для узла на странице «Узлы»."
+                f"а панель подключается по HTTP. {mark_hint}"
             )
         if "certificate verify failed" in msg or "certificate_verify_failed" in msg:
             return (
                 "Ошибка проверки сертификата proxy_agent. Проверьте CA и клиентский сертификат панели "
-                "или повторно включите mTLS для узла в панели."
+                "или заново отметьте mTLS после обновления сертификатов (docs/proxy-agent.md)."
             )
         if (
             "certificate has expired" in msg
@@ -82,18 +86,18 @@ class ProxyNodeAdapter:
             or "certificate_expired" in msg
         ):
             return (
-                "Сертификат mTLS истёк. Повторно включите mTLS для узла на странице «Узлы» "
-                "или обновите сертификаты вручную."
+                "Сертификат mTLS истёк. Обновите сертификаты proxy_agent вручную "
+                "(docs/proxy-agent.md) и проверьте CA панели."
             )
         if "self signed certificate" in msg or "self-signed certificate" in msg:
             return (
                 "proxy_agent использует самоподписанный или неизвестный сертификат. "
-                "Убедитесь, что CA панели совпадает с CA на узле."
+                "Убедитесь, что CA панели совпадает с CA на узле (docs/proxy-agent.md)."
             )
         if "unknown ca" in msg or "tlsv1_alert_unknown_ca" in msg:
             return (
                 "proxy_agent не доверяет клиентскому сертификату панели (unknown CA). "
-                "Повторно включите mTLS для узла или проверьте CA на агенте."
+                "Проверьте CA на агенте (docs/proxy-agent.md)."
             )
         if (
             "handshake failure" in msg
@@ -105,10 +109,7 @@ class ProxyNodeAdapter:
                     "Ошибка TLS handshake с proxy_agent. Проверьте, что на узле включён mTLS, "
                     "сертификаты выданы одним CA, и порт доступен с IP панели."
                 )
-            return (
-                "Ошибка TLS handshake: узел, вероятно, ожидает mTLS. "
-                "Включите mTLS для узла на странице «Узлы»."
-            )
+            return f"Ошибка TLS handshake: узел, вероятно, ожидает mTLS. {mark_hint}"
         if "ssl" in msg or "tls" in msg:
             if self._mtls_enabled:
                 return (
@@ -117,7 +118,7 @@ class ProxyNodeAdapter:
                 )
             return (
                 "Ошибка SSL при подключении по HTTP — узел, вероятно, отвечает по HTTPS (mTLS). "
-                "Включите mTLS для узла на странице «Узлы»."
+                f"{mark_hint}"
             )
         return None
 
@@ -134,7 +135,8 @@ class ProxyNodeAdapter:
             if not self._mtls_enabled:
                 return (
                     "Сервер закрыл соединение без ответа. Вероятно, на узле включён mTLS (HTTPS), "
-                    "а панель обращается по HTTP. Включите mTLS для узла на странице «Узлы»."
+                    "а панель обращается по HTTP. Отметьте mTLS для прокси-узла на странице «Узлы» "
+                    "(сертификаты — вручную, docs/proxy-agent.md)."
                 )
             return (
                 "Сервер закрыл соединение без ответа. Проверьте mTLS-сертификаты панели."

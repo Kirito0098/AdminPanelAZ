@@ -55,33 +55,46 @@ def _exc_message(exc: BaseException) -> str:
     return str(exc)
 
 
+def _proxy_service_from_cache(
+    node: Node,
+    *,
+    active: bool,
+    version: str | None = None,
+    detail: str | None = None,
+) -> MonitoringService:
+    """Build proxy_agent service row using DB-cached DESTINATION (no iptables-save)."""
+    bits: list[str] = []
+    if version:
+        bits.append(str(version))
+    dest = getattr(node, "destination_ip", None)
+    if dest:
+        bits.append(f"DESTINATION={dest}")
+    if detail:
+        bits.append(detail)
+    return MonitoringService(
+        name="proxy_agent",
+        status="active" if active else "inactive",
+        active=active,
+        description="; ".join(bits) or None,
+    )
+
+
 def _probe_proxy_node(node: Node) -> tuple[list[MonitoringService], str | None, str | None]:
-    """Health + optional DESTINATION for a proxy node. Never uses the VPN adapter."""
+    """Health-only probe for a proxy node. Never uses the VPN adapter.
+
+    DESTINATION comes from the panel DB cache (synced by Nodes UI refresh/PUT),
+    not from ``proxy_status`` / ``iptables-save`` on every dashboard poll.
+    """
     adapter = get_proxy_adapter(node)
     health = adapter.health()
     ok = bool(health.get("ok", True))
     version = health.get("version")
-    dest = getattr(node, "destination_ip", None)
-    try:
-        status = adapter.proxy_status()
-        dest = status.get("destination_ip") or dest
-    except Exception:
-        pass
-    bits: list[str] = []
-    if version:
-        bits.append(str(version))
-    if dest:
-        bits.append(f"DESTINATION={dest}")
-    services = [
-        MonitoringService(
-            name="proxy_agent",
-            status="active" if ok else "inactive",
-            active=ok,
-            description="; ".join(bits) or None,
-        )
-    ]
     error = None if ok else "proxy_agent health failed"
-    return services, error, getattr(node, "host", None)
+    return (
+        [_proxy_service_from_cache(node, active=ok, version=str(version) if version else None)],
+        error,
+        getattr(node, "host", None),
+    )
 
 
 def _load_awg2_peers_for_node(db: Session, adapter: Any) -> list[WireGuardPeer]:
@@ -113,10 +126,21 @@ def _collect_nodes_monitoring_data(db: Session) -> list[dict]:
         }
         try:
             if not _is_vpn_node(node):
-                services, error, server_ip = _probe_proxy_node(node)
-                payload["services"] = services
-                payload["error"] = error
-                payload["server_ip"] = server_ip
+                if not is_proxy_nodes_enabled(db):
+                    # Module off: keep the card visible, do not hit proxy_agent.
+                    payload["services"] = [
+                        _proxy_service_from_cache(
+                            node,
+                            active=False,
+                            detail="модуль proxy_nodes выключен",
+                        )
+                    ]
+                    payload["server_ip"] = getattr(node, "host", None)
+                else:
+                    services, error, server_ip = _probe_proxy_node(node)
+                    payload["services"] = services
+                    payload["error"] = error
+                    payload["server_ip"] = server_ip
             else:
                 adapter = get_adapter_for_node(node)
                 ovpn_clients, _ = adapter.get_openvpn_status_snapshot()
@@ -396,7 +420,17 @@ def enrich_wireguard_peers(
 def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOverview:
     if not _is_vpn_node(node):
         try:
-            services, _error, server_ip = _probe_proxy_node(node)
+            if not is_proxy_nodes_enabled(db):
+                services = [
+                    _proxy_service_from_cache(
+                        node,
+                        active=False,
+                        detail="модуль proxy_nodes выключен",
+                    )
+                ]
+                server_ip = getattr(node, "host", None)
+            else:
+                services, _error, server_ip = _probe_proxy_node(node)
         except Exception as exc:
             services = [
                 MonitoringService(
