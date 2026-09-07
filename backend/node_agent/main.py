@@ -940,11 +940,7 @@ def warper_toggle(_: None = Depends(verify_api_key)):
 
 @app.get("/warper/domains")
 def warper_domains_list(_: None = Depends(verify_api_key)):
-    return {
-        "domains": run_warper_action("list_domains"),
-        "lists": run_warper_action("domain_lists_status"),
-        "user_text": run_warper_action("get_user_domains_text"),
-    }
+    return run_warper_action("domains_bundle")
 
 
 @app.get("/warper/domains/text")

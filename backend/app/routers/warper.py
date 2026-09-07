@@ -105,11 +105,12 @@ def warper_toggle(_: User = Depends(require_admin), db: Session = Depends(get_db
 def warper_domains_list(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
-    lists = adapter.get_warper_domain_lists()
+    payload = adapter.get_warper_domains_bundle()
+    lists = payload.get("lists") or {}
     return WarperDomainsResponse(
-        domains=adapter.get_warper_domains(),
+        domains=payload.get("domains") or [],
         lists=WarperDomainListsStatus(**lists),
-        user_text=adapter.get_warper_user_domains_text(),
+        user_text=payload.get("user_text"),
         **_node_meta(node),
     )
 

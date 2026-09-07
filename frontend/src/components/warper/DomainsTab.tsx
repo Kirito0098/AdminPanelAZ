@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, Globe, RefreshCw, RotateCcw, Save } from 'lucide-react'
 import {
   getWarperDomains,
@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
-import type { WarperHealthResponse } from '@/types'
+import type { WarperDomainsResponse, WarperHealthResponse } from '@/types'
 import { buildUserDomainsTextFromItems, countActiveTextLines, isWarperDisabled } from './utils'
 
 const BUILTIN_LISTS = {
@@ -24,10 +24,15 @@ const BUILTIN_LISTS = {
 
 interface DomainsTabProps {
   health: WarperHealthResponse | null
+  /**
+   * Parent-fetched /warper/domains payload.
+   * `undefined` = parent still loading (wait); `null` = parent finished without data (fetch here).
+   */
+  initialDomains?: WarperDomainsResponse | null
   onDomainsChange?: (count: number) => void
 }
 
-export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps) {
+export default function DomainsTab({ health, initialDomains, onDomainsChange }: DomainsTabProps) {
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
   const disabled = isWarperDisabled(health)
@@ -39,9 +44,26 @@ export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps)
   const [saving, setSaving] = useState(false)
   const [listBusy, setListBusy] = useState<string | null>(null)
   const [listStatus, setListStatus] = useState({ gemini: false, chatgpt: false })
+  const appliedInitialKeyRef = useRef<string | null>(null)
 
   const dirty = draftText !== savedText
   const domainCount = useMemo(() => countActiveTextLines(draftText), [draftText])
+
+  const applyPayload = useCallback(
+    (listsData: WarperDomainsResponse) => {
+      const content =
+        listsData.user_text?.trim() ||
+        buildUserDomainsTextFromItems(listsData.domains ?? [])
+      setSavedText(content)
+      setDraftText(content)
+      setListStatus({
+        gemini: listsData.lists?.gemini ?? false,
+        chatgpt: listsData.lists?.chatgpt ?? false,
+      })
+      onDomainsChange?.(countActiveTextLines(content))
+    },
+    [onDomainsChange],
+  )
 
   const load = useCallback(async () => {
     if (!health?.installed) {
@@ -56,26 +78,40 @@ export default function DomainsTab({ health, onDomainsChange }: DomainsTabProps)
     setLoadError(null)
     try {
       const listsData = await getWarperDomains()
-      const content =
-        listsData.user_text?.trim() ||
-        buildUserDomainsTextFromItems(listsData.domains ?? [])
-      setSavedText(content)
-      setDraftText(content)
-      setListStatus({
-        gemini: listsData.lists?.gemini ?? false,
-        chatgpt: listsData.lists?.chatgpt ?? false,
-      })
-      onDomainsChange?.(countActiveTextLines(content))
+      applyPayload(listsData)
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Не удалось загрузить домены')
     } finally {
       setLoading(false)
     }
-  }, [health?.installed, onDomainsChange])
+  }, [applyPayload, health?.installed, onDomainsChange])
 
   useEffect(() => {
+    if (!health?.installed) {
+      appliedInitialKeyRef.current = null
+      void load()
+      return
+    }
+
+    // Parent overview still loading — wait for seed instead of double-fetching.
+    if (initialDomains === undefined) {
+      appliedInitialKeyRef.current = null
+      return
+    }
+
+    const seedKey = `${activeNode?.id ?? 'local'}:${initialDomains ? 'seeded' : 'fetch'}`
+    if (appliedInitialKeyRef.current === seedKey) return
+    appliedInitialKeyRef.current = seedKey
+
+    if (initialDomains) {
+      applyPayload(initialDomains)
+      setLoadError(null)
+      setLoading(false)
+      return
+    }
+
     void load()
-  }, [load, activeNode?.id, health?.installed])
+  }, [activeNode?.id, applyPayload, health?.installed, initialDomains, load])
 
   async function handleSave() {
     if (!dirty) return

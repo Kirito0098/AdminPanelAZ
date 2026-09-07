@@ -293,6 +293,9 @@ class NodeAdapter(ABC):
     def get_warper_domain_lists(self) -> dict[str, bool]: ...
 
     @abstractmethod
+    def get_warper_domains_bundle(self) -> dict: ...
+
+    @abstractmethod
     def add_warper_domain(self, domain: str) -> dict: ...
 
     @abstractmethod
@@ -791,6 +794,9 @@ class LocalNodeAdapter(NodeAdapter):
 
     def get_warper_domain_lists(self) -> dict[str, bool]:
         return self._warper.get_domain_lists_status()
+
+    def get_warper_domains_bundle(self) -> dict:
+        return self._warper.get_domains_bundle()
 
     def add_warper_domain(self, domain: str) -> dict:
         return self._warper.add_domain(domain)
@@ -1636,6 +1642,24 @@ class RemoteNodeAdapter(NodeAdapter):
         return {
             "gemini": bool(lists.get("gemini")),
             "chatgpt": bool(lists.get("chatgpt")),
+        }
+
+    def get_warper_domains_bundle(self) -> dict:
+        data = self._request("GET", "/warper/domains")
+        lists = data.get("lists", {}) if isinstance(data, dict) else {}
+        domains = data.get("domains", []) if isinstance(data, dict) else []
+        user_text = data.get("user_text") if isinstance(data, dict) else None
+        if not isinstance(user_text, str) or not user_text:
+            user_text = build_user_domains_text_from_items(
+                domains if isinstance(domains, list) else []
+            )
+        return {
+            "domains": domains if isinstance(domains, list) else [],
+            "lists": {
+                "gemini": bool(lists.get("gemini")) if isinstance(lists, dict) else False,
+                "chatgpt": bool(lists.get("chatgpt")) if isinstance(lists, dict) else False,
+            },
+            "user_text": user_text,
         }
 
     def add_warper_domain(self, domain: str) -> dict:

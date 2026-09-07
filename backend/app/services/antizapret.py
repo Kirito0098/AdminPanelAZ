@@ -657,30 +657,38 @@ class AntiZapretService:
         # Skip units disabled in setup (e.g. OPENVPN_TCP_ENABLE=n) so NOC
         # incidents / health score do not treat intentional stop as failure.
         enable_flags = read_protocol_enable_flags(self.base_path / "setup")
-        result_list: list[MonitoringService] = []
-        for svc in services:
-            if not is_vpn_monitor_service_expected(svc, enable_flags):
-                continue
-            try:
-                result = subprocess.run(
-                    ["systemctl", "is-active", svc],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    check=False,
-                )
-                state = result.stdout.strip() or "unknown"
-            except (subprocess.TimeoutExpired, OSError):
-                state = "unknown"
-            result_list.append(
-                MonitoringService(
-                    name=svc,
-                    status=state,
-                    active=state == "active",
-                    description="Служба VPN" if "openvpn" in svc or "wg" in svc else None,
-                )
+        expected = [svc for svc in services if is_vpn_monitor_service_expected(svc, enable_flags)]
+        if not expected:
+            return []
+
+        states: list[str]
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", *expected],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
             )
-        return result_list
+            states = [line.strip() or "unknown" for line in result.stdout.splitlines()]
+        except (subprocess.TimeoutExpired, OSError):
+            states = ["unknown"] * len(expected)
+
+        # Pad / trim so a partial systemctl response cannot desync names vs states.
+        if len(states) < len(expected):
+            states.extend(["unknown"] * (len(expected) - len(states)))
+        elif len(states) > len(expected):
+            states = states[: len(expected)]
+
+        return [
+            MonitoringService(
+                name=svc,
+                status=state,
+                active=state == "active",
+                description="Служба VPN" if "openvpn" in svc or "wg" in svc else None,
+            )
+            for svc, state in zip(expected, states)
+        ]
 
     def parse_openvpn_status(self) -> tuple[list[OpenVpnClient], str]:
         clients, data_source = openvpn_management_service.collect_clients(self.openvpn_logs)

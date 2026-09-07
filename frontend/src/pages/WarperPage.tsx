@@ -12,7 +12,7 @@ import WarperHero from '@/components/warper/WarperHero'
 import WarperInstallPrompt from '@/components/warper/WarperInstallPrompt'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNode } from '@/context/NodeContext'
-import type { WarperHealthResponse, WarperStatusResponse } from '@/types'
+import type { WarperDomainsResponse, WarperHealthResponse, WarperStatusResponse } from '@/types'
 import { formatNodeLabel, type WarperTab } from '@/components/warper/utils'
 
 export default function WarperPage() {
@@ -20,6 +20,7 @@ export default function WarperPage() {
   const [tab, setTab] = useState<WarperTab>('domains')
   const [health, setHealth] = useState<WarperHealthResponse | null>(null)
   const [status, setStatus] = useState<WarperStatusResponse | null>(null)
+  const [domainsPayload, setDomainsPayload] = useState<WarperDomainsResponse | null>(null)
   const [domainCount, setDomainCount] = useState<number | null>(null)
   const [trafficToday, setTrafficToday] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(true)
@@ -39,16 +40,19 @@ export default function WarperPage() {
           getWarperTraffic('today').catch(() => null),
         ])
         setStatus(statusData)
+        setDomainsPayload(domainsData)
         setDomainCount(domainsData?.domains?.length ?? null)
         setTrafficToday(trafficData?.data ?? null)
       } else {
         setStatus(null)
+        setDomainsPayload(null)
         setDomainCount(null)
         setTrafficToday(null)
       }
     } catch (err) {
       setHealth(null)
       setStatus(null)
+      setDomainsPayload(null)
       setDomainCount(null)
       setTrafficToday(null)
       setLoadError(err instanceof Error ? err.message : 'Не удалось загрузить AZ-WARP')
@@ -116,7 +120,11 @@ export default function WarperPage() {
         </TabsList>
 
         <TabsContent value="domains" className="mt-0 focus-visible:outline-none">
-          <DomainsTab health={health} onDomainsChange={setDomainCount} />
+          <DomainsTab
+            health={health}
+            initialDomains={loading ? undefined : domainsPayload}
+            onDomainsChange={setDomainCount}
+          />
         </TabsContent>
 
         <TabsContent value="catalog" className="mt-0 focus-visible:outline-none">

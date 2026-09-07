@@ -13,6 +13,7 @@ interface NodeContextValue {
   refresh: () => Promise<void>
   refreshNodes: () => Promise<void>
   refreshSyncGroups: () => Promise<void>
+  applySyncGroups: (groups: NodeSyncGroup[]) => void
   activate: (id: number) => Promise<void>
 }
 
@@ -74,6 +75,11 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user])
 
+  const applySyncGroups = useCallback((groups: NodeSyncGroup[]) => {
+    setSyncGroups(groups)
+    setSyncGroupsLoaded(true)
+  }, [])
+
   const activate = useCallback(
     async (id: number) => {
       const data = await api.activateNode(id)
@@ -103,6 +109,7 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
     if (!user) return
 
     const interval = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
       void refresh()
       if (user.role === 'admin') {
         void refreshNodes().catch(() => {})
@@ -132,6 +139,7 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
       refresh,
       refreshNodes,
       refreshSyncGroups,
+      applySyncGroups,
       activate,
     }),
     [
@@ -144,6 +152,7 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
       refresh,
       refreshNodes,
       refreshSyncGroups,
+      applySyncGroups,
       activate,
     ],
   )

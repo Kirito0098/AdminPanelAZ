@@ -159,19 +159,29 @@ def _has_list_block(list_name: str, text: str | None = None) -> bool:
     return marker[0] in text
 
 
-def get_domain_lists_status() -> dict[str, bool]:
-    return {name: _has_list_block(name) for name in _BUILTIN_LIST_MARKERS}
-
-
-def _parse_domains_file() -> list[dict[str, Any]]:
+def _read_domains_file_text() -> str:
     if not WARPER_DOMAINS_FILE.is_file():
-        return []
-    has_gemini = _has_list_block("gemini")
-    has_chatgpt = _has_list_block("chatgpt")
+        return ""
+    return WARPER_DOMAINS_FILE.read_text(encoding="utf-8", errors="replace")
+
+
+def get_domain_lists_status(text: str | None = None) -> dict[str, bool]:
+    if text is None:
+        text = _read_domains_file_text()
+    return {name: _has_list_block(name, text) for name in _BUILTIN_LIST_MARKERS}
+
+
+def _parse_domains_file(text: str | None = None) -> list[dict[str, Any]]:
+    if text is None:
+        if not WARPER_DOMAINS_FILE.is_file():
+            return []
+        text = WARPER_DOMAINS_FILE.read_text(encoding="utf-8", errors="replace")
+    has_gemini = _has_list_block("gemini", text)
+    has_chatgpt = _has_list_block("chatgpt", text)
     items: list[dict[str, Any]] = []
     in_gemini = False
     in_chatgpt = False
-    for raw_line in WARPER_DOMAINS_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
+    for raw_line in text.splitlines():
         line = raw_line.strip()
         if line == _BUILTIN_LIST_MARKERS["gemini"][0]:
             in_gemini, in_chatgpt = True, False
@@ -241,6 +251,20 @@ def _extract_user_domains_text(text: str | None = None) -> str:
         lines_out.append(line)
     body = "\n".join(lines_out).rstrip()
     return f"{body}\n" if body else "# Пользовательские домены:\n"
+
+
+def domains_payload_from_text(text: str) -> dict[str, Any]:
+    """Derive lists/domains/user_text from a single domains.txt snapshot."""
+    return {
+        "lists": get_domain_lists_status(text=text),
+        "domains": _parse_domains_file(text=text),
+        "user_text": _extract_user_domains_text(text),
+    }
+
+
+def read_domains_file_payload() -> dict[str, Any]:
+    """One read_text of domains.txt → lists, domains, user_text."""
+    return domains_payload_from_text(_read_domains_file_text())
 
 
 def _text_from_api_result(result: Any, *, fallback: str = "") -> str:
@@ -531,6 +555,38 @@ class WarperService:
 
     def get_domain_lists_status(self) -> dict[str, bool]:
         return get_domain_lists_status()
+
+    def get_domains_bundle(self) -> dict[str, Any]:
+        """Build /warper/domains payload with at most one domains.txt read."""
+        text = _read_domains_file_text()
+        file_payload = domains_payload_from_text(text)
+        domains = file_payload["domains"]
+        user_text = file_payload["user_text"]
+        lists = file_payload["lists"]
+
+        api = self._api_client()
+        try:
+            raw = api.list_domains()
+            if hasattr(raw, "ok"):
+                if raw.ok:
+                    data = raw.data if raw.data is not None else []
+                    if isinstance(data, list) and data:
+                        domains = _normalize_domain_items(data)
+            else:
+                data = _result_or_raise(raw, default=[])
+                if isinstance(data, list) and data:
+                    domains = _normalize_domain_items(data)
+        except HTTPException:
+            pass
+
+        getter = getattr(api, "get_user_domains_text", None)
+        if callable(getter):
+            try:
+                user_text = _text_from_api_result(getter(), fallback=user_text)
+            except HTTPException:
+                pass
+
+        return {"lists": lists, "domains": domains, "user_text": user_text}
 
     def add_domain(self, domain: str) -> dict[str, Any]:
         _ensure_no_conflict()
@@ -1084,6 +1140,7 @@ def run_warper_action(operation: str, **kwargs: Any) -> Any:
         "toggle": lambda: service.toggle(),
         "list_domains": lambda: service.list_domains(),
         "domain_lists_status": lambda: service.get_domain_lists_status(),
+        "domains_bundle": lambda: service.get_domains_bundle(),
         "add_domain": lambda: service.add_domain(kwargs["domain"]),
         "remove_domain": lambda: service.remove_domain(kwargs["domain"]),
         "sync_domains": lambda: service.sync_domains(),

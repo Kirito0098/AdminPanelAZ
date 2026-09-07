@@ -705,7 +705,9 @@ export default function LogsPage() {
 
   useEffect(() => {
     if (!autoRefresh) return
+
     const tick = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return
       setCountdown((c) => {
         if (c <= 1) {
           void load(false, false)
@@ -714,7 +716,18 @@ export default function LogsPage() {
         return c - 1
       })
     }, 1000)
-    return () => clearInterval(tick)
+
+    const onVisible = () => {
+      if (document.hidden) return
+      setCountdown(REFRESH_INTERVAL)
+      void load(false, false)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      clearInterval(tick)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [autoRefresh, load])
 
   const skipTabFetchRef = useRef(true)

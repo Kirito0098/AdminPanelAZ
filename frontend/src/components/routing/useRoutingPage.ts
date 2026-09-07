@@ -279,7 +279,9 @@ export function useRoutingPage() {
 
   useEffect(() => {
     if (!autoRefresh) return
+
     const tick = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return
       setCountdown((c) => {
         if (c <= 1) {
           load()
@@ -288,7 +290,18 @@ export function useRoutingPage() {
         return c - 1
       })
     }, 1000)
-    return () => clearInterval(tick)
+
+    const onVisible = () => {
+      if (document.hidden) return
+      setCountdown(REFRESH_INTERVAL)
+      void load()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      clearInterval(tick)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [autoRefresh, load])
 
   const withPipelineAction = async (

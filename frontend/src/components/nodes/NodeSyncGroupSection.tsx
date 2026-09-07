@@ -75,6 +75,8 @@ import type { BackgroundTask, Node, NodeSyncGroup, NodeSyncVerifyResult, SyncSta
 
 type NodeSyncGroupSectionProps = {
   nodes: Node[]
+  initialGroups?: NodeSyncGroup[]
+  groupsLoaded?: boolean
   onGroupsChanged?: (groups: NodeSyncGroup[]) => void
 }
 
@@ -410,11 +412,16 @@ function AutoSyncModeDescription({ compact = false }: { compact?: boolean }) {
   )
 }
 
-export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyncGroupSectionProps) {
+export default function NodeSyncGroupSection({
+  nodes,
+  initialGroups,
+  groupsLoaded = false,
+  onGroupsChanged,
+}: NodeSyncGroupSectionProps) {
   const { success, error: notifyError, warning: notifyWarning } = useNotifications()
   const { task, polling, startPoll } = useBackgroundTaskPoll()
-  const [groups, setGroups] = useState<NodeSyncGroup[]>([])
-  const [loading, setLoading] = useState(true)
+  const [groups, setGroups] = useState<NodeSyncGroup[]>(() => initialGroups ?? [])
+  const [loading, setLoading] = useState(() => !(groupsLoaded && initialGroups !== undefined))
   const [refreshing, setRefreshing] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<NodeSyncGroup | null>(null)
@@ -446,6 +453,7 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
   const prevSyncStatusRef = useRef<Map<number, SyncStatus>>(new Map())
   const notifiedReplicationRef = useRef<Set<string>>(new Set())
   const resumedTaskIdsRef = useRef<Set<string>>(new Set())
+  const seededFromContextRef = useRef(false)
 
   const clearGroupReplicationNotices = (groupId: number) => {
     for (const key of notifiedReplicationRef.current) {
@@ -524,10 +532,24 @@ export default function NodeSyncGroupSection({ nodes, onGroupsChanged }: NodeSyn
   useEffect(() => {
     if (nodes.length < 2) {
       setLoading(false)
+      seededFromContextRef.current = false
       return
     }
+    if (seededFromContextRef.current) return
+
+    if (groupsLoaded && initialGroups !== undefined) {
+      seededFromContextRef.current = true
+      reportReplicationIssues(initialGroups)
+      setGroups(initialGroups)
+      setLoading(false)
+      return
+    }
+
+    if (!groupsLoaded) return
+
+    seededFromContextRef.current = true
     void load()
-  }, [load, nodes.length])
+  }, [groupsLoaded, initialGroups, load, nodes.length, reportReplicationIssues])
 
   const hasAutoGroups = useMemo(() => groups.some((g) => g.sync_mode === 'auto'), [groups])
 

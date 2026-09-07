@@ -23,8 +23,6 @@ import {
   disableNodeMtls,
   enableNodeMtls,
   getNodeMtlsStatus,
-  getNodeSyncGroups,
-  getNodes,
   rollingNodeUpdate,
   rotateNodeApiKey,
   restartNodeAgent,
@@ -677,12 +675,21 @@ function NodeBulkActionsBar({
 
 export default function NodesPage() {
   const { user } = useAuth()
-  const { activeNode, refresh, refreshNodes, activate } = useNode()
+  const {
+    activeNode,
+    nodes,
+    syncGroups,
+    syncGroupsLoaded,
+    refresh,
+    refreshNodes,
+    refreshSyncGroups,
+    applySyncGroups,
+    activate,
+  } = useNode()
   const { features } = useFeatureModules()
   // Default-off toggle: treat missing key as disabled (isEnabled() falls back to true).
   const proxyNodesEnabled = features.proxy_nodes === true
   const { success, warning, error: notifyError } = useNotifications()
-  const [nodes, setNodes] = useState<Node[]>([])
   const [loading, setLoading] = useState(true)
   const [showDialog, setShowDialog] = useState(false)
   const [editing, setEditing] = useState<Node | null>(null)
@@ -704,7 +711,6 @@ export default function NodesPage() {
   const [rollingUpdating, setRollingUpdating] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkConfirmAction, setBulkConfirmAction] = useState<BulkConfirmAction>(null)
-  const [syncGroups, setSyncGroups] = useState<NodeSyncGroup[]>([])
   const [haDeleteBlockedNodes, setHaDeleteBlockedNodes] = useState<Node[]>([])
   const { task: rollTask, polling: rollPolling, startPoll: startRollPoll } = useBackgroundTaskPoll()
 
@@ -719,19 +725,25 @@ export default function NodesPage() {
     setHaDeleteBlockedNodes(blockedNodes)
   }
 
-  const load = async () => {
+  const load = async (opts?: { forceNodes?: boolean }) => {
+    const forceNodes = opts?.forceNodes ?? true
     setLoading(true)
     try {
-      const [nodesList, status, groups] = await Promise.all([
-        getNodes(),
-        getNodeMtlsStatus(),
-        getNodeSyncGroups(),
-      ])
-      setNodes(nodesList)
+      const status = await getNodeMtlsStatus()
       setMtlsStatus(status)
-      setSyncGroups(groups)
-      await refreshNodes()
-      await refresh()
+      const tasks: Promise<unknown>[] = []
+      if (forceNodes || nodes.length === 0) {
+        tasks.push(refreshNodes().catch(() => {}))
+      }
+      if (forceNodes || !syncGroupsLoaded) {
+        tasks.push(refreshSyncGroups())
+      }
+      if (forceNodes) {
+        tasks.push(refresh())
+      }
+      if (tasks.length > 0) {
+        await Promise.all(tasks)
+      }
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки узлов')
     } finally {
@@ -740,7 +752,9 @@ export default function NodesPage() {
   }
 
   useEffect(() => {
-    if (user?.role === 'admin') load()
+    if (user?.role === 'admin') void load({ forceNodes: false })
+    // Initial mount: reuse NodeContext nodes/syncGroups when already loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role])
 
   if (user?.role !== 'admin') {
@@ -1263,7 +1277,7 @@ export default function NodesPage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={load} disabled={loading}>
+          <Button variant="outline" onClick={() => void load()} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
             Обновить
           </Button>
@@ -1284,7 +1298,12 @@ export default function NodesPage() {
 
       <NodeOfflineNotifyCard />
 
-      <NodeSyncGroupSection nodes={nodes} onGroupsChanged={setSyncGroups} />
+      <NodeSyncGroupSection
+        nodes={nodes}
+        initialGroups={syncGroups}
+        groupsLoaded={syncGroupsLoaded}
+        onGroupsChanged={applySyncGroups}
+      />
 
       {(rollPolling || rollTask) && (
         <SettingsAlert variant="info" title="Rolling update">
@@ -1387,7 +1406,7 @@ export default function NodesPage() {
                     onDisableMtls={() => handleDisableMtls(node)}
                     onEdit={() => openEdit(node)}
                     onDelete={() => handleDelete(node)}
-                    onProxyUpdated={load}
+                    onProxyUpdated={() => void load()}
                   />
                 ))}
                 desktop={
@@ -1533,7 +1552,7 @@ export default function NodesPage() {
                                 node={node}
                                 nodes={nodes}
                                 syncGroups={syncGroups}
-                                onUpdated={load}
+                                onUpdated={() => void load()}
                               />
                             </TableCell>
                           </TableRow>
