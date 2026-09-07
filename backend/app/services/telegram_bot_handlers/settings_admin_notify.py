@@ -24,7 +24,7 @@ _EVENT_LABELS = dict(TG_NOTIFY_EVENT_LABELS)
 
 
 def _get_admin_notify(ctx: BotContext):
-    from app.routers.maintenance import _admin_notify_settings_response
+    from app.routers.settings_telegram import _admin_notify_settings_response
 
     return _admin_notify_settings_response(ctx.db, ctx.user)
 
@@ -34,7 +34,7 @@ def _events_map(settings) -> dict[str, bool]:
 
 
 def _apply_admin_notify_patch(ctx: BotContext, payload: AdminNotifySettingsUpdate, *, log_details: str):
-    from app.routers.maintenance import update_admin_notify_settings
+    from app.routers.settings_telegram import update_admin_notify_settings
 
     try:
         result = update_admin_notify_settings(payload, ctx.db, ctx.user)
@@ -196,7 +196,7 @@ async def handle_admin_notify_callback(ctx: BotContext, data: str, *, message_id
             return
 
         if rest == "test":
-            from app.routers.maintenance import test_admin_notify
+            from app.routers.settings_telegram import test_admin_notify
 
             test_admin_notify(ctx.db, ctx.user)
             _log_bot_action(ctx, "settings_admin_notify_test", "action=test")

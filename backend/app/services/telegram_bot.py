@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.routers.maintenance import _get_setting
+from app.services.app_setting_store import _get_setting
 from app.services.telegram_api import answer_callback_query
 from app.services.telegram_bot_handlers.base import BotContext, resolve_user
 from app.services.telegram_bot_handlers.configs import (

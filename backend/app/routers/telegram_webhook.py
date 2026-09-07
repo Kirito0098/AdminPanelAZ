@@ -11,7 +11,7 @@ from app.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
-from app.routers.maintenance import _get_setting
+from app.services.app_setting_store import _get_setting
 from app.schemas import TelegramBotInfoResponse, TelegramLinkCodeResponse
 from app.services.feature_guards import get_feature_service, module_disabled_message
 from app.services.panel_publish_info import resolve_request_url_root

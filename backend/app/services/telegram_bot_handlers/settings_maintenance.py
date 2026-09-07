@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.models import Node, NodeStatus
 from app.services.node_manager import _is_vpn_node
-from app.routers.maintenance import cancel_server_reboot, schedule_server_reboot
+from app.routers.settings_reboot import cancel_server_reboot, schedule_server_reboot
 from app.schemas import ServerRebootRequest, ServiceRestartRequest
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext, inline_button, inline_keyboard

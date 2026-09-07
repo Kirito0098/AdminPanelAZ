@@ -20,11 +20,10 @@ from app.auth import create_access_token, get_tg_mini_user, require_tg_mini_admi
 from app.config import get_settings
 from app.database import get_db
 from app.models import DEFAULT_TG_NOTIFY_EVENTS, AppSetting, User, UserRole, VpnConfig, VpnType
-from app.routers.maintenance import (
+from app.services.app_setting_store import _get_setting, _set_setting
+from app.routers.settings_telegram import (
     _admin_notify_settings_response,
-    _get_setting,
     _send_test_message_to_recipients,
-    _set_setting,
     _telegram_settings_response,
     update_telegram_settings,
 )

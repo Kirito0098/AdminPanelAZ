@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.database import Base, get_db
 import app.models  # noqa: F401 — register ORM models on Base.metadata
 from app.models import AppSetting, User
-from app.routers import maintenance as maintenance_router
+from app.routers import settings_cloudflare as maintenance_router
 from app.services import cloudflare_proxy_settings as cps
 
 
@@ -94,7 +94,7 @@ def test_patch_cloudflare_proxy_regenerates_nginx_on_enabled_toggle(client, db, 
     monkeypatch.setattr(cps, "_ENV_FILE", tmp_path / ".env")
 
     with patch(
-        "app.routers.maintenance.cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy"
+        "app.routers.settings_cloudflare.cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy"
     ) as regen:
         resp = client.patch(
             "/api/settings/cloudflare-proxy",
@@ -114,7 +114,7 @@ def test_patch_cloudflare_proxy_regenerates_nginx_on_enabled_toggle(client, db, 
 
 def test_patch_cloudflare_proxy_skips_regeneration_when_enabled_unchanged(client):
     with patch(
-        "app.routers.maintenance.cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy"
+        "app.routers.settings_cloudflare.cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy"
     ) as regen:
         resp = client.patch("/api/settings/cloudflare-proxy", json={"auto_update": True})
 
@@ -126,7 +126,7 @@ def test_patch_cloudflare_proxy_reverts_flags_when_regeneration_fails(client, db
     monkeypatch.setattr(cps, "_ENV_FILE", tmp_path / ".env")
 
     with patch(
-        "app.routers.maintenance.cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy",
+        "app.routers.settings_cloudflare.cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy",
         side_effect=RuntimeError("nginx -t failed"),
     ) as regen:
         resp = client.patch(
@@ -159,7 +159,7 @@ def test_refresh_cloudflare_proxy_forwards_force_flag(client):
         },
     }
     with patch(
-        "app.routers.maintenance.cloudflare_proxy_settings_service.refresh_cloudflare_ips",
+        "app.routers.settings_cloudflare.cloudflare_proxy_settings_service.refresh_cloudflare_ips",
         return_value=result,
     ) as refresh:
         resp = client.post("/api/settings/cloudflare-proxy/refresh", json={"force": True})

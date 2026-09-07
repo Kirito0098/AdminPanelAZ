@@ -16,7 +16,7 @@ _CODE_LENGTH = 8
 
 
 def _load_codes(db: Session) -> dict[str, dict[str, str | int]]:
-    from app.routers.maintenance import _get_setting
+    from app.services.app_setting_store import _get_setting
 
     raw = _get_setting(db, _LINK_CODES_KEY, "{}")
     try:
@@ -27,7 +27,7 @@ def _load_codes(db: Session) -> dict[str, dict[str, str | int]]:
 
 
 def _save_codes(db: Session, codes: dict[str, dict[str, str | int]]) -> None:
-    from app.routers.maintenance import _set_setting
+    from app.services.app_setting_store import _set_setting
 
     _set_setting(db, _LINK_CODES_KEY, json.dumps(codes))
 

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.auth import require_admin
 from app.database import get_db
 from app.models import NodeStatus, User
-from app.routers import maintenance as maintenance_router
+from app.routers import settings_reboot as maintenance_router
 from app.services import server_reboot as sr
 
 
@@ -61,7 +61,7 @@ def test_schedule_missing_node_404(client):
     db.query.return_value.filter.return_value.first.return_value = None
     client.app.dependency_overrides[get_db] = lambda: db
 
-    with patch("app.routers.maintenance.admin_notify_service"), patch("app.routers.maintenance.log_action"):
+    with patch("app.routers.settings_reboot.admin_notify_service"), patch("app.routers.settings_reboot.log_action"):
         resp = client.post("/api/settings/reboot", json={"node_id": 999, "confirm": "REBOOT"})
     assert resp.status_code == 404
 
@@ -71,7 +71,7 @@ def test_schedule_rejects_proxy_node(client):
     node.node_kind = "proxy"
     client.app.dependency_overrides[get_db] = lambda: _db_with_node(node)
 
-    with patch("app.routers.maintenance.admin_notify_service"), patch("app.routers.maintenance.log_action"):
+    with patch("app.routers.settings_reboot.admin_notify_service"), patch("app.routers.settings_reboot.log_action"):
         resp = client.post("/api/settings/reboot", json={"node_id": 10, "confirm": "REBOOT"})
     assert resp.status_code == 400
     assert "VPN" in resp.json()["detail"]
@@ -81,9 +81,9 @@ def test_schedule_duplicate_409(client):
     node = _node()
     client.app.dependency_overrides[get_db] = lambda: _db_with_node(node)
 
-    with patch("app.routers.maintenance.get_adapter_for_node") as get_ad, patch(
-        "app.routers.maintenance.admin_notify_service"
-    ), patch("app.routers.maintenance.log_action"):
+    with patch("app.routers.settings_reboot.get_adapter_for_node") as get_ad, patch(
+        "app.routers.settings_reboot.admin_notify_service"
+    ), patch("app.routers.settings_reboot.log_action"):
         adapter = MagicMock()
         adapter.reboot = MagicMock(return_value="ok")
         get_ad.return_value = adapter
@@ -98,9 +98,9 @@ def test_schedule_and_cancel(client):
     node = _node()
     client.app.dependency_overrides[get_db] = lambda: _db_with_node(node)
 
-    with patch("app.routers.maintenance.get_adapter_for_node") as get_ad, patch(
-        "app.routers.maintenance.admin_notify_service"
-    ), patch("app.routers.maintenance.log_action"):
+    with patch("app.routers.settings_reboot.get_adapter_for_node") as get_ad, patch(
+        "app.routers.settings_reboot.admin_notify_service"
+    ), patch("app.routers.settings_reboot.log_action"):
         adapter = MagicMock()
         adapter.reboot = MagicMock(return_value="ok")
         get_ad.return_value = adapter
@@ -119,9 +119,9 @@ def test_schedule_offline_node_includes_warning(client):
     node = _node(status=NodeStatus.offline)
     client.app.dependency_overrides[get_db] = lambda: _db_with_node(node)
 
-    with patch("app.routers.maintenance.get_adapter_for_node"), patch(
-        "app.routers.maintenance.admin_notify_service"
-    ), patch("app.routers.maintenance.log_action"):
+    with patch("app.routers.settings_reboot.get_adapter_for_node"), patch(
+        "app.routers.settings_reboot.admin_notify_service"
+    ), patch("app.routers.settings_reboot.log_action"):
         resp = client.post("/api/settings/reboot", json={"node_id": 10, "confirm": "REBOOT"})
     assert resp.status_code == 200
     warning = resp.json()["warning"]
@@ -133,9 +133,9 @@ def test_schedule_unknown_node_includes_warning(client):
     node = _node(status=NodeStatus.unknown)
     client.app.dependency_overrides[get_db] = lambda: _db_with_node(node)
 
-    with patch("app.routers.maintenance.get_adapter_for_node"), patch(
-        "app.routers.maintenance.admin_notify_service"
-    ), patch("app.routers.maintenance.log_action"):
+    with patch("app.routers.settings_reboot.get_adapter_for_node"), patch(
+        "app.routers.settings_reboot.admin_notify_service"
+    ), patch("app.routers.settings_reboot.log_action"):
         resp = client.post("/api/settings/reboot", json={"node_id": 10, "confirm": "REBOOT"})
     assert resp.status_code == 200
     assert resp.json()["warning"]
@@ -145,9 +145,9 @@ def test_schedule_calls_audit_and_notify(client):
     node = _node()
     client.app.dependency_overrides[get_db] = lambda: _db_with_node(node)
 
-    with patch("app.routers.maintenance.get_adapter_for_node"), patch(
-        "app.routers.maintenance.admin_notify_service"
-    ) as notify, patch("app.routers.maintenance.log_action") as log_action:
+    with patch("app.routers.settings_reboot.get_adapter_for_node"), patch(
+        "app.routers.settings_reboot.admin_notify_service"
+    ) as notify, patch("app.routers.settings_reboot.log_action") as log_action:
         resp = client.post("/api/settings/reboot", json={"node_id": 10, "confirm": "REBOOT"})
     assert resp.status_code == 200
     log_action.assert_called_once()
@@ -160,9 +160,9 @@ def test_cancel_not_pending_returns_409(client):
     node = _node()
     client.app.dependency_overrides[get_db] = lambda: _db_with_node(node)
 
-    with patch("app.routers.maintenance.get_adapter_for_node"), patch(
-        "app.routers.maintenance.admin_notify_service"
-    ), patch("app.routers.maintenance.log_action"):
+    with patch("app.routers.settings_reboot.get_adapter_for_node"), patch(
+        "app.routers.settings_reboot.admin_notify_service"
+    ), patch("app.routers.settings_reboot.log_action"):
         resp = client.post("/api/settings/reboot", json={"node_id": 10, "confirm": "REBOOT"})
         rid = resp.json()["reboot_id"]
         first_cancel = client.post(f"/api/settings/reboot/{rid}/cancel")
@@ -177,9 +177,9 @@ def test_execute_failure_still_audits(client):
     db = _db_with_node(node)
     client.app.dependency_overrides[get_db] = lambda: db
 
-    with patch("app.routers.maintenance.get_adapter_for_node") as get_ad, patch(
-        "app.routers.maintenance.admin_notify_service"
-    ) as notify, patch("app.routers.maintenance.log_action") as log_action, patch(
+    with patch("app.routers.settings_reboot.get_adapter_for_node") as get_ad, patch(
+        "app.routers.settings_reboot.admin_notify_service"
+    ) as notify, patch("app.routers.settings_reboot.log_action") as log_action, patch(
         "app.database.SessionLocal"
     ) as session_local, patch("app.services.server_reboot.DELAY_SECONDS", 0.05):
         adapter = MagicMock()
@@ -209,9 +209,9 @@ def test_execute_failure_still_audits(client):
 
 
 def test_pending_list(client):
-    with patch("app.routers.maintenance.admin_notify_service"), patch(
-        "app.routers.maintenance.log_action"
-    ), patch("app.routers.maintenance.get_adapter_for_node"):
+    with patch("app.routers.settings_reboot.admin_notify_service"), patch(
+        "app.routers.settings_reboot.log_action"
+    ), patch("app.routers.settings_reboot.get_adapter_for_node"):
         sr.schedule_reboot(node_id=1, node_name="n", scheduled_by="a", execute_fn=MagicMock(), delay_seconds=5)
         resp = client.get("/api/settings/reboot/pending")
         assert resp.status_code == 200
@@ -222,9 +222,9 @@ def test_pending_list_recomputes_offline_warning(client):
     node = _node(status=NodeStatus.offline)
     client.app.dependency_overrides[get_db] = lambda: _db_with_node(node)
 
-    with patch("app.routers.maintenance.admin_notify_service"), patch(
-        "app.routers.maintenance.log_action"
-    ), patch("app.routers.maintenance.get_adapter_for_node"):
+    with patch("app.routers.settings_reboot.admin_notify_service"), patch(
+        "app.routers.settings_reboot.log_action"
+    ), patch("app.routers.settings_reboot.get_adapter_for_node"):
         sr.schedule_reboot(
             node_id=10, node_name="vpn-a", scheduled_by="a", execute_fn=MagicMock(), delay_seconds=5
         )

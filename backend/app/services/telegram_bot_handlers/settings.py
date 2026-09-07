@@ -71,7 +71,7 @@ def _log_bot_action(ctx: BotContext, action: str, details: str) -> None:
 
 
 def _get_telegram_settings(ctx: BotContext):
-    from app.routers.maintenance import _telegram_settings_response
+    from app.routers.settings_telegram import _telegram_settings_response
 
     return _telegram_settings_response(ctx.db, _make_bot_request(ctx))
 
@@ -83,7 +83,7 @@ def _apply_telegram_patch(
     log_action_name: str = "settings_telegram_update",
     log_details: str,
 ) -> Any:
-    from app.routers.maintenance import update_telegram_settings
+    from app.routers.settings_telegram import update_telegram_settings
 
     try:
         result = update_telegram_settings(payload, _make_bot_request(ctx), ctx.db, ctx.user)
@@ -429,7 +429,7 @@ async def handle_settings_callback(ctx: BotContext, data: str, *, message_id: in
             return
 
         if rest == "test":
-            from app.routers.maintenance import test_telegram
+            from app.routers.settings_telegram import test_telegram
 
             test_telegram(ctx.db, ctx.user)
             _log_bot_action(ctx, "settings_telegram_test", "action=test")
@@ -437,7 +437,7 @@ async def handle_settings_callback(ctx: BotContext, data: str, *, message_id: in
             return
 
         if rest == "wh:reg":
-            from app.routers.maintenance import register_telegram_webhook
+            from app.routers.settings_telegram import register_telegram_webhook
 
             register_telegram_webhook(_make_bot_request(ctx), ctx.db, ctx.user)
             _log_bot_action(ctx, "settings_telegram_webhook", "action=register")
@@ -463,7 +463,7 @@ async def handle_settings_callback(ctx: BotContext, data: str, *, message_id: in
             return
 
         if rest == "do:wh:del":
-            from app.routers.maintenance import unregister_telegram_webhook
+            from app.routers.settings_telegram import unregister_telegram_webhook
 
             unregister_telegram_webhook(_make_bot_request(ctx), ctx.db, ctx.user)
             _log_bot_action(ctx, "settings_telegram_webhook", "action=delete")

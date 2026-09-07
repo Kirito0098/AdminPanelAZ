@@ -37,6 +37,10 @@ from app.routers import (
     warper,
     security,
     server_monitor,
+    settings_cloudflare,
+    settings_reboot,
+    settings_telegram,
+    settings_vpn_network,
     site_diagnostics,
     system,
     feature_toggles,
@@ -215,6 +219,10 @@ app.include_router(monitoring.router, prefix=_API_PREFIX)
 app.include_router(alert_rules.router, prefix=_API_PREFIX)
 app.include_router(settings_router.router, prefix=_API_PREFIX)
 app.include_router(maintenance.router, prefix=_API_PREFIX)
+app.include_router(settings_reboot.router, prefix=_API_PREFIX)
+app.include_router(settings_telegram.router, prefix=_API_PREFIX)
+app.include_router(settings_vpn_network.router, prefix=_API_PREFIX)
+app.include_router(settings_cloudflare.router, prefix=_API_PREFIX)
 app.include_router(backups.router, prefix=_API_PREFIX)
 app.include_router(node_sync.router, prefix=_API_PREFIX)
 app.include_router(nodes.router, prefix=_API_PREFIX)

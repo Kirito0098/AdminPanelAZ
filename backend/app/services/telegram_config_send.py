@@ -121,7 +121,7 @@ def send_config_for_user(
     install_platform: InstallPlatform | None = None,
 ) -> tuple[int, str | None]:
     """Resolve destination chat and send config files."""
-    from app.routers.maintenance import _get_setting
+    from app.services.app_setting_store import _get_setting
     from app.services.telegram_recipients import get_setting_chat_ids
 
     if chat_id_override is not None:

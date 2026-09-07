@@ -62,7 +62,7 @@
 │   │   ├── schemas.py           # Pydantic-схемы API
 │   │   ├── database.py          # engine, миграции основной БД
 │   │   ├── cidr_database.py     # engine CIDR БД
-│   │   ├── routers/             # HTTP API (33 роутера)
+│   │   ├── routers/             # HTTP API (37 роутеров)
 │   │   ├── services/            # бизнес-логика (~160+ файлов + подпакеты)
 │   │   ├── middleware/          # rate limit, security, sessions
 │   │   └── static/tg_mini/      # собранный Mini App
@@ -196,7 +196,7 @@
 | `warper` | AZ-WARP |
 | `awg2` | AZ-AWG2 (клиенты `amneziawg2`, обфускация, мониторинг, Dashboard, docs) |
 | `edit_files` | Редактор конфигов AntiZapret |
-| `backups`, `maintenance`, `system` | Бэкапы, обслуживание, обновления |
+| `backups`, `maintenance`, `settings_reboot`, `settings_telegram`, `settings_vpn_network`, `settings_cloudflare`, `system` | Бэкапы, обслуживание, reboot, Telegram/admin-notify, VPN-сеть/DDNS, Cloudflare, обновления |
 | `settings`, `security` | Настройки панели, IP whitelist, firewall |
 | `server_monitor` | Мониторинг сервера (vnStat) |
 | `logs` | Action logs |

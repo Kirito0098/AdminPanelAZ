@@ -10,7 +10,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.models import Node, User, VpnConfig, VpnType
-from app.routers.maintenance import _get_setting
+from app.services.app_setting_store import _get_setting
 from app.services.access_policy import AccessPolicyService
 from app.services.admin_notify import admin_notify_service
 from app.services.feature_guards import get_feature_service
