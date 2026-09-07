@@ -4,31 +4,64 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import psutil
+
+# Cheap probes: cache availability / interface discovery across WS + REST ticks.
+_VNSTAT_AVAIL_TTL_S = 60.0
+_IFACE_LIST_TTL_S = 30.0
+
+_vnstat_avail_cache: tuple[float, bool] | None = None
+_iface_list_cache: tuple[float, dict] | None = None
 
 
 def vnstat_bin() -> str:
     return os.environ.get("VNSTAT_BIN", "vnstat")
 
 
-def is_vnstat_available() -> bool:
+def clear_server_monitor_caches() -> None:
+    """Test helper — drop TTL caches for vnstat / interface discovery."""
+    global _vnstat_avail_cache, _iface_list_cache
+    _vnstat_avail_cache = None
+    _iface_list_cache = None
+
+
+def is_vnstat_available(*, force: bool = False) -> bool:
+    """Return whether vnstat can be invoked. Cached; prefers --version over --json."""
+    global _vnstat_avail_cache
+    now = time.monotonic()
+    if not force and _vnstat_avail_cache is not None:
+        cached_at, cached_ok = _vnstat_avail_cache
+        if now - cached_at < _VNSTAT_AVAIL_TTL_S:
+            return cached_ok
+
+    ok = False
+    binary = vnstat_bin()
     try:
-        proc = subprocess.run(
-            [vnstat_bin(), "--json"],
-            capture_output=True,
-            text=True,
-            timeout=4,
-            check=False,
-        )
-        return proc.returncode == 0
+        resolved = shutil.which(binary)
+        if resolved is None and not Path(binary).exists():
+            ok = False
+        else:
+            proc = subprocess.run(
+                [binary, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            ok = proc.returncode == 0
     except FileNotFoundError:
-        return False
+        ok = False
     except Exception:
-        return False
+        ok = False
+
+    _vnstat_avail_cache = (now, ok)
+    return ok
 
 
 def _net_if_stats() -> dict:
@@ -81,19 +114,33 @@ def collect_interface_groups() -> dict[str, list[str]]:
     for values in default_groups.values():
         candidates.update(values)
     vnstat = vnstat_bin()
-    try:
-        vn_json = subprocess.run([vnstat, "--json"], capture_output=True, text=True, timeout=4, check=False)
-        if vn_json.returncode == 0:
-            parsed = json.loads(vn_json.stdout or "{}")
-            for item in parsed.get("interfaces") or []:
-                name = str(item.get("name") or "").strip()
-                if name:
-                    candidates.add(name)
-    except Exception:
-        pass
+    # Prefer cached availability; only run heavy --json when vnstat is known present.
+    if is_vnstat_available():
+        try:
+            vn_json = subprocess.run(
+                [vnstat, "--json"],
+                capture_output=True,
+                text=True,
+                timeout=4,
+                check=False,
+            )
+            if vn_json.returncode == 0:
+                parsed = json.loads(vn_json.stdout or "{}")
+                for item in parsed.get("interfaces") or []:
+                    name = str(item.get("name") or "").strip()
+                    if name:
+                        candidates.add(name)
+        except Exception:
+            pass
     wg_interfaces: set[str] = set()
     try:
-        wg_out = subprocess.run(["wg", "show", "interfaces"], capture_output=True, text=True, timeout=3, check=False)
+        wg_out = subprocess.run(
+            ["wg", "show", "interfaces"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
         for token in re.split(r"\s+", (wg_out.stdout or "").strip()):
             if token.strip():
                 wg_interfaces.add(token.strip())
@@ -212,6 +259,7 @@ class ServerMonitorService:
                 return {"error": proc_d.stderr.strip() or "vnstat недоступен", "iface": iface}
             data_d = json.loads(proc_d.stdout or "{}")
         except FileNotFoundError:
+            clear_server_monitor_caches()
             return {
                 "error": "vnstat не установлен на этом узле. Установите: apt install -y vnstat && sudo ./scripts/setup-vnstat.sh",
                 "iface": iface,
@@ -299,7 +347,14 @@ class ServerMonitorService:
             "totals": {"1d": sum_days(1), "7d": sum_days(7), "30d": sum_days(30)},
         }
 
-    def list_interfaces(self) -> dict:
+    def list_interfaces(self, *, force: bool = False) -> dict:
+        global _iface_list_cache
+        now = time.monotonic()
+        if not force and _iface_list_cache is not None:
+            cached_at, cached = _iface_list_cache
+            if now - cached_at < _IFACE_LIST_TTL_S:
+                return cached
+
         groups = collect_interface_groups()
         primary = detect_primary_interface()
         all_ifaces: list[str] = []
@@ -312,12 +367,14 @@ class ServerMonitorService:
         if not all_ifaces:
             stats = _net_if_stats()
             all_ifaces = [name for name in list(stats.keys())[:5] if name != "lo"] or ["eth0"]
-        return {
+        result = {
             "interfaces": all_ifaces,
             "groups": groups,
             "primary_interface": primary,
             "vnstat_available": is_vnstat_available(),
         }
+        _iface_list_cache = (now, result)
+        return result
 
     def sample_interface_throughput(
         self,
@@ -373,11 +430,17 @@ class ServerMonitorService:
         *,
         interval: float = 0.8,
         max_interfaces: int = 6,
+        interface_names: list[str] | None = None,
     ) -> dict:
-        listed = self.list_interfaces()
-        names = list(listed.get("interfaces") or [])
+        names = [str(n).strip() for n in (interface_names or []) if str(n).strip()]
+        if names:
+            primary = names[0]
+        else:
+            listed = self.list_interfaces()
+            names = list(listed.get("interfaces") or [])
+            primary = listed.get("primary_interface")
         return {
-            "primary_interface": listed.get("primary_interface"),
+            "primary_interface": primary,
             "interfaces": self.sample_interface_throughput(
                 names,
                 interval=interval,

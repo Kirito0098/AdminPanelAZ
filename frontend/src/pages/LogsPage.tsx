@@ -599,41 +599,85 @@ export default function LogsPage() {
   const [expandedActionGroups, setExpandedActionGroups] = useState<Set<string>>(() => new Set())
   const [exportingActions, setExportingActions] = useState(false)
   const actionsLoadedRef = useRef(false)
+  const activeTabRef = useRef<string>('connections')
+
+  const defaultLogTab = logsDashboardEnabled ? 'connections' : 'actions'
+  const showConnectionTabs = logsDashboardEnabled
+  const showActionTab = user?.role === 'admin' && actionLogsEnabled
+  const showQrDownloadsTab = user?.role === 'admin' && qrDownloadsEnabled
+  const showSocketsTab = user?.role === 'admin' && logsDashboardEnabled
+
+  const [searchParams] = useSearchParams()
+  const initialLogTab = useMemo(() => {
+    const tab = searchParams.get('tab')
+    if (tab === 'qr-downloads' && showQrDownloadsTab) return tab
+    if (tab === 'openvpn-sockets' && showSocketsTab) return tab
+    if (tab === 'actions' && showActionTab) return tab
+    if ((tab === 'connections' || tab === 'openvpn-events') && showConnectionTabs) return tab
+    return defaultLogTab
+  }, [
+    searchParams,
+    showQrDownloadsTab,
+    showSocketsTab,
+    showActionTab,
+    showConnectionTabs,
+    defaultLogTab,
+  ])
+
+  const [activeTab, setActiveTab] = useState(initialLogTab)
+  activeTabRef.current = activeTab
+
+  useEffect(() => {
+    setActiveTab(initialLogTab)
+    activeTabRef.current = initialLogTab
+  }, [initialLogTab])
 
   const load = useCallback(
-    async (manual = false, initial = false) => {
+    async (manual = false, initial = false, tabOverride?: string) => {
       if (initial) {
         setLoading(true)
         startGlobal()
       } else if (manual) {
         setRefreshing(true)
       }
+      const tab = tabOverride ?? activeTabRef.current
+      // Auto-refresh only hits the active tab; manual/initial still avoids unused heavy probes.
+      const fetchConnections =
+        logsDashboardEnabled && (initial || manual || tab === 'connections')
+      const fetchEvents =
+        logsDashboardEnabled && (manual || tab === 'openvpn-events')
+      const fetchSockets =
+        user?.role === 'admin' &&
+        logsDashboardEnabled &&
+        (manual || tab === 'openvpn-sockets')
+      const fetchQr =
+        user?.role === 'admin' &&
+        qrDownloadsEnabled &&
+        (initial || manual || tab === 'qr-downloads')
       try {
-        const connPromise = logsDashboardEnabled ? getConnectionLogs() : Promise.resolve(null)
-        const evtPromise = logsDashboardEnabled ? getOpenVpnEvents() : Promise.resolve({ profiles: [] })
-        const qrPromise =
-          user?.role === 'admin' && qrDownloadsEnabled
-            ? getQrDownloadLogs()
-            : Promise.resolve([])
-        const socketsPromise =
-          user?.role === 'admin' && logsDashboardEnabled
-            ? getOpenVpnSockets()
-            : Promise.resolve(null)
+        const connPromise = fetchConnections ? getConnectionLogs() : Promise.resolve(undefined)
+        const evtPromise = fetchEvents ? getOpenVpnEvents() : Promise.resolve(undefined)
+        const qrPromise = fetchQr ? getQrDownloadLogs() : Promise.resolve(undefined)
+        const socketsPromise = fetchSockets ? getOpenVpnSockets() : Promise.resolve(undefined)
         const [conn, evt, qr, sockets] = await Promise.all([
           connPromise,
           evtPromise,
           qrPromise,
           socketsPromise,
         ])
-        if (conn) setConnections(conn)
-        setEvents(evt.profiles)
-        setQrDownloads(qr)
-        if (sockets) {
+        if (conn !== undefined) setConnections(conn)
+        if (evt !== undefined) setEvents(evt.profiles)
+        if (qr !== undefined) setQrDownloads(qr)
+        if (sockets !== undefined) {
           setOpenVpnSockets(sockets.sockets)
           setSocketsTimestamp(sockets.timestamp)
         }
         setLoadError(null)
-        if (user?.role === 'admin' && actionLogsEnabled && !actionsLoadedRef.current) {
+        if (
+          user?.role === 'admin' &&
+          actionLogsEnabled &&
+          (manual || tab === 'actions' || (!actionsLoadedRef.current && (initial || !logsDashboardEnabled)))
+        ) {
           setActions(await getActionLogs())
           actionsLoadedRef.current = true
         }
@@ -653,15 +697,18 @@ export default function LogsPage() {
   )
 
   useEffect(() => {
-    load(false, true)
-  }, [load, activeNode?.id])
+    // Node switch (and URL deep-link): reload for the tab the user is viewing, not only initialLogTab.
+    // activeTabRef stays in sync on each render; URL changes also setActiveTab(initialLogTab) above.
+    load(false, true, activeTabRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- remount on node / tab deep-link only
+  }, [activeNode?.id, initialLogTab])
 
   useEffect(() => {
     if (!autoRefresh) return
     const tick = setInterval(() => {
       setCountdown((c) => {
         if (c <= 1) {
-          load()
+          void load(false, false)
           return REFRESH_INTERVAL
         }
         return c - 1
@@ -669,6 +716,17 @@ export default function LogsPage() {
     }, 1000)
     return () => clearInterval(tick)
   }, [autoRefresh, load])
+
+  const skipTabFetchRef = useRef(true)
+  useEffect(() => {
+    // Soft-load when switching tabs so content appears without waiting for the next tick.
+    if (skipTabFetchRef.current) {
+      skipTabFetchRef.current = false
+      return
+    }
+    void load(false, false, activeTab)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on explicit tab switches
+  }, [activeTab])
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
@@ -760,29 +818,6 @@ export default function LogsPage() {
     }
   }
 
-  const defaultLogTab = logsDashboardEnabled ? 'connections' : 'actions'
-  const showConnectionTabs = logsDashboardEnabled
-  const showActionTab = user?.role === 'admin' && actionLogsEnabled
-  const showQrDownloadsTab = user?.role === 'admin' && qrDownloadsEnabled
-  const showSocketsTab = user?.role === 'admin' && logsDashboardEnabled
-
-  const [searchParams] = useSearchParams()
-  const initialLogTab = useMemo(() => {
-    const tab = searchParams.get('tab')
-    if (tab === 'qr-downloads' && showQrDownloadsTab) return tab
-    if (tab === 'openvpn-sockets' && showSocketsTab) return tab
-    if (tab === 'actions' && showActionTab) return tab
-    if ((tab === 'connections' || tab === 'openvpn-events') && showConnectionTabs) return tab
-    return defaultLogTab
-  }, [
-    searchParams,
-    showQrDownloadsTab,
-    showSocketsTab,
-    showActionTab,
-    showConnectionTabs,
-    defaultLogTab,
-  ])
-
   if (user?.role !== 'admin') {
     return <Navigate to="/" replace />
   }
@@ -852,7 +887,7 @@ export default function LogsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Tabs defaultValue={initialLogTab} key={initialLogTab}>
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
             {showConnectionTabs && (
             <TabsTrigger value="connections" className="gap-1.5">

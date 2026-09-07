@@ -232,9 +232,15 @@ def server_interfaces(_: None = Depends(verify_api_key)):
 def server_live_throughput(
     interval: float = 0.8,
     max_interfaces: int = 6,
+    iface: str | None = None,
     _: None = Depends(verify_api_key),
 ):
-    return monitor.get_live_throughput(interval=interval, max_interfaces=max_interfaces)
+    names = [iface.strip()] if iface and iface.strip() else None
+    return monitor.get_live_throughput(
+        interval=interval,
+        max_interfaces=max_interfaces,
+        interface_names=names,
+    )
 
 
 @app.get("/monitoring/overview")

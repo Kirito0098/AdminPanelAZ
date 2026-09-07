@@ -184,6 +184,7 @@ class NodeAdapter(ABC):
         *,
         interval: float = 0.8,
         max_interfaces: int = 6,
+        interface_names: list[str] | None = None,
     ) -> dict: ...
 
     @abstractmethod
@@ -712,8 +713,13 @@ class LocalNodeAdapter(NodeAdapter):
         *,
         interval: float = 0.8,
         max_interfaces: int = 6,
+        interface_names: list[str] | None = None,
     ) -> dict:
-        return self._monitor.get_live_throughput(interval=interval, max_interfaces=max_interfaces)
+        return self._monitor.get_live_throughput(
+            interval=interval,
+            max_interfaces=max_interfaces,
+            interface_names=interface_names,
+        )
 
     def block_wireguard_client_runtime(self, client_name: str) -> dict:
         return block_client_runtime(client_name)
@@ -1444,14 +1450,19 @@ class RemoteNodeAdapter(NodeAdapter):
         *,
         interval: float = 0.8,
         max_interfaces: int = 6,
+        interface_names: list[str] | None = None,
     ) -> dict:
+        params: dict[str, str] = {
+            "interval": str(interval),
+            "max_interfaces": str(max_interfaces),
+        }
+        names = [str(n).strip() for n in (interface_names or []) if str(n).strip()]
+        if names:
+            params["iface"] = names[0]
         return self._request(
             "GET",
             "/server-monitor/live-throughput",
-            params={
-                "interval": str(interval),
-                "max_interfaces": str(max_interfaces),
-            },
+            params=params,
             timeout=30.0,
         )
 

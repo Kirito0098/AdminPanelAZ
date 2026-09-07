@@ -424,7 +424,7 @@ export default function ServerMonitorPage() {
               )}
             </div>
             <p className="text-sm text-muted-foreground">
-              CPU, RAM, диск и трафик vnStat · WebSocket каждые 2 с
+              CPU, RAM, диск и трафик vnStat · Live RX/TX через WebSocket
               {metrics?.hostname ? ` · ${metrics.hostname}` : ''}
             </p>
           </div>

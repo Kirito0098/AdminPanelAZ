@@ -11,19 +11,31 @@ from app.services.admin_notify import admin_notify_service
 from app.services.resource_metrics import persist_sample, purge_old_samples
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
+
+
+def _is_resource_monitor_enabled() -> bool:
+    """Runtime gate — MONITOR_ENABLED / resource_monitor can flip without restart."""
+    from app.services.feature_guards import get_feature_service
+
+    return get_feature_service().is_enabled("resource_monitor")
 
 
 async def run_resource_metrics_loop():
+    settings = get_settings()
     if not settings.resource_metrics_enabled:
         return
 
     while True:
+        settings = get_settings()
+        interval = max(5, int(settings.resource_metrics_interval_seconds or 60))
         try:
-            await asyncio.to_thread(_collect_all_nodes)
+            if not _is_resource_monitor_enabled():
+                logger.debug("resource_metrics skipped — resource_monitor disabled")
+            else:
+                await asyncio.to_thread(_collect_all_nodes)
         except Exception as exc:
             logger.warning("Resource metrics collector error: %s", exc)
-        await asyncio.sleep(settings.resource_metrics_interval_seconds)
+        await asyncio.sleep(interval)
 
 
 def _collect_all_nodes():
