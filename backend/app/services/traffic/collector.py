@@ -1,6 +1,8 @@
 """Traffic snapshot collector and persistence (ported from AdminAntizapret)."""
 
 from datetime import datetime, timedelta, timezone
+import time
+from threading import Lock
 
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
@@ -21,6 +23,17 @@ from app.services.openvpn_group import (
     is_openvpn_protocol_type,
 )
 from app.services.wireguard_status import wireguard_peer_is_online
+
+# Coalesce rapid Traffic overview polls (UI + Telegram) that re-aggregate 30d samples.
+_RECENT_USAGE_TTL_SECONDS = 12.0
+_recent_usage_lock = Lock()
+_recent_usage_cache: dict[tuple[int, ...], tuple[float, dict]] = {}
+
+
+def clear_recent_usage_cache() -> None:
+    """Test helper — drop TTL cache for overview recent-usage aggregates."""
+    with _recent_usage_lock:
+        _recent_usage_cache.clear()
 
 
 def _profile_from_log_name(log_name: str) -> str:
@@ -495,9 +508,23 @@ class TrafficCollectorService:
         )
         return rows_out, summary
 
-    def _recent_usage(self, node_ids: list[int] | None = None) -> dict:
-        now = datetime.utcnow()
+    def _recent_usage(
+        self,
+        node_ids: list[int] | None = None,
+        *,
+        ttl_seconds: float | None = _RECENT_USAGE_TTL_SECONDS,
+    ) -> dict:
         scope_ids = node_ids or [self.node_id]
+        cache_key = tuple(sorted(int(n) for n in scope_ids))
+        ttl = 0.0 if ttl_seconds is None else max(0.0, float(ttl_seconds))
+        now_mono = time.monotonic()
+        if ttl > 0:
+            with _recent_usage_lock:
+                entry = _recent_usage_cache.get(cache_key)
+                if entry is not None and now_mono < entry[0]:
+                    return entry[1]
+
+        now = datetime.utcnow()
         since_1d = now - timedelta(days=1)
         since_7d = now - timedelta(days=7)
         since_30d = now - timedelta(days=30)
@@ -536,6 +563,9 @@ class TrafficCollectorService:
                 "days_7": int(row.days_7 or 0),
                 "days_30": int(row.days_30 or 0),
             }
+        if ttl > 0:
+            with _recent_usage_lock:
+                _recent_usage_cache[cache_key] = (now_mono + ttl, result)
         return result
 
     def reset_traffic(self, scope: str = "all") -> int:

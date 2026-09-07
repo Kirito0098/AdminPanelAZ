@@ -10,17 +10,18 @@ from app.database import SessionLocal
 from app.services.retention import run_retention_purge
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 async def run_retention_loop() -> None:
-    if not settings.retention_enabled:
-        return
-
-    interval = max(3600, int(settings.retention_interval_hours or 24) * 3600)
+    """Purge loop — re-checks RETENTION_ENABLED each tick (settings API can flip it)."""
     while True:
+        settings = get_settings()
+        interval = max(3600, int(settings.retention_interval_hours or 24) * 3600)
         try:
-            await asyncio.to_thread(_purge_once)
+            if not settings.retention_enabled:
+                logger.debug("retention skipped — RETENTION_ENABLED disabled")
+            else:
+                await asyncio.to_thread(_purge_once)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

@@ -66,7 +66,9 @@ def should_start_user_reminders() -> bool:
 
 
 def should_start_retention() -> bool:
-    return get_settings().retention_enabled
+    # Always spawn — loop re-checks RETENTION_ENABLED each tick so settings
+    # API flips apply without process restart.
+    return True
 
 
 def should_start_resource_monitor() -> bool:

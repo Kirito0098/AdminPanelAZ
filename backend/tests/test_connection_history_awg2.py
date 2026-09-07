@@ -28,11 +28,12 @@ def test_collect_samples_awg2_when_enabled(monkeypatch):
     monkeypatch.setattr(ch, "get_adapter_for_node", lambda _n: adapter)
     persisted = {}
 
-    def fake_persist(db, node_id, *, openvpn_count, wireguard_count, amneziawg2_count=0):
+    def fake_persist(db, node_id, *, openvpn_count, wireguard_count, amneziawg2_count=0, commit=True):
         persisted.update(
             openvpn_count=openvpn_count,
             wireguard_count=wireguard_count,
             amneziawg2_count=amneziawg2_count,
+            commit=commit,
         )
         return MagicMock()
 
@@ -49,6 +50,8 @@ def test_collect_samples_awg2_when_enabled(monkeypatch):
     monkeypatch.setattr(ch, "fetch_awg2_peers_for_adapter", lambda _a: [online])
     ch.collect_connection_samples(db)
     assert persisted["amneziawg2_count"] == 1
+    assert persisted["commit"] is False
+    db.commit.assert_called_once()
 
 
 def test_collect_samples_awg2_zero_when_toggle_off(monkeypatch):

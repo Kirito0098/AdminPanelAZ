@@ -58,6 +58,8 @@ def _collect_all_nodes():
                 )
             except Exception as exc:
                 logger.debug("Resource metrics collect failed for node %s: %s", node.name, exc)
-        purge_old_samples(db)
+        # Retention worker purges node_resource_sample when enabled.
+        if not get_settings().retention_enabled:
+            purge_old_samples(db)
     finally:
         db.close()

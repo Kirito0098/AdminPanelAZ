@@ -14,8 +14,6 @@ from app.services.feature_toggles import is_awg2_enabled
 from app.services.node_manager import _is_vpn_node, get_active_node, get_adapter_for_node
 from app.services.wireguard_status import wireguard_peer_is_online
 
-settings = get_settings()
-
 VALID_PERIODS = frozenset({"1h", "6h", "24h"})
 PERIOD_DELTAS = {
     "1h": timedelta(hours=1),
@@ -40,6 +38,7 @@ def persist_connection_sample(
     openvpn_count: int,
     wireguard_count: int,
     amneziawg2_count: int = 0,
+    commit: bool = True,
 ) -> ConnectionCountSample:
     sample = ConnectionCountSample(
         node_id=node_id,
@@ -48,8 +47,9 @@ def persist_connection_sample(
         amneziawg2_count=max(0, int(amneziawg2_count)),
     )
     db.add(sample)
-    db.commit()
-    db.refresh(sample)
+    if commit:
+        db.commit()
+        db.refresh(sample)
     return sample
 
 
@@ -64,7 +64,12 @@ def collect_connection_samples(db: Session) -> int:
         status = node.status.value if hasattr(node.status, "value") else str(node.status)
         if status != NodeStatus.online.value and status != "online":
             persist_connection_sample(
-                db, node.id, openvpn_count=0, wireguard_count=0, amneziawg2_count=0
+                db,
+                node.id,
+                openvpn_count=0,
+                wireguard_count=0,
+                amneziawg2_count=0,
+                commit=False,
             )
             written += 1
             continue
@@ -83,18 +88,26 @@ def collect_connection_samples(db: Session) -> int:
                 openvpn_count=len(ovpn_clients),
                 wireguard_count=wg_online,
                 amneziawg2_count=awg2_online,
+                commit=False,
             )
             written += 1
         except Exception:
             persist_connection_sample(
-                db, node.id, openvpn_count=0, wireguard_count=0, amneziawg2_count=0
+                db,
+                node.id,
+                openvpn_count=0,
+                wireguard_count=0,
+                amneziawg2_count=0,
+                commit=False,
             )
             written += 1
+    if written:
+        db.commit()
     return written
 
 
 def purge_old_connection_samples(db: Session) -> int:
-    cutoff = _utcnow() - timedelta(days=settings.resource_metrics_retention_days)
+    cutoff = _utcnow() - timedelta(days=get_settings().resource_metrics_retention_days)
     deleted = (
         db.query(ConnectionCountSample)
         .filter(ConnectionCountSample.created_at < cutoff)
