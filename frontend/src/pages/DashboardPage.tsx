@@ -23,7 +23,6 @@ import {
   getConfigProfileFiles,
   getConfigQuota,
   getConfigs,
-  getDashboardSummary,
   getAwg2Health,
   getEffectiveVisibleVpnProfiles,
   getMonitoring,
@@ -31,6 +30,7 @@ import {
   importConfigsCsv,
   syncConfigs,
 } from '@/api/client'
+import { buildDashboardSummary } from '@/lib/dashboardSummary'
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
@@ -206,16 +206,24 @@ export default function DashboardPage() {
       setSummaryLoading(true)
       startGlobal()
     }
-    void getDashboardSummary()
-      .then((summaryData) => {
-        setSummary(summaryData)
-      })
-      .catch((err) => {
-        notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки сводки')
-      })
-      .finally(() => {
-        setSummaryLoading(false)
-      })
+
+    // Admin: one live probe via /monitoring/overview (feeds cards + connectionMap).
+    // Config counts come from getConfigs — avoids a second /monitoring/summary probe.
+    const monitoringPromise =
+      user?.role === 'admin'
+        ? getMonitoring('node')
+            .then((data) => {
+              setConnectionMap(
+                buildClientConnectionMap(data.openvpn_clients, data.wireguard_peers),
+              )
+              return data
+            })
+            .catch((err) => {
+              setConnectionMap(null)
+              notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки мониторинга')
+              return null
+            })
+        : Promise.resolve(null)
 
     try {
       const configsData = await getConfigs(false)
@@ -233,19 +241,22 @@ export default function DashboardPage() {
       } else {
         setPolicies({})
       }
-      if (user?.role === 'admin') {
-        void getMonitoring('node')
-          .then((data) =>
-            setConnectionMap(buildClientConnectionMap(data.openvpn_clients, data.wireguard_peers)),
-          )
-          .catch(() => setConnectionMap(null))
-      } else {
+      const monitoring = await monitoringPromise
+      if (user?.role !== 'admin') {
         setConnectionMap(null)
       }
+      setSummary(buildDashboardSummary(configsData, monitoring, activeNode?.name))
       void loadProfileFiles(configsData)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки конфигураций')
+      try {
+        const monitoring = await monitoringPromise
+        setSummary(buildDashboardSummary([], monitoring, activeNode?.name))
+      } catch {
+        setSummary(null)
+      }
     } finally {
+      setSummaryLoading(false)
       if (!opts.silent) {
         setLoading(false)
         doneGlobal()

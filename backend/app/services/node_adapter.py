@@ -21,6 +21,10 @@ from app.services.node_update import apply_node_update, check_agent_updates, res
 from app.services.openvpn_management import openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.server_monitor import get_server_monitor
+from app.services.local_vpn_status_cache import (
+    LocalVpnClientsSnapshot,
+    get_local_vpn_clients_snapshot,
+)
 from app.services.node_remote_cache import get_cached_monitoring_overview, monitoring_overview_cache_key
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 from app.services.awg2_runtime import (
@@ -643,12 +647,25 @@ class LocalNodeAdapter(NodeAdapter):
     def get_service_status(self) -> list[MonitoringService]:
         return self._service.get_service_status()
 
+    def _local_vpn_clients_snapshot(self) -> LocalVpnClientsSnapshot:
+        def fetch() -> LocalVpnClientsSnapshot:
+            clients, source = self._service.parse_openvpn_status()
+            peers = self._service.parse_wireguard_status()
+            return LocalVpnClientsSnapshot(
+                openvpn_clients=tuple(clients),
+                openvpn_data_source=source,
+                wireguard_peers=tuple(peers),
+            )
+
+        return get_local_vpn_clients_snapshot(fetch)
+
     def parse_openvpn_status(self) -> list[OpenVpnClient]:
         clients, _ = self.get_openvpn_status_snapshot()
         return clients
 
     def get_openvpn_status_snapshot(self) -> tuple[list[OpenVpnClient], str]:
-        return self._service.parse_openvpn_status()
+        snap = self._local_vpn_clients_snapshot()
+        return list(snap.openvpn_clients), snap.openvpn_data_source
 
     def get_openvpn_data_source(self) -> str:
         _, data_source = self.get_openvpn_status_snapshot()
@@ -661,7 +678,7 @@ class LocalNodeAdapter(NodeAdapter):
         return openvpn_management_service.get_socket_status()
 
     def parse_wireguard_status(self) -> list[WireGuardPeer]:
-        return self._service.parse_wireguard_status()
+        return list(self._local_vpn_clients_snapshot().wireguard_peers)
 
     def restart_service(self, service_name: str) -> str:
         return self._service.restart_service(service_name)
