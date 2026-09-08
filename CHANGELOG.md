@@ -57,6 +57,8 @@
 - **Адрес сайта и HTTPS** — внутренние вкладки **Публикация** и **Cloudflare** (без отдельного пункта в боковом меню).
 - **nginx webhook** — `include cloudflare-realip.conf` только при `CLOUDFLARE_PROXY_ENABLED=true` (default true).
 - **Тексты прокси ≠ VPN** — 400 больше не содержит внутреннее `get_proxy_adapter`. Пишет по-русски: «это прокси-узел (российский вход), а не VPN-сервер; OpenVPN/WireGuard на нём не запускаются». Обратная ошибка: «это VPN-узел, DESTINATION только у прокси». Нельзя сделать прокси активным VPN: «у него нет OpenVPN/WireGuard». В NOC заголовки: «Ошибка прокси-узла» / «Прокси-узел нездоров» (вместо голого «Ошибка узла»).
+- **Telegram Bot API** — общий `httpx.AsyncClient` для исходящих вызовов `api.telegram.org`; повторные запросы переиспользуют одно соединение (`telegram_api.py`, `call_bot_api_result`).
+- **Telegram бот → Настройки (корень)** — сводка статуса webhook (дата регистрации / «не зарегистрирован»), токена, secret и интерактива.
 
 ### 🐛 Fixed
 
@@ -79,9 +81,11 @@
 - **Тест AWG2 monitoring** — изолирует `AWG2_STATS_DB`.
 - **Telegram OIDC** — ошибки PyJWT на `/oidc/token` дают 401 (ValueError), не 500; `algorithms` зафиксирован на RS256.
 - **Telegram Mini App** — auth не ждёт `feature-modules`; фичи подгружаются в фоне после входа.
+- **Отправка конфига в Telegram** — при сбое `sendDocument` возвращается понятная ошибка (timeout, сеть, ответ Bot API), а не молчаливый fail.
 
 ### 🧪 Tests
 
+- **Telegram Bot API / webhook / OIDC** — regression pytest: `test_telegram_api_client.py`, `test_telegram_api_errors.py`, `test_telegram_bot_context.py`, `test_telegram_settings_dashboard.py`, `test_telegram_config_send_errors.py`, `test_telegram_webhook.py`, `test_telegram_oidc.py` (31 passed).
 - **Telegram OIDC** — `test_telegram_oidc.py`: happy path, wrong aud, expired, malformed, alg=none, JWKS miss.
 - **`scripts/test-install-reboot-check.sh`** — маркер `reboot-required`, список пакетов, новое ядро, контейнер, skip / non-interactive.
 - **Прокси ≠ VPN** — мониторинг не зовёт VPN-адаптер; health 100 при живом `proxy_agent`; 400 без `get_proxy_adapter`; воркеры трафика/лимитов/политик/сертификатов/CIDR/напоминаний и geo-hint пропускают `node_kind=proxy`.

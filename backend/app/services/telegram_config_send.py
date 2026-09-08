@@ -13,7 +13,7 @@ from app.services.node_manager import get_active_adapter
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename
 from app.services.telegram_profile_ui import file_caption
-from app.services.telegram import send_tg_document, send_tg_message
+from app.services.telegram import send_tg_document_result, send_tg_message
 from app.services.vpn_install_instructions import InstallPlatform, build_install_instruction_message
 
 
@@ -76,7 +76,7 @@ def send_config_files_to_chat(
             handle.write(content)
             tmp = handle.name
         try:
-            ok = send_tg_document(
+            ok, send_error = send_tg_document_result(
                 bot_token,
                 str(chat_id),
                 tmp,
@@ -88,7 +88,8 @@ def send_config_files_to_chat(
             os.unlink(tmp)
 
         if not ok:
-            return sent, "Не удалось отправить файл в Telegram" if sent == 0 else None
+            detail = send_error or "Не удалось отправить файл в Telegram"
+            return sent, detail if sent == 0 else None
         sent += 1
         last_file_item = file_item
 

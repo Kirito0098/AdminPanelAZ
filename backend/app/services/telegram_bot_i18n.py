@@ -21,6 +21,22 @@ def webhook_registered(value: bool) -> str:
     return "зарег." if value else "нет"
 
 
+def interactive_on_off(value: bool) -> str:
+    return "вкл" if value else "выкл"
+
+
+def settings_root_webhook_state(webhook_set_at: str) -> str:
+    if webhook_set_at:
+        return f"зарегистрирован ({webhook_set_at})"
+    return "не зарегистрирован"
+
+
+def settings_root_secret_state(webhook_secret_set: bool) -> str:
+    if webhook_secret_set:
+        return "задан (header при наличии проверяется)"
+    return "не задан"
+
+
 def firewall_active(value: bool) -> str:
     return "активен" if value else "нет"
 
@@ -55,6 +71,7 @@ BTN_NODES_ACTIVATE = "⭐ Сделать активным"
 BTN_NODES_BACK = "◀️ К списку узлов"
 
 BTN_SETTINGS_TELEGRAM = "Telegram"
+BTN_SETTINGS_TELEGRAM_WEBHOOK = "📱 Telegram / Webhook"
 BTN_SETTINGS_NOTIFY = "Уведомления"
 BTN_SETTINGS_BACKUPS = "Бэкапы"
 BTN_SETTINGS_MONITOR = "Мониторинг"
@@ -281,7 +298,14 @@ INLINE_EMPTY_MESSAGE = "Конфиги по запросу <code>{query}</code> 
 
 # --- /settings root ---
 
-SETTINGS_ROOT_TITLE = "⚙️ <b>Настройки панели</b>\n\nВыберите раздел:"
+SETTINGS_ROOT_BODY = (
+    "⚙️ <b>Настройки</b>\n\n"
+    "Интерактив: {interactive}\n"
+    "Токен: {token_state}\n"
+    "Webhook: {webhook_state}\n"
+    "Secret: {secret_state}\n\n"
+    "Выберите раздел:"
+)
 SETTINGS_SECTION_STUB = "Раздел «{section}» — в разработке."
 
 SETTINGS_SECTION_LABELS = {

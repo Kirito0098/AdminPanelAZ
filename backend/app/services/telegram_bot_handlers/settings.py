@@ -12,6 +12,7 @@ from app.services.action_log import log_action
 from app.services.telegram_api import edit_message_text, send_message
 from app.services.telegram_bot_handlers.base import (
     BotContext,
+    TelegramBotSettingsSnapshot,
     inline_button,
     inline_keyboard,
     is_admin,
@@ -177,6 +178,7 @@ def _telegram_keyboard(settings) -> dict:
 def _settings_root_keyboard() -> dict:
     return inline_keyboard(
         [
+            [inline_button(i18n.BTN_SETTINGS_TELEGRAM_WEBHOOK, callback_data="st:tg")],
             [
                 inline_button(i18n.BTN_SETTINGS_TELEGRAM, callback_data="st:tg"),
                 inline_button(i18n.BTN_SETTINGS_NOTIFY, callback_data="st:an"),
@@ -194,8 +196,13 @@ def _settings_root_keyboard() -> dict:
     )
 
 
-def _settings_root_text() -> str:
-    return i18n.SETTINGS_ROOT_TITLE
+def _settings_root_text(settings: TelegramBotSettingsSnapshot) -> str:
+    return i18n.SETTINGS_ROOT_BODY.format(
+        interactive=i18n.interactive_on_off(settings.interactive_enabled),
+        token_state=i18n.token_set(settings.token_set),
+        webhook_state=i18n.settings_root_webhook_state(settings.webhook_set_at),
+        secret_state=i18n.settings_root_secret_state(settings.webhook_secret_set),
+    )
 
 
 async def _send_or_edit(
@@ -227,7 +234,7 @@ async def handle_settings_root(ctx: BotContext, *, message_id: int | None = None
     settings_fsm.clear_pending(ctx.telegram_user_id)
     await _send_or_edit(
         ctx,
-        _settings_root_text(),
+        _settings_root_text(ctx.settings),
         markup=_settings_root_keyboard(),
         message_id=message_id,
     )

@@ -7,6 +7,29 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.models import User, UserRole
+from app.services.app_setting_store import _get_setting
+
+
+@dataclass(frozen=True)
+class TelegramBotSettingsSnapshot:
+    bot_token: str
+    interactive_enabled: bool
+    bot_username: str
+    webhook_set_at: str
+    webhook_secret_set: bool
+    token_set: bool
+
+
+def load_telegram_bot_settings_snapshot(db: Session) -> TelegramBotSettingsSnapshot:
+    bot_token = _get_setting(db, "telegram_bot_token")
+    return TelegramBotSettingsSnapshot(
+        bot_token=bot_token,
+        interactive_enabled=_get_setting(db, "telegram_bot_interactive_enabled", "false") == "true",
+        bot_username=_get_setting(db, "telegram_bot_username"),
+        webhook_set_at=_get_setting(db, "telegram_webhook_set_at"),
+        webhook_secret_set=bool(_get_setting(db, "telegram_webhook_secret")),
+        token_set=bool(bot_token),
+    )
 
 
 @dataclass
@@ -16,6 +39,7 @@ class BotContext:
     chat_id: int | str
     telegram_user_id: str
     user: User | None
+    settings: TelegramBotSettingsSnapshot
     mini_app_url: str = ""
 
 

@@ -7,9 +7,13 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.services.app_setting_store import _get_setting
 from app.services.telegram_api import answer_callback_query
-from app.services.telegram_bot_handlers.base import BotContext, resolve_user
+from app.services.telegram_bot_handlers.base import (
+    BotContext,
+    TelegramBotSettingsSnapshot,
+    load_telegram_bot_settings_snapshot,
+    resolve_user,
+)
 from app.services.telegram_bot_handlers.configs import (
     handle_config,
     handle_configs,
@@ -44,10 +48,6 @@ logger = logging.getLogger(__name__)
 _PUBLIC_COMMANDS = frozenset({"/start", "/help", "/link"})
 
 
-def _is_interactive_enabled(db: Session) -> bool:
-    return _get_setting(db, "telegram_bot_interactive_enabled", "false") == "true"
-
-
 def _parse_command(text: str) -> tuple[str, str]:
     raw = (text or "").strip()
     if not raw.startswith("/"):
@@ -58,15 +58,23 @@ def _parse_command(text: str) -> tuple[str, str]:
     return command, args
 
 
-def _build_context(db: Session, *, chat_id: int | str, telegram_user_id: str, mini_app_url: str) -> BotContext:
-    bot_token = _get_setting(db, "telegram_bot_token")
+def _build_context(
+    db: Session,
+    *,
+    chat_id: int | str,
+    telegram_user_id: str,
+    mini_app_url: str,
+    settings: TelegramBotSettingsSnapshot | None = None,
+) -> BotContext:
+    snap = settings or load_telegram_bot_settings_snapshot(db)
     user = resolve_user(db, telegram_user_id)
     return BotContext(
         db=db,
-        bot_token=bot_token,
+        bot_token=snap.bot_token,
         chat_id=chat_id,
         telegram_user_id=telegram_user_id,
         user=user,
+        settings=snap,
         mini_app_url=mini_app_url,
     )
 
@@ -186,26 +194,23 @@ async def _dispatch_callback(ctx: BotContext, data: str, *, message_id: int | No
 
 class TelegramBotService:
     async def handle_update(self, db: Session, update: dict[str, Any], *, mini_app_url: str) -> None:
-        if not _is_interactive_enabled(db):
-            return
-
-        bot_token = _get_setting(db, "telegram_bot_token")
-        if not bot_token:
+        snap = load_telegram_bot_settings_snapshot(db)
+        if not snap.interactive_enabled or not snap.bot_token:
             return
 
         callback = update.get("callback_query")
         if callback:
-            await self._handle_callback(db, callback, mini_app_url=mini_app_url)
+            await self._handle_callback(db, callback, mini_app_url=mini_app_url, settings=snap)
             return
 
         inline_query = update.get("inline_query")
         if inline_query:
-            await self._handle_inline_query(db, inline_query, mini_app_url=mini_app_url)
+            await self._handle_inline_query(db, inline_query, mini_app_url=mini_app_url, settings=snap)
             return
 
         chosen = update.get("chosen_inline_result")
         if chosen:
-            await self._handle_chosen_inline_result(db, chosen, mini_app_url=mini_app_url)
+            await self._handle_chosen_inline_result(db, chosen, mini_app_url=mini_app_url, settings=snap)
             return
 
         message = update.get("message") or update.get("edited_message")
@@ -227,8 +232,8 @@ class TelegramBotService:
             chat_id=chat_id,
             telegram_user_id=telegram_user_id,
             mini_app_url=mini_app_url,
+            settings=snap,
         )
-
         if not command:
             if text.strip() and await handle_menu_text(ctx, text):
                 return
@@ -240,8 +245,15 @@ class TelegramBotService:
 
         await _dispatch_command(ctx, command, args)
 
-    async def _handle_callback(self, db: Session, callback: dict[str, Any], *, mini_app_url: str) -> None:
-        bot_token = _get_setting(db, "telegram_bot_token")
+    async def _handle_callback(
+        self,
+        db: Session,
+        callback: dict[str, Any],
+        *,
+        mini_app_url: str,
+        settings: TelegramBotSettingsSnapshot | None = None,
+    ) -> None:
+        snap = settings or load_telegram_bot_settings_snapshot(db)
         callback_id = str(callback.get("id", ""))
         data = str(callback.get("data") or "")
         from_user = callback.get("from") or {}
@@ -252,7 +264,7 @@ class TelegramBotService:
         message_id = message.get("message_id")
 
         if callback_id:
-            await answer_callback_query(bot_token, callback_id)
+            await answer_callback_query(snap.bot_token, callback_id)
 
         if not data or not telegram_user_id:
             return
@@ -262,6 +274,7 @@ class TelegramBotService:
             chat_id=chat_id,
             telegram_user_id=telegram_user_id,
             mini_app_url=mini_app_url,
+            settings=snap,
         )
         if ctx.user is None and not (data == "help" or data.startswith("nav:help")):
             from app.services.telegram_api import send_message
@@ -278,6 +291,7 @@ class TelegramBotService:
         inline_query: dict[str, Any],
         *,
         mini_app_url: str,
+        settings: TelegramBotSettingsSnapshot | None = None,
     ) -> None:
         from_user = inline_query.get("from") or {}
         telegram_user_id = str(from_user.get("id", ""))
@@ -289,6 +303,7 @@ class TelegramBotService:
             chat_id=telegram_user_id,
             telegram_user_id=telegram_user_id,
             mini_app_url=mini_app_url,
+            settings=settings,
         )
         await handle_inline_query(ctx, inline_query)
 
@@ -298,6 +313,7 @@ class TelegramBotService:
         chosen: dict[str, Any],
         *,
         mini_app_url: str,
+        settings: TelegramBotSettingsSnapshot | None = None,
     ) -> None:
         from_user = chosen.get("from") or {}
         telegram_user_id = str(from_user.get("id", ""))
@@ -309,6 +325,7 @@ class TelegramBotService:
             chat_id=telegram_user_id,
             telegram_user_id=telegram_user_id,
             mini_app_url=mini_app_url,
+            settings=settings,
         )
         if ctx.user is None:
             return

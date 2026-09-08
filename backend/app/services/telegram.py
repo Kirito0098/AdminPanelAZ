@@ -2,6 +2,7 @@ import json
 import logging
 import threading
 import uuid
+import urllib.error
 import urllib.request
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,27 @@ def _outbound_enabled() -> bool:
         return get_feature_service().is_enabled("telegram")
     except Exception:
         return False
+
+
+def _telegram_http_error_detail(exc: BaseException) -> str:
+    """Prefer Telegram JSON ``description`` from HTTPError bodies when present."""
+    if isinstance(exc, urllib.error.HTTPError):
+        body = ""
+        try:
+            raw = exc.read()
+            body = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw or "")
+        except Exception:
+            body = ""
+        if body:
+            try:
+                data = json.loads(body)
+                desc = str(data.get("description") or "").strip()
+                if desc:
+                    return desc
+            except Exception:
+                pass
+            return body.strip() or str(exc)
+    return str(exc)
 
 
 def send_tg_message(bot_token: str, chat_id: str, text: str, *, run_async: bool = True) -> bool:
@@ -43,7 +65,7 @@ def send_tg_message(bot_token: str, chat_id: str, text: str, *, run_async: bool 
     return _send()
 
 
-def send_tg_document(
+def send_tg_document_result(
     bot_token: str,
     chat_id: str,
     file_path: str,
@@ -53,12 +75,12 @@ def send_tg_document(
     content_type: str = "application/gzip",
     run_async: bool = True,
     timeout_seconds: int = 120,
-) -> bool:
+) -> tuple[bool, str | None]:
     if not _outbound_enabled():
-        return False
+        return False, None
     upload_timeout = max(15, int(timeout_seconds or 120))
 
-    def _send() -> bool:
+    def _send() -> tuple[bool, str | None]:
         try:
             with open(file_path, "rb") as fh:
                 file_bytes = fh.read()
@@ -98,15 +120,42 @@ def send_tg_document(
             )
             with urllib.request.urlopen(req, timeout=upload_timeout):
                 pass
-            return True
+            return True, None
         except Exception as exc:
             logger.warning("TG document send failed chat_id=%s file=%s: %s", chat_id, file_path, exc)
-            return False
+            from app.services.telegram_api import format_telegram_connect_error
+
+            detail = _telegram_http_error_detail(exc)
+            return False, format_telegram_connect_error(detail, operation="отправить документ")
 
     if run_async:
         threading.Thread(target=_send, daemon=True).start()
-        return True
+        return True, None
     return _send()
+
+
+def send_tg_document(
+    bot_token: str,
+    chat_id: str,
+    file_path: str,
+    caption: str = "",
+    *,
+    filename: str | None = None,
+    content_type: str = "application/gzip",
+    run_async: bool = True,
+    timeout_seconds: int = 120,
+) -> bool:
+    ok, _ = send_tg_document_result(
+        bot_token,
+        chat_id,
+        file_path,
+        caption,
+        filename=filename,
+        content_type=content_type,
+        run_async=run_async,
+        timeout_seconds=timeout_seconds,
+    )
+    return ok
 
 
 def send_tg_photo(
