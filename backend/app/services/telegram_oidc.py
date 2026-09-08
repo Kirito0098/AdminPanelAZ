@@ -89,19 +89,23 @@ def _get_jwks_client() -> PyJWKClient:
 
 
 def verify_id_token(id_token: str, *, client_id: str) -> dict[str, Any]:
-    header = jwt.get_unverified_header(id_token)
-    alg = header.get("alg", "RS256")
+    """Validate Telegram OIDC id_token; raise ValueError on any verify failure.
+
+    Always pins ``algorithms=["RS256"]`` — never trusts the unverified header ``alg``.
+    """
     try:
         signing_key = _get_jwks_client().get_signing_key_from_jwt(id_token)
+        return jwt.decode(
+            id_token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=client_id,
+            issuer=OIDC_ISSUER,
+        )
     except jwt.PyJWKClientError as exc:
         raise ValueError("Ключ подписи Telegram OIDC не найден") from exc
-    return jwt.decode(
-        id_token,
-        signing_key.key,
-        algorithms=[alg],
-        audience=client_id,
-        issuer=OIDC_ISSUER,
-    )
+    except jwt.PyJWTError as exc:
+        raise ValueError("Недействительный Telegram OIDC id_token") from exc
 
 
 def exchange_authorization_code(

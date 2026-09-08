@@ -67,9 +67,10 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
       // would call /auth again below — duplicate "TG ID не привязан" notifies.
       if (getTgToken()) {
         try {
+          // Authenticate as soon as settings succeed — features must not block Mini App.
           await loadSettings({ retry: false })
-          await refreshFeatures()
           setStatus('authenticated')
+          void refreshFeatures()
           return
         } catch (err) {
           if (!(err instanceof ApiError && err.status === 401)) {
@@ -81,8 +82,8 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
 
       await refreshTgSessionFromInitData(initData)
       await loadSettings({ retry: false })
-      await refreshFeatures()
       setStatus('authenticated')
+      void refreshFeatures()
     } catch (err) {
       clearTgToken()
       const message = err instanceof ApiError ? err.message : 'Ошибка авторизации'

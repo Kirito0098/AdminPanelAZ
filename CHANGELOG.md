@@ -77,9 +77,12 @@
 - **Logs** — при смене узла подгружаются events/sockets.
 - **ErrorBoundary Retry remount; NodeContext refresh** — списка узлов при возврате на вкладку.
 - **Тест AWG2 monitoring** — изолирует `AWG2_STATS_DB`.
+- **Telegram OIDC** — ошибки PyJWT на `/oidc/token` дают 401 (ValueError), не 500; `algorithms` зафиксирован на RS256.
+- **Telegram Mini App** — auth не ждёт `feature-modules`; фичи подгружаются в фоне после входа.
 
 ### 🧪 Tests
 
+- **Telegram OIDC** — `test_telegram_oidc.py`: happy path, wrong aud, expired, malformed, alg=none, JWKS miss.
 - **`scripts/test-install-reboot-check.sh`** — маркер `reboot-required`, список пакетов, новое ядро, контейнер, skip / non-interactive.
 - **Прокси ≠ VPN** — мониторинг не зовёт VPN-адаптер; health 100 при живом `proxy_agent`; 400 без `get_proxy_adapter`; воркеры трафика/лимитов/политик/сертификатов/CIDR/напоминаний и geo-hint пропускают `node_kind=proxy`.
 - **Имя файла при скачивании** — `test_file_download.py`: `application/octet-stream` и RFC 5987 `filename*`.
