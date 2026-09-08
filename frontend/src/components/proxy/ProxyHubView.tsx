@@ -13,6 +13,7 @@ import { ApiError } from '@/api/client'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import { NodeStatusBadge } from '@/components/NodeSelector'
 import ProxyNodePanel, { AZ_PROXY_SH_DOCS_URL } from '@/components/nodes/ProxyNodePanel'
+import { isProxyNode } from '@/components/nodes/nodeKind'
 import ProxyLinkBadge from '@/components/proxy/ProxyLinkBadge'
 import RemoteHostsCard from '@/components/proxy/RemoteHostsCard'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
@@ -24,16 +25,11 @@ import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
-import type { Node } from '@/types'
 
 const PROXY_NODES_DOCS_URL =
   'https://github.com/Kirito0098/AdminPanelAZ/blob/main/docs/proxy-nodes.md'
 
 const ANTIZAPRET_REMOTES_HASH = encodeURIComponent('section-Адреса подключения')
-
-function isProxyNode(node: Node): boolean {
-  return (node.node_kind || 'vpn') === 'proxy'
-}
 
 const QUICK_LINKS = [
   {

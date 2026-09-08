@@ -1,4 +1,5 @@
 import { getWebSessionId } from '@/lib/webSession'
+import { clearAccessToken } from '@/lib/accessToken'
 import {
   API_BASE,
   apiFetch,
@@ -188,7 +189,7 @@ export async function fetchQrBlob(
     if (newToken) {
       return fetchQrBlob(configId, path, false)
     }
-    localStorage.removeItem('token')
+    clearAccessToken()
   }
   if (!response.ok) {
     throw await parseApiError(response, 'Ошибка генерации QR')

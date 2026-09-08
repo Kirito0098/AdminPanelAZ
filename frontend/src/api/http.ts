@@ -1,5 +1,6 @@
 import { apiBase as API_BASE } from '@/lib/panelBase'
 import { parseHttpErrorBody } from '@/lib/httpErrorMessage'
+import { clearAccessToken, getAccessToken, setAccessToken } from '@/lib/accessToken'
 import { getActiveTimeZone } from '@/lib/datetime'
 import { getWebSessionId } from '@/lib/webSession'
 
@@ -13,8 +14,9 @@ export class ApiError extends Error {
   }
 }
 
+/** @deprecated Prefer getAccessToken — kept as alias for existing API modules. */
 export function getToken(): string | null {
-  return localStorage.getItem('token')
+  return getAccessToken()
 }
 
 let refreshPromise: Promise<string | null> | null = null
@@ -26,10 +28,13 @@ export async function refreshAccessToken(): Promise<string | null> {
       credentials: 'include',
     })
       .then(async (response) => {
-        if (!response.ok) return null
+        if (!response.ok) {
+          clearAccessToken()
+          return null
+        }
         const data = await response.json()
         const token = data.access_token as string
-        localStorage.setItem('token', token)
+        setAccessToken(token)
         return token
       })
       .finally(() => {
@@ -53,7 +58,7 @@ export async function apiFetchAtBase<T>(
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
-  const token = getToken()
+  const token = getAccessToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
   const sessionId = getWebSessionId()
   if (sessionId) headers.set('X-Web-Session-Id', sessionId)
@@ -77,7 +82,7 @@ export async function apiFetchAtBase<T>(
     if (newToken) {
       return apiFetchAtBase<T>(base, path, options, false)
     }
-    localStorage.removeItem('token')
+    clearAccessToken()
   }
   if (!response.ok) {
     const body = await response.text()

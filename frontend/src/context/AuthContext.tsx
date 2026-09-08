@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/api/client'
+import { refreshAccessToken } from '@/api/http'
 import { useSessionHeartbeat } from '@/hooks/useSessionHeartbeat'
+import { clearAccessToken, getAccessToken, migrateLegacyAccessToken, setAccessToken } from '@/lib/accessToken'
 import { setActiveTimeZone } from '@/lib/datetime'
 import { applyThemeClass, getStoredTheme } from '@/lib/theme'
 import { storeWebSessionId } from '@/lib/webSession'
@@ -31,7 +33,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const refreshUser = useCallback(async () => {
-    const token = localStorage.getItem('token')
+    migrateLegacyAccessToken()
+    let token = getAccessToken()
+    if (!token) {
+      token = await refreshAccessToken()
+    }
     if (!token) {
       setUser(null)
       setLoading(false)
@@ -43,7 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       applyTheme(me.theme || getStoredTheme())
       setActiveTimeZone(me.timezone || '')
     } catch {
-      localStorage.removeItem('token')
+      clearAccessToken()
       setUser(null)
     } finally {
       setLoading(false)
@@ -60,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!response.ok) return
       const data = await response.json()
       if (data.access_token) {
-        localStorage.setItem('token', data.access_token)
+        setAccessToken(data.access_token)
       }
     } catch {
       /* ignore background refresh errors */
@@ -69,7 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     applyTheme(getStoredTheme())
-    refreshUser()
+    void refreshUser()
   }, [applyTheme, refreshUser])
 
   useEffect(() => {
@@ -94,7 +100,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     api.logoutApi().catch(() => {})
-    localStorage.removeItem('token')
+    clearAccessToken()
+    try {
+      localStorage.removeItem('token')
+    } catch {
+      /* ignore */
+    }
     setUser(null)
   }, [])
 
@@ -103,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(async (username: string, password: string) => {
     const result = await api.login(username, password)
     if ('access_token' in result && result.access_token) {
-      localStorage.setItem('token', result.access_token)
+      setAccessToken(result.access_token)
       if (result.web_session_id) {
         storeWebSessionId(result.web_session_id)
       }
@@ -114,7 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const setToken = useCallback(
     async (token: string) => {
-      localStorage.setItem('token', token)
+      setAccessToken(token)
       await refreshUser()
     },
     [refreshUser],

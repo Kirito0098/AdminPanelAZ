@@ -1,4 +1,5 @@
 import { getWebSessionId } from '@/lib/webSession'
+import { clearAccessToken } from '@/lib/accessToken'
 import {
   API_BASE,
   apiFetch,
@@ -105,7 +106,7 @@ export async function downloadAwg2Backup(retry = true): Promise<Response> {
     if (newToken) {
       return downloadAwg2Backup(false)
     }
-    localStorage.removeItem('token')
+    clearAccessToken()
   }
   if (!response.ok) {
     throw await parseApiError(response, 'Ошибка скачивания бэкапа AZ-AWG2')

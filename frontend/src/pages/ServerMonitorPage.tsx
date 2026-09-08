@@ -49,6 +49,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { formatDateTime } from '@/lib/datetime'
+import { getAccessToken } from '@/lib/accessToken'
 import { cn } from '@/lib/utils'
 import type { BandwidthChart, ResourceHistory, ServerMetrics } from '@/types'
 
@@ -327,7 +328,7 @@ export default function ServerMonitorPage() {
 
   useEffect(() => {
     if (user?.role !== 'admin' || !iface) return
-    const token = localStorage.getItem('token')
+    const token = getAccessToken()
     if (!token) return
 
     let ws: WebSocket | null = null
