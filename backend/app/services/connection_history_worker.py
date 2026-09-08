@@ -20,15 +20,11 @@ def _is_resource_monitor_enabled() -> bool:
 
 
 async def run_connection_history_loop():
-    settings = get_settings()
-    if not settings.resource_metrics_enabled:
-        return
-
     while True:
         settings = get_settings()
         interval = max(5, int(settings.resource_metrics_interval_seconds or 60))
         try:
-            if not _is_resource_monitor_enabled():
+            if not settings.resource_metrics_enabled or not _is_resource_monitor_enabled():
                 logger.debug("connection_history skipped — resource_monitor disabled")
             else:
                 await asyncio.to_thread(_collect_once)

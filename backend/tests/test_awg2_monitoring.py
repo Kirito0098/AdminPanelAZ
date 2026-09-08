@@ -112,6 +112,7 @@ def test_monitoring_parses_overview_subprocess(tmp_path: Path):
         patch.object(awg2, "AWG2_CLIENT_BIN", bin_path),
         patch.object(awg2, "AWG2_OVERLAY_DIR", overlay),
         patch.object(awg2, "AWG2_AMNEZIA_DIR", amnezia),
+        patch.object(awg2, "AWG2_STATS_DB", overlay / "stats.db"),
         patch.object(awg2, "AWG2_STATS_SCRIPT", stats_py),
         patch.object(awg2.Awg2Service, "_awg_show_dump", side_effect=lambda iface: dump_calls.append(iface) or ""),
         patch("app.services.awg2.subprocess.run", side_effect=fake_run),

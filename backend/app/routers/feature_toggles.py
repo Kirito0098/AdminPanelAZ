@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
+from app.config import get_settings
 from app.database import get_db
 from app.models import User
 from app.services.feature_guards import get_feature_service
@@ -47,6 +48,7 @@ def update_feature_toggles(payload: FeatureToggleUpdate, _: User = Depends(requi
 
         shutdown_telegram_integration(db)
     db.commit()
+    get_settings.cache_clear()
     return result
 
 
@@ -68,6 +70,7 @@ def apply_resource_profile(profile: str, _: User = Depends(require_admin), db: S
 
         shutdown_telegram_integration(db)
         db.commit()
+    get_settings.cache_clear()
     return result
 
 

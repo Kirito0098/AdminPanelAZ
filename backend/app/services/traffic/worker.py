@@ -23,15 +23,11 @@ def _is_traffic_sync_enabled() -> bool:
 
 
 async def run_traffic_collector_loop():
-    settings = get_settings()
-    if not settings.traffic_sync_enabled:
-        return
-
     while True:
         settings = get_settings()
         interval = max(5, int(settings.traffic_sync_interval_seconds or 60))
         try:
-            if not _is_traffic_sync_enabled():
+            if not settings.traffic_sync_enabled or not _is_traffic_sync_enabled():
                 logger.debug("traffic_collector skipped — traffic_sync disabled")
             else:
                 await asyncio.to_thread(_collect_all_nodes)

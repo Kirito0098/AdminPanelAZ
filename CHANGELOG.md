@@ -71,6 +71,12 @@
 - **NOC ложные аварии на прокси-узлах** — «ошибка 400» и health 60 при живом сервере. Панель опрашивала прокси как VPN. Сводка узлов для `node_kind=proxy` ходит в `proxy_agent` (`/health`, DESTINATION), а не в OpenVPN/WireGuard.
 - **Остальные VPN-воркеры не трогают прокси** — лимиты трафика, политики WG, сертификаты OpenVPN, напоминания, geo-подсказка сервера, выкладка CIDR на «все online», копирование файлов AntiZapret, rolling update, снимок трафика, истечение AmneziaWG2. Иначе те же ложные 400 могли появиться в логах и задачах, не только в NOC.
 - **Скачивание профилей как `.txt`** — Safari / iOS / часть Chromium сохраняли `.ovpn` и `.conf` как `.txt`, потому что ответ был `text/plain` + `nosniff`. Теперь `application/octet-stream` и RFC 5987 `filename*`; CORS отдаёт `Content-Disposition`.
+- **Telegram webhook** — пустой `X-Telegram-Bot-Api-Secret-Token` снова допускается (legacy); неверный header по-прежнему 403.
+- **Workers traffic/connection_history** — always-spawn + runtime gate; `get_settings.cache_clear()` после feature profile/toggles.
+- **Server Monitor WS** — свежий access JWT на reconnect.
+- **Logs** — при смене узла подгружаются events/sockets.
+- **ErrorBoundary Retry remount; NodeContext refresh** — списка узлов при возврате на вкладку.
+- **Тест AWG2 monitoring** — изолирует `AWG2_STATS_DB`.
 
 ### 🧪 Tests
 

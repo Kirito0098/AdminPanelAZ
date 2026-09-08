@@ -69,12 +69,10 @@ async def telegram_webhook(
 
     expected = _get_setting(db, "telegram_webhook_secret")
     header_secret = (request.headers.get(TELEGRAM_SECRET_TOKEN_HEADER) or "").strip()
-    # URL path secret (legacy) + header secret_token from setWebhook (Telegram docs).
-    if (
-        not expected
-        or not secrets_match(secret, expected)
-        or not secrets_match(header_secret, expected)
-    ):
+    if not expected or not secrets_match(secret, expected):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    # Header required only when Telegram/proxy sends it (setWebhook secret_token).
+    if header_secret and not secrets_match(header_secret, expected):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     client_ip = get_telegram_webhook_client_ip(request)

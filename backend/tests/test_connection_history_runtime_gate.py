@@ -98,6 +98,54 @@ def test_collect_once_skips_purge_when_retention_enabled(monkeypatch):
     assert purged["n"] == 0
 
 
+def test_connection_history_loop_runs_even_when_settings_disabled_at_start(monkeypatch):
+    monkeypatch.setattr(worker, "_is_resource_monitor_enabled", lambda: False)
+    called = {"n": 0}
+
+    def boom():
+        called["n"] += 1
+        raise AssertionError("collect must not run while resource_monitor is disabled")
+
+    monkeypatch.setattr(worker, "_collect_once", boom)
+
+    class _Off:
+        resource_metrics_enabled = False
+        resource_metrics_interval_seconds = 0
+        retention_enabled = True
+
+    monkeypatch.setattr(worker, "get_settings", lambda: _Off())
+
+    sleeps = 0
+
+    async def fake_sleep(_seconds):
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps >= 2:
+            raise asyncio.CancelledError()
+
+    async def run():
+        with patch.object(worker.asyncio, "sleep", side_effect=fake_sleep):
+            await worker.run_connection_history_loop()
+
+    try:
+        asyncio.run(run())
+    except asyncio.CancelledError:
+        pass
+
+    assert called["n"] == 0
+    assert sleeps >= 2
+
+
+def test_should_start_connection_history_always_true(monkeypatch):
+    from app.services import worker_lifecycle as lifecycle
+
+    class _Off:
+        resource_metrics_enabled = False
+
+    monkeypatch.setattr(lifecycle, "get_settings", lambda: _Off())
+    assert lifecycle.should_start_connection_history() is True
+
+
 def test_collect_once_purges_when_retention_disabled(monkeypatch):
     purged = {"n": 0}
     monkeypatch.setattr(worker, "collect_connection_samples", lambda _db: None)

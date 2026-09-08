@@ -7,9 +7,13 @@ from app.services.feature_guards import get_feature_service
 
 
 def should_start_traffic_collector() -> bool:
-    # Settings gate only — feature toggle is re-checked each collect loop tick
-    # so TRAFFIC_SYNC / traffic_sync can flip without process restart.
-    return get_settings().traffic_sync_enabled
+    # Always spawn — loop re-checks traffic_sync_enabled + TRAFFIC_SYNC each tick.
+    return True
+
+
+def should_start_connection_history() -> bool:
+    # Always spawn — loop re-checks resource_metrics_enabled + resource_monitor each tick.
+    return True
 
 
 def should_start_cert_sync() -> bool:

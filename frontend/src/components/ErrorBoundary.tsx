@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { Component, Fragment, type ErrorInfo, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 
 type Props = {
@@ -9,12 +9,13 @@ type Props = {
 
 type State = {
   error: Error | null
+  resetKey: number
 }
 
 export default class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null }
+  state: State = { error: null, resetKey: 0 }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { error }
   }
 
@@ -28,12 +29,12 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   private handleRetry = () => {
-    this.setState({ error: null })
+    this.setState((s) => ({ error: null, resetKey: s.resetKey + 1 }))
   }
 
   render() {
     if (!this.state.error) {
-      return this.props.children
+      return <Fragment key={this.state.resetKey}>{this.props.children}</Fragment>
     }
 
     const section = this.props.label ? ` (${this.props.label})` : ''

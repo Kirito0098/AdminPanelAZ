@@ -119,6 +119,10 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
       enabled: Boolean(user),
       onBecomeVisible: () => {
         void refresh()
+        if (user?.role === 'admin') {
+          void refreshNodes().catch(() => {})
+          void refreshSyncGroups()
+        }
       },
     },
   )

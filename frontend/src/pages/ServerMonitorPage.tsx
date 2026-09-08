@@ -328,8 +328,6 @@ export default function ServerMonitorPage() {
 
   useEffect(() => {
     if (user?.role !== 'admin' || !iface) return
-    const token = getAccessToken()
-    if (!token) return
 
     let ws: WebSocket | null = null
 
@@ -342,7 +340,9 @@ export default function ServerMonitorPage() {
 
     const connect = () => {
       disconnect()
-      const wsUrl = `${API_BASE.replace('/api', '')}/api/server-monitor/ws?token=${token}&iface=${encodeURIComponent(iface)}`.replace(
+      const fresh = getAccessToken()
+      if (!fresh) return
+      const wsUrl = `${API_BASE.replace('/api', '')}/api/server-monitor/ws?token=${fresh}&iface=${encodeURIComponent(iface)}`.replace(
         'http',
         'ws',
       )

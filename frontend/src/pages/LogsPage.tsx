@@ -646,11 +646,11 @@ export default function LogsPage() {
       const fetchConnections =
         logsDashboardEnabled && (initial || manual || tab === 'connections')
       const fetchEvents =
-        logsDashboardEnabled && (manual || tab === 'openvpn-events')
+        logsDashboardEnabled && (initial || manual || tab === 'openvpn-events')
       const fetchSockets =
         user?.role === 'admin' &&
         logsDashboardEnabled &&
-        (manual || tab === 'openvpn-sockets')
+        (initial || manual || tab === 'openvpn-sockets')
       const fetchQr =
         user?.role === 'admin' &&
         qrDownloadsEnabled &&
