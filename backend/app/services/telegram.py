@@ -1,9 +1,11 @@
 import json
 import logging
 import threading
-import uuid
-import urllib.error
 import urllib.request
+
+import httpx
+
+from app.services import telegram_api
 
 logger = logging.getLogger(__name__)
 
@@ -15,27 +17,6 @@ def _outbound_enabled() -> bool:
         return get_feature_service().is_enabled("telegram")
     except Exception:
         return False
-
-
-def _telegram_http_error_detail(exc: BaseException) -> str:
-    """Prefer Telegram JSON ``description`` from HTTPError bodies when present."""
-    if isinstance(exc, urllib.error.HTTPError):
-        body = ""
-        try:
-            raw = exc.read()
-            body = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw or "")
-        except Exception:
-            body = ""
-        if body:
-            try:
-                data = json.loads(body)
-                desc = str(data.get("description") or "").strip()
-                if desc:
-                    return desc
-            except Exception:
-                pass
-            return body.strip() or str(exc)
-    return str(exc)
 
 
 def send_tg_message(bot_token: str, chat_id: str, text: str, *, run_async: bool = True) -> bool:
@@ -82,51 +63,35 @@ def send_tg_document_result(
 
     def _send() -> tuple[bool, str | None]:
         try:
-            with open(file_path, "rb") as fh:
-                file_bytes = fh.read()
-
-            boundary = f"----adminpanelaz-{uuid.uuid4().hex}"
-            body = bytearray()
-
-            def _add_field(name: str, value: str) -> None:
-                body.extend(f"--{boundary}\r\n".encode("utf-8"))
-                body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
-                body.extend((value or "").encode("utf-8"))
-                body.extend(b"\r\n")
-
-            _add_field("chat_id", str(chat_id))
+            data = {"chat_id": str(chat_id)}
             if caption:
-                _add_field("caption", caption)
-                _add_field("parse_mode", "HTML")
-
+                data["caption"] = caption
+                data["parse_mode"] = "HTML"
             upload_name = (filename or "").strip() or (file_path or "").strip().split("/")[-1] or "backup.tar.gz"
-            body.extend(f"--{boundary}\r\n".encode("utf-8"))
             mime = (content_type or "application/octet-stream").strip()
-            body.extend(
-                (
-                    f'Content-Disposition: form-data; name="document"; filename="{upload_name}"\r\n'
-                    f"Content-Type: {mime}\r\n\r\n"
-                ).encode("utf-8")
-            )
-            body.extend(file_bytes)
-            body.extend(b"\r\n")
-            body.extend(f"--{boundary}--\r\n".encode("utf-8"))
-
             url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
-            req = urllib.request.Request(
-                url,
-                data=bytes(body),
-                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-            )
-            with urllib.request.urlopen(req, timeout=upload_timeout):
-                pass
+            client = telegram_api._get_bot_api_sync_client()
+            with open(file_path, "rb") as fh:
+                response = client.post(
+                    url,
+                    data=data,
+                    files={"document": (upload_name, fh, mime)},
+                    timeout=httpx.Timeout(float(upload_timeout), connect=5.0),
+                )
+            payload = response.json()
+            if not payload.get("ok"):
+                detail = str(payload.get("description") or "sendDocument failed")
+                return False, telegram_api.format_telegram_connect_error(
+                    detail,
+                    operation="отправить документ",
+                )
             return True, None
         except Exception as exc:
             logger.warning("TG document send failed chat_id=%s file=%s: %s", chat_id, file_path, exc)
-            from app.services.telegram_api import format_telegram_connect_error
-
-            detail = _telegram_http_error_detail(exc)
-            return False, format_telegram_connect_error(detail, operation="отправить документ")
+            return False, telegram_api.format_telegram_connect_error(
+                str(exc),
+                operation="отправить документ",
+            )
 
     if run_async:
         threading.Thread(target=_send, daemon=True).start()
@@ -174,43 +139,29 @@ def send_tg_photo(
 
     def _send() -> bool:
         try:
-            with open(file_path, "rb") as fh:
-                file_bytes = fh.read()
-
-            boundary = f"----adminpanelaz-{uuid.uuid4().hex}"
-            body = bytearray()
-
-            def _add_field(name: str, value: str) -> None:
-                body.extend(f"--{boundary}\r\n".encode("utf-8"))
-                body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
-                body.extend((value or "").encode("utf-8"))
-                body.extend(b"\r\n")
-
-            _add_field("chat_id", str(chat_id))
+            data = {"chat_id": str(chat_id)}
             if caption:
-                _add_field("caption", caption)
-                _add_field("parse_mode", "HTML")
-
+                data["caption"] = caption
+                data["parse_mode"] = "HTML"
             upload_name = (filename or "").strip() or (file_path or "").strip().split("/")[-1] or "report.png"
-            body.extend(f"--{boundary}\r\n".encode("utf-8"))
-            body.extend(
-                (
-                    f'Content-Disposition: form-data; name="photo"; filename="{upload_name}"\r\n'
-                    f"Content-Type: image/png\r\n\r\n"
-                ).encode("utf-8")
-            )
-            body.extend(file_bytes)
-            body.extend(b"\r\n")
-            body.extend(f"--{boundary}--\r\n".encode("utf-8"))
-
             url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
-            req = urllib.request.Request(
-                url,
-                data=bytes(body),
-                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-            )
-            with urllib.request.urlopen(req, timeout=upload_timeout):
-                pass
+            client = telegram_api._get_bot_api_sync_client()
+            with open(file_path, "rb") as fh:
+                response = client.post(
+                    url,
+                    data=data,
+                    files={"photo": (upload_name, fh, "image/png")},
+                    timeout=httpx.Timeout(float(upload_timeout), connect=5.0),
+                )
+            payload = response.json()
+            if not payload.get("ok"):
+                logger.warning(
+                    "TG photo send failed chat_id=%s file=%s: %s",
+                    chat_id,
+                    file_path,
+                    payload.get("description") or "sendPhoto failed",
+                )
+                return False
             return True
         except Exception as exc:
             logger.warning("TG photo send failed chat_id=%s file=%s: %s", chat_id, file_path, exc)

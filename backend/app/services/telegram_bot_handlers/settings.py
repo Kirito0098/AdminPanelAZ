@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from html import escape
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.schemas import TelegramSettingsUpdate
 from app.services.action_log import log_action
-from app.services.telegram_api import edit_message_text, send_message
+from app.services.telegram_api import (
+    edit_message_text,
+    get_webhook_info_result,
+    send_message,
+)
 from app.services.telegram_bot_handlers.base import (
     BotContext,
     TelegramBotSettingsSnapshot,
@@ -22,6 +29,7 @@ from app.services.telegram_bot_handlers import settings_fsm
 from app.services import telegram_bot_i18n as i18n
 
 _SECTION_LABELS: dict[str, str] = i18n.SETTINGS_SECTION_LABELS
+_TG_WEBHOOK_TEXT_LIMIT = 3500
 
 
 def _make_bot_request(ctx: BotContext) -> Request:
@@ -103,6 +111,108 @@ def _yes_no(value: bool) -> str:
     return i18n.yes_no(value)
 
 
+def _mask_webhook_url(url: str) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return i18n.TG_WEBHOOK_NONE
+    try:
+        parts = urlsplit(raw)
+        path = parts.path or ""
+        secret_prefix = "/api/telegram/webhook/"
+        if path.startswith(secret_prefix):
+            masked_path = f"{secret_prefix}***"
+        elif path:
+            segments = [segment for segment in path.split("/") if segment]
+            if segments:
+                segments[-1] = "***"
+                masked_path = "/" + "/".join(segments)
+            else:
+                masked_path = path
+        else:
+            masked_path = path
+        return escape(urlunsplit((parts.scheme, parts.netloc, masked_path, "", "")))
+    except Exception:
+        return escape(raw)
+
+
+def _format_webhook_timestamp(value: Any) -> str:
+    try:
+        ts = int(value)
+    except (TypeError, ValueError):
+        return i18n.TG_WEBHOOK_NONE
+    if ts <= 0:
+        return i18n.TG_WEBHOOK_NONE
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _build_webhook_health_text(info: dict[str, Any], last_error_value: str) -> str:
+    raw_url = str(info.get("url") or "")
+    allowed_updates = info.get("allowed_updates") or []
+    if isinstance(allowed_updates, (list, tuple, set)):
+        allowed_updates_text = ", ".join(str(item) for item in allowed_updates if item) or i18n.TG_WEBHOOK_NONE
+    else:
+        allowed_updates_text = str(allowed_updates or i18n.TG_WEBHOOK_NONE)
+    pending = info.get("pending_update_count")
+    status_text = i18n.TG_WEBHOOK_REGISTERED if raw_url else i18n.TG_WEBHOOK_NOT_REGISTERED
+    lines = [
+        i18n.TG_WEBHOOK_HEALTH_TITLE,
+        "",
+        i18n.TG_WEBHOOK_LINE_STATUS.format(value=status_text),
+        i18n.TG_WEBHOOK_LINE_URL.format(value=_mask_webhook_url(raw_url)),
+        i18n.TG_WEBHOOK_LINE_PENDING.format(value=escape(str(pending if pending is not None else 0))),
+        i18n.TG_WEBHOOK_LINE_IP.format(value=escape(str(info.get("ip_address") or i18n.TG_WEBHOOK_NONE))),
+        i18n.TG_WEBHOOK_LINE_LAST_ERROR.format(value=last_error_value),
+        i18n.TG_WEBHOOK_LINE_LAST_ERROR_DATE.format(
+            value=escape(_format_webhook_timestamp(info.get("last_error_date")))
+        ),
+        i18n.TG_WEBHOOK_LINE_SYNC_ERROR_DATE.format(
+            value=escape(_format_webhook_timestamp(info.get("last_synchronization_error_date")))
+        ),
+        i18n.TG_WEBHOOK_LINE_MAX_CONNECTIONS.format(
+            value=escape(str(info.get("max_connections") or i18n.TG_WEBHOOK_NONE))
+        ),
+        i18n.TG_WEBHOOK_LINE_ALLOWED_UPDATES.format(value=escape(allowed_updates_text)),
+        i18n.TG_WEBHOOK_LINE_CUSTOM_CERT.format(
+            value=i18n.TG_WEBHOOK_CUSTOM_CERT_YES
+            if info.get("has_custom_certificate")
+            else i18n.TG_WEBHOOK_CUSTOM_CERT_NO
+        ),
+    ]
+    return "\n".join(lines)
+
+
+def format_webhook_health_text(info: dict) -> str:
+    info = info or {}
+    raw_error = str(info.get("last_error_message") or "").strip()
+    if not raw_error:
+        return _build_webhook_health_text(info, i18n.TG_WEBHOOK_NONE)
+
+    def render(error_text: str) -> str:
+        return _build_webhook_health_text(info, escape(error_text))
+
+    full_text = render(raw_error)
+    if len(full_text) <= _TG_WEBHOOK_TEXT_LIMIT:
+        return full_text
+
+    lo, hi = 0, len(raw_error)
+    best = "..."
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = raw_error[:mid].rstrip() + "..."
+        text = render(candidate)
+        if len(text) <= _TG_WEBHOOK_TEXT_LIMIT:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return render(best)
+
+
+def format_webhook_health_error_text(error: str) -> str:
+    detail = escape((error or "").strip() or "Неизвестная ошибка Telegram API.")
+    return i18n.TG_WEBHOOK_FETCH_FAILED.format(detail=detail)
+
+
 def _format_telegram_menu(settings) -> str:
     username = settings.bot_username or i18n.TG_USERNAME_DEFAULT
     if username and not username.startswith("@"):
@@ -160,10 +270,9 @@ def _telegram_keyboard(settings) -> dict:
     action_row: list = []
     if token_ok and settings.chat_id:
         action_row.append(inline_button("📤 Тест chat_id", callback_data="st:tg:test"))
-    if ie and token_ok:
-        action_row.append(inline_button("🔗 Webhook", callback_data="st:tg:wh:reg"))
-    if settings.webhook_registered:
-        action_row.append(inline_button("🗑 Webhook", callback_data="st:tg:cfrm:wh:del"))
+    action_row.append(
+        inline_button(i18n.BTN_TG_WEBHOOK_STATUS, callback_data="st:tg:wh:status")
+    )
     if action_row:
         rows.append(action_row)
     rows.extend(
@@ -178,7 +287,12 @@ def _telegram_keyboard(settings) -> dict:
 def _settings_root_keyboard() -> dict:
     return inline_keyboard(
         [
-            [inline_button(i18n.BTN_SETTINGS_TELEGRAM_WEBHOOK, callback_data="st:tg")],
+            [
+                inline_button(
+                    i18n.BTN_SETTINGS_TELEGRAM_WEBHOOK,
+                    callback_data="st:tg:wh:status",
+                )
+            ],
             [
                 inline_button(i18n.BTN_SETTINGS_TELEGRAM, callback_data="st:tg"),
                 inline_button(i18n.BTN_SETTINGS_NOTIFY, callback_data="st:an"),
@@ -192,6 +306,17 @@ def _settings_root_keyboard() -> dict:
                 inline_button(i18n.BTN_SETTINGS_MAINTENANCE, callback_data="st:mnt"),
             ],
             [inline_button(i18n.BTN_BACK, callback_data="st:back")],
+        ]
+    )
+
+
+def _webhook_health_keyboard() -> dict:
+    return inline_keyboard(
+        [
+            [inline_button(i18n.BTN_REFRESH, callback_data="st:tg:wh:status")],
+            [inline_button(i18n.BTN_TG_WEBHOOK_REREGISTER, callback_data="st:tg:wh:reg")],
+            [inline_button(i18n.BTN_TG_WEBHOOK_DELETE, callback_data="st:tg:cfrm:wh:del")],
+            [inline_button(i18n.BTN_BACK_SETTINGS, callback_data="st:tg")],
         ]
     )
 
@@ -248,6 +373,23 @@ async def handle_settings_telegram(ctx: BotContext, *, message_id: int | None = 
         ctx,
         _format_telegram_menu(settings),
         markup=_telegram_keyboard(settings),
+        message_id=message_id,
+    )
+
+
+async def handle_webhook_health(ctx: BotContext, *, message_id: int | None = None) -> None:
+    if not await _require_admin_ctx(ctx):
+        return
+    result = await get_webhook_info_result(ctx.bot_token)
+    text = (
+        format_webhook_health_text(result.result if isinstance(result.result, dict) else {})
+        if result.ok
+        else format_webhook_health_error_text(result.error or "")
+    )
+    await _send_or_edit(
+        ctx,
+        text,
+        markup=_webhook_health_keyboard(),
         message_id=message_id,
     )
 
@@ -449,7 +591,11 @@ async def handle_settings_callback(ctx: BotContext, data: str, *, message_id: in
             register_telegram_webhook(_make_bot_request(ctx), ctx.db, ctx.user)
             _log_bot_action(ctx, "settings_telegram_webhook", "action=register")
             await send_message(ctx.bot_token, ctx.chat_id, "✅ Webhook зарегистрирован.")
-            await handle_settings_telegram(ctx, message_id=message_id)
+            await handle_webhook_health(ctx, message_id=message_id)
+            return
+
+        if rest == "wh:status":
+            await handle_webhook_health(ctx, message_id=message_id)
             return
 
         if rest == "cfrm:wh:del":
@@ -475,7 +621,7 @@ async def handle_settings_callback(ctx: BotContext, data: str, *, message_id: in
             unregister_telegram_webhook(_make_bot_request(ctx), ctx.db, ctx.user)
             _log_bot_action(ctx, "settings_telegram_webhook", "action=delete")
             await send_message(ctx.bot_token, ctx.chat_id, "✅ Webhook удалён.")
-            await handle_settings_telegram(ctx, message_id=message_id)
+            await handle_webhook_health(ctx, message_id=message_id)
             return
 
     except ValueError as exc:

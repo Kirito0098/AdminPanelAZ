@@ -18,6 +18,8 @@ _TELEGRAM_API_HOST = "api.telegram.org"
 
 _bot_api_client: httpx.AsyncClient | None = None
 _bot_api_client_lock = threading.Lock()
+_bot_api_sync_client: httpx.Client | None = None
+_bot_api_sync_client_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,30 @@ def _get_bot_api_client() -> httpx.AsyncClient:
         if _bot_api_client is None:
             _bot_api_client = _build_bot_api_client()
         return _bot_api_client
+
+
+def _build_bot_api_sync_client() -> httpx.Client:
+    return httpx.Client(timeout=_TIMEOUT)
+
+
+def reset_bot_api_sync_client_for_tests() -> None:
+    global _bot_api_sync_client
+    with _bot_api_sync_client_lock:
+        client = _bot_api_sync_client
+        _bot_api_sync_client = None
+    if client is None:
+        return
+    client.close()
+
+
+def _get_bot_api_sync_client() -> httpx.Client:
+    global _bot_api_sync_client
+    if _bot_api_sync_client is not None:
+        return _bot_api_sync_client
+    with _bot_api_sync_client_lock:
+        if _bot_api_sync_client is None:
+            _bot_api_sync_client = _build_bot_api_sync_client()
+        return _bot_api_sync_client
 
 
 def format_telegram_connect_error(message: str, *, operation: str) -> str:
@@ -162,6 +188,18 @@ async def call_bot_api(
 ) -> dict[str, Any] | None:
     res = await call_bot_api_result(bot_token, method, payload=payload)
     return res.result if res.ok else None
+
+
+async def get_webhook_info_result(bot_token: str) -> BotApiResult:
+    res = await call_bot_api_result(
+        bot_token,
+        "getWebhookInfo",
+        operation="получить статус webhook",
+    )
+    if not res.ok:
+        return res
+    info = res.result if isinstance(res.result, dict) else {}
+    return BotApiResult(ok=True, result=info)
 
 
 async def send_message(
@@ -281,19 +319,19 @@ async def delete_webhook(bot_token: str) -> tuple[bool, str]:
 
 
 def delete_webhook_sync(bot_token: str) -> tuple[bool, str]:
+    client = _get_bot_api_sync_client()
     try:
-        with httpx.Client(timeout=_TIMEOUT) as client:
-            response = client.post(
-                _API_BASE.format(token=bot_token, method="deleteWebhook"),
-                json={"drop_pending_updates": True},
-            )
-            data = response.json()
-            if data.get("ok"):
-                return True, ""
-            return False, format_telegram_connect_error(
-                str(data.get("description") or "deleteWebhook failed"),
-                operation="отключить бота от панели",
-            )
+        response = client.post(
+            _API_BASE.format(token=bot_token, method="deleteWebhook"),
+            json={"drop_pending_updates": True},
+        )
+        data = response.json()
+        if data.get("ok"):
+            return True, ""
+        return False, format_telegram_connect_error(
+            str(data.get("description") or "deleteWebhook failed"),
+            operation="отключить бота от панели",
+        )
     except Exception as exc:
         return False, format_telegram_connect_error(
             str(exc), operation="отключить бота от панели"
@@ -308,19 +346,19 @@ def set_webhook_sync(bot_token: str, url: str, *, secret_token: str | None = Non
     }
     if secret_token:
         payload["secret_token"] = secret_token
+    client = _get_bot_api_sync_client()
     try:
-        with httpx.Client(timeout=_TIMEOUT) as client:
-            response = client.post(
-                _API_BASE.format(token=bot_token, method="setWebhook"),
-                json=payload,
-            )
-            data = response.json()
-            if data.get("ok"):
-                return True, ""
-            return False, format_telegram_connect_error(
-                str(data.get("description") or "setWebhook failed"),
-                operation="подключить бота к панели",
-            )
+        response = client.post(
+            _API_BASE.format(token=bot_token, method="setWebhook"),
+            json=payload,
+        )
+        data = response.json()
+        if data.get("ok"):
+            return True, ""
+        return False, format_telegram_connect_error(
+            str(data.get("description") or "setWebhook failed"),
+            operation="подключить бота к панели",
+        )
     except Exception as exc:
         return False, format_telegram_connect_error(
             str(exc), operation="подключить бота к панели"
@@ -328,16 +366,9 @@ def set_webhook_sync(bot_token: str, url: str, *, secret_token: str | None = Non
 
 
 async def get_webhook_info(bot_token: str) -> dict[str, Any]:
-    client = _get_bot_api_client()
-    try:
-        response = await client.post(
-            _API_BASE.format(token=bot_token, method="getWebhookInfo"),
-        )
-        data = response.json()
-        if data.get("ok"):
-            return data.get("result") or {}
-    except Exception as exc:
-        logger.warning("getWebhookInfo error: %s", exc)
+    res = await get_webhook_info_result(bot_token)
+    if res.ok and isinstance(res.result, dict):
+        return res.result
     return {}
 
 
@@ -348,19 +379,19 @@ async def set_my_commands(bot_token: str, commands: list[dict[str, str]]) -> boo
 
 def set_my_commands_sync(bot_token: str, commands: list[dict[str, str]]) -> tuple[bool, str]:
     payload = {"commands": commands}
+    client = _get_bot_api_sync_client()
     try:
-        with httpx.Client(timeout=_TIMEOUT) as client:
-            response = client.post(
-                _API_BASE.format(token=bot_token, method="setMyCommands"),
-                json=payload,
-            )
-            data = response.json()
-            if data.get("ok"):
-                return True, ""
-            return False, format_telegram_connect_error(
-                str(data.get("description") or "setMyCommands failed"),
-                operation="настроить команды бота",
-            )
+        response = client.post(
+            _API_BASE.format(token=bot_token, method="setMyCommands"),
+            json=payload,
+        )
+        data = response.json()
+        if data.get("ok"):
+            return True, ""
+        return False, format_telegram_connect_error(
+            str(data.get("description") or "setMyCommands failed"),
+            operation="настроить команды бота",
+        )
     except Exception as exc:
         return False, format_telegram_connect_error(
             str(exc), operation="настроить команды бота"
@@ -370,19 +401,19 @@ def set_my_commands_sync(bot_token: str, commands: list[dict[str, str]]) -> tupl
 def reset_chat_menu_button_sync(bot_token: str) -> tuple[bool, str]:
     """Reset bot chat menu button to Telegram default (removes Web App launcher)."""
     payload = {"menu_button": {"type": "default"}}
+    client = _get_bot_api_sync_client()
     try:
-        with httpx.Client(timeout=_TIMEOUT) as client:
-            response = client.post(
-                _API_BASE.format(token=bot_token, method="setChatMenuButton"),
-                json=payload,
-            )
-            data = response.json()
-            if data.get("ok"):
-                return True, ""
-            return False, format_telegram_connect_error(
-                str(data.get("description") or "setChatMenuButton failed"),
-                operation="сбросить кнопку меню бота",
-            )
+        response = client.post(
+            _API_BASE.format(token=bot_token, method="setChatMenuButton"),
+            json=payload,
+        )
+        data = response.json()
+        if data.get("ok"):
+            return True, ""
+        return False, format_telegram_connect_error(
+            str(data.get("description") or "setChatMenuButton failed"),
+            operation="сбросить кнопку меню бота",
+        )
     except Exception as exc:
         return False, format_telegram_connect_error(
             str(exc), operation="сбросить кнопку меню бота"

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import io
-import urllib.error
 from unittest.mock import MagicMock, patch
+
+import httpx
 
 from app.models import User, UserRole, VpnConfig, VpnType
 from app.services.telegram_config_send import send_config_for_user
@@ -49,8 +49,8 @@ def test_send_config_for_user_returns_connect_error_on_timeout():
         ),
         patch("app.services.telegram._outbound_enabled", return_value=True),
         patch(
-            "app.services.telegram.urllib.request.urlopen",
-            side_effect=TimeoutError("timed out"),
+            "app.services.telegram_api._get_bot_api_sync_client",
+            return_value=MagicMock(post=MagicMock(side_effect=httpx.ReadTimeout("timed out"))),
         ),
     ):
         sent, error = send_config_for_user(
@@ -73,18 +73,18 @@ def test_send_tg_document_result_surfaces_telegram_api_description(tmp_path):
     path = tmp_path / "client.ovpn"
     path.write_text("client\n", encoding="utf-8")
 
-    fp = io.BytesIO(b'{"ok":false,"description":"Bad Request: chat not found"}')
-    http_err = urllib.error.HTTPError(
-        url="https://api.telegram.org/botx/sendDocument",
-        code=400,
-        msg="Bad Request",
-        hdrs=None,
-        fp=fp,
+    response = httpx.Response(
+        200,
+        json={"ok": False, "description": "Bad Request: chat not found"},
     )
 
     with (
         patch("app.services.telegram._outbound_enabled", return_value=True),
-        patch("app.services.telegram.urllib.request.urlopen", side_effect=http_err),
+        patch(
+            "app.services.telegram_api._get_bot_api_sync_client",
+            return_value=MagicMock(post=MagicMock(return_value=response)),
+        ),
+        patch("app.services.telegram.urllib.request.urlopen") as urlopen,
     ):
         ok, error = send_tg_document_result(
             "tok",
@@ -97,3 +97,4 @@ def test_send_tg_document_result_surfaces_telegram_api_description(tmp_path):
     assert ok is False
     assert error is not None
     assert "chat not found" in error
+    urlopen.assert_not_called()

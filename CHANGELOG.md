@@ -51,6 +51,7 @@
 
 - **Cloudflare proxy UI** — внутри **Настройки → Адрес сайта и HTTPS** вкладка **Cloudflare**: toggle proxy-mode для Telegram webhook realip, автообновление CIDR (scheduler), кнопка «Обновить сейчас», статус last success/error.
 - **Установщик: reboot после обновлений** — `install.sh` проверяет `/var/run/reboot-required` и новое ядро в `/boot` до мастера. Интерактивно предлагает reboot или отложить установку; `-y` / `--non-interactive` только предупреждает. Пропуск: `INSTALL_SKIP_REBOOT_CHECK=1`.
+- **Экран webhook health** — в Telegram Settings добавлена безопасная сводка webhook: URL маскируется, показываются pending updates и последняя ошибка, а кнопки статуса/регистрации/удаления ведут к нужным действиям.
 
 ### 🔄 Changed
 
@@ -58,6 +59,7 @@
 - **nginx webhook** — `include cloudflare-realip.conf` только при `CLOUDFLARE_PROXY_ENABLED=true` (default true).
 - **Тексты прокси ≠ VPN** — 400 больше не содержит внутреннее `get_proxy_adapter`. Пишет по-русски: «это прокси-узел (российский вход), а не VPN-сервер; OpenVPN/WireGuard на нём не запускаются». Обратная ошибка: «это VPN-узел, DESTINATION только у прокси». Нельзя сделать прокси активным VPN: «у него нет OpenVPN/WireGuard». В NOC заголовки: «Ошибка прокси-узла» / «Прокси-узел нездоров» (вместо голого «Ошибка узла»).
 - **Telegram Bot API** — общий `httpx.AsyncClient` для исходящих вызовов `api.telegram.org`; повторные запросы переиспользуют одно соединение (`telegram_api.py`, `call_bot_api_result`).
+- **Telegram документ / фото** — отправка `sendDocument` и `sendPhoto` тоже переведена на `httpx`; клиент переиспользуется и больше не зависит от `urllib.request.urlopen`.
 - **Telegram бот → Настройки (корень)** — сводка статуса webhook (дата регистрации / «не зарегистрирован»), токена, secret и интерактива.
 
 ### 🐛 Fixed

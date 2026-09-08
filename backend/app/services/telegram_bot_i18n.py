@@ -64,7 +64,7 @@ BTN_OPEN_MINI_APP_CONFIG = "📱 Открыть в Mini App"
 BTN_HELP = "❓ Помощь"
 BTN_ALL_CONFIGS = "📁 Все конфиги"
 BTN_BACK = "◀️ Назад"
-BTN_BACK_SETTINGS = "◀️ Настройки"
+BTN_BACK_SETTINGS = "◀️ Telegram"
 BTN_REFRESH = "🔄 Обновить"
 BTN_NODES_HEALTH = "🩺 Проверить связь"
 BTN_NODES_ACTIVATE = "⭐ Сделать активным"
@@ -77,6 +77,9 @@ BTN_SETTINGS_BACKUPS = "Бэкапы"
 BTN_SETTINGS_MONITOR = "Мониторинг"
 BTN_SETTINGS_SECURITY = "Безопасность"
 BTN_SETTINGS_MAINTENANCE = "Обслуживание"
+BTN_TG_WEBHOOK_STATUS = "Статус webhook"
+BTN_TG_WEBHOOK_REREGISTER = "♻️ Перерегистрировать"
+BTN_TG_WEBHOOK_DELETE = "🗑 Удалить webhook"
 
 # --- Main menu (Reply Keyboard + inline nav) ---
 
@@ -341,6 +344,27 @@ TG_NO_PENDING_TOKEN = "Нет ожидающего токена. Начните 
 TG_NO_PENDING_TOKEN_SHORT = "Нет ожидающего токена."
 TG_AGE_INVALID = "Введите целое число от 30 до 86400."
 TG_AGE_RANGE = "Допустимый диапазон: 30–86400 сек."
+TG_WEBHOOK_HEALTH_TITLE = "🩺 <b>Webhook Telegram</b>"
+TG_WEBHOOK_FETCH_FAILED = (
+    "❌ <b>Не удалось получить статус webhook</b>\n\n"
+    "{detail}\n\n"
+    "Проверьте токен бота, исходящий доступ сервера к Telegram API и повторите обновление."
+)
+TG_WEBHOOK_REGISTERED = "зарегистрирован"
+TG_WEBHOOK_NOT_REGISTERED = "не зарегистрирован"
+TG_WEBHOOK_NONE = "—"
+TG_WEBHOOK_CUSTOM_CERT_YES = "свой"
+TG_WEBHOOK_CUSTOM_CERT_NO = "стандартный"
+TG_WEBHOOK_LINE_STATUS = "Статус: <b>{value}</b>"
+TG_WEBHOOK_LINE_URL = "URL: <code>{value}</code>"
+TG_WEBHOOK_LINE_PENDING = "В очереди Telegram: <code>{value}</code>"
+TG_WEBHOOK_LINE_IP = "IP Telegram: <code>{value}</code>"
+TG_WEBHOOK_LINE_LAST_ERROR = "Последняя ошибка: <code>{value}</code>"
+TG_WEBHOOK_LINE_LAST_ERROR_DATE = "Время ошибки: <code>{value}</code>"
+TG_WEBHOOK_LINE_SYNC_ERROR_DATE = "Сбой синхронизации: <code>{value}</code>"
+TG_WEBHOOK_LINE_MAX_CONNECTIONS = "Макс. подключений: <code>{value}</code>"
+TG_WEBHOOK_LINE_ALLOWED_UPDATES = "Типы обновлений: <code>{value}</code>"
+TG_WEBHOOK_LINE_CUSTOM_CERT = "Сертификат: <code>{value}</code>"
 
 # --- /settings → Security ---
 
