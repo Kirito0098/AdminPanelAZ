@@ -241,7 +241,7 @@
 ### Telegram
 - `telegram_bot.py` + `telegram_bot_handlers/` — команды бота
 - `telegram_webhook.py`, `telegram_config_send.py`
-- `tg_mini.py` (router) — API для Mini App
+- `tg_mini/` (router package) — API для Mini App
 - Документация: `docs/Telegram.md`
 
 ### Безопасность

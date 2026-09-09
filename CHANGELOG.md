@@ -61,6 +61,10 @@
 - **Telegram Bot API** — общий `httpx.AsyncClient` для исходящих вызовов `api.telegram.org`; повторные запросы переиспользуют одно соединение (`telegram_api.py`, `call_bot_api_result`).
 - **Telegram документ / фото** — отправка `sendDocument` и `sendPhoto` тоже переведена на `httpx`; клиент переиспользуется и больше не зависит от `urllib.request.urlopen`.
 - **Telegram бот → Настройки (корень)** — сводка статуса webhook (дата регистрации / «не зарегистрирован»), токена, secret и интерактива.
+- **Telegram settings** — пресеты для резервных копий (дни и срок хранения) и перезагрузка теперь подтверждается кнопкой, без ручного ввода `REBOOT`.
+- **Telegram Mini App** — роутер Mini App вынесен в пакет `backend/app/routers/tg_mini/`; добавлен `FeatureGate`, который скрывает фичи до готовности `featuresReady` и не пускает на выключенные разделы.
+- **Telegram Mini App start_param** — `start_param` теперь маппится на внутренние маршруты (`awg2`, `warper`, `cidr`, `nodes`, `configs`, `settings`).
+- **Telegram Mini App refresh** — фичи подгружаются отдельно после авторизации и обновляются при возврате в приложение, не блокируя вход.
 
 ### 🐛 Fixed
 
@@ -92,6 +96,7 @@
 - **`scripts/test-install-reboot-check.sh`** — маркер `reboot-required`, список пакетов, новое ядро, контейнер, skip / non-interactive.
 - **Прокси ≠ VPN** — мониторинг не зовёт VPN-адаптер; health 100 при живом `proxy_agent`; 400 без `get_proxy_adapter`; воркеры трафика/лимитов/политик/сертификатов/CIDR/напоминаний и geo-hint пропускают `node_kind=proxy`.
 - **Имя файла при скачивании** — `test_file_download.py`: `application/octet-stream` и RFC 5987 `filename*`.
+- **Telegram Mini App** — regression pytest: `test_tg_mini_unlink.py`, `test_tg_mini_access_path.py`, `test_awg2_telegram.py`, `test_tg_unlinked_notify_dedup.py`, `test_telegram_oidc.py` (24 passed); vitest `src/tg-mini/lib/startParam.test.ts` (2 passed).
 
 ---
 

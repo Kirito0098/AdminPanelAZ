@@ -29,7 +29,7 @@ const ADMIN_TABS: MiniTabItem[] = [
   { to: '/', label: 'Дашборд', shortLabel: 'Сводка', icon: LayoutDashboard, end: true },
   { to: '/configs', label: 'Конфиги', icon: FileKey },
   { to: '/nodes', label: 'Узлы', icon: Server },
-  { to: '/warper', label: 'WARP', icon: Cloud },
+  { to: '/warper', label: 'WARP', icon: Cloud, featureKey: 'warper' },
   { to: '/awg2', label: 'AWG 2.0', icon: Shield, featureKey: 'awg2' },
   { to: '/cidr', label: 'CIDR', icon: Database },
   { to: '/settings', label: 'Настройки', shortLabel: 'Настр.', icon: Settings },

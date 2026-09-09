@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ApiError } from '@/api/client'
+import { isDocumentHidden } from '@/hooks/useIntervalWhenVisible'
 import { applyThemeClass, normalizeTheme } from '@/lib/theme'
 import {
   clearTgToken,
@@ -14,11 +15,15 @@ import type { TgMiniSettings } from '@/types'
 
 type AuthStatus = 'loading' | 'authenticated' | 'error' | 'no-telegram'
 
+const FEATURE_REFRESH_RETRY_DELAY_MS = 3_000
+const FEATURE_VISIBILITY_REFRESH_COOLDOWN_MS = 60_000
+
 interface TgAuthContextValue {
   status: AuthStatus
   error: string | null
   settings: TgMiniSettings | null
   features: Record<string, boolean>
+  featuresReady: boolean
   isAdmin: boolean
   retryAuth: () => Promise<void>
   refreshSettings: () => Promise<void>
@@ -32,6 +37,9 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [settings, setSettings] = useState<TgMiniSettings | null>(null)
   const [features, setFeatures] = useState<Record<string, boolean>>({})
+  const [featuresReady, setFeaturesReady] = useState(false)
+  const featureRetryTimeoutRef = useRef<number | null>(null)
+  const lastFeatureAttemptAtRef = useRef(0)
 
   const loadSettings = useCallback(async (opts?: { retry?: boolean }) => {
     const data = await getTgSettings({ retry: opts?.retry ?? true })
@@ -40,14 +48,38 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
     return data
   }, [])
 
-  const refreshFeatures = useCallback(async () => {
+  const clearFeatureRetry = useCallback(() => {
+    if (featureRetryTimeoutRef.current === null) return
+    window.clearTimeout(featureRetryTimeoutRef.current)
+    featureRetryTimeoutRef.current = null
+  }, [])
+
+  const refreshFeatures = useCallback(async (opts?: { allowRetry?: boolean; markReadyOnSettle?: boolean }) => {
+    if (opts?.allowRetry !== false) {
+      clearFeatureRetry()
+    }
+    lastFeatureAttemptAtRef.current = Date.now()
+    let scheduledRetry = false
+
     try {
       const data = await getTgFeatureModules()
       setFeatures(data.features || {})
     } catch {
-      setFeatures({})
+      if (opts?.allowRetry !== false) {
+        scheduledRetry = true
+        featureRetryTimeoutRef.current = window.setTimeout(() => {
+          featureRetryTimeoutRef.current = null
+          void refreshFeatures({ allowRetry: false, markReadyOnSettle: opts?.markReadyOnSettle })
+        }, FEATURE_REFRESH_RETRY_DELAY_MS)
+      } else {
+        setFeatures({})
+      }
+    } finally {
+      if (opts?.markReadyOnSettle && !scheduledRetry) {
+        setFeaturesReady(true)
+      }
     }
-  }, [])
+  }, [clearFeatureRetry])
 
   const authenticate = useCallback(async () => {
     const tg = getTelegramWebApp()
@@ -56,6 +88,7 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
       setStatus('no-telegram')
       setError(TG_MINI_NO_INIT_DATA)
       setFeatures({})
+      setFeaturesReady(false)
       return
     }
 
@@ -69,8 +102,9 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
         try {
           // Authenticate as soon as settings succeed — features must not block Mini App.
           await loadSettings({ retry: false })
+          setFeaturesReady(false)
           setStatus('authenticated')
-          void refreshFeatures()
+          void refreshFeatures({ markReadyOnSettle: true })
           return
         } catch (err) {
           if (!(err instanceof ApiError && err.status === 401)) {
@@ -82,13 +116,15 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
 
       await refreshTgSessionFromInitData(initData)
       await loadSettings({ retry: false })
+      setFeaturesReady(false)
       setStatus('authenticated')
-      void refreshFeatures()
+      void refreshFeatures({ markReadyOnSettle: true })
     } catch (err) {
       clearTgToken()
       const message = err instanceof ApiError ? err.message : 'Ошибка авторизации'
       setError(message)
       setFeatures({})
+      setFeaturesReady(false)
       setStatus('error')
     }
   }, [loadSettings, refreshFeatures])
@@ -97,6 +133,25 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
     initTelegramWebApp()
     void authenticate()
   }, [authenticate])
+
+  useEffect(() => {
+    if (status !== 'authenticated') return
+
+    const onVisibilityChange = () => {
+      if (isDocumentHidden()) return
+      if (Date.now() - lastFeatureAttemptAtRef.current < FEATURE_VISIBILITY_REFRESH_COOLDOWN_MS) return
+      void refreshFeatures()
+    }
+
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [refreshFeatures, status])
+
+  useEffect(() => () => {
+    clearFeatureRetry()
+  }, [clearFeatureRetry])
 
   const refreshSettings = useCallback(async () => {
     await loadSettings()
@@ -108,12 +163,13 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
       error,
       settings,
       features,
+      featuresReady,
       isAdmin: settings?.role === 'admin',
       retryAuth: authenticate,
       refreshSettings,
       refreshFeatures,
     }),
-    [authenticate, error, features, refreshFeatures, refreshSettings, settings, status],
+    [authenticate, error, features, featuresReady, refreshFeatures, refreshSettings, settings, status],
   )
 
   return <TgAuthContext.Provider value={value}>{children}</TgAuthContext.Provider>
