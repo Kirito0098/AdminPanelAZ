@@ -19,6 +19,19 @@ export function getToken(): string | null {
   return getAccessToken()
 }
 
+export function isNodeAgentAuthFailureDetail(detail: unknown): boolean {
+  const text =
+    typeof detail === 'string'
+      ? detail
+      : Array.isArray(detail) && detail.length > 0 && typeof detail[0] === 'string'
+        ? detail[0]
+        : typeof detail === 'object' && detail && 'msg' in detail && typeof (detail as { msg: unknown }).msg === 'string'
+          ? (detail as { msg: string }).msg
+          : ''
+  if (!text) return false
+  return text.includes('X-Node-Key') || text.includes('Неверный API-ключ')
+}
+
 let refreshPromise: Promise<string | null> | null = null
 
 export async function refreshAccessToken(): Promise<string | null> {
@@ -78,11 +91,28 @@ export async function apiFetchAtBase<T>(
     )
   }
   if (response.status === 401 && retry && !path.startsWith('/auth/') && normalizedBase === API_BASE) {
+    const body = await response.text()
+    let payload: unknown
+    try {
+      payload = body ? JSON.parse(body) : undefined
+    } catch {
+      payload = undefined
+    }
+    const detail =
+      payload && typeof payload === 'object' && payload !== null && 'detail' in payload
+        ? (payload as { detail: unknown }).detail
+        : body
+    if (isNodeAgentAuthFailureDetail(detail)) {
+      const message = parseHttpErrorBody(body, 401)
+      throw new ApiError(message, 401, payload)
+    }
     const newToken = await refreshAccessToken()
     if (newToken) {
       return apiFetchAtBase<T>(base, path, options, false)
     }
     clearAccessToken()
+    const message = parseHttpErrorBody(body, 401)
+    throw new ApiError(message, 401, payload)
   }
   if (!response.ok) {
     const body = await response.text()

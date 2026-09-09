@@ -8,7 +8,6 @@ import { applyThemeClass, getStoredTheme } from '@/lib/theme'
 import { storeWebSessionId } from '@/lib/webSession'
 import type { User } from '@/types'
 
-import { apiBase as API_BASE } from '@/lib/panelBase'
 const REFRESH_INTERVAL_MS = 25 * 60 * 1000
 
 interface AuthContextValue {
@@ -59,15 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const silentRefresh = useCallback(async () => {
     if (typeof document !== 'undefined' && document.hidden) return
     try {
-      const response = await fetch(`${API_BASE}/auth/refresh`, {
-        method: 'POST',
-        credentials: 'include',
-      })
-      if (!response.ok) return
-      const data = await response.json()
-      if (data.access_token) {
-        setAccessToken(data.access_token)
-      }
+      await refreshAccessToken()
     } catch {
       /* ignore background refresh errors */
     }
