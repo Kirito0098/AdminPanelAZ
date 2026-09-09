@@ -7,6 +7,7 @@ import tempfile
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -28,7 +29,7 @@ from app.models import (
 from app.services.feature_guards import get_feature_service
 from app.services.feature_toggles import is_awg2_enabled
 from app.services.node_compare_metrics import get_traffic_totals_by_node
-from app.services.notify_time import format_notify_when, resolve_notify_timezone
+from app.services.notify_time import _timezone_suffix, format_notify_when, resolve_notify_timezone
 from app.services.resource_metrics import get_latest_samples_by_node, get_resource_stats_by_node
 from app.services.telegram import send_tg_message, send_tg_photo
 from app.services.traffic_limit import human_bytes
@@ -382,12 +383,24 @@ def _period_bounds(*, period: str, now: datetime | None = None) -> tuple[datetim
     return until - timedelta(days=days), until
 
 
-def _format_period_window(since: datetime, until: datetime, *, period: str) -> str:
+def _localize_datetime(dt: datetime, tz_name: str | None) -> datetime:
+    if not tz_name:
+        return dt.astimezone(timezone.utc)
+    try:
+        tz = ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        return dt.astimezone(timezone.utc)
+    return dt.astimezone(tz)
+
+
+def _format_period_window(since: datetime, until: datetime, *, period: str, tz_name: str | None = None) -> str:
     if period == "daily":
         return "последние 24 ч"
-    start = since.astimezone(timezone.utc).strftime("%d.%m")
-    end = until.astimezone(timezone.utc).strftime("%d.%m")
-    return f"{start} — {end} UTC (7 дн.)"
+    start_dt = _localize_datetime(since, tz_name)
+    end_dt = _localize_datetime(until, tz_name)
+    tz = start_dt.tzinfo
+    suffix = _timezone_suffix(tz, start_dt) if isinstance(tz, ZoneInfo) else "UTC"
+    return f"{start_dt.strftime('%d.%m')} — {end_dt.strftime('%d.%m')} {suffix} (7 дн.)"
 
 
 def _period_average_label(period: str) -> str:
@@ -687,11 +700,14 @@ def build_noc_report_data(
     }
 
 
-def _format_incident_line(incident: dict) -> str:
+def _format_incident_line(incident: dict, *, tz_name: str | None = None) -> str:
     triggered = incident.get("last_triggered_at")
     when = "—"
     if isinstance(triggered, datetime):
-        when = triggered.astimezone(timezone.utc).strftime("%d.%m %H:%M")
+        local = _localize_datetime(triggered, tz_name)
+        tz = local.tzinfo
+        suffix = _timezone_suffix(tz, local) if isinstance(tz, ZoneInfo) else "UTC"
+        when = f"{local.strftime('%d.%m %H:%M')} {suffix}"
     name = str(incident.get("name") or "Алерт")
     return f"• {name} · {when}"
 
@@ -717,7 +733,9 @@ def format_noc_report_message(
         f"🕐 {when}",
     ]
     if isinstance(since, datetime) and isinstance(until, datetime):
-        lines.append(f"📅 Период: {_format_period_window(since, until, period=period)}")
+        lines.append(
+            f"📅 Период: {_format_period_window(since, until, period=period, tz_name=client_timezone)}"
+        )
     lines.append("")
     lines.append(f"Узлы: <b>{summary['nodes_online']}/{summary['nodes_total']}</b> online")
     awg2_enabled = bool(summary.get("awg2_enabled"))
@@ -799,7 +817,7 @@ def format_noc_report_message(
         lines.append("")
         lines.append(f"⚠️ Алерты: <b>{len(incidents)}</b> срабатываний")
         for incident in incidents[:3]:
-            lines.append(_format_incident_line(incident))
+            lines.append(_format_incident_line(incident, tz_name=client_timezone))
         if len(incidents) > 3:
             lines.append(f"… и ещё {len(incidents) - 3}")
 

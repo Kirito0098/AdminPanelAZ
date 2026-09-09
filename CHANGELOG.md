@@ -86,6 +86,7 @@
 ### 🐛 Fixed
 
 - **График трафика клиента** — ось и бакеты в поясе профиля (не UTC); API отдаёт `timestamps` (GitHub #6).
+- **NOC Telegram сводка** — период и время инцидентов теперь показываются в поясе получателя, а не в UTC.
 - **Cloudflare snippet** — backup перед overwrite; `# snapshot: date`; `uninstall --remove-nginx` удаляет snippet.
 - **Telegram Mini App + ACCESS_PATH** — `GET …/tg-mini` инжектит
   `window.__PANEL_ACCESS_PATH__`, чтобы API ходило на `{ACCESS_PATH}/api/...`
@@ -108,6 +109,7 @@
 
 ### 🧪 Tests
 
+- **NOC Telegram TZ** — регрессия на weekly window и incident line в `Europe/Moscow`.
 - **Telegram Bot API / webhook / OIDC** — regression pytest: `test_telegram_api_client.py`, `test_telegram_api_errors.py`, `test_telegram_bot_context.py`, `test_telegram_settings_dashboard.py`, `test_telegram_config_send_errors.py`, `test_telegram_webhook.py`, `test_telegram_oidc.py` (31 passed).
 - **Telegram OIDC** — `test_telegram_oidc.py`: happy path, wrong aud, expired, malformed, alg=none, JWKS miss.
 - **`scripts/test-install-reboot-check.sh`** — маркер `reboot-required`, список пакетов, новое ядро, контейнер, skip / non-interactive.
