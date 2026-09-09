@@ -6,6 +6,11 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.models import UserTrafficSample
+from app.services.chart_timezone import (
+    local_bucket_start_as_utc_iso,
+    naive_utc_to_local,
+    resolve_chart_timezone,
+)
 
 
 def fetch_traffic_chart(
@@ -14,11 +19,13 @@ def fetch_traffic_chart(
     client: str,
     range_key: str = "7d",
     protocol_filter: str = "all",
+    tz_name: str | None = None,
 ) -> dict:
     scope_ids = [node_ids] if isinstance(node_ids, int) else list(node_ids)
     client = (client or "").strip()
     range_key = (range_key or "7d").strip().lower()
     protocol_filter = (protocol_filter or "all").strip().lower()
+    tz = resolve_chart_timezone(explicit=tz_name)
 
     if not client:
         return {"error": "Параметр client обязателен"}
@@ -65,20 +72,21 @@ def fetch_traffic_chart(
         dt = item.created_at
         if not dt:
             continue
+        local_dt = naive_utc_to_local(dt, tz)
 
         if bucket == "minute5":
-            minute = (dt.minute // 5) * 5
-            bucket_key = dt.strftime("%Y-%m-%d %H") + f":{minute:02d}"
-            label = dt.strftime("%H") + f":{minute:02d}"
+            minute = (local_dt.minute // 5) * 5
+            bucket_key = local_dt.strftime("%Y-%m-%d %H") + f":{minute:02d}"
+            label = local_dt.strftime("%H") + f":{minute:02d}"
         elif bucket == "hour":
-            bucket_key = dt.strftime("%Y-%m-%d %H")
-            label = dt.strftime("%d.%m %H:00")
+            bucket_key = local_dt.strftime("%Y-%m-%d %H")
+            label = local_dt.strftime("%d.%m %H:00")
         elif bucket == "day":
-            bucket_key = dt.strftime("%Y-%m-%d")
-            label = dt.strftime("%d.%m")
+            bucket_key = local_dt.strftime("%Y-%m-%d")
+            label = local_dt.strftime("%d.%m")
         else:
-            bucket_key = dt.strftime("%Y-%m")
-            label = dt.strftime("%Y-%m")
+            bucket_key = local_dt.strftime("%Y-%m")
+            label = local_dt.strftime("%Y-%m")
 
         total_delta = int(item.delta_received or 0) + int(item.delta_sent or 0)
         net = "antizapret" if item.network_type == "antizapret" else "vpn"
@@ -92,11 +100,13 @@ def fetch_traffic_chart(
             continue
 
         grouped[bucket_key]["label"] = label
+        grouped[bucket_key].setdefault("timestamp", local_bucket_start_as_utc_iso(local_dt, bucket))
         grouped[bucket_key][net] += total_delta
         grouped[bucket_key][protocol] += total_delta
 
     ordered_keys = sorted(grouped.keys())
     labels = [grouped[k].get("label", k) for k in ordered_keys]
+    timestamps = [grouped[k].get("timestamp") for k in ordered_keys]
     vpn_bytes = [int(grouped[k].get("vpn", 0)) for k in ordered_keys]
     antizapret_bytes = [int(grouped[k].get("antizapret", 0)) for k in ordered_keys]
     openvpn_bytes = [int(grouped[k].get("openvpn", 0)) for k in ordered_keys]
@@ -111,7 +121,9 @@ def fetch_traffic_chart(
         "range": range_key,
         "bucket": bucket,
         "protocol_filter": protocol_filter,
+        "timezone": tz,
         "labels": labels,
+        "timestamps": timestamps,
         "vpn_bytes": vpn_bytes,
         "antizapret_bytes": antizapret_bytes,
         "openvpn_bytes": openvpn_bytes,

@@ -1,7 +1,7 @@
 from datetime import datetime
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ from app.schemas import (
     TrafficNeverConnectedSummary,
     TrafficOverview,
 )
+from app.services.chart_timezone import resolve_chart_timezone
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.models import Node
 from app.services.config_access import accessible_client_names
@@ -238,6 +239,7 @@ def never_connected_client_traffic(
 
 @router.get("/chart")
 def traffic_chart(
+    request: Request,
     client: str = Query(...),
     range: str = Query(default="7d", alias="range"),
     protocol: str = Query(default="all"),
@@ -249,7 +251,8 @@ def traffic_chart(
     if allowed is not None and client not in allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     scope = resolve_traffic_scope(db, node.id)
-    result = fetch_traffic_chart(db, scope.node_ids, client, range, protocol)
+    tz = resolve_chart_timezone(user=current_user, request=request)
+    result = fetch_traffic_chart(db, scope.node_ids, client, range, protocol, tz_name=tz)
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
     return result
