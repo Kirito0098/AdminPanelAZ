@@ -51,7 +51,7 @@ describe('refreshAccessToken mutex', () => {
   })
 })
 
-describe('apiFetchAtBase node-key 401', () => {
+describe('apiFetchAtBase session vs node-key auth', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
@@ -75,5 +75,63 @@ describe('apiFetchAtBase node-key 401', () => {
     expect(clearSpy).not.toHaveBeenCalled()
     // Only the original request — no /auth/refresh
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('on session 401 calls /auth/refresh once then retries the request', async () => {
+    vi.spyOn(accessToken, 'getAccessToken').mockReturnValue('old-jwt')
+    vi.spyOn(accessToken, 'setAccessToken')
+    vi.spyOn(webSession, 'getWebSessionId').mockReturnValue(null)
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: 'Неверный токен авторизации' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: 'new-jwt' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiFetchAtBase('/api', '/configs', {}, true)).resolves.toEqual({ ok: true })
+
+    const refreshCalls = fetchMock.mock.calls.filter((call) =>
+      String(call[0]).includes('/auth/refresh'),
+    )
+    expect(refreshCalls).toHaveLength(1)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('502 with node-key detail does not trigger session refresh (Mikhail path)', async () => {
+    const clearSpy = vi.spyOn(accessToken, 'clearAccessToken')
+    vi.spyOn(accessToken, 'getAccessToken').mockReturnValue('valid-jwt')
+    vi.spyOn(webSession, 'getWebSessionId').mockReturnValue(null)
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'Неверный API-ключ узла (заголовок X-Node-Key)' }), {
+        status: 502,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiFetchAtBase('/api', '/monitoring/overview', {}, true)).rejects.toMatchObject({
+      status: 502,
+    })
+    expect(clearSpy).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('/auth/refresh'))).toBe(
+      false,
+    )
   })
 })

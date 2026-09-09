@@ -58,9 +58,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const silentRefresh = useCallback(async () => {
     if (typeof document !== 'undefined' && document.hidden) return
     try {
-      await refreshAccessToken()
+      // Shared mutex with apiFetch. HTTP failure clears the access JWT inside
+      // refreshAccessToken — drop React user too so we never stay half-logged-in.
+      // Network errors reject without clearing; keep the session for retry.
+      const token = await refreshAccessToken()
+      if (!token) setUser(null)
     } catch {
-      /* ignore background refresh errors */
+      /* ignore background network errors — access token kept */
     }
   }, [])
 
