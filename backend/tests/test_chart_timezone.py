@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
@@ -32,6 +33,14 @@ def test_hour_bucket_start_iso_moscow():
     iso = local_bucket_start_as_utc_iso(local, "hour")
     # Local 11:00 MSK == 08:00 UTC
     assert iso.startswith("2026-09-07T08:00:00")
+
+def test_resolve_prefers_request_header_when_no_user_and_explicit_invalid():
+    request = SimpleNamespace(headers={"X-Client-Timezone": "Europe/Moscow"})
+    assert (
+        resolve_chart_timezone(explicit="Not/AZone", request=request)
+        == "Europe/Moscow"
+    )
+    assert resolve_chart_timezone(request=request) == "Europe/Moscow"
 
 
 @pytest.fixture()
@@ -79,4 +88,4 @@ def test_traffic_chart_hour_bucket_uses_moscow(chart_db, monkeypatch):
     assert result["bucket"] == "hour"
     assert len(result["timestamps"]) == 1
     assert result["timestamps"][0].startswith("2026-09-07T08:00:00")
-    assert result["labels"]
+    assert result["labels"] == ["07.09 11:00"]

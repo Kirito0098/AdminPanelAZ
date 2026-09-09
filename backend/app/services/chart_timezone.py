@@ -17,11 +17,11 @@ def resolve_chart_timezone(
     request: Any | None = None,
     explicit: str | None = None,
 ) -> str:
-    for candidate in (
-        explicit,
-        effective_user_timezone(user),
-        get_client_timezone_from_request(request),
-    ):
+    # NOTE: when `request` is not provided, do not fall back to any ambient
+    # module-level request state; callers should pass an explicit request
+    # context to resolve from headers.
+    request_tz = get_client_timezone_from_request(request) if request is not None else None
+    for candidate in (explicit, effective_user_timezone(user), request_tz):
         resolved = _normalize_timezone_name(candidate)
         if resolved:
             return resolved
