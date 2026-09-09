@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.23.0](#2230---2026-09-09) — 2026-09-09
 - [2.22.0](#2220---2026-08-14) — 2026-08-14
 - [2.21.0](#2210---2026-08-07) — 2026-08-07
 - [2.20.0](#2200---2026-08-02) — 2026-08-02
@@ -46,6 +47,12 @@
 ---
 
 ## [Unreleased]
+
+---
+
+## [2.23.0] - 2026-09-09
+
+> **Кратко:** снижение нагрузки (proxy/workers/UI polls, Dashboard/NOC/traffic/AWG2/Server Monitor); security (access JWT in-memory, PyJWT, harden public downloads); Telegram (httpx Bot API, webhook health, backup presets + reboot-кнопка, Mini App `tg_mini`/`FeatureGate`/`start_param`); оси графиков и NOC-тексты в поясе профиля (GitHub #6); Cloudflare proxy UI; SPA chunks `recharts`/`victory-vendor`.
 
 ### ✨ Added
 
@@ -2374,7 +2381,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.22.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.0...HEAD
+[2.23.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.20.0...v2.21.0
 [2.20.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.19.0...v2.20.0
