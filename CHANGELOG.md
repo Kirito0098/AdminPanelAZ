@@ -58,6 +58,15 @@
 - **Адрес сайта и HTTPS** — внутренние вкладки **Публикация** и **Cloudflare** (без отдельного пункта в боковом меню).
 - **nginx webhook** — `include cloudflare-realip.conf` только при `CLOUDFLARE_PROXY_ENABLED=true` (default true).
 - **Тексты прокси ≠ VPN** — 400 больше не содержит внутреннее `get_proxy_adapter`. Пишет по-русски: «это прокси-узел (российский вход), а не VPN-сервер; OpenVPN/WireGuard на нём не запускаются». Обратная ошибка: «это VPN-узел, DESTINATION только у прокси». Нельзя сделать прокси активным VPN: «у него нет OpenVPN/WireGuard». В NOC заголовки: «Ошибка прокси-узла» / «Прокси-узел нездоров» (вместо голого «Ошибка узла»).
+- **Прокси-узлы (нагрузка)** — меньше дублирующих status/monitoring/iptables опросов; DESTINATION подтягивается на status GET; mTLS/update гейтятся, когда модуль выключен.
+- **Фоновые воркеры: runtime-gate** — reconcile, reminders, NOC, CIDR, policy/cert/health, retention, traffic collectors, AWG2 expire и др. перечитывают тогглы каждый tick без рестарта процесса; traffic/connection_history always-spawn + gate; `get_settings.cache_clear()` после feature profile/toggles.
+- **UI: пауза на скрытой вкладке** — фоновые polls / WS / SSE / HA sync / session refresh останавливаются, пока вкладка невидима (`useIntervalWhenVisible`); меньше дублей на Nodes, Warper, Settings, Dashboard, Traffic, Monitoring.
+- **Dashboard** — карточки метрик из configs + monitoring overview вместо fan-out `/monitoring/summary`; локальный OVPN/WG status coalesce (~12 с).
+- **NOC / traffic / routing / AWG2 / Server Monitor** — coalesce SSE и live-проб; CIDR overview кэширует line counts по mtime; AWG2 monitoring предпочитает `stats.db` вместо live dump; дешевле метрики Server Monitor.
+- **API-клиент frontend** — монолитный `client.ts` разбит на domain-модули `api/*` с тонким barrel (импорты стабильны).
+- **Settings maintenance API** — telegram / reboot / VPN-network / Cloudflare вынесены из монолита в domain-роутеры; общие helpers через `app_setting_store`.
+- **NodesPage** — список узлов разбит на сфокусированные компоненты.
+- **SPA** — lazy routes; recharts в отдельном chunk; frontend typecheck (`tsc --noEmit`) в CI.
 - **Telegram Bot API** — общий `httpx.AsyncClient` для исходящих вызовов `api.telegram.org`; повторные запросы переиспользуют одно соединение (`telegram_api.py`, `call_bot_api_result`).
 - **Telegram документ / фото** — отправка `sendDocument` и `sendPhoto` тоже переведена на `httpx`; клиент переиспользуется и больше не зависит от `urllib.request.urlopen`.
 - **Telegram бот → Настройки (корень)** — сводка статуса webhook (дата регистрации / «не зарегистрирован»), токена, secret и интерактива.
@@ -65,6 +74,12 @@
 - **Telegram Mini App** — роутер Mini App вынесен в пакет `backend/app/routers/tg_mini/`; добавлен `FeatureGate`, который скрывает фичи до готовности `featuresReady` и не пускает на выключенные разделы.
 - **Telegram Mini App start_param** — `start_param` теперь маппится на внутренние маршруты (`awg2`, `warper`, `cidr`, `nodes`, `configs`, `settings`).
 - **Telegram Mini App refresh** — фичи подгружаются отдельно после авторизации и обновляются при возврате в приложение, не блокируя вход.
+
+### 🔒 Security
+
+- **Access JWT** — больше не пишется в `localStorage` (только in-memory); XSS не читает долгоживущий bearer.
+- **Публичные download / QR** — жёстче rate limits, PIN, очистка cookie на logout, CSP и OpenAPI defaults.
+- **JWT-библиотека** — `python-jose` заменён на PyJWT (панель HS256 + Telegram OIDC JWKS); сняты ignore CVE по транзитивному `ecdsa` в pip-audit.
 
 ### 🐛 Fixed
 
@@ -80,11 +95,10 @@
 - **Остальные VPN-воркеры не трогают прокси** — лимиты трафика, политики WG, сертификаты OpenVPN, напоминания, geo-подсказка сервера, выкладка CIDR на «все online», копирование файлов AntiZapret, rolling update, снимок трафика, истечение AmneziaWG2. Иначе те же ложные 400 могли появиться в логах и задачах, не только в NOC.
 - **Скачивание профилей как `.txt`** — Safari / iOS / часть Chromium сохраняли `.ovpn` и `.conf` как `.txt`, потому что ответ был `text/plain` + `nosniff`. Теперь `application/octet-stream` и RFC 5987 `filename*`; CORS отдаёт `Content-Disposition`.
 - **Telegram webhook** — пустой `X-Telegram-Bot-Api-Secret-Token` снова допускается (legacy); неверный header по-прежнему 403.
-- **Workers traffic/connection_history** — always-spawn + runtime gate; `get_settings.cache_clear()` после feature profile/toggles.
 - **Server Monitor WS** — свежий access JWT на reconnect.
 - **Logs** — при смене узла подгружаются events/sockets.
 - **ErrorBoundary Retry remount; NodeContext refresh** — списка узлов при возврате на вкладку.
-- **Тест AWG2 monitoring** — изолирует `AWG2_STATS_DB`.
+- **Тест AWG2 monitoring** — изолирует `AWG2_STATS_DB` / env сервисов хоста.
 - **Telegram OIDC** — ошибки PyJWT на `/oidc/token` дают 401 (ValueError), не 500; `algorithms` зафиксирован на RS256.
 - **Telegram Mini App** — auth не ждёт `feature-modules`; фичи подгружаются в фоне после входа.
 - **Отправка конфига в Telegram** — при сбое `sendDocument` возвращается понятная ошибка (timeout, сеть, ответ Bot API), а не молчаливый fail.
@@ -97,6 +111,7 @@
 - **Прокси ≠ VPN** — мониторинг не зовёт VPN-адаптер; health 100 при живом `proxy_agent`; 400 без `get_proxy_adapter`; воркеры трафика/лимитов/политик/сертификатов/CIDR/напоминаний и geo-hint пропускают `node_kind=proxy`.
 - **Имя файла при скачивании** — `test_file_download.py`: `application/octet-stream` и RFC 5987 `filename*`.
 - **Telegram Mini App** — regression pytest: `test_tg_mini_unlink.py`, `test_tg_mini_access_path.py`, `test_awg2_telegram.py`, `test_tg_unlinked_notify_dedup.py`, `test_telegram_oidc.py` (24 passed); vitest `src/tg-mini/lib/startParam.test.ts` (2 passed).
+- **Frontend CI** — vitest в pipeline; `npm run typecheck` обязателен; high-severity `npm audit` на lockfile.
 
 ---
 
