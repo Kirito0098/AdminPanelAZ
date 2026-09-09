@@ -33,10 +33,18 @@ def _mock_client(status_code: int, payload: dict | None = None, text: str = ""):
     return client
 
 
+def _auth_failure_payload(status_code: int) -> dict:
+    if status_code == 401:
+        return {"detail": "nope"}
+    return {"detail": ""}
+
+
 @pytest.mark.parametrize("status_code", [401, 403])
 def test_remote_request_maps_agent_auth_to_502(status_code):
     adapter = _adapter_remote()
-    adapter._get_http_client = MagicMock(return_value=_mock_client(status_code, {"detail": "nope"}))
+    adapter._get_http_client = MagicMock(
+        return_value=_mock_client(status_code, _auth_failure_payload(status_code))
+    )
     with pytest.raises(HTTPException) as exc:
         adapter._request("GET", "/health")
     assert exc.value.status_code == 502
@@ -49,21 +57,31 @@ def test_remote_request_maps_agent_auth_to_502(status_code):
 @pytest.mark.parametrize("status_code", [401, 403])
 def test_remote_request_bytes_maps_agent_auth_to_502(status_code):
     adapter = _adapter_remote()
-    adapter._get_http_client = MagicMock(return_value=_mock_client(status_code, {"detail": "nope"}))
+    adapter._get_http_client = MagicMock(
+        return_value=_mock_client(status_code, _auth_failure_payload(status_code))
+    )
     with pytest.raises(HTTPException) as exc:
         adapter._request_bytes("GET", "/clients/openvpn/x/file")
     assert exc.value.status_code == 502
+    if status_code == 401:
+        assert "X-Node-Key" in str(exc.value.detail)
+    else:
+        assert "NODE_AGENT_ALLOWED_IPS" in str(exc.value.detail) or "Доступ" in str(exc.value.detail)
 
 
 @pytest.mark.parametrize("status_code", [401, 403])
 def test_proxy_request_maps_agent_auth_to_502(status_code):
     adapter = _adapter_proxy()
-    adapter._get_http_client = MagicMock(return_value=_mock_client(status_code, {"detail": "nope"}))
+    adapter._get_http_client = MagicMock(
+        return_value=_mock_client(status_code, _auth_failure_payload(status_code))
+    )
     with pytest.raises(HTTPException) as exc:
         adapter._request("GET", "/health")
     assert exc.value.status_code == 502
     if status_code == 401:
         assert "X-Node-Key" in str(exc.value.detail)
+    else:
+        assert "allowlist" in str(exc.value.detail) or "Доступ" in str(exc.value.detail)
 
 
 def test_remote_request_preserves_other_4xx():

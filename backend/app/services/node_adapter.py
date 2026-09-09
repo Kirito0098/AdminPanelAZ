@@ -1090,11 +1090,7 @@ class RemoteNodeAdapter(NodeAdapter):
             if response.status_code == status.HTTP_401_UNAUTHORIZED:
                 detail = "Неверный API-ключ узла (заголовок X-Node-Key)"
             elif response.status_code == status.HTTP_403_FORBIDDEN:
-                if not detail or (
-                    "NODE_AGENT_ALLOWED_IPS" not in str(detail)
-                    and "Доступ" not in str(detail)
-                ):
-                    detail = "Доступ запрещён — проверьте NODE_AGENT_ALLOWED_IPS на узле"
+                detail = detail or "Доступ запрещён — проверьте NODE_AGENT_ALLOWED_IPS на узле"
             out_status = response.status_code
             if response.status_code in (
                 status.HTTP_401_UNAUTHORIZED,
