@@ -4,6 +4,7 @@ import {
   API_BASE,
   apiFetch,
   getToken,
+  isNodeAgentAuthFailureDetail,
   parseApiError,
   refreshAccessToken,
 } from './http'
@@ -102,6 +103,11 @@ export async function downloadAwg2Backup(retry = true): Promise<Response> {
     credentials: 'include',
   })
   if (response.status === 401 && retry) {
+    const peek = await response.clone().json().catch(() => null)
+    const detail = peek && typeof peek === 'object' ? (peek as { detail?: unknown }).detail : undefined
+    if (isNodeAgentAuthFailureDetail(detail)) {
+      throw await parseApiError(response, 'Ошибка скачивания бэкапа AZ-AWG2')
+    }
     const newToken = await refreshAccessToken()
     if (newToken) {
       return downloadAwg2Backup(false)

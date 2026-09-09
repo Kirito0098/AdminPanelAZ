@@ -4,6 +4,7 @@ import {
   API_BASE,
   apiFetch,
   getToken,
+  isNodeAgentAuthFailureDetail,
   parseApiError,
   refreshAccessToken,
 } from './http'
@@ -185,6 +186,11 @@ export async function fetchQrBlob(
     credentials: 'include',
   })
   if (response.status === 401 && retry) {
+    const peek = await response.clone().json().catch(() => null)
+    const detail = peek && typeof peek === 'object' ? (peek as { detail?: unknown }).detail : undefined
+    if (isNodeAgentAuthFailureDetail(detail)) {
+      throw await parseApiError(response, 'Ошибка генерации QR')
+    }
     const newToken = await refreshAccessToken()
     if (newToken) {
       return fetchQrBlob(configId, path, false)
