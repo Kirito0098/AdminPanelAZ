@@ -172,7 +172,13 @@ class ProxyNodeAdapter:
                 detail = "Неверный API-ключ узла (заголовок X-Node-Key)"
             elif response.status_code == status.HTTP_403_FORBIDDEN:
                 detail = detail or "Доступ запрещён — проверьте allowlist IP на proxy_agent"
-            raise HTTPException(status_code=response.status_code, detail=detail)
+            out_status = response.status_code
+            if response.status_code in (
+                status.HTTP_401_UNAUTHORIZED,
+                status.HTTP_403_FORBIDDEN,
+            ):
+                out_status = status.HTTP_502_BAD_GATEWAY
+            raise HTTPException(status_code=out_status, detail=detail)
 
         if response.status_code == 204 or not response.content:
             return None
