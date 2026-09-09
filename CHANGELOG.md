@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.23.1](#2231---2026-09-10) — 2026-09-10
 - [2.23.0](#2230---2026-09-09) — 2026-09-09
 - [2.22.0](#2220---2026-08-14) — 2026-08-14
 - [2.21.0](#2210---2026-08-07) — 2026-08-07
@@ -47,6 +48,12 @@
 ---
 
 ## [Unreleased]
+
+---
+
+## [2.23.1] - 2026-09-10
+
+> **Кратко:** hotfix — неверный API-ключ remote-узла больше не маскируется под протухшую сессию админа; можно остаться в панели и поправить ключи в **Узлы**.
 
 ### 🐛 Fixed
 
@@ -2385,7 +2392,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.1...HEAD
+[2.23.1]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.0...v2.23.1
 [2.23.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.20.0...v2.21.0
