@@ -11,9 +11,9 @@ from app.models import Node, NodeStatus
 from app.services.node_manager import _is_vpn_node
 from app.routers.settings_reboot import cancel_server_reboot, schedule_server_reboot
 from app.schemas import ServerRebootRequest, ServiceRestartRequest
+from app.services import telegram_bot_i18n as i18n
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext, inline_button, inline_keyboard
-from app.services.telegram_bot_handlers import settings_fsm
 from app.services.telegram_bot_handlers.nodes import _list_nodes
 from app.services.telegram_bot_handlers.settings import (
     _log_bot_action,
@@ -100,7 +100,7 @@ async def _show_reboot_nodes(ctx: BotContext, *, message_id: int | None = None) 
         return
     await _send_or_edit(
         ctx,
-        "🔁 <b>Перезагрузка сервера ОС</b>\n\nВыберите узел:",
+        i18n.MNT_REBOOT_LIST,
         markup=_reboot_nodes_keyboard(nodes),
         message_id=message_id,
     )
@@ -121,35 +121,36 @@ async def _show_reboot_confirm(ctx: BotContext, node_id: int, *, message_id: int
     )
     await _send_or_edit(
         ctx,
-        f"⚠️ Точно перезагрузить <b>{node.name}</b>?\nПерезагрузка ОС сервера.",
+        i18n.MNT_REBOOT_CONFIRM.format(node_name=node.name),
         markup=markup,
         message_id=message_id,
     )
 
 
-async def handle_maintenance_text(ctx: BotContext, text: str) -> bool:
-    pending = settings_fsm.get_pending(ctx.telegram_user_id)
-    if pending is None or pending.field != "mnt_reboot":
-        return False
+async def _show_reboot_execute_confirm(
+    ctx: BotContext, node_id: int, *, message_id: int | None = None
+) -> None:
+    node = _get_node(ctx.db, node_id)
+    if not node:
+        await send_message(ctx.bot_token, ctx.chat_id, "❌ Узел не найден.")
+        return
+    markup = inline_keyboard(
+        [
+            [
+                inline_button(i18n.BTN_MNT_REBOOT_EXECUTE, callback_data=f"st:mnt:reboot:do:{node_id}"),
+                inline_button("❌ Отмена", callback_data="st:mnt"),
+            ]
+        ]
+    )
+    await _send_or_edit(
+        ctx,
+        i18n.MNT_REBOOT_FINAL_CONFIRM.format(node_name=node.name),
+        markup=markup,
+        message_id=message_id,
+    )
 
-    if not await _require_admin_ctx(ctx):
-        settings_fsm.clear_pending(ctx.telegram_user_id)
-        return True
 
-    raw = (text or "").strip()
-    if raw != "REBOOT":
-        await send_message(ctx.bot_token, ctx.chat_id, "Введите <code>REBOOT</code> для подтверждения.")
-        return True
-
-    node_id_raw = pending.value
-    if not node_id_raw or not node_id_raw.isdigit():
-        settings_fsm.clear_pending(ctx.telegram_user_id)
-        await send_message(ctx.bot_token, ctx.chat_id, "❌ Узел не выбран.")
-        return True
-
-    node_id = int(node_id_raw)
-    settings_fsm.clear_pending(ctx.telegram_user_id)
-
+async def _schedule_reboot(ctx: BotContext, node_id: int) -> None:
     try:
         result = schedule_server_reboot(
             ServerRebootRequest(node_id=node_id, confirm="REBOOT"),
@@ -176,7 +177,6 @@ async def handle_maintenance_text(ctx: BotContext, text: str) -> bool:
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         await send_message(ctx.bot_token, ctx.chat_id, f"❌ {detail}")
-    return True
 
 
 async def handle_settings_maintenance(ctx: BotContext, *, message_id: int | None = None) -> None:
@@ -325,18 +325,19 @@ async def handle_maintenance_callback(ctx: BotContext, data: str, *, message_id:
             if not node_id_raw.isdigit():
                 await send_message(ctx.bot_token, ctx.chat_id, "❌ Некорректный узел.")
                 return
+            await _show_reboot_execute_confirm(ctx, int(node_id_raw), message_id=message_id)
+            return
+
+        if rest.startswith("reboot:do:"):
+            node_id_raw = rest.split(":", 2)[2]
+            if not node_id_raw.isdigit():
+                await send_message(ctx.bot_token, ctx.chat_id, "❌ Некорректный узел.")
+                return
             node = _get_node(ctx.db, int(node_id_raw))
             if not node:
                 await send_message(ctx.bot_token, ctx.chat_id, "❌ Узел не найден.")
                 return
-            settings_fsm.set_pending(ctx.telegram_user_id, "mnt_reboot")
-            settings_fsm.set_pending_value(ctx.telegram_user_id, node_id_raw)
-            await send_message(
-                ctx.bot_token,
-                ctx.chat_id,
-                f"Отправьте <code>REBOOT</code> для подтверждения перезагрузки <b>{node.name}</b>.",
-                reply_markup={"force_reply": True, "selective": True},
-            )
+            await _schedule_reboot(ctx, int(node_id_raw))
             return
 
         if rest.startswith("reboot:cancel:"):

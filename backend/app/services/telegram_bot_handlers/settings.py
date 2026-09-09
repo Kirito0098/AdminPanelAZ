@@ -638,7 +638,6 @@ async def handle_settings_text(ctx: BotContext, text: str) -> bool:
     from app.services.telegram_bot_handlers.settings_admin_notify import handle_admin_notify_text
     from app.services.telegram_bot_handlers.settings_monitor import handle_monitor_text
     from app.services.telegram_bot_handlers.settings_backups import handle_backups_text
-    from app.services.telegram_bot_handlers.settings_maintenance import handle_maintenance_text
     from app.services.telegram_bot_handlers.settings_security import handle_security_text
 
     if await handle_admin_notify_text(ctx, text):
@@ -648,8 +647,6 @@ async def handle_settings_text(ctx: BotContext, text: str) -> bool:
     if await handle_backups_text(ctx, text):
         return True
     if await handle_security_text(ctx, text):
-        return True
-    if await handle_maintenance_text(ctx, text):
         return True
 
     pending = settings_fsm.get_pending(ctx.telegram_user_id)

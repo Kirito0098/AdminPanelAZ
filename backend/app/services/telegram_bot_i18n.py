@@ -397,6 +397,14 @@ MNT_BODY = (
     "Опасные операции требуют подтверждения."
 )
 MNT_RESTART_TITLE = "🔄 <b>Перезапуск службы VPN</b>\n\nВыберите службу:"
+BTN_MNT_REBOOT_EXECUTE = "🚨 Перезагрузить"
+MNT_REBOOT_LIST = "🔁 <b>Перезагрузка сервера ОС</b>\n\nВыберите узел:"
+MNT_REBOOT_CONFIRM = "⚠️ Точно перезагрузить <b>{node_name}</b>?\nПерезагрузка ОС сервера."
+MNT_REBOOT_FINAL_CONFIRM = (
+    "⚠️ <b>Последнее подтверждение</b>\n\n"
+    "Перезагрузить <b>{node_name}</b>?\n"
+    "Будет выполнена перезагрузка ОС сервера."
+)
 MNT_CONFIRM_DOALL = "Запустить doall.sh?\n\nАктивные VPN-сессии будут прерваны."
 
 # --- /settings → Backups ---
@@ -408,6 +416,10 @@ BK_TG = "TG при бэкапе: <b>{state}</b>"
 BK_ARCHIVES = "Архивов на сервере: <b>{count}</b>"
 BK_LIST_EMPTY = "Архивов нет."
 BK_ASK_FIELD = "Введите {label} ({lo}–{hi}):"
+BK_PRESET_DAYS_BUTTON = "{days} дн."
+BK_PRESET_RETENTION_BUTTON = "{count} коп."
+BK_CUSTOM_DAYS_BUTTON = "✏️ Свой интервал"
+BK_CUSTOM_RETENTION_BUTTON = "✏️ Своё хранение"
 BK_CONFIRM_CREATE = "Создать бэкап панели сейчас?\n(без конфигов VPN и AZ)"
 BK_TASK_QUEUED = "Задача поставлена в очередь"
 BK_RESTORE_WARN = (

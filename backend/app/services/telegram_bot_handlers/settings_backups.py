@@ -8,7 +8,7 @@ from app.schemas import BackupCreateRequest, BackupRestoreRequest, BackupSetting
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext, inline_button, inline_keyboard
 from app.services.telegram_bot_handlers import settings_fsm
-from app.services.telegram_bot_i18n import BK_RESTORE_WARN
+from app.services import telegram_bot_i18n as i18n
 from app.services.telegram_bot_handlers.settings import (
     _log_bot_action,
     _make_bot_request,
@@ -23,6 +23,9 @@ _FIELD_LABELS = {
     "bk_days": ("интервал авто-бэкапа, дней", 1, 90),
     "bk_ret": ("число хранимых копий", 1, 30),
 }
+
+_DAY_PRESETS = (1, 3, 7, 14)
+_RETENTION_PRESETS = (3, 5, 7, 14)
 
 _ASK_CALLBACKS = {
     "days": "bk_days",
@@ -111,8 +114,28 @@ def _backup_main_keyboard(settings) -> dict:
             ),
         ],
         [
-            inline_button("✏️ Интервал, дн.", callback_data="st:bk:ask:days"),
-            inline_button("✏️ Хранить", callback_data="st:bk:ask:ret"),
+            *[
+                inline_button(
+                    i18n.BK_PRESET_DAYS_BUTTON.format(days=days),
+                    callback_data=f"st:bk:days:{days}",
+                )
+                for days in _DAY_PRESETS
+            ]
+        ],
+        [
+            inline_button(i18n.BK_CUSTOM_DAYS_BUTTON, callback_data="st:bk:ask:days"),
+        ],
+        [
+            *[
+                inline_button(
+                    i18n.BK_PRESET_RETENTION_BUTTON.format(count=count),
+                    callback_data=f"st:bk:ret:{count}",
+                )
+                for count in _RETENTION_PRESETS
+            ]
+        ],
+        [
+            inline_button(i18n.BK_CUSTOM_RETENTION_BUTTON, callback_data="st:bk:ask:ret"),
         ],
         [
             inline_button("➕ Создать", callback_data="st:bk:cfrm:create"),
@@ -240,6 +263,34 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
             await handle_settings_backups(ctx, message_id=message_id)
             return
 
+        if rest.startswith("days:"):
+            raw = rest.split(":", 1)[1]
+            value = int(raw) if raw.isdigit() else -1
+            if value not in _DAY_PRESETS:
+                await send_message(ctx.bot_token, ctx.chat_id, "❌ Неизвестный параметр.")
+                return
+            _apply_backup_settings_patch(
+                ctx,
+                BackupSettingsUpdate(auto_backup_days=value),
+                log_details=f"field=bk_days; value={value}",
+            )
+            await handle_settings_backups(ctx, message_id=message_id)
+            return
+
+        if rest.startswith("ret:"):
+            raw = rest.split(":", 1)[1]
+            value = int(raw) if raw.isdigit() else -1
+            if value not in _RETENTION_PRESETS:
+                await send_message(ctx.bot_token, ctx.chat_id, "❌ Неизвестный параметр.")
+                return
+            _apply_backup_settings_patch(
+                ctx,
+                BackupSettingsUpdate(retention_count=value),
+                log_details=f"field=bk_ret; value={value}",
+            )
+            await handle_settings_backups(ctx, message_id=message_id)
+            return
+
         if rest.startswith("ask:"):
             key = rest.split(":", 1)[1]
             field = _ASK_CALLBACKS.get(key)
@@ -356,7 +407,7 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
                 ctx,
                 "⚠️ <b>Восстановить из бэкапа?</b>\n"
                 f"<code>{entry.file_name}</code>\n\n"
-                f"{BK_RESTORE_WARN}",
+                f"{i18n.BK_RESTORE_WARN}",
                 markup=markup,
                 message_id=message_id,
             )
