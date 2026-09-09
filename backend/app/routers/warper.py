@@ -44,6 +44,7 @@ from app.schemas import (
     WarperUpdatesCheckResponse,
 )
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.chart_timezone import resolve_chart_timezone
 from app.services.warper import enrich_warper_traffic_payload
 
 router = APIRouter(prefix="/warper", tags=["warper"])
@@ -242,15 +243,17 @@ def warper_ip_ranges_export(
 
 @router.get("/traffic", response_model=WarperTrafficResponse)
 def warper_traffic(
+    request: Request,
     period: str = Query("today", pattern="^(today|week|month|all)$"),
-    _: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     data = adapter.get_warper_traffic(period)
     if isinstance(data, dict):
-        data = enrich_warper_traffic_payload(data, period)
+        tz = resolve_chart_timezone(user=current_user, request=request)
+        data = enrich_warper_traffic_payload(data, period, tz_name=tz)
     else:
         data = {"raw": data}
     return WarperTrafficResponse(data=data, **_node_meta(node))

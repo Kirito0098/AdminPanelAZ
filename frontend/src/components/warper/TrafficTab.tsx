@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { formatDate, formatTime } from '@/lib/datetime'
 import type { WarperHealthResponse } from '@/types'
 import WarperTrafficChart, { type WarperTrafficChartPoint } from './WarperTrafficChart'
 import { WarperStatTile } from './WarperSection'
@@ -55,6 +56,24 @@ function readChartNumber(value: unknown): number {
   return readTrafficNumber(value) ?? 0
 }
 
+function normalizeWarperTs(ts: string): string {
+  const value = ts.trim()
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(value)) {
+    return `${value}:00:00Z`
+  }
+  return value
+}
+
+function buildChartLabel(ts: string, period: string): string {
+  const normalizedTs = normalizeWarperTs(ts)
+  const opts =
+    period === 'today'
+      ? { hour: '2-digit' as const, minute: '2-digit' as const }
+      : { day: '2-digit' as const, month: '2-digit' as const }
+  const label = period === 'today' ? formatTime(normalizedTs, opts) : formatDate(normalizedTs, opts)
+  return label === '—' ? ts : label
+}
+
 function readChartPoints(data: Record<string, unknown>, period: string): WarperTrafficChartPoint[] {
   const chart = data.chart
   if (Array.isArray(chart)) {
@@ -62,9 +81,11 @@ function readChartPoints(data: Record<string, unknown>, period: string): WarperT
     for (const item of chart) {
       if (!item || typeof item !== 'object') continue
       const row = item as Record<string, unknown>
-      const label = typeof row.label === 'string' ? row.label : ''
+      const ts = typeof row.ts === 'string' ? row.ts : ''
+      const fallbackLabel = typeof row.label === 'string' ? row.label : ''
       const rx = readChartNumber(row.rx)
       const tx = readChartNumber(row.tx)
+      const label = ts ? buildChartLabel(ts, period) : fallbackLabel
       if (!label) continue
       points.push({ label, rx, tx })
     }
@@ -81,14 +102,7 @@ function readChartPoints(data: Record<string, unknown>, period: string): WarperT
       const rx = readChartNumber(row.rx)
       const tx = readChartNumber(row.tx)
       if (!ts) continue
-      const label =
-        period === 'today'
-          ? `${ts.split('T', 1)[1]?.slice(0, 2) ?? ts}:00`
-          : (() => {
-              const day = ts.slice(0, 10)
-              const parts = day.split('-')
-              return parts.length === 3 ? `${parts[2]}.${parts[1]}` : ts.slice(5)
-            })()
+      const label = buildChartLabel(ts, period)
       points.push({ label, rx, tx })
     }
     if (points.length > 0) return points

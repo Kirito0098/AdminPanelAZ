@@ -16,6 +16,7 @@ from fastapi import HTTPException, status
 
 from app.config import get_settings
 from app.services.antizapret_settings import read_antizapret_settings
+from app.services.chart_timezone import naive_utc_to_local
 
 WARPER_BIN = Path("/usr/local/bin/warper")
 WARPER_SCRIPT = Path("/root/warper/warper.sh")
@@ -370,20 +371,63 @@ def _read_traffic_hourly_map() -> dict[str, dict[str, int]]:
     return parsed
 
 
-def _filter_traffic_hourly(hourly: dict[str, dict[str, int]], period: str) -> list[dict[str, Any]]:
-    now = datetime.now(timezone.utc)
+def _parse_traffic_hour_key(value: str) -> datetime | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    for fmt in ("%Y-%m-%dT%H", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+        try:
+            return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _filter_traffic_hourly(
+    hourly: dict[str, dict[str, int]],
+    period: str,
+    tz_name: str | None = None,
+) -> list[dict[str, Any]]:
+    tz = tz_name or "UTC"
+    now_local = naive_utc_to_local(datetime.now(timezone.utc), tz)
     items = sorted(hourly.items())
     if period == "today":
-        prefix = now.strftime("%Y-%m-%dT")
-        filtered = [(key, value) for key, value in items if key.startswith(prefix)]
+        start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_local = start_local + timedelta(days=1)
+        filtered = []
+        for key, value in items:
+            utc_dt = _parse_traffic_hour_key(key)
+            if utc_dt is None:
+                continue
+            local_dt = naive_utc_to_local(utc_dt, tz)
+            if start_local <= local_dt < end_local:
+                filtered.append((key, value))
     elif period == "week":
-        cutoff = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H")
-        filtered = [(key, value) for key, value in items if key >= cutoff]
+        cutoff = now_local - timedelta(days=7)
+        filtered = []
+        for key, value in items:
+            utc_dt = _parse_traffic_hour_key(key)
+            if utc_dt is None:
+                continue
+            if naive_utc_to_local(utc_dt, tz) >= cutoff:
+                filtered.append((key, value))
     elif period == "month":
-        cutoff = (now - timedelta(days=30)).strftime("%Y-%m-%dT%H")
-        filtered = [(key, value) for key, value in items if key >= cutoff]
+        cutoff = now_local - timedelta(days=30)
+        filtered = []
+        for key, value in items:
+            utc_dt = _parse_traffic_hour_key(key)
+            if utc_dt is None:
+                continue
+            if naive_utc_to_local(utc_dt, tz) >= cutoff:
+                filtered.append((key, value))
     else:
-        filtered = items
+        filtered = [(key, value) for key, value in items if _parse_traffic_hour_key(key) is not None]
     return [{"ts": key, "rx": value["rx"], "tx": value["tx"]} for key, value in filtered]
 
 
@@ -399,30 +443,52 @@ def _format_traffic_chart_label(ts: str, period: str) -> str:
         return day[5:]
 
 
-def _chart_points_from_hourly(hourly_points: list[dict[str, Any]], period: str) -> list[dict[str, Any]]:
+def _chart_points_from_hourly(
+    hourly_points: list[dict[str, Any]],
+    period: str,
+    tz_name: str | None = None,
+) -> list[dict[str, Any]]:
     if not hourly_points:
         return []
 
     if period == "today":
-        return [
-            {
-                "label": _format_traffic_chart_label(str(point["ts"]), period),
-                "rx": int(point["rx"]),
-                "tx": int(point["tx"]),
-            }
-            for point in hourly_points
-        ]
+        points: list[dict[str, Any]] = []
+        for point in hourly_points:
+            ts = str(point.get("ts") or "").strip()
+            if not ts:
+                continue
+            points.append(
+                {
+                    "ts": ts,
+                    "rx": int(point["rx"]),
+                    "tx": int(point["tx"]),
+                }
+            )
+        return points
 
-    by_day: dict[str, dict[str, int]] = {}
+    tz = tz_name or "UTC"
+    by_day: dict[str, dict[str, Any]] = {}
     for point in hourly_points:
-        day = str(point["ts"])[:10]
-        bucket = by_day.setdefault(day, {"rx": 0, "tx": 0})
+        utc_dt = _parse_traffic_hour_key(str(point.get("ts") or ""))
+        if utc_dt is None:
+            continue
+        local_dt = naive_utc_to_local(utc_dt, tz)
+        day = local_dt.strftime("%Y-%m-%d")
+        bucket = by_day.setdefault(day, {"rx": 0, "tx": 0, "ts": None})
         bucket["rx"] += int(point["rx"])
         bucket["tx"] += int(point["tx"])
+        if bucket["ts"] is None:
+            day_start_local = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            bucket["ts"] = (
+                day_start_local.astimezone(timezone.utc)
+                .replace(microsecond=0)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
 
     return [
         {
-            "label": _format_traffic_chart_label(day, period),
+            "ts": values["ts"] or day,
             "rx": values["rx"],
             "tx": values["tx"],
         }
@@ -439,25 +505,29 @@ def _synthetic_traffic_chart(payload: dict[str, Any], period: str) -> list[dict[
     return [{"label": labels.get(period, period), "rx": rx, "tx": tx}]
 
 
-def _build_traffic_chart(period: str) -> list[dict[str, Any]]:
-    hourly_points = _filter_traffic_hourly(_read_traffic_hourly_map(), period)
-    return _chart_points_from_hourly(hourly_points, period)
+def _build_traffic_chart(period: str, tz_name: str | None = None) -> list[dict[str, Any]]:
+    hourly_points = _filter_traffic_hourly(_read_traffic_hourly_map(), period, tz_name=tz_name)
+    return _chart_points_from_hourly(hourly_points, period, tz_name=tz_name)
 
 
-def enrich_warper_traffic_payload(payload: dict[str, Any], period: str) -> dict[str, Any]:
+def enrich_warper_traffic_payload(
+    payload: dict[str, Any],
+    period: str,
+    tz_name: str | None = None,
+) -> dict[str, Any]:
     """Ensure chart data is present even when an older node agent omits it."""
-    chart = payload.get("chart")
-    if isinstance(chart, list) and chart:
-        return payload
-
     hourly_points = payload.get("hourly_points")
     if isinstance(hourly_points, list) and hourly_points:
-        rebuilt = _chart_points_from_hourly(hourly_points, period)
+        rebuilt = _chart_points_from_hourly(hourly_points, period, tz_name=tz_name)
         if rebuilt:
             payload["chart"] = rebuilt
             return payload
 
-    rebuilt = _build_traffic_chart(period)
+    chart = payload.get("chart")
+    if isinstance(chart, list) and chart:
+        return payload
+
+    rebuilt = _build_traffic_chart(period, tz_name=tz_name)
     if rebuilt:
         payload["chart"] = rebuilt
         return payload

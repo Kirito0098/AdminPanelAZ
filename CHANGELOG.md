@@ -57,6 +57,7 @@
 
 - **Адрес сайта и HTTPS** — внутренние вкладки **Публикация** и **Cloudflare** (без отдельного пункта в боковом меню).
 - **nginx webhook** — `include cloudflare-realip.conf` только при `CLOUDFLARE_PROXY_ENABLED=true` (default true).
+- **Warper traffic** — график теперь строится по локальному часовому поясу пользователя, а подписи часов и дней на FE считаются из `ts`, без UTC-срезов строк.
 - **Тексты прокси ≠ VPN** — 400 больше не содержит внутреннее `get_proxy_adapter`. Пишет по-русски: «это прокси-узел (российский вход), а не VPN-сервер; OpenVPN/WireGuard на нём не запускаются». Обратная ошибка: «это VPN-узел, DESTINATION только у прокси». Нельзя сделать прокси активным VPN: «у него нет OpenVPN/WireGuard». В NOC заголовки: «Ошибка прокси-узла» / «Прокси-узел нездоров» (вместо голого «Ошибка узла»).
 - **Прокси-узлы (нагрузка)** — меньше дублирующих status/monitoring/iptables опросов; DESTINATION подтягивается на status GET; mTLS/update гейтятся, когда модуль выключен.
 - **Фоновые воркеры: runtime-gate** — reconcile, reminders, NOC, CIDR, policy/cert/health, retention, traffic collectors, AWG2 expire и др. перечитывают тогглы каждый tick без рестарта процесса; traffic/connection_history always-spawn + gate; `get_settings.cache_clear()` после feature profile/toggles.
