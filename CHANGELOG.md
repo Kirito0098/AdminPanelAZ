@@ -58,7 +58,8 @@
 - **Server Monitor vnStat** — backend теперь отдаёт `timestamps[]` в UTC из node-local vnStat времени, плюс `time_base: "node_local"` и `node_timezone`; график на странице сервера форматирует ось по TZ профиля и показывает подпись о TZ узла.
 - **Адрес сайта и HTTPS** — внутренние вкладки **Публикация** и **Cloudflare** (без отдельного пункта в боковом меню).
 - **nginx webhook** — `include cloudflare-realip.conf` только при `CLOUDFLARE_PROXY_ENABLED=true` (default true).
-- **Warper traffic** — график теперь строится по локальному часовому поясу пользователя, а подписи часов и дней на FE считаются из `ts`, без UTC-срезов строк.
+- **Warper traffic** — график строится в поясе профиля; подписи часов/дней на FE из `ts` (без UTC-срезов). TZ-пересборка идёт из `hourly_points` выбранного узла; локальный `traffic.json` контроллера — только fallback, если history в payload нет.
+- **SPA chunks** — `recharts` и `victory-vendor` в отдельных manual chunks (кэш/параллельная загрузка; предупреждение Vite >500 kB снято).
 - **Тексты прокси ≠ VPN** — 400 больше не содержит внутреннее `get_proxy_adapter`. Пишет по-русски: «это прокси-узел (российский вход), а не VPN-сервер; OpenVPN/WireGuard на нём не запускаются». Обратная ошибка: «это VPN-узел, DESTINATION только у прокси». Нельзя сделать прокси активным VPN: «у него нет OpenVPN/WireGuard». В NOC заголовки: «Ошибка прокси-узла» / «Прокси-узел нездоров» (вместо голого «Ошибка узла»).
 - **Прокси-узлы (нагрузка)** — меньше дублирующих status/monitoring/iptables опросов; DESTINATION подтягивается на status GET; mTLS/update гейтятся, когда модуль выключен.
 - **Фоновые воркеры: runtime-gate** — reconcile, reminders, NOC, CIDR, policy/cert/health, retention, traffic collectors, AWG2 expire и др. перечитывают тогглы каждый tick без рестарта процесса; traffic/connection_history always-spawn + gate; `get_settings.cache_clear()` после feature profile/toggles.
@@ -68,7 +69,7 @@
 - **API-клиент frontend** — монолитный `client.ts` разбит на domain-модули `api/*` с тонким barrel (импорты стабильны).
 - **Settings maintenance API** — telegram / reboot / VPN-network / Cloudflare вынесены из монолита в domain-роутеры; общие helpers через `app_setting_store`.
 - **NodesPage** — список узлов разбит на сфокусированные компоненты.
-- **SPA** — lazy routes; recharts в отдельном chunk; frontend typecheck (`tsc --noEmit`) в CI.
+- **SPA** — lazy routes; frontend typecheck (`tsc --noEmit`) в CI.
 - **Telegram Bot API** — общий `httpx.AsyncClient` для исходящих вызовов `api.telegram.org`; повторные запросы переиспользуют одно соединение (`telegram_api.py`, `call_bot_api_result`).
 - **Telegram документ / фото** — отправка `sendDocument` и `sendPhoto` тоже переведена на `httpx`; клиент переиспользуется и больше не зависит от `urllib.request.urlopen`.
 - **Telegram бот → Настройки (корень)** — сводка статуса webhook (дата регистрации / «не зарегистрирован»), токена, secret и интерактива.
@@ -109,6 +110,7 @@
 
 ### 🧪 Tests
 
+- **Chart / report TZ (GitHub #6)** — `test_chart_timezone.py` (helpers, traffic hour-bucket MSK, `X-Client-Timezone`); `test_warper_traffic_chart_tz.py` (local today/week, payload-first enrich); `test_server_monitor_bandwidth_tz.py` (`1d`/`7d`/`30d` timestamps); `test_noc_report_timezone.py` (weekly window + incidents).
 - **NOC Telegram TZ** — регрессия на weekly window и incident line в `Europe/Moscow`.
 - **Telegram Bot API / webhook / OIDC** — regression pytest: `test_telegram_api_client.py`, `test_telegram_api_errors.py`, `test_telegram_bot_context.py`, `test_telegram_settings_dashboard.py`, `test_telegram_config_send_errors.py`, `test_telegram_webhook.py`, `test_telegram_oidc.py` (31 passed).
 - **Telegram OIDC** — `test_telegram_oidc.py`: happy path, wrong aud, expired, malformed, alg=none, JWKS miss.
