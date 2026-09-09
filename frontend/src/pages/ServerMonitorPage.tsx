@@ -48,7 +48,7 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { PercentBar } from '@/components/ui/percent-bar'
-import { formatDateTime } from '@/lib/datetime'
+import { formatDate, formatDateTime, formatTime } from '@/lib/datetime'
 import { getAccessToken } from '@/lib/accessToken'
 import { cn } from '@/lib/utils'
 import type { BandwidthChart, ResourceHistory, ServerMetrics } from '@/types'
@@ -420,10 +420,20 @@ export default function ServerMonitorPage() {
 
   const chartData =
     bwChart?.labels?.map((label, i) => ({
-      label,
+      label: bwChart.timestamps?.[i]
+        ? range === '1d'
+          ? formatTime(bwChart.timestamps[i], { hour: '2-digit', minute: '2-digit' })
+          : formatDate(bwChart.timestamps[i], { day: '2-digit', month: '2-digit' })
+        : label,
       rx: bwChart.rx_mbps[i] ?? 0,
       tx: bwChart.tx_mbps[i] ?? 0,
     })) ?? []
+  const bandwidthAxisCaption =
+    bwChart?.timestamps?.length && bwChart.time_base === 'node_local'
+      ? `Ось: пояс профиля · данные vnStat собраны в TZ узла (${bwChart.node_timezone ?? 'UTC'})`
+      : bwChart
+        ? 'Ось: локальное время узла (TZ неизвестен)'
+        : null
 
   const interfaceList = ifaces.length ? ifaces : iface ? [iface] : []
   const selectedGroups = getInterfaceGroups(iface, interfaceGroups)
@@ -617,9 +627,10 @@ export default function ServerMonitorPage() {
                   className="py-8"
                 />
               ) : chartData.length > 0 ? (
-                <ChartResponsive height={300}>
-                  {({ width, height }) => (
-                <AreaChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <>
+                  <ChartResponsive height={300}>
+                    {({ width, height }) => (
+                  <AreaChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="bwRx" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor={CHART_RX} stopOpacity={0.35} />
@@ -673,8 +684,10 @@ export default function ServerMonitorPage() {
                       activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
                     />
                   </AreaChart>
-                  )}
-                </ChartResponsive>
+                    )}
+                  </ChartResponsive>
+                  {bandwidthAxisCaption && <p className="mt-2 text-xs text-muted-foreground">{bandwidthAxisCaption}</p>}
+                </>
               ) : (
                 <EmptyState
                   icon={Network}

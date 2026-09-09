@@ -1526,8 +1526,11 @@ export interface BandwidthChart {
   iface: string
   range: string
   labels: string[]
+  timestamps?: string[]
   rx_mbps: number[]
   tx_mbps: number[]
+  time_base?: string
+  node_timezone?: string
   totals?: Record<string, { rx_bytes: number; tx_bytes: number; total_bytes: number }>
   error?: string
 }

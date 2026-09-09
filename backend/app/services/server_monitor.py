@@ -7,8 +7,9 @@ import re
 import shutil
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psutil
 
@@ -29,6 +30,64 @@ def clear_server_monitor_caches() -> None:
     global _vnstat_avail_cache, _iface_list_cache
     _vnstat_avail_cache = None
     _iface_list_cache = None
+
+
+def _format_utc_offset(dt: datetime) -> str:
+    offset = dt.utcoffset()
+    if offset is None:
+        return "UTC"
+    total_minutes = int(offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    total_minutes = abs(total_minutes)
+    hours, minutes = divmod(total_minutes, 60)
+    if minutes:
+        return f"UTC{sign}{hours}:{minutes:02d}"
+    return f"UTC{sign}{hours}"
+
+
+def _node_timezone() -> tzinfo:
+    tz_name = os.environ.get("TZ", "").strip()
+    if tz_name:
+        try:
+            return ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError:
+            pass
+    current = datetime.now().astimezone()
+    tzinfo = current.tzinfo
+    if tzinfo is not None:
+        return tzinfo
+    return timezone.utc
+
+
+def _node_timezone_name() -> str:
+    tz_name = os.environ.get("TZ", "").strip()
+    if tz_name:
+        return tz_name
+    current = datetime.now().astimezone()
+    tzinfo = current.tzinfo
+    if tzinfo is None:
+        return "UTC"
+    key = getattr(tzinfo, "key", None)
+    if key:
+        return str(key)
+    name = current.tzname()
+    if name:
+        return name
+    return _format_utc_offset(current)
+
+
+def bandwidth_point_timestamp(date_dict: dict, time_dict: dict) -> str:
+    tz = _node_timezone()
+    local_dt = datetime(
+        int(date_dict.get("year", 0) or 0),
+        int(date_dict.get("month", 1) or 1),
+        int(date_dict.get("day", 1) or 1),
+        int(time_dict.get("hour", 0) or 0),
+        int(time_dict.get("minute", 0) or 0),
+        0,
+        tzinfo=tz,
+    )
+    return local_dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def is_vnstat_available(*, force: bool = False) -> bool:
@@ -303,6 +362,7 @@ class ServerMonitorService:
             return round((int(bytes_val) * 8) / (86_400 * 1_000_000), 3)
 
         labels: list[str] = []
+        timestamps: list[str] = []
         rx_mbps: list[float] = []
         tx_mbps: list[float] = []
 
@@ -310,23 +370,27 @@ class ServerMonitorService:
             if fivemin:
                 last288 = sorted(fivemin, key=sort_key_dt)[-288:]
                 for m in last288:
+                    date = m.get("date") or {}
                     t = m.get("time") or {}
                     labels.append(f"{int(t.get('hour', 0)):02d}:{int(t.get('minute', 0)):02d}")
+                    timestamps.append(bandwidth_point_timestamp(date, t))
                     rx_mbps.append(to_mbps_from_5min_bytes(m.get("rx", 0)))
                     tx_mbps.append(to_mbps_from_5min_bytes(m.get("tx", 0)))
             else:
-                labels, rx_mbps, tx_mbps = [""] * 288, [0.0] * 288, [0.0] * 288
+                labels, timestamps, rx_mbps, tx_mbps = [""] * 288, [""] * 288, [0.0] * 288, [0.0] * 288
         else:
             need_days = 7 if rng == "7d" else 30
             use_days = sorted(days, key=sort_key_dt)[-need_days:]
             for d in use_days:
                 date = d.get("date") or {}
                 labels.append(f"{int(date.get('day', 0)):02d}.{int(date.get('month', 0)):02d}")
+                timestamps.append(bandwidth_point_timestamp(date, {"hour": 0, "minute": 0}))
                 rx_mbps.append(to_mbps_avg_per_day(d.get("rx", 0)))
                 tx_mbps.append(to_mbps_avg_per_day(d.get("tx", 0)))
             if len(labels) < need_days:
                 pad = need_days - len(labels)
                 labels = [""] * pad + labels
+                timestamps = [""] * pad + timestamps
                 rx_mbps = [0.0] * pad + rx_mbps
                 tx_mbps = [0.0] * pad + tx_mbps
 
@@ -342,8 +406,11 @@ class ServerMonitorService:
             "iface": iface,
             "range": rng,
             "labels": labels,
+            "timestamps": timestamps,
             "rx_mbps": rx_mbps,
             "tx_mbps": tx_mbps,
+            "time_base": "node_local",
+            "node_timezone": _node_timezone_name(),
             "totals": {"1d": sum_days(1), "7d": sum_days(7), "30d": sum_days(30)},
         }
 

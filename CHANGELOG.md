@@ -55,6 +55,7 @@
 
 ### 🔄 Changed
 
+- **Server Monitor vnStat** — backend теперь отдаёт `timestamps[]` в UTC из node-local vnStat времени, плюс `time_base: "node_local"` и `node_timezone`; график на странице сервера форматирует ось по TZ профиля и показывает подпись о TZ узла.
 - **Адрес сайта и HTTPS** — внутренние вкладки **Публикация** и **Cloudflare** (без отдельного пункта в боковом меню).
 - **nginx webhook** — `include cloudflare-realip.conf` только при `CLOUDFLARE_PROXY_ENABLED=true` (default true).
 - **Warper traffic** — график теперь строится по локальному часовому поясу пользователя, а подписи часов и дней на FE считаются из `ts`, без UTC-срезов строк.
