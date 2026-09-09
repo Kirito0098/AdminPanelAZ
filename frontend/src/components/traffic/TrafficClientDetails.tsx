@@ -45,7 +45,7 @@ import {
 } from '@/components/ui/table'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
-import { formatDateTime } from '@/lib/datetime'
+import { formatDate, formatDateTime, formatTime } from '@/lib/datetime'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { COL_VPN_IP } from '@/lib/uiLabels'
 import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficClientSessions } from '@/types'
@@ -79,6 +79,17 @@ function getProtocolVariant(protocol: string): 'default' | 'secondary' | 'outlin
 function formatLastSeen(value?: string | null) {
   if (!value) return '—'
   return formatDateTime(value)
+}
+
+function formatTrafficChartLabel(ts: string | undefined, fallback: string, bucket: string) {
+  if (!ts) return fallback
+  if (bucket === 'minute5' || bucket === 'hour') {
+    return formatTime(ts, { hour: '2-digit', minute: '2-digit' })
+  }
+  if (bucket === 'day') {
+    return formatDate(ts, { day: '2-digit', month: '2-digit' })
+  }
+  return formatDate(ts, { year: 'numeric', month: '2-digit' })
 }
 
 type SourceSortKey = 'sessions' | 'last_seen'
@@ -278,16 +289,22 @@ export default function TrafficClientDetails({
       </TableRow>
     ))
 
-  const chartPoints =
-    chartData?.labels?.map((label, i) => ({
-      label,
-      vpn: chartData.vpn_bytes?.[i] ?? 0,
-      antizapret: chartData.antizapret_bytes?.[i] ?? 0,
-      openvpn: chartData.openvpn_bytes?.[i] ?? 0,
-      wireguard: chartData.wireguard_bytes?.[i] ?? 0,
-      amneziawg2: chartData.amneziawg2_bytes?.[i] ?? 0,
-      total: (chartData.vpn_bytes?.[i] ?? 0) + (chartData.antizapret_bytes?.[i] ?? 0),
-    })) ?? []
+  const chartPoints = useMemo(() => {
+    const n = chartData?.timestamps?.length || chartData?.labels?.length || 0
+    return Array.from({ length: n }, (_, i) => {
+      const fallback = chartData?.labels?.[i] ?? ''
+      const ts = chartData?.timestamps?.[i]
+      return {
+        label: formatTrafficChartLabel(ts, fallback, chartData?.bucket || 'day'),
+        vpn: chartData?.vpn_bytes?.[i] ?? 0,
+        antizapret: chartData?.antizapret_bytes?.[i] ?? 0,
+        openvpn: chartData?.openvpn_bytes?.[i] ?? 0,
+        wireguard: chartData?.wireguard_bytes?.[i] ?? 0,
+        amneziawg2: chartData?.amneziawg2_bytes?.[i] ?? 0,
+        total: (chartData?.vpn_bytes?.[i] ?? 0) + (chartData?.antizapret_bytes?.[i] ?? 0),
+      }
+    })
+  }, [chartData])
 
   const showProtocolSeries = showAwg2
 

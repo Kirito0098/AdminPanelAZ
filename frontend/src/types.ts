@@ -1676,6 +1676,8 @@ export interface TrafficChartData {
   range: string
   bucket: string
   protocol_filter: string
+  timezone?: string
+  timestamps?: string[]
   labels: string[]
   vpn_bytes: number[]
   antizapret_bytes: number[]

@@ -83,6 +83,7 @@
 
 ### 🐛 Fixed
 
+- **График трафика клиента** — ось и бакеты в поясе профиля (не UTC); API отдаёт `timestamps` (GitHub #6).
 - **Cloudflare snippet** — backup перед overwrite; `# snapshot: date`; `uninstall --remove-nginx` удаляет snippet.
 - **Telegram Mini App + ACCESS_PATH** — `GET …/tg-mini` инжектит
   `window.__PANEL_ACCESS_PATH__`, чтобы API ходило на `{ACCESS_PATH}/api/...`
