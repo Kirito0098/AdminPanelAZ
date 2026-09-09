@@ -409,7 +409,7 @@ def _filter_traffic_hourly(
             if start_local <= local_dt < end_local:
                 filtered.append((key, value))
     elif period == "week":
-        cutoff = now_local - timedelta(days=7)
+        cutoff = (now_local - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
         filtered = []
         for key, value in items:
             utc_dt = _parse_traffic_hour_key(key)
@@ -418,7 +418,7 @@ def _filter_traffic_hourly(
             if naive_utc_to_local(utc_dt, tz) >= cutoff:
                 filtered.append((key, value))
     elif period == "month":
-        cutoff = now_local - timedelta(days=30)
+        cutoff = (now_local - timedelta(days=30)).replace(hour=0, minute=0, second=0, microsecond=0)
         filtered = []
         for key, value in items:
             utc_dt = _parse_traffic_hour_key(key)
@@ -516,6 +516,15 @@ def enrich_warper_traffic_payload(
     tz_name: str | None = None,
 ) -> dict[str, Any]:
     """Ensure chart data is present even when an older node agent omits it."""
+    if tz_name:
+        hourly_points = _filter_traffic_hourly(_read_traffic_hourly_map(), period, tz_name=tz_name)
+        if hourly_points:
+            rebuilt = _chart_points_from_hourly(hourly_points, period, tz_name=tz_name)
+            if rebuilt:
+                payload["hourly_points"] = hourly_points
+                payload["chart"] = rebuilt
+                return payload
+
     hourly_points = payload.get("hourly_points")
     if isinstance(hourly_points, list) and hourly_points:
         rebuilt = _chart_points_from_hourly(hourly_points, period, tz_name=tz_name)
