@@ -13,7 +13,7 @@ export default function FeatureGate({ featureKey, children }: FeatureGateProps) 
     return null
   }
 
-  if (!Boolean(features[featureKey])) {
+  if (!features[featureKey]) {
     return <Navigate to="/" replace />
   }
 
