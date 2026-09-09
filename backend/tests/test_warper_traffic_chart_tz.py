@@ -88,14 +88,15 @@ def test_enrich_rebuilds_from_full_hourly_map(monkeypatch):
         warper_mod,
         "_read_traffic_hourly_map",
         lambda: {
-            "2026-09-06T20": {"rx": 9, "tx": 1},  # local Sep 6, should stay out of "today"
-            "2026-09-06T22": {"rx": 2, "tx": 1},  # local Sep 7, should be recovered
-            "2026-09-07T01": {"rx": 4, "tx": 3},  # local Sep 7, should be recovered
+            "2026-09-05T20": {"rx": 99, "tx": 99},
+            "2026-09-05T21": {"rx": 88, "tx": 88},
         },
     )
 
     payload = {
         "hourly_points": [
+            {"ts": "2026-09-06T20", "rx": 9, "tx": 1},  # local Sep 6, should stay out of "today"
+            {"ts": "2026-09-06T22", "rx": 2, "tx": 1},  # local Sep 7, should be recovered
             {"ts": "2026-09-07T01", "rx": 4, "tx": 3},
         ]
     }
@@ -103,9 +104,38 @@ def test_enrich_rebuilds_from_full_hourly_map(monkeypatch):
     enriched = enrich_warper_traffic_payload(payload, "today", tz_name="Europe/Moscow")
 
     assert [point["ts"] for point in enriched["hourly_points"]] == [
+        "2026-09-06T20",
         "2026-09-06T22",
         "2026-09-07T01",
     ]
+    assert [point["ts"] for point in enriched["chart"]] == [
+        "2026-09-06T22",
+        "2026-09-07T01",
+    ]
+    assert all(point["rx"] != 99 for point in enriched["chart"])
+    assert all(point["tx"] != 99 for point in enriched["chart"])
+
+
+def test_enrich_falls_back_to_local_hourly_map_when_payload_missing_history(monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = cls(2026, 9, 7, 1, 30, tzinfo=timezone.utc)
+            return base if tz is None else base.astimezone(tz)
+
+    monkeypatch.setattr(warper_mod, "datetime", FixedDateTime)
+    monkeypatch.setattr(
+        warper_mod,
+        "_read_traffic_hourly_map",
+        lambda: {
+            "2026-09-06T20": {"rx": 9, "tx": 1},  # local Sep 6, should stay out of "today"
+            "2026-09-06T22": {"rx": 2, "tx": 1},  # local Sep 7, should be recovered
+            "2026-09-07T01": {"rx": 4, "tx": 3},  # local Sep 7, should be recovered
+        },
+    )
+
+    enriched = enrich_warper_traffic_payload({}, "today", tz_name="Europe/Moscow")
+
     assert [point["ts"] for point in enriched["chart"]] == [
         "2026-09-06T22",
         "2026-09-07T01",

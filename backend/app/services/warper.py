@@ -389,6 +389,34 @@ def _parse_traffic_hour_key(value: str) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _normalize_hourly_points(hourly_points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for point in hourly_points:
+        if not isinstance(point, dict):
+            continue
+        ts = str(point.get("ts") or "").strip()
+        if not ts or _parse_traffic_hour_key(ts) is None:
+            continue
+        try:
+            normalized.append(
+                {
+                    "ts": ts,
+                    "rx": int(point["rx"]),
+                    "tx": int(point["tx"]),
+                }
+            )
+        except (TypeError, ValueError, KeyError):
+            continue
+    return normalized
+
+
+def _hourly_map_from_points(hourly_points: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    return {
+        point["ts"]: {"rx": point["rx"], "tx": point["tx"]}
+        for point in _normalize_hourly_points(hourly_points)
+    }
+
+
 def _filter_traffic_hourly(
     hourly: dict[str, dict[str, int]],
     period: str,
@@ -429,18 +457,6 @@ def _filter_traffic_hourly(
     else:
         filtered = [(key, value) for key, value in items if _parse_traffic_hour_key(key) is not None]
     return [{"ts": key, "rx": value["rx"], "tx": value["tx"]} for key, value in filtered]
-
-
-def _format_traffic_chart_label(ts: str, period: str) -> str:
-    if period == "today":
-        hour = ts.split("T", 1)[1][:2] if "T" in ts else ts
-        return f"{hour}:00"
-    day = ts[:10]
-    try:
-        parsed = datetime.strptime(day, "%Y-%m-%d")
-        return parsed.strftime("%d.%m")
-    except ValueError:
-        return day[5:]
 
 
 def _chart_points_from_hourly(
@@ -496,6 +512,18 @@ def _chart_points_from_hourly(
     ]
 
 
+def _build_traffic_chart_from_hourly_points(
+    hourly_points: list[dict[str, Any]],
+    period: str,
+    tz_name: str | None = None,
+) -> list[dict[str, Any]]:
+    hourly_map = _hourly_map_from_points(hourly_points)
+    if not hourly_map:
+        return []
+    filtered = _filter_traffic_hourly(hourly_map, period, tz_name=tz_name)
+    return _chart_points_from_hourly(filtered, period, tz_name=tz_name)
+
+
 def _synthetic_traffic_chart(payload: dict[str, Any], period: str) -> list[dict[str, Any]]:
     rx = int(payload.get("period_rx") or payload.get("today_rx") or 0)
     tx = int(payload.get("period_tx") or payload.get("today_tx") or 0)
@@ -506,8 +534,11 @@ def _synthetic_traffic_chart(payload: dict[str, Any], period: str) -> list[dict[
 
 
 def _build_traffic_chart(period: str, tz_name: str | None = None) -> list[dict[str, Any]]:
-    hourly_points = _filter_traffic_hourly(_read_traffic_hourly_map(), period, tz_name=tz_name)
-    return _chart_points_from_hourly(hourly_points, period, tz_name=tz_name)
+    return _build_traffic_chart_from_hourly_points(
+        [{"ts": ts, "rx": value["rx"], "tx": value["tx"]} for ts, value in _read_traffic_hourly_map().items()],
+        period,
+        tz_name=tz_name,
+    )
 
 
 def enrich_warper_traffic_payload(
@@ -516,20 +547,12 @@ def enrich_warper_traffic_payload(
     tz_name: str | None = None,
 ) -> dict[str, Any]:
     """Ensure chart data is present even when an older node agent omits it."""
-    if tz_name:
-        hourly_points = _filter_traffic_hourly(_read_traffic_hourly_map(), period, tz_name=tz_name)
-        if hourly_points:
-            rebuilt = _chart_points_from_hourly(hourly_points, period, tz_name=tz_name)
-            if rebuilt:
-                payload["hourly_points"] = hourly_points
-                payload["chart"] = rebuilt
-                return payload
-
     hourly_points = payload.get("hourly_points")
     if isinstance(hourly_points, list) and hourly_points:
-        rebuilt = _chart_points_from_hourly(hourly_points, period, tz_name=tz_name)
-        if rebuilt:
-            payload["chart"] = rebuilt
+        usable_hourly_points = _normalize_hourly_points(hourly_points)
+        if usable_hourly_points:
+            payload["hourly_points"] = usable_hourly_points
+            payload["chart"] = _build_traffic_chart_from_hourly_points(usable_hourly_points, period, tz_name=tz_name)
             return payload
 
     chart = payload.get("chart")
