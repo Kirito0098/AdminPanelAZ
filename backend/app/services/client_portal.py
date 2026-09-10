@@ -236,6 +236,39 @@ def get_valid_portal_token(db: Session, token: str) -> ClientPortalToken:
     return row
 
 
+def _portal_protocol_for_file(file_item: dict, config: VpnConfig) -> str:
+    """Prefer on-disk profile protocol (WG vs AWG) over DB vpn_type.
+
+    AmneziaWG clients are stored as VpnType.wireguard but expose both
+    ``wireguard`` and ``amneziawg`` profile files — same split as dashboard tabs.
+    """
+    proto = (file_item.get("protocol") or "").strip().lower()
+    if proto in {"openvpn", "wireguard", "amneziawg", "amneziawg2"}:
+        return proto
+    return config.vpn_type.value
+
+
+def _protocol_feature_key(protocol: str) -> str | None:
+    if protocol == "openvpn":
+        return "openvpn"
+    if protocol == "wireguard":
+        return "wireguard"
+    if protocol == "amneziawg":
+        return "amneziawg"
+    if protocol == "amneziawg2":
+        return "awg2"
+    return None
+
+
+def _protocol_feature_enabled(protocol: str) -> bool:
+    key = _protocol_feature_key(protocol)
+    if not key:
+        return True
+    from app.services.feature_guards import get_feature_service
+
+    return get_feature_service().is_enabled(key)
+
+
 def _list_files_for_configs(db: Session, configs: list[VpnConfig]) -> list[dict]:
     adapter = get_active_adapter(db)
     out: list[dict] = []
@@ -246,14 +279,25 @@ def _list_files_for_configs(db: Session, configs: list[VpnConfig]) -> list[dict]
             path = f.get("path") or ""
             if not path:
                 continue
-            filename = build_profile_download_filename(config.client_name, path=path)
+            protocol = _portal_protocol_for_file(f, config)
+            if not _protocol_feature_enabled(protocol):
+                continue
+            filename = (
+                f.get("download_filename")
+                or build_profile_download_filename(
+                    config.client_name,
+                    protocol=protocol,
+                    variant=f.get("variant", ""),
+                    path=path,
+                )
+            )
             label = f.get("name") or filename
             out.append(
                 {
                     "path": path,
                     "label": label,
                     "filename": filename,
-                    "vpn_type": config.vpn_type.value,
+                    "vpn_type": protocol,
                     "config_id": config.id,
                 }
             )
@@ -304,7 +348,7 @@ def _collect_access_policies(db: Session, *, node_id: int, client_name: str, pro
             .filter(OpenVpnAccessPolicy.node_id == node_id, OpenVpnAccessPolicy.client_name == client_name)
             .first()
         )
-    if "wireguard" in protocols:
+    if "wireguard" in protocols or "amneziawg" in protocols:
         policies.append(
             db.query(WgAccessPolicy)
             .filter(WgAccessPolicy.node_id == node_id, WgAccessPolicy.client_name == client_name)
@@ -394,6 +438,10 @@ def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
         )
         .all()
     )
+    brand = _setting_value(db, "app_name") or "VPN"
+    # Shorten default panel name for the public page
+    if brand.lower().startswith("adminpanel"):
+        brand = "VPN"
     files_meta = _list_files_for_configs(db, configs)
     files = []
     for item in files_meta:
@@ -405,14 +453,11 @@ def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
             "vpn_type": item["vpn_type"],
             "download_url": download_url,
         }
-        if item["vpn_type"] == VpnType.openvpn.value or (item["filename"] or "").lower().endswith(".ovpn"):
+        if item["vpn_type"] == "openvpn" or (item["filename"] or "").lower().endswith(".ovpn"):
             entry["openvpn_import_url"] = openvpn_import_url(download_url)
         files.append(entry)
-    protocols = sorted({c.vpn_type.value for c in configs})
-    brand = _setting_value(db, "app_name") or "VPN"
-    # Shorten default panel name for the public page
-    if brand.lower().startswith("adminpanel"):
-        brand = "VPN"
+    # Protocols shown on the page = enabled profile protocols actually present.
+    protocols = sorted({f["vpn_type"] for f in files})
     return {
         "client_name": token_row.client_name,
         "brand_title": brand,

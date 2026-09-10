@@ -49,6 +49,13 @@ const APP_DOWNLOADS: Record<string, Partial<Record<OsId, { label: string; url: s
     },
     ios: { label: 'WireGuard', url: 'https://apps.apple.com/app/wireguard/id1441195209' },
   },
+  amneziawg: {
+    windows: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
+    mac: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
+    linux: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
+    android: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
+    ios: { label: 'AmneziaWG', url: 'https://apps.apple.com/app/amneziawg/id6478942365' },
+  },
   amneziawg2: {
     windows: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
     mac: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
@@ -61,6 +68,7 @@ const APP_DOWNLOADS: Record<string, Partial<Record<OsId, { label: string; url: s
 function protocolTitle(vpnType: string): string {
   if (vpnType === 'openvpn') return 'OpenVPN'
   if (vpnType === 'wireguard') return 'WireGuard'
+  if (vpnType === 'amneziawg') return 'AmneziaWG'
   if (vpnType === 'amneziawg2') return 'AmneziaWG 2.0'
   return vpnType
 }
@@ -96,6 +104,14 @@ function profileHint(protocol: string): string {
     return 'Скачайте .conf и импортируйте в WireGuard (Import tunnel from file / из файла).'
   }
   return 'Скачайте конфиг и импортируйте в AmneziaWG (.conf) или AmneziaVPN (.vpn).'
+}
+
+/** Prefer OpenVPN → AWG2 → AWG → WG when choosing the initial protocol tab. */
+function preferredProtocol(protocols: string[]): string {
+  for (const key of ['openvpn', 'amneziawg2', 'amneziawg', 'wireguard']) {
+    if (protocols.includes(key)) return key
+  }
+  return protocols[0] || ''
 }
 
 async function copyText(value: string) {
@@ -248,7 +264,7 @@ export default function PortalPage() {
     fetchPublicPortalMeta(token)
       .then((meta) => {
         setData(meta)
-        setProtocol(meta.protocols[0] || meta.files[0]?.vpn_type || '')
+        setProtocol(preferredProtocol(meta.protocols.length ? meta.protocols : meta.files.map((f) => f.vpn_type)))
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Ошибка загрузки'))
       .finally(() => setLoading(false))
@@ -370,7 +386,10 @@ export default function PortalPage() {
             </div>
             {data.protocols.length > 1 && (
               <div className="flex flex-wrap gap-1.5">
-                {data.protocols.map((p) => (
+                {(['openvpn', 'amneziawg2', 'amneziawg', 'wireguard'] as const)
+                  .filter((p) => data.protocols.includes(p))
+                  .concat(data.protocols.filter((p) => !['openvpn', 'amneziawg2', 'amneziawg', 'wireguard'].includes(p)))
+                  .map((p) => (
                   <button
                     key={p}
                     type="button"

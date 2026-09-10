@@ -170,3 +170,37 @@ def test_build_portal_status_active_unlimited():
     assert status["traffic_used_bytes"] == 3072
     assert status["traffic_limit_bytes"] is None
     assert "/ ∞" in status["traffic_label"]
+
+
+def test_portal_protocol_prefers_file_protocol_over_db_vpn_type():
+    cfg = MagicMock()
+    cfg.vpn_type = VpnType.wireguard
+    assert portal._portal_protocol_for_file({"protocol": "amneziawg"}, cfg) == "amneziawg"
+    assert portal._portal_protocol_for_file({"protocol": "wireguard"}, cfg) == "wireguard"
+    assert portal._portal_protocol_for_file({}, cfg) == "wireguard"
+
+
+def test_list_files_hides_wireguard_when_feature_disabled():
+    db = MagicMock()
+    cfg = MagicMock()
+    cfg.id = 7
+    cfg.client_name = "test1"
+    cfg.vpn_type = VpnType.wireguard
+    adapter = MagicMock()
+    adapter.get_profile_files.return_value = [
+        {"protocol": "wireguard", "variant": "vpn", "path": "/client/wireguard/vpn/a-wg.conf", "filename": "a-wg.conf"},
+        {"protocol": "amneziawg", "variant": "vpn", "path": "/client/amneziawg/vpn/a-am.conf", "filename": "a-am.conf"},
+    ]
+
+    def feat_enabled(key: str) -> bool:
+        return key != "wireguard"
+
+    with (
+        patch("app.services.client_portal.get_active_adapter", return_value=adapter),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+    ):
+        feats.return_value.is_enabled.side_effect = feat_enabled
+        files = portal._list_files_for_configs(db, [cfg])
+
+    assert [f["vpn_type"] for f in files] == ["amneziawg"]
+    assert files[0]["filename"].startswith("AWG-")
