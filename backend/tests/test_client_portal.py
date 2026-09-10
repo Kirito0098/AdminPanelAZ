@@ -129,3 +129,44 @@ def test_link_response_builds_page_url():
         payload = portal.link_response(db, token)
     assert payload["url"] == "https://sub.example.com/p/XxYy"
     assert payload["token"] == "XxYy"
+
+
+def test_format_bytes_label():
+    assert portal._format_bytes_label(0) == "0 B"
+    assert "GiB" in portal._format_bytes_label(44.69 * 1024**3)
+
+
+def test_build_portal_status_active_unlimited():
+    db = MagicMock()
+    # OpenVPN policy: not blocked, no limit
+    policy = MagicMock()
+    policy.is_permanent_blocked = False
+    policy.is_temp_blocked = False
+    policy.block_until = None
+    policy.traffic_limit_bytes = None
+    # traffic stats
+    stat = MagicMock()
+    stat.total_received = 1024
+    stat.total_sent = 2048
+
+    def query_side_effect(model):
+        q = MagicMock()
+        if model.__name__ == "OpenVpnAccessPolicy":
+            q.filter.return_value.first.return_value = policy
+        elif model.__name__ == "UserTrafficStatProtocol":
+            q.filter.return_value.all.return_value = [stat]
+        else:
+            q.filter.return_value.first.return_value = None
+            q.filter.return_value.all.return_value = []
+        return q
+
+    db.query.side_effect = query_side_effect
+    cfg = MagicMock()
+    cfg.vpn_type = VpnType.openvpn
+    cfg.expires_at = None
+    status = portal.build_portal_status(db, node_id=1, client_name="alice", configs=[cfg])
+    assert status["status"] == "active"
+    assert status["expires_label"] == "Бессрочно"
+    assert status["traffic_used_bytes"] == 3072
+    assert status["traffic_limit_bytes"] is None
+    assert "/ ∞" in status["traffic_label"]

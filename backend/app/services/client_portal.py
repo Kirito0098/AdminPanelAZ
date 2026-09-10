@@ -11,7 +11,17 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AppSetting, ClientPortalToken, User, VpnConfig, VpnType
+from app.models import (
+    AmneziaWg2AccessPolicy,
+    AppSetting,
+    ClientPortalToken,
+    OpenVpnAccessPolicy,
+    User,
+    UserTrafficStatProtocol,
+    VpnConfig,
+    VpnType,
+    WgAccessPolicy,
+)
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.panel_publish_info import public_https_origin_url
@@ -250,6 +260,127 @@ def _list_files_for_configs(db: Session, configs: list[VpnConfig]) -> list[dict]
     return out
 
 
+def _setting_value(db: Session, key: str, default: str = "") -> str:
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if row and (row.value or "").strip():
+        return (row.value or "").strip()
+    return default
+
+
+def _format_bytes_label(n: int) -> str:
+    value = float(max(0, int(n or 0)))
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    idx = 0
+    while value >= 1024 and idx < len(units) - 1:
+        value /= 1024.0
+        idx += 1
+    if idx == 0:
+        return f"{int(value)} {units[idx]}"
+    return f"{value:.2f} {units[idx]}"
+
+
+def _policy_blocked(policy) -> bool:
+    if policy is None:
+        return False
+    if bool(getattr(policy, "is_permanent_blocked", False)):
+        return True
+    if bool(getattr(policy, "is_temp_blocked", False)):
+        return True
+    until = getattr(policy, "block_until", None)
+    if until is None:
+        return False
+    now = datetime.utcnow()
+    try:
+        return until > now
+    except TypeError:
+        return False
+
+
+def _collect_access_policies(db: Session, *, node_id: int, client_name: str, protocols: set[str]) -> list:
+    policies = []
+    if "openvpn" in protocols:
+        policies.append(
+            db.query(OpenVpnAccessPolicy)
+            .filter(OpenVpnAccessPolicy.node_id == node_id, OpenVpnAccessPolicy.client_name == client_name)
+            .first()
+        )
+    if "wireguard" in protocols:
+        policies.append(
+            db.query(WgAccessPolicy)
+            .filter(WgAccessPolicy.node_id == node_id, WgAccessPolicy.client_name == client_name)
+            .first()
+        )
+    if "amneziawg2" in protocols:
+        policies.append(
+            db.query(AmneziaWg2AccessPolicy)
+            .filter(
+                AmneziaWg2AccessPolicy.node_id == node_id,
+                AmneziaWg2AccessPolicy.client_name == client_name,
+            )
+            .first()
+        )
+    return [p for p in policies if p is not None]
+
+
+def build_portal_status(db: Session, *, node_id: int, client_name: str, configs: list[VpnConfig]) -> dict:
+    """Account overview for the public portal (status / expiry / traffic)."""
+    protocols = {c.vpn_type.value for c in configs}
+    policies = _collect_access_policies(db, node_id=node_id, client_name=client_name, protocols=protocols)
+    blocked = any(_policy_blocked(p) for p in policies)
+
+    expiries = [c.expires_at for c in configs if getattr(c, "expires_at", None)]
+    expires_at = min(expiries) if expiries else None
+    now = datetime.utcnow()
+    expired = bool(expires_at and expires_at <= now)
+
+    if blocked:
+        status_key = "blocked"
+        status_label = "Заблокирована"
+    elif expired:
+        status_key = "expired"
+        status_label = "Истекла"
+    else:
+        status_key = "active"
+        status_label = "Активна"
+
+    if expires_at is None:
+        expires_label = "Бессрочно"
+    else:
+        expires_label = expires_at.strftime("%d.%m.%Y")
+
+    stats = (
+        db.query(UserTrafficStatProtocol)
+        .filter(
+            UserTrafficStatProtocol.node_id == node_id,
+            UserTrafficStatProtocol.common_name == client_name,
+        )
+        .all()
+    )
+    used_bytes = sum(int(r.total_received or 0) + int(r.total_sent or 0) for r in stats)
+
+    limit_candidates = [
+        int(p.traffic_limit_bytes)
+        for p in policies
+        if getattr(p, "traffic_limit_bytes", None) is not None and int(p.traffic_limit_bytes or 0) > 0
+    ]
+    limit_bytes = min(limit_candidates) if limit_candidates else None
+
+    if limit_bytes is None:
+        traffic_label = f"{_format_bytes_label(used_bytes)} / ∞"
+    else:
+        traffic_label = f"{_format_bytes_label(used_bytes)} / {_format_bytes_label(limit_bytes)}"
+
+    return {
+        "status": status_key,
+        "status_label": status_label,
+        "expires_at": expires_at.isoformat() + "Z" if expires_at else None,
+        "expires_label": expires_label,
+        "traffic_used_bytes": used_bytes,
+        "traffic_limit_bytes": limit_bytes,
+        "traffic_label": traffic_label,
+    }
+
+
 def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
     base = resolve_portal_base_url(db)
     if not base:
@@ -278,11 +409,21 @@ def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
             entry["openvpn_import_url"] = openvpn_import_url(download_url)
         files.append(entry)
     protocols = sorted({c.vpn_type.value for c in configs})
+    brand = _setting_value(db, "app_name") or "VPN"
+    # Shorten default panel name for the public page
+    if brand.lower().startswith("adminpanel"):
+        brand = "VPN"
     return {
         "client_name": token_row.client_name,
-        "brand_title": "VPN",
+        "brand_title": brand,
         "protocols": protocols,
         "files": files,
+        "status": build_portal_status(
+            db,
+            node_id=token_row.node_id,
+            client_name=token_row.client_name,
+            configs=configs,
+        ),
     }
 
 

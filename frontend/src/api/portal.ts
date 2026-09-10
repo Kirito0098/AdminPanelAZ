@@ -16,11 +16,22 @@ export interface PortalFileMeta {
   openvpn_import_url?: string
 }
 
+export interface PortalStatusMeta {
+  status: 'active' | 'expired' | 'blocked' | string
+  status_label: string
+  expires_at: string | null
+  expires_label: string
+  traffic_used_bytes: number
+  traffic_limit_bytes: number | null
+  traffic_label: string
+}
+
 export interface PortalMetaResponse {
   client_name: string
   brand_title: string
   protocols: string[]
   files: PortalFileMeta[]
+  status?: PortalStatusMeta
 }
 
 export async function getPortalLink(clientName: string) {
