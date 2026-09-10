@@ -57,6 +57,45 @@ def test_from_without_to_raises():
         )
 
 
+def test_both_garbage_date_strings_raises_not_preset():
+    with pytest.raises(TrafficPeriodError) as ei:
+        resolve_traffic_period(
+            period="7d",
+            from_s="not-a-date",
+            to_s="also-garbage",
+            retention_days=90,
+            tz_name="UTC",
+        )
+    assert ei.value.retention_days == 90
+    assert "90" in str(ei.value)
+
+
+def test_invalid_from_empty_to_raises():
+    with pytest.raises(TrafficPeriodError) as ei:
+        resolve_traffic_period(
+            period=None,
+            from_s="2026-13-40",
+            to_s="",
+            retention_days=90,
+            tz_name="UTC",
+        )
+    assert ei.value.retention_days == 90
+
+
+def test_valid_from_invalid_to_raises():
+    now = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+    with pytest.raises(TrafficPeriodError) as ei:
+        resolve_traffic_period(
+            period=None,
+            from_s="2026-09-01",
+            to_s="bad",
+            retention_days=90,
+            tz_name="UTC",
+            now=now,
+        )
+    assert ei.value.retention_days == 90
+
+
 def test_custom_overrides_period():
     now = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
     w = resolve_traffic_period(

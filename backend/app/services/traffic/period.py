@@ -91,10 +91,12 @@ def resolve_traffic_period(
     instant = now if now is not None else datetime.now(timezone.utc)
     until_naive = _to_naive_utc(instant)
 
+    from_stripped = (from_s or "").strip()
+    to_stripped = (to_s or "").strip()
     from_parsed = _parse_iso_date(from_s)
     to_parsed = _parse_iso_date(to_s)
 
-    if from_parsed is not None or to_parsed is not None:
+    if from_stripped or to_stripped:
         if from_parsed is None or to_parsed is None:
             raise _retention_error(retention_days)
 
