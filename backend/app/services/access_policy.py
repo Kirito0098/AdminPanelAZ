@@ -79,6 +79,19 @@ def _as_utc(dt: datetime | None) -> datetime | None:
     return dt
 
 
+def _policy_access_until(row) -> datetime | None:
+    value = getattr(row, "access_until", None)
+    if value is None:
+        value = getattr(row, "expires_at", None)
+    return _as_utc(value)
+
+
+def _policy_access_expired(row, now: datetime | None = None) -> bool:
+    current = _as_utc(now) or _now()
+    access_until = _policy_access_until(row)
+    return bool(access_until and access_until <= current)
+
+
 class AccessPolicyService:
     def __init__(
         self,
@@ -234,13 +247,17 @@ class AccessPolicyService:
 
     def _ovpn_state(self, row: OpenVpnAccessPolicy, now: datetime | None = None) -> dict:
         now = _as_utc(now) or _now()
+        access_until = _as_utc(row.access_until)
+        access_expired = bool(access_until and access_until <= now)
         block_until = _as_utc(row.block_until)
         temp = bool(row.is_temp_blocked and block_until and block_until > now)
         perm = bool(row.is_permanent_blocked)
         traffic_state = self._ovpn_traffic_state(row)
         traffic_exceeded = bool(traffic_state.get("traffic_limit_exceeded"))
-        blocked = temp or perm or traffic_exceeded
-        if perm:
+        blocked = access_expired or temp or perm or traffic_exceeded
+        if access_expired:
+            block_mode = "access_expired"
+        elif perm:
             block_mode = "permanent"
         elif temp:
             block_mode = "temp"
@@ -251,6 +268,8 @@ class AccessPolicyService:
         return self._attach_node_context({
             "is_blocked": blocked,
             "block_mode": block_mode,
+            "access_expired": access_expired,
+            "access_until": access_until.isoformat() if access_until else None,
             "blocked_days_left": (block_until - now).days if temp and block_until else None,
             "block_duration_days": row.block_days,
             "block_until": block_until.strftime("%Y-%m-%d %H:%M:%S") if block_until else None,
@@ -313,6 +332,10 @@ class AccessPolicyService:
             return
         now = _now()
         changed = self._cleanup_ovpn_temp_block(row, now)
+        access_expired = _policy_access_expired(row, now)
+        if not access_expired and row.block_reason == "access_expired":
+            row.block_reason = None
+            changed = True
         traffic_state = self._ovpn_traffic_state(row)
         if self._cleanup_ovpn_traffic_limit(row, traffic_state, traffic_limit_changed=traffic_limit_changed):
             changed = True
@@ -362,6 +385,8 @@ class AccessPolicyService:
 
     def openvpn_unblock(self, client_name: str, *, actor: str | None = None) -> dict:
         row = self._get_ovpn(client_name)
+        if self._ovpn_state(row)["block_mode"] == "access_expired":
+            raise ValueError("Клиент отключён по истечении срока. Продлите срок доступа.")
         traffic_state = self._ovpn_traffic_state(row)
         if traffic_state.get("traffic_limit_exceeded"):
             raise TrafficLimitExceededError()
@@ -420,6 +445,7 @@ class AccessPolicyService:
             return self._attach_node_context({
                 "is_blocked": client_name in self.read_banned_clients(),
                 "block_mode": "none",
+                "access_until": None,
                 **self._traffic_human_fields(traffic_state),
             })
         return self._ovpn_state(row)
@@ -444,8 +470,8 @@ class AccessPolicyService:
         if not state["is_blocked"]:
             return None
         mode = state["block_mode"]
-        if mode == "expired":
-            return "expired"
+        if mode == "access_expired":
+            return "access_expired"
         if mode == "permanent":
             return "manual_permanent"
         if mode == "temp":
@@ -548,6 +574,8 @@ class AccessPolicyService:
         if not state["is_blocked"]:
             return None
         mode = state["block_mode"]
+        if mode == "access_expired":
+            return "access_expired"
         if mode == "permanent":
             return "manual_permanent"
         if mode == "temp":
@@ -558,13 +586,17 @@ class AccessPolicyService:
 
     def _awg2_state(self, row: AmneziaWg2AccessPolicy, now: datetime | None = None) -> dict:
         now = _as_utc(now) or _now()
+        access_until = _as_utc(row.access_until)
+        access_expired = bool(access_until and access_until <= now)
         block_until = _as_utc(row.block_until)
         temp = bool(row.is_temp_blocked and block_until and block_until > now)
         perm = bool(row.is_permanent_blocked)
         traffic_state = self._awg2_traffic_state(row)
         traffic_exceeded = bool(traffic_state.get("traffic_limit_exceeded"))
-        blocked = temp or perm or traffic_exceeded
-        if perm:
+        blocked = access_expired or temp or perm or traffic_exceeded
+        if access_expired:
+            block_mode = "access_expired"
+        elif perm:
             block_mode = "permanent"
         elif temp:
             block_mode = "temp"
@@ -575,6 +607,8 @@ class AccessPolicyService:
         return self._attach_node_context({
             "is_blocked": blocked,
             "block_mode": block_mode,
+            "access_expired": access_expired,
+            "access_until": access_until.isoformat() if access_until else None,
             "blocked_days_left": (block_until - now).days if temp and block_until else None,
             "block_duration_days": row.block_days,
             "block_until": block_until.strftime("%Y-%m-%d %H:%M:%S") if block_until else None,
@@ -603,14 +637,21 @@ class AccessPolicyService:
         before_blocked = bool(self._awg2_state(row, now)["is_blocked"])
         before_reason = row.block_reason
         self._cleanup_awg2_temp_block(row, now)
+        access_expired = _policy_access_expired(row, now)
+        if not access_expired and row.block_reason == "access_expired":
+            row.block_reason = None
+            row.is_permanent_blocked = False
         traffic_state = self._awg2_traffic_state(row)
         if row.block_reason == "traffic_limit" and not traffic_state.get("traffic_limit_exceeded"):
             row.block_reason = None
         state = self._awg2_state(row, now)
-        if state["is_blocked"] and state["block_mode"] == "traffic_limit":
-            row.block_reason = "traffic_limit"
+        if state["is_blocked"] and state["block_mode"] in {"traffic_limit", "access_expired"}:
+            row.block_reason = state["block_mode"]
         elif row.block_reason == "traffic_limit" and not state["is_blocked"]:
             row.block_reason = None
+        elif row.block_reason == "access_expired" and not state["is_blocked"]:
+            row.block_reason = None
+            row.is_permanent_blocked = False
         if (
             traffic_limit_changed
             and not state["traffic_limit_exceeded"]
@@ -662,6 +703,8 @@ class AccessPolicyService:
 
     def awg2_unblock(self, client_name: str, *, actor: str | None = None) -> dict:
         row = self._get_awg2(client_name)
+        if self._awg2_state(row)["block_mode"] == "access_expired":
+            raise ValueError("Клиент отключён по истечении срока. Продлите срок доступа.")
         traffic_state = self._awg2_traffic_state(row)
         if traffic_state.get("traffic_limit_exceeded"):
             raise TrafficLimitExceededError()
@@ -721,6 +764,7 @@ class AccessPolicyService:
             return self._attach_node_context({
                 "is_blocked": False,
                 "block_mode": "none",
+                "access_until": None,
                 "blocked_days_left": None,
                 "block_duration_days": None,
                 "block_until": None,
@@ -763,15 +807,15 @@ class AccessPolicyService:
     def _wg_state(self, row: WgAccessPolicy, now: datetime | None = None) -> dict:
         now = _as_utc(now) or _now()
         expires = _as_utc(row.expires_at)
+        access_expired = bool(expires and expires <= now)
         block_until = _as_utc(row.block_until)
-        expired = bool(expires and expires <= now)
         temp = bool(row.is_temp_blocked and block_until and block_until > now)
         perm = bool(row.is_permanent_blocked)
         traffic_state = self._wg_traffic_state(row)
         traffic_exceeded = bool(traffic_state.get("traffic_limit_exceeded"))
-        blocked = expired or temp or perm or traffic_exceeded
-        if expired:
-            block_mode = "expired"
+        blocked = access_expired or temp or perm or traffic_exceeded
+        if access_expired:
+            block_mode = "access_expired"
         elif perm:
             block_mode = "permanent"
         elif temp:
@@ -783,7 +827,9 @@ class AccessPolicyService:
         return self._attach_node_context({
             "is_blocked": blocked,
             "block_mode": block_mode,
-            "expired": expired,
+            "expired": access_expired,
+            "access_expired": access_expired,
+            "access_until": expires.isoformat() if expires else None,
             "access_days_left": (expires - now).days if expires and expires > now else None,
             "blocked_days_left": (block_until - now).days if temp and block_until else None,
             "block_until": block_until.strftime("%Y-%m-%d %H:%M:%S") if block_until else None,
@@ -813,14 +859,21 @@ class AccessPolicyService:
         before_blocked = bool(self._wg_state(row, now)["is_blocked"])
         before_reason = row.block_reason
         self._cleanup_wg_temp_block(row, now)
+        access_expired = _policy_access_expired(row, now)
+        if not access_expired and row.block_reason == "access_expired":
+            row.block_reason = None
+            row.is_permanent_blocked = False
         traffic_state = self._wg_traffic_state(row)
         if row.block_reason == "traffic_limit" and not traffic_state.get("traffic_limit_exceeded"):
             row.block_reason = None
         state = self._wg_state(row, now)
-        if state["is_blocked"] and state["block_mode"] == "traffic_limit":
-            row.block_reason = "traffic_limit"
+        if state["is_blocked"] and state["block_mode"] in {"traffic_limit", "access_expired"}:
+            row.block_reason = state["block_mode"]
         elif row.block_reason == "traffic_limit" and not state["is_blocked"]:
             row.block_reason = None
+        elif row.block_reason == "access_expired" and not state["is_blocked"]:
+            row.block_reason = None
+            row.is_permanent_blocked = False
         if traffic_limit_changed and not state["traffic_limit_exceeded"] and row.is_permanent_blocked and not row.is_temp_blocked:
             row.is_permanent_blocked = False
             row.block_reason = None
@@ -880,7 +933,7 @@ class AccessPolicyService:
 
     def wg_unblock(self, client_name: str, *, actor: str | None = None) -> dict:
         row = self._get_wg(client_name)
-        if self._wg_state(row)["expired"]:
+        if self._wg_state(row)["block_mode"] == "access_expired":
             raise ValueError("Клиент отключён по истечении срока. Продлите срок доступа.")
         traffic_state = self._wg_traffic_state(row)
         if traffic_state.get("traffic_limit_exceeded"):
@@ -941,6 +994,8 @@ class AccessPolicyService:
             return self._attach_node_context({
                 "is_blocked": False,
                 "block_mode": "none",
+                "access_until": None,
+                "expires_at": None,
                 **self._traffic_human_fields(traffic_state),
             })
         return self._wg_state(row)
@@ -1107,7 +1162,7 @@ class AccessPolicyService:
 
 
 def _policy_row_flags(row: OpenVpnAccessPolicy | WgAccessPolicy) -> tuple[bool, bool]:
-    blocked = bool(row.is_permanent_blocked or row.is_temp_blocked)
+    blocked = bool(row.is_permanent_blocked or row.is_temp_blocked or _policy_access_expired(row))
     limited = row.traffic_limit_bytes is not None
     return blocked, limited
 

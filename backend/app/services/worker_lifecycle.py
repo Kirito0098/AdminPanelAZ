@@ -99,5 +99,10 @@ def should_start_awg2_expire() -> bool:
     return True
 
 
+def should_start_access_expiry() -> bool:
+    # Always spawn — loop re-checks access-until due rows each tick.
+    return True
+
+
 def should_start_cloudflare_ips_scheduler() -> bool:
     return True

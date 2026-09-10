@@ -9,6 +9,7 @@ from typing import Callable
 from app.config import get_settings
 from app.services.backup_scheduler import run_backup_scheduler_loop, run_runtime_backup_cleanup_loop
 from app.services.cloudflare_ips_scheduler import run_cloudflare_ips_scheduler_loop
+from app.services.access_expiry_worker import run_access_expiry_loop
 from app.services.awg2_expire_worker import run_awg2_expire_loop
 from app.services.cert_sync_worker import run_cert_sync_loop
 from app.services.cidr.cidr_scheduler import run_cidr_db_scheduler_loop
@@ -46,6 +47,7 @@ from app.services.worker_lifecycle import (
     should_start_noc_report_scheduler,
     should_start_alert_rules_worker,
     should_start_awg2_expire,
+    should_start_access_expiry,
     should_start_cloudflare_ips_scheduler,
 )
 
@@ -74,6 +76,7 @@ def get_worker_startup_plan() -> dict[str, bool]:
         "noc_report_scheduler": should_start_noc_report_scheduler(),
         "alert_rules": should_start_alert_rules_worker(),
         "awg2_expire": should_start_awg2_expire(),
+        "access_expiry": should_start_access_expiry(),
         "cloudflare_ips_scheduler": should_start_cloudflare_ips_scheduler(),
     }
 
@@ -134,6 +137,8 @@ def spawn_background_tasks(
         tasks["alert_rules"] = create_task(run_alert_rules_loop())
     if plan.get("awg2_expire"):
         tasks["awg2_expire"] = create_task(run_awg2_expire_loop())
+    if plan.get("access_expiry"):
+        tasks["access_expiry"] = create_task(run_access_expiry_loop())
     if plan.get("cloudflare_ips_scheduler"):
         tasks["cloudflare_ips_scheduler"] = create_task(run_cloudflare_ips_scheduler_loop())
 

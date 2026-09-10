@@ -19,6 +19,7 @@ from app.models import (
     WgAccessPolicy,
 )
 from app.services.access_policy import NODE_DEFAULT_POLICY_CLIENT, AccessPolicyService, is_node_default_policy_client
+from app.services.access_until import set_access_until as set_policy_access_until
 from app.services.node_manager import get_adapter_for_node, node_metadata_dict
 from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes, is_auto_sync_enabled
 from app.services.node_sync.replicate import ReplicateOperation, ReplicateResult, finalize_replicate_outcome, get_shadow_configs
@@ -33,9 +34,10 @@ PolicyOp = Literal[
     "set_traffic_limit",
     "clear_traffic_limit",
     "set_wg_expiry",
+    "set_access_until",
 ]
 
-_LIMIT_OPS = frozenset({"set_traffic_limit", "clear_traffic_limit"})
+_COPY_OPS = frozenset({"set_traffic_limit", "clear_traffic_limit", "set_access_until"})
 
 
 def _antizapret_path_for_node(node: Node) -> Path:
@@ -81,6 +83,15 @@ def _apply_policy_op(
             )
         if op == "clear_traffic_limit":
             return svc.openvpn_clear_traffic_limit(client_name, actor=actor)
+        if op == "set_access_until":
+            return set_policy_access_until(
+                svc.db,
+                "openvpn",
+                svc.node_id,
+                client_name,
+                kwargs.get("access_until"),
+                actor=actor,
+            )
         raise ValueError(f"Unsupported OpenVPN policy op: {op}")
 
     if primary_config.vpn_type == VpnType.amneziawg2:
@@ -99,6 +110,15 @@ def _apply_policy_op(
             )
         if op == "clear_traffic_limit":
             return svc.awg2_clear_traffic_limit(client_name, actor=actor)
+        if op == "set_access_until":
+            return set_policy_access_until(
+                svc.db,
+                "amneziawg2",
+                svc.node_id,
+                client_name,
+                kwargs.get("access_until"),
+                actor=actor,
+            )
         raise ValueError(f"Unsupported AmneziaWG2 policy op: {op}")
 
     if op == "set_wg_expiry":
@@ -123,6 +143,15 @@ def _apply_policy_op(
         )
     if op == "clear_traffic_limit":
         return svc.wg_clear_traffic_limit(client_name, actor=actor)
+    if op == "set_access_until":
+        return set_policy_access_until(
+            svc.db,
+            "wireguard",
+            svc.node_id,
+            client_name,
+            kwargs.get("access_until"),
+            actor=actor,
+        )
     raise ValueError(f"Unsupported WireGuard policy op: {op}")
 
 
@@ -168,7 +197,7 @@ def replicate_policy_op(
 
         adapter = get_adapter_for_node(replica_node)
         try:
-            if op in _LIMIT_OPS:
+            if op in _COPY_OPS:
                 copy_single_client_policy(
                     db,
                     primary_node,

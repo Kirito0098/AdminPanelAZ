@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, VpnType, WgAccessPolicy
 
 _OVPN_POLICY_FIELDS = (
+    "access_until",
     "is_temp_blocked",
     "is_permanent_blocked",
     "block_reason",
@@ -20,6 +21,7 @@ _OVPN_POLICY_FIELDS = (
 
 _WG_POLICY_FIELDS = _OVPN_POLICY_FIELDS + ("expires_at",)
 _AWG2_POLICY_FIELDS = (
+    "access_until",
     "is_temp_blocked",
     "is_permanent_blocked",
     "block_reason",
