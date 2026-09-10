@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Activity,
@@ -73,7 +73,12 @@ import { useProgress } from '@/context/ProgressContext'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { formatDateTime } from '@/lib/datetime'
-import { parseLocalDate, validateCustomRange } from '@/lib/trafficPeriod'
+import {
+  isAppliedCustomValid,
+  overviewPeriodSubtitle,
+  parseLocalDate,
+  validateCustomRange,
+} from '@/lib/trafficPeriod'
 import { cn } from '@/lib/utils'
 import type {
   ClientAccessPolicy,
@@ -168,10 +173,18 @@ type TrafficClientCardProps = {
   totalBytes: number
   expanded: boolean
   onToggle: () => void
+  periodLabel?: string
   children?: React.ReactNode
 }
 
-function TrafficClientCard({ row, totalBytes, expanded, onToggle, children }: TrafficClientCardProps) {
+function TrafficClientCard({
+  row,
+  totalBytes,
+  expanded,
+  onToggle,
+  periodLabel,
+  children,
+}: TrafficClientCardProps) {
   return (
     <div
       className={cn(
@@ -224,7 +237,9 @@ function TrafficClientCard({ row, totalBytes, expanded, onToggle, children }: Tr
           <p className="mono font-medium">{formatBytes(row.total_bytes)}</p>
         </div>
         <div>
-          <p className="text-muted-foreground">За период</p>
+          <p className="text-muted-foreground">
+            За период{periodLabel ? ` · ${periodLabel}` : ''}
+          </p>
           <p className="mono font-medium">{formatBytes(row.traffic_period)}</p>
         </div>
       </div>
@@ -300,7 +315,7 @@ export default function TrafficPage() {
   const isAdmin = user?.role === 'admin'
   const { isEnabled } = useFeatureModules()
   const awg2Enabled = isEnabled('awg2')
-  const { success, error: notifyError } = useNotifications()
+  const { success, error: notifyError, warning: notifyWarning } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
   const [searchParams, setSearchParams] = useSearchParams()
   const [data, setData] = useState<TrafficOverview | null>(null)
@@ -353,6 +368,7 @@ export default function TrafficPage() {
   const [openvpnLogEnabled, setOpenvpnLogEnabled] = useState(false)
   const [cleanupPeriod, setCleanupPeriod] = useState('none')
   const [maintenanceLoading, setMaintenanceLoading] = useState(false)
+  const prevRetentionDaysRef = useRef<number | null>(null)
 
   const load = useCallback(
     async (initial = false, manual = false) => {
@@ -535,6 +551,52 @@ export default function TrafficPage() {
     loadChart()
   }, [loadChart])
 
+  // When retention shrinks, drop applied custom ranges that no longer fit.
+  useEffect(() => {
+    if (retentionDays == null || retentionDays < 1) return
+    const prev = prevRetentionDaysRef.current
+    prevRetentionDaysRef.current = retentionDays
+    if (prev === null || prev === retentionDays) return
+
+    let didReset = false
+
+    if (appliedFrom && appliedTo && !isAppliedCustomValid(appliedFrom, appliedTo, retentionDays)) {
+      setAppliedFrom('')
+      setAppliedTo('')
+      setDraftFrom('')
+      setDraftTo('')
+      setOverviewMode('preset')
+      setOverviewPreset('30d')
+      didReset = true
+    }
+
+    if (
+      chartAppliedFrom &&
+      chartAppliedTo &&
+      !isAppliedCustomValid(chartAppliedFrom, chartAppliedTo, retentionDays)
+    ) {
+      setChartAppliedFrom('')
+      setChartAppliedTo('')
+      setChartDraftFrom('')
+      setChartDraftTo('')
+      setChartMode('preset')
+      // Keep last chart preset; default to 7d if somehow empty.
+      setChartPreset((p) => p || '7d')
+      didReset = true
+    }
+
+    if (didReset) {
+      notifyWarning('Период сброшен: изменился срок хранения данных трафика.')
+    }
+  }, [
+    retentionDays,
+    appliedFrom,
+    appliedTo,
+    chartAppliedFrom,
+    chartAppliedTo,
+    notifyWarning,
+  ])
+
   useEffect(() => {
     if (!awg2Enabled && resetScope === 'amneziawg2') {
       setResetScope('all')
@@ -624,9 +686,18 @@ export default function TrafficPage() {
   const handleOverviewPresetChange = (preset: OverviewPreset) => {
     setOverviewPreset(preset)
     setOverviewMode('preset')
+    setAppliedFrom('')
+    setAppliedTo('')
+    setDraftFrom('')
+    setDraftTo('')
   }
 
   const handleOverviewCustomChange = (from: string, to: string) => {
+    // Entering custom: clear applied so fetch stays on last preset until Apply.
+    if (overviewMode !== 'custom') {
+      setAppliedFrom('')
+      setAppliedTo('')
+    }
     setOverviewMode('custom')
     setDraftFrom(from)
     setDraftTo(to)
@@ -660,9 +731,17 @@ export default function TrafficPage() {
   const handleChartPresetChange = (preset: TrafficPeriodPreset) => {
     setChartPreset(preset)
     setChartMode('preset')
+    setChartAppliedFrom('')
+    setChartAppliedTo('')
+    setChartDraftFrom('')
+    setChartDraftTo('')
   }
 
   const handleChartCustomChange = (from: string, to: string) => {
+    if (chartMode !== 'custom') {
+      setChartAppliedFrom('')
+      setChartAppliedTo('')
+    }
     setChartMode('custom')
     setChartDraftFrom(from)
     setChartDraftTo(to)
@@ -756,6 +835,12 @@ export default function TrafficPage() {
 
   const hasRows = (data?.rows?.length ?? 0) > 0
   const showTrafficMaintenance = isAdmin && (openvpnLogEnabled || deletedRows.length > 0)
+  const periodColumnSubtitle = overviewPeriodSubtitle(
+    overviewMode,
+    overviewPreset,
+    appliedFrom,
+    appliedTo,
+  )
 
   return (
     <div className="space-y-6">
@@ -982,6 +1067,7 @@ export default function TrafficPage() {
                           totalBytes={totalBytes}
                           expanded={expanded}
                           onToggle={() => toggleClient(r.common_name, r.protocol_type)}
+                          periodLabel={periodColumnSubtitle}
                         >
                           {expanded && selectedRow && (
                             <TrafficClientDetails
@@ -1017,7 +1103,12 @@ export default function TrafficPage() {
                           <TableHead className="text-right">TX</TableHead>
                           <TableHead className="text-right">Всего</TableHead>
                           <TableHead className="min-w-[8rem]">Доля</TableHead>
-                          <TableHead className="text-right">За период</TableHead>
+                          <TableHead className="text-right">
+                            За период
+                            <span className="block text-[10px] font-normal text-muted-foreground">
+                              {periodColumnSubtitle}
+                            </span>
+                          </TableHead>
                           <TableHead>Последний раз</TableHead>
                           <TableHead>Статус</TableHead>
                         </TableRow>

@@ -61,3 +61,31 @@ export function parseLocalDate(iso: string): Date | null {
   }
   return date
 }
+
+/** True when ISO from/to parse and pass validateCustomRange for retention. */
+export function isAppliedCustomValid(
+  fromIso: string,
+  toIso: string,
+  retentionDays: number,
+  today: Date = new Date(),
+): boolean {
+  const from = parseLocalDate(fromIso)
+  const to = parseLocalDate(toIso)
+  if (!from || !to) return false
+  return validateCustomRange(from, to, retentionDays, today) == null
+}
+
+/** Short RU label for overview preset or applied custom range. */
+export function overviewPeriodSubtitle(
+  mode: 'preset' | 'custom',
+  preset: '1d' | '7d' | '30d',
+  appliedFrom: string,
+  appliedTo: string,
+): string {
+  if (mode === 'custom' && appliedFrom && appliedTo) {
+    return `${appliedFrom} — ${appliedTo}`
+  }
+  if (preset === '1d') return '1д'
+  if (preset === '7d') return '7д'
+  return '30д'
+}
