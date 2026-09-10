@@ -51,6 +51,7 @@ from app.routers import (
     traffic,
     telegram_webhook,
     session,
+    unlock_codes,
 )
 from app.routers import settings as settings_router
 from app.routers import users
@@ -234,6 +235,7 @@ app.include_router(awg2.router, prefix=_API_PREFIX)
 app.include_router(cidr_db.router, prefix=_API_PREFIX)
 app.include_router(traffic.router, prefix=_API_PREFIX)
 app.include_router(client_access.router, prefix=_API_PREFIX)
+app.include_router(unlock_codes.router, prefix=_API_PREFIX)
 app.include_router(edit_files.router, prefix=_API_PREFIX)
 app.include_router(security.router, prefix=_API_PREFIX)
 app.include_router(public_download.router, prefix=_API_PREFIX)

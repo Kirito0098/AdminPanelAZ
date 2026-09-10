@@ -394,6 +394,7 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         resource_impact_level="low",
         default=True,
         group="app_module",
+        api_prefixes=("/api/unlock-codes",),
     ),
     FeatureToggleDefinition(
         key="client_portal",
