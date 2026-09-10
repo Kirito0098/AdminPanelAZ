@@ -196,3 +196,117 @@ def test_openvpn_access_until_route_wires_replication():
         actor="admin",
         access_until=until,
     )
+
+
+def test_wg_access_renew_preserves_manual_permanent_block():
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        past = datetime.now(timezone.utc) - timedelta(days=1)
+        future = datetime.now(timezone.utc) + timedelta(days=7)
+        db.add(
+            WgAccessPolicy(
+                node_id=node.id,
+                client_name="alice",
+                expires_at=past.replace(tzinfo=None),
+                is_temp_blocked=False,
+                is_permanent_blocked=True,
+                block_reason="access_expired",
+            )
+        )
+        db.add(
+            AmneziaWg2AccessPolicy(
+                node_id=node.id,
+                client_name="alice",
+                access_until=past.replace(tzinfo=None),
+                is_temp_blocked=False,
+                is_permanent_blocked=True,
+                block_reason="access_expired",
+            )
+        )
+        db.commit()
+
+        with patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()):
+            wg_state = set_access_until(db, "wireguard", node.id, "alice", future, actor="admin")
+            awg2_state = set_access_until(db, "amneziawg2", node.id, "alice", future, actor="admin")
+
+        wg_row = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
+        awg2_row = db.query(AmneziaWg2AccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
+        assert wg_row.is_permanent_blocked is True
+        assert awg2_row.is_permanent_blocked is True
+        assert wg_state["block_mode"] == "permanent"
+        assert awg2_state["block_mode"] == "permanent"
+        assert wg_state["is_blocked"] is True
+        assert awg2_state["is_blocked"] is True
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_manual_unblock_while_access_expired_defers_reblock_to_worker():
+    from pathlib import Path
+
+    from app.services.access_policy import AccessPolicyService
+
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        past = datetime.now(timezone.utc) - timedelta(days=1)
+        db.add(
+            OpenVpnAccessPolicy(
+                node_id=node.id,
+                client_name="Alice",
+                access_until=past.replace(tzinfo=None),
+                is_temp_blocked=False,
+                is_permanent_blocked=False,
+                block_reason="access_expired",
+            )
+        )
+        db.add(
+            WgAccessPolicy(
+                node_id=node.id,
+                client_name="alice",
+                expires_at=past.replace(tzinfo=None),
+                is_temp_blocked=False,
+                is_permanent_blocked=False,
+                block_reason="access_expired",
+            )
+        )
+        db.commit()
+
+        adapter = _adapter()
+        service = AccessPolicyService(
+            db,
+            antizapret_path=Path("/tmp"),
+            node_id=node.id,
+            node_name=node.name,
+            adapter=adapter,
+        )
+        with (
+            patch.object(service, "read_banned_clients", return_value={"Alice"}),
+            patch.object(service, "write_banned_clients") as write_banned,
+        ):
+            ovpn_state = service.openvpn_unblock("Alice", actor="admin")
+            write_banned.assert_called_once_with(set())
+
+        wg_state = service.wg_unblock("alice", actor="admin")
+        adapter.unblock_wireguard_client_runtime.assert_called_once_with("alice")
+
+        # Policy date still expired (state reports access_expired), but reason cleared for worker re-apply.
+        ovpn_row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one()
+        wg_row = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
+        assert ovpn_row.block_reason is None
+        assert wg_row.block_reason is None
+        assert ovpn_state["block_mode"] == "access_expired"
+        assert wg_state["block_mode"] == "access_expired"
+
+        with patch("app.services.access_until.get_adapter_for_node", return_value=adapter):
+            counts = apply_due_access_blocks(db)
+        assert counts["blocked"] >= 1
+        db.refresh(ovpn_row)
+        db.refresh(wg_row)
+        assert ovpn_row.block_reason == "access_expired"
+        assert wg_row.block_reason == "access_expired"
+    finally:
+        db.close()
+        engine.dispose()

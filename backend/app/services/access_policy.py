@@ -385,11 +385,10 @@ class AccessPolicyService:
 
     def openvpn_unblock(self, client_name: str, *, actor: str | None = None) -> dict:
         row = self._get_ovpn(client_name)
-        if self._ovpn_state(row)["block_mode"] == "access_expired":
-            raise ValueError("Клиент отключён по истечении срока. Продлите срок доступа.")
         traffic_state = self._ovpn_traffic_state(row)
         if traffic_state.get("traffic_limit_exceeded"):
             raise TrafficLimitExceededError()
+        still_access_expired = _policy_access_expired(row)
         row.is_temp_blocked = False
         row.is_permanent_blocked = False
         row.block_reason = None
@@ -398,7 +397,13 @@ class AccessPolicyService:
         row.block_until = None
         row.updated_by = actor
         self.db.commit()
-        self.reconcile_openvpn(client_name)
+        if still_access_expired:
+            # Temporary runtime allow; next access-expiry worker tick re-blocks if access_until still past.
+            banned = self.read_banned_clients()
+            banned.discard(client_name)
+            self.write_banned_clients(banned)
+        else:
+            self.reconcile_openvpn(client_name)
         return self._ovpn_state(row)
 
     def openvpn_set_traffic_limit(
@@ -639,8 +644,8 @@ class AccessPolicyService:
         self._cleanup_awg2_temp_block(row, now)
         access_expired = _policy_access_expired(row, now)
         if not access_expired and row.block_reason == "access_expired":
+            # Keep is_permanent_blocked — access schedule must not wipe a manual ban.
             row.block_reason = None
-            row.is_permanent_blocked = False
         traffic_state = self._awg2_traffic_state(row)
         if row.block_reason == "traffic_limit" and not traffic_state.get("traffic_limit_exceeded"):
             row.block_reason = None
@@ -651,7 +656,6 @@ class AccessPolicyService:
             row.block_reason = None
         elif row.block_reason == "access_expired" and not state["is_blocked"]:
             row.block_reason = None
-            row.is_permanent_blocked = False
         if (
             traffic_limit_changed
             and not state["traffic_limit_exceeded"]
@@ -703,11 +707,10 @@ class AccessPolicyService:
 
     def awg2_unblock(self, client_name: str, *, actor: str | None = None) -> dict:
         row = self._get_awg2(client_name)
-        if self._awg2_state(row)["block_mode"] == "access_expired":
-            raise ValueError("Клиент отключён по истечении срока. Продлите срок доступа.")
         traffic_state = self._awg2_traffic_state(row)
         if traffic_state.get("traffic_limit_exceeded"):
             raise TrafficLimitExceededError()
+        still_access_expired = _policy_access_expired(row)
         row.is_temp_blocked = False
         row.is_permanent_blocked = False
         row.block_reason = None
@@ -716,7 +719,11 @@ class AccessPolicyService:
         row.block_until = None
         row.updated_by = actor
         self.db.commit()
-        self.reconcile_awg2(client_name, force_runtime=True)
+        if still_access_expired:
+            # Temporary runtime allow; access-expiry worker re-blocks on the next tick.
+            self._apply_awg2_client_runtime(client_name.strip().lower(), is_blocked=False)
+        else:
+            self.reconcile_awg2(client_name, force_runtime=True)
         return self._awg2_state(row)
 
     def awg2_set_traffic_limit(
@@ -861,8 +868,8 @@ class AccessPolicyService:
         self._cleanup_wg_temp_block(row, now)
         access_expired = _policy_access_expired(row, now)
         if not access_expired and row.block_reason == "access_expired":
+            # Keep is_permanent_blocked — access schedule must not wipe a manual ban.
             row.block_reason = None
-            row.is_permanent_blocked = False
         traffic_state = self._wg_traffic_state(row)
         if row.block_reason == "traffic_limit" and not traffic_state.get("traffic_limit_exceeded"):
             row.block_reason = None
@@ -873,7 +880,6 @@ class AccessPolicyService:
             row.block_reason = None
         elif row.block_reason == "access_expired" and not state["is_blocked"]:
             row.block_reason = None
-            row.is_permanent_blocked = False
         if traffic_limit_changed and not state["traffic_limit_exceeded"] and row.is_permanent_blocked and not row.is_temp_blocked:
             row.is_permanent_blocked = False
             row.block_reason = None
@@ -933,11 +939,10 @@ class AccessPolicyService:
 
     def wg_unblock(self, client_name: str, *, actor: str | None = None) -> dict:
         row = self._get_wg(client_name)
-        if self._wg_state(row)["block_mode"] == "access_expired":
-            raise ValueError("Клиент отключён по истечении срока. Продлите срок доступа.")
         traffic_state = self._wg_traffic_state(row)
         if traffic_state.get("traffic_limit_exceeded"):
             raise TrafficLimitExceededError()
+        still_access_expired = _policy_access_expired(row)
         row.is_temp_blocked = False
         row.is_permanent_blocked = False
         row.block_reason = None
@@ -946,7 +951,11 @@ class AccessPolicyService:
         row.block_until = None
         row.updated_by = actor
         self.db.commit()
-        self.reconcile_wg(client_name, force_runtime=True)
+        if still_access_expired:
+            # Temporary runtime allow; access-expiry worker re-blocks on the next tick.
+            self._apply_wg_client_runtime(client_name.strip().lower(), is_blocked=False)
+        else:
+            self.reconcile_wg(client_name, force_runtime=True)
         return self._wg_state(row)
 
     def wg_set_traffic_limit(

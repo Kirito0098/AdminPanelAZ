@@ -236,8 +236,9 @@ export default function ClientActionsDialog({
   const isBlocked = policy?.is_blocked ?? false
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
   const blockReason = (policy?.block_reason || '').toLowerCase()
-  const wgExpired =
-    Boolean(policy?.expired) || blockMode === 'expired' || blockMode === 'access_expired' || blockReason === 'access_expired'
+  const wgAccessExpired = blockMode === 'access_expired' || blockReason === 'access_expired'
+  const wgCertExpired = Boolean(policy?.expired) || blockMode === 'expired'
+  const wgExpired = wgCertExpired || wgAccessExpired
   const hasTrafficLimit = Boolean(policy?.traffic_limit_human || policy?.traffic_limit_bytes)
   const trafficLimitExceeded = Boolean(policy?.traffic_limit_exceeded) || blockMode === 'traffic_limit'
   const status = getConfigStatus(config, tab, policy)
@@ -430,13 +431,18 @@ export default function ClientActionsDialog({
   }
 
   const handleWgUnblock = async () => {
-    if (wgExpired) {
+    // Cert/TTL expiry still opens renew prompt; access_expired allows temporary runtime unblock.
+    if (wgCertExpired && !wgAccessExpired) {
       setPromptMode('expired-wg')
       return
     }
     await runAction('unblock', async () => {
       await wgUnblock(config.client_name)
-      onNotifySuccess('Блокировка снята')
+      onNotifySuccess(
+        wgAccessExpired
+          ? 'Блокировка снята временно; при истёкшем доступе воркер снова отключит'
+          : 'Блокировка снята',
+      )
     })
   }
 
@@ -466,7 +472,11 @@ export default function ClientActionsDialog({
           onClick: () =>
             runAction('unblock', async () => {
               await openvpnUnblock(config.client_name)
-              onNotifySuccess('Блокировка снята')
+              onNotifySuccess(
+                blockMode === 'access_expired'
+                  ? 'Блокировка снята временно; при истёкшем доступе воркер снова отключит'
+                  : 'Блокировка снята',
+              )
             }),
         },
         {
@@ -545,11 +555,15 @@ export default function ClientActionsDialog({
             label: 'Снять блокировку',
             icon: <Unlock size={14} />,
             // Like WG: hide for traffic_limit — operator clears limit instead
-            hidden: !canManage || !['temp', 'permanent'].includes(blockMode) || haReplicaReadonly,
+            hidden: !canManage || !['temp', 'permanent', 'access_expired'].includes(blockMode) || haReplicaReadonly,
             onClick: () =>
               runAction('unblock', async () => {
                 await awg2Unblock(config.client_name)
-                onNotifySuccess('Блокировка снята')
+                onNotifySuccess(
+                  blockMode === 'access_expired'
+                    ? 'Блокировка снята временно; при истёкшем доступе воркер снова отключит'
+                    : 'Блокировка снята',
+                )
               }),
           },
           {
@@ -845,7 +859,6 @@ export default function ClientActionsDialog({
                   <Input
                     id="access-until"
                     type="date"
-                    min={todayStr()}
                     value={accessUntilValue}
                     onChange={(e) => setAccessUntilValue(e.target.value)}
                   />

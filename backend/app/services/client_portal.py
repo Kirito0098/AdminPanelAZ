@@ -98,6 +98,13 @@ def _request_host(request_host: str | None) -> str:
 
 
 def assert_portal_host(db: Session, request_host: str | None) -> None:
+    """Require Host to match configured portal_domain.
+
+    Deployment note: this check is only as strong as the reverse proxy's
+    virtual-host pinning. Terminate TLS and reject unmatched Host at the edge
+    so public portal write paths (including redeem) cannot be reached by
+    spoofing Host against a direct upstream bind.
+    """
     expected = get_portal_domain(db)
     if not expected:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
