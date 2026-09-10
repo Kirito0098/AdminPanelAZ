@@ -73,7 +73,7 @@ export default function ConfigDeliveryTab() {
   const clientPortalEnabled = isEnabled('client_portal')
   const unlockCodesEnabled = isEnabled('unlock_codes')
   const openvpnEnabled = isEnabled('openvpn')
-  const wireguardEnabled = isEnabled('wireguard')
+  const wireguardEnabled = isEnabled('wireguard') || isEnabled('amneziawg')
   const awg2Enabled = isEnabled('awg2')
   const [settings, setSettings] = useState<SecuritySettings | null>(null)
   const [qrPin, setQrPin] = useState('')

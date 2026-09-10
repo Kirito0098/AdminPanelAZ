@@ -82,9 +82,11 @@ export default function UnlockCodes() {
 
   const availableProtocols = useMemo(
     () =>
-      ALL_PROTOCOLS.filter((protocol) =>
-        protocol === 'amneziawg2' ? Boolean(features.awg2) : Boolean(features[protocol]),
-      ),
+      ALL_PROTOCOLS.filter((protocol) => {
+        if (protocol === 'amneziawg2') return Boolean(features.awg2)
+        if (protocol === 'wireguard') return Boolean(features.wireguard || features.amneziawg)
+        return Boolean(features[protocol])
+      }),
     [features],
   )
 

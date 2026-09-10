@@ -780,6 +780,7 @@ export default function ConfigCardsSection({
         config={selectedConfig}
         tab={selectedTab}
         policy={selectedConfig ? getPolicyForConfig(selectedConfig, policies) : undefined}
+        allConfigs={configs}
         userRole={userRole}
         currentUserId={currentUserId}
         ownerCandidates={ownerCandidates}

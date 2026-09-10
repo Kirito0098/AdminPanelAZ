@@ -79,6 +79,8 @@ interface ClientActionsDialogProps {
   config: VpnConfig | null
   tab: ProtocolTab
   policy?: ClientAccessPolicy
+  /** All panel configs — used to limit unlock protocols to this client_name. */
+  allConfigs?: VpnConfig[]
   userRole: UserRole
   currentUserId?: number
   ownerCandidates?: User[]
@@ -160,6 +162,7 @@ export default function ClientActionsDialog({
   config,
   tab,
   policy,
+  allConfigs = [],
   userRole,
   currentUserId,
   ownerCandidates = [],
@@ -178,7 +181,7 @@ export default function ClientActionsDialog({
   const clientPortalEnabled = isEnabled('client_portal')
   const unlockCodesEnabled = isEnabled('unlock_codes')
   const openvpnEnabled = isEnabled('openvpn')
-  const wireguardEnabled = isEnabled('wireguard')
+  const wireguardFamilyEnabled = isEnabled('wireguard') || isEnabled('amneziawg')
   const awg2Enabled = isEnabled('awg2')
   const haReplicaReadonly = useHaReplicaReadonly()
   const [promptMode, setPromptMode] = useState<PromptMode>(null)
@@ -711,10 +714,19 @@ export default function ClientActionsDialog({
 
   const visibleManagement = managementActions.filter((a) => !a.hidden)
   const visibleDanger = dangerActions.filter((a) => !a.hidden)
+  // Only protocols this client_name actually has ( ∩ enabled modules), not all panel modules.
+  const clientNameKey = config.client_name.toLowerCase()
+  const clientVpnTypes = new Set(
+    (allConfigs.length > 0 ? allConfigs : [config])
+      .filter((item) => item.client_name.toLowerCase() === clientNameKey)
+      .map((item) => item.vpn_type),
+  )
+  clientVpnTypes.add(config.vpn_type)
   const availableUnlockProtocols: UnlockCodeProtocol[] = []
-  if (openvpnEnabled) availableUnlockProtocols.push('openvpn')
-  if (wireguardEnabled) availableUnlockProtocols.push('wireguard')
-  if (awg2Enabled) availableUnlockProtocols.push('amneziawg2')
+  if (openvpnEnabled && clientVpnTypes.has('openvpn')) availableUnlockProtocols.push('openvpn')
+  // Portal may list AmneziaWG separately; access policy / unlock target is still `wireguard`.
+  if (wireguardFamilyEnabled && clientVpnTypes.has('wireguard')) availableUnlockProtocols.push('wireguard')
+  if (awg2Enabled && clientVpnTypes.has('amneziawg2')) availableUnlockProtocols.push('amneziawg2')
   const unlockCodeInitialProtocols: UnlockCodeProtocol[] = availableUnlockProtocols.includes(
     config.vpn_type as UnlockCodeProtocol,
   )
