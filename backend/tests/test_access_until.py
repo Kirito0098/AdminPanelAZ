@@ -107,11 +107,15 @@ def test_apply_due_access_blocks_sets_access_expired():
             db.commit()
 
             counts = apply_due_access_blocks(db)
+            counts_again = apply_due_access_blocks(db)
 
         assert counts["blocked"] == 3
+        assert counts_again["blocked"] == 0
         assert counts["openvpn"] == 1
         assert counts["wireguard"] == 1
         assert counts["amneziawg2"] == 1
+        assert adapter.block_wireguard_client_runtime.call_count == 1
+        assert adapter.block_awg2_client_runtime.call_count == 1
         assert (
             db.query(OpenVpnAccessPolicy)
             .filter_by(node_id=node.id, client_name="ovpn")

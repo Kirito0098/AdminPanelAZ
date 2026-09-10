@@ -162,30 +162,34 @@ def apply_due_access_blocks(db: Session) -> dict[str, int]:
         "wireguard": 0,
         "amneziawg2": 0,
         "blocked": 0,
+        "skipped": 0,
         "errors": 0,
     }
 
-    due_rows: list[tuple[Protocol, int, str, datetime]] = []
+    due_rows: list[tuple[Protocol, object, datetime]] = []
     for row in db.query(OpenVpnAccessPolicy).filter(OpenVpnAccessPolicy.access_until.isnot(None)).all():
         access_until = _row_access_until("openvpn", row)
         if access_until is not None and access_until <= now:
-            due_rows.append(("openvpn", row.node_id, row.client_name, access_until))
+            due_rows.append(("openvpn", row, access_until))
     for row in db.query(WgAccessPolicy).filter(WgAccessPolicy.expires_at.isnot(None)).all():
         access_until = _row_access_until("wireguard", row)
         if access_until is not None and access_until <= now:
-            due_rows.append(("wireguard", row.node_id, row.client_name, access_until))
+            due_rows.append(("wireguard", row, access_until))
     for row in db.query(AmneziaWg2AccessPolicy).filter(AmneziaWg2AccessPolicy.access_until.isnot(None)).all():
         access_until = _row_access_until("amneziawg2", row)
         if access_until is not None and access_until <= now:
-            due_rows.append(("amneziawg2", row.node_id, row.client_name, access_until))
+            due_rows.append(("amneziawg2", row, access_until))
 
-    for protocol, node_id, client_name, access_until in due_rows:
+    for protocol, row, access_until in due_rows:
+        if getattr(row, "block_reason", None) == "access_expired":
+            counts["skipped"] += 1
+            continue
         try:
             set_access_until(
                 db,
                 protocol,
-                node_id,
-                client_name,
+                row.node_id,
+                row.client_name,
                 access_until,
                 actor="access_expiry_worker",
             )
