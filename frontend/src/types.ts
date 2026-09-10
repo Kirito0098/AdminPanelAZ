@@ -1289,7 +1289,7 @@ export interface TrafficHaNodeBreakdown {
   node_id: number
   node_name: string
   total_bytes: number
-  traffic_7d: number
+  traffic_period: number
   is_active: boolean
 }
 
@@ -1305,9 +1305,7 @@ export interface TrafficClientRow {
   total_received_antizapret: number
   total_sent_antizapret: number
   total_bytes_antizapret: number
-  traffic_1d: number
-  traffic_7d: number
-  traffic_30d: number
+  traffic_period: number
   total_sessions: number
   first_seen_at?: string | null
   last_seen_at?: string | null
@@ -1347,6 +1345,11 @@ export interface TrafficOverview {
   node_id?: number | null
   node_name?: string | null
   ha_context?: TrafficHaContext | null
+  period_mode: string
+  period?: string | null
+  from_date?: string | null
+  to_date?: string | null
+  retention_days: number
 }
 
 export interface TrafficNeverConnectedRow {
@@ -1690,6 +1693,7 @@ export interface TrafficChartData {
   total_vpn: number
   total_antizapret: number
   total: number
+  retention_days: number
 }
 
 export interface TrafficSessionSourceRow {

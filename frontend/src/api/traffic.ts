@@ -1,7 +1,17 @@
 import { apiFetch } from './http'
 
-export async function getTrafficOverview(live = true) {
-  return apiFetch<import('../types').TrafficOverview>(`/traffic/overview?live=${live}`)
+export async function getTrafficOverview(
+  live = true,
+  opts?: { period?: '1d' | '7d' | '30d'; from?: string; to?: string },
+) {
+  const params = new URLSearchParams({ live: String(live) })
+  if (opts?.from && opts?.to) {
+    params.set('from', opts.from)
+    params.set('to', opts.to)
+  } else if (opts?.period) {
+    params.set('period', opts.period)
+  }
+  return apiFetch<import('../types').TrafficOverview>(`/traffic/overview?${params}`)
 }
 
 export async function getTrafficActiveClients() {
@@ -13,8 +23,17 @@ export async function getTrafficActiveClients() {
   }>('/traffic/active-clients')
 }
 
-export async function getTrafficChart(client: string, range = '7d', protocol = 'all') {
-  const params = new URLSearchParams({ client, range, protocol })
+export async function getTrafficChart(
+  client: string,
+  opts: { range?: string; from?: string; to?: string; protocol?: string } = {},
+) {
+  const params = new URLSearchParams({ client, protocol: opts.protocol ?? 'all' })
+  if (opts.from && opts.to) {
+    params.set('from', opts.from)
+    params.set('to', opts.to)
+  } else {
+    params.set('range', opts.range ?? '7d')
+  }
   return apiFetch<import('../types').TrafficChartData>(`/traffic/chart?${params}`)
 }
 
