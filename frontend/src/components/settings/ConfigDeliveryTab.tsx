@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { ClipboardList, Download, Globe, QrCode, Router, Save, Shield, Timer } from 'lucide-react'
+import { ClipboardList, Download, Globe, KeyRound, Loader2, QrCode, Router, Save, Shield, Timer, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ApiError, getSecuritySettings, updateSecuritySettings } from '@/api/client'
+import { getUnlockCodes, revokeUnlockCode, type UnlockCodeProtocol } from '@/api/unlockCodes'
 import RouteResultsPanel from '@/components/settings/RouteResultsPanel'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
+import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,8 +17,9 @@ import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Switch } from '@/components/ui/switch'
 import { useNotifications } from '@/context/NotificationContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
+import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
-import type { SecuritySettings } from '@/types'
+import type { SecuritySettings, UnlockCodeRecord } from '@/types'
 
 const MAX_DOWNLOAD_OPTIONS = [1, 3, 5] as const
 const TTL_PRESETS_MIN = [15, 60, 240] as const
@@ -68,10 +71,17 @@ export default function ConfigDeliveryTab() {
   const { isEnabled } = useFeatureModules()
   const qrDownloadsEnabled = isEnabled('qr_downloads')
   const clientPortalEnabled = isEnabled('client_portal')
+  const unlockCodesEnabled = isEnabled('unlock_codes')
   const openvpnEnabled = isEnabled('openvpn')
+  const wireguardEnabled = isEnabled('wireguard')
+  const awg2Enabled = isEnabled('awg2')
   const [settings, setSettings] = useState<SecuritySettings | null>(null)
   const [qrPin, setQrPin] = useState('')
   const [portalDomain, setPortalDomain] = useState('')
+  const [unlockCodes, setUnlockCodes] = useState<UnlockCodeRecord[]>([])
+  const [unlockCodesLoading, setUnlockCodesLoading] = useState(false)
+  const [unlockCodesBusyId, setUnlockCodesBusyId] = useState<number | null>(null)
+  const [unlockCreateOpen, setUnlockCreateOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -85,6 +95,19 @@ export default function ConfigDeliveryTab() {
       .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки'))
       .finally(() => setLoading(false))
   }, [notifyError])
+
+  useEffect(() => {
+    if (!unlockCodesEnabled) {
+      setUnlockCodes([])
+      setUnlockCodesLoading(false)
+      return
+    }
+    setUnlockCodesLoading(true)
+    void getUnlockCodes()
+      .then(setUnlockCodes)
+      .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки unlock-ключей'))
+      .finally(() => setUnlockCodesLoading(false))
+  }, [notifyError, unlockCodesEnabled])
 
   const persistSettings = async (snapshot: {
     settings: SecuritySettings
@@ -123,19 +146,48 @@ export default function ConfigDeliveryTab() {
     void persistSettings({ settings: next, qrPin: '', portalDomain })
   }
 
+  const refreshUnlockCodes = async () => {
+    if (!unlockCodesEnabled) return
+    setUnlockCodesLoading(true)
+    try {
+      setUnlockCodes(await getUnlockCodes())
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки unlock-ключей')
+    } finally {
+      setUnlockCodesLoading(false)
+    }
+  }
+
+  const handleRevokeUnlockCode = async (code: UnlockCodeRecord) => {
+    setUnlockCodesBusyId(code.id)
+    try {
+      await revokeUnlockCode(code.id)
+      success(`Код «${code.code}» отозван`)
+      await refreshUnlockCodes()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка отзыва unlock-ключа')
+    } finally {
+      setUnlockCodesBusyId(null)
+    }
+  }
+
   if (loading) {
     return <Spinner label="Загрузка настроек выдачи профилей..." className="py-12" />
   }
 
   if (!settings) return null
 
-  if (!qrDownloadsEnabled && !openvpnEnabled && !clientPortalEnabled) {
+  if (!qrDownloadsEnabled && !openvpnEnabled && !clientPortalEnabled && !unlockCodesEnabled) {
     return null
   }
 
   const bothSections = qrDownloadsEnabled && openvpnEnabled
   const ttlMinutes = Math.max(1, Math.round(settings.qr_download_ttl_seconds / 60))
   const portalPreviewHost = portalDomain.trim().replace(/^https?:\/\//i, '').split('/')[0] || 'sub.example.com'
+  const availableUnlockProtocols: UnlockCodeProtocol[] = []
+  if (openvpnEnabled) availableUnlockProtocols.push('openvpn')
+  if (wireguardEnabled) availableUnlockProtocols.push('wireguard')
+  if (awg2Enabled) availableUnlockProtocols.push('amneziawg2')
 
   return (
     <div className="space-y-4">
@@ -205,6 +257,100 @@ export default function ConfigDeliveryTab() {
                 {saving ? 'Сохранение...' : 'Сохранить портал'}
               </Button>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {unlockCodesEnabled && availableUnlockProtocols.length > 0 && (
+        <Card className="shadow-sm">
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <KeyRound size={18} />
+                Unlock-ключи
+              </CardTitle>
+              <CardDescription className="mt-1.5">
+                Создание и отзыв ключей продления для клиентов
+              </CardDescription>
+            </div>
+            {unlockCodes.length > 0 && (
+              <Badge variant="secondary" className="shrink-0">
+                {unlockCodes.length}
+              </Badge>
+            )}
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => setUnlockCreateOpen(true)}
+              >
+                <KeyRound size={16} />
+                Создать ключ
+              </Button>
+            </div>
+
+            {unlockCodesLoading ? (
+              <div className="flex items-center justify-center rounded-xl border border-dashed bg-muted/10 px-4 py-8 text-sm text-muted-foreground">
+                <Loader2 size={16} className="mr-2 animate-spin" />
+                Загрузка ключей...
+              </div>
+            ) : unlockCodes.length === 0 ? (
+              <div className="rounded-xl border border-dashed bg-muted/10 px-4 py-8 text-center text-sm text-muted-foreground">
+                Пока нет unlock-ключей. Создайте первый ключ продления.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {unlockCodes.map((code) => {
+                  const isRevoked = Boolean(code.revoked_at)
+                  const protocolList = code.protocols.join(', ')
+                  return (
+                    <div
+                      key={code.id}
+                      className="flex flex-col gap-3 rounded-xl border bg-card/60 p-3 sm:flex-row sm:items-start sm:justify-between"
+                    >
+                      <div className="min-w-0 space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="break-all font-mono text-sm font-semibold">{code.code}</p>
+                          <Badge variant={code.mode === 'multi' ? 'default' : 'secondary'}>
+                            {code.mode === 'multi' ? 'multi' : 'single'}
+                          </Badge>
+                          {isRevoked && <Badge variant="destructive">Отозван</Badge>}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {code.grant_days} дн. · до {code.max_redemptions} активаций
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Протоколы: {protocolList || '—'} · создан {formatDateTime(code.created_at)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Истекает: {formatDateTime(code.code_expires_at)} · активаций: {code.redemption_count ?? 0}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5"
+                          disabled={isRevoked || unlockCodesBusyId === code.id}
+                          onClick={() => void handleRevokeUnlockCode(code)}
+                        >
+                          {unlockCodesBusyId === code.id ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Trash2 size={14} />
+                          )}
+                          Отозвать
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -364,6 +510,16 @@ export default function ConfigDeliveryTab() {
             </Card>
         )}
         </div>
+
+      {availableUnlockProtocols.length > 0 && (
+        <UnlockCodeCreateDialog
+          open={unlockCreateOpen}
+          onOpenChange={setUnlockCreateOpen}
+          initialProtocols={availableUnlockProtocols}
+          availableProtocols={availableUnlockProtocols}
+          onCreated={() => void refreshUnlockCodes()}
+        />
+      )}
     </div>
   )
 }

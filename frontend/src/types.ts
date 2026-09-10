@@ -1375,6 +1375,7 @@ export interface ClientAccessPolicy {
   access_days_left?: number | null
   blocked_days_left?: number | null
   block_duration_days?: number | null
+  access_until?: string | null
   expires_at?: string | null
   expired?: boolean
   traffic_limit_bytes?: number | null
@@ -1392,6 +1393,20 @@ export interface ClientAccessPolicy {
   traffic_limit_exceeded?: boolean
   traffic_limit_unblock_at?: string | null
   traffic_limit_unblock_label?: string | null
+}
+
+export interface UnlockCodeRecord {
+  id: number
+  code: string
+  grant_days: number
+  protocols: string[]
+  mode: 'single' | 'multi' | string
+  max_redemptions: number
+  redemption_count?: number
+  code_expires_at: string | null
+  created_by_user_id: number | null
+  created_at: string | null
+  revoked_at: string | null
 }
 
 export interface ClientPoliciesResponseEntry {

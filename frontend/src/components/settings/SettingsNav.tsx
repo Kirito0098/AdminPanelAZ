@@ -130,7 +130,8 @@ export function isNavItemVisible(
     return (
       isTabEnabled('qr_downloads') ||
       isModuleEnabled('openvpn') ||
-      isModuleEnabled('client_portal')
+      isModuleEnabled('client_portal') ||
+      isModuleEnabled('unlock_codes')
     )
   }
   if (item.settingsTab && !isTabEnabled(item.settingsTab)) return false

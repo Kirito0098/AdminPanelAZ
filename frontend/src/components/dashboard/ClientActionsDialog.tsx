@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import {
   AlertTriangle,
   Ban,
@@ -41,7 +41,9 @@ import {
   wgTempBlock,
   wgUnblock,
 } from '@/api/client'
+import { setClientAccessUntil, type UnlockCodeProtocol } from '@/api/unlockCodes'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
+import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -173,6 +175,10 @@ export default function ClientActionsDialog({
   const { activeNode } = useNode()
   const { isEnabled } = useFeatureModules()
   const clientPortalEnabled = isEnabled('client_portal')
+  const unlockCodesEnabled = isEnabled('unlock_codes')
+  const openvpnEnabled = isEnabled('openvpn')
+  const wireguardEnabled = isEnabled('wireguard')
+  const awg2Enabled = isEnabled('awg2')
   const haReplicaReadonly = useHaReplicaReadonly()
   const [promptMode, setPromptMode] = useState<PromptMode>(null)
   const [promptTitle, setPromptTitle] = useState('')
@@ -186,11 +192,21 @@ export default function ClientActionsDialog({
   const [pendingAction, setPendingAction] = useState<((days?: number) => Promise<void>) | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [portalUrl, setPortalUrl] = useState<string | null>(null)
-
-  if (!config) return null
+  const [accessUntilValue, setAccessUntilValue] = useState('')
+  const [unlockCodeDialogOpen, setUnlockCodeDialogOpen] = useState(false)
 
   const isAdmin = userRole === 'admin'
   const policyNodeName = policy?.node_name ?? activeNode?.name
+
+  useEffect(() => {
+    if (!open) return
+    if (!config) return
+    const value = policy?.access_until ?? policy?.expires_at ?? null
+    setAccessUntilValue(value ? toDateInputValue(value) : '')
+    setUnlockCodeDialogOpen(false)
+  }, [open, config?.id, policy?.access_until, policy?.expires_at])
+
+  if (!config) return null
 
   const toggleConfigTag = async (tagId: number) => {
     if (!isAdmin) return
@@ -227,6 +243,23 @@ export default function ClientActionsDialog({
   const todayStr = () => {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  }
+
+  const toDateInputValue = (value: string) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return ''
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  const dateInputToIso = (value: string) => {
+    if (!value) return null
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+    if (!match) return null
+    const next = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
+    return next.toISOString()
   }
 
   const runAction = async (key: string, fn: () => Promise<void>) => {
@@ -362,6 +395,19 @@ export default function ClientActionsDialog({
         nextOwner
           ? `Владелец изменён на «${nextOwner.username}»`
           : 'Владелец конфигурации изменён',
+      )
+    })
+  }
+
+  const handleAccessUntilSave = async () => {
+    await runAction('access-until', async () => {
+      await setClientAccessUntil(
+        config.vpn_type,
+        config.client_name,
+        dateInputToIso(accessUntilValue),
+      )
+      onNotifySuccess(
+        accessUntilValue ? 'Срок доступа обновлён' : 'Срок доступа сброшен',
       )
     })
   }
@@ -644,6 +690,15 @@ export default function ClientActionsDialog({
 
   const visibleManagement = managementActions.filter((a) => !a.hidden)
   const visibleDanger = dangerActions.filter((a) => !a.hidden)
+  const availableUnlockProtocols: UnlockCodeProtocol[] = []
+  if (openvpnEnabled) availableUnlockProtocols.push('openvpn')
+  if (wireguardEnabled) availableUnlockProtocols.push('wireguard')
+  if (awg2Enabled) availableUnlockProtocols.push('amneziawg2')
+  const unlockCodeInitialProtocols: UnlockCodeProtocol[] = availableUnlockProtocols.includes(
+    config.vpn_type as UnlockCodeProtocol,
+  )
+    ? [config.vpn_type as UnlockCodeProtocol]
+    : availableUnlockProtocols.slice(0, 1)
 
   type FileRow = {
     key: string
@@ -687,7 +742,7 @@ export default function ClientActionsDialog({
   }
 
   const handleMainOpenChange = (next: boolean) => {
-    if (!next && (busyAction !== null || promptMode !== null)) return
+    if (!next && (busyAction !== null || promptMode !== null || unlockCodeDialogOpen)) return
     onOpenChange(next)
   }
 
@@ -768,6 +823,74 @@ export default function ClientActionsDialog({
                     <ActionButton key={action.key} action={action} busyAction={busyAction} />
                   ))}
                 </div>
+              </section>
+            )}
+
+            {canManage && (
+              <section className="space-y-3 rounded-lg border bg-muted/10 p-3">
+                <SectionTitle>Доступ до</SectionTitle>
+                <p className="text-xs text-muted-foreground">
+                  Установите дату отключения для протокола {protocolLabel(tab)}. Пустое значение убирает
+                  ограничение доступа.
+                </p>
+                <div className="space-y-2">
+                  <Label htmlFor="access-until">Дата</Label>
+                  <Input
+                    id="access-until"
+                    type="date"
+                    min={todayStr()}
+                    value={accessUntilValue}
+                    onChange={(e) => setAccessUntilValue(e.target.value)}
+                  />
+                </div>
+                {policy?.access_until || policy?.expires_at ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    Текущее значение:{' '}
+                    <span className="font-mono">
+                      {policy?.access_until ?? policy?.expires_at ?? '—'}
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">Сейчас ограничение не задано.</p>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    disabled={busyAction !== null || haReplicaReadonly}
+                    onClick={() => void handleAccessUntilSave()}
+                  >
+                    {busyAction === 'access-until' ? <Loader2 size={14} className="animate-spin" /> : null}
+                    Сохранить
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={busyAction !== null || haReplicaReadonly || !accessUntilValue}
+                    onClick={() => setAccessUntilValue('')}
+                  >
+                    Сбросить
+                  </Button>
+                </div>
+              </section>
+            )}
+
+            {unlockCodesEnabled && availableUnlockProtocols.length > 0 && (
+              <section className="space-y-3 rounded-lg border bg-muted/10 p-3">
+                <SectionTitle>Unlock-ключ</SectionTitle>
+                <p className="text-xs text-muted-foreground">
+                  Создайте ключ продления с протоколами этого клиента.
+                </p>
+                <Button
+                  type="button"
+                  className="w-full"
+                  variant="outline"
+                  disabled={busyAction !== null || haReplicaReadonly}
+                  onClick={() => setUnlockCodeDialogOpen(true)}
+                >
+                  Создать unlock-ключ
+                </Button>
               </section>
             )}
 
@@ -1195,6 +1318,13 @@ export default function ClientActionsDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <UnlockCodeCreateDialog
+        open={unlockCodeDialogOpen}
+        onOpenChange={setUnlockCodeDialogOpen}
+        initialProtocols={unlockCodeInitialProtocols}
+        availableProtocols={availableUnlockProtocols}
+      />
     </>
   )
 }

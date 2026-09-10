@@ -208,12 +208,20 @@ export function buildAccessMeta(
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
   const isBlocked = policy?.is_blocked ?? false
   let tone: 'active' | 'expiring' | 'expired' = 'active'
-  const accessExpiresAt = policy?.expires_at ?? config.expires_at
+  const accessExpiresAt = policy?.access_until ?? policy?.expires_at ?? config.expires_at
   const displayed =
     tab === 'openvpn' ? resolveDisplayedTraffic(policy, openvpnGroup) : resolveDisplayedTraffic(policy, null)
 
   if (config.vpn_type === 'openvpn') {
     lines.push({ text: `Сертификат: ${formatCertExpiry(config)}` })
+    if (accessExpiresAt) {
+      lines.push({ text: `Доступ до: ${formatDateShort(accessExpiresAt)}` })
+      const remaining = formatAccessRemaining(accessExpiresAt)
+      lines.push({ text: `Осталось: ${remaining || 'неизвестно'}` })
+    } else {
+      lines.push({ text: 'Доступ: не ограничен' })
+      lines.push({ text: 'Осталось: неизвестно' })
+    }
   } else if (accessExpiresAt) {
     lines.push({ text: `Отключение: ${formatDateShort(accessExpiresAt)}` })
     const remaining = formatAccessRemaining(accessExpiresAt)
