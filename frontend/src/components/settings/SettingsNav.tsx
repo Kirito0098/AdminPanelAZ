@@ -127,7 +127,11 @@ export function isNavItemVisible(
 ): boolean {
   if ((group.adminOnly || item.adminOnly) && !isAdmin) return false
   if (item.id === 'config_delivery') {
-    return isTabEnabled('qr_downloads') || isModuleEnabled('openvpn')
+    return (
+      isTabEnabled('qr_downloads') ||
+      isModuleEnabled('openvpn') ||
+      isModuleEnabled('client_portal')
+    )
   }
   if (item.settingsTab && !isTabEnabled(item.settingsTab)) return false
   return true

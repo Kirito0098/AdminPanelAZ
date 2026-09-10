@@ -16,6 +16,7 @@ import { ThemeProvider } from './context/ThemeContext'
 import { TimezoneProvider } from './context/TimezoneContext'
 import LoginPage from './pages/LoginPage'
 
+const PortalPage = lazy(() => import('./pages/PortalPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const MonitoringPage = lazy(() => import('./pages/MonitoringPage'))
 const NodesPage = lazy(() => import('./pages/NodesPage'))
@@ -60,6 +61,14 @@ export default function App() {
               <RouteProgress />
               <Routes>
                 <Route path="/login" element={<LoginPage />} />
+                <Route
+                  path="/p/:token"
+                  element={
+                    <LazyPage>
+                      <PortalPage />
+                    </LazyPage>
+                  }
+                />
                 <Route
                   path="/"
                   element={

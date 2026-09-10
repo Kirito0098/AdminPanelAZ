@@ -385,6 +385,21 @@ class QrDownloadToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ClientPortalToken(Base):
+    """Permanent shareable client portal link (Remnawave-style), keyed by node + client_name."""
+
+    __tablename__ = "client_portal_tokens"
+    __table_args__ = (UniqueConstraint("token", name="uq_client_portal_token"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    client_name: Mapped[str] = mapped_column(String(32), index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class QrDownloadAuditLog(Base):
     __tablename__ = "qr_download_audit_logs"
 

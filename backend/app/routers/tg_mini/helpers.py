@@ -64,7 +64,9 @@ def _static_index() -> Path:
 def _qr_download_service(db: Session, request: Request) -> QrDownloadService:
     sec = SecurityService().get_settings(db)
     pin_row = db.query(AppSetting).filter(AppSetting.key == "qr_download_pin").first()
-    base_url = resolve_public_base_url(request)
+    from app.services.client_portal import resolve_portal_base_url
+
+    base_url = resolve_portal_base_url(db) or resolve_public_base_url(request)
     return QrDownloadService(
         db,
         base_url=base_url,

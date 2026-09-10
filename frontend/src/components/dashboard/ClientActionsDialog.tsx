@@ -23,6 +23,9 @@ import {
   ApiError,
   createOneTimeLink,
   deleteConfig,
+  createPortalLink,
+  rotatePortalLink,
+  revokePortalLink,
   openvpnClearTrafficLimit,
   openvpnDisconnect,
   openvpnPermanentBlock,
@@ -64,6 +67,7 @@ import {
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import type { ClientAccessPolicy, ConfigTag, User, UserRole, VpnConfig } from '@/types'
@@ -167,6 +171,8 @@ export default function ClientActionsDialog({
   showQrDownloads = true,
 }: ClientActionsDialogProps) {
   const { activeNode } = useNode()
+  const { isEnabled } = useFeatureModules()
+  const clientPortalEnabled = isEnabled('client_portal')
   const haReplicaReadonly = useHaReplicaReadonly()
   const [promptMode, setPromptMode] = useState<PromptMode>(null)
   const [promptTitle, setPromptTitle] = useState('')
@@ -179,6 +185,7 @@ export default function ClientActionsDialog({
   const [limitPeriodDays, setLimitPeriodDays] = useState('7')
   const [pendingAction, setPendingAction] = useState<((days?: number) => Promise<void>) | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
+  const [portalUrl, setPortalUrl] = useState<string | null>(null)
 
   if (!config) return null
 
@@ -266,6 +273,47 @@ export default function ClientActionsDialog({
       onNotifySuccess('Одноразовая ссылка скопирована в буфер')
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка формирования ссылки')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const handlePortalCopy = async () => {
+    setBusyAction('portal-copy')
+    try {
+      const link = await createPortalLink(config.client_name)
+      setPortalUrl(link.url)
+      await navigator.clipboard.writeText(link.url)
+      onNotifySuccess('Ссылка портала скопирована')
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка ссылки портала')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const handlePortalRotate = async () => {
+    setBusyAction('portal-rotate')
+    try {
+      const link = await rotatePortalLink(config.client_name)
+      setPortalUrl(link.url)
+      await navigator.clipboard.writeText(link.url)
+      onNotifySuccess('Ссылка портала перевыпущена и скопирована')
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка перевыпуска')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const handlePortalRevoke = async () => {
+    setBusyAction('portal-revoke')
+    try {
+      await revokePortalLink(config.client_name)
+      setPortalUrl(null)
+      onNotifySuccess('Ссылка портала отозвана')
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка отзыва')
     } finally {
       setBusyAction(null)
     }
@@ -719,6 +767,73 @@ export default function ClientActionsDialog({
                   {visibleManagement.map((action) => (
                     <ActionButton key={action.key} action={action} busyAction={busyAction} />
                   ))}
+                </div>
+              </section>
+            )}
+
+            {clientPortalEnabled && (
+              <section className="space-y-3">
+                <SectionTitle>Клиентский портал</SectionTitle>
+                <p className="text-xs text-muted-foreground">
+                  Постоянная ссылка на страницу установки для клиента{' '}
+                  <span className="font-medium text-foreground">{config.client_name}</span>.
+                  {portalUrl ? (
+                    <>
+                      {' '}
+                      Текущая: <span className="break-all font-mono text-[11px]">{portalUrl}</span>
+                    </>
+                  ) : null}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={busyAction !== null || haReplicaReadonly}
+                    onClick={() => void handlePortalCopy()}
+                  >
+                    {busyAction === 'portal-copy' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Link2 size={14} />
+                    )}
+                    Скопировать ссылку
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={busyAction !== null || haReplicaReadonly}
+                    onClick={() => void handlePortalRotate()}
+                  >
+                    {busyAction === 'portal-rotate' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <RefreshCw size={14} />
+                    )}
+                    Перевыпустить
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={busyAction !== null || haReplicaReadonly}
+                    onClick={() =>
+                      askConfirm('Отозвать ссылку портала?', 'Старая ссылка перестанет открываться.', () =>
+                        handlePortalRevoke(),
+                      )
+                    }
+                  >
+                    {busyAction === 'portal-revoke' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Ban size={14} />
+                    )}
+                    Отозвать
+                  </Button>
                 </div>
               </section>
             )}

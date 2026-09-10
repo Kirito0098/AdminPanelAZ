@@ -72,7 +72,9 @@ def _unlinked_article() -> dict[str, Any]:
 
 
 def _create_download_url(ctx: BotContext, config: VpnConfig, path: str) -> str | None:
-    base_url = _panel_base_url(ctx.mini_app_url)
+    from app.services.client_portal import resolve_portal_base_url
+
+    base_url = resolve_portal_base_url(ctx.db) or _panel_base_url(ctx.mini_app_url)
     if not base_url or ctx.user is None:
         return None
     sec = SecurityService().get_settings(ctx.db)

@@ -1455,6 +1455,7 @@ export interface SecuritySettings {
   qr_download_max_downloads: number
   qr_download_pin_set: boolean
   public_download_enabled: boolean
+  portal_domain: string
 }
 
 export interface SecretRotationItem {

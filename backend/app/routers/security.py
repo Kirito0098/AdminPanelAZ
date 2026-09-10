@@ -41,6 +41,7 @@ class SecuritySettingsUpdate(BaseModel):
     qr_download_max_downloads: int | None = None
     qr_download_pin: str | None = None
     public_download_enabled: bool | None = None
+    portal_domain: str | None = None
 
 
 class PublicDownloadToggle(BaseModel):

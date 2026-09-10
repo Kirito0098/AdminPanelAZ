@@ -85,6 +85,7 @@ class SecurityService:
             "qr_download_max_downloads": int(_get(db, "qr_download_max_downloads", "1") or "1"),
             "qr_download_pin_set": bool(_get(db, "qr_download_pin", "")),
             "public_download_enabled": is_public_download_enabled(db),
+            "portal_domain": _get(db, "portal_domain", ""),
             "whitelist_firewall": whitelist_firewall,
             "whitelist_firewall_applicable": applicable,
             "whitelist_firewall_active": False,
@@ -145,6 +146,13 @@ class SecurityService:
             _set(db, "qr_download_pin", pin)
         if "public_download_enabled" in payload:
             set_public_download_enabled(db, bool(payload["public_download_enabled"]))
+        if "portal_domain" in payload:
+            from app.services.client_portal import set_portal_domain
+
+            try:
+                set_portal_domain(db, payload.get("portal_domain"))
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
         if "whitelist_firewall" in payload:
             requested = bool(payload["whitelist_firewall"])
             if requested and not self.is_whitelist_port_firewall_applicable():

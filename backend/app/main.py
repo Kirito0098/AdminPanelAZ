@@ -21,6 +21,7 @@ from app.routers import (
     backups,
     cidr_db,
     client_access,
+    client_portal,
     client_templates,
     config_tags,
     configs,
@@ -33,6 +34,7 @@ from app.routers import (
     nodes,
     node_sync,
     public_download,
+    public_portal,
     routing,
     warper,
     security,
@@ -235,6 +237,8 @@ app.include_router(client_access.router, prefix=_API_PREFIX)
 app.include_router(edit_files.router, prefix=_API_PREFIX)
 app.include_router(security.router, prefix=_API_PREFIX)
 app.include_router(public_download.router, prefix=_API_PREFIX)
+app.include_router(public_portal.router, prefix=_API_PREFIX)
+app.include_router(client_portal.router, prefix=_API_PREFIX)
 app.include_router(server_monitor.router, prefix=_API_PREFIX)
 app.include_router(logs.router, prefix=_API_PREFIX)
 app.include_router(system.router, prefix=_API_PREFIX)
@@ -265,6 +269,7 @@ async def feature_guard_middleware(request, call_next):
 async def ip_restriction_middleware(request, call_next):
     path = request.url.path
     api = _API_PREFIX
+    portal_page_prefix = f"{_ACCESS_PREFIX}/p/" if _ACCESS_PREFIX else "/p/"
     exempt = (
         path.startswith(f"{api}/public/")
         or path.startswith(f"{api}/tg-mini")
@@ -274,6 +279,7 @@ async def ip_restriction_middleware(request, call_next):
         or path.startswith(f"{api}/auth/telegram")
         or path.startswith(f"{api}/auth/refresh")
         or path.startswith(f"{api}/auth/login")
+        or path.startswith(portal_page_prefix)
         or path
         in (
             f"{api}/health",
@@ -282,6 +288,22 @@ async def ip_restriction_middleware(request, call_next):
             with_access_path(settings, "/ip-blocked"),
         )
     )
+    # Entire Host = portal_domain is client-facing (share links); skip IP whitelist.
+    if not exempt:
+        try:
+            from app.database import SessionLocal as _SL
+            from app.services.client_portal import get_portal_domain
+
+            _db = _SL()
+            try:
+                portal_host = get_portal_domain(_db)
+                req_host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+                if portal_host and req_host == portal_host.lower():
+                    exempt = True
+            finally:
+                _db.close()
+        except Exception:
+            pass
     if exempt:
         return await call_next(request)
 

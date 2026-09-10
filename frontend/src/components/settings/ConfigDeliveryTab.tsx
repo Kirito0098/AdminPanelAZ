@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ClipboardList, Download, QrCode, Router, Save, Shield, Timer } from 'lucide-react'
+import { ClipboardList, Download, Globe, QrCode, Router, Save, Shield, Timer } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ApiError, getSecuritySettings, updateSecuritySettings } from '@/api/client'
 import RouteResultsPanel from '@/components/settings/RouteResultsPanel'
@@ -67,21 +67,30 @@ export default function ConfigDeliveryTab() {
   const { success, error: notifyError } = useNotifications()
   const { isEnabled } = useFeatureModules()
   const qrDownloadsEnabled = isEnabled('qr_downloads')
+  const clientPortalEnabled = isEnabled('client_portal')
   const openvpnEnabled = isEnabled('openvpn')
   const [settings, setSettings] = useState<SecuritySettings | null>(null)
   const [qrPin, setQrPin] = useState('')
+  const [portalDomain, setPortalDomain] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     setLoading(true)
     getSecuritySettings()
-      .then(setSettings)
+      .then((data) => {
+        setSettings(data)
+        setPortalDomain(data.portal_domain || '')
+      })
       .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки'))
       .finally(() => setLoading(false))
   }, [notifyError])
 
-  const persistSettings = async (snapshot: { settings: SecuritySettings; qrPin: string }) => {
+  const persistSettings = async (snapshot: {
+    settings: SecuritySettings
+    qrPin: string
+    portalDomain: string
+  }) => {
     setSaving(true)
     try {
       const updated = await updateSecuritySettings({
@@ -89,8 +98,10 @@ export default function ConfigDeliveryTab() {
         qr_download_max_downloads: snapshot.settings.qr_download_max_downloads,
         qr_download_pin: snapshot.qrPin || undefined,
         public_download_enabled: snapshot.settings.public_download_enabled,
+        portal_domain: snapshot.portalDomain.trim(),
       })
       setSettings(updated)
+      setPortalDomain(updated.portal_domain || '')
       if (snapshot.qrPin) setQrPin('')
       success('Настройки выдачи профилей сохранены')
     } catch (err) {
@@ -102,14 +113,14 @@ export default function ConfigDeliveryTab() {
 
   const save = () => {
     if (!settings) return
-    void persistSettings({ settings, qrPin })
+    void persistSettings({ settings, qrPin, portalDomain })
   }
 
   const saveWithPatch = (patch: Partial<SecuritySettings>) => {
     if (!settings) return
     const next = { ...settings, ...patch }
     setSettings(next)
-    void persistSettings({ settings: next, qrPin: '' })
+    void persistSettings({ settings: next, qrPin: '', portalDomain })
   }
 
   if (loading) {
@@ -118,12 +129,13 @@ export default function ConfigDeliveryTab() {
 
   if (!settings) return null
 
-  if (!qrDownloadsEnabled && !openvpnEnabled) {
+  if (!qrDownloadsEnabled && !openvpnEnabled && !clientPortalEnabled) {
     return null
   }
 
   const bothSections = qrDownloadsEnabled && openvpnEnabled
   const ttlMinutes = Math.max(1, Math.round(settings.qr_download_ttl_seconds / 60))
+  const portalPreviewHost = portalDomain.trim().replace(/^https?:\/\//i, '').split('/')[0] || 'sub.example.com'
 
   return (
     <div className="space-y-4">
@@ -155,6 +167,47 @@ export default function ConfigDeliveryTab() {
             ? 'Готовые конфиги маршрутизации для домашних роутеров'
             : 'Временные ссылки и QR-коды для передачи профиля клиенту'}
       </p>
+
+      {clientPortalEnabled && (
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Globe size={18} />
+              Клиентский портал
+            </CardTitle>
+            <CardDescription>
+              Постоянные ссылки на отдельном поддомене: страница установки, OpenVPN import и скачивание
+              профилей. DNS и TLS настройте сами (прокси на эту панель).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="portal-domain">Поддомен / хост портала</Label>
+              <Input
+                id="portal-domain"
+                value={portalDomain}
+                onChange={(e) => setPortalDomain(e.target.value)}
+                placeholder="sub.example.com"
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">
+                Без схемы. Пример ссылки:{' '}
+                <code className="rounded bg-muted px-1 py-0.5">
+                  https://{portalPreviewHost}/p/…
+                </code>
+                . Не используйте домен самой панели. При заданном хосте одноразовые QR-ссылки тоже
+                строятся с него.
+              </p>
+            </div>
+            <div className="flex justify-end border-t pt-4">
+              <Button onClick={save} disabled={saving} className="gap-1.5">
+                <Save size={16} />
+                {saving ? 'Сохранение...' : 'Сохранить портал'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div
         className={cn(
