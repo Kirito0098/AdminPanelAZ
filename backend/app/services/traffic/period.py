@@ -31,12 +31,16 @@ class TrafficPeriodWindow:
     label: str
 
 
-def _retention_error(retention_days: int) -> TrafficPeriodError:
-    message = (
-        f"Данные трафика хранятся только {retention_days} дн. "
-        "(Настройки → Обслуживание)."
-    )
+def _error(message: str, retention_days: int) -> TrafficPeriodError:
     return TrafficPeriodError(message, retention_days)
+
+
+def _retention_error(retention_days: int) -> TrafficPeriodError:
+    return _error(
+        f"Данные трафика хранятся только {retention_days} дн. "
+        "(Настройки → Обслуживание).",
+        retention_days,
+    )
 
 
 def _resolve_tz(tz_name: str) -> ZoneInfo:
@@ -97,12 +101,22 @@ def resolve_traffic_period(
     to_parsed = _parse_iso_date(to_s)
 
     if from_stripped or to_stripped:
+        if not from_stripped or not to_stripped:
+            raise _error(
+                "Укажите обе даты периода (от и до).",
+                retention_days,
+            )
         if from_parsed is None or to_parsed is None:
-            raise _retention_error(retention_days)
+            raise _error(
+                "Некорректный формат даты (ожидается ГГГГ-ММ-ДД).",
+                retention_days,
+            )
 
         today = _local_today(instant, tz)
-        if from_parsed > to_parsed or from_parsed > today or to_parsed > today:
-            raise _retention_error(retention_days)
+        if from_parsed > to_parsed:
+            raise _error('Дата «от» не может быть позже даты «до».', retention_days)
+        if from_parsed > today or to_parsed > today:
+            raise _error("Нельзя выбрать дату в будущем.", retention_days)
 
         earliest = today - timedelta(days=retention_days)
         if from_parsed < earliest or to_parsed < earliest:
@@ -125,7 +139,10 @@ def resolve_traffic_period(
 
     preset = (period or "30d").strip().lower()
     if preset not in _PRESET_DAYS:
-        preset = "30d"
+        raise _error(
+            f"Неизвестный период: {preset}. Допустимо: 1d, 7d, 30d.",
+            retention_days,
+        )
     days = _PRESET_DAYS[preset]
     since_utc = until_naive - timedelta(days=days)
     return TrafficPeriodWindow(

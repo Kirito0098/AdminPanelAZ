@@ -1,5 +1,4 @@
 from datetime import date, datetime, timezone
-from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -48,13 +47,15 @@ def test_custom_wider_than_retention_raises():
         )
     assert ei.value.retention_days == 90
     assert "90" in str(ei.value)
+    assert "хранятся" in str(ei.value)
 
 
 def test_from_without_to_raises():
-    with pytest.raises(TrafficPeriodError):
+    with pytest.raises(TrafficPeriodError) as ei:
         resolve_traffic_period(
             period=None, from_s="2026-09-01", to_s=None, retention_days=90, tz_name="UTC"
         )
+    assert "обе даты" in str(ei.value)
 
 
 def test_both_garbage_date_strings_raises_not_preset():
@@ -67,7 +68,7 @@ def test_both_garbage_date_strings_raises_not_preset():
             tz_name="UTC",
         )
     assert ei.value.retention_days == 90
-    assert "90" in str(ei.value)
+    assert "формат" in str(ei.value).lower() or "ГГГГ" in str(ei.value)
 
 
 def test_invalid_from_empty_to_raises():
@@ -79,7 +80,7 @@ def test_invalid_from_empty_to_raises():
             retention_days=90,
             tz_name="UTC",
         )
-    assert ei.value.retention_days == 90
+    assert "обе даты" in str(ei.value) or "формат" in str(ei.value).lower()
 
 
 def test_valid_from_invalid_to_raises():
@@ -93,7 +94,43 @@ def test_valid_from_invalid_to_raises():
             tz_name="UTC",
             now=now,
         )
-    assert ei.value.retention_days == 90
+    assert "формат" in str(ei.value).lower() or "ГГГГ" in str(ei.value)
+
+
+def test_from_after_to_distinct_message():
+    now = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+    with pytest.raises(TrafficPeriodError) as ei:
+        resolve_traffic_period(
+            period=None,
+            from_s="2026-09-08",
+            to_s="2026-09-01",
+            retention_days=90,
+            tz_name="UTC",
+            now=now,
+        )
+    assert "позже" in str(ei.value)
+
+
+def test_future_date_distinct_message():
+    now = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+    with pytest.raises(TrafficPeriodError) as ei:
+        resolve_traffic_period(
+            period=None,
+            from_s="2026-09-11",
+            to_s="2026-09-12",
+            retention_days=90,
+            tz_name="UTC",
+            now=now,
+        )
+    assert "будущ" in str(ei.value)
+
+
+def test_unknown_period_raises():
+    with pytest.raises(TrafficPeriodError) as ei:
+        resolve_traffic_period(
+            period="99d", from_s=None, to_s=None, retention_days=90, tz_name="UTC"
+        )
+    assert "Неизвестный период" in str(ei.value)
 
 
 def test_custom_overrides_period():

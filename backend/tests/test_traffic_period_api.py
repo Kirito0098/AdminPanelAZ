@@ -150,3 +150,33 @@ def test_chart_custom_range_ignores_preset_range(client, db):
     kwargs = fetch_mock.call_args.kwargs
     assert kwargs.get("period_window") is not None
     assert kwargs["period_window"].mode == "custom"
+
+
+def test_overview_from_after_to_returns_400(client):
+    resp = client.get("/traffic/overview?from=2026-09-08&to=2026-09-01&live=false")
+    assert resp.status_code == 400
+    assert "позже" in resp.json()["detail"]
+
+
+def test_overview_future_dates_returns_400(client):
+    resp = client.get("/traffic/overview?from=2099-01-01&to=2099-01-02&live=false")
+    assert resp.status_code == 400
+    assert "будущ" in resp.json()["detail"]
+
+
+def test_overview_only_from_returns_400(client):
+    resp = client.get("/traffic/overview?from=2026-09-01&live=false")
+    assert resp.status_code == 400
+    assert "обе даты" in resp.json()["detail"]
+
+
+def test_overview_unknown_period_returns_400(client):
+    resp = client.get("/traffic/overview?period=99d&live=false")
+    assert resp.status_code == 400
+    assert "Неизвестный период" in resp.json()["detail"]
+
+
+def test_chart_invalid_custom_returns_400(client):
+    resp = client.get("/traffic/chart?client=alice&from=2026-09-08&to=2026-09-01")
+    assert resp.status_code == 400
+    assert "позже" in resp.json()["detail"]

@@ -366,6 +366,8 @@ class TrafficCollectorService:
             scope_ids,
             since_utc=period_window.since_utc,
             until_utc=period_window.until_utc,
+            # Custom windows are rare/explicit — do not coalesce via TTL cache.
+            ttl_seconds=None if period_window.mode == "custom" else _RECENT_USAGE_TTL_SECONDS,
         )
 
         aggregates: dict[tuple[str, str], dict] = {}

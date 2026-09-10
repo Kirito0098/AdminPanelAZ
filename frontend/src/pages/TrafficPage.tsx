@@ -31,6 +31,7 @@ import {
   resetTraffic,
   setTrafficCleanupSchedule,
 } from '@/api/client'
+import { getRetentionSettings } from '@/api/settings'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import TrafficClientDetails from '@/components/traffic/TrafficClientDetails'
@@ -75,6 +76,7 @@ import { PercentBar } from '@/components/ui/percent-bar'
 import { formatDateTime } from '@/lib/datetime'
 import {
   isAppliedCustomValid,
+  isTrafficPeriodHttpError,
   overviewPeriodSubtitle,
   parseLocalDate,
   validateCustomRange,
@@ -377,11 +379,8 @@ export default function TrafficPage() {
         startGlobal()
       }
       if (manual) setRefreshing(true)
-      try {
-        const opts =
-          overviewMode === 'custom' && appliedFrom && appliedTo
-            ? { from: appliedFrom, to: appliedTo }
-            : { period: overviewPreset }
+
+      const fetchOverview = async (opts: { period?: OverviewPreset; from?: string; to?: string }) => {
         const overview = await getTrafficOverview(false, opts)
         setData(overview)
         setRetentionDays(overview.retention_days)
@@ -412,7 +411,37 @@ export default function TrafficPage() {
           .finally(() => {
             setLiveLoading(false)
           })
+      }
+
+      try {
+        const usingCustom = overviewMode === 'custom' && Boolean(appliedFrom && appliedTo)
+        const opts = usingCustom
+          ? { from: appliedFrom, to: appliedTo }
+          : { period: overviewPreset }
+        await fetchOverview(opts)
       } catch (err) {
+        // Custom range can 400 after retention shrink before retentionDays updates —
+        // reset to preset and retry so the page does not stick on a dead custom window.
+        if (
+          isTrafficPeriodHttpError(err) &&
+          overviewMode === 'custom' &&
+          appliedFrom &&
+          appliedTo
+        ) {
+          setAppliedFrom('')
+          setAppliedTo('')
+          setDraftFrom('')
+          setDraftTo('')
+          setOverviewMode('preset')
+          setOverviewPreset('30d')
+          notifyWarning('Период сброшен: диапазон больше недоступен (срок хранения).')
+          try {
+            await fetchOverview({ period: '30d' })
+            return
+          } catch (retryErr) {
+            err = retryErr
+          }
+        }
         const message =
           err instanceof ApiError
             ? err.message
@@ -435,6 +464,7 @@ export default function TrafficPage() {
       startGlobal,
       doneGlobal,
       notifyError,
+      notifyWarning,
     ],
   )
 
@@ -485,25 +515,82 @@ export default function TrafficPage() {
   const loadChart = useCallback(async () => {
     if (!selectedClient) return
     setChartLoading(true)
+    const fallbackPreset = chartPreset || '7d'
     try {
       // Always request all protocols so awg2-enabled UI can render amneziawg2_bytes
       // alongside openvpn/wireguard when the feature toggle is on.
       const opts =
         chartMode === 'custom' && chartAppliedFrom && chartAppliedTo
           ? { from: chartAppliedFrom, to: chartAppliedTo, protocol: 'all' as const }
-          : { range: chartPreset, protocol: 'all' as const }
-      setChartData(await getTrafficChart(selectedClient, opts))
+          : { range: fallbackPreset, protocol: 'all' as const }
+      const chart = await getTrafficChart(selectedClient, opts)
+      setChartData(chart)
+      if (typeof chart.retention_days === 'number' && chart.retention_days >= 1) {
+        setRetentionDays(chart.retention_days)
+      }
     } catch (err) {
+      if (
+        isTrafficPeriodHttpError(err) &&
+        chartMode === 'custom' &&
+        chartAppliedFrom &&
+        chartAppliedTo
+      ) {
+        setChartAppliedFrom('')
+        setChartAppliedTo('')
+        setChartDraftFrom('')
+        setChartDraftTo('')
+        setChartMode('preset')
+        setChartPreset(fallbackPreset)
+        notifyWarning('Период графика сброшен: диапазон больше недоступен (срок хранения).')
+        try {
+          const chart = await getTrafficChart(selectedClient, {
+            range: fallbackPreset,
+            protocol: 'all',
+          })
+          setChartData(chart)
+          if (typeof chart.retention_days === 'number' && chart.retention_days >= 1) {
+            setRetentionDays(chart.retention_days)
+          }
+          return
+        } catch (retryErr) {
+          err = retryErr
+        }
+      }
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки графика')
     } finally {
       setChartLoading(false)
     }
-  }, [selectedClient, chartMode, chartPreset, chartAppliedFrom, chartAppliedTo, notifyError])
+  }, [
+    selectedClient,
+    chartMode,
+    chartPreset,
+    chartAppliedFrom,
+    chartAppliedTo,
+    notifyError,
+    notifyWarning,
+  ])
 
   useEffect(() => {
     if (nodeLoading) return
     load(true)
   }, [load, nodeLoading, activeNode?.id])
+
+  // Seed retention early so the calendar knows max window even before overview succeeds.
+  useEffect(() => {
+    let cancelled = false
+    void getRetentionSettings()
+      .then((cfg) => {
+        if (cancelled) return
+        const days = Number(cfg.traffic_sample_retention_days)
+        if (Number.isFinite(days) && days >= 1) {
+          setRetentionDays((prev) => (prev == null ? days : prev))
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [activeNode?.id])
 
   const loadDeletedClients = useCallback(async () => {
     if (!isAdmin) return
