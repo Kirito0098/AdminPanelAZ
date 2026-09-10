@@ -366,14 +366,38 @@ def _collect_access_policies(db: Session, *, node_id: int, client_name: str, pro
     return [p for p in policies if p is not None]
 
 
+def _earliest_datetime(values: list[datetime | None]) -> datetime | None:
+    present = [v for v in values if v is not None]
+    return min(present) if present else None
+
+
+def _format_expires_label(expires_at: datetime | None, *, now: datetime | None = None) -> str:
+    if expires_at is None:
+        return "Бессрочно"
+    current = now or datetime.utcnow()
+    delta = expires_at - current
+    days_left = delta.days if delta.total_seconds() > 0 else 0
+    until = expires_at.strftime("%d.%m.%Y")
+    if days_left <= 0:
+        return f"истёк {until}"
+    return f"{days_left} дн. (до {until})"
+
+
 def build_portal_status(db: Session, *, node_id: int, client_name: str, configs: list[VpnConfig]) -> dict:
     """Account overview for the public portal (status / expiry / traffic)."""
     protocols = {c.vpn_type.value for c in configs}
     policies = _collect_access_policies(db, node_id=node_id, client_name=client_name, protocols=protocols)
     blocked = any(_policy_blocked(p) for p in policies)
 
-    expiries = [c.expires_at for c in configs if getattr(c, "expires_at", None)]
-    expires_at = min(expiries) if expiries else None
+    # OpenVPN uses cert_expires_at; AWG2/access TTL use expires_at; WG policy may also set expires_at.
+    expiry_candidates: list[datetime | None] = []
+    for c in configs:
+        expiry_candidates.append(getattr(c, "expires_at", None))
+        expiry_candidates.append(getattr(c, "cert_expires_at", None))
+    for p in policies:
+        expiry_candidates.append(getattr(p, "expires_at", None))
+
+    expires_at = _earliest_datetime(expiry_candidates)
     now = datetime.utcnow()
     expired = bool(expires_at and expires_at <= now)
 
@@ -387,10 +411,7 @@ def build_portal_status(db: Session, *, node_id: int, client_name: str, configs:
         status_key = "active"
         status_label = "Активна"
 
-    if expires_at is None:
-        expires_label = "Бессрочно"
-    else:
-        expires_label = expires_at.strftime("%d.%m.%Y")
+    expires_label = _format_expires_label(expires_at, now=now)
 
     stats = (
         db.query(UserTrafficStatProtocol)

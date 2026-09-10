@@ -144,6 +144,7 @@ def test_build_portal_status_active_unlimited():
     policy.is_temp_blocked = False
     policy.block_until = None
     policy.traffic_limit_bytes = None
+    policy.expires_at = None
     # traffic stats
     stat = MagicMock()
     stat.total_received = 1024
@@ -164,12 +165,34 @@ def test_build_portal_status_active_unlimited():
     cfg = MagicMock()
     cfg.vpn_type = VpnType.openvpn
     cfg.expires_at = None
+    cfg.cert_expires_at = None
     status = portal.build_portal_status(db, node_id=1, client_name="alice", configs=[cfg])
     assert status["status"] == "active"
     assert status["expires_label"] == "Бессрочно"
     assert status["traffic_used_bytes"] == 3072
     assert status["traffic_limit_bytes"] is None
     assert "/ ∞" in status["traffic_label"]
+
+
+def test_build_portal_status_uses_cert_expires_at():
+    db = MagicMock()
+
+    def query_side_effect(model):
+        q = MagicMock()
+        q.filter.return_value.first.return_value = None
+        q.filter.return_value.all.return_value = []
+        return q
+
+    db.query.side_effect = query_side_effect
+    now = datetime.utcnow()
+    cfg = MagicMock()
+    cfg.vpn_type = VpnType.openvpn
+    cfg.expires_at = None
+    cfg.cert_expires_at = now + __import__("datetime").timedelta(days=25, hours=2)
+    status = portal.build_portal_status(db, node_id=1, client_name="test1", configs=[cfg])
+    assert status["status"] == "active"
+    assert status["expires_label"].startswith("25 дн. (до ")
+    assert status["expires_at"] is not None
 
 
 def test_portal_protocol_prefers_file_protocol_over_db_vpn_type():
