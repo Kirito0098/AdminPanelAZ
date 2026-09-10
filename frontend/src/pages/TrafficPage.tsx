@@ -34,6 +34,7 @@ import {
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import TrafficClientDetails from '@/components/traffic/TrafficClientDetails'
+import TrafficPeriodControls from '@/components/traffic/TrafficPeriodControls'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import { NodeBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -70,6 +71,7 @@ import { useProgress } from '@/context/ProgressContext'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { formatDateTime } from '@/lib/datetime'
+import { parseLocalDate, validateCustomRange } from '@/lib/trafficPeriod'
 import { cn } from '@/lib/utils'
 import type {
   ClientAccessPolicy,
@@ -86,12 +88,12 @@ function isPageReload() {
   return nav?.type === 'reload'
 }
 
-type SortKey = 'total_bytes' | 'traffic_7d' | 'traffic_1d' | 'total_received' | 'total_sent' | 'common_name'
+type OverviewPreset = '1d' | '7d' | '30d'
+type SortKey = 'total_bytes' | 'traffic_period' | 'total_received' | 'total_sent' | 'common_name'
 
 const SORT_LABELS: Record<SortKey, string> = {
   total_bytes: 'Общий объём',
-  traffic_7d: 'За 7 дней',
-  traffic_1d: 'За 1 день',
+  traffic_period: 'За период',
   total_received: 'RX',
   total_sent: 'TX',
   common_name: 'Имя клиента',
@@ -220,14 +222,8 @@ function TrafficClientCard({ row, totalBytes, expanded, onToggle, children }: Tr
           <p className="mono font-medium">{formatBytes(row.total_bytes)}</p>
         </div>
         <div>
-          <p className="text-muted-foreground">1д / 7д</p>
-          <p className="mono font-medium">
-            {formatBytes(row.traffic_1d)} / {formatBytes(row.traffic_7d)}
-          </p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">30д</p>
-          <p className="mono font-medium">{formatBytes(row.traffic_30d)}</p>
+          <p className="text-muted-foreground">За период</p>
+          <p className="mono font-medium">{formatBytes(row.traffic_period)}</p>
         </div>
       </div>
       <div className="mt-3">
@@ -315,6 +311,13 @@ export default function TrafficPage() {
   const [clientPolicy, setClientPolicy] = useState<ClientAccessPolicy | null>(null)
   const [policyLoading, setPolicyLoading] = useState(false)
   const [chartRange, setChartRange] = useState('7d')
+  const [overviewPreset, setOverviewPreset] = useState<OverviewPreset>('30d')
+  const [overviewMode, setOverviewMode] = useState<'preset' | 'custom'>('preset')
+  const [draftFrom, setDraftFrom] = useState('')
+  const [draftTo, setDraftTo] = useState('')
+  const [appliedFrom, setAppliedFrom] = useState('')
+  const [appliedTo, setAppliedTo] = useState('')
+  const [retentionDays, setRetentionDays] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [liveLoading, setLiveLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -352,8 +355,13 @@ export default function TrafficPage() {
       }
       if (manual) setRefreshing(true)
       try {
-        const overview = await getTrafficOverview(false)
+        const opts =
+          overviewMode === 'custom' && appliedFrom && appliedTo
+            ? { from: appliedFrom, to: appliedTo }
+            : { period: overviewPreset }
+        const overview = await getTrafficOverview(false, opts)
         setData(overview)
+        setRetentionDays(overview.retention_days)
         setLoadError(null)
         setSelectedClient((current) => {
           if (current && overview.rows.some((r) => r.common_name === current)) return current
@@ -396,7 +404,15 @@ export default function TrafficPage() {
         if (initial) doneGlobal()
       }
     },
-    [startGlobal, doneGlobal, notifyError],
+    [
+      overviewMode,
+      overviewPreset,
+      appliedFrom,
+      appliedTo,
+      startGlobal,
+      doneGlobal,
+      notifyError,
+    ],
   )
 
   useEffect(() => {
@@ -449,7 +465,7 @@ export default function TrafficPage() {
     try {
       // Always request all protocols so awg2-enabled UI can render amneziawg2_bytes
       // alongside openvpn/wireguard when the feature toggle is on.
-      setChartData(await getTrafficChart(selectedClient, chartRange, 'all'))
+      setChartData(await getTrafficChart(selectedClient, { range: chartRange, protocol: 'all' }))
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки графика')
     } finally {
@@ -526,7 +542,7 @@ export default function TrafficPage() {
     },
     1000,
     {
-      enabled: autoRefresh,
+      enabled: autoRefresh && overviewMode === 'preset',
       onBecomeVisible: () => {
         setCountdown(REFRESH_INTERVAL)
         void load()
@@ -589,10 +605,46 @@ export default function TrafficPage() {
   const topConsumer = useMemo(() => {
     const rows = data?.rows ?? []
     if (!rows.length) return null
-    return [...rows].sort((a, b) => b.traffic_7d - a.traffic_7d)[0]
+    return [...rows].sort((a, b) => b.traffic_period - a.traffic_period)[0]
   }, [data?.rows])
 
   const handleRefresh = () => load(false, true)
+
+  const handleOverviewPresetChange = (preset: OverviewPreset) => {
+    setOverviewPreset(preset)
+    setOverviewMode('preset')
+  }
+
+  const handleOverviewCustomChange = (from: string, to: string) => {
+    setOverviewMode('custom')
+    setDraftFrom(from)
+    setDraftTo(to)
+  }
+
+  const handleOverviewApplyCustom = () => {
+    if (!draftFrom || !draftTo || retentionDays == null) {
+      notifyError(
+        retentionDays == null
+          ? 'Срок хранения ещё не загружен.'
+          : 'Выберите даты начала и конца периода.',
+      )
+      return
+    }
+    const from = parseLocalDate(draftFrom)
+    const to = parseLocalDate(draftTo)
+    if (!from || !to) {
+      notifyError('Некорректные даты периода.')
+      return
+    }
+    const err = validateCustomRange(from, to, retentionDays)
+    if (err) {
+      notifyError(err)
+      return
+    }
+    setAppliedFrom(draftFrom)
+    setAppliedTo(draftTo)
+    setOverviewMode('custom')
+  }
 
   const handleReset = async () => {
     setResetting(true)
@@ -792,8 +844,8 @@ export default function TrafficPage() {
               accent="text-amber-500"
             />
             <SummaryCard
-              label="Топ за 7д"
-              value={topConsumer ? formatBytes(topConsumer.traffic_7d) : '—'}
+              label="Топ за период"
+              value={topConsumer ? formatBytes(topConsumer.traffic_period) : '—'}
               icon={TrendingUp}
               sub={topConsumer ? topConsumer.common_name : 'нет данных'}
             />
@@ -809,13 +861,26 @@ export default function TrafficPage() {
                 <CardDescription>
                   {hasRows
                     ? `${filteredRows.length} из ${data?.rows.length ?? 0} клиентов · сортировка: ${SORT_LABELS[sortKey]}${selectedClient ? ` · раскрыт: ${selectedClient}` : ''}`
-                    : 'Накопленные RX/TX, окна 1д / 7д / 30д'}
+                    : 'Накопленные RX/TX и трафик за выбранный период'}
                   {summary?.latest_sample_at && (
                     <> · последний снимок {formatDateTime(summary.latest_sample_at)}</>
                   )}
                 </CardDescription>
               </div>
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+                <TrafficPeriodControls
+                  retentionDays={retentionDays}
+                  mode={overviewMode}
+                  preset={overviewPreset}
+                  customFrom={draftFrom}
+                  customTo={draftTo}
+                  showApply
+                  onPresetChange={handleOverviewPresetChange}
+                  onCustomChange={handleOverviewCustomChange}
+                  onApplyCustom={handleOverviewApplyCustom}
+                  onNotifyError={notifyError}
+                  disabled={refreshing}
+                />
                 <div className="relative sm:w-56">
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -893,9 +958,7 @@ export default function TrafficPage() {
                           <TableHead className="text-right">TX</TableHead>
                           <TableHead className="text-right">Всего</TableHead>
                           <TableHead className="min-w-[8rem]">Доля</TableHead>
-                          <TableHead className="text-right">1д</TableHead>
-                          <TableHead className="text-right">7д</TableHead>
-                          <TableHead className="text-right">30д</TableHead>
+                          <TableHead className="text-right">За период</TableHead>
                           <TableHead>Последний раз</TableHead>
                           <TableHead>Статус</TableHead>
                         </TableRow>
@@ -941,13 +1004,7 @@ export default function TrafficPage() {
                               <TrafficShareBar value={r.total_bytes} max={totalBytes} />
                             </TableCell>
                             <TableCell className="whitespace-nowrap text-right font-mono text-xs">
-                              {formatBytes(r.traffic_1d)}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap text-right font-mono text-xs">
-                              {formatBytes(r.traffic_7d)}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap text-right font-mono text-xs">
-                              {formatBytes(r.traffic_30d)}
+                              {formatBytes(r.traffic_period)}
                             </TableCell>
                             <TableCell className="text-xs text-muted-foreground">
                               <span className="inline-flex items-center gap-1">
@@ -963,7 +1020,7 @@ export default function TrafficPage() {
                               </TableRow>
                               {expanded && selectedRow && (
                                 <TableRow className="bg-muted/20 hover:bg-muted/20">
-                                  <TableCell colSpan={12} className="p-0">
+                                  <TableCell colSpan={10} className="p-0">
                                     <div className="border-t border-primary/20 p-4">
                                       <TrafficClientDetails
                                         row={selectedRow}
