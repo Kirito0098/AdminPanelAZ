@@ -28,6 +28,7 @@ from app.services.traffic.active_clients import (
 )
 from app.services.traffic.chart import fetch_traffic_chart
 from app.services.traffic.collector import TrafficCollectorService
+from app.services.traffic.period import TrafficPeriodError, resolve_traffic_period
 from app.services.traffic.ha_aggregate import resolve_traffic_scope
 from app.services.traffic.sessions import fetch_client_sessions
 from app.services.traffic.maintenance import (
@@ -157,10 +158,26 @@ def traffic_active_clients(current_user: User = Depends(get_current_user), db: S
 
 @router.get("/overview", response_model=TrafficOverview)
 def traffic_overview(
+    request: Request,
     live: bool = Query(True, description="Запрашивать live-статус онлайн с узла"),
+    period: str = Query(default="30d", description="Период: 1d, 7d, 30d"),
+    from_date: str | None = Query(default=None, alias="from"),
+    to_date: str | None = Query(default=None, alias="to"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    tz = resolve_chart_timezone(user=current_user, request=request)
+    try:
+        period_window = resolve_traffic_period(
+            period=period,
+            from_s=from_date,
+            to_s=to_date,
+            retention_days=settings.traffic_sample_retention_days,
+            tz_name=tz,
+        )
+    except TrafficPeriodError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     node = get_active_node(db)
     allowed = _scoped_client_names(db, current_user, node.id)
     scope = resolve_traffic_scope(db, node.id)
@@ -179,6 +196,7 @@ def traffic_overview(
         ha_info=scope.ha_info,
         node_names=scope.node_names,
         active_by_node=active_by_node,
+        period_window=period_window,
     )
     if allowed is not None:
         rows = [row for row in rows if row.common_name in allowed]
@@ -208,6 +226,11 @@ def traffic_overview(
         node_id=node.id,
         node_name=node.name,
         ha_context=ha_context,
+        period_mode=period_window.mode,
+        period=period_window.period,
+        from_date=period_window.from_date.isoformat() if period_window.from_date else None,
+        to_date=period_window.to_date.isoformat() if period_window.to_date else None,
+        retention_days=period_window.retention_days,
     )
 
 
@@ -243,16 +266,39 @@ def traffic_chart(
     client: str = Query(...),
     range: str = Query(default="7d", alias="range"),
     protocol: str = Query(default="all"),
+    from_date: str | None = Query(default=None, alias="from"),
+    to_date: str | None = Query(default=None, alias="to"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    tz = resolve_chart_timezone(user=current_user, request=request)
+    period_window = None
+    if (from_date or "").strip() or (to_date or "").strip():
+        try:
+            period_window = resolve_traffic_period(
+                period=None,
+                from_s=from_date,
+                to_s=to_date,
+                retention_days=settings.traffic_sample_retention_days,
+                tz_name=tz,
+            )
+        except TrafficPeriodError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     node = get_active_node(db)
     allowed = _scoped_client_names(db, current_user, node.id)
     if allowed is not None and client not in allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     scope = resolve_traffic_scope(db, node.id)
-    tz = resolve_chart_timezone(user=current_user, request=request)
-    result = fetch_traffic_chart(db, scope.node_ids, client, range, protocol, tz_name=tz)
+    result = fetch_traffic_chart(
+        db,
+        scope.node_ids,
+        client,
+        range,
+        protocol,
+        tz_name=tz,
+        period_window=period_window,
+    )
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
     return result

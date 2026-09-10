@@ -5,12 +5,14 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import UserTrafficSample
 from app.services.chart_timezone import (
     local_bucket_start_as_utc_iso,
     naive_utc_to_local,
     resolve_chart_timezone,
 )
+from app.services.traffic.period import TrafficPeriodWindow, chart_bucket_for_window
 
 
 def fetch_traffic_chart(
@@ -20,6 +22,8 @@ def fetch_traffic_chart(
     range_key: str = "7d",
     protocol_filter: str = "all",
     tz_name: str | None = None,
+    *,
+    period_window: TrafficPeriodWindow | None = None,
 ) -> dict:
     scope_ids = [node_ids] if isinstance(node_ids, int) else list(node_ids)
     client = (client or "").strip()
@@ -39,9 +43,21 @@ def fetch_traffic_chart(
 
     now = datetime.utcnow()
     since_dt = None
+    until_dt = None
     bucket = "day"
+    response_range = range_key
+    retention_days = (
+        period_window.retention_days
+        if period_window is not None
+        else get_settings().traffic_sample_retention_days
+    )
 
-    if range_key == "1h":
+    if period_window is not None and period_window.mode == "custom":
+        since_dt = period_window.since_utc
+        until_dt = period_window.until_utc
+        bucket = chart_bucket_for_window(period_window)
+        response_range = "custom"
+    elif range_key == "1h":
         since_dt = now - timedelta(hours=1)
         bucket = "minute5"
     elif range_key == "1d":
@@ -62,6 +78,8 @@ def fetch_traffic_chart(
     )
     if since_dt is not None:
         query = query.filter(UserTrafficSample.created_at >= since_dt)
+    if until_dt is not None:
+        query = query.filter(UserTrafficSample.created_at < until_dt)
 
     samples = query.order_by(UserTrafficSample.created_at.asc()).all()
     grouped: dict = defaultdict(
@@ -118,7 +136,7 @@ def fetch_traffic_chart(
 
     return {
         "client": client,
-        "range": range_key,
+        "range": response_range,
         "bucket": bucket,
         "protocol_filter": protocol_filter,
         "timezone": tz,
@@ -132,4 +150,5 @@ def fetch_traffic_chart(
         "total_vpn": total_vpn,
         "total_antizapret": total_antizapret,
         "total": total_vpn + total_antizapret,
+        "retention_days": retention_days,
     }
