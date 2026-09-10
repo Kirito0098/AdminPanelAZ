@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { useNotifications } from '@/context/NotificationContext'
+import { formatDate } from '@/lib/datetime'
 import type { UnlockCodeRecord } from '@/types'
 
 const ALL_PROTOCOLS: UnlockCodeProtocol[] = ['openvpn', 'wireguard', 'amneziawg2']
@@ -30,17 +31,6 @@ function toEndOfDayIso(value: string) {
   if (!match) return null
   const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
   return date.toISOString()
-}
-
-function formatDateOnly(value: string | null) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ru-RU', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date)
 }
 
 interface UnlockCodeCreateDialogProps {
@@ -173,7 +163,7 @@ export default function UnlockCodeCreateDialog({
                     {protocolLabel(protocol as UnlockCodeProtocol)}
                   </Badge>
                 ))}
-                <Badge variant="outline">До {formatDateOnly(createdCode.code_expires_at)}</Badge>
+                <Badge variant="outline">До {formatDate(createdCode.code_expires_at)}</Badge>
               </div>
             </div>
           )}

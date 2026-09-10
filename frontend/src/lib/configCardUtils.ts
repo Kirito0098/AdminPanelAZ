@@ -208,7 +208,7 @@ export function buildAccessMeta(
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
   const isBlocked = policy?.is_blocked ?? false
   let tone: 'active' | 'expiring' | 'expired' = 'active'
-  const accessExpiresAt = policy?.access_until ?? policy?.expires_at ?? config.expires_at
+  const accessExpiresAt = policy?.access_until ?? null
   const displayed =
     tab === 'openvpn' ? resolveDisplayedTraffic(policy, openvpnGroup) : resolveDisplayedTraffic(policy, null)
 
@@ -271,14 +271,8 @@ export function buildAccessMeta(
     lines.push({ text: 'Блокировка: нет' })
   }
 
-  const daysLeft = config.vpn_type === 'openvpn' ? certDaysLeft(config) : null
-
   if (blockMode === 'temp' || blockMode === 'permanent' || blockMode === 'expired' || blockMode === 'traffic_limit' || isBlocked) {
     tone = 'expired'
-  } else if (daysLeft != null && daysLeft <= 0) {
-    tone = 'expired'
-  } else if (daysLeft != null && daysLeft <= 30) {
-    tone = 'expiring'
   } else if (policy?.access_days_left != null && policy.access_days_left <= 30) {
     tone = 'expiring'
   } else if (accessExpiresAt) {

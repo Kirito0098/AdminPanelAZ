@@ -69,6 +69,7 @@ import {
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
+import { formatDate, parseTimestamp } from '@/lib/datetime'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
@@ -201,10 +202,10 @@ export default function ClientActionsDialog({
   useEffect(() => {
     if (!open) return
     if (!config) return
-    const value = policy?.access_until ?? policy?.expires_at ?? null
+    const value = policy?.access_until ?? null
     setAccessUntilValue(value ? toDateInputValue(value) : '')
     setUnlockCodeDialogOpen(false)
-  }, [open, config?.id, policy?.access_until, policy?.expires_at])
+  }, [open, config?.id, policy?.access_until])
 
   if (!config) return null
 
@@ -246,8 +247,8 @@ export default function ClientActionsDialog({
   }
 
   const toDateInputValue = (value: string) => {
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) return ''
+    const date = parseTimestamp(value)
+    if (!date) return ''
     const year = date.getFullYear()
     const month = String(date.getMonth() + 1).padStart(2, '0')
     const day = String(date.getDate()).padStart(2, '0')
@@ -843,12 +844,9 @@ export default function ClientActionsDialog({
                     onChange={(e) => setAccessUntilValue(e.target.value)}
                   />
                 </div>
-                {policy?.access_until || policy?.expires_at ? (
+                {policy?.access_until ? (
                   <p className="text-[11px] text-muted-foreground">
-                    Текущее значение:{' '}
-                    <span className="font-mono">
-                      {policy?.access_until ?? policy?.expires_at ?? '—'}
-                    </span>
+                    Текущее значение: <span className="font-mono">{formatDate(policy.access_until)}</span>
                   </p>
                 ) : (
                   <p className="text-[11px] text-muted-foreground">Сейчас ограничение не задано.</p>
