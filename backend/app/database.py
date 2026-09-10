@@ -270,6 +270,11 @@ def _migrate_access_policy_node_scope() -> None:
 def _migrate_awg2_access_policy_table() -> None:
     inspector = inspect(engine)
     if "amneziawg2_access_policies" in inspector.get_table_names():
+        cols = {col["name"] for col in inspector.get_columns("amneziawg2_access_policies")}
+        if "access_until" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE amneziawg2_access_policies ADD COLUMN access_until DATETIME"))
+            logger.info("DB migration: added amneziawg2_access_policies.access_until")
         return
     with engine.begin() as conn:
         conn.execute(
@@ -279,6 +284,7 @@ def _migrate_awg2_access_policy_table() -> None:
                     id INTEGER NOT NULL PRIMARY KEY,
                     node_id INTEGER NOT NULL,
                     client_name VARCHAR(64) NOT NULL,
+                    access_until DATETIME,
                     is_temp_blocked BOOLEAN,
                     is_permanent_blocked BOOLEAN,
                     block_reason VARCHAR(32),
@@ -308,6 +314,76 @@ def _migrate_awg2_access_policy_table() -> None:
             )
         )
     logger.info("DB migration: created amneziawg2_access_policies table")
+
+
+def _migrate_unlock_codes_tables() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    if "unlock_codes" not in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE unlock_codes (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        code VARCHAR(32) NOT NULL,
+                        grant_days INTEGER NOT NULL,
+                        protocols TEXT NOT NULL DEFAULT '[]',
+                        mode VARCHAR(8) NOT NULL,
+                        max_redemptions INTEGER NOT NULL,
+                        code_expires_at DATETIME,
+                        created_by_user_id INTEGER,
+                        created_at DATETIME,
+                        revoked_at DATETIME,
+                        CONSTRAINT uq_unlock_codes_code UNIQUE (code),
+                        CONSTRAINT ck_unlock_codes_code_len CHECK (length(code) BETWEEN 8 AND 32),
+                        CONSTRAINT ck_unlock_codes_mode CHECK (mode IN ('single', 'multi')),
+                        FOREIGN KEY(created_by_user_id) REFERENCES users (id)
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_unlock_codes_code ON unlock_codes (code)"))
+        logger.info("DB migration: created unlock_codes table")
+
+    if "unlock_code_redemptions" not in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE unlock_code_redemptions (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        code_id INTEGER NOT NULL,
+                        client_name VARCHAR(64) NOT NULL,
+                        node_id INTEGER,
+                        redeemed_at DATETIME,
+                        CONSTRAINT uq_unlock_code_redemptions_code_client UNIQUE (code_id, client_name),
+                        FOREIGN KEY(code_id) REFERENCES unlock_codes (id) ON DELETE CASCADE,
+                        FOREIGN KEY(node_id) REFERENCES nodes (id)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_code_id "
+                    "ON unlock_code_redemptions (code_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_client_name "
+                    "ON unlock_code_redemptions (client_name)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_node_id "
+                    "ON unlock_code_redemptions (node_id)"
+                )
+            )
+        logger.info("DB migration: created unlock_code_redemptions table")
 
 
 def _migrate_node_resource_sample_table() -> None:
@@ -854,6 +930,7 @@ def run_db_migrations() -> None:
     _migrate_vpn_configs_node_scope()
     _migrate_access_policy_node_scope()
     _migrate_awg2_access_policy_table()
+    _migrate_unlock_codes_tables()
     _migrate_node_resource_sample_table()
     _migrate_connection_count_samples_table()
     _migrate_connection_count_samples_awg2_column()
@@ -872,10 +949,12 @@ def run_db_migrations() -> None:
             ("traffic_limit_period_days", "INTEGER"),
         ],
         "amneziawg2_access_policies": [
+            ("access_until", "DATETIME"),
             ("traffic_limit_bytes", "BIGINT"),
             ("traffic_limit_period_days", "INTEGER"),
         ],
         "openvpn_access_policy": [
+            ("access_until", "DATETIME"),
             ("traffic_limit_bytes", "BIGINT"),
             ("traffic_limit_period_days", "INTEGER"),
         ],

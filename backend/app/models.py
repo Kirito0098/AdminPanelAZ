@@ -2,7 +2,20 @@ import enum
 import json
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -337,6 +350,7 @@ class AmneziaWg2AccessPolicy(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     client_name: Mapped[str] = mapped_column(String(64), index=True)
+    access_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_temp_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     is_permanent_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     block_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -356,6 +370,7 @@ class OpenVpnAccessPolicy(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     client_name: Mapped[str] = mapped_column(String(64), index=True)
+    access_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_temp_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     is_permanent_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     block_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -366,6 +381,45 @@ class OpenVpnAccessPolicy(Base):
     traffic_limit_period_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class UnlockCode(Base):
+    __tablename__ = "unlock_codes"
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_unlock_codes_code"),
+        CheckConstraint("length(code) BETWEEN 8 AND 32", name="ck_unlock_codes_code_len"),
+        CheckConstraint("mode IN ('single', 'multi')", name="ck_unlock_codes_mode"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), index=True)
+    grant_days: Mapped[int] = mapped_column(Integer)
+    protocols: Mapped[str] = mapped_column(Text, default="[]")
+    mode: Mapped[str] = mapped_column(String(8))
+    max_redemptions: Mapped[int] = mapped_column(Integer)
+    code_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    redemptions: Mapped[list["UnlockCodeRedemption"]] = relationship(
+        back_populates="code",
+        cascade="all, delete-orphan",
+    )
+
+
+class UnlockCodeRedemption(Base):
+    __tablename__ = "unlock_code_redemptions"
+    __table_args__ = (UniqueConstraint("code_id", "client_name", name="uq_unlock_code_redemptions_code_client"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code_id: Mapped[int] = mapped_column(ForeignKey("unlock_codes.id", ondelete="CASCADE"), index=True)
+    client_name: Mapped[str] = mapped_column(String(64), index=True)
+    node_id: Mapped[int | None] = mapped_column(ForeignKey("nodes.id"), nullable=True, index=True)
+    redeemed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    code: Mapped["UnlockCode"] = relationship(back_populates="redemptions")
+    node: Mapped["Node | None"] = relationship()
 
 
 class QrDownloadToken(Base):

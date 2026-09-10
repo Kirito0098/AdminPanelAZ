@@ -385,6 +385,17 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         settings_tabs=("qr_downloads",),
     ),
     FeatureToggleDefinition(
+        key="unlock_codes",
+        env_key="FEATURE_UNLOCK_CODES_ENABLED",
+        label="Unlock-коды доступа",
+        description="Unlock-коды для выдачи доступа с заданным сроком и поддерживаемыми протоколами.",
+        icon="🎟️",
+        disable_hint="Unlock-коды доступа и связанные операции будут недоступны.",
+        resource_impact_level="low",
+        default=True,
+        group="app_module",
+    ),
+    FeatureToggleDefinition(
         key="client_portal",
         env_key="FEATURE_CLIENT_PORTAL_ENABLED",
         label="Клиентский портал",
