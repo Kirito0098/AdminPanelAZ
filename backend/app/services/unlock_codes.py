@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
 import string
@@ -20,12 +21,20 @@ from app.models import (
     UnlockCodeRedemption,
     User,
     VpnConfig,
+    VpnType,
     WgAccessPolicy,
 )
 from app.services.access_until import _policy_service_for_node, _reconcile_access_until, get_access_until, set_access_until
 from app.services.feature_guards import get_feature_service, module_disabled_message
 
+logger = logging.getLogger(__name__)
+
 _ALLOWED_PROTOCOLS = ("openvpn", "wireguard", "amneziawg2")
+_PROTOCOL_VPN_TYPE = {
+    "openvpn": VpnType.openvpn,
+    "wireguard": VpnType.wireguard,
+    "amneziawg2": VpnType.amneziawg2,
+}
 _CODE_CHARS = string.ascii_uppercase + string.digits
 _CUSTOM_CODE_RE = re.compile(r"^[A-Z0-9-]+$")
 _REDEEM_INVALID_MESSAGE = "Неверный unlock-ключ"
@@ -239,6 +248,73 @@ def _client_config_name_and_protocols(db: Session, node_id: int, client_name: st
     return canonical_name, protocols
 
 
+def _vpn_config_client_name_for_protocol(
+    db: Session,
+    *,
+    node_id: int,
+    client_key: str,
+    protocol: str,
+) -> str | None:
+    vpn_type = _PROTOCOL_VPN_TYPE.get(protocol)
+    if vpn_type is None:
+        return None
+    row = (
+        db.query(VpnConfig.client_name)
+        .filter(
+            VpnConfig.node_id == node_id,
+            VpnConfig.vpn_type == vpn_type,
+            VpnConfig.ha_primary_config_id.is_(None),
+            VpnConfig.client_name.ilike(client_key),
+        )
+        .first()
+    )
+    if row is None:
+        return None
+    return str(row[0] or "").strip() or None
+
+
+def _replicate_redeemed_access_until(
+    db: Session,
+    *,
+    node_id: int,
+    client_key: str,
+    granted_until_by_protocol: dict[str, datetime],
+) -> None:
+    """Best-effort HA policy sync after portal redeem (same op as admin PATCH)."""
+    from app.services.node_sync.policy_sync import maybe_replicate_policy_op
+
+    for protocol, access_until in granted_until_by_protocol.items():
+        vpn_type = _PROTOCOL_VPN_TYPE.get(protocol)
+        if vpn_type is None or access_until is None:
+            continue
+        config_client_name = _vpn_config_client_name_for_protocol(
+            db,
+            node_id=node_id,
+            client_key=client_key,
+            protocol=protocol,
+        )
+        if not config_client_name:
+            continue
+        try:
+            maybe_replicate_policy_op(
+                db,
+                node_id=node_id,
+                client_name=config_client_name,
+                vpn_type=vpn_type,
+                op="set_access_until",
+                actor="unlock_codes",
+                access_until=access_until,
+            )
+        except Exception:
+            logger.warning(
+                "HA replicate access_until after unlock redeem failed protocol=%s node_id=%s client=%s",
+                protocol,
+                node_id,
+                config_client_name,
+                exc_info=True,
+            )
+
+
 def _clear_policy_block(row, *, actor: str) -> None:
     row.is_temp_blocked = False
     row.is_permanent_blocked = False
@@ -289,6 +365,7 @@ def redeem_unlock_code(
     access_until_by_protocol: dict[str, str] = {}
     protocols_applied: list[str] = []
     grant_days = 0
+    granted_until_by_protocol: dict[str, datetime] = {}
     try:
         row = db.query(UnlockCode).filter(UnlockCode.code == normalized_code).first()
         if row is None:
@@ -341,6 +418,7 @@ def redeem_unlock_code(
             "amneziawg2": _policy_rows_for_client(db, node_id, canonical_client_name.lower())["amneziawg2"],
         }
         grant_until_base = now
+        granted_until_by_protocol = {}
         for protocol in protocols_applied:
             policy_client_name = canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
             current = get_access_until(db, protocol, node_id, policy_client_name)
@@ -360,6 +438,7 @@ def redeem_unlock_code(
                 actor="unlock_codes",
                 commit=False,
             )
+            granted_until_by_protocol[protocol] = grant_until
             access_until_by_protocol[protocol] = result.get("access_until") or grant_until.isoformat()
 
         redemption = UnlockCodeRedemption(
@@ -381,6 +460,13 @@ def redeem_unlock_code(
     for protocol in protocols_applied:
         policy_client_name = canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
         _reconcile_access_until(policy_service, protocol, policy_client_name)
+
+    _replicate_redeemed_access_until(
+        db,
+        node_id=node_id,
+        client_key=client_key,
+        granted_until_by_protocol=granted_until_by_protocol,
+    )
 
     return {
         "grant_days": grant_days,

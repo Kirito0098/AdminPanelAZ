@@ -56,6 +56,10 @@
 - **Unlock-коды и доступ до даты** — `access_until` стал главным сроком доступа в статусе портала; публичный redeem на `/api/public/portal/{token}/redeem` активирует ключи и возвращает новый срок; генерация unlock-кодов доступна из панели, Telegram и Mini App. Публичный redeem идёт через отдельный public-download rate limit bucket.
 - **Доступ до при создании клиента** — в диалоге «Новый клиент» (панель и Mini App) админ может сразу задать дату отключения; после create вызывается `PATCH …/access-until`.
 
+### 🐛 Fixed
+
+- **Unlock redeem + HA** — после активации unlock-кода на портале `access_until` реплицируется на HA-replica тем же `set_access_until`, что и ручной PATCH в панели (раньше продлевался только primary).
+
 ---
 
 ## [2.24.0] - 2026-09-10

@@ -351,6 +351,59 @@ def test_redeem_unlock_code_applies_protocols_and_extends_from_current(db):
     assert redemption is not None and redemption.code_id == 1
 
 
+def test_redeem_unlock_code_replicates_access_until_to_ha(db):
+    node = _make_node(db)
+    admin = _make_user(db)
+    _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn, VpnType.wireguard])
+    create_unlock_code(
+        db,
+        grant_days=7,
+        protocols=["openvpn", "wireguard"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="HA-REDEEM-01",
+    )
+
+    fixed_now = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
+    replicate_calls: list[dict] = []
+
+    def _fake_replicate(_db, *, node_id, client_name, vpn_type, op, **kwargs):
+        replicate_calls.append(
+            {
+                "node_id": node_id,
+                "client_name": client_name,
+                "vpn_type": vpn_type,
+                "op": op,
+                "access_until": kwargs.get("access_until"),
+                "actor": kwargs.get("actor"),
+            }
+        )
+        return {"applied": [], "errors": [], "skipped": False}
+
+    with (
+        patch("app.services.unlock_codes._now", return_value=fixed_now),
+        patch("app.services.unlock_codes.get_access_until", return_value=None),
+        patch(
+            "app.services.unlock_codes.set_access_until",
+            side_effect=lambda *_a, **_k: {"access_until": (fixed_now + timedelta(days=7)).isoformat()},
+        ),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
+        patch(
+            "app.services.node_sync.policy_sync.maybe_replicate_policy_op",
+            side_effect=_fake_replicate,
+        ),
+    ):
+        redeem_unlock_code(db, code="HA-REDEEM-01", client_name="Alice", node_id=node.id)
+
+    assert len(replicate_calls) == 2
+    assert {call["vpn_type"] for call in replicate_calls} == {VpnType.openvpn, VpnType.wireguard}
+    assert all(call["op"] == "set_access_until" for call in replicate_calls)
+    assert all(call["actor"] == "unlock_codes" for call in replicate_calls)
+    assert all(call["node_id"] == node.id for call in replicate_calls)
+    assert all(call["access_until"] == fixed_now + timedelta(days=7) for call in replicate_calls)
+
 
 def test_redeem_unlock_code_same_client_twice_fails(db):
     node = _make_node(db)
