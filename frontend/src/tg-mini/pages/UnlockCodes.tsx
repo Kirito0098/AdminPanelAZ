@@ -9,6 +9,11 @@ import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
 import { createTgUnlockCode, getTgUnlockCodes, revokeTgUnlockCode, type UnlockCodeProtocol } from '@/tg-mini/api'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import { formatDateTime } from '@/lib/datetime'
+import {
+  isUnlockCodeExhausted,
+  unlockCodeRedeemedCount,
+  unlockCodeStatusLabel,
+} from '@/lib/unlockCodeStatus'
 import { cn } from '@/lib/utils'
 import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
 import type { UnlockCodeRecord } from '@/types'
@@ -392,26 +397,53 @@ export default function UnlockCodes() {
             <div className="space-y-2">
               {codes.map((code) => {
                 const revoked = Boolean(code.revoked_at)
+                const redeemed = unlockCodeRedeemedCount(code)
+                const exhausted = isUnlockCodeExhausted(code)
+                const statusLabel = unlockCodeStatusLabel(code)
+                const redemptions = code.redemptions ?? []
                 return (
                   <div
                     key={code.id}
-                    className="flex flex-col gap-3 rounded-xl border bg-card/60 p-3 sm:flex-row sm:items-start sm:justify-between"
+                    className={cn(
+                      'flex flex-col gap-3 rounded-xl border bg-card/60 p-3 sm:flex-row sm:items-start sm:justify-between',
+                      exhausted && !revoked && 'border-amber-500/30 bg-amber-500/5',
+                      revoked && 'opacity-70',
+                    )}
                   >
                     <div className="min-w-0 space-y-1.5">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="break-all font-mono text-sm font-semibold">{code.code}</p>
                         <Badge variant={code.mode === 'multi' ? 'default' : 'secondary'}>{code.mode}</Badge>
-                        {revoked && <Badge variant="destructive">Отозван</Badge>}
+                        {statusLabel === 'Отозван' && <Badge variant="destructive">Отозван</Badge>}
+                        {statusLabel === 'Активирован' && <Badge variant="success">Активирован</Badge>}
+                        {statusLabel === 'Исчерпан' && <Badge variant="warning">Исчерпан</Badge>}
+                        {statusLabel === 'Частично' && <Badge variant="outline">Частично</Badge>}
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        {code.grant_days} дн. · активаций {code.redemption_count ?? 0} / {code.max_redemptions}
+                        {code.grant_days} дн. · активаций {redeemed} / {code.max_redemptions}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Протоколы: {code.protocols.map((protocol) => protocolLabel(protocol as UnlockCodeProtocol)).join(', ') || '—'}
+                        Протоколы:{' '}
+                        {code.protocols
+                          .map((protocol) => protocolLabel(protocol as UnlockCodeProtocol))
+                          .join(', ') || '—'}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Создан: {formatDateTime(code.created_at)} · Истекает: {formatDateTime(code.code_expires_at)}
+                        Создан: {formatDateTime(code.created_at)} · Истекает:{' '}
+                        {formatDateTime(code.code_expires_at)}
                       </p>
+                      {redemptions.length > 0 && (
+                        <div className="space-y-1 pt-1">
+                          <p className="text-xs font-medium text-foreground">Активации</p>
+                          {redemptions.map((item) => (
+                            <p key={item.id} className="text-xs text-muted-foreground">
+                              {item.client_name}
+                              {item.node_name ? ` · ${item.node_name}` : ''}
+                              {item.redeemed_at ? ` · ${formatDateTime(item.redeemed_at)}` : ''}
+                            </p>
+                          ))}
+                        </div>
+                      )}
                       {code.revoked_at && (
                         <p className="text-xs text-muted-foreground">Отозван: {formatDateTime(code.revoked_at)}</p>
                       )}

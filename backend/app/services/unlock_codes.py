@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
     AmneziaWg2AccessPolicy,
@@ -113,20 +113,41 @@ def _parse_code_protocols(raw: str | None) -> list[str]:
     return _normalize_protocols([str(item) for item in parsed])
 
 
+def _serialize_redemption(row: UnlockCodeRedemption) -> dict:
+    node = getattr(row, "node", None)
+    return {
+        "id": row.id,
+        "client_name": row.client_name,
+        "node_id": row.node_id,
+        "node_name": getattr(node, "name", None),
+        "redeemed_at": _as_utc(row.redeemed_at).isoformat() if row.redeemed_at else None,
+    }
+
+
 def _serialize_code(code: UnlockCode) -> dict:
+    redemptions = sorted(code.redemptions or [], key=lambda item: item.id, reverse=True)
+    redemption_count = int(getattr(code, "redemption_count", None) or len(redemptions))
+    max_redemptions = int(code.max_redemptions)
+    exhausted = redemption_count >= max_redemptions
     return {
         "id": code.id,
         "code": code.code,
         "grant_days": code.grant_days,
         "protocols": _parse_code_protocols(code.protocols),
         "mode": code.mode,
-        "max_redemptions": code.max_redemptions,
-        "redemption_count": int(getattr(code, "redemption_count", None) or len(code.redemptions)),
+        "max_redemptions": max_redemptions,
+        "redemption_count": redemption_count,
+        "exhausted": exhausted,
+        "redemptions": [_serialize_redemption(item) for item in redemptions],
         "code_expires_at": _as_utc(code.code_expires_at).isoformat() if code.code_expires_at else None,
         "created_by_user_id": code.created_by_user_id,
         "created_at": _as_utc(code.created_at).isoformat() if code.created_at else None,
         "revoked_at": _as_utc(code.revoked_at).isoformat() if code.revoked_at else None,
     }
+
+
+def serialize_unlock_code(code: UnlockCode) -> dict:
+    return _serialize_code(code)
 
 
 def generate_code_value() -> str:
@@ -200,7 +221,9 @@ def revoke_unlock_code(db: Session, code_id: int) -> None:
 
 
 def list_unlock_codes(db: Session, *, include_revoked: bool = False) -> list[dict]:
-    query = db.query(UnlockCode)
+    query = db.query(UnlockCode).options(
+        joinedload(UnlockCode.redemptions).joinedload(UnlockCodeRedemption.node)
+    )
     if not include_revoked:
         query = query.filter(UnlockCode.revoked_at.is_(None))
     rows = query.order_by(UnlockCode.created_at.desc(), UnlockCode.id.desc()).all()

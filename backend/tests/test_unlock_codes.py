@@ -681,6 +681,47 @@ def test_redeem_single_code_second_client_hits_atomic_limit(db):
     assert db.query(UnlockCodeRedemption).filter_by(code_id=row.id).count() == 1
 
 
+def test_list_unlock_codes_marks_exhausted_and_includes_redemptions(db):
+    from app.services.unlock_codes import list_unlock_codes
+
+    node = _make_node(db)
+    admin = _make_user(db)
+    _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn])
+    create_unlock_code(
+        db,
+        grant_days=3,
+        protocols=["openvpn"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2040, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="MARKED-001",
+    )
+
+    with (
+        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        patch("app.services.unlock_codes.get_access_until", return_value=None),
+        patch(
+            "app.services.unlock_codes.set_access_until",
+            return_value={"access_until": datetime(2030, 1, 4, tzinfo=timezone.utc).isoformat()},
+        ),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
+        patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
+    ):
+        redeem_unlock_code(db, code="MARKED-001", client_name="Alice", node_id=node.id)
+
+    listed = list_unlock_codes(db)
+    assert len(listed) == 1
+    item = listed[0]
+    assert item["code"] == "MARKED-001"
+    assert item["exhausted"] is True
+    assert item["redemption_count"] == 1
+    assert len(item["redemptions"]) == 1
+    assert item["redemptions"][0]["client_name"] == "alice"
+    assert item["redemptions"][0]["node_id"] == node.id
+    assert item["redemptions"][0]["node_name"] == node.name
+
+
 def test_atomic_redemption_slot_update_rejects_when_full(db):
     admin = _make_user(db)
     row = create_unlock_code(
@@ -766,10 +807,15 @@ def test_unlock_codes_admin_routes():
         body = created.json()
         assert body["code"] == "ADMIN-0001"
         assert body["grant_days"] == 10
+        assert body["exhausted"] is False
+        assert body["redemption_count"] == 0
+        assert body["redemptions"] == []
 
         listed = client.get("/api/unlock-codes")
         assert listed.status_code == 200
         assert len(listed.json()) == 1
+        assert listed.json()[0]["exhausted"] is False
+        assert listed.json()[0]["redemptions"] == []
 
         revoked = client.post(f"/api/unlock-codes/{body['id']}/revoke")
         assert revoked.status_code == 200

@@ -26,7 +26,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   config_delivery: {
     title: 'Выдача VPN-профилей',
     description: 'QR-коды для телефона и готовые файлы для роутеров',
-    hint: 'Клиенты могут скачать профиль по ссылке или QR без входа в панель — если вы это включите.',
+    hint: 'Клиенты могут скачать профиль по ссылке или QR без входа в панель — если вы это включите. Портал и unlock-ключи — в разделе «Подписка».',
   },
   maintenance: {
     title: 'Обслуживание VPN',

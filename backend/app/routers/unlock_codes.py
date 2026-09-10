@@ -16,6 +16,7 @@ from app.services.unlock_codes import (
     create_unlock_code,
     list_unlock_codes,
     revoke_unlock_code,
+    serialize_unlock_code,
 )
 
 router = APIRouter(
@@ -74,18 +75,7 @@ def post_unlock_code(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {
-        "id": row.id,
-        "code": row.code,
-        "grant_days": row.grant_days,
-        "protocols": payload.protocols,
-        "mode": row.mode,
-        "max_redemptions": row.max_redemptions,
-        "code_expires_at": row.code_expires_at.isoformat() if row.code_expires_at else None,
-        "created_by_user_id": row.created_by_user_id,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "revoked_at": None,
-    }
+    return serialize_unlock_code(row)
 
 
 @router.post("/{code_id}/revoke")

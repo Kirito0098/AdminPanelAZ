@@ -1397,6 +1397,14 @@ export interface ClientAccessPolicy {
   traffic_limit_unblock_label?: string | null
 }
 
+export interface UnlockCodeRedemptionRecord {
+  id: number
+  client_name: string
+  node_id: number
+  node_name?: string | null
+  redeemed_at: string | null
+}
+
 export interface UnlockCodeRecord {
   id: number
   code: string
@@ -1405,6 +1413,8 @@ export interface UnlockCodeRecord {
   mode: 'single' | 'multi' | string
   max_redemptions: number
   redemption_count?: number
+  exhausted?: boolean
+  redemptions?: UnlockCodeRedemptionRecord[]
   code_expires_at: string | null
   created_by_user_id: number | null
   created_at: string | null

@@ -20,6 +20,7 @@ import {
   Settings2,
   Shield,
   Sun,
+  Ticket,
   User,
 } from 'lucide-react'
 import NodeSelector from '@/components/NodeSelector'
@@ -56,6 +57,15 @@ const NAV_GROUPS: NavGroupDef[] = [
     label: 'Операции',
     items: [
       { to: '/', label: 'Конфигурации', icon: LayoutDashboard, end: true, adminOnly: false, featureKey: null },
+      {
+        to: '/subscription',
+        label: 'Подписка',
+        icon: Ticket,
+        end: false,
+        adminOnly: true,
+        featureKey: null,
+        featureAnyOf: ['client_portal', 'unlock_codes'] as const,
+      },
       { to: '/monitoring', label: 'NOC Мониторинг', icon: Activity, end: false, adminOnly: true, featureKey: 'logs_dashboard' },
       { to: '/traffic', label: 'Мониторинг трафика', icon: HardDrive, end: false, adminOnly: false, featureKey: 'traffic_sync' },
       { to: '/routing', label: 'Маршрутизация / CIDR', icon: GitBranch, end: false, adminOnly: true, featureKey: 'routing' },
