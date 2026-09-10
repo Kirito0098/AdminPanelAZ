@@ -20,6 +20,8 @@ def _help_text(ctx: BotContext) -> str:
         lines.extend(["", i18n.HELP_SECTION_ADMIN, *i18n.HELP_LINES_ADMIN])
         if get_feature_service().is_enabled("routing"):
             lines.append(i18n.HELP_ADMIN_CIDR)
+        if get_feature_service().is_enabled("unlock_codes"):
+            lines.append(i18n.HELP_ADMIN_UNLOCK)
         if get_feature_service().is_enabled("warper"):
             lines.append(i18n.HELP_ADMIN_WARPER)
         if get_feature_service().is_enabled("awg2"):

@@ -34,6 +34,11 @@ from app.services.telegram_bot_handlers.settings import (
 )
 from app.services.telegram_bot_handlers.start import handle_start
 from app.services.telegram_bot_handlers.menu import handle_menu_callback, handle_menu_text
+from app.services.telegram_bot_handlers.unlock_codes import (
+    handle_unlock_codes_callback,
+    handle_unlock_codes_root,
+    handle_unlock_codes_text,
+)
 from app.services.telegram_bot_handlers.ui import handle_unknown_text, nav_footer_keyboard
 from app.services.telegram_bot_handlers.status import handle_status
 from app.services.telegram_bot_handlers.warper_status import handle_warper_status
@@ -114,6 +119,8 @@ async def _dispatch_command(ctx: BotContext, command: str, args: str) -> None:
         await handle_config(ctx, args)
     elif command == "/settings":
         await handle_settings_root(ctx)
+    elif command == "/unlock":
+        await handle_unlock_codes_root(ctx)
     elif command == "/cidr":
         await handle_cidr_status(ctx)
     elif command == "/nodes":
@@ -173,6 +180,9 @@ async def _dispatch_callback(ctx: BotContext, data: str, *, message_id: int | No
         return
     if data.startswith("st:"):
         await handle_settings_callback(ctx, data, message_id=message_id)
+        return
+    if data.startswith("uc:"):
+        await handle_unlock_codes_callback(ctx, data, message_id=message_id)
         return
     if data.startswith("nodes:"):
         page = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
@@ -238,6 +248,8 @@ class TelegramBotService:
             if text.strip() and await handle_menu_text(ctx, text):
                 return
             if text.strip() and await handle_settings_text(ctx, text):
+                return
+            if text.strip() and await handle_unlock_codes_text(ctx, text):
                 return
             if text.strip():
                 await handle_unknown_text(ctx)
