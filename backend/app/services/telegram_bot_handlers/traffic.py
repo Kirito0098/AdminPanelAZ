@@ -34,7 +34,10 @@ def _aggregate_clients(rows) -> list[dict]:
                 "is_active": False,
             }
             by_key[key] = bucket
-        bucket["traffic_1d"] += int(row.traffic_1d or 0)
+        period_bytes = getattr(row, "traffic_period", None)
+        if period_bytes is None:
+            period_bytes = getattr(row, "traffic_1d", 0)
+        bucket["traffic_1d"] += int(period_bytes or 0)
         bucket["total_bytes"] += int(row.total_received or 0) + int(row.total_sent or 0)
         bucket["is_active"] = bucket["is_active"] or bool(row.is_active)
     return list(by_key.values())

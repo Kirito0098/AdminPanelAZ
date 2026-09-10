@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import time
 from threading import Lock
 
-from sqlalchemy import case, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import Node, TrafficSessionState, UserTrafficSample, UserTrafficStatProtocol
@@ -22,12 +22,14 @@ from app.services.openvpn_group import (
     OPENVPN_PROTOCOL_UDP,
     is_openvpn_protocol_type,
 )
+from app.config import get_settings
+from app.services.traffic.period import TrafficPeriodWindow, resolve_traffic_period
 from app.services.wireguard_status import wireguard_peer_is_online
 
 # Coalesce rapid Traffic overview polls (UI + Telegram) that re-aggregate 30d samples.
 _RECENT_USAGE_TTL_SECONDS = 12.0
 _recent_usage_lock = Lock()
-_recent_usage_cache: dict[tuple[int, ...], tuple[float, dict]] = {}
+_recent_usage_cache: dict[tuple, tuple[float, dict]] = {}
 
 
 def clear_recent_usage_cache() -> None:
@@ -326,6 +328,7 @@ class TrafficCollectorService:
         ha_info: VpnConfigHaInfo | None = None,
         node_names: dict[int, str] | None = None,
         active_by_node: dict[int, set[str]] | None = None,
+        period_window: TrafficPeriodWindow | None = None,
     ) -> tuple[list[TrafficClientRow], TrafficSummary]:
         """Aggregate persisted traffic stats into per-client rows.
 
@@ -337,6 +340,15 @@ class TrafficCollectorService:
         now = datetime.utcnow()
         scope_ids = node_ids or [self.node_id]
         node_names = node_names or {}
+
+        if period_window is None:
+            period_window = resolve_traffic_period(
+                period="30d",
+                from_s=None,
+                to_s=None,
+                retention_days=get_settings().traffic_sample_retention_days,
+                tz_name="UTC",
+            )
 
         def _node_active(node_id: int, name: str) -> bool:
             if active_by_node is not None:
@@ -350,7 +362,11 @@ class TrafficCollectorService:
             .all()
         )
 
-        recent_usage = self._recent_usage(scope_ids)
+        recent_usage = self._recent_usage(
+            scope_ids,
+            since_utc=period_window.since_utc,
+            until_utc=period_window.until_utc,
+        )
 
         aggregates: dict[tuple[str, str], dict] = {}
         order: list[tuple[str, str]] = []
@@ -371,9 +387,7 @@ class TrafficCollectorService:
                     "tx_vpn": 0,
                     "rx_az": 0,
                     "tx_az": 0,
-                    "traffic_1d": 0,
-                    "traffic_7d": 0,
-                    "traffic_30d": 0,
+                    "traffic_period": 0,
                     "total_sessions": 0,
                     "first_seen_at": None,
                     "last_seen_at": None,
@@ -400,12 +414,8 @@ class TrafficCollectorService:
 
             # Samples keep transport-specific protocol_type; look up raw key.
             recent = recent_usage.get((row.node_id, client_lower, row.protocol_type), {})
-            node_1d = int(recent.get("days_1", 0))
-            node_7d = int(recent.get("days_7", 0))
-            node_30d = int(recent.get("days_30", 0))
-            agg["traffic_1d"] += node_1d
-            agg["traffic_7d"] += node_7d
-            agg["traffic_30d"] += node_30d
+            node_period = int(recent.get("period", 0))
+            agg["traffic_period"] += node_period
 
             if row.first_seen_at is not None:
                 if agg["first_seen_at"] is None or row.first_seen_at < agg["first_seen_at"]:
@@ -424,7 +434,7 @@ class TrafficCollectorService:
                         "node_id": row.node_id,
                         "node_name": node_names.get(row.node_id) or f"node-{row.node_id}",
                         "total_bytes": row_total,
-                        "traffic_7d": node_7d,
+                        "traffic_period": node_period,
                         "is_active": node_active,
                     }
                 )
@@ -471,9 +481,7 @@ class TrafficCollectorService:
                     total_received_antizapret=rx_az,
                     total_sent_antizapret=tx_az,
                     total_bytes_antizapret=rx_az + tx_az,
-                    traffic_1d=agg["traffic_1d"],
-                    traffic_7d=agg["traffic_7d"],
-                    traffic_30d=agg["traffic_30d"],
+                    traffic_period=agg["traffic_period"],
                     total_sessions=agg["total_sessions"],
                     first_seen_at=agg["first_seen_at"].isoformat() if agg["first_seen_at"] else None,
                     last_seen_at=agg["last_seen_at"].isoformat() if agg["last_seen_at"] else None,
@@ -512,10 +520,16 @@ class TrafficCollectorService:
         self,
         node_ids: list[int] | None = None,
         *,
+        since_utc: datetime,
+        until_utc: datetime,
         ttl_seconds: float | None = _RECENT_USAGE_TTL_SECONDS,
     ) -> dict:
         scope_ids = node_ids or [self.node_id]
-        cache_key = tuple(sorted(int(n) for n in scope_ids))
+        cache_key = (
+            tuple(sorted(int(n) for n in scope_ids)),
+            since_utc,
+            until_utc,
+        )
         ttl = 0.0 if ttl_seconds is None else max(0.0, float(ttl_seconds))
         now_mono = time.monotonic()
         if ttl > 0:
@@ -523,11 +537,6 @@ class TrafficCollectorService:
                 entry = _recent_usage_cache.get(cache_key)
                 if entry is not None and now_mono < entry[0]:
                     return entry[1]
-
-        now = datetime.utcnow()
-        since_1d = now - timedelta(days=1)
-        since_7d = now - timedelta(days=7)
-        since_30d = now - timedelta(days=30)
 
         delta = func.coalesce(UserTrafficSample.delta_received, 0) + func.coalesce(
             UserTrafficSample.delta_sent, 0
@@ -539,13 +548,12 @@ class TrafficCollectorService:
                 UserTrafficSample.node_id,
                 common_name_lower.label("cn"),
                 UserTrafficSample.protocol_type,
-                func.sum(case((UserTrafficSample.created_at >= since_1d, delta), else_=0)).label("days_1"),
-                func.sum(case((UserTrafficSample.created_at >= since_7d, delta), else_=0)).label("days_7"),
-                func.sum(case((UserTrafficSample.created_at >= since_30d, delta), else_=0)).label("days_30"),
+                func.sum(delta).label("period_bytes"),
             )
             .filter(
                 UserTrafficSample.node_id.in_(scope_ids),
-                UserTrafficSample.created_at >= since_30d,
+                UserTrafficSample.created_at >= since_utc,
+                UserTrafficSample.created_at < until_utc,
             )
             .group_by(
                 UserTrafficSample.node_id,
@@ -559,9 +567,7 @@ class TrafficCollectorService:
         for row in rows:
             key = (row.node_id, row.cn or "", row.protocol_type)
             result[key] = {
-                "days_1": int(row.days_1 or 0),
-                "days_7": int(row.days_7 or 0),
-                "days_30": int(row.days_30 or 0),
+                "period": int(row.period_bytes or 0),
             }
         if ttl > 0:
             with _recent_usage_lock:

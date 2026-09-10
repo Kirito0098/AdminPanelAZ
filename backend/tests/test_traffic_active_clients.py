@@ -154,7 +154,7 @@ def test_telegram_traffic_summary_uses_active_names(monkeypatch):
             captured["stale_seconds"] = stale_seconds
             row = SimpleNamespace(
                 common_name="Claymore_OpenWRT",
-                traffic_1d=15_000_000_000,
+                traffic_period=15_000_000_000,
                 total_received=100,
                 total_sent=200,
                 is_active="Claymore_OpenWRT" in active_names,

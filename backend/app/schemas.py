@@ -1677,7 +1677,7 @@ class TrafficHaNodeBreakdown(BaseModel):
     node_id: int
     node_name: str
     total_bytes: int = 0
-    traffic_7d: int = 0
+    traffic_period: int = 0
     is_active: bool = False
 
 
@@ -1693,9 +1693,7 @@ class TrafficClientRow(BaseModel):
     total_received_antizapret: int = 0
     total_sent_antizapret: int = 0
     total_bytes_antizapret: int = 0
-    traffic_1d: int = 0
-    traffic_7d: int = 0
-    traffic_30d: int = 0
+    traffic_period: int = 0
     total_sessions: int = 0
     first_seen_at: str | None = None
     last_seen_at: str | None = None
@@ -1735,6 +1733,11 @@ class TrafficOverview(BaseModel):
     node_id: int | None = None
     node_name: str | None = None
     ha_context: TrafficHaContext | None = None
+    period_mode: str = "preset"
+    period: str | None = "30d"
+    from_date: str | None = None
+    to_date: str | None = None
+    retention_days: int = 90
 
 
 class TrafficNeverConnectedRow(BaseModel):
