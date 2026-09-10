@@ -234,6 +234,7 @@ def test_unlock_code_models_and_migrations_smoke(monkeypatch):
     assert "access_until" in {col["name"] for col in inspector.get_columns("openvpn_access_policy")}
     assert "access_until" in {col["name"] for col in inspector.get_columns("amneziawg2_access_policies")}
     assert "access_until" not in {col["name"] for col in inspector.get_columns("wg_access_policy")}
+    assert "redemption_count" in {col["name"] for col in inspector.get_columns("unlock_codes")}
 
     engine.dispose()
 
@@ -535,6 +536,83 @@ def test_redeem_unlock_code_rejects_no_protocol_overlap(db):
     with pytest.raises(ValueError, match="Нет пересечения протоколов"):
         redeem_unlock_code(db, code="noproto-01", client_name="Alice", node_id=node.id)
 
+
+def test_redeem_single_code_serializes_concurrent_clients():
+    import threading
+
+    engine, Session = _make_db()
+    setup = Session()
+    node = _make_node(setup)
+    admin = _make_user(setup)
+    _make_configs(setup, node.id, admin.id, "alice", [VpnType.openvpn])
+    _make_configs(setup, node.id, admin.id, "bob", [VpnType.openvpn])
+    create_unlock_code(
+        setup,
+        grant_days=3,
+        protocols=["openvpn"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2040, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="RACE-0001",
+    )
+    node_id = int(node.id)
+    setup.close()
+
+    barrier = threading.Barrier(2)
+    results: list[str] = []
+    lock = threading.Lock()
+
+    def _worker(client_name: str) -> None:
+        session = Session()
+        try:
+            with (
+                patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
+                patch("app.services.unlock_codes.get_access_until", return_value=None),
+                patch(
+                    "app.services.unlock_codes.set_access_until",
+                    return_value={"access_until": datetime(2030, 1, 4, tzinfo=timezone.utc).isoformat()},
+                ),
+                patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
+                patch(
+                    "app.services.unlock_codes._policy_service_for_node",
+                    return_value=SimpleNamespace(
+                        reconcile_openvpn=lambda *_a, **_k: None,
+                        reconcile_wg=lambda *_a, **_k: None,
+                        reconcile_awg2=lambda *_a, **_k: None,
+                    ),
+                ),
+            ):
+                barrier.wait(timeout=5)
+                try:
+                    redeem_unlock_code(session, code="RACE-0001", client_name=client_name, node_id=node_id)
+                    outcome = "ok"
+                except Exception as exc:
+                    outcome = str(exc)
+                with lock:
+                    results.append(outcome)
+        finally:
+            session.close()
+
+    threads = [
+        threading.Thread(target=_worker, args=("Alice",)),
+        threading.Thread(target=_worker, args=("Bob",)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert results.count("ok") == 1
+    assert any("Лимит" in item for item in results)
+    verify = Session()
+    try:
+        row = verify.query(UnlockCode).filter_by(code="RACE-0001").one()
+        assert row.redemption_count == 1
+        assert verify.query(UnlockCodeRedemption).filter_by(code_id=row.id).count() == 1
+    finally:
+        verify.close()
+        engine.dispose()
 
 
 def test_unlock_codes_routes_and_feature_guard(tmp_path):

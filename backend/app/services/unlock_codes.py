@@ -8,6 +8,7 @@ import secrets
 import string
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -111,7 +112,7 @@ def _serialize_code(code: UnlockCode) -> dict:
         "protocols": _parse_code_protocols(code.protocols),
         "mode": code.mode,
         "max_redemptions": code.max_redemptions,
-        "redemption_count": len(code.redemptions),
+        "redemption_count": int(getattr(code, "redemption_count", None) or len(code.redemptions)),
         "code_expires_at": _as_utc(code.code_expires_at).isoformat() if code.code_expires_at else None,
         "created_by_user_id": code.created_by_user_id,
         "created_at": _as_utc(code.created_at).isoformat() if code.created_at else None,
@@ -170,6 +171,7 @@ def create_unlock_code(
         protocols=json.dumps(normalized_protocols, ensure_ascii=False),
         mode=normalized_mode,
         max_redemptions=int(max_redemptions),
+        redemption_count=0,
         code_expires_at=_to_db_datetime(code_expires_at),
         created_by_user_id=creator.id if creator is not None else None,
     )
@@ -277,6 +279,7 @@ def redeem_unlock_code(
     normalized_code = _normalize_code(code)
     client_key = _normalize_client_name(client_name)
     now = _now()
+    now_db = _to_db_datetime(now)
     node = db.get(Node, node_id)
     if node is None:
         raise ValueError("Узел не найден")
@@ -285,20 +288,15 @@ def redeem_unlock_code(
     canonical_client_name = client_key
     access_until_by_protocol: dict[str, str] = {}
     protocols_applied: list[str] = []
+    grant_days = 0
     try:
-        row = db.query(UnlockCode).filter(UnlockCode.code == normalized_code).with_for_update().first()
+        row = db.query(UnlockCode).filter(UnlockCode.code == normalized_code).first()
         if row is None:
             raise ValueError(_REDEEM_INVALID_MESSAGE)
         if row.revoked_at is not None:
             raise ValueError(_REDEEM_REVOKED_MESSAGE)
         if row.code_expires_at is not None and _as_utc(row.code_expires_at) <= now:
             raise ValueError(_REDEEM_EXPIRED_MESSAGE)
-
-        redeemed_count = (
-            db.query(UnlockCodeRedemption).filter(UnlockCodeRedemption.code_id == row.id).count()
-        )
-        if redeemed_count >= int(row.max_redemptions):
-            raise ValueError(_REDEEM_LIMIT_MESSAGE)
 
         if (
             db.query(UnlockCodeRedemption.id)
@@ -314,6 +312,29 @@ def redeem_unlock_code(
         if not protocols_applied:
             raise ValueError(_REDEEM_PROTOCOL_MISMATCH_MESSAGE)
 
+        # Atomic slot reservation — works on SQLite (page write lock) and Postgres.
+        reserved = db.execute(
+            text(
+                """
+                UPDATE unlock_codes
+                SET redemption_count = redemption_count + 1
+                WHERE id = :id
+                  AND revoked_at IS NULL
+                  AND redemption_count < max_redemptions
+                  AND (code_expires_at IS NULL OR code_expires_at > :now)
+                """
+            ),
+            {"id": row.id, "now": now_db},
+        )
+        if reserved.rowcount != 1:
+            db.refresh(row)
+            if row.revoked_at is not None:
+                raise ValueError(_REDEEM_REVOKED_MESSAGE)
+            if row.code_expires_at is not None and _as_utc(row.code_expires_at) <= now:
+                raise ValueError(_REDEEM_EXPIRED_MESSAGE)
+            raise ValueError(_REDEEM_LIMIT_MESSAGE)
+
+        grant_days = int(row.grant_days)
         policy_rows = {
             "openvpn": _policy_rows_for_client(db, node_id, canonical_client_name)["openvpn"],
             "wireguard": _policy_rows_for_client(db, node_id, canonical_client_name.lower())["wireguard"],
@@ -324,7 +345,7 @@ def redeem_unlock_code(
             policy_client_name = canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
             current = get_access_until(db, protocol, node_id, policy_client_name)
             current_utc = _as_utc(current)
-            grant_until = max(grant_until_base, current_utc or grant_until_base) + timedelta(days=row.grant_days)
+            grant_until = max(grant_until_base, current_utc or grant_until_base) + timedelta(days=grant_days)
 
             policy_row = policy_rows[protocol]
             if policy_row is not None:
@@ -362,7 +383,7 @@ def redeem_unlock_code(
         _reconcile_access_until(policy_service, protocol, policy_client_name)
 
     return {
-        "grant_days": row.grant_days,
+        "grant_days": grant_days,
         "protocols_applied": protocols_applied,
         "access_until_by_protocol": access_until_by_protocol,
     }

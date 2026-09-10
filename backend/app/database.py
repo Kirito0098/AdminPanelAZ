@@ -332,6 +332,7 @@ def _migrate_unlock_codes_tables() -> None:
                         protocols TEXT NOT NULL DEFAULT '[]',
                         mode VARCHAR(8) NOT NULL,
                         max_redemptions INTEGER NOT NULL,
+                        redemption_count INTEGER NOT NULL DEFAULT 0,
                         code_expires_at DATETIME,
                         created_by_user_id INTEGER,
                         created_at DATETIME,
@@ -346,6 +347,30 @@ def _migrate_unlock_codes_tables() -> None:
             )
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_unlock_codes_code ON unlock_codes (code)"))
         logger.info("DB migration: created unlock_codes table")
+    else:
+        unlock_cols = {col["name"] for col in inspector.get_columns("unlock_codes")}
+        if "redemption_count" not in unlock_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE unlock_codes "
+                        "ADD COLUMN redemption_count INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+                if "unlock_code_redemptions" in tables:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE unlock_codes
+                            SET redemption_count = (
+                                SELECT COUNT(*)
+                                FROM unlock_code_redemptions
+                                WHERE unlock_code_redemptions.code_id = unlock_codes.id
+                            )
+                            """
+                        )
+                    )
+            logger.info("DB migration: added unlock_codes.redemption_count")
 
     if "unlock_code_redemptions" not in tables:
         with engine.begin() as conn:
