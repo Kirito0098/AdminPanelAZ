@@ -172,6 +172,12 @@ export interface AccessMetaLine {
   text: string
 }
 
+function isAccessExpiredBlock(policy?: ClientAccessPolicy): boolean {
+  const blockMode = (policy?.block_mode || 'none').toLowerCase()
+  const blockReason = (policy?.block_reason || '').toLowerCase()
+  return blockMode === 'access_expired' || blockReason === 'access_expired'
+}
+
 /** Pick consumed traffic for the OpenVPN UDP/TCP group toggle (display only). */
 export function resolveDisplayedTraffic(
   policy: ClientAccessPolicy | undefined,
@@ -206,6 +212,7 @@ export function buildAccessMeta(
 ): { lines: AccessMetaLine[]; tone: 'active' | 'expiring' | 'expired' } {
   const lines: AccessMetaLine[] = []
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
+  const accessExpiredBlocked = isAccessExpiredBlock(policy)
   const isBlocked = policy?.is_blocked ?? false
   let tone: 'active' | 'expiring' | 'expired' = 'active'
   const accessExpiresAt = policy?.access_until ?? null
@@ -265,13 +272,22 @@ export function buildAccessMeta(
     } else {
       lines.push({ text: 'Блокировка: временная' })
     }
+  } else if (accessExpiredBlocked) {
+    lines.push({ text: 'Блокировка: доступ истёк' })
   } else if (blockMode === 'permanent' || blockMode === 'expired') {
     lines.push({ text: 'Блокировка: до ручной разблокировки' })
   } else {
     lines.push({ text: 'Блокировка: нет' })
   }
 
-  if (blockMode === 'temp' || blockMode === 'permanent' || blockMode === 'expired' || blockMode === 'traffic_limit' || isBlocked) {
+  if (
+    blockMode === 'temp' ||
+    blockMode === 'permanent' ||
+    blockMode === 'expired' ||
+    blockMode === 'traffic_limit' ||
+    accessExpiredBlocked ||
+    isBlocked
+  ) {
     tone = 'expired'
   } else if (policy?.access_days_left != null && policy.access_days_left <= 30) {
     tone = 'expiring'
@@ -300,12 +316,13 @@ export function matchesFilter(
 
   const isBlocked = policy?.is_blocked ?? false
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
+  const accessExpiredBlocked = isAccessExpiredBlock(policy)
   const { tone } = buildAccessMeta(config, tab, policy)
 
   if (filter === 'active') return !isBlocked && tone !== 'expired'
   if (filter === 'expiring') return tone === 'expiring'
   if (filter === 'expired') {
-    return tone === 'expired' || blockMode === 'expired' || Boolean(policy?.expired)
+    return tone === 'expired' || blockMode === 'expired' || accessExpiredBlocked || Boolean(policy?.expired)
   }
   return true
 }
@@ -318,6 +335,7 @@ function isConfigBlocked(policy?: ClientAccessPolicy): boolean {
     blockMode === 'temp' ||
     blockMode === 'permanent' ||
     blockMode === 'expired' ||
+    isAccessExpiredBlock(policy) ||
     blockMode === 'traffic_limit' ||
     Boolean(policy.traffic_limit_exceeded)
   )
@@ -512,6 +530,7 @@ export function formatBlockStatus(policy?: ClientAccessPolicy): {
   }
 
   const blockMode = (policy.block_mode || 'none').toLowerCase()
+  const accessExpiredBlocked = isAccessExpiredBlock(policy)
   const isBlocked = policy.is_blocked ?? false
 
   if (blockMode === 'traffic_limit' || policy.traffic_limit_exceeded) {
@@ -529,6 +548,9 @@ export function formatBlockStatus(policy?: ClientAccessPolicy): {
       return { value: `на ${policy.blocked_days_left} дн.`, tone: 'danger' }
     }
     return { value: 'временная', tone: 'danger' }
+  }
+  if (accessExpiredBlocked) {
+    return { value: 'доступ истёк', tone: 'danger' }
   }
   if (blockMode === 'permanent' || blockMode === 'expired') {
     return { value: 'до ручной разблокировки', tone: 'danger' }

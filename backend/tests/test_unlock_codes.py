@@ -6,6 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -286,7 +287,7 @@ def test_redeem_unlock_code_rejects_feature_off(db):
         "app.services.unlock_codes.get_feature_service",
         return_value=SimpleNamespace(is_enabled=lambda key: False),
     ):
-        with pytest.raises(ValueError, match="Unlock"):
+        with pytest.raises(ValueError, match="отключён"):
             redeem_unlock_code(db, code="feature-off-1", client_name="Alice", node_id=node.id)
 
 
@@ -375,7 +376,7 @@ def test_redeem_unlock_code_same_client_twice_fails(db):
         patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
     ):
         redeem_unlock_code(db, code="same-client-01", client_name="Alice", node_id=node.id)
-        with pytest.raises(ValueError, match="already redeemed"):
+        with pytest.raises(ValueError, match="использован вами"):
             redeem_unlock_code(db, code="same-client-01", client_name="alice", node_id=node.id)
 
 
@@ -456,6 +457,44 @@ def test_redeem_unlock_code_second_client_ok(db):
 
 
 
+def test_redeem_unlock_code_converts_duplicate_integrity_error(db):
+    node = _make_node(db)
+    admin = _make_user(db)
+    _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn])
+    create_unlock_code(
+        db,
+        grant_days=3,
+        protocols=["openvpn"],
+        mode="multi",
+        max_redemptions=2,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="DUPERR-0001",
+    )
+
+    integrity_error = IntegrityError(
+        "insert",
+        {},
+        Exception("UNIQUE constraint failed: unlock_code_redemptions.code_id, unlock_code_redemptions.client_name"),
+    )
+
+    with (
+        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        patch("app.services.unlock_codes.get_access_until", return_value=None),
+        patch(
+            "app.services.unlock_codes.set_access_until",
+            return_value={"access_until": datetime(2030, 1, 4, tzinfo=timezone.utc).isoformat()},
+        ),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
+        patch.object(db, "commit", side_effect=integrity_error),
+    ):
+        with pytest.raises(ValueError, match="использован вами"):
+            redeem_unlock_code(db, code="duperr-0001", client_name="Alice", node_id=node.id)
+
+    db.rollback()
+    assert db.query(UnlockCodeRedemption).filter_by(client_name="alice", node_id=node.id).count() == 0
+
+
 def test_redeem_unlock_code_rejects_revoked(db):
     node = _make_node(db)
     admin = _make_user(db)
@@ -473,7 +512,7 @@ def test_redeem_unlock_code_rejects_revoked(db):
     row.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
 
-    with pytest.raises(ValueError, match="revoked"):
+    with pytest.raises(ValueError, match="отозван"):
         redeem_unlock_code(db, code="revoke-0001", client_name="Alice", node_id=node.id)
 
 
@@ -493,7 +532,7 @@ def test_redeem_unlock_code_rejects_no_protocol_overlap(db):
         code="NOPROTO-01",
     )
 
-    with pytest.raises(ValueError, match="No matching client protocols"):
+    with pytest.raises(ValueError, match="Нет пересечения протоколов"):
         redeem_unlock_code(db, code="noproto-01", client_name="Alice", node_id=node.id)
 
 

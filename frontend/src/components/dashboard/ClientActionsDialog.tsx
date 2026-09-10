@@ -235,7 +235,9 @@ export default function ClientActionsDialog({
   const isAwg2 = config.vpn_type === 'amneziawg2'
   const isBlocked = policy?.is_blocked ?? false
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
-  const wgExpired = Boolean(policy?.expired) || blockMode === 'expired'
+  const blockReason = (policy?.block_reason || '').toLowerCase()
+  const wgExpired =
+    Boolean(policy?.expired) || blockMode === 'expired' || blockMode === 'access_expired' || blockReason === 'access_expired'
   const hasTrafficLimit = Boolean(policy?.traffic_limit_human || policy?.traffic_limit_bytes)
   const trafficLimitExceeded = Boolean(policy?.traffic_limit_exceeded) || blockMode === 'traffic_limit'
   const status = getConfigStatus(config, tab, policy)
@@ -601,7 +603,11 @@ export default function ClientActionsDialog({
           key: 'unblock',
           label: 'Снять блокировку',
           icon: <Unlock size={14} />,
-          hidden: !canManage || !['temp', 'permanent', 'expired'].includes(blockMode) || haReplicaReadonly,
+          hidden:
+            !canManage ||
+            (!['temp', 'permanent', 'expired', 'access_expired'].includes(blockMode) &&
+              blockReason !== 'access_expired') ||
+            haReplicaReadonly,
           onClick: handleWgUnblock,
         },
         {

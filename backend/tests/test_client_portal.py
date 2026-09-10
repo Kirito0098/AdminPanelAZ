@@ -291,6 +291,29 @@ def test_public_portal_redeem_returns_access_until(public_client):
     rl.consume.assert_called_once_with("198.51.100.1")
 
 
+def test_public_portal_redeem_returns_bad_request_for_redeem_errors(public_client):
+    token_row = ClientPortalToken(id=1, token="tok", node_id=1, client_name="alice", revoked_at=None)
+    with (
+        patch("app.routers.public_portal.get_feature_service") as feats,
+        patch("app.routers.public_portal.assert_portal_host"),
+        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_portal.public_download_rate_limit_service") as rl,
+        patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
+        patch("app.routers.public_portal.redeem_unlock_code", side_effect=ValueError("Этот unlock-ключ уже использован вами")),
+    ):
+        feats.return_value.is_enabled.side_effect = lambda key: True
+        ip_svc.get_client_ip.return_value = "198.51.100.1"
+        resp = public_client.post(
+            "/api/public/portal/tok/redeem",
+            json={"code": "ABCD-EFGH-IJKL"},
+            headers={"Host": "sub.example.com"},
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Этот unlock-ключ уже использован вами"
+    rl.consume.assert_called_once_with("198.51.100.1")
+
+
 def test_public_portal_redeem_requires_unlock_codes_feature(public_client):
     token_row = ClientPortalToken(id=1, token="tok", node_id=1, client_name="alice", revoked_at=None)
     with (

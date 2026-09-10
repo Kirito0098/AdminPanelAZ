@@ -8,6 +8,7 @@ import secrets
 import string
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -26,6 +27,13 @@ from app.services.feature_guards import get_feature_service, module_disabled_mes
 _ALLOWED_PROTOCOLS = ("openvpn", "wireguard", "amneziawg2")
 _CODE_CHARS = string.ascii_uppercase + string.digits
 _CUSTOM_CODE_RE = re.compile(r"^[A-Z0-9-]+$")
+_REDEEM_INVALID_MESSAGE = "Неверный unlock-ключ"
+_REDEEM_REVOKED_MESSAGE = "Unlock-ключ отозван"
+_REDEEM_EXPIRED_MESSAGE = "Срок действия unlock-ключа истёк"
+_REDEEM_LIMIT_MESSAGE = "Лимит активаций unlock-ключа исчерпан"
+_REDEEM_ALREADY_USED_MESSAGE = "Этот unlock-ключ уже использован вами"
+_REDEEM_PROTOCOL_MISMATCH_MESSAGE = "Нет пересечения протоколов клиента и unlock-ключа"
+_REDEEM_GENERIC_ERROR_MESSAGE = "Не удалось активировать unlock-ключ"
 
 
 def _now() -> datetime:
@@ -244,6 +252,20 @@ def _require_unlock_codes_enabled() -> None:
         raise ValueError(module_disabled_message("unlock_codes"))
 
 
+def _is_duplicate_redemption_error(exc: IntegrityError) -> bool:
+    message = str(getattr(exc, "orig", exc)).lower()
+    return (
+        "uq_unlock_code_redemptions_code_client" in message
+        or "unlock_code_redemptions.code_id, unlock_code_redemptions.client_name" in message
+        or (
+            "unlock_code_redemptions" in message
+            and "code_id" in message
+            and "client_name" in message
+            and "unique" in message
+        )
+    )
+
+
 def redeem_unlock_code(
     db: Session,
     *,
@@ -259,45 +281,52 @@ def redeem_unlock_code(
     if node is None:
         raise ValueError("Узел не найден")
 
-    row = db.query(UnlockCode).filter(UnlockCode.code == normalized_code).first()
-    if row is None:
-        raise ValueError("Unlock code not found")
-    if row.revoked_at is not None:
-        raise ValueError("Unlock code has been revoked")
-    if row.code_expires_at is not None and _as_utc(row.code_expires_at) <= now:
-        raise ValueError("Unlock code has expired")
-
-    redeemed_count = (
-        db.query(UnlockCodeRedemption).filter(UnlockCodeRedemption.code_id == row.id).count()
-    )
-    if redeemed_count >= int(row.max_redemptions):
-        raise ValueError("Unlock code redemption limit reached")
-
-    if (
-        db.query(UnlockCodeRedemption.id)
-        .filter(UnlockCodeRedemption.code_id == row.id, UnlockCodeRedemption.client_name == client_key)
-        .first()
-        is not None
-    ):
-        raise ValueError("This client has already redeemed this unlock code")
-
-    canonical_client_name, client_protocols = _client_config_name_and_protocols(db, node_id, client_key)
-    code_protocols = _parse_code_protocols(row.protocols)
-    protocols_applied = [protocol for protocol in code_protocols if protocol in client_protocols]
-    if not protocols_applied:
-        raise ValueError("No matching client protocols for this unlock code")
-
-    access_until_by_protocol: dict[str, str] = {}
-    grant_until_base = now
     policy_service = _policy_service_for_node(db, node)
+    canonical_client_name = client_key
+    access_until_by_protocol: dict[str, str] = {}
+    protocols_applied: list[str] = []
     try:
+        row = db.query(UnlockCode).filter(UnlockCode.code == normalized_code).with_for_update().first()
+        if row is None:
+            raise ValueError(_REDEEM_INVALID_MESSAGE)
+        if row.revoked_at is not None:
+            raise ValueError(_REDEEM_REVOKED_MESSAGE)
+        if row.code_expires_at is not None and _as_utc(row.code_expires_at) <= now:
+            raise ValueError(_REDEEM_EXPIRED_MESSAGE)
+
+        redeemed_count = (
+            db.query(UnlockCodeRedemption).filter(UnlockCodeRedemption.code_id == row.id).count()
+        )
+        if redeemed_count >= int(row.max_redemptions):
+            raise ValueError(_REDEEM_LIMIT_MESSAGE)
+
+        if (
+            db.query(UnlockCodeRedemption.id)
+            .filter(UnlockCodeRedemption.code_id == row.id, UnlockCodeRedemption.client_name == client_key)
+            .first()
+            is not None
+        ):
+            raise ValueError(_REDEEM_ALREADY_USED_MESSAGE)
+
+        canonical_client_name, client_protocols = _client_config_name_and_protocols(db, node_id, client_key)
+        code_protocols = _parse_code_protocols(row.protocols)
+        protocols_applied = [protocol for protocol in code_protocols if protocol in client_protocols]
+        if not protocols_applied:
+            raise ValueError(_REDEEM_PROTOCOL_MISMATCH_MESSAGE)
+
+        policy_rows = {
+            "openvpn": _policy_rows_for_client(db, node_id, canonical_client_name)["openvpn"],
+            "wireguard": _policy_rows_for_client(db, node_id, canonical_client_name.lower())["wireguard"],
+            "amneziawg2": _policy_rows_for_client(db, node_id, canonical_client_name.lower())["amneziawg2"],
+        }
+        grant_until_base = now
         for protocol in protocols_applied:
             policy_client_name = canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
             current = get_access_until(db, protocol, node_id, policy_client_name)
             current_utc = _as_utc(current)
             grant_until = max(grant_until_base, current_utc or grant_until_base) + timedelta(days=row.grant_days)
 
-            policy_row = _policy_rows_for_client(db, node_id, policy_client_name)[protocol]
+            policy_row = policy_rows[protocol]
             if policy_row is not None:
                 _clear_policy_block(policy_row, actor="unlock_codes")
 
@@ -319,6 +348,11 @@ def redeem_unlock_code(
         )
         db.add(redemption)
         db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if _is_duplicate_redemption_error(exc):
+            raise ValueError(_REDEEM_ALREADY_USED_MESSAGE) from exc
+        raise ValueError(_REDEEM_GENERIC_ERROR_MESSAGE) from exc
     except Exception:
         db.rollback()
         raise

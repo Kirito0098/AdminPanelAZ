@@ -1370,6 +1370,7 @@ export interface TrafficNeverConnectedResponse {
 export interface ClientAccessPolicy {
   is_blocked: boolean
   block_mode: string
+  block_reason?: string | null
   node_id?: number | null
   node_name?: string | null
   access_days_left?: number | null
@@ -1378,6 +1379,7 @@ export interface ClientAccessPolicy {
   access_until?: string | null
   expires_at?: string | null
   expired?: boolean
+  access_expired?: boolean
   traffic_limit_bytes?: number | null
   traffic_limit_period_days?: number | null
   traffic_limit_period_label?: string | null
