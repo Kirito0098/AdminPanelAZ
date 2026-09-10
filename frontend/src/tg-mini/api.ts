@@ -27,6 +27,7 @@ import type {
   VpnType,
   ClientTemplate,
   ClientAccessPolicy,
+  UnlockCodeRecord,
 } from '@/types'
 import { apiBase } from '@/lib/panelBase'
 
@@ -320,4 +321,33 @@ export async function tgWgPermanentBlock(clientName: string) {
 
 export async function tgWgUnblock(clientName: string) {
   return postClientAccess('/client-access/wireguard/unblock', clientName)
+}
+
+export type UnlockCodeProtocol = 'openvpn' | 'wireguard' | 'amneziawg2'
+
+export async function getTgUnlockCodes(includeRevoked = false): Promise<UnlockCodeRecord[]> {
+  const params = new URLSearchParams()
+  if (includeRevoked) params.set('include_revoked', 'true')
+  const query = params.toString()
+  return panelApiFetch<UnlockCodeRecord[]>(`/unlock-codes${query ? `?${query}` : ''}`)
+}
+
+export async function createTgUnlockCode(payload: {
+  grant_days: number
+  protocols: UnlockCodeProtocol[]
+  mode: 'single' | 'multi'
+  max_redemptions?: number
+  code_expires_at?: string | null
+  code?: string | null
+}): Promise<UnlockCodeRecord> {
+  return panelApiFetch<UnlockCodeRecord>('/unlock-codes', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function revokeTgUnlockCode(codeId: number): Promise<{ ok: boolean; id: number }> {
+  return panelApiFetch<{ ok: boolean; id: number }>(`/unlock-codes/${codeId}/revoke`, {
+    method: 'POST',
+  })
 }
