@@ -340,7 +340,7 @@ def _policy_blocked(policy) -> bool:
     until = getattr(policy, "block_until", None)
     if until is None:
         return False
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     try:
         return until > now
     except TypeError:
@@ -381,7 +381,7 @@ def _earliest_datetime(values: list[datetime | None]) -> datetime | None:
 def _format_expires_label(expires_at: datetime | None, *, now: datetime | None = None) -> str:
     if expires_at is None:
         return "Бессрочно"
-    current = now or datetime.utcnow()
+    current = now or datetime.now(timezone.utc).replace(tzinfo=None)
     delta = expires_at - current
     days_left = delta.days if delta.total_seconds() > 0 else 0
     until = expires_at.strftime("%d.%m.%Y")
@@ -395,7 +395,7 @@ def build_portal_status(db: Session, *, node_id: int, client_name: str, configs:
     protocols = {c.vpn_type.value for c in configs}
     policies = _collect_access_policies(db, node_id=node_id, client_name=client_name, protocols=protocols)
     blocked = any(_policy_blocked(p) for p in policies)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     access_until_candidates: list[datetime | None] = []
     for p in policies:
         for attr in ("expires_at", "access_until"):

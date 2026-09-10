@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +13,10 @@ from app.database import get_db
 from app.models import ClientPortalToken, VpnConfig, VpnType
 from app.routers import public_portal as public_portal_router
 from app.services import client_portal as portal
+
+
+def _utc_now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def test_normalize_portal_domain_strips_scheme_and_path():
@@ -62,7 +66,7 @@ def test_get_valid_portal_token_revoked():
         token="abc",
         node_id=1,
         client_name="alice",
-        revoked_at=datetime.utcnow(),
+        revoked_at=_utc_now_naive(),
     )
     db.query.return_value.filter.return_value.first.return_value = row
     with pytest.raises(HTTPException) as ei:
@@ -184,7 +188,7 @@ def test_build_portal_status_uses_cert_expires_at():
         return q
 
     db.query.side_effect = query_side_effect
-    now = datetime.utcnow()
+    now = _utc_now_naive()
     cfg = MagicMock()
     cfg.vpn_type = VpnType.openvpn
     cfg.expires_at = None
@@ -197,7 +201,7 @@ def test_build_portal_status_uses_cert_expires_at():
 
 def test_build_portal_status_prefers_access_until_over_cert():
     db = MagicMock()
-    now = datetime.utcnow()
+    now = _utc_now_naive()
 
     policy = MagicMock()
     policy.is_permanent_blocked = False
@@ -230,7 +234,7 @@ def test_build_portal_status_prefers_access_until_over_cert():
 
 def test_build_portal_status_marks_access_until_expired_even_if_cert_valid():
     db = MagicMock()
-    now = datetime.utcnow()
+    now = _utc_now_naive()
 
     policy = MagicMock()
     policy.is_permanent_blocked = False
