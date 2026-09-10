@@ -537,82 +537,86 @@ def test_redeem_unlock_code_rejects_no_protocol_overlap(db):
         redeem_unlock_code(db, code="noproto-01", client_name="Alice", node_id=node.id)
 
 
-def test_redeem_single_code_serializes_concurrent_clients():
-    import threading
-
-    engine, Session = _make_db()
-    setup = Session()
-    node = _make_node(setup)
-    admin = _make_user(setup)
-    _make_configs(setup, node.id, admin.id, "alice", [VpnType.openvpn])
-    _make_configs(setup, node.id, admin.id, "bob", [VpnType.openvpn])
+def test_redeem_single_code_second_client_hits_atomic_limit(db):
+    node = _make_node(db)
+    admin = _make_user(db)
+    _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn])
+    _make_configs(db, node.id, admin.id, "bob", [VpnType.openvpn])
     create_unlock_code(
-        setup,
+        db,
         grant_days=3,
         protocols=["openvpn"],
         mode="single",
         max_redemptions=1,
         code_expires_at=datetime(2040, 1, 1, tzinfo=timezone.utc),
         creator=admin,
-        code="RACE-0001",
+        code="LIMIT-0001",
     )
-    node_id = int(node.id)
-    setup.close()
 
-    barrier = threading.Barrier(2)
-    results: list[str] = []
-    lock = threading.Lock()
+    with (
+        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        patch("app.services.unlock_codes.get_access_until", return_value=None),
+        patch(
+            "app.services.unlock_codes.set_access_until",
+            return_value={"access_until": datetime(2030, 1, 4, tzinfo=timezone.utc).isoformat()},
+        ),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
+        patch(
+            "app.services.unlock_codes._policy_service_for_node",
+            return_value=SimpleNamespace(
+                reconcile_openvpn=lambda *_a, **_k: None,
+                reconcile_wg=lambda *_a, **_k: None,
+                reconcile_awg2=lambda *_a, **_k: None,
+            ),
+        ),
+    ):
+        redeem_unlock_code(db, code="LIMIT-0001", client_name="Alice", node_id=node.id)
+        with pytest.raises(ValueError, match="Лимит"):
+            redeem_unlock_code(db, code="LIMIT-0001", client_name="Bob", node_id=node.id)
 
-    def _worker(client_name: str) -> None:
-        session = Session()
-        try:
-            with (
-                patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
-                patch("app.services.unlock_codes.get_access_until", return_value=None),
-                patch(
-                    "app.services.unlock_codes.set_access_until",
-                    return_value={"access_until": datetime(2030, 1, 4, tzinfo=timezone.utc).isoformat()},
-                ),
-                patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
-                patch(
-                    "app.services.unlock_codes._policy_service_for_node",
-                    return_value=SimpleNamespace(
-                        reconcile_openvpn=lambda *_a, **_k: None,
-                        reconcile_wg=lambda *_a, **_k: None,
-                        reconcile_awg2=lambda *_a, **_k: None,
-                    ),
-                ),
-            ):
-                barrier.wait(timeout=5)
-                try:
-                    redeem_unlock_code(session, code="RACE-0001", client_name=client_name, node_id=node_id)
-                    outcome = "ok"
-                except Exception as exc:
-                    outcome = str(exc)
-                with lock:
-                    results.append(outcome)
-        finally:
-            session.close()
+    row = db.query(UnlockCode).filter_by(code="LIMIT-0001").one()
+    assert row.redemption_count == 1
+    assert db.query(UnlockCodeRedemption).filter_by(code_id=row.id).count() == 1
 
-    threads = [
-        threading.Thread(target=_worker, args=("Alice",)),
-        threading.Thread(target=_worker, args=("Bob",)),
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=10)
 
-    assert results.count("ok") == 1
-    assert any("Лимит" in item for item in results)
-    verify = Session()
-    try:
-        row = verify.query(UnlockCode).filter_by(code="RACE-0001").one()
-        assert row.redemption_count == 1
-        assert verify.query(UnlockCodeRedemption).filter_by(code_id=row.id).count() == 1
-    finally:
-        verify.close()
-        engine.dispose()
+def test_atomic_redemption_slot_update_rejects_when_full(db):
+    admin = _make_user(db)
+    row = create_unlock_code(
+        db,
+        grant_days=3,
+        protocols=["openvpn"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=None,
+        creator=admin,
+        code="SLOT-0001",
+    )
+    first = db.execute(
+        text(
+            """
+            UPDATE unlock_codes
+            SET redemption_count = redemption_count + 1
+            WHERE id = :id AND redemption_count < max_redemptions
+            """
+        ),
+        {"id": row.id},
+    )
+    db.commit()
+    second = db.execute(
+        text(
+            """
+            UPDATE unlock_codes
+            SET redemption_count = redemption_count + 1
+            WHERE id = :id AND redemption_count < max_redemptions
+            """
+        ),
+        {"id": row.id},
+    )
+    db.rollback()
+    assert first.rowcount == 1
+    assert second.rowcount == 0
+    db.refresh(row)
+    assert row.redemption_count == 1
 
 
 def test_unlock_codes_routes_and_feature_guard(tmp_path):
