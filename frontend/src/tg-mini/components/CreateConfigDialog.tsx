@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { createTgPanelConfig, applyTgClientTemplate, getTgClientTemplates, getTgPanelUsers } from '@/tg-mini/api'
+import { createTgPanelConfig, applyTgClientTemplate, getTgClientTemplates, getTgPanelUsers, setTgClientAccessUntil } from '@/tg-mini/api'
 import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
 import type { ClientTemplate, SelfServiceQuota, User, VpnType } from '@/types'
 
@@ -58,6 +58,7 @@ export default function CreateConfigDialog({
   const [vpnType, setVpnType] = useState<VpnType>(defaultVpnType)
   const [certDays, setCertDays] = useState('3650')
   const [ttl, setTtl] = useState<string>('none')
+  const [accessUntilDate, setAccessUntilDate] = useState('')
   const [ownerId, setOwnerId] = useState<number | null>(currentUserId ?? null)
   const [users, setUsers] = useState<User[]>([])
   const [templates, setTemplates] = useState<ClientTemplate[]>([])
@@ -69,6 +70,7 @@ export default function CreateConfigDialog({
     if (!open) return
     setVpnType(defaultVpnType)
     setTtl('none')
+    setAccessUntilDate('')
     setOwnerId(currentUserId ?? null)
     setError(null)
   }, [open, defaultVpnType, currentUserId])
@@ -93,6 +95,7 @@ export default function CreateConfigDialog({
     setVpnType(defaultVpnType)
     setCertDays('3650')
     setTtl('none')
+    setAccessUntilDate('')
     setOwnerId(currentUserId ?? null)
     setError(null)
   }
@@ -110,6 +113,42 @@ export default function CreateConfigDialog({
     return null
   }
 
+  const dateInputToIso = (value: string) => {
+    if (!value) return null
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+    if (!match) return null
+    const next = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
+    return next.toISOString()
+  }
+
+  const applyAccessUntilAfterCreate = async (
+    name: string,
+    protocol: VpnType,
+    dateValue: string,
+  ): Promise<string | null> => {
+    if (!isAdmin || !dateValue) return null
+    if (protocol !== 'openvpn' && protocol !== 'wireguard' && protocol !== 'amneziawg2') {
+      return 'дата доступа не применена для этого протокола'
+    }
+    const iso = dateInputToIso(dateValue)
+    if (!iso) return 'некорректная дата доступа'
+    try {
+      await setTgClientAccessUntil(protocol, name, iso)
+      return null
+    } catch (err) {
+      return err instanceof ApiError ? err.message : 'срок доступа не сохранён'
+    }
+  }
+
+  const finishCreate = (accessErr: string | null) => {
+    window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
+    onCreated()
+    handleClose()
+    if (accessErr) {
+      window.Telegram?.WebApp.showAlert?.(`Клиент создан, но срок доступа не сохранён: ${accessErr}`)
+    }
+  }
+
   const handleApplyTemplate = async (template: ClientTemplate) => {
     const trimmedName = clientName.trim()
     const nameError = validateClientName(trimmedName)
@@ -119,14 +158,18 @@ export default function CreateConfigDialog({
     }
     setApplyingTemplateId(template.id)
     setError(null)
+    const accessDateSnapshot = accessUntilDate
     try {
-      await applyTgClientTemplate(template.id, {
+      const created = await applyTgClientTemplate(template.id, {
         client_name: trimmedName,
         owner_id: isAdmin && ownerId ? ownerId : undefined,
       })
-      window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
-      onCreated()
-      handleClose()
+      const accessErr = await applyAccessUntilAfterCreate(
+        trimmedName,
+        created.vpn_type,
+        accessDateSnapshot,
+      )
+      finishCreate(accessErr)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка применения шаблона')
     } finally {
@@ -150,6 +193,7 @@ export default function CreateConfigDialog({
 
     setSubmitting(true)
     setError(null)
+    const accessDateSnapshot = accessUntilDate
     try {
       await createTgPanelConfig({
         client_name: trimmedName,
@@ -159,9 +203,8 @@ export default function CreateConfigDialog({
         owner_id: isAdmin && ownerId ? ownerId : undefined,
         ttl: vpnType === 'amneziawg2' && ttl !== 'none' ? ttl : undefined,
       })
-      window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
-      onCreated()
-      handleClose()
+      const accessErr = await applyAccessUntilAfterCreate(trimmedName, vpnType, accessDateSnapshot)
+      finishCreate(accessErr)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка создания')
     } finally {
@@ -253,6 +296,22 @@ export default function CreateConfigDialog({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+
+            {isAdmin && (
+              <div className="space-y-2">
+                <Label htmlFor="tg-mini-access-until">Доступ до</Label>
+                <Input
+                  id="tg-mini-access-until"
+                  type="date"
+                  value={accessUntilDate}
+                  onChange={(e) => setAccessUntilDate(e.target.value)}
+                  disabled={busy || quotaReached}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Необязательно. Дата отключения доступа, не срок сертификата.
+                </p>
               </div>
             )}
 

@@ -325,6 +325,20 @@ export async function tgWgUnblock(clientName: string) {
 
 export type UnlockCodeProtocol = 'openvpn' | 'wireguard' | 'amneziawg2'
 
+export async function setTgClientAccessUntil(
+  protocol: UnlockCodeProtocol,
+  clientName: string,
+  accessUntil: string | null,
+) {
+  return panelApiFetch<{ access_until: string | null }>(
+    `/client-access/${protocol}/${encodeURIComponent(clientName)}/access-until`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ access_until: accessUntil }),
+    },
+  )
+}
+
 export async function getTgUnlockCodes(includeRevoked = false): Promise<UnlockCodeRecord[]> {
   const params = new URLSearchParams()
   if (includeRevoked) params.set('include_revoked', 'true')

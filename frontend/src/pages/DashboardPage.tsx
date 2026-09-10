@@ -28,6 +28,7 @@ import {
   getMonitoring,
   getUsers,
   importConfigsCsv,
+  setClientAccessUntil,
   syncConfigs,
 } from '@/api/client'
 import { buildDashboardSummary } from '@/lib/dashboardSummary'
@@ -119,6 +120,7 @@ export default function DashboardPage() {
   const [vpnType, setVpnType] = useState<VpnType>('openvpn')
   const [certDays, setCertDays] = useState(3650)
   const [awg2Ttl, setAwg2Ttl] = useState('none')
+  const [accessUntilDate, setAccessUntilDate] = useState('')
   const [description, setDescription] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -293,12 +295,21 @@ export default function DashboardPage() {
       .catch(() => setTemplates([]))
   }, [canCreateClient, activeNode?.id])
 
+  const dateInputToIso = (value: string) => {
+    if (!value) return null
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+    if (!match) return null
+    const next = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
+    return next.toISOString()
+  }
+
   const resetForm = () => {
     setClientName('')
     setDescription('')
     setVpnType('openvpn')
     setCertDays(3650)
     setAwg2Ttl('none')
+    setAccessUntilDate('')
     setOwnerId(user?.id ?? null)
   }
 
@@ -326,6 +337,7 @@ export default function DashboardPage() {
 
     setSubmitting(true)
     const name = trimmedName
+    const accessDateSnapshot = accessUntilDate
     try {
       await withInline(async () => {
         const created = await createConfig({
@@ -336,6 +348,22 @@ export default function DashboardPage() {
           description: description || undefined,
           owner_id: isAdmin && ownerId ? ownerId : undefined,
         })
+        if (isAdmin && accessDateSnapshot) {
+          const iso = dateInputToIso(accessDateSnapshot)
+          if (iso && (vpnType === 'openvpn' || vpnType === 'wireguard' || vpnType === 'amneziawg2')) {
+            try {
+              await setClientAccessUntil(vpnType, name, iso)
+            } catch (err) {
+              notifyWarning(
+                err instanceof ApiError
+                  ? `Клиент создан, но срок доступа не сохранён: ${err.message}`
+                  : `Клиент «${name}» создан, но срок доступа не сохранён`,
+              )
+            }
+          } else if (accessDateSnapshot) {
+            notifyWarning(`Клиент «${name}» создан, но дата доступа некорректна — задайте её в карточке`)
+          }
+        }
         closeForm()
         await load({ silent: true })
         if (created.ha_replicate_warning) {
@@ -361,12 +389,32 @@ export default function DashboardPage() {
       return
     }
     setSubmitting(true)
+    const accessDateSnapshot = accessUntilDate
     try {
       await withInline(async () => {
-        await applyClientTemplate(template.id, {
+        const created = await applyClientTemplate(template.id, {
           client_name: trimmedName,
           owner_id: isAdmin && ownerId ? ownerId : undefined,
         })
+        const protocol = created.vpn_type
+        if (isAdmin && accessDateSnapshot) {
+          const iso = dateInputToIso(accessDateSnapshot)
+          if (iso && (protocol === 'openvpn' || protocol === 'wireguard' || protocol === 'amneziawg2')) {
+            try {
+              await setClientAccessUntil(protocol, trimmedName, iso)
+            } catch (err) {
+              notifyWarning(
+                err instanceof ApiError
+                  ? `Клиент создан, но срок доступа не сохранён: ${err.message}`
+                  : `Клиент «${trimmedName}» создан, но срок доступа не сохранён`,
+              )
+            }
+          } else if (accessDateSnapshot) {
+            notifyWarning(
+              `Клиент «${trimmedName}» создан, но дата доступа некорректна — задайте её в карточке`,
+            )
+          }
+        }
         closeForm()
         await load({ silent: true })
       }, `Создание: ${template.name}...`)
@@ -719,6 +767,20 @@ export default function DashboardPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+            {isAdmin && (
+              <div className="space-y-2">
+                <Label htmlFor="accessUntilDate">Доступ до</Label>
+                <Input
+                  id="accessUntilDate"
+                  type="date"
+                  value={accessUntilDate}
+                  onChange={(e) => setAccessUntilDate(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Необязательно. Дата отключения доступа (не срок сертификата). Пусто — без ограничения.
+                </p>
               </div>
             )}
             <div className="space-y-2">

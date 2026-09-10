@@ -15,6 +15,7 @@ interface TelegramWebApp {
   expand: () => void
   close: () => void
   openLink: (url: string) => void
+  showAlert?: (message: string, callback?: () => void) => void
   shareUrl?: (url: string, text?: string) => void
   MainButton?: {
     isVisible?: boolean
