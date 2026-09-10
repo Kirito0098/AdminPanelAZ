@@ -411,16 +411,23 @@ class UnlockCode(Base):
 
 class UnlockCodeRedemption(Base):
     __tablename__ = "unlock_code_redemptions"
-    __table_args__ = (UniqueConstraint("code_id", "client_name", name="uq_unlock_code_redemptions_code_client"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "code_id",
+            "client_name",
+            "node_id",
+            name="uq_unlock_code_redemptions_code_client_node",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code_id: Mapped[int] = mapped_column(ForeignKey("unlock_codes.id", ondelete="CASCADE"), index=True)
     client_name: Mapped[str] = mapped_column(String(64), index=True)
-    node_id: Mapped[int | None] = mapped_column(ForeignKey("nodes.id"), nullable=True, index=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     redeemed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     code: Mapped["UnlockCode"] = relationship(back_populates="redemptions")
-    node: Mapped["Node | None"] = relationship()
+    node: Mapped["Node"] = relationship()
 
 
 class QrDownloadToken(Base):

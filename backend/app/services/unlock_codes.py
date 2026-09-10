@@ -333,8 +333,8 @@ def _require_unlock_codes_enabled() -> None:
 def _is_duplicate_redemption_error(exc: IntegrityError) -> bool:
     message = str(getattr(exc, "orig", exc)).lower()
     return (
-        "uq_unlock_code_redemptions_code_client" in message
-        or "unlock_code_redemptions.code_id, unlock_code_redemptions.client_name" in message
+        "uq_unlock_code_redemptions_code_client_node" in message
+        or "uq_unlock_code_redemptions_code_client" in message
         or (
             "unlock_code_redemptions" in message
             and "code_id" in message
@@ -377,7 +377,11 @@ def redeem_unlock_code(
 
         if (
             db.query(UnlockCodeRedemption.id)
-            .filter(UnlockCodeRedemption.code_id == row.id, UnlockCodeRedemption.client_name == client_key)
+            .filter(
+                UnlockCodeRedemption.code_id == row.id,
+                UnlockCodeRedemption.client_name == client_key,
+                UnlockCodeRedemption.node_id == node_id,
+            )
             .first()
             is not None
         ):

@@ -372,6 +372,9 @@ def _migrate_unlock_codes_tables() -> None:
                     )
             logger.info("DB migration: added unlock_codes.redemption_count")
 
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
     if "unlock_code_redemptions" not in tables:
         with engine.begin() as conn:
             conn.execute(
@@ -381,9 +384,10 @@ def _migrate_unlock_codes_tables() -> None:
                         id INTEGER NOT NULL PRIMARY KEY,
                         code_id INTEGER NOT NULL,
                         client_name VARCHAR(64) NOT NULL,
-                        node_id INTEGER,
+                        node_id INTEGER NOT NULL,
                         redeemed_at DATETIME,
-                        CONSTRAINT uq_unlock_code_redemptions_code_client UNIQUE (code_id, client_name),
+                        CONSTRAINT uq_unlock_code_redemptions_code_client_node
+                            UNIQUE (code_id, client_name, node_id),
                         FOREIGN KEY(code_id) REFERENCES unlock_codes (id) ON DELETE CASCADE,
                         FOREIGN KEY(node_id) REFERENCES nodes (id)
                     )
@@ -409,6 +413,126 @@ def _migrate_unlock_codes_tables() -> None:
                 )
             )
         logger.info("DB migration: created unlock_code_redemptions table")
+    else:
+        _migrate_unlock_redemptions_unique_include_node()
+
+
+def _unlock_redemptions_unique_includes_node(inspector) -> bool:
+    for constraint in inspector.get_unique_constraints("unlock_code_redemptions"):
+        cols = list(constraint.get("column_names") or [])
+        if cols == ["code_id", "client_name", "node_id"] or set(cols) == {
+            "code_id",
+            "client_name",
+            "node_id",
+        }:
+            return True
+        if constraint.get("name") == "uq_unlock_code_redemptions_code_client_node":
+            return True
+    # SQLite may expose the unique as an index instead of a constraint.
+    for index in inspector.get_indexes("unlock_code_redemptions"):
+        if not index.get("unique"):
+            continue
+        cols = list(index.get("column_names") or [])
+        if set(cols) == {"code_id", "client_name", "node_id"}:
+            return True
+    return False
+
+
+def _migrate_unlock_redemptions_unique_include_node() -> None:
+    """Scope unlock redemption uniqueness by node (code_id, client_name, node_id)."""
+    inspector = inspect(engine)
+    if "unlock_code_redemptions" not in inspector.get_table_names():
+        return
+    if _unlock_redemptions_unique_includes_node(inspector):
+        return
+
+    from app.models import Node
+
+    db = SessionLocal()
+    try:
+        fallback_node = db.query(Node).filter(Node.is_local.is_(True)).first()
+        if fallback_node is None:
+            fallback_node = db.query(Node).order_by(Node.id).first()
+        fallback_node_id = fallback_node.id if fallback_node is not None else None
+    finally:
+        db.close()
+
+    with engine.begin() as conn:
+        if fallback_node_id is not None:
+            conn.execute(
+                text(
+                    """
+                    UPDATE unlock_code_redemptions
+                    SET node_id = :node_id
+                    WHERE node_id IS NULL
+                    """
+                ),
+                {"node_id": fallback_node_id},
+            )
+        # Drop rows that still cannot satisfy NOT NULL node_id.
+        conn.execute(text("DELETE FROM unlock_code_redemptions WHERE node_id IS NULL"))
+        # Keep one row per (code_id, client_name, node_id) if duplicates somehow exist.
+        conn.execute(
+            text(
+                """
+                DELETE FROM unlock_code_redemptions
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM unlock_code_redemptions
+                    GROUP BY code_id, client_name, node_id
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE unlock_code_redemptions_new (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    code_id INTEGER NOT NULL,
+                    client_name VARCHAR(64) NOT NULL,
+                    node_id INTEGER NOT NULL,
+                    redeemed_at DATETIME,
+                    CONSTRAINT uq_unlock_code_redemptions_code_client_node
+                        UNIQUE (code_id, client_name, node_id),
+                    FOREIGN KEY(code_id) REFERENCES unlock_codes (id) ON DELETE CASCADE,
+                    FOREIGN KEY(node_id) REFERENCES nodes (id)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO unlock_code_redemptions_new (
+                    id, code_id, client_name, node_id, redeemed_at
+                )
+                SELECT id, code_id, client_name, node_id, redeemed_at
+                FROM unlock_code_redemptions
+                """
+            )
+        )
+        conn.execute(text("DROP TABLE unlock_code_redemptions"))
+        conn.execute(text("ALTER TABLE unlock_code_redemptions_new RENAME TO unlock_code_redemptions"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_code_id "
+                "ON unlock_code_redemptions (code_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_client_name "
+                "ON unlock_code_redemptions (client_name)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_node_id "
+                "ON unlock_code_redemptions (node_id)"
+            )
+        )
+    logger.info("DB migration: unlock_code_redemptions unique scoped by node_id")
 
 
 def _migrate_node_resource_sample_table() -> None:

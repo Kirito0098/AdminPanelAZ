@@ -133,7 +133,7 @@ def _make_db():
 
 
 
-def _make_node(db, *, name: str = "node-1") -> Node:
+def _make_node(db, *, name: str = "node-1", is_local: bool = True) -> Node:
     node = Node(
         name=name,
         host="127.0.0.1",
@@ -141,7 +141,7 @@ def _make_node(db, *, name: str = "node-1") -> Node:
         api_key_hash="",
         api_key_encrypted="",
         status=NodeStatus.online,
-        is_local=True,
+        is_local=is_local,
         node_metadata="{}",
     )
     db.add(node)
@@ -235,6 +235,15 @@ def test_unlock_code_models_and_migrations_smoke(monkeypatch):
     assert "access_until" in {col["name"] for col in inspector.get_columns("amneziawg2_access_policies")}
     assert "access_until" not in {col["name"] for col in inspector.get_columns("wg_access_policy")}
     assert "redemption_count" in {col["name"] for col in inspector.get_columns("unlock_codes")}
+    redemptions_uniques = inspector.get_unique_constraints("unlock_code_redemptions")
+    assert any(
+        set(constraint.get("column_names") or []) == {"code_id", "client_name", "node_id"}
+        or constraint.get("name") == "uq_unlock_code_redemptions_code_client_node"
+        for constraint in redemptions_uniques
+    ) or any(
+        index.get("unique") and set(index.get("column_names") or []) == {"code_id", "client_name", "node_id"}
+        for index in inspector.get_indexes("unlock_code_redemptions")
+    )
 
     engine.dispose()
 
@@ -433,6 +442,46 @@ def test_redeem_unlock_code_same_client_twice_fails(db):
         with pytest.raises(ValueError, match="использован вами"):
             redeem_unlock_code(db, code="same-client-01", client_name="alice", node_id=node.id)
 
+
+def test_redeem_unlock_code_same_client_name_on_different_nodes_ok(db):
+    node_a = _make_node(db, name="node-a")
+    node_b = _make_node(db, name="node-b")
+    admin = _make_user(db)
+    _make_configs(db, node_a.id, admin.id, "alice", [VpnType.openvpn])
+    _make_configs(db, node_b.id, admin.id, "alice", [VpnType.openvpn])
+    create_unlock_code(
+        db,
+        grant_days=5,
+        protocols=["openvpn"],
+        mode="multi",
+        max_redemptions=5,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="CROSS-NODE-01",
+    )
+
+    with (
+        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        patch("app.services.unlock_codes.get_access_until", return_value=None),
+        patch(
+            "app.services.unlock_codes.set_access_until",
+            return_value={"access_until": datetime(2030, 1, 6, tzinfo=timezone.utc).isoformat()},
+        ),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
+        patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
+    ):
+        first = redeem_unlock_code(db, code="CROSS-NODE-01", client_name="Alice", node_id=node_a.id)
+        second = redeem_unlock_code(db, code="CROSS-NODE-01", client_name="Alice", node_id=node_b.id)
+
+    assert first["grant_days"] == 5
+    assert second["grant_days"] == 5
+    assert db.query(UnlockCodeRedemption).filter_by(client_name="alice").count() == 2
+    assert (
+        db.query(UnlockCodeRedemption).filter_by(client_name="alice", node_id=node_a.id).count() == 1
+    )
+    assert (
+        db.query(UnlockCodeRedemption).filter_by(client_name="alice", node_id=node_b.id).count() == 1
+    )
 
 
 def test_redeem_unlock_code_rolls_back_on_protocol_failure(db):
