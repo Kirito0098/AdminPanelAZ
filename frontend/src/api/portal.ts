@@ -31,6 +31,7 @@ export interface PortalMetaResponse {
   brand_title: string
   protocols: string[]
   files: PortalFileMeta[]
+  unlock_codes_enabled: boolean
   status?: PortalStatusMeta
 }
 

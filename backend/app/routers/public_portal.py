@@ -61,12 +61,12 @@ def portal_redeem(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    _require_portal_enabled()
-    if not get_feature_service().is_enabled("unlock_codes"):
-        raise HTTPException(status_code=403, detail=module_disabled_message("unlock_codes"))
     assert_portal_host(db, request.headers.get("host"))
     client_ip = ip_restriction_service.get_client_ip(request)
     public_download_rate_limit_service.consume(client_ip)
+    _require_portal_enabled()
+    if not get_feature_service().is_enabled("unlock_codes"):
+        raise HTTPException(status_code=403, detail=module_disabled_message("unlock_codes"))
     row = get_valid_portal_token(db, token)
     try:
         result = redeem_unlock_code(db, code=payload.code, client_name=row.client_name, node_id=row.node_id)

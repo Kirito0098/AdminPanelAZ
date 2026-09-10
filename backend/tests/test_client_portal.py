@@ -292,8 +292,16 @@ def test_public_portal_redeem_returns_access_until(public_client):
 
 
 def test_public_portal_redeem_requires_unlock_codes_feature(public_client):
-    with patch("app.routers.public_portal.get_feature_service") as feats:
+    token_row = ClientPortalToken(id=1, token="tok", node_id=1, client_name="alice", revoked_at=None)
+    with (
+        patch("app.routers.public_portal.get_feature_service") as feats,
+        patch("app.routers.public_portal.assert_portal_host"),
+        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_portal.public_download_rate_limit_service"),
+        patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
+    ):
         feats.return_value.is_enabled.side_effect = lambda key: key == "client_portal"
+        ip_svc.get_client_ip.return_value = "198.51.100.1"
         resp = public_client.post(
             "/api/public/portal/tok/redeem",
             json={"code": "ABCD-EFGH-IJKL"},
@@ -302,6 +310,25 @@ def test_public_portal_redeem_requires_unlock_codes_feature(public_client):
 
     assert resp.status_code == 403
     assert "unlock" in resp.json()["detail"].lower()
+
+
+def test_public_portal_redeem_rejects_wrong_host_before_features(public_client):
+    with (
+        patch("app.routers.public_portal.get_feature_service") as feats,
+        patch("app.routers.public_portal.assert_portal_host", side_effect=HTTPException(status_code=404, detail="Not found")),
+        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_portal.public_download_rate_limit_service") as rl,
+    ):
+        resp = public_client.post(
+            "/api/public/portal/tok/redeem",
+            json={"code": "ABCD-EFGH-IJKL"},
+            headers={"Host": "wrong.example.com"},
+        )
+
+    assert resp.status_code == 404
+    feats.assert_not_called()
+    ip_svc.get_client_ip.assert_not_called()
+    rl.consume.assert_not_called()
 
 
 def test_portal_protocol_prefers_file_protocol_over_db_vpn_type():

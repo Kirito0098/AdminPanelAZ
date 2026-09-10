@@ -488,11 +488,14 @@ def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
         files.append(entry)
     # Protocols shown on the page = enabled profile protocols actually present.
     protocols = sorted({f["vpn_type"] for f in files})
+    from app.services.feature_guards import get_feature_service
+
     return {
         "client_name": token_row.client_name,
         "brand_title": brand,
         "protocols": protocols,
         "files": files,
+        "unlock_codes_enabled": get_feature_service().is_enabled("unlock_codes"),
         "status": build_portal_status(
             db,
             node_id=token_row.node_id,

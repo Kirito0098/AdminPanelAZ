@@ -568,29 +568,31 @@ export default function PortalPage() {
           />
         </section>
 
-        <section className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
-          <div>
-            <h2 className="text-base font-semibold">Активировать ключ</h2>
-            <p className="text-xs text-slate-400">Введите unlock-код, чтобы продлить доступ к порталу и подключению.</p>
-          </div>
-          <form className="flex flex-col gap-3 sm:flex-row" onSubmit={handleRedeem}>
-            <Input
-              value={redeemCode}
-              onChange={(event) => {
-                setRedeemCode(event.target.value)
-                if (redeemError) setRedeemError(null)
-              }}
-              placeholder="Введите код"
-              autoComplete="off"
-              spellCheck={false}
-              className="border-white/10 bg-black/20 text-slate-100 placeholder:text-slate-500"
-            />
-            <Button type="submit" disabled={redeeming || redeemCode.trim().length === 0} className="shrink-0">
-              {redeeming ? 'Проверка…' : 'Активировать ключ'}
-            </Button>
-          </form>
-          {redeemError && <p className="text-sm text-amber-300">{redeemError}</p>}
-        </section>
+        {data.unlock_codes_enabled && (
+          <section className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
+            <div>
+              <h2 className="text-base font-semibold">Активировать ключ</h2>
+              <p className="text-xs text-slate-400">Введите unlock-код, чтобы продлить доступ к порталу и подключению.</p>
+            </div>
+            <form className="flex flex-col gap-3 sm:flex-row" onSubmit={handleRedeem}>
+              <Input
+                value={redeemCode}
+                onChange={(event) => {
+                  setRedeemCode(event.target.value)
+                  if (redeemError) setRedeemError(null)
+                }}
+                placeholder="Введите код"
+                autoComplete="off"
+                spellCheck={false}
+                className="border-white/10 bg-black/20 text-slate-100 placeholder:text-slate-500"
+              />
+              <Button type="submit" disabled={redeeming || redeemCode.trim().length === 0} className="shrink-0">
+                {redeeming ? 'Проверка…' : 'Активировать ключ'}
+              </Button>
+            </form>
+            {redeemError && <p className="text-sm text-amber-300">{redeemError}</p>}
+          </section>
+        )}
 
         <section className="space-y-4 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
