@@ -10,6 +10,7 @@ from app.services.telegram_bot_handlers.base import BotContext, is_admin, unlink
 from app.services.telegram_bot_handlers.ui import nav_footer_keyboard, send_or_edit
 from app.services.traffic.active_clients import live_active_names_for_node
 from app.services.traffic.collector import TrafficCollectorService
+from app.services.traffic.period import resolve_traffic_period
 from app.services.traffic_limit import human_bytes
 from app.services import telegram_bot_i18n as i18n
 
@@ -34,10 +35,7 @@ def _aggregate_clients(rows) -> list[dict]:
                 "is_active": False,
             }
             by_key[key] = bucket
-        period_bytes = getattr(row, "traffic_period", None)
-        if period_bytes is None:
-            period_bytes = getattr(row, "traffic_1d", 0)
-        bucket["traffic_1d"] += int(period_bytes or 0)
+        bucket["traffic_1d"] += int(row.traffic_period or 0)
         bucket["total_bytes"] += int(row.total_received or 0) + int(row.total_sent or 0)
         bucket["is_active"] = bucket["is_active"] or bool(row.is_active)
     return list(by_key.values())
@@ -76,7 +74,16 @@ async def handle_traffic(ctx: BotContext, *, page: int = 0, message_id: int | No
     node = get_active_node(ctx.db)
     collector = TrafficCollectorService(ctx.db, node.id)
     active_names = live_active_names_for_node(ctx.db, node)
-    rows, _summary = collector.get_summary(active_names, settings.traffic_db_stale_seconds)
+    window = resolve_traffic_period(
+        period="1d",
+        from_s=None,
+        to_s=None,
+        retention_days=settings.traffic_sample_retention_days,
+        tz_name="UTC",
+    )
+    rows, _summary = collector.get_summary(
+        active_names, settings.traffic_db_stale_seconds, period_window=window
+    )
 
     if is_admin(ctx.user):
         clients = _aggregate_clients(rows)
