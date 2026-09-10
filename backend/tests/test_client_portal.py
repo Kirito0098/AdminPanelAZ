@@ -225,7 +225,7 @@ def test_build_portal_status_prefers_access_until_over_cert():
     status = portal.build_portal_status(db, node_id=1, client_name="test1", configs=[cfg])
     assert status["status"] == "active"
     assert status["expires_label"].startswith("40 дн. (до ")
-    assert status["expires_at"] is not None
+    assert status["expires_at"] == (policy.access_until.isoformat() + "Z")
 
 
 def test_build_portal_status_marks_access_until_expired_even_if_cert_valid():
@@ -258,7 +258,7 @@ def test_build_portal_status_marks_access_until_expired_even_if_cert_valid():
     status = portal.build_portal_status(db, node_id=1, client_name="test1", configs=[cfg])
     assert status["status"] == "expired"
     assert status["expires_label"].startswith("истёк ")
-    assert status["expires_at"] is not None
+    assert status["expires_at"] == (policy.access_until.isoformat() + "Z")
 
 
 def test_public_portal_redeem_returns_access_until(public_client):
