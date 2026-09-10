@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
@@ -19,10 +20,12 @@ from app.models import (
     VpnConfig,
     WgAccessPolicy,
 )
-from app.services.access_until import get_access_until, set_access_until
+from app.services.access_until import _policy_service_for_node, _reconcile_access_until, get_access_until, set_access_until
+from app.services.feature_guards import get_feature_service, module_disabled_message
 
 _ALLOWED_PROTOCOLS = ("openvpn", "wireguard", "amneziawg2")
 _CODE_CHARS = string.ascii_uppercase + string.digits
+_CUSTOM_CODE_RE = re.compile(r"^[A-Z0-9-]+$")
 
 
 def _now() -> datetime:
@@ -68,6 +71,17 @@ def _normalize_protocols(protocols: list[str]) -> list[str]:
         normalized.append(protocol)
     if not normalized:
         raise ValueError("Specify at least one supported protocol")
+    return normalized
+
+
+def _validate_custom_code(code: str) -> str:
+    normalized = _normalize_code(code)
+    if not normalized:
+        raise ValueError("Code cannot be empty")
+    if not 8 <= len(normalized) <= 32:
+        raise ValueError("Code must be between 8 and 32 characters")
+    if not _CUSTOM_CODE_RE.fullmatch(normalized):
+        raise ValueError("Code may contain only A-Z, 0-9, and hyphen")
     return normalized
 
 
@@ -130,7 +144,7 @@ def create_unlock_code(
         raise ValueError("max_redemptions must be at least 1")
 
     normalized_protocols = _normalize_protocols(protocols)
-    code_value = _normalize_code(code) if code is not None else ""
+    code_value = _validate_custom_code(code) if code is not None and _normalize_code(code) else ""
     if not code_value:
         for _ in range(32):
             candidate = generate_code_value()
@@ -225,6 +239,11 @@ def _clear_policy_block(row, *, actor: str) -> None:
     row.updated_by = actor
 
 
+def _require_unlock_codes_enabled() -> None:
+    if not get_feature_service().is_enabled("unlock_codes"):
+        raise ValueError(module_disabled_message("unlock_codes"))
+
+
 def redeem_unlock_code(
     db: Session,
     *,
@@ -232,9 +251,13 @@ def redeem_unlock_code(
     client_name: str,
     node_id: int,
 ) -> dict:
+    _require_unlock_codes_enabled()
     normalized_code = _normalize_code(code)
     client_key = _normalize_client_name(client_name)
     now = _now()
+    node = db.get(Node, node_id)
+    if node is None:
+        raise ValueError("Узел не найден")
 
     row = db.query(UnlockCode).filter(UnlockCode.code == normalized_code).first()
     if row is None:
@@ -266,34 +289,43 @@ def redeem_unlock_code(
 
     access_until_by_protocol: dict[str, str] = {}
     grant_until_base = now
+    policy_service = _policy_service_for_node(db, node)
+    try:
+        for protocol in protocols_applied:
+            policy_client_name = canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
+            current = get_access_until(db, protocol, node_id, policy_client_name)
+            current_utc = _as_utc(current)
+            grant_until = max(grant_until_base, current_utc or grant_until_base) + timedelta(days=row.grant_days)
+
+            policy_row = _policy_rows_for_client(db, node_id, policy_client_name)[protocol]
+            if policy_row is not None:
+                _clear_policy_block(policy_row, actor="unlock_codes")
+
+            result = set_access_until(
+                db,
+                protocol,
+                node_id,
+                policy_client_name,
+                grant_until,
+                actor="unlock_codes",
+                commit=False,
+            )
+            access_until_by_protocol[protocol] = result.get("access_until") or grant_until.isoformat()
+
+        redemption = UnlockCodeRedemption(
+            code_id=row.id,
+            client_name=client_key,
+            node_id=node_id,
+        )
+        db.add(redemption)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
     for protocol in protocols_applied:
         policy_client_name = canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
-        current = get_access_until(db, protocol, node_id, policy_client_name)
-        current_utc = _as_utc(current)
-        grant_until = max(grant_until_base, current_utc or grant_until_base) + timedelta(days=row.grant_days)
-
-        policy_row = _policy_rows_for_client(db, node_id, policy_client_name)[protocol]
-        if policy_row is not None:
-            _clear_policy_block(policy_row, actor="unlock_codes")
-            db.commit()
-
-        result = set_access_until(
-            db,
-            protocol,
-            node_id,
-            policy_client_name,
-            grant_until,
-            actor="unlock_codes",
-        )
-        access_until_by_protocol[protocol] = result.get("access_until") or grant_until.isoformat()
-
-    redemption = UnlockCodeRedemption(
-        code_id=row.id,
-        client_name=client_key,
-        node_id=node_id,
-    )
-    db.add(redemption)
-    db.commit()
+        _reconcile_access_until(policy_service, protocol, policy_client_name)
 
     return {
         "grant_days": row.grant_days,

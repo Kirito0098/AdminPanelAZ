@@ -133,6 +133,7 @@ def set_access_until(
     access_until: datetime | None,
     *,
     actor: str,
+    commit: bool = True,
 ) -> dict:
     normalized = _normalized_client_name(protocol, client_name)
     node = db.get(Node, node_id)
@@ -148,10 +149,14 @@ def set_access_until(
 
     _set_row_access_until(protocol, row, access_until)
     row.updated_by = actor
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
     service = _policy_service_for_node(db, node)
-    _reconcile_access_until(service, protocol, normalized)
+    if commit:
+        _reconcile_access_until(service, protocol, normalized)
     return _policy_state(service, protocol, normalized)
 
 

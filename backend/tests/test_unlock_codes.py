@@ -26,7 +26,7 @@ from app.models import (
     WgAccessPolicy,
 )
 from app.routers import unlock_codes as unlock_codes_router
-from app.services.feature_guards import check_path_access
+from app.services.feature_guards import check_path_access, module_disabled_message
 from app.services.feature_toggles import FeatureToggleService
 from app.services.unlock_codes import create_unlock_code, generate_code_value, redeem_unlock_code
 
@@ -252,6 +252,44 @@ def test_generate_code_value_is_url_safe():
     assert all(part.isalnum() and part.upper() == part for part in code.split("-"))
 
 
+def test_create_unlock_code_rejects_short_custom_code(db):
+    admin = _make_user(db)
+    with pytest.raises(ValueError, match="between 8 and 32"):
+        create_unlock_code(
+            db,
+            grant_days=7,
+            protocols=["openvpn"],
+            mode="single",
+            max_redemptions=1,
+            code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+            creator=admin,
+            code="SHORT7",
+        )
+
+
+def test_redeem_unlock_code_rejects_feature_off(db):
+    node = _make_node(db)
+    admin = _make_user(db)
+    _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn])
+    create_unlock_code(
+        db,
+        grant_days=3,
+        protocols=["openvpn"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="FEATURE-OFF-1",
+    )
+
+    with patch(
+        "app.services.unlock_codes.get_feature_service",
+        return_value=SimpleNamespace(is_enabled=lambda key: False),
+    ):
+        with pytest.raises(ValueError, match="Unlock"):
+            redeem_unlock_code(db, code="feature-off-1", client_name="Alice", node_id=node.id)
+
+
 
 def test_redeem_unlock_code_applies_protocols_and_extends_from_current(db):
     node = _make_node(db)
@@ -279,7 +317,7 @@ def test_redeem_unlock_code_applies_protocols_and_extends_from_current(db):
     def _fake_get_access_until(_db, protocol, _node_id, _client_name):
         return current_values[protocol]
 
-    def _fake_set_access_until(_db, protocol, node_id, client_name, access_until, *, actor):
+    def _fake_set_access_until(_db, protocol, node_id, client_name, access_until, *, actor, commit):
         calls.append((protocol, node_id, client_name, access_until))
         current_values[protocol] = access_until
         return {"access_until": access_until.isoformat()}
@@ -288,6 +326,8 @@ def test_redeem_unlock_code_applies_protocols_and_extends_from_current(db):
         patch("app.services.unlock_codes._now", return_value=fixed_now),
         patch("app.services.unlock_codes.get_access_until", side_effect=_fake_get_access_until),
         patch("app.services.unlock_codes.set_access_until", side_effect=_fake_set_access_until),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
+        patch.object(db, "commit", wraps=db.commit) as commit_spy,
     ):
         result = redeem_unlock_code(db, code="abcd-efgh-ijkl", client_name="Alice", node_id=node.id)
 
@@ -299,6 +339,7 @@ def test_redeem_unlock_code_applies_protocols_and_extends_from_current(db):
         ("openvpn", node.id, "alice", fixed_now + timedelta(days=9)),
         ("wireguard", node.id, "alice", fixed_now + timedelta(days=7)),
     ]
+    assert commit_spy.call_count == 1
 
     openvpn_row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="alice").first()
     wg_row = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").first()
@@ -331,11 +372,54 @@ def test_redeem_unlock_code_same_client_twice_fails(db):
             "app.services.unlock_codes.set_access_until",
             return_value={"access_until": datetime(2030, 1, 6, tzinfo=timezone.utc).isoformat()},
         ),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
     ):
         redeem_unlock_code(db, code="same-client-01", client_name="Alice", node_id=node.id)
         with pytest.raises(ValueError, match="already redeemed"):
             redeem_unlock_code(db, code="same-client-01", client_name="alice", node_id=node.id)
 
+
+
+def test_redeem_unlock_code_rolls_back_on_protocol_failure(db):
+    node = _make_node(db)
+    admin = _make_user(db)
+    _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn, VpnType.wireguard])
+    _make_policy_rows(db, node.id, "alice")
+    create_unlock_code(
+        db,
+        grant_days=5,
+        protocols=["openvpn", "wireguard"],
+        mode="multi",
+        max_redemptions=2,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="ROLLBACK-01",
+    )
+
+    calls = 0
+
+    def _fake_set_access_until(_db, protocol, node_id, client_name, access_until, *, actor, commit):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("boom")
+        return {"access_until": access_until.isoformat()}
+
+    with (
+        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        patch("app.services.unlock_codes.get_access_until", return_value=None),
+        patch("app.services.unlock_codes.set_access_until", side_effect=_fake_set_access_until),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
+        patch.object(db, "commit", wraps=db.commit) as commit_spy,
+    ):
+        with pytest.raises(RuntimeError, match="boom"):
+            redeem_unlock_code(db, code="rollback-01", client_name="Alice", node_id=node.id)
+
+    db.rollback()
+    assert commit_spy.call_count == 0
+    assert db.query(UnlockCodeRedemption).filter_by(client_name="alice", node_id=node.id).count() == 0
+    openvpn_row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="alice").first()
+    assert openvpn_row is not None and openvpn_row.is_temp_blocked is True
 
 
 def test_redeem_unlock_code_second_client_ok(db):
@@ -361,6 +445,7 @@ def test_redeem_unlock_code_second_client_ok(db):
             "app.services.unlock_codes.set_access_until",
             return_value={"access_until": datetime(2030, 1, 4, tzinfo=timezone.utc).isoformat()},
         ),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
     ):
         first = redeem_unlock_code(db, code="multi-0001", client_name="Alice", node_id=node.id)
         second = redeem_unlock_code(db, code="multi-0001", client_name="Bob", node_id=node.id)
@@ -418,6 +503,7 @@ def test_unlock_codes_routes_and_feature_guard(tmp_path):
     env_file.write_text("FEATURE_UNLOCK_CODES_ENABLED=false\n", encoding="utf-8")
     service = FeatureToggleService(env_file)
     assert check_path_access("/api/unlock-codes", service=service)[0] == "unlock_codes"
+    assert module_disabled_message("unlock_codes")
 
 
 
@@ -473,6 +559,44 @@ def test_unlock_codes_admin_routes():
         all_codes = client.get("/api/unlock-codes", params={"include_revoked": True})
         assert all_codes.status_code == 200
         assert all_codes.json()[0]["revoked_at"] is not None
+
+    db.close()
+    engine.dispose()
+
+
+def test_unlock_codes_admin_routes_rejects_short_custom_code():
+    engine, Session = _make_db()
+    db = Session()
+    _make_node(db)
+    admin = _make_user(db)
+    app = FastAPI()
+    app.include_router(unlock_codes_router.router, prefix="/api")
+
+    def _override_db():
+        request_db = Session()
+        try:
+            yield request_db
+        finally:
+            request_db.close()
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_admin] = lambda: admin
+    app.dependency_overrides[unlock_codes_router.get_feature_service] = lambda: SimpleNamespace(
+        is_enabled=lambda key: True
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/unlock-codes",
+            json={
+                "grant_days": 10,
+                "protocols": ["openvpn"],
+                "mode": "single",
+                "code": "SHORT7",
+            },
+        )
+        assert resp.status_code == 400
+        assert "between 8 and 32" in resp.json()["detail"]
 
     db.close()
     engine.dispose()
