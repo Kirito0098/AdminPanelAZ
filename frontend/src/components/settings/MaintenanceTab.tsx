@@ -57,9 +57,9 @@ const SERVICES = [
 ] as const
 
 const RETENTION_PRESETS = [
-  { id: 'compact', label: 'Экономия', traffic: 14, logs: 14, metrics: 7 },
-  { id: 'balanced', label: 'Стандарт', traffic: 30, logs: 30, metrics: 14 },
-  { id: 'long', label: 'Долго', traffic: 90, logs: 90, metrics: 30 },
+  { id: 'compact', label: 'Экономия (трафик 14д)', traffic: 14, logs: 14, metrics: 7 },
+  { id: 'balanced', label: 'Стандарт (трафик 30д)', traffic: 30, logs: 30, metrics: 14 },
+  { id: 'long', label: 'Долго (трафик 90д)', traffic: 90, logs: 90, metrics: 30 },
 ] as const
 
 const INTERVAL_PRESETS = [6, 12, 24] as const
@@ -527,6 +527,15 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
                           })
                         }
                       />
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        Срок хранения сэмплов для «Мониторинг трафика». Графики и колонка «За период» не
+                        покажут данные старше этого окна.
+                      </p>
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        Больше дней — больше места в БД (
+                        <code className="text-foreground">user_traffic_sample</code>, примерно 1 запись/мин
+                        на активного клиента/протокол).
+                      </p>
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="retention-logs" className="text-xs">
