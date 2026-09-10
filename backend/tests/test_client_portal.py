@@ -331,6 +331,30 @@ def test_public_portal_redeem_rejects_wrong_host_before_features(public_client):
     rl.consume.assert_not_called()
 
 
+def test_public_portal_redeem_rate_limit_propagates(public_client):
+    with (
+        patch("app.routers.public_portal.get_feature_service") as feats,
+        patch("app.routers.public_portal.assert_portal_host"),
+        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_portal.public_download_rate_limit_service") as rl,
+        patch("app.routers.public_portal.get_valid_portal_token") as get_token,
+        patch("app.routers.public_portal.redeem_unlock_code") as redeem,
+    ):
+        ip_svc.get_client_ip.return_value = "198.51.100.9"
+        rl.consume.side_effect = HTTPException(status_code=429, detail="too many")
+        resp = public_client.post(
+            "/api/public/portal/tok/redeem",
+            json={"code": "ABCD-EFGH-IJKL"},
+            headers={"Host": "sub.example.com"},
+        )
+
+    assert resp.status_code == 429
+    assert resp.json()["detail"] == "too many"
+    feats.assert_not_called()
+    get_token.assert_not_called()
+    redeem.assert_not_called()
+
+
 def test_portal_protocol_prefers_file_protocol_over_db_vpn_type():
     cfg = MagicMock()
     cfg.vpn_type = VpnType.wireguard
