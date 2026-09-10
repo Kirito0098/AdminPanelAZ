@@ -50,6 +50,34 @@ def test_unlock_root_denies_non_admin():
     assert "Команда доступна только администратору." in send.await_args.args[2]
 
 
+def test_unlock_callback_denies_non_admin():
+    ctx = _ctx(role=UserRole.user)
+
+    with patch(
+        "app.services.telegram_bot_handlers.unlock_codes.send_message",
+        new=AsyncMock(),
+    ) as send:
+        asyncio.run(handle_unlock_codes_callback(ctx, "uc:mode:single", message_id=17))
+
+    send.assert_awaited_once()
+    assert "Команда доступна только администратору." in send.await_args.args[2]
+
+
+def test_unlock_text_denies_non_admin():
+    ctx = _ctx(role=UserRole.user)
+    unlock_codes_fsm.set_pending(ctx.telegram_user_id, step="grant_days")
+
+    with patch(
+        "app.services.telegram_bot_handlers.unlock_codes.send_message",
+        new=AsyncMock(),
+    ) as send:
+        asyncio.run(handle_unlock_codes_text(ctx, "30"))
+
+    send.assert_awaited_once()
+    assert "Команда доступна только администратору." in send.await_args.args[2]
+    assert unlock_codes_fsm.get_pending(ctx.telegram_user_id) is None
+
+
 def test_unlock_command_is_registered():
     commands = build_bot_commands()
     assert any(item["command"] == "unlock" for item in commands)
