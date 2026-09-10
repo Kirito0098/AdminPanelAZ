@@ -177,9 +177,11 @@ def chart_bucket_for_window(
         return "day"
 
     assert window.from_date is not None and window.to_date is not None
+    # Inclusive calendar days. Max allowed custom window is retention_days+1
+    # (validate: (to-from).days <= retention), so a ≤90 threshold would force
+    # the full retention range into monthly buckets (2–3 points). Custom is
+    # already capped by retention — keep day resolution for the whole window.
     span_days = (window.to_date - window.from_date).days + 1
     if span_days <= 2:
         return "hour"
-    if span_days <= 90:
-        return "day"
-    return "month"
+    return "day"

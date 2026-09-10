@@ -330,7 +330,8 @@ export default function TrafficPage() {
   const [clientPolicy, setClientPolicy] = useState<ClientAccessPolicy | null>(null)
   const [policyLoading, setPolicyLoading] = useState(false)
   const [chartMode, setChartMode] = useState<'preset' | 'custom'>('preset')
-  const [chartPreset, setChartPreset] = useState<TrafficPeriodPreset>('7d')
+  // Match overview default so deep-link (?client=) does not fetch 7d before sync.
+  const [chartPreset, setChartPreset] = useState<TrafficPeriodPreset>('30d')
   const [chartDraftFrom, setChartDraftFrom] = useState('')
   const [chartDraftTo, setChartDraftTo] = useState('')
   const [chartAppliedFrom, setChartAppliedFrom] = useState('')
@@ -515,7 +516,7 @@ export default function TrafficPage() {
   const loadChart = useCallback(async () => {
     if (!selectedClient) return
     setChartLoading(true)
-    const fallbackPreset = chartPreset || '7d'
+    const fallbackPreset = chartPreset || '30d'
     try {
       // Always request all protocols so awg2-enabled UI can render amneziawg2_bytes
       // alongside openvpn/wireguard when the feature toggle is on.
@@ -667,8 +668,8 @@ export default function TrafficPage() {
       setChartDraftFrom('')
       setChartDraftTo('')
       setChartMode('preset')
-      // Keep last chart preset; default to 7d if somehow empty.
-      setChartPreset((p) => p || '7d')
+      // Keep last chart preset; default to overview default if somehow empty.
+      setChartPreset((p) => p || '30d')
       didReset = true
     }
 
@@ -742,15 +743,53 @@ export default function TrafficPage() {
     [data?.rows, selectedClient, selectedProtocol],
   )
 
+  /** Copy table period into chart controls (open card / overview commit). */
+  const applyOverviewPeriodToChart = useCallback(() => {
+    if (overviewMode === 'custom' && appliedFrom && appliedTo) {
+      setChartMode('custom')
+      setChartPreset(overviewPreset)
+      setChartDraftFrom(draftFrom || appliedFrom)
+      setChartDraftTo(draftTo || appliedTo)
+      setChartAppliedFrom(appliedFrom)
+      setChartAppliedTo(appliedTo)
+      return
+    }
+    if (overviewMode === 'custom') {
+      // Custom UI open but not applied yet — mirror drafts; chart still uses preset until Apply.
+      setChartMode('custom')
+      setChartPreset(overviewPreset)
+      setChartDraftFrom(draftFrom)
+      setChartDraftTo(draftTo)
+      setChartAppliedFrom('')
+      setChartAppliedTo('')
+      return
+    }
+    setChartMode('preset')
+    setChartPreset(overviewPreset)
+    setChartDraftFrom('')
+    setChartDraftTo('')
+    setChartAppliedFrom('')
+    setChartAppliedTo('')
+  }, [overviewMode, overviewPreset, draftFrom, draftTo, appliedFrom, appliedTo])
+
   const toggleClient = (name: string, protocol: string) => {
     if (selectedClient === name && selectedProtocol === protocol) {
       setSelectedClient('')
       setSelectedProtocol('')
       return
     }
+    applyOverviewPeriodToChart()
     setSelectedClient(name)
     setSelectedProtocol(protocol)
   }
+
+  // Deep-link (?client=…) opens a card without toggleClient — seed chart from table period once.
+  const seededChartFromUrlRef = useRef(false)
+  useEffect(() => {
+    if (!selectedClient || seededChartFromUrlRef.current) return
+    seededChartFromUrlRef.current = true
+    applyOverviewPeriodToChart()
+  }, [selectedClient, applyOverviewPeriodToChart])
 
   const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== 'Enter' || filteredRows.length === 0) return
@@ -777,6 +816,13 @@ export default function TrafficPage() {
     setAppliedTo('')
     setDraftFrom('')
     setDraftTo('')
+    // Keep an open card's chart in lockstep with the table period.
+    setChartMode('preset')
+    setChartPreset(preset)
+    setChartAppliedFrom('')
+    setChartAppliedTo('')
+    setChartDraftFrom('')
+    setChartDraftTo('')
   }
 
   const handleOverviewCustomChange = (from: string, to: string) => {
@@ -813,6 +859,13 @@ export default function TrafficPage() {
     setAppliedFrom(draftFrom)
     setAppliedTo(draftTo)
     setOverviewMode('custom')
+    // Mirror applied table range into an open (or next) chart.
+    setChartMode('custom')
+    setChartPreset(overviewPreset)
+    setChartDraftFrom(draftFrom)
+    setChartDraftTo(draftTo)
+    setChartAppliedFrom(draftFrom)
+    setChartAppliedTo(draftTo)
   }
 
   const handleChartPresetChange = (preset: TrafficPeriodPreset) => {

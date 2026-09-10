@@ -156,3 +156,9 @@ def test_chart_bucket_custom_lengths():
         period=None, from_s="2026-08-01", to_s="2026-08-31", retention_days=90, tz_name="UTC", now=now
     )
     assert chart_bucket_for_window(mid) == "day"
+    # Full retention window: (to-from).days == 90 → 91 inclusive days — must stay daily.
+    full = resolve_traffic_period(
+        period=None, from_s="2026-06-12", to_s="2026-09-10", retention_days=90, tz_name="UTC", now=now
+    )
+    assert (full.to_date - full.from_date).days + 1 == 91
+    assert chart_bucket_for_window(full) == "day"

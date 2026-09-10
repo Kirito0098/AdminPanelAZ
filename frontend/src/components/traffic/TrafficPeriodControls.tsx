@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Calendar, type DateRange } from '@/components/ui/calendar'
 import { Button } from '@/components/ui/button'
 import {
@@ -42,6 +43,8 @@ type Props = {
   disabled?: boolean
 }
 
+const PANEL_WIDTH = 300
+
 function defaultDraftRange(retentionDays: number): { from: string; to: string } {
   const { min, max } = availableDateBounds(retentionDays)
   const from = new Date(max)
@@ -67,11 +70,67 @@ export default function TrafficPeriodControls({
   disabled = false,
 }: Props) {
   const customEnabled = retentionDays != null && retentionDays >= 1 && !disabled
-  const [open, setOpen] = useState(mode === 'custom')
+  // Popover open state is independent of mode: custom mode can stay active with the
+  // calendar closed so the table/chart layout is not pushed aside.
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null)
 
   useEffect(() => {
-    setOpen(mode === 'custom')
+    if (mode !== 'custom') setOpen(false)
   }, [mode])
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelPos(null)
+      return
+    }
+    const place = () => {
+      const anchor = rootRef.current
+      if (!anchor) return
+      const rect = anchor.getBoundingClientRect()
+      const left = Math.min(
+        Math.max(8, rect.right - PANEL_WIDTH),
+        window.innerWidth - PANEL_WIDTH - 8,
+      )
+      const estimatedHeight = 360
+      let top = rect.bottom + 6
+      if (top + estimatedHeight > window.innerHeight - 8) {
+        top = Math.max(8, rect.top - estimatedHeight - 6)
+      }
+      setPanelPos({ top, left })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      if (rootRef.current?.contains(target)) return
+      if (panelRef.current?.contains(target)) return
+      setOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('touchstart', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('touchstart', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
 
   const bounds = useMemo(() => {
     if (retentionDays == null || retentionDays < 1) return null
@@ -106,7 +165,6 @@ export default function TrafficPeriodControls({
 
   const handleCustomClick = () => {
     if (!customEnabled || retentionDays == null) return
-    setOpen(true)
     if (!customFrom || !customTo) {
       const draft = defaultDraftRange(retentionDays)
       onCustomChange(draft.from, draft.to)
@@ -114,6 +172,7 @@ export default function TrafficPeriodControls({
       // Signal parent to enter custom mode even when dates already set.
       onCustomChange(customFrom, customTo)
     }
+    setOpen((prev) => !prev)
   }
 
   const handleSelect = (range: DateRange | undefined) => {
@@ -127,7 +186,7 @@ export default function TrafficPeriodControls({
       return
     }
     if (!showApply) {
-      validateAndMaybeApply(range.from, range.to)
+      if (validateAndMaybeApply(range.from, range.to)) setOpen(false)
       return
     }
     emitRange(range.from, range.to)
@@ -150,6 +209,7 @@ export default function TrafficPeriodControls({
     }
     if (!validateAndMaybeApply(from, to)) return
     onApplyCustom?.()
+    setOpen(false)
   }
 
   const rangeLabel =
@@ -159,8 +219,43 @@ export default function TrafficPeriodControls({
         ? `${customFrom} — …`
         : 'Выберите период'
 
+  const panel =
+    open && bounds && panelPos
+      ? createPortal(
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-label="Свой период"
+            className="fixed z-[80] rounded-md border bg-background p-2 shadow-lg"
+            style={{ top: panelPos.top, left: panelPos.left, width: PANEL_WIDTH }}
+          >
+            <Calendar
+              mode="range"
+              selected={selected}
+              onSelect={handleSelect}
+              fromDate={bounds.min}
+              toDate={bounds.max}
+            />
+            <div className="mt-2 flex items-center justify-between gap-2 px-1">
+              <span className={cn('text-xs text-muted-foreground')}>{rangeLabel}</span>
+              {showApply && (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={disabled || !customFrom || !customTo}
+                  onClick={handleApply}
+                >
+                  Применить
+                </Button>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )
+      : null
+
   return (
-    <div className="flex flex-col gap-2">
+    <div ref={rootRef} className="relative flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1">
         {presets.map(({ id, label }) => (
           <Button
@@ -181,6 +276,8 @@ export default function TrafficPeriodControls({
           variant={mode === 'custom' ? 'default' : 'outline'}
           disabled={!customEnabled}
           onClick={handleCustomClick}
+          aria-expanded={open}
+          aria-haspopup="dialog"
           title={
             retentionDays == null
               ? 'Срок хранения ещё не загружен'
@@ -190,31 +287,7 @@ export default function TrafficPeriodControls({
           Свой
         </Button>
       </div>
-
-      {mode === 'custom' && open && bounds && (
-        <div className="rounded-md border bg-background p-2 shadow-sm">
-          <Calendar
-            mode="range"
-            selected={selected}
-            onSelect={handleSelect}
-            fromDate={bounds.min}
-            toDate={bounds.max}
-          />
-          <div className="mt-2 flex items-center justify-between gap-2 px-1">
-            <span className={cn('text-xs text-muted-foreground')}>{rangeLabel}</span>
-            {showApply && (
-              <Button
-                type="button"
-                size="sm"
-                disabled={disabled || !customFrom || !customTo}
-                onClick={handleApply}
-              >
-                Применить
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
+      {panel}
     </div>
   )
 }

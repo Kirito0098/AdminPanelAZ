@@ -368,6 +368,9 @@ class TrafficCollectorService:
             until_utc=period_window.until_utc,
             # Custom windows are rare/explicit — do not coalesce via TTL cache.
             ttl_seconds=None if period_window.mode == "custom" else _RECENT_USAGE_TTL_SECONDS,
+            # Preset polls use a sliding "now" for until_utc; key by period label so
+            # TTL can hit across refreshes (same as pre-custom-period behavior).
+            cache_period=period_window.period if period_window.mode == "preset" else None,
         )
 
         aggregates: dict[tuple[str, str], dict] = {}
@@ -525,13 +528,16 @@ class TrafficCollectorService:
         since_utc: datetime,
         until_utc: datetime,
         ttl_seconds: float | None = _RECENT_USAGE_TTL_SECONDS,
+        cache_period: str | None = None,
     ) -> dict:
         scope_ids = node_ids or [self.node_id]
-        cache_key = (
-            tuple(sorted(int(n) for n in scope_ids)),
-            since_utc,
-            until_utc,
-        )
+        scope_key = tuple(sorted(int(n) for n in scope_ids))
+        period_key = (cache_period or "").strip().lower()
+        if period_key:
+            # Stable key for 1d/7d/30d polls (until_utc moves every request).
+            cache_key: tuple = (scope_key, "preset", period_key)
+        else:
+            cache_key = (scope_key, "window", since_utc, until_utc)
         ttl = 0.0 if ttl_seconds is None else max(0.0, float(ttl_seconds))
         now_mono = time.monotonic()
         if ttl > 0:

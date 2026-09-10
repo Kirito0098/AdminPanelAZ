@@ -372,7 +372,11 @@ export default function TrafficClientDetails({
           value={formatBytes(row.total_bytes)}
           sub={`RX ${formatBytes(row.total_received)} · TX ${formatBytes(row.total_sent)}`}
         />
-        <MetricTile label="За период" value={formatBytes(chartData?.total ?? 0)} sub={chartPeriodLabel} />
+        <MetricTile
+          label="За период"
+          value={chartLoading && chartData == null ? '…' : formatBytes(chartData?.total ?? 0)}
+          sub={chartPeriodLabel}
+        />
       </div>
 
       {row.ha_aggregated && row.ha_node_breakdown && row.ha_node_breakdown.length > 0 && (
@@ -664,6 +668,7 @@ export default function TrafficClientDetails({
                     tick={{ fontSize: 11 }}
                     tickLine={false}
                     axisLine={false}
+                    minTickGap={28}
                     interval="preserveStartEnd"
                   />
                   <YAxis
@@ -683,32 +688,35 @@ export default function TrafficClientDetails({
                   <Legend formatter={(value) => SERIES_LABELS[value] ?? value} />
                   {showProtocolSeries ? (
                     <>
+                      {/* Unstacked: stacked areas put the top series stroke at the total
+                          height, so a tiny AWG series looked like the only “strip” while
+                          OpenVPN (hundreds of GB) was hidden underneath. */}
                       <Area
                         type="monotone"
                         dataKey="openvpn"
-                        stackId="proto"
                         stroke={MONITORING_PROTOCOL_COLORS.openvpn}
                         fill={`url(#focusTrafficOvpn_${chartIdSuffix})`}
                         strokeWidth={2}
                         name="openvpn"
+                        dot={false}
                       />
                       <Area
                         type="monotone"
                         dataKey="wireguard"
-                        stackId="proto"
                         stroke={MONITORING_PROTOCOL_COLORS.wireguard}
                         fill={`url(#focusTrafficWg_${chartIdSuffix})`}
                         strokeWidth={2}
                         name="wireguard"
+                        dot={false}
                       />
                       <Area
                         type="monotone"
                         dataKey="amneziawg2"
-                        stackId="proto"
                         stroke={MONITORING_PROTOCOL_COLORS.amneziawg2}
                         fill={`url(#focusTrafficAwg2_${chartIdSuffix})`}
                         strokeWidth={2}
                         name="amneziawg2"
+                        dot={false}
                       />
                     </>
                   ) : (
