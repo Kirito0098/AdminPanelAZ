@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+import warnings
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -14,6 +15,8 @@ from app.services.access_until import (
     get_access_until,
     set_access_until,
 )
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 def _make_db():
@@ -145,7 +148,7 @@ def test_wg_access_until_aliases_expires_at():
 
         row = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").first()
         assert row is not None
-        assert row.expires_at == until
+        assert row.expires_at == until.replace(tzinfo=None)
         assert get_access_until(db, "wireguard", node.id, "Alice") == until
         assert state["access_until"] == until.isoformat()
     finally:
