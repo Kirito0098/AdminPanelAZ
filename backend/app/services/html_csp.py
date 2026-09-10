@@ -75,4 +75,13 @@ def serve_html_with_nonce(request: Request, index_file: Path) -> HTMLResponse:
     script = panel_access_path_script(settings)
     if script and "</head>" in html:
         html = html.replace("</head>", f"    {script}\n  </head>", 1)
-    return HTMLResponse(inject_csp_nonce(html, nonce), media_type="text/html")
+    # Never cache the SPA shell: after rebuild Vite hashes change and a stale
+    # index.html points at deleted /assets/index-*.js → blank white page.
+    return HTMLResponse(
+        inject_csp_nonce(html, nonce),
+        media_type="text/html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )

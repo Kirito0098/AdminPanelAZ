@@ -779,7 +779,7 @@ export default function ClientActionsDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={handleMainOpenChange}>
-        <DialogContent className="flex max-h-[min(90dvh,40rem)] max-w-md flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+        <DialogContent className="flex max-h-[min(92dvh,52rem)] w-[calc(100vw-1.5rem)] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
           <DialogHeader className="shrink-0 space-y-3 border-b px-6 pb-4 pt-6">
             <div className="pr-6">
               <DialogTitle className="text-xl font-semibold tracking-tight">{config.client_name}</DialogTitle>
@@ -839,7 +839,7 @@ export default function ClientActionsDialog({
             {visibleManagement.length > 0 && (
               <section className="space-y-3">
                 <SectionTitle>Управление</SectionTitle>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {visibleManagement.map((action) => (
                     <ActionButton key={action.key} action={action} busyAction={busyAction} />
                   ))}
@@ -854,14 +854,35 @@ export default function ClientActionsDialog({
                   Установите дату отключения для протокола {protocolLabel(tab)}. Пустое значение убирает
                   ограничение доступа.
                 </p>
-                <div className="space-y-2">
-                  <Label htmlFor="access-until">Дата</Label>
-                  <Input
-                    id="access-until"
-                    type="date"
-                    value={accessUntilValue}
-                    onChange={(e) => setAccessUntilValue(e.target.value)}
-                  />
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Label htmlFor="access-until">Дата</Label>
+                    <Input
+                      id="access-until"
+                      type="date"
+                      value={accessUntilValue}
+                      onChange={(e) => setAccessUntilValue(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busyAction !== null || haReplicaReadonly}
+                      onClick={() => void handleAccessUntilSave()}
+                    >
+                      {busyAction === 'access-until' ? <Loader2 size={14} className="animate-spin" /> : null}
+                      Сохранить
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={busyAction !== null || haReplicaReadonly || !accessUntilValue}
+                      onClick={() => setAccessUntilValue('')}
+                    >
+                      Сбросить
+                    </Button>
+                  </div>
                 </div>
                 {policy?.access_until ? (
                   <p className="text-[11px] text-muted-foreground">
@@ -870,26 +891,6 @@ export default function ClientActionsDialog({
                 ) : (
                   <p className="text-[11px] text-muted-foreground">Сейчас ограничение не задано.</p>
                 )}
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="flex-1"
-                    disabled={busyAction !== null || haReplicaReadonly}
-                    onClick={() => void handleAccessUntilSave()}
-                  >
-                    {busyAction === 'access-until' ? <Loader2 size={14} className="animate-spin" /> : null}
-                    Сохранить
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    disabled={busyAction !== null || haReplicaReadonly || !accessUntilValue}
-                    onClick={() => setAccessUntilValue('')}
-                  >
-                    Сбросить
-                  </Button>
-                </div>
               </section>
             )}
 
@@ -1047,7 +1048,7 @@ export default function ClientActionsDialog({
             {visibleDanger.length > 0 && (
               <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
                 <h3 className="mb-2.5 text-sm font-medium text-destructive">Опасные действия</h3>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {visibleDanger.map((action) => (
                     <ActionButton
                       key={action.key}
