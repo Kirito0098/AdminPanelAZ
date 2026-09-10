@@ -34,6 +34,13 @@ export interface PortalMetaResponse {
   status?: PortalStatusMeta
 }
 
+export interface PortalRedeemResponse {
+  ok: boolean
+  grant_days: number
+  protocols_applied: string[]
+  access_until: string | null
+}
+
 export async function getPortalLink(clientName: string) {
   return apiFetch<PortalLinkResponse>(`/portal/clients/${encodeURIComponent(clientName)}/link`)
 }
@@ -74,4 +81,27 @@ export async function fetchPublicPortalMeta(token: string) {
     throw new Error(detail)
   }
   return (await res.json()) as PortalMetaResponse
+}
+
+export async function redeemPublicPortalCode(token: string, code: string) {
+  const { apiBase } = await import('../lib/panelBase')
+  const res = await fetch(`${apiBase}/public/portal/${encodeURIComponent(token)}/redeem`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ code }),
+  })
+  if (!res.ok) {
+    let detail = 'Не удалось активировать ключ'
+    try {
+      const body = await res.json()
+      if (body?.detail) detail = typeof body.detail === 'string' ? body.detail : detail
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail)
+  }
+  return (await res.json()) as PortalRedeemResponse
 }

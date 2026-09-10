@@ -388,23 +388,32 @@ def build_portal_status(db: Session, *, node_id: int, client_name: str, configs:
     protocols = {c.vpn_type.value for c in configs}
     policies = _collect_access_policies(db, node_id=node_id, client_name=client_name, protocols=protocols)
     blocked = any(_policy_blocked(p) for p in policies)
-
-    # OpenVPN uses cert_expires_at; AWG2/access TTL use expires_at; WG policy may also set expires_at.
-    expiry_candidates: list[datetime | None] = []
-    for c in configs:
-        expiry_candidates.append(getattr(c, "expires_at", None))
-        expiry_candidates.append(getattr(c, "cert_expires_at", None))
-    for p in policies:
-        expiry_candidates.append(getattr(p, "expires_at", None))
-
-    expires_at = _earliest_datetime(expiry_candidates)
     now = datetime.utcnow()
+    access_until_candidates: list[datetime | None] = []
+    for p in policies:
+        for attr in ("expires_at", "access_until"):
+            value = getattr(p, attr, None)
+            if isinstance(value, datetime):
+                access_until_candidates.append(value)
+    access_until = _earliest_datetime(access_until_candidates)
+    access_expired = bool(access_until and access_until <= now)
+
+    if access_until is not None:
+        expires_at = access_until
+    else:
+        # Prefer actual access deadlines over certificate notAfter.
+        expiry_candidates: list[datetime | None] = []
+        for c in configs:
+            expiry_candidates.append(getattr(c, "expires_at", None))
+            expiry_candidates.append(getattr(c, "cert_expires_at", None))
+        expires_at = _earliest_datetime(expiry_candidates)
+
     expired = bool(expires_at and expires_at <= now)
 
     if blocked:
         status_key = "blocked"
         status_label = "Заблокирована"
-    elif expired:
+    elif access_expired or expired:
         status_key = "expired"
         status_label = "Истекла"
     else:

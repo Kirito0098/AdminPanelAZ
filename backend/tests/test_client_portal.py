@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -193,6 +193,115 @@ def test_build_portal_status_uses_cert_expires_at():
     assert status["status"] == "active"
     assert status["expires_label"].startswith("25 дн. (до ")
     assert status["expires_at"] is not None
+
+
+def test_build_portal_status_prefers_access_until_over_cert():
+    db = MagicMock()
+    now = datetime.utcnow()
+
+    policy = MagicMock()
+    policy.is_permanent_blocked = False
+    policy.is_temp_blocked = False
+    policy.block_until = None
+    policy.traffic_limit_bytes = None
+    policy.access_until = now + timedelta(days=40, hours=2)
+
+    def query_side_effect(model):
+        q = MagicMock()
+        if model.__name__ == "OpenVpnAccessPolicy":
+            q.filter.return_value.first.return_value = policy
+        elif model.__name__ == "UserTrafficStatProtocol":
+            q.filter.return_value.all.return_value = []
+        else:
+            q.filter.return_value.first.return_value = None
+            q.filter.return_value.all.return_value = []
+        return q
+
+    db.query.side_effect = query_side_effect
+    cfg = MagicMock()
+    cfg.vpn_type = VpnType.openvpn
+    cfg.expires_at = None
+    cfg.cert_expires_at = now + timedelta(days=5)
+    status = portal.build_portal_status(db, node_id=1, client_name="test1", configs=[cfg])
+    assert status["status"] == "active"
+    assert status["expires_label"].startswith("40 дн. (до ")
+    assert status["expires_at"] is not None
+
+
+def test_build_portal_status_marks_access_until_expired_even_if_cert_valid():
+    db = MagicMock()
+    now = datetime.utcnow()
+
+    policy = MagicMock()
+    policy.is_permanent_blocked = False
+    policy.is_temp_blocked = False
+    policy.block_until = None
+    policy.traffic_limit_bytes = None
+    policy.access_until = now - timedelta(days=1)
+
+    def query_side_effect(model):
+        q = MagicMock()
+        if model.__name__ == "OpenVpnAccessPolicy":
+            q.filter.return_value.first.return_value = policy
+        elif model.__name__ == "UserTrafficStatProtocol":
+            q.filter.return_value.all.return_value = []
+        else:
+            q.filter.return_value.first.return_value = None
+            q.filter.return_value.all.return_value = []
+        return q
+
+    db.query.side_effect = query_side_effect
+    cfg = MagicMock()
+    cfg.vpn_type = VpnType.openvpn
+    cfg.expires_at = None
+    cfg.cert_expires_at = now + timedelta(days=25)
+    status = portal.build_portal_status(db, node_id=1, client_name="test1", configs=[cfg])
+    assert status["status"] == "expired"
+    assert status["expires_label"].startswith("истёк ")
+    assert status["expires_at"] is not None
+
+
+def test_public_portal_redeem_returns_access_until(public_client):
+    token_row = ClientPortalToken(id=1, token="tok", node_id=1, client_name="alice", revoked_at=None)
+    fixed_until = datetime(2030, 1, 8, 12, 30)
+    with (
+        patch("app.routers.public_portal.get_feature_service") as feats,
+        patch("app.routers.public_portal.assert_portal_host"),
+        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_portal.public_download_rate_limit_service") as rl,
+        patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
+        patch("app.routers.public_portal.redeem_unlock_code", return_value={"grant_days": 7, "protocols_applied": ["openvpn"], "access_until_by_protocol": {"openvpn": fixed_until.isoformat()}}),
+        patch("app.routers.public_portal.effective_access_until_for_client", return_value=fixed_until),
+    ):
+        feats.return_value.is_enabled.side_effect = lambda key: True
+        ip_svc.get_client_ip.return_value = "198.51.100.1"
+        resp = public_client.post(
+            "/api/public/portal/tok/redeem",
+            json={"code": "ABCD-EFGH-IJKL"},
+            headers={"Host": "sub.example.com"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "ok": True,
+        "grant_days": 7,
+        "protocols_applied": ["openvpn"],
+        "access_until": fixed_until.isoformat(),
+    }
+    rl.consume.assert_called_once_with("198.51.100.1")
+
+
+def test_public_portal_redeem_requires_unlock_codes_feature(public_client):
+    with patch("app.routers.public_portal.get_feature_service") as feats:
+        feats.return_value.is_enabled.side_effect = lambda key: key == "client_portal"
+        resp = public_client.post(
+            "/api/public/portal/tok/redeem",
+            json={"code": "ABCD-EFGH-IJKL"},
+            headers={"Host": "sub.example.com"},
+        )
+
+    assert resp.status_code == 403
+    assert "unlock" in resp.json()["detail"].lower()
 
 
 def test_portal_protocol_prefers_file_protocol_over_db_vpn_type():

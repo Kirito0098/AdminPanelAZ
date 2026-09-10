@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   ArrowLeftRight,
@@ -12,8 +12,14 @@ import {
   Shield,
   UserRound,
 } from 'lucide-react'
-import { fetchPublicPortalMeta, type PortalFileMeta, type PortalMetaResponse } from '@/api/portal'
+import {
+  fetchPublicPortalMeta,
+  redeemPublicPortalCode,
+  type PortalFileMeta,
+  type PortalMetaResponse,
+} from '@/api/portal'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import Spinner from '@/components/ui/Spinner'
 import { cn } from '@/lib/utils'
 
@@ -128,6 +134,16 @@ function statusToneClass(status?: string) {
     return 'text-amber-300 bg-amber-500/15 border-amber-500/30'
   }
   return 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30'
+}
+
+function formatPortalDate(value: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('ru-RU', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
 }
 
 function StatCard({
@@ -400,6 +416,9 @@ export default function PortalPage() {
   const [protocol, setProtocol] = useState<string>('')
   const [openStep, setOpenStep] = useState<KitStep>('install')
   const [toast, setToast] = useState<string | null>(null)
+  const [redeemCode, setRedeemCode] = useState('')
+  const [redeeming, setRedeeming] = useState(false)
+  const [redeemError, setRedeemError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!token) {
@@ -422,6 +441,30 @@ export default function PortalPage() {
     const t = window.setTimeout(() => setToast(null), 2200)
     return () => window.clearTimeout(t)
   }, [toast])
+
+  async function handleRedeem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const code = redeemCode.trim()
+    if (!token || !code || redeeming) return
+    setRedeeming(true)
+    setRedeemError(null)
+    try {
+      const result = await redeemPublicPortalCode(token, code)
+      const refreshed = await fetchPublicPortalMeta(token)
+      setData(refreshed)
+      setProtocol(preferredProtocol(refreshed.protocols.length ? refreshed.protocols : refreshed.files.map((f) => f.vpn_type)))
+      setRedeemCode('')
+      setToast(
+        result.access_until
+          ? `Ключ принят. Доступ до ${formatPortalDate(result.access_until)}`
+          : 'Ключ принят',
+      )
+    } catch (err: unknown) {
+      setRedeemError(err instanceof Error ? err.message : 'Не удалось активировать ключ')
+    } finally {
+      setRedeeming(false)
+    }
+  }
 
   const filesForProtocol = useMemo(() => {
     if (!data) return []
@@ -523,6 +566,30 @@ export default function PortalPage() {
             icon={<ArrowLeftRight size={14} />}
             tone="border-teal-400/30 bg-teal-400/10 text-teal-300"
           />
+        </section>
+
+        <section className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
+          <div>
+            <h2 className="text-base font-semibold">Активировать ключ</h2>
+            <p className="text-xs text-slate-400">Введите unlock-код, чтобы продлить доступ к порталу и подключению.</p>
+          </div>
+          <form className="flex flex-col gap-3 sm:flex-row" onSubmit={handleRedeem}>
+            <Input
+              value={redeemCode}
+              onChange={(event) => {
+                setRedeemCode(event.target.value)
+                if (redeemError) setRedeemError(null)
+              }}
+              placeholder="Введите код"
+              autoComplete="off"
+              spellCheck={false}
+              className="border-white/10 bg-black/20 text-slate-100 placeholder:text-slate-500"
+            />
+            <Button type="submit" disabled={redeeming || redeemCode.trim().length === 0} className="shrink-0">
+              {redeeming ? 'Проверка…' : 'Активировать ключ'}
+            </Button>
+          </form>
+          {redeemError && <p className="text-sm text-amber-300">{redeemError}</p>}
         </section>
 
         <section className="space-y-4 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
