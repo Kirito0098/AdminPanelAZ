@@ -24,17 +24,14 @@ import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import { MONITORING_PROTOCOL_COLORS } from '@/components/monitoring/monitoringChartTheme'
 import { getTrafficClientSessions } from '@/api/client'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
+import TrafficPeriodControls, {
+  CHART_PERIOD_PRESETS,
+  type TrafficPeriodPreset,
+} from '@/components/traffic/TrafficPeriodControls'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -53,7 +50,7 @@ import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficCli
 const CHART_VPN = 'hsl(187, 72%, 45%)'
 const CHART_ANTIZAPRET = 'hsl(38, 92%, 50%)'
 
-const RANGE_LABELS: Record<string, string> = {
+const RANGE_LABELS: Record<TrafficPeriodPreset, string> = {
   '1h': '1 час',
   '1d': '24 часа',
   '7d': '7 дней',
@@ -191,8 +188,17 @@ export type TrafficClientDetailsProps = {
   row: TrafficClientRow
   chartData: TrafficChartData | null
   chartLoading: boolean
-  chartRange: string
-  onChartRangeChange: (range: string) => void
+  retentionDays: number | null
+  chartMode: 'preset' | 'custom'
+  chartPreset: TrafficPeriodPreset
+  chartCustomFrom?: string
+  chartCustomTo?: string
+  chartAppliedFrom?: string
+  chartAppliedTo?: string
+  onChartPresetChange: (preset: TrafficPeriodPreset) => void
+  onChartCustomChange: (from: string, to: string) => void
+  onChartApplyCustom: () => void
+  onNotifyError?: (message: string) => void
   policy: ClientAccessPolicy | null
   policyLoading?: boolean
 }
@@ -201,8 +207,17 @@ export default function TrafficClientDetails({
   row,
   chartData,
   chartLoading,
-  chartRange,
-  onChartRangeChange,
+  retentionDays,
+  chartMode,
+  chartPreset,
+  chartCustomFrom,
+  chartCustomTo,
+  chartAppliedFrom,
+  chartAppliedTo,
+  onChartPresetChange,
+  onChartCustomChange,
+  onChartApplyCustom,
+  onNotifyError,
   policy,
   policyLoading = false,
 }: TrafficClientDetailsProps) {
@@ -321,6 +336,12 @@ export default function TrafficClientDetails({
       ? Math.min(((policy.traffic_consumed_bytes ?? 0) / policy.traffic_limit_bytes) * 100, 100)
       : null
 
+  const chartRetentionDays = retentionDays ?? chartData?.retention_days ?? null
+  const chartPeriodLabel =
+    chartMode === 'custom' && chartAppliedFrom && chartAppliedTo
+      ? `${chartAppliedFrom} — ${chartAppliedTo}`
+      : RANGE_LABELS[chartPreset]
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
@@ -345,15 +366,13 @@ export default function TrafficClientDetails({
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <MetricTile
           label="Всего"
           value={formatBytes(row.total_bytes)}
           sub={`RX ${formatBytes(row.total_received)} · TX ${formatBytes(row.total_sent)}`}
         />
-        <MetricTile label="За 1 день" value={formatBytes(row.traffic_1d)} />
-        <MetricTile label="За 7 дней" value={formatBytes(row.traffic_7d)} />
-        <MetricTile label="За 30 дней" value={formatBytes(row.traffic_30d)} />
+        <MetricTile label="За период" value={formatBytes(chartData?.total ?? 0)} sub={chartPeriodLabel} />
       </div>
 
       {row.ha_aggregated && row.ha_node_breakdown && row.ha_node_breakdown.length > 0 && (
@@ -370,7 +389,7 @@ export default function TrafficClientDetails({
               <TableRow>
                 <TableHead>Узел</TableHead>
                 <TableHead className="text-right">Всего</TableHead>
-                <TableHead className="text-right">За 7 дней</TableHead>
+                <TableHead className="text-right">За период</TableHead>
                 <TableHead>Статус</TableHead>
               </TableRow>
             </TableHeader>
@@ -382,7 +401,7 @@ export default function TrafficClientDetails({
                     {formatBytes(node.total_bytes)}
                   </TableCell>
                   <TableCell className="text-right font-mono text-xs tabular-nums">
-                    {formatBytes(node.traffic_7d)}
+                    {formatBytes(node.traffic_period)}
                   </TableCell>
                   <TableCell>
                     <Badge variant={node.is_active ? 'success' : 'secondary'} className="text-[10px]">
@@ -581,27 +600,27 @@ export default function TrafficClientDetails({
       </div>
 
       <div className="rounded-lg border bg-background">
-        <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="flex items-center gap-2 text-sm font-medium">
               <Activity size={16} />
               График трафика клиента
             </p>
-            <p className="text-xs text-muted-foreground">
-              Дельта байт · {RANGE_LABELS[chartRange] ?? chartRange}
-            </p>
+            <p className="text-xs text-muted-foreground">Дельта байт · {chartPeriodLabel}</p>
           </div>
-          <Select value={chartRange} onValueChange={onChartRangeChange}>
-            <SelectTrigger className="h-9 w-full text-xs sm:w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="1h">1 час</SelectItem>
-              <SelectItem value="1d">24 часа</SelectItem>
-              <SelectItem value="7d">7 дней</SelectItem>
-              <SelectItem value="30d">30 дней</SelectItem>
-            </SelectContent>
-          </Select>
+          <TrafficPeriodControls
+            retentionDays={chartRetentionDays}
+            mode={chartMode}
+            preset={chartPreset}
+            presets={CHART_PERIOD_PRESETS}
+            customFrom={chartCustomFrom}
+            customTo={chartCustomTo}
+            showApply
+            onPresetChange={onChartPresetChange}
+            onCustomChange={onChartCustomChange}
+            onApplyCustom={onChartApplyCustom}
+            onNotifyError={onNotifyError}
+          />
         </div>
         <div className="p-4">
           {chartLoading ? (

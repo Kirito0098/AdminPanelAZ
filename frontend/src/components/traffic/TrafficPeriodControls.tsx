@@ -9,27 +9,38 @@ import {
 } from '@/lib/trafficPeriod'
 import { cn } from '@/lib/utils'
 
-type Preset = '1d' | '7d' | '30d'
+/** Widest preset set; overview omits `1h` via default `presets`. */
+export type TrafficPeriodPreset = '1h' | '1d' | '7d' | '30d'
+
+export const OVERVIEW_PERIOD_PRESETS: { id: TrafficPeriodPreset; label: string }[] = [
+  { id: '1d', label: '1д' },
+  { id: '7d', label: '7д' },
+  { id: '30d', label: '30д' },
+]
+
+/** Chart-only: includes 1h alongside day presets. */
+export const CHART_PERIOD_PRESETS: { id: TrafficPeriodPreset; label: string }[] = [
+  { id: '1h', label: '1ч' },
+  { id: '1d', label: '1д' },
+  { id: '7d', label: '7д' },
+  { id: '30d', label: '30д' },
+]
 
 type Props = {
   retentionDays: number | null
   mode: 'preset' | 'custom'
-  preset: Preset
+  preset: TrafficPeriodPreset
+  /** Defaults to overview presets (no 1h). Pass `CHART_PERIOD_PRESETS` for the client chart. */
+  presets?: { id: TrafficPeriodPreset; label: string }[]
   customFrom?: string // YYYY-MM-DD
   customTo?: string
-  showApply?: boolean // true for overview
-  onPresetChange: (p: Preset) => void
+  showApply?: boolean // true for overview / chart custom Apply
+  onPresetChange: (p: TrafficPeriodPreset) => void
   onCustomChange: (from: string, to: string) => void
   onApplyCustom?: () => void
   onNotifyError?: (message: string) => void
   disabled?: boolean
 }
-
-const PRESETS: { id: Preset; label: string }[] = [
-  { id: '1d', label: '1д' },
-  { id: '7d', label: '7д' },
-  { id: '30d', label: '30д' },
-]
 
 function defaultDraftRange(retentionDays: number): { from: string; to: string } {
   const { min, max } = availableDateBounds(retentionDays)
@@ -45,6 +56,7 @@ export default function TrafficPeriodControls({
   retentionDays,
   mode,
   preset,
+  presets = OVERVIEW_PERIOD_PRESETS,
   customFrom,
   customTo,
   showApply = false,
@@ -87,7 +99,7 @@ export default function TrafficPeriodControls({
     return true
   }
 
-  const handlePreset = (p: Preset) => {
+  const handlePreset = (p: TrafficPeriodPreset) => {
     setOpen(false)
     onPresetChange(p)
   }
@@ -150,7 +162,7 @@ export default function TrafficPeriodControls({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1">
-        {PRESETS.map(({ id, label }) => (
+        {presets.map(({ id, label }) => (
           <Button
             key={id}
             type="button"

@@ -34,7 +34,9 @@ import {
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { formatBytes } from '@/components/monitoring/MonitoringCharts'
 import TrafficClientDetails from '@/components/traffic/TrafficClientDetails'
-import TrafficPeriodControls from '@/components/traffic/TrafficPeriodControls'
+import TrafficPeriodControls, {
+  type TrafficPeriodPreset,
+} from '@/components/traffic/TrafficPeriodControls'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import { NodeBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -310,7 +312,12 @@ export default function TrafficPage() {
   const [selectedProtocol, setSelectedProtocol] = useState<string>('')
   const [clientPolicy, setClientPolicy] = useState<ClientAccessPolicy | null>(null)
   const [policyLoading, setPolicyLoading] = useState(false)
-  const [chartRange, setChartRange] = useState('7d')
+  const [chartMode, setChartMode] = useState<'preset' | 'custom'>('preset')
+  const [chartPreset, setChartPreset] = useState<TrafficPeriodPreset>('7d')
+  const [chartDraftFrom, setChartDraftFrom] = useState('')
+  const [chartDraftTo, setChartDraftTo] = useState('')
+  const [chartAppliedFrom, setChartAppliedFrom] = useState('')
+  const [chartAppliedTo, setChartAppliedTo] = useState('')
   const [overviewPreset, setOverviewPreset] = useState<OverviewPreset>('30d')
   const [overviewMode, setOverviewMode] = useState<'preset' | 'custom'>('preset')
   const [draftFrom, setDraftFrom] = useState('')
@@ -465,13 +472,17 @@ export default function TrafficPage() {
     try {
       // Always request all protocols so awg2-enabled UI can render amneziawg2_bytes
       // alongside openvpn/wireguard when the feature toggle is on.
-      setChartData(await getTrafficChart(selectedClient, { range: chartRange, protocol: 'all' }))
+      const opts =
+        chartMode === 'custom' && chartAppliedFrom && chartAppliedTo
+          ? { from: chartAppliedFrom, to: chartAppliedTo, protocol: 'all' as const }
+          : { range: chartPreset, protocol: 'all' as const }
+      setChartData(await getTrafficChart(selectedClient, opts))
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки графика')
     } finally {
       setChartLoading(false)
     }
-  }, [selectedClient, chartRange, notifyError])
+  }, [selectedClient, chartMode, chartPreset, chartAppliedFrom, chartAppliedTo, notifyError])
 
   useEffect(() => {
     if (nodeLoading) return
@@ -644,6 +655,42 @@ export default function TrafficPage() {
     setAppliedFrom(draftFrom)
     setAppliedTo(draftTo)
     setOverviewMode('custom')
+  }
+
+  const handleChartPresetChange = (preset: TrafficPeriodPreset) => {
+    setChartPreset(preset)
+    setChartMode('preset')
+  }
+
+  const handleChartCustomChange = (from: string, to: string) => {
+    setChartMode('custom')
+    setChartDraftFrom(from)
+    setChartDraftTo(to)
+  }
+
+  const handleChartApplyCustom = () => {
+    if (!chartDraftFrom || !chartDraftTo || retentionDays == null) {
+      notifyError(
+        retentionDays == null
+          ? 'Срок хранения ещё не загружен.'
+          : 'Выберите даты начала и конца периода.',
+      )
+      return
+    }
+    const from = parseLocalDate(chartDraftFrom)
+    const to = parseLocalDate(chartDraftTo)
+    if (!from || !to) {
+      notifyError('Некорректные даты периода.')
+      return
+    }
+    const err = validateCustomRange(from, to, retentionDays)
+    if (err) {
+      notifyError(err)
+      return
+    }
+    setChartAppliedFrom(chartDraftFrom)
+    setChartAppliedTo(chartDraftTo)
+    setChartMode('custom')
   }
 
   const handleReset = async () => {
@@ -875,7 +922,10 @@ export default function TrafficPage() {
                   customFrom={draftFrom}
                   customTo={draftTo}
                   showApply
-                  onPresetChange={handleOverviewPresetChange}
+                  onPresetChange={(p) => {
+                    if (p === '1h') return
+                    handleOverviewPresetChange(p)
+                  }}
                   onCustomChange={handleOverviewCustomChange}
                   onApplyCustom={handleOverviewApplyCustom}
                   onNotifyError={notifyError}
@@ -938,8 +988,17 @@ export default function TrafficPage() {
                               row={selectedRow}
                               chartData={chartData}
                               chartLoading={chartLoading}
-                              chartRange={chartRange}
-                              onChartRangeChange={setChartRange}
+                              retentionDays={retentionDays}
+                              chartMode={chartMode}
+                              chartPreset={chartPreset}
+                              chartCustomFrom={chartDraftFrom}
+                              chartCustomTo={chartDraftTo}
+                              chartAppliedFrom={chartAppliedFrom}
+                              chartAppliedTo={chartAppliedTo}
+                              onChartPresetChange={handleChartPresetChange}
+                              onChartCustomChange={handleChartCustomChange}
+                              onChartApplyCustom={handleChartApplyCustom}
+                              onNotifyError={notifyError}
                               policy={clientPolicy}
                               policyLoading={policyLoading}
                             />
@@ -1026,8 +1085,17 @@ export default function TrafficPage() {
                                         row={selectedRow}
                                         chartData={chartData}
                                         chartLoading={chartLoading}
-                                        chartRange={chartRange}
-                                        onChartRangeChange={setChartRange}
+                                        retentionDays={retentionDays}
+                                        chartMode={chartMode}
+                                        chartPreset={chartPreset}
+                                        chartCustomFrom={chartDraftFrom}
+                                        chartCustomTo={chartDraftTo}
+                                        chartAppliedFrom={chartAppliedFrom}
+                                        chartAppliedTo={chartAppliedTo}
+                                        onChartPresetChange={handleChartPresetChange}
+                                        onChartCustomChange={handleChartCustomChange}
+                                        onChartApplyCustom={handleChartApplyCustom}
+                                        onNotifyError={notifyError}
                                         policy={clientPolicy}
                                         policyLoading={policyLoading}
                                       />
