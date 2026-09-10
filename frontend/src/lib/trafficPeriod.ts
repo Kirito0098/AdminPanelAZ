@@ -41,7 +41,6 @@ export function availableDateBounds(
 
 const MSG_ORDER = 'Дата «от» не может быть позже даты «до».'
 const MSG_FUTURE = 'Нельзя выбрать дату в будущем.'
-const MSG_FORMAT = 'Некорректный формат даты (ожидается ГГГГ-ММ-ДД).'
 
 function retentionMessage(retentionDays: number): string {
   return `Нельзя: данные трафика хранятся ${retentionDays} дней (Настройки → Обслуживание).`

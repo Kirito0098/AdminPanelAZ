@@ -423,6 +423,7 @@ export default function TrafficPage() {
       } catch (err) {
         // Custom range can 400 after retention shrink before retentionDays updates —
         // reset to preset and retry so the page does not stick on a dead custom window.
+        let failure: unknown = err
         if (
           isTrafficPeriodHttpError(err) &&
           overviewMode === 'custom' &&
@@ -440,14 +441,14 @@ export default function TrafficPage() {
             await fetchOverview({ period: '30d' })
             return
           } catch (retryErr) {
-            err = retryErr
+            failure = retryErr
           }
         }
         const message =
-          err instanceof ApiError
-            ? err.message
-            : err instanceof Error
-              ? err.message
+          failure instanceof ApiError
+            ? failure.message
+            : failure instanceof Error
+              ? failure.message
               : 'Ошибка загрузки трафика'
         setLoadError(message)
         notifyError(message)
@@ -530,6 +531,7 @@ export default function TrafficPage() {
         setRetentionDays(chart.retention_days)
       }
     } catch (err) {
+      let failure: unknown = err
       if (
         isTrafficPeriodHttpError(err) &&
         chartMode === 'custom' &&
@@ -554,10 +556,10 @@ export default function TrafficPage() {
           }
           return
         } catch (retryErr) {
-          err = retryErr
+          failure = retryErr
         }
       }
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки графика')
+      notifyError(failure instanceof ApiError ? failure.message : 'Ошибка загрузки графика')
     } finally {
       setChartLoading(false)
     }
