@@ -244,6 +244,153 @@ function FileActions({
   )
 }
 
+type OpenVpnTransport = 'both' | 'udp' | 'tcp'
+
+const OPENVPN_TRANSPORT_ORDER: OpenVpnTransport[] = ['both', 'udp', 'tcp']
+const OPENVPN_TRANSPORT_LABEL: Record<OpenVpnTransport, string> = {
+  both: 'UDP+TCP',
+  udp: 'UDP',
+  tcp: 'TCP',
+}
+
+function openvpnTransportOf(file: PortalFileMeta): OpenVpnTransport {
+  const name = file.filename.toLowerCase()
+  if (/-udp\.ovpn$/i.test(name) || name.includes('-udp.')) return 'udp'
+  if (/-tcp\.ovpn$/i.test(name) || name.includes('-tcp.')) return 'tcp'
+  return 'both'
+}
+
+/** AZ-test1-udp.ovpn / VPN-test1.ovpn → family key AZ-test1 / VPN-test1 */
+function openvpnFamilyKey(file: PortalFileMeta): string {
+  return file.filename.replace(/-(udp|tcp)\.ovpn$/i, '').replace(/\.ovpn$/i, '')
+}
+
+function openvpnFamilyTitle(key: string): string {
+  return key
+}
+
+type OpenVpnFamilyGroup = {
+  key: string
+  title: string
+  byTransport: Partial<Record<OpenVpnTransport, PortalFileMeta>>
+}
+
+function groupOpenVpnFiles(files: PortalFileMeta[]): OpenVpnFamilyGroup[] {
+  const map = new Map<string, OpenVpnFamilyGroup>()
+  for (const file of files) {
+    const key = openvpnFamilyKey(file)
+    const transport = openvpnTransportOf(file)
+    let group = map.get(key)
+    if (!group) {
+      group = { key, title: openvpnFamilyTitle(key), byTransport: {} }
+      map.set(key, group)
+    }
+    group.byTransport[transport] = file
+  }
+  return [...map.values()].sort((a, b) => {
+    const rank = (k: string) => (k.startsWith('AZ-') ? 0 : k.startsWith('VPN-') ? 1 : 2)
+    return rank(a.key) - rank(b.key) || a.key.localeCompare(b.key)
+  })
+}
+
+function defaultTransport(group: OpenVpnFamilyGroup): OpenVpnTransport {
+  for (const t of OPENVPN_TRANSPORT_ORDER) {
+    if (group.byTransport[t]) return t
+  }
+  return 'both'
+}
+
+function OpenVpnFamilyCard({
+  group,
+  onCopied,
+}: {
+  group: OpenVpnFamilyGroup
+  onCopied: (ok: boolean) => void
+}) {
+  const available = OPENVPN_TRANSPORT_ORDER.filter((t) => group.byTransport[t])
+  const [transport, setTransport] = useState<OpenVpnTransport>(() => defaultTransport(group))
+  const selected = group.byTransport[transport] || group.byTransport[defaultTransport(group)]
+
+  useEffect(() => {
+    if (!group.byTransport[transport]) {
+      const next = defaultTransport(group)
+      if (next !== transport) setTransport(next)
+    }
+  }, [group, transport])
+
+  if (!selected) return null
+
+  return (
+    <div className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-3.5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-slate-100">{group.title}</p>
+          <p className="truncate text-xs text-slate-400">{selected.filename}</p>
+        </div>
+        {available.length > 1 && (
+          <div className="flex flex-wrap gap-1.5">
+            {available.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTransport(t)}
+                className={cn(
+                  'rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors',
+                  transport === t
+                    ? 'border-cyan-400/50 bg-cyan-400/15 text-cyan-200'
+                    : 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-slate-200',
+                )}
+              >
+                {OPENVPN_TRANSPORT_LABEL[t]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <FileActions file={selected} onCopied={onCopied} />
+    </div>
+  )
+}
+
+function ProfileFileList({
+  files,
+  protocol,
+  onCopied,
+}: {
+  files: PortalFileMeta[]
+  protocol: string
+  onCopied: (ok: boolean) => void
+}) {
+  if (files.length === 0) {
+    return <p className="text-sm text-slate-400">Файлы профиля для этого протокола не найдены.</p>
+  }
+
+  if (protocol === 'openvpn') {
+    const groups = groupOpenVpnFiles(files)
+    return (
+      <>
+        {groups.map((group) => (
+          <OpenVpnFamilyCard key={group.key} group={group} onCopied={onCopied} />
+        ))}
+      </>
+    )
+  }
+
+  return (
+    <>
+      {files.map((file) => (
+        <div key={file.path} className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-3.5">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-slate-100">{file.label}</p>
+            <p className="truncate text-xs text-slate-400">{file.filename}</p>
+          </div>
+          <FileActions file={file} onCopied={onCopied} />
+        </div>
+      ))}
+    </>
+  )
+}
+
 export default function PortalPage() {
   const { token = '' } = useParams()
   const [data, setData] = useState<PortalMetaResponse | null>(null)
@@ -386,10 +533,12 @@ export default function PortalPage() {
             </div>
             {data.protocols.length > 1 && (
               <div className="flex flex-wrap gap-1.5">
-                {(['openvpn', 'amneziawg2', 'amneziawg', 'wireguard'] as const)
-                  .filter((p) => data.protocols.includes(p))
-                  .concat(data.protocols.filter((p) => !['openvpn', 'amneziawg2', 'amneziawg', 'wireguard'].includes(p)))
-                  .map((p) => (
+                {[...data.protocols].sort((a, b) => {
+                  const order = ['openvpn', 'amneziawg2', 'amneziawg', 'wireguard']
+                  const ia = order.indexOf(a)
+                  const ib = order.indexOf(b)
+                  return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+                }).map((p) => (
                   <button
                     key={p}
                     type="button"
@@ -459,25 +608,11 @@ export default function PortalPage() {
               title="Получить профиль"
             >
               <p className="text-sm text-slate-300">{profileHint(protocol || 'openvpn')}</p>
-              {filesForProtocol.length === 0 ? (
-                <p className="text-sm text-slate-400">Файлы профиля для этого протокола не найдены.</p>
-              ) : (
-                filesForProtocol.map((file) => (
-                  <div
-                    key={file.path}
-                    className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-3.5"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-100">{file.label}</p>
-                      <p className="truncate text-xs text-slate-400">{file.filename}</p>
-                    </div>
-                    <FileActions
-                      file={file}
-                      onCopied={(ok) => setToast(ok ? 'Ссылка на файл скопирована' : 'Не удалось скопировать')}
-                    />
-                  </div>
-                ))
-              )}
+              <ProfileFileList
+                files={filesForProtocol}
+                protocol={protocol || 'openvpn'}
+                onCopied={(ok) => setToast(ok ? 'Ссылка на файл скопирована' : 'Не удалось скопировать')}
+              />
             </KitPanel>
 
             <KitPanel
