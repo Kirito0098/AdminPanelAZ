@@ -78,5 +78,6 @@ def portal_redeem(
         "ok": True,
         "grant_days": result["grant_days"],
         "protocols_applied": result["protocols_applied"],
+        "access_until_by_protocol": result.get("access_until_by_protocol") or {},
         "access_until": access_until.isoformat() if access_until else None,
     }

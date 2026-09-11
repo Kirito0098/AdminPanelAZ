@@ -32,6 +32,7 @@ class UnlockCodeCreateRequest(BaseModel):
     max_redemptions: int | None = Field(default=None, ge=1, le=1000)
     code_expires_at: datetime | None = None
     code: str | None = None
+    allowed_client_names: list[str] | None = None
 
 
 def _require_unlock_codes_enabled() -> None:
@@ -72,6 +73,7 @@ def post_unlock_code(
             code_expires_at=payload.code_expires_at,
             creator=current_user,
             code=payload.code,
+            allowed_client_names=payload.allowed_client_names,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

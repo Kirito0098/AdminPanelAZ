@@ -9,6 +9,7 @@ export interface UnlockCodeCreateInput {
   mode: 'single' | 'multi'
   max_redemptions?: number
   code_expires_at?: string | null
+  allowed_client_names?: string[]
 }
 
 export interface UnlockCodeCreateResponse extends UnlockCodeRecord {}

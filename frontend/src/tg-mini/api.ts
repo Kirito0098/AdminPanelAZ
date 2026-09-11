@@ -353,6 +353,7 @@ export async function createTgUnlockCode(payload: {
   max_redemptions?: number
   code_expires_at?: string | null
   code?: string | null
+  allowed_client_names?: string[]
 }): Promise<UnlockCodeRecord> {
   return panelApiFetch<UnlockCodeRecord>('/unlock-codes', {
     method: 'POST',

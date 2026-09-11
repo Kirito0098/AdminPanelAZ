@@ -235,6 +235,7 @@ def test_unlock_code_models_and_migrations_smoke(monkeypatch):
     assert "access_until" in {col["name"] for col in inspector.get_columns("amneziawg2_access_policies")}
     assert "access_until" not in {col["name"] for col in inspector.get_columns("wg_access_policy")}
     assert "redemption_count" in {col["name"] for col in inspector.get_columns("unlock_codes")}
+    assert "allowed_client_names" in {col["name"] for col in inspector.get_columns("unlock_codes")}
     redemptions_uniques = inspector.get_unique_constraints("unlock_code_redemptions")
     assert any(
         set(constraint.get("column_names") or []) == {"code_id", "client_name", "node_id"}
@@ -722,6 +723,123 @@ def test_list_unlock_codes_marks_exhausted_and_includes_redemptions(db):
     assert item["redemptions"][0]["node_name"] == node.name
 
 
+def test_redeem_unlock_code_respects_client_allowlist(db):
+    node = _make_node(db)
+    admin = _make_user(db)
+    _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn])
+    _make_configs(db, node.id, admin.id, "bob", [VpnType.openvpn])
+    create_unlock_code(
+        db,
+        grant_days=5,
+        protocols=["openvpn"],
+        mode="multi",
+        max_redemptions=5,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="ALLOW-LIST1",
+        allowed_client_names=["Alice"],
+    )
+
+    with (
+        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        patch("app.services.unlock_codes.get_access_until", return_value=None),
+        patch(
+            "app.services.unlock_codes.set_access_until",
+            return_value={"access_until": datetime(2030, 1, 6, tzinfo=timezone.utc).isoformat()},
+        ),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
+        patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
+    ):
+        ok = redeem_unlock_code(db, code="ALLOW-LIST1", client_name="Alice", node_id=node.id)
+        with pytest.raises(ValueError, match="не предназначен"):
+            redeem_unlock_code(db, code="ALLOW-LIST1", client_name="Bob", node_id=node.id)
+
+    assert ok["grant_days"] == 5
+    from app.services.unlock_codes import list_unlock_codes
+
+    listed = list_unlock_codes(db)
+    assert listed[0]["allowed_client_names"] == ["alice"]
+
+
+def test_redeem_profile_bound_code_extends_all_client_protocols(db):
+    node = _make_node(db)
+    admin = _make_user(db)
+    _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn, VpnType.wireguard, VpnType.amneziawg2])
+    create_unlock_code(
+        db,
+        grant_days=10,
+        protocols=["amneziawg2"],  # stored protocol ignored for allowlisted codes
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="PROFILE-01",
+        allowed_client_names=["alice"],
+    )
+
+    fixed_now = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
+    current = {
+        "openvpn": datetime(2030, 1, 20, tzinfo=timezone.utc),
+        "wireguard": datetime(2030, 1, 10, tzinfo=timezone.utc),
+        "amneziawg2": datetime(2030, 2, 1, tzinfo=timezone.utc),
+    }
+    set_calls: list[tuple] = []
+
+    def _fake_get(_db, protocol, _node_id, _client_name):
+        return current[protocol]
+
+    def _fake_set(_db, protocol, node_id, client_name, access_until, *, actor, commit):
+        set_calls.append((protocol, access_until))
+        current[protocol] = access_until
+        return {"access_until": access_until.isoformat()}
+
+    with (
+        patch("app.services.unlock_codes._now", return_value=fixed_now),
+        patch("app.services.unlock_codes.get_access_until", side_effect=_fake_get),
+        patch("app.services.unlock_codes.set_access_until", side_effect=_fake_set),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
+        patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
+    ):
+        result = redeem_unlock_code(db, code="PROFILE-01", client_name="Alice", node_id=node.id)
+
+    assert set(result["protocols_applied"]) == {"openvpn", "wireguard", "amneziawg2"}
+    # Shared profile deadline: earliest current (Jan 10) + 10 days.
+    expected = datetime(2030, 1, 20, tzinfo=timezone.utc)
+    assert {until for _, until in set_calls} == {expected}
+    assert len(set_calls) == 3
+
+
+def test_redeem_unlock_code_empty_allowlist_allows_any_client(db):
+    node = _make_node(db)
+    admin = _make_user(db)
+    _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn])
+    create_unlock_code(
+        db,
+        grant_days=5,
+        protocols=["openvpn"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="ALLOW-EMPTY",
+        allowed_client_names=[],
+    )
+
+    with (
+        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        patch("app.services.unlock_codes.get_access_until", return_value=None),
+        patch(
+            "app.services.unlock_codes.set_access_until",
+            return_value={"access_until": datetime(2030, 1, 6, tzinfo=timezone.utc).isoformat()},
+        ),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
+        patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
+    ):
+        result = redeem_unlock_code(db, code="ALLOW-EMPTY", client_name="Alice", node_id=node.id)
+
+    assert result["grant_days"] == 5
+
+
 def test_atomic_redemption_slot_update_rejects_when_full(db):
     admin = _make_user(db)
     row = create_unlock_code(
@@ -810,12 +928,14 @@ def test_unlock_codes_admin_routes():
         assert body["exhausted"] is False
         assert body["redemption_count"] == 0
         assert body["redemptions"] == []
+        assert body["allowed_client_names"] == []
 
         listed = client.get("/api/unlock-codes")
         assert listed.status_code == 200
         assert len(listed.json()) == 1
         assert listed.json()[0]["exhausted"] is False
         assert listed.json()[0]["redemptions"] == []
+        assert listed.json()[0]["allowed_client_names"] == []
 
         revoked = client.post(f"/api/unlock-codes/{body['id']}/revoke")
         assert revoked.status_code == 200

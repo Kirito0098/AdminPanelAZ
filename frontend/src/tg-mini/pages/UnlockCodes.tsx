@@ -84,6 +84,7 @@ export default function UnlockCodes() {
   const [maxRedemptions, setMaxRedemptions] = useState('10')
   const [codeExpiresAt, setCodeExpiresAt] = useState('')
   const [selectedProtocols, setSelectedProtocols] = useState<UnlockCodeProtocol[]>([])
+  const [allowedClientsRaw, setAllowedClientsRaw] = useState('')
 
   const availableProtocols = useMemo(
     () =>
@@ -155,14 +156,20 @@ export default function UnlockCodes() {
     setSaving(true)
     setFeedback(null)
     try {
+      const allowed_client_names = allowedClientsRaw
+        .split(/[,;\n]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
       const created = await createTgUnlockCode({
         grant_days: parsedGrantDays,
         protocols: selectedProtocols,
         mode,
         max_redemptions: mode === 'single' ? 1 : parsedMaxRedemptions,
         code_expires_at: toEndOfDayIso(codeExpiresAt),
+        allowed_client_names,
       })
       setCreatedCode(created)
+      setAllowedClientsRaw('')
       window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
       setFeedback({ tone: 'success', text: 'Unlock-код создан' })
       await load({ silent: true })
@@ -360,6 +367,18 @@ export default function UnlockCodes() {
               )}
             </div>
 
+            <div className="space-y-2">
+              <Label htmlFor="allowed-clients">Клиенты (опционально)</Label>
+              <Input
+                id="allowed-clients"
+                value={allowedClientsRaw}
+                onChange={(event) => setAllowedClientsRaw(event.target.value)}
+                placeholder="alice, bob — пусто = любой"
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">Имена через запятую. Пусто — любой клиент.</p>
+            </div>
+
             <div className="flex flex-wrap gap-2">
               <Button type="submit" className="gap-1.5" disabled={saving || availableProtocols.length === 0}>
                 {saving ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <KeyRound size={16} aria-hidden />}
@@ -431,6 +450,12 @@ export default function UnlockCodes() {
                       <p className="text-xs text-muted-foreground">
                         Создан: {formatDateTime(code.created_at)} · Истекает:{' '}
                         {formatDateTime(code.code_expires_at)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Клиенты:{' '}
+                        {(code.allowed_client_names?.length ?? 0) > 0
+                          ? code.allowed_client_names!.join(', ')
+                          : 'любой'}
                       </p>
                       {redemptions.length > 0 && (
                         <div className="space-y-1 pt-1">

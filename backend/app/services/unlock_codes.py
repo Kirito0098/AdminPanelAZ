@@ -42,6 +42,7 @@ _REDEEM_REVOKED_MESSAGE = "Unlock-ключ отозван"
 _REDEEM_EXPIRED_MESSAGE = "Срок действия unlock-ключа истёк"
 _REDEEM_LIMIT_MESSAGE = "Лимит активаций unlock-ключа исчерпан"
 _REDEEM_ALREADY_USED_MESSAGE = "Этот unlock-ключ уже использован вами"
+_REDEEM_CLIENT_NOT_ALLOWED_MESSAGE = "Этот unlock-ключ не предназначен для вашего клиента"
 _REDEEM_PROTOCOL_MISMATCH_MESSAGE = "Нет пересечения протоколов клиента и unlock-ключа"
 _REDEEM_GENERIC_ERROR_MESSAGE = "Не удалось активировать unlock-ключ"
 
@@ -113,6 +114,32 @@ def _parse_code_protocols(raw: str | None) -> list[str]:
     return _normalize_protocols([str(item) for item in parsed])
 
 
+def _normalize_allowed_client_names(names: list[str] | None) -> list[str]:
+    if not names:
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in names:
+        key = _normalize_client_name(str(raw))
+        if not key or key in seen:
+            continue
+        if len(key) > 64:
+            raise ValueError("Client name in allowlist is too long")
+        seen.add(key)
+        normalized.append(key)
+    return normalized
+
+
+def _parse_allowed_client_names(raw: str | None) -> list[str]:
+    try:
+        parsed = json.loads(raw or "[]")
+    except ValueError as exc:
+        raise ValueError("Invalid unlock code client allowlist payload") from exc
+    if not isinstance(parsed, list):
+        raise ValueError("Invalid unlock code client allowlist payload")
+    return _normalize_allowed_client_names([str(item) for item in parsed])
+
+
 def _serialize_redemption(row: UnlockCodeRedemption) -> dict:
     node = getattr(row, "node", None)
     return {
@@ -138,6 +165,9 @@ def _serialize_code(code: UnlockCode) -> dict:
         "max_redemptions": max_redemptions,
         "redemption_count": redemption_count,
         "exhausted": exhausted,
+        "allowed_client_names": _parse_allowed_client_names(
+            getattr(code, "allowed_client_names", None)
+        ),
         "redemptions": [_serialize_redemption(item) for item in redemptions],
         "code_expires_at": _as_utc(code.code_expires_at).isoformat() if code.code_expires_at else None,
         "created_by_user_id": code.created_by_user_id,
@@ -169,6 +199,7 @@ def create_unlock_code(
     code_expires_at: datetime | None,
     creator: User | None,
     code: str | None = None,
+    allowed_client_names: list[str] | None = None,
 ) -> UnlockCode:
     if int(grant_days) < 1:
         raise ValueError("grant_days must be at least 1")
@@ -183,6 +214,7 @@ def create_unlock_code(
         raise ValueError("max_redemptions must be at least 1")
 
     normalized_protocols = _normalize_protocols(protocols)
+    normalized_clients = _normalize_allowed_client_names(allowed_client_names)
     code_value = _validate_custom_code(code) if code is not None and _normalize_code(code) else ""
     if not code_value:
         for _ in range(32):
@@ -202,6 +234,7 @@ def create_unlock_code(
         mode=normalized_mode,
         max_redemptions=int(max_redemptions),
         redemption_count=0,
+        allowed_client_names=json.dumps(normalized_clients, ensure_ascii=False),
         code_expires_at=_to_db_datetime(code_expires_at),
         created_by_user_id=creator.id if creator is not None else None,
     )
@@ -410,9 +443,18 @@ def redeem_unlock_code(
         ):
             raise ValueError(_REDEEM_ALREADY_USED_MESSAGE)
 
+        allowed_clients = _parse_allowed_client_names(getattr(row, "allowed_client_names", None))
+        if allowed_clients and client_key not in allowed_clients:
+            raise ValueError(_REDEEM_CLIENT_NOT_ALLOWED_MESSAGE)
+
         canonical_client_name, client_protocols = _client_config_name_and_protocols(db, node_id, client_key)
         code_protocols = _parse_code_protocols(row.protocols)
-        protocols_applied = [protocol for protocol in code_protocols if protocol in client_protocols]
+        # Client-bound codes extend the whole profile (all protocols the client has on this node).
+        # Unrestricted codes still apply only the protocols stored on the code.
+        if allowed_clients:
+            protocols_applied = [protocol for protocol in ("openvpn", "wireguard", "amneziawg2") if protocol in client_protocols]
+        else:
+            protocols_applied = [protocol for protocol in code_protocols if protocol in client_protocols]
         if not protocols_applied:
             raise ValueError(_REDEEM_PROTOCOL_MISMATCH_MESSAGE)
 
@@ -446,11 +488,27 @@ def redeem_unlock_code(
         }
         grant_until_base = now
         granted_until_by_protocol = {}
+        profile_grant_until: datetime | None = None
+        if allowed_clients:
+            # One shared profile deadline: extend from the earliest current access (portal "Истекает").
+            current_values = []
+            for protocol in protocols_applied:
+                policy_client_name = (
+                    canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
+                )
+                current_values.append(_as_utc(get_access_until(db, protocol, node_id, policy_client_name)))
+            present = [value for value in current_values if value is not None]
+            profile_base = min(present) if present else grant_until_base
+            profile_grant_until = max(grant_until_base, profile_base) + timedelta(days=grant_days)
+
         for protocol in protocols_applied:
             policy_client_name = canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
-            current = get_access_until(db, protocol, node_id, policy_client_name)
-            current_utc = _as_utc(current)
-            grant_until = max(grant_until_base, current_utc or grant_until_base) + timedelta(days=grant_days)
+            if profile_grant_until is not None:
+                grant_until = profile_grant_until
+            else:
+                current = get_access_until(db, protocol, node_id, policy_client_name)
+                current_utc = _as_utc(current)
+                grant_until = max(grant_until_base, current_utc or grant_until_base) + timedelta(days=grant_days)
 
             policy_row = policy_rows[protocol]
             if policy_row is not None:

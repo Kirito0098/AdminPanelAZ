@@ -727,11 +727,7 @@ export default function ClientActionsDialog({
   // Portal may list AmneziaWG separately; access policy / unlock target is still `wireguard`.
   if (wireguardFamilyEnabled && clientVpnTypes.has('wireguard')) availableUnlockProtocols.push('wireguard')
   if (awg2Enabled && clientVpnTypes.has('amneziawg2')) availableUnlockProtocols.push('amneziawg2')
-  const unlockCodeInitialProtocols: UnlockCodeProtocol[] = availableUnlockProtocols.includes(
-    config.vpn_type as UnlockCodeProtocol,
-  )
-    ? [config.vpn_type as UnlockCodeProtocol]
-    : availableUnlockProtocols.slice(0, 1)
+  const unlockCodeInitialProtocols: UnlockCodeProtocol[] = availableUnlockProtocols
 
   type FileRow = {
     key: string
@@ -1354,6 +1350,7 @@ export default function ClientActionsDialog({
         onOpenChange={setUnlockCodeDialogOpen}
         initialProtocols={unlockCodeInitialProtocols}
         availableProtocols={availableUnlockProtocols}
+        initialClientNames={config.client_name ? [config.client_name] : []}
       />
     </>
   )

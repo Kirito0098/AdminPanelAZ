@@ -40,6 +40,7 @@ export interface PortalRedeemResponse {
   grant_days: number
   protocols_applied: string[]
   access_until: string | null
+  access_until_by_protocol?: Record<string, string | null>
 }
 
 export async function getPortalLink(clientName: string) {

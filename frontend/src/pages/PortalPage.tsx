@@ -454,11 +454,35 @@ export default function PortalPage() {
       setData(refreshed)
       setProtocol(preferredProtocol(refreshed.protocols.length ? refreshed.protocols : refreshed.files.map((f) => f.vpn_type)))
       setRedeemCode('')
-      setToast(
-        result.access_until
-          ? `Ключ принят. Доступ до ${formatPortalDate(result.access_until)}`
-          : 'Ключ принят',
-      )
+      const applied = result.protocols_applied || []
+      const byProtocol = result.access_until_by_protocol || {}
+      const appliedDates = applied
+        .map((protocol) => byProtocol[protocol])
+        .filter((value): value is string => Boolean(value))
+        .sort()
+      const appliedLatest = appliedDates.length > 0 ? appliedDates[appliedDates.length - 1] : null
+      const protocolNames = applied
+        .map((protocol) =>
+          protocol === 'openvpn'
+            ? 'OpenVPN'
+            : protocol === 'wireguard'
+              ? 'WireGuard'
+              : protocol === 'amneziawg2'
+                ? 'AmneziaWG 2.0'
+                : protocol,
+        )
+        .join(', ')
+      if (appliedLatest && result.access_until && appliedLatest.slice(0, 10) !== result.access_until.slice(0, 10)) {
+        setToast(
+          `Ключ принят (${protocolNames || 'протоколы'}): до ${formatPortalDate(appliedLatest)}. Общий срок портала: до ${formatPortalDate(result.access_until)}`,
+        )
+      } else if (appliedLatest || result.access_until) {
+        setToast(
+          `Ключ принят${protocolNames ? ` (${protocolNames})` : ''}. Доступ до ${formatPortalDate(appliedLatest || result.access_until!)}`,
+        )
+      } else {
+        setToast('Ключ принят')
+      }
     } catch (err: unknown) {
       setRedeemError(err instanceof Error ? err.message : 'Не удалось активировать ключ')
     } finally {
