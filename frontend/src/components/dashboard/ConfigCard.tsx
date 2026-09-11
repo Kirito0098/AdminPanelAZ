@@ -560,24 +560,6 @@ export default function ConfigCard({
                 >
                   <Copy size={13} />
                 </button>
-                {onCopyPortalLink && (
-                  <button
-                    type="button"
-                    title="Копировать ссылку портала"
-                    disabled={loadingAction === 'portal-copy'}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onCopyPortalLink()
-                    }}
-                    className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
-                  >
-                    {loadingAction === 'portal-copy' ? (
-                      <Loader2 size={13} className="animate-spin" />
-                    ) : (
-                      <Link2 size={13} />
-                    )}
-                  </button>
-                )}
               </CardTitle>
               <Badge variant={statusBadgeVariant} className="shrink-0 gap-1 px-2 py-0.5 text-[11px]">
                 <StatusIcon size={11} />
@@ -754,6 +736,20 @@ export default function ConfigCard({
                 >
                   <BarChart3 size={14} className="shrink-0" />
                 </IconActionLink>
+              )}
+
+              {onCopyPortalLink && (
+                <IconActionButton
+                  title="Копировать ссылку портала"
+                  label="Ссылка"
+                  disabled={actionBusy}
+                  loading={loadingAction === 'portal-copy'}
+                  className={actionAccent?.className}
+                  style={actionAccent?.style}
+                  onClick={onCopyPortalLink}
+                >
+                  <Link2 size={14} className="shrink-0" />
+                </IconActionButton>
               )}
 
               <IconActionButton
