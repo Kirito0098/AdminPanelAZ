@@ -809,6 +809,61 @@ def test_redeem_profile_bound_code_extends_all_client_protocols(db):
     assert len(set_calls) == 3
 
 
+def test_redeem_unlock_code_preserves_manual_permanent_ban(db):
+    node = _make_node(db)
+    admin = _make_user(db)
+    _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn, VpnType.wireguard])
+    db.add(
+        OpenVpnAccessPolicy(
+            node_id=node.id,
+            client_name="alice",
+            is_temp_blocked=False,
+            is_permanent_blocked=True,
+            block_reason="manual_permanent",
+        )
+    )
+    db.add(
+        WgAccessPolicy(
+            node_id=node.id,
+            client_name="alice",
+            expires_at=None,
+            is_temp_blocked=False,
+            is_permanent_blocked=True,
+            block_reason="manual_permanent",
+        )
+    )
+    db.commit()
+    create_unlock_code(
+        db,
+        grant_days=7,
+        protocols=["openvpn", "wireguard"],
+        mode="multi",
+        max_redemptions=3,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="PERM-BAN-01",
+    )
+
+    with (
+        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        patch("app.services.unlock_codes.get_access_until", return_value=None),
+        patch(
+            "app.services.unlock_codes.set_access_until",
+            return_value={"access_until": datetime(2030, 1, 8, tzinfo=timezone.utc).isoformat()},
+        ),
+        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
+        patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
+    ):
+        redeem_unlock_code(db, code="PERM-BAN-01", client_name="Alice", node_id=node.id)
+
+    ovpn = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
+    wg = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
+    assert ovpn.is_permanent_blocked is True
+    assert ovpn.block_reason == "manual_permanent"
+    assert wg.is_permanent_blocked is True
+    assert wg.block_reason == "manual_permanent"
+
+
 def test_redeem_unlock_code_empty_allowlist_allows_any_client(db):
     node = _make_node(db)
     admin = _make_user(db)

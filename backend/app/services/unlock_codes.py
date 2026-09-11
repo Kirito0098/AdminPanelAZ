@@ -372,6 +372,10 @@ def _replicate_redeemed_access_until(
 
 
 def _clear_policy_block(row, *, actor: str) -> None:
+    reason = (getattr(row, "block_reason", None) or "").strip().lower()
+    # Unlock redeem extends access_until; it must not lift an admin permanent ban.
+    if bool(getattr(row, "is_permanent_blocked", False)) and reason == "manual_permanent":
+        return
     row.is_temp_blocked = False
     row.is_permanent_blocked = False
     row.block_reason = None

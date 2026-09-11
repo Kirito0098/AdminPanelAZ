@@ -290,22 +290,6 @@ async def ip_restriction_middleware(request, call_next):
             with_access_path(settings, "/ip-blocked"),
         )
     )
-    # Entire Host = portal_domain is client-facing (share links); skip IP whitelist.
-    if not exempt:
-        try:
-            from app.database import SessionLocal as _SL
-            from app.services.client_portal import get_portal_domain
-
-            _db = _SL()
-            try:
-                portal_host = get_portal_domain(_db)
-                req_host = (request.headers.get("host") or "").split(":")[0].strip().lower()
-                if portal_host and req_host == portal_host.lower():
-                    exempt = True
-            finally:
-                _db.close()
-        except Exception:
-            pass
     if exempt:
         return await call_next(request)
 

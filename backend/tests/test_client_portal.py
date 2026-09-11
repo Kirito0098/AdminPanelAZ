@@ -291,6 +291,7 @@ def test_public_portal_redeem_returns_access_until(public_client):
         "grant_days": 7,
         "protocols_applied": ["openvpn"],
         "access_until": fixed_until.isoformat(),
+        "access_until_by_protocol": {"openvpn": fixed_until.isoformat()},
     }
     rl.consume.assert_called_once_with("198.51.100.1")
 
@@ -394,6 +395,7 @@ def test_list_files_hides_wireguard_when_feature_disabled():
     db = MagicMock()
     cfg = MagicMock()
     cfg.id = 7
+    cfg.node_id = 3
     cfg.client_name = "test1"
     cfg.vpn_type = VpnType.wireguard
     adapter = MagicMock()
@@ -401,16 +403,57 @@ def test_list_files_hides_wireguard_when_feature_disabled():
         {"protocol": "wireguard", "variant": "vpn", "path": "/client/wireguard/vpn/a-wg.conf", "filename": "a-wg.conf"},
         {"protocol": "amneziawg", "variant": "vpn", "path": "/client/amneziawg/vpn/a-am.conf", "filename": "a-am.conf"},
     ]
+    node = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = node
 
     def feat_enabled(key: str) -> bool:
         return key != "wireguard"
 
     with (
-        patch("app.services.client_portal.get_active_adapter", return_value=adapter),
+        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter) as get_adapter,
         patch("app.services.feature_guards.get_feature_service") as feats,
     ):
         feats.return_value.is_enabled.side_effect = feat_enabled
         files = portal._list_files_for_configs(db, [cfg])
 
+    get_adapter.assert_called_once_with(node)
     assert [f["vpn_type"] for f in files] == ["amneziawg"]
     assert files[0]["filename"].startswith("AWG-")
+
+
+def test_collect_access_policies_lowercases_wg_client_name():
+    from app.models import AmneziaWg2AccessPolicy, WgAccessPolicy
+
+    db = MagicMock()
+    filter_calls: list[tuple[str, tuple]] = []
+
+    def make_query(model):
+        q = MagicMock()
+
+        def filter_(*args, **kwargs):
+            filter_calls.append((model.__name__, args))
+            return q
+
+        q.filter.side_effect = filter_
+        q.first.return_value = None
+        return q
+
+    db.query.side_effect = make_query
+    portal._collect_access_policies(
+        db,
+        node_id=1,
+        client_name="Alice",
+        protocols={"wireguard", "amneziawg2"},
+    )
+
+    names: list[tuple[str, str]] = []
+    for model_name, args in filter_calls:
+        for expr in args:
+            right = getattr(expr, "right", None)
+            value = getattr(right, "value", None)
+            if isinstance(value, str):
+                names.append((model_name, value))
+    assert ("WgAccessPolicy", "alice") in names
+    assert ("AmneziaWg2AccessPolicy", "alice") in names
+    assert WgAccessPolicy.__name__ in {m for m, _ in filter_calls}
+    assert AmneziaWg2AccessPolicy.__name__ in {m for m, _ in filter_calls}

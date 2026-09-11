@@ -15,6 +15,7 @@ from app.models import (
     AmneziaWg2AccessPolicy,
     AppSetting,
     ClientPortalToken,
+    Node,
     OpenVpnAccessPolicy,
     User,
     UserTrafficStatProtocol,
@@ -22,7 +23,7 @@ from app.models import (
     VpnType,
     WgAccessPolicy,
 )
-from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.node_manager import get_adapter_for_node, get_active_node
 from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.panel_publish_info import public_https_origin_url
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
@@ -276,8 +277,17 @@ def _protocol_feature_enabled(protocol: str) -> bool:
     return get_feature_service().is_enabled(key)
 
 
+def _adapter_for_node_id(db: Session, node_id: int):
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    return get_adapter_for_node(node)
+
+
 def _list_files_for_configs(db: Session, configs: list[VpnConfig]) -> list[dict]:
-    adapter = get_active_adapter(db)
+    if not configs:
+        return []
+    adapter = _adapter_for_node_id(db, configs[0].node_id)
     out: list[dict] = []
     for config in configs:
         files = adapter.get_profile_files(config.client_name, config.vpn_type)
@@ -356,17 +366,20 @@ def _collect_access_policies(db: Session, *, node_id: int, client_name: str, pro
             .first()
         )
     if "wireguard" in protocols or "amneziawg" in protocols:
+        # WG policy rows are stored lowercased across the stack.
+        wg_name = client_name.lower()
         policies.append(
             db.query(WgAccessPolicy)
-            .filter(WgAccessPolicy.node_id == node_id, WgAccessPolicy.client_name == client_name)
+            .filter(WgAccessPolicy.node_id == node_id, WgAccessPolicy.client_name == wg_name)
             .first()
         )
     if "amneziawg2" in protocols:
+        awg2_name = client_name.lower()
         policies.append(
             db.query(AmneziaWg2AccessPolicy)
             .filter(
                 AmneziaWg2AccessPolicy.node_id == node_id,
-                AmneziaWg2AccessPolicy.client_name == client_name,
+                AmneziaWg2AccessPolicy.client_name == awg2_name,
             )
             .first()
         )
@@ -528,7 +541,7 @@ def read_portal_profile(db: Session, token_row: ClientPortalToken, path: str) ->
     allowed = {item["path"] for item in _list_files_for_configs(db, configs)}
     if path not in allowed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
-    adapter = get_active_adapter(db)
+    adapter = _adapter_for_node_id(db, token_row.node_id)
     hosts = load_node_remote_hosts(db, token_row.node_id)
     content = read_profile_file_for_delivery(adapter, path, hosts)
     filename = build_profile_download_filename(token_row.client_name, path=path)
