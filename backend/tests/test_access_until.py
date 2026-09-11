@@ -310,3 +310,96 @@ def test_manual_unblock_while_access_expired_defers_reblock_to_worker():
     finally:
         db.close()
         engine.dispose()
+
+
+def test_set_access_until_require_deadline_skips_when_extended():
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        now = datetime.now(timezone.utc)
+        expired = now - timedelta(minutes=5)
+        future = now + timedelta(days=10)
+        adapter = _adapter()
+        with patch("app.services.access_until.get_adapter_for_node", return_value=adapter):
+            set_access_until(db, "openvpn", node.id, "Alice", expired, actor="admin")
+            set_access_until(db, "openvpn", node.id, "Alice", future, actor="unlock_codes")
+            result = set_access_until(
+                db,
+                "openvpn",
+                node.id,
+                "Alice",
+                expired,
+                actor="access_expiry_worker",
+                require_deadline_lte=now,
+            )
+
+        assert result is None
+        assert get_access_until(db, "openvpn", node.id, "Alice") == future
+        row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one()
+        assert row.block_reason != "access_expired"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_apply_due_access_blocks_does_not_clobber_concurrent_extension():
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        now = datetime.now(timezone.utc)
+        expired = now - timedelta(minutes=5)
+        future = now + timedelta(days=14)
+        adapter = _adapter()
+        with patch("app.services.access_until.get_adapter_for_node", return_value=adapter):
+            db.add(
+                OpenVpnAccessPolicy(
+                    node_id=node.id,
+                    client_name="Alice",
+                    access_until=expired.replace(tzinfo=None),
+                )
+            )
+            db.add(
+                WgAccessPolicy(
+                    node_id=node.id,
+                    client_name="alice",
+                    expires_at=expired.replace(tzinfo=None),
+                )
+            )
+            db.commit()
+
+            # After worker collects due rows and releases its read snapshot, a
+            # concurrent redeem extends deadlines before claim UPDATEs run.
+            orig_commit = db.commit
+            released = {"done": False}
+
+            def commit_then_concurrent_redeem():
+                if not released["done"]:
+                    released["done"] = True
+                    orig_commit()
+                    other = sessionmaker(bind=engine)()
+                    try:
+                        set_access_until(other, "openvpn", node.id, "Alice", future, actor="unlock_codes")
+                        set_access_until(other, "wireguard", node.id, "Alice", future, actor="unlock_codes")
+                    finally:
+                        other.close()
+                    return None
+                return orig_commit()
+
+            db.commit = commit_then_concurrent_redeem  # type: ignore[method-assign]
+            try:
+                counts = apply_due_access_blocks(db)
+            finally:
+                db.commit = orig_commit  # type: ignore[method-assign]
+
+        assert counts["rows_due"] == 2
+        assert counts["blocked"] == 0
+        assert counts["skipped"] == 2
+        assert get_access_until(db, "openvpn", node.id, "Alice") == future
+        assert get_access_until(db, "wireguard", node.id, "Alice") == future
+        ovpn = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one()
+        wg = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
+        assert ovpn.block_reason != "access_expired"
+        assert wg.block_reason != "access_expired"
+    finally:
+        db.close()
+        engine.dispose()

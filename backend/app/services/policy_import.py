@@ -19,7 +19,20 @@ _OVPN_POLICY_FIELDS = (
     "updated_by",
 )
 
-_WG_POLICY_FIELDS = _OVPN_POLICY_FIELDS + ("expires_at",)
+# WG stores access deadline in expires_at (no access_until column).
+_WG_POLICY_FIELDS = (
+    "expires_at",
+    "is_temp_blocked",
+    "is_permanent_blocked",
+    "block_reason",
+    "block_started_at",
+    "block_days",
+    "block_until",
+    "traffic_limit_bytes",
+    "traffic_limit_period_days",
+    "updated_by",
+)
+
 _AWG2_POLICY_FIELDS = (
     "access_until",
     "is_temp_blocked",
@@ -28,6 +41,8 @@ _AWG2_POLICY_FIELDS = (
     "block_started_at",
     "block_days",
     "block_until",
+    "traffic_limit_bytes",
+    "traffic_limit_period_days",
     "updated_by",
 )
 

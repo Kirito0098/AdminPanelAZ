@@ -62,6 +62,8 @@
 
 - **Unlock redeem + HA** — после активации unlock-кода на портале `access_until` реплицируется на HA-replica тем же `set_access_until`, что и ручной PATCH в панели (раньше продлевался только primary).
 - **Portal security** — скачивание профилей идёт через адаптер узла токена (не active node); Host=`portal_domain` больше не обходит IP-whitelist целиком (exempt только `/p/` и `/api/public/…`); WG/AWG2 policy на портале ищется по lowercased имени; unlock redeem не снимает `manual_permanent` бан.
+- **HA policy copy** — `_WG_POLICY_FIELDS` больше не наследует несуществующий `access_until` (дедлайн WG — `expires_at`); в `_AWG2_POLICY_FIELDS` добавлены traffic-limit поля для heal/Push-full copy.
+- **Access expiry TOCTOU** — воркер больше не затирает concurrent redeem/PATCH: claim через `UPDATE … WHERE deadline <= now`, иначе skip (SQLite snapshot isolation).
 - **Unlock redeem по узлу** — уникальность активации `(code, client_name, node_id)`: одноимённые клиенты на разных узлах могут активировать один multi-код независимо; повтор на том же узле по-прежнему запрещён.
 - **Статус unlock-ключей** — в **Подписка** / Mini App у использованных кодов бейджи «Активирован» / «Исчерпан» / «Частично» и список активаций (клиент, узел, время).
 - **Копирование ссылки портала на карточке** — кнопка **Ссылка** в ряду с «Трафик» / «Ещё» копирует постоянную portal-ссылку (если модуль `client_portal` включён).
