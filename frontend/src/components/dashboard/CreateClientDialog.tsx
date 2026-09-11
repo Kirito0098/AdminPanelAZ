@@ -21,6 +21,8 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import DatePickerField from '@/components/ui/DatePickerField'
+import { panelToday } from '@/lib/trafficPeriod'
 import {
   Select,
   SelectContent,
@@ -536,13 +538,12 @@ export default function CreateClientDialog({
                   <Label htmlFor="createAccessUntil" className="lg:text-base">
                     Доступ до
                   </Label>
-                  <Input
+                  <DatePickerField
                     id="createAccessUntil"
-                    className={fieldClass}
-                    type="date"
                     value={accessUntilDate}
-                    onChange={(e) => setAccessUntilDate(e.target.value)}
+                    onChange={setAccessUntilDate}
                     disabled={submitting}
+                    fromDate={panelToday()}
                   />
                   <p className={hintClass}>Необязательно. Одна дата для всех выбранных конфигураций.</p>
                 </div>

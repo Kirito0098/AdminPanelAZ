@@ -57,6 +57,8 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import DatePickerField from '@/components/ui/DatePickerField'
+import { panelToday } from '@/lib/trafficPeriod'
 import {
   getConfigStatus,
   getDownloadFilename,
@@ -359,11 +361,6 @@ export default function ClientActionsDialog({
   const trafficLimitExceeded = Boolean(policy?.traffic_limit_exceeded) || blockMode === 'traffic_limit'
   const status = getConfigStatus(config, tab, policy)
   const StatusIcon = statusIcons[status.variant]
-
-  const todayStr = () => {
-    const now = new Date()
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-  }
 
   const toDateInputValue = (value: string) => {
     const date = parseTimestamp(value)
@@ -981,12 +978,12 @@ export default function ClientActionsDialog({
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                   <div className="min-w-0 flex-1 space-y-2">
                     <Label htmlFor="access-until">Дата</Label>
-                    <Input
+                    <DatePickerField
                       id="access-until"
-                      type="date"
                       value={accessUntilValue}
-                      onChange={(e) => setAccessUntilValue(e.target.value)}
+                      onChange={setAccessUntilValue}
                       disabled={busyAction !== null || haReplicaReadonly}
+                      fromDate={panelToday()}
                     />
                   </div>
                   <div className="flex shrink-0 gap-2">
@@ -1309,18 +1306,17 @@ export default function ClientActionsDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="renewDate">Дата окончания сертификата</Label>
-              <Input
+              <DatePickerField
                 id="renewDate"
-                type="date"
-                min={todayStr()}
                 value={renewDate}
-                onChange={(e) => {
-                  setRenewDate(e.target.value)
-                  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(e.target.value)
+                allowClear={false}
+                fromDate={panelToday()}
+                onChange={(next) => {
+                  setRenewDate(next)
+                  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(next)
                   if (!match) return
                   const target = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
-                  const today = new Date()
-                  today.setHours(0, 0, 0, 0)
+                  const today = panelToday()
                   const diff = Math.round((target.getTime() - today.getTime()) / 86400000)
                   if (diff >= 1 && diff <= 3650) setRenewDays(String(diff))
                 }}

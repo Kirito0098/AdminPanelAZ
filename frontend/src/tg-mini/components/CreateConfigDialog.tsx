@@ -468,6 +468,7 @@ export default function CreateConfigDialog({
                   id="tg-mini-access-until"
                   type="date"
                   value={accessUntilDate}
+                  min={new Date().toISOString().slice(0, 10)}
                   onChange={(e) => setAccessUntilDate(e.target.value)}
                   disabled={busy || quotaReached}
                 />
