@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   Ban,
@@ -15,9 +15,7 @@ import {
   Zap,
 } from 'lucide-react'
 import {
-  awg2ClearTrafficLimit,
   awg2PermanentBlock,
-  awg2SetTrafficLimit,
   awg2TempBlock,
   awg2Unblock,
   ApiError,
@@ -26,22 +24,24 @@ import {
   createPortalLink,
   rotatePortalLink,
   revokePortalLink,
-  openvpnClearTrafficLimit,
   openvpnDisconnect,
   openvpnPermanentBlock,
-  openvpnSetTrafficLimit,
   openvpnTempBlock,
   openvpnUnblock,
   setConfigTags,
   updateConfig,
-  wgClearTrafficLimit,
   wgPermanentBlock,
-  wgSetTrafficLimit,
   wgSetExpiry,
   wgTempBlock,
   wgUnblock,
 } from '@/api/client'
 import { setClientAccessUntil, type UnlockCodeProtocol } from '@/api/unlockCodes'
+import {
+  clearProfileTrafficLimits,
+  formatProfileProtocols,
+  orderedProfileProtocols,
+  setProfileTrafficLimits,
+} from '@/lib/profileTrafficLimit'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
@@ -210,7 +210,120 @@ export default function ClientActionsDialog({
     setUnlockCodeDialogOpen(false)
   }, [open, config?.id, policy?.access_until])
 
+  const profileVpnTypes = useMemo(() => {
+    if (!config) return new Set<import('@/types').VpnType>()
+    const clientNameKey = config.client_name.toLowerCase()
+    const types = new Set(
+      (allConfigs.length > 0 ? allConfigs : [config])
+        .filter((item) => item.client_name.toLowerCase() === clientNameKey)
+        .map((item) => item.vpn_type),
+    )
+    types.add(config.vpn_type)
+    return types
+  }, [allConfigs, config])
+
   if (!config) return null
+
+  const profileProtocolsLabel = formatProfileProtocols(profileVpnTypes)
+  const haGroupHint = config.ha
+    ? 'В HA-группе изменение уйдёт на реплики (auto-sync policies), если узел — primary.'
+    : null
+
+  const applyProfileTrafficLimit = async (
+    value: number,
+    unit: string,
+    period: number | null,
+  ) => {
+    const { applied, failed } = await setProfileTrafficLimits(
+      config.client_name,
+      profileVpnTypes,
+      value,
+      unit,
+      period,
+    )
+    if (applied.length === 0) {
+      throw new Error(
+        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+          'Не удалось установить лимит',
+      )
+    }
+    if (failed.length > 0) {
+      onNotifyError(
+        `Лимит частично не применён: ${failed
+          .map((item) => `${item.protocol}: ${item.message}`)
+          .join('; ')}`,
+      )
+    }
+    onNotifySuccess(
+      applied.length > 1
+        ? `Лимит трафика установлен для профиля (${formatProfileProtocols(applied)})`
+        : 'Лимит трафика установлен',
+    )
+  }
+
+  const clearProfileTrafficLimit = async () => {
+    const { cleared, failed } = await clearProfileTrafficLimits(
+      config.client_name,
+      profileVpnTypes,
+    )
+    if (cleared.length === 0) {
+      throw new Error(
+        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+          'Не удалось снять лимит',
+      )
+    }
+    if (failed.length > 0) {
+      onNotifyError(
+        `Лимит частично не снят: ${failed
+          .map((item) => `${item.protocol}: ${item.message}`)
+          .join('; ')}`,
+      )
+    }
+    onNotifySuccess(
+      cleared.length > 1
+        ? `Лимит трафика снят для профиля (${formatProfileProtocols(cleared)})`
+        : 'Лимит трафика снят',
+    )
+  }
+
+  const applyProfileAccessUntil = async (iso: string | null) => {
+    const protocols = orderedProfileProtocols(profileVpnTypes)
+    const applied: typeof protocols = []
+    const failed: Array<{ protocol: (typeof protocols)[number]; message: string }> = []
+    for (const protocol of protocols) {
+      try {
+        await setClientAccessUntil(protocol, config.client_name, iso)
+        applied.push(protocol)
+      } catch (err) {
+        failed.push({
+          protocol,
+          message: err instanceof ApiError ? err.message : 'ошибка',
+        })
+      }
+    }
+    if (applied.length === 0) {
+      throw new Error(
+        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+          'Не удалось обновить срок доступа',
+      )
+    }
+    if (failed.length > 0) {
+      onNotifyError(
+        `Срок доступа частично не обновлён: ${failed
+          .map((item) => `${item.protocol}: ${item.message}`)
+          .join('; ')}`,
+      )
+    }
+    onNotifySuccess(
+      applied.length > 1
+        ? iso
+          ? `Срок доступа обновлён для профиля (${formatProfileProtocols(applied)})`
+          : `Срок доступа сброшен для профиля (${formatProfileProtocols(applied)})`
+        : iso
+          ? 'Срок доступа обновлён'
+          : 'Срок доступа сброшен',
+    )
+  }
 
   const toggleConfigTag = async (tagId: number) => {
     if (!isAdmin) return
@@ -408,14 +521,7 @@ export default function ClientActionsDialog({
 
   const handleAccessUntilSave = async () => {
     await runAction('access-until', async () => {
-      await setClientAccessUntil(
-        config.vpn_type,
-        config.client_name,
-        dateInputToIso(accessUntilValue),
-      )
-      onNotifySuccess(
-        accessUntilValue ? 'Срок доступа обновлён' : 'Срок доступа сброшен',
-      )
+      await applyProfileAccessUntil(dateInputToIso(accessUntilValue))
     })
   }
 
@@ -514,8 +620,12 @@ export default function ClientActionsDialog({
             setLimitValue('10')
             setLimitUnit('GB')
             setLimitPeriodDays('7')
-            setPromptTitle('Лимит трафика')
-            setPromptMessage(`Укажите лимит для клиента «${config.client_name}»`)
+            setPromptTitle('Лимит трафика профиля')
+            setPromptMessage(
+              profileVpnTypes.size > 1
+                ? `Лимит для «${config.client_name}» применится ко всем конфигурациям: ${profileProtocolsLabel}`
+                : `Укажите лимит для клиента «${config.client_name}»`,
+            )
             setPromptMode('traffic-limit')
           },
         },
@@ -527,10 +637,11 @@ export default function ClientActionsDialog({
           onClick: () =>
             askConfirm(
               'Снять лимит трафика',
-              `Снять лимит трафика для «${config.client_name}»?`,
+              profileVpnTypes.size > 1
+                ? `Снять лимит у профиля «${config.client_name}» на всех конфигурациях (${profileProtocolsLabel})?`
+                : `Снять лимит трафика для «${config.client_name}»?`,
               async () => {
-                await openvpnClearTrafficLimit(config.client_name)
-                onNotifySuccess('Лимит трафика снят')
+                await clearProfileTrafficLimit()
               },
             ),
         },
@@ -578,8 +689,12 @@ export default function ClientActionsDialog({
               setLimitValue('10')
               setLimitUnit('GB')
               setLimitPeriodDays('7')
-              setPromptTitle('Лимит трафика')
-              setPromptMessage(`Укажите лимит для клиента «${config.client_name}»`)
+              setPromptTitle('Лимит трафика профиля')
+              setPromptMessage(
+                profileVpnTypes.size > 1
+                  ? `Лимит для «${config.client_name}» применится ко всем конфигурациям: ${profileProtocolsLabel}`
+                  : `Укажите лимит для клиента «${config.client_name}»`,
+              )
               setPromptMode('traffic-limit')
             },
           },
@@ -591,10 +706,11 @@ export default function ClientActionsDialog({
             onClick: () =>
               askConfirm(
                 'Снять лимит трафика',
-                `Снять лимит трафика для «${config.client_name}»?`,
+                profileVpnTypes.size > 1
+                  ? `Снять лимит у профиля «${config.client_name}» на всех конфигурациях (${profileProtocolsLabel})?`
+                  : `Снять лимит трафика для «${config.client_name}»?`,
                 async () => {
-                  await awg2ClearTrafficLimit(config.client_name)
-                  onNotifySuccess('Лимит трафика снят')
+                  await clearProfileTrafficLimit()
                 },
               ),
           },
@@ -652,8 +768,12 @@ export default function ClientActionsDialog({
             setLimitValue('10')
             setLimitUnit('GB')
             setLimitPeriodDays('7')
-            setPromptTitle('Лимит трафика')
-            setPromptMessage(`Укажите лимит для клиента «${config.client_name}»`)
+            setPromptTitle('Лимит трафика профиля')
+            setPromptMessage(
+              profileVpnTypes.size > 1
+                ? `Лимит для «${config.client_name}» применится ко всем конфигурациям: ${profileProtocolsLabel}`
+                : `Укажите лимит для клиента «${config.client_name}»`,
+            )
             setPromptMode('traffic-limit')
           },
         },
@@ -665,14 +785,15 @@ export default function ClientActionsDialog({
           onClick: () =>
             askConfirm(
               'Снять лимит трафика',
-              `Снять лимит трафика для «${config.client_name}»?`,
+              profileVpnTypes.size > 1
+                ? `Снять лимит у профиля «${config.client_name}» на всех конфигурациях (${profileProtocolsLabel})?`
+                : `Снять лимит трафика для «${config.client_name}»?`,
               async () => {
-                await wgClearTrafficLimit(config.client_name)
-                onNotifySuccess('Лимит трафика снят')
+                await clearProfileTrafficLimit()
               },
             ),
         },
-        ]
+      ]
 
   const dangerActions: ActionItem[] = [
     {
@@ -715,18 +836,11 @@ export default function ClientActionsDialog({
   const visibleManagement = managementActions.filter((a) => !a.hidden)
   const visibleDanger = dangerActions.filter((a) => !a.hidden)
   // Only protocols this client_name actually has ( ∩ enabled modules), not all panel modules.
-  const clientNameKey = config.client_name.toLowerCase()
-  const clientVpnTypes = new Set(
-    (allConfigs.length > 0 ? allConfigs : [config])
-      .filter((item) => item.client_name.toLowerCase() === clientNameKey)
-      .map((item) => item.vpn_type),
-  )
-  clientVpnTypes.add(config.vpn_type)
   const availableUnlockProtocols: UnlockCodeProtocol[] = []
-  if (openvpnEnabled && clientVpnTypes.has('openvpn')) availableUnlockProtocols.push('openvpn')
+  if (openvpnEnabled && profileVpnTypes.has('openvpn')) availableUnlockProtocols.push('openvpn')
   // Portal may list AmneziaWG separately; access policy / unlock target is still `wireguard`.
-  if (wireguardFamilyEnabled && clientVpnTypes.has('wireguard')) availableUnlockProtocols.push('wireguard')
-  if (awg2Enabled && clientVpnTypes.has('amneziawg2')) availableUnlockProtocols.push('amneziawg2')
+  if (wireguardFamilyEnabled && profileVpnTypes.has('wireguard')) availableUnlockProtocols.push('wireguard')
+  if (awg2Enabled && profileVpnTypes.has('amneziawg2')) availableUnlockProtocols.push('amneziawg2')
   const unlockCodeInitialProtocols: UnlockCodeProtocol[] = availableUnlockProtocols
 
   type FileRow = {
@@ -859,9 +973,11 @@ export default function ClientActionsDialog({
               <section className="space-y-3 rounded-lg border bg-muted/10 p-3">
                 <SectionTitle>Доступ до</SectionTitle>
                 <p className="text-xs text-muted-foreground">
-                  Установите дату отключения для протокола {protocolLabel(tab)}. Пустое значение убирает
-                  ограничение доступа.
+                  {profileVpnTypes.size > 1
+                    ? `Дата отключения для всего профиля «${config.client_name}» (${profileProtocolsLabel}). Пустое значение убирает ограничение.`
+                    : `Установите дату отключения для протокола ${protocolLabel(tab)}. Пустое значение убирает ограничение доступа.`}
                 </p>
+                {haGroupHint && <p className="text-xs text-muted-foreground">{haGroupHint}</p>}
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                   <div className="min-w-0 flex-1 space-y-2">
                     <Label htmlFor="access-until">Дата</Label>
@@ -870,6 +986,7 @@ export default function ClientActionsDialog({
                       type="date"
                       value={accessUntilValue}
                       onChange={(e) => setAccessUntilValue(e.target.value)}
+                      disabled={busyAction !== null || haReplicaReadonly}
                     />
                   </div>
                   <div className="flex shrink-0 gap-2">
@@ -1244,14 +1361,7 @@ export default function ClientActionsDialog({
               }
               setPromptMode(null)
               void runAction('traffic-limit', async () => {
-                if (isOpenVpn) {
-                  await openvpnSetTrafficLimit(config.client_name, value, limitUnit, period)
-                } else if (isAwg2) {
-                  await awg2SetTrafficLimit(config.client_name, value, limitUnit, period)
-                } else {
-                  await wgSetTrafficLimit(config.client_name, value, limitUnit, period)
-                }
-                onNotifySuccess('Лимит трафика установлен')
+                await applyProfileTrafficLimit(value, limitUnit, period)
               })
             }}
             className="space-y-4"
@@ -1292,6 +1402,12 @@ export default function ClientActionsDialog({
                 <option value="7">7 дней (пн–вс)</option>
                 <option value="30">30 дней (месяц)</option>
               </select>
+              {profileVpnTypes.size > 1 && (
+                <p className="text-xs text-muted-foreground">
+                  Применится ко всем конфигурациям профиля: {profileProtocolsLabel}
+                </p>
+              )}
+              {haGroupHint && <p className="text-xs text-muted-foreground">{haGroupHint}</p>}
             </div>
             {trafficLimitExceeded && (
               <p className="text-sm text-destructive">Клиент сейчас заблокирован по превышению лимита.</p>
