@@ -139,24 +139,56 @@ function ActionButton({
       title={action.title ?? action.label}
       onClick={action.onClick}
       className={cn(
-        'h-9 justify-start gap-2 text-left text-xs',
+        'h-auto min-h-11 flex-col items-start justify-center gap-1.5 px-3 py-2.5 text-left text-xs shadow-none',
+        'hover:bg-accent/60',
         fullWidth && 'col-span-2',
         destructive &&
-          'border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive',
+          'border-destructive/35 text-destructive hover:bg-destructive/10 hover:text-destructive',
       )}
     >
-      {isBusy ? <Loader2 size={14} className="shrink-0 animate-spin" /> : action.icon}
-      <span className="truncate">{action.label}</span>
+      <span className="flex items-center gap-2">
+        {isBusy ? <Loader2 size={14} className="shrink-0 animate-spin" /> : action.icon}
+        <span className="line-clamp-2 font-medium leading-snug">{action.label}</span>
+      </span>
     </Button>
   )
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+function ProfileSection({
+  title,
+  description,
+  children,
+  tone = 'default',
+}: {
+  title: string
+  description?: React.ReactNode
+  children: React.ReactNode
+  tone?: 'default' | 'danger'
+}) {
   return (
-    <div className="flex items-center gap-3">
-      <h3 className="shrink-0 text-sm font-medium text-foreground">{children}</h3>
-      <div className="h-px flex-1 bg-border" />
-    </div>
+    <section
+      className={cn(
+        'space-y-3 rounded-xl border p-4',
+        tone === 'danger'
+          ? 'border-destructive/30 bg-destructive/[0.04]'
+          : 'border-border/70 bg-muted/15',
+      )}
+    >
+      <div className="space-y-1">
+        <h3
+          className={cn(
+            'text-sm font-medium tracking-tight',
+            tone === 'danger' ? 'text-destructive' : 'text-foreground',
+          )}
+        >
+          {title}
+        </h3>
+        {description ? (
+          <div className="text-xs leading-relaxed text-muted-foreground">{description}</div>
+        ) : null}
+      </div>
+      {children}
+    </section>
   )
 }
 
@@ -199,6 +231,7 @@ export default function ClientActionsDialog({
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [portalUrl, setPortalUrl] = useState<string | null>(null)
   const [accessUntilValue, setAccessUntilValue] = useState('')
+  const [descriptionValue, setDescriptionValue] = useState('')
   const [unlockCodeDialogOpen, setUnlockCodeDialogOpen] = useState(false)
 
   const isAdmin = userRole === 'admin'
@@ -209,8 +242,9 @@ export default function ClientActionsDialog({
     if (!config) return
     const value = policy?.access_until ?? null
     setAccessUntilValue(value ? toDateInputValue(value) : '')
+    setDescriptionValue(config.description ?? '')
     setUnlockCodeDialogOpen(false)
-  }, [open, config?.id, policy?.access_until])
+  }, [open, config?.id, config?.description, policy?.access_until])
 
   const profileVpnTypes = useMemo(() => {
     if (!config) return new Set<import('@/types').VpnType>()
@@ -513,6 +547,16 @@ export default function ClientActionsDialog({
           ? `Владелец изменён на «${nextOwner.username}»`
           : 'Владелец конфигурации изменён',
       )
+    })
+  }
+
+  const handleDescriptionSave = async () => {
+    const next = descriptionValue.trim()
+    const current = (config.description ?? '').trim()
+    if (next === current) return
+    await runAction('save-description', async () => {
+      await updateConfig(config.id, { description: next })
+      onNotifySuccess(next ? 'Описание сохранено' : 'Описание очищено')
     })
   }
 
@@ -899,13 +943,16 @@ export default function ClientActionsDialog({
     <>
       <Dialog open={open} onOpenChange={handleMainOpenChange}>
         <DialogContent className="flex max-h-[min(92dvh,52rem)] w-[calc(100vw-1.5rem)] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
-          <DialogHeader className="shrink-0 space-y-3 border-b px-6 pb-4 pt-6">
-            <div className="pr-6">
-              <DialogTitle className="text-xl font-semibold tracking-tight">{config.client_name}</DialogTitle>
-              <DialogDescription
-                className={config.description ? 'mt-1 line-clamp-2' : 'sr-only'}
-              >
-                {config.description || 'Управление VPN-конфигурацией клиента'}
+          <DialogHeader className="shrink-0 space-y-3 border-b bg-muted/10 px-6 pb-4 pt-6">
+            <div className="pr-8">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                Профиль конфигурации
+              </p>
+              <DialogTitle className="mt-1 text-xl font-semibold tracking-tight">
+                {config.client_name}
+              </DialogTitle>
+              <DialogDescription className="mt-1.5 line-clamp-2 text-sm text-muted-foreground">
+                {config.description?.trim() || 'Без описания — можно добавить ниже'}
               </DialogDescription>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -935,46 +982,89 @@ export default function ClientActionsDialog({
             </div>
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
-            {isAdmin && ownerCandidates.length > 0 && (
-              <section className="space-y-3">
-                <SectionTitle>Владелец</SectionTitle>
-                <ConfigOwnerSelect
-                  id={`owner-${config.id}`}
-                  users={ownerCandidates}
-                  value={config.owner_id}
-                  onChange={(ownerId) => void handleOwnerChange(ownerId)}
-                  disabled={busyAction !== null}
-                  currentOwner={
-                    config.owner_username
-                      ? { id: config.owner_id, username: config.owner_username }
-                      : undefined
-                  }
-                  description="Назначьте пользователя, который будет видеть этот конфиг в своём списке."
-                />
-              </section>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-5">
+            {(isOwner || (isAdmin && ownerCandidates.length > 0)) && (
+              <ProfileSection
+                title="Основное"
+                description="Описание видно на карточке. Владелец определяет, кто видит конфиг в своём списке."
+              >
+                <div className="space-y-4">
+                  {isOwner && (
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <Label htmlFor={`description-${config.id}`}>Описание</Label>
+                        <Input
+                          id={`description-${config.id}`}
+                          value={descriptionValue}
+                          onChange={(e) => setDescriptionValue(e.target.value)}
+                          placeholder="Необязательно"
+                          maxLength={255}
+                          disabled={busyAction !== null || haReplicaReadonly}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="shrink-0"
+                        disabled={
+                          busyAction !== null ||
+                          haReplicaReadonly ||
+                          descriptionValue.trim() === (config.description ?? '').trim()
+                        }
+                        onClick={() => void handleDescriptionSave()}
+                      >
+                        {busyAction === 'save-description' ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : null}
+                        Сохранить
+                      </Button>
+                    </div>
+                  )}
+                  {isAdmin && ownerCandidates.length > 0 && (
+                    <ConfigOwnerSelect
+                      id={`owner-${config.id}`}
+                      users={ownerCandidates}
+                      value={config.owner_id}
+                      onChange={(ownerId) => void handleOwnerChange(ownerId)}
+                      disabled={busyAction !== null}
+                      currentOwner={
+                        config.owner_username
+                          ? { id: config.owner_id, username: config.owner_username }
+                          : undefined
+                      }
+                    />
+                  )}
+                </div>
+              </ProfileSection>
             )}
 
             {visibleManagement.length > 0 && (
-              <section className="space-y-3">
-                <SectionTitle>Управление</SectionTitle>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <ProfileSection title="Управление" description="Быстрые действия для этого протокола.">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                   {visibleManagement.map((action) => (
                     <ActionButton key={action.key} action={action} busyAction={busyAction} />
                   ))}
                 </div>
-              </section>
+              </ProfileSection>
             )}
 
             {canManage && (
-              <section className="space-y-3 rounded-lg border bg-muted/10 p-3">
-                <SectionTitle>Доступ до</SectionTitle>
-                <p className="text-xs text-muted-foreground">
-                  {profileVpnTypes.size > 1
-                    ? `Дата отключения для всего профиля «${config.client_name}» (${profileProtocolsLabel}). Пустое значение убирает ограничение.`
-                    : `Установите дату отключения для протокола ${protocolLabel(tab)}. Пустое значение убирает ограничение доступа.`}
-                </p>
-                {haGroupHint && <p className="text-xs text-muted-foreground">{haGroupHint}</p>}
+              <ProfileSection
+                title="Доступ до"
+                description={
+                  <>
+                    {profileVpnTypes.size > 1
+                      ? `Дата отключения для всего профиля «${config.client_name}» (${profileProtocolsLabel}). Пустое значение убирает ограничение.`
+                      : `Дата отключения для протокола ${protocolLabel(tab)}. Пустое значение убирает ограничение.`}
+                    {haGroupHint ? (
+                      <>
+                        <br />
+                        {haGroupHint}
+                      </>
+                    ) : null}
+                  </>
+                }
+              >
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                   <div className="min-w-0 flex-1 space-y-2">
                     <Label htmlFor="access-until">Дата</Label>
@@ -989,7 +1079,7 @@ export default function ClientActionsDialog({
                   <div className="flex shrink-0 gap-2">
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="secondary"
                       disabled={busyAction !== null || haReplicaReadonly}
                       onClick={() => void handleAccessUntilSave()}
                     >
@@ -1006,51 +1096,59 @@ export default function ClientActionsDialog({
                     </Button>
                   </div>
                 </div>
-                {policy?.access_until ? (
-                  <p className="text-[11px] text-muted-foreground">
-                    Текущее значение: <span className="font-mono">{formatDate(policy.access_until)}</span>
-                  </p>
-                ) : (
-                  <p className="text-[11px] text-muted-foreground">Сейчас ограничение не задано.</p>
-                )}
-              </section>
+                <p className="text-[11px] text-muted-foreground">
+                  {policy?.access_until ? (
+                    <>
+                      Сейчас: <span className="font-mono">{formatDate(policy.access_until)}</span>
+                    </>
+                  ) : (
+                    'Сейчас ограничение не задано.'
+                  )}
+                </p>
+              </ProfileSection>
             )}
 
             {unlockCodesEnabled && availableUnlockProtocols.length > 0 && (
-              <section className="space-y-3 rounded-lg border bg-muted/10 p-3">
-                <SectionTitle>Unlock-ключ</SectionTitle>
-                <p className="text-xs text-muted-foreground">
-                  Создайте ключ продления с протоколами этого клиента.
-                </p>
+              <ProfileSection
+                title="Unlock-ключ"
+                description="Создайте ключ продления с протоколами этого клиента."
+              >
                 <Button
                   type="button"
-                  className="w-full"
-                  variant="outline"
+                  className="w-full sm:w-auto"
+                  variant="secondary"
                   disabled={busyAction !== null || haReplicaReadonly}
                   onClick={() => setUnlockCodeDialogOpen(true)}
                 >
+                  <Unlock size={14} />
                   Создать unlock-ключ
                 </Button>
-              </section>
+              </ProfileSection>
             )}
 
             {clientPortalEnabled && (
-              <section className="space-y-3">
-                <SectionTitle>Клиентский портал</SectionTitle>
-                <p className="text-xs text-muted-foreground">
-                  Постоянная ссылка на страницу установки для клиента{' '}
-                  <span className="font-medium text-foreground">{config.client_name}</span>.
-                  {portalUrl ? (
-                    <>
-                      {' '}
-                      Текущая: <span className="break-all font-mono text-[11px]">{portalUrl}</span>
-                    </>
-                  ) : null}
-                </p>
+              <ProfileSection
+                title="Клиентский портал"
+                description={
+                  <>
+                    Постоянная ссылка на страницу установки для{' '}
+                    <span className="font-medium text-foreground">{config.client_name}</span>.
+                    {portalUrl ? (
+                      <>
+                        {' '}
+                        Текущая:{' '}
+                        <span className="break-all font-mono text-[11px] text-foreground/80">
+                          {portalUrl}
+                        </span>
+                      </>
+                    ) : null}
+                  </>
+                }
+              >
                 <div className="flex flex-wrap gap-2">
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     className="gap-1.5"
                     disabled={busyAction !== null || haReplicaReadonly}
@@ -1098,17 +1196,16 @@ export default function ClientActionsDialog({
                     Отозвать
                   </Button>
                 </div>
-              </section>
+              </ProfileSection>
             )}
 
             {fileRows.length > 0 && showQrDownloads && (
-              <section className="space-y-3">
-                <SectionTitle>Файлы и доступ</SectionTitle>
+              <ProfileSection title="Файлы и доступ" description="Скачивание, QR и одноразовые ссылки.">
                 <div className="space-y-2">
                   {fileRows.map((row) => (
                     <div
                       key={row.key}
-                      className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/50 px-3 py-2.5"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{row.label}</p>
@@ -1164,28 +1261,11 @@ export default function ClientActionsDialog({
                     </div>
                   ))}
                 </div>
-              </section>
-            )}
-
-            {visibleDanger.length > 0 && (
-              <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-                <h3 className="mb-2.5 text-sm font-medium text-destructive">Опасные действия</h3>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {visibleDanger.map((action) => (
-                    <ActionButton
-                      key={action.key}
-                      action={action}
-                      busyAction={busyAction}
-                      destructive
-                    />
-                  ))}
-                </div>
-              </section>
+              </ProfileSection>
             )}
 
             {isAdmin && allTags.length > 0 && (
-              <section className="rounded-lg border p-3">
-                <h3 className="mb-2.5 text-sm font-medium">Теги</h3>
+              <ProfileSection title="Теги" description="Метки для фильтрации и группировки.">
                 <div className="flex flex-wrap gap-2">
                   {allTags.map((tag) => {
                     const active = (config.tags ?? []).some((t) => t.id === tag.id)
@@ -1204,7 +1284,22 @@ export default function ClientActionsDialog({
                     )
                   })}
                 </div>
-              </section>
+              </ProfileSection>
+            )}
+
+            {visibleDanger.length > 0 && (
+              <ProfileSection title="Опасная зона" tone="danger">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {visibleDanger.map((action) => (
+                    <ActionButton
+                      key={action.key}
+                      action={action}
+                      busyAction={busyAction}
+                      destructive
+                    />
+                  ))}
+                </div>
+              </ProfileSection>
             )}
 
             {visibleManagement.length === 0 && fileRows.length === 0 && visibleDanger.length === 0 && (
