@@ -18,6 +18,7 @@ import {
   wgTempBlock,
   wgUnblock,
 } from '@/api/client'
+import { createPortalLink } from '@/api/portal'
 import ClientActionsDialog from '@/components/dashboard/ClientActionsDialog'
 import ConfigCard from '@/components/dashboard/ConfigCard'
 import ConfigCardViewSettings from '@/components/dashboard/ConfigCardViewSettings'
@@ -86,7 +87,7 @@ const TAB_ORDER: ProtocolTab[] = ['openvpn', 'amneziawg2', 'amneziawg', 'wiregua
 
 type ConfirmAction = 'delete' | 'block' | 'unblock' | null
 type BulkAction = 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert' | 'change_owner' | null
-type LoadingKey = `${number}-${'download' | 'qr' | 'block' | 'unblock' | 'delete'}` | null
+type LoadingKey = `${number}-${'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy'}` | null
 
 function useVisibleTabs(visibilityPolicy: VisibleVpnProfilesPolicy | null, userRole: UserRole): ProtocolTab[] {
   const { isEnabled } = useFeatureModules()
@@ -121,6 +122,7 @@ export default function ConfigCardsSection({
   const { trackBackgroundTask } = useProgress()
   const qrDownloadsEnabled = isEnabled('qr_downloads')
   const trafficLinkEnabled = isEnabled('traffic_sync')
+  const clientPortalEnabled = isEnabled('client_portal')
   const [visibilityPolicy, setVisibilityPolicy] = useState<VisibleVpnProfilesPolicy | null>(null)
   const visibleTabs = useVisibleTabs(visibilityPolicy, userRole)
   const [activeTab, setActiveTab] = useState<ProtocolTab>(visibleTabs[0] ?? 'openvpn')
@@ -246,8 +248,24 @@ export default function ConfigCardsSection({
     }
   }
 
-  const setCardLoading = (configId: number, action: 'download' | 'qr' | 'block' | 'unblock' | 'delete' | null) => {
+  const setCardLoading = (
+    configId: number,
+    action: 'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy' | null,
+  ) => {
     setLoadingAction(action ? `${configId}-${action}` : null)
+  }
+
+  const copyPortalLink = async (config: VpnConfig) => {
+    setCardLoading(config.id, 'portal-copy')
+    try {
+      const link = await createPortalLink(config.client_name)
+      await navigator.clipboard.writeText(link.url)
+      onNotifySuccess('Ссылка портала скопирована')
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка ссылки портала')
+    } finally {
+      setCardLoading(config.id, null)
+    }
   }
 
   const handleCardDownload = async (config: VpnConfig, path: string, filename: string) => {
@@ -343,9 +361,17 @@ export default function ConfigCardsSection({
     }
   }
 
-  const getCardLoading = (configId: number): 'download' | 'qr' | 'block' | 'unblock' | 'delete' | null => {
+  const getCardLoading = (
+    configId: number,
+  ): 'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy' | null => {
     if (!loadingAction?.startsWith(`${configId}-`)) return null
-    return loadingAction.split('-').slice(1).join('-') as 'download' | 'qr' | 'block' | 'unblock' | 'delete'
+    return loadingAction.split('-').slice(1).join('-') as
+      | 'download'
+      | 'qr'
+      | 'block'
+      | 'unblock'
+      | 'delete'
+      | 'portal-copy'
   }
 
   const handleOpenVpnGroupChange = async (group: string) => {
@@ -746,6 +772,9 @@ export default function ConfigCardsSection({
                           setSelectedConfig(config)
                         }}
                         onCopyName={() => void copyName(config.client_name)}
+                        onCopyPortalLink={
+                          clientPortalEnabled ? () => void copyPortalLink(config) : undefined
+                        }
                         onDownload={(path, filename) => void handleCardDownload(config, path, filename)}
                         onQr={(path, filename) => void handleCardQr(config, path, filename)}
                         onBlock={isAdmin && !haReplicaReadonly ? () => openConfirm('block', config) : undefined}

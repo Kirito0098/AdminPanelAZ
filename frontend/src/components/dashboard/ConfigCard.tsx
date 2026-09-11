@@ -10,6 +10,7 @@ import {
   Download,
   Gauge,
   KeyRound,
+  Link2,
   Loader2,
   MoreHorizontal,
   Network,
@@ -55,7 +56,7 @@ import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { cn } from '@/lib/utils'
 
-type ActionKey = 'download' | 'qr' | 'block' | 'unblock' | 'delete'
+type ActionKey = 'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy'
 
 interface ConfigCardProps {
   config: VpnConfig
@@ -70,6 +71,7 @@ interface ConfigCardProps {
   onSelectChange?: (checked: boolean) => void
   onOpenDetails: () => void
   onCopyName: () => void
+  onCopyPortalLink?: () => void
   onDownload: (path: string, filename: string) => void
   onQr: (path: string, filename: string) => void
   onBlock?: () => void
@@ -422,6 +424,7 @@ export default function ConfigCard({
   onSelectChange,
   onOpenDetails,
   onCopyName,
+  onCopyPortalLink,
   onDownload,
   onQr,
   onBlock,
@@ -557,6 +560,24 @@ export default function ConfigCard({
                 >
                   <Copy size={13} />
                 </button>
+                {onCopyPortalLink && (
+                  <button
+                    type="button"
+                    title="Копировать ссылку портала"
+                    disabled={loadingAction === 'portal-copy'}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onCopyPortalLink()
+                    }}
+                    className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+                  >
+                    {loadingAction === 'portal-copy' ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <Link2 size={13} />
+                    )}
+                  </button>
+                )}
               </CardTitle>
               <Badge variant={statusBadgeVariant} className="shrink-0 gap-1 px-2 py-0.5 text-[11px]">
                 <StatusIcon size={11} />
