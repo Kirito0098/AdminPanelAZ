@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Copy,
   Download,
@@ -13,8 +13,6 @@ import {
 } from 'lucide-react'
 import {
   ApiError,
-  applyClientTemplate,
-  createConfig,
   downloadConfigsExport,
   downloadProfile,
   fetchQrBlob,
@@ -28,17 +26,15 @@ import {
   getMonitoring,
   getUsers,
   importConfigsCsv,
-  setClientAccessUntil,
   syncConfigs,
 } from '@/api/client'
 import { buildDashboardSummary } from '@/lib/dashboardSummary'
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
-import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
+import CreateClientDialog from '@/components/dashboard/CreateClientDialog'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
 import { triggerFileDownload } from '@/lib/triggerFileDownload'
 import MetricCard from '@/components/noc/MetricCard'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
-import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
@@ -52,15 +48,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { NodeBadge } from '@/components/NodeSelector'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
@@ -78,7 +65,6 @@ import type {
   User,
   VisibleVpnProfilesPolicy,
   VpnConfig,
-  VpnType,
 } from '@/types'
 
 export default function DashboardPage() {
@@ -116,13 +102,6 @@ export default function DashboardPage() {
   const [loadingFiles, setLoadingFiles] = useState(false)
   const [summaryLoading, setSummaryLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
-  const [clientName, setClientName] = useState('')
-  const [vpnType, setVpnType] = useState<VpnType>('openvpn')
-  const [certDays, setCertDays] = useState(3650)
-  const [awg2Ttl, setAwg2Ttl] = useState('none')
-  const [accessUntilDate, setAccessUntilDate] = useState('')
-  const [description, setDescription] = useState('')
-  const [submitting, setSubmitting] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [awg2Installed, setAwg2Installed] = useState(false)
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
@@ -135,7 +114,6 @@ export default function DashboardPage() {
   const [policies, setPolicies] = useState<Record<string, import('../types').ClientPoliciesResponseEntry>>({})
   const [connectionMap, setConnectionMap] = useState<ClientConnectionMap | null>(null)
   const [panelUsers, setPanelUsers] = useState<User[]>([])
-  const [ownerId, setOwnerId] = useState<number | null>(null)
   const [templates, setTemplates] = useState<ClientTemplate[]>([])
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
   const isAdmin = user?.role === 'admin'
@@ -174,12 +152,6 @@ export default function DashboardPage() {
       cancelled = true
     }
   }, [awg2ToggleOn, isAdmin, activeNode?.id])
-
-  useEffect(() => {
-    if (openvpnEnabled) setVpnType('openvpn')
-    else if (wireguardEnabled) setVpnType('wireguard')
-    else if (awg2CreateEnabled) setVpnType('amneziawg2')
-  }, [openvpnEnabled, wireguardEnabled, awg2CreateEnabled])
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
@@ -294,137 +266,6 @@ export default function DashboardPage() {
       .then(setTemplates)
       .catch(() => setTemplates([]))
   }, [canCreateClient, activeNode?.id])
-
-  const dateInputToIso = (value: string) => {
-    if (!value) return null
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-    if (!match) return null
-    const next = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
-    return next.toISOString()
-  }
-
-  const resetForm = () => {
-    setClientName('')
-    setDescription('')
-    setVpnType('openvpn')
-    setCertDays(3650)
-    setAwg2Ttl('none')
-    setAccessUntilDate('')
-    setOwnerId(user?.id ?? null)
-  }
-
-  const closeForm = () => {
-    setShowForm(false)
-    resetForm()
-  }
-
-  const handleCreate = async (e: FormEvent) => {
-    e.preventDefault()
-
-    const trimmedName = clientName.trim()
-    if (!trimmedName) {
-      notifyError('Укажите имя клиента')
-      return
-    }
-    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(trimmedName)) {
-      notifyError('Имя: латиница, цифры, _ и -, до 32 символов')
-      return
-    }
-    if (vpnType === 'openvpn' && (!Number.isFinite(certDays) || certDays < 1 || certDays > 3650)) {
-      notifyError('Срок сертификата: от 1 до 3650 дней')
-      return
-    }
-
-    setSubmitting(true)
-    const name = trimmedName
-    const accessDateSnapshot = accessUntilDate
-    try {
-      await withInline(async () => {
-        const created = await createConfig({
-          client_name: name,
-          vpn_type: vpnType,
-          cert_expire_days: vpnType === 'openvpn' ? certDays : undefined,
-          ttl: vpnType === 'amneziawg2' && awg2Ttl !== 'none' ? awg2Ttl : undefined,
-          description: description || undefined,
-          owner_id: isAdmin && ownerId ? ownerId : undefined,
-        })
-        if (isAdmin && accessDateSnapshot) {
-          const iso = dateInputToIso(accessDateSnapshot)
-          if (iso && (vpnType === 'openvpn' || vpnType === 'wireguard' || vpnType === 'amneziawg2')) {
-            try {
-              await setClientAccessUntil(vpnType, name, iso)
-            } catch (err) {
-              notifyWarning(
-                err instanceof ApiError
-                  ? `Клиент создан, но срок доступа не сохранён: ${err.message}`
-                  : `Клиент «${name}» создан, но срок доступа не сохранён`,
-              )
-            }
-          } else if (accessDateSnapshot) {
-            notifyWarning(`Клиент «${name}» создан, но дата доступа некорректна — задайте её в карточке`)
-          }
-        }
-        closeForm()
-        await load({ silent: true })
-        if (created.ha_replicate_warning) {
-          notifyWarning(created.ha_replicate_warning)
-        }
-      }, 'Создание клиента...')
-      success(`Клиент «${name}» создан`)
-    } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка создания клиента')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const handleApplyTemplate = async (template: ClientTemplate) => {
-    const trimmedName = clientName.trim()
-    if (!trimmedName) {
-      notifyError('Укажите имя клиента для шаблона')
-      return
-    }
-    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(trimmedName)) {
-      notifyError('Имя: латиница, цифры, _ и -, до 32 символов')
-      return
-    }
-    setSubmitting(true)
-    const accessDateSnapshot = accessUntilDate
-    try {
-      await withInline(async () => {
-        const created = await applyClientTemplate(template.id, {
-          client_name: trimmedName,
-          owner_id: isAdmin && ownerId ? ownerId : undefined,
-        })
-        const protocol = created.vpn_type
-        if (isAdmin && accessDateSnapshot) {
-          const iso = dateInputToIso(accessDateSnapshot)
-          if (iso && (protocol === 'openvpn' || protocol === 'wireguard' || protocol === 'amneziawg2')) {
-            try {
-              await setClientAccessUntil(protocol, trimmedName, iso)
-            } catch (err) {
-              notifyWarning(
-                err instanceof ApiError
-                  ? `Клиент создан, но срок доступа не сохранён: ${err.message}`
-                  : `Клиент «${trimmedName}» создан, но срок доступа не сохранён`,
-              )
-            }
-          } else if (accessDateSnapshot) {
-            notifyWarning(
-              `Клиент «${trimmedName}» создан, но дата доступа некорректна — задайте её в карточке`,
-            )
-          }
-        }
-        closeForm()
-        await load({ silent: true })
-      }, `Создание: ${template.name}...`)
-      success(`Клиент «${trimmedName}» создан по шаблону`)
-    } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка применения шаблона')
-    } finally {
-      setSubmitting(false)
-    }
-  }
 
   const handleDownload = async (config: VpnConfig, path: string, filename: string) => {
     try {
@@ -610,10 +451,7 @@ export default function DashboardPage() {
                 icon={<Plus size={18} />}
                 label="Новый клиент"
                 shortLabel="Новый"
-                onClick={() => {
-                  setOwnerId(user?.id ?? null)
-                  setShowForm(true)
-                }}
+                onClick={() => setShowForm(true)}
                 disabled={quotaReached || haReplicaReadonly}
               />
             )}
@@ -698,150 +536,23 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <Dialog
+      <CreateClientDialog
         open={showForm}
-        onOpenChange={(open) => {
-          if (!open && !submitting) closeForm()
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Plus size={18} />
-              Новый клиент
-            </DialogTitle>
-            <DialogDescription>Создание VPN-клиента через AntiZapret client.sh</DialogDescription>
-          </DialogHeader>
-          <form noValidate onSubmit={handleCreate} className="space-y-4">
-            <SettingsAlert variant="info">
-              Имя клиента: латиница, цифры, <strong>_</strong> и <strong>-</strong>, до 32 символов.
-            </SettingsAlert>
-            <div className="space-y-2">
-              <Label htmlFor="clientName">Имя клиента</Label>
-              <Input
-                id="clientName"
-                value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
-                placeholder="my-client"
-                autoFocus
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Тип VPN</Label>
-              <Select value={vpnType} onValueChange={(v) => setVpnType(v as VpnType)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {openvpnEnabled && <SelectItem value="openvpn">OpenVPN</SelectItem>}
-                  {wireguardEnabled && <SelectItem value="wireguard">WireGuard / AmneziaWG</SelectItem>}
-                  {awg2CreateEnabled && <SelectItem value="amneziawg2">AmneziaWG 2.0</SelectItem>}
-                </SelectContent>
-              </Select>
-            </div>
-            {vpnType === 'openvpn' && (
-              <div className="space-y-2">
-                <Label htmlFor="certDays">Срок сертификата (дней)</Label>
-                <Input
-                  id="certDays"
-                  type="number"
-                  min={1}
-                  max={3650}
-                  value={certDays}
-                  onChange={(e) => setCertDays(Number(e.target.value))}
-                />
-              </div>
-            )}
-            {vpnType === 'amneziawg2' && (
-              <div className="space-y-2">
-                <Label htmlFor="awg2Ttl">TTL</Label>
-                <Select value={awg2Ttl} onValueChange={setAwg2Ttl}>
-                  <SelectTrigger id="awg2Ttl">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AWG2_TTL_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {isAdmin && (
-              <div className="space-y-2">
-                <Label htmlFor="accessUntilDate">Доступ до</Label>
-                <Input
-                  id="accessUntilDate"
-                  type="date"
-                  value={accessUntilDate}
-                  onChange={(e) => setAccessUntilDate(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Необязательно. Дата отключения доступа (не срок сертификата). Пусто — без ограничения.
-                </p>
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="description">Описание</Label>
-              <Input
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Необязательно"
-              />
-            </div>
-            {isAdmin && (
-              <ConfigOwnerSelect
-                id="createConfigOwner"
-                users={panelUsers}
-                value={ownerId}
-                onChange={setOwnerId}
-                disabled={submitting}
-                description="Пользователь с ролью «Пользователь» увидит этот конфиг в своём списке."
-              />
-            )}
-            {templates.length > 0 && (
-              <div className="space-y-2">
-                <Label>Шаблоны (one-click)</Label>
-                <div className="flex flex-wrap gap-2">
-                  {templates.map((tpl) => (
-                    <Button
-                      key={tpl.id}
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      disabled={submitting || haReplicaReadonly}
-                      onClick={() => void handleApplyTemplate(tpl)}
-                    >
-                      {tpl.name}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={closeForm} disabled={submitting}>
-                Отмена
-              </Button>
-              <Button type="submit" disabled={submitting || haReplicaReadonly}>
-                {submitting ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin" />
-                    Создание...
-                  </>
-                ) : (
-                  <>
-                    <Plus size={16} />
-                    Создать
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+        onOpenChange={setShowForm}
+        openvpnEnabled={openvpnEnabled}
+        wireguardEnabled={wireguardEnabled}
+        awg2CreateEnabled={awg2CreateEnabled}
+        isAdmin={isAdmin}
+        currentUserId={user?.id}
+        panelUsers={panelUsers}
+        templates={templates}
+        haReplicaReadonly={haReplicaReadonly}
+        onCreated={() => load({ silent: true })}
+        onSuccess={success}
+        onError={notifyError}
+        onWarning={notifyWarning}
+        withProgress={withInline}
+      />
 
       <Dialog
         open={!!qrPreview}
@@ -910,10 +621,7 @@ export default function DashboardPage() {
                   )}
                   {canCreateClient && (
                     <Button
-                      onClick={() => {
-                        setOwnerId(user?.id ?? null)
-                        setShowForm(true)
-                      }}
+                      onClick={() => setShowForm(true)}
                       disabled={quotaReached || haReplicaReadonly}
                     >
                       <Plus size={16} />
