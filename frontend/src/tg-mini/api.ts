@@ -323,6 +323,45 @@ export async function tgWgUnblock(clientName: string) {
   return postClientAccess('/client-access/wireguard/unblock', clientName)
 }
 
+export async function tgOpenvpnSetTrafficLimit(
+  clientName: string,
+  limitValue: number,
+  limitUnit = 'MB',
+  limitPeriodDays?: number | null,
+) {
+  return postClientAccess('/client-access/openvpn/set-traffic-limit', clientName, {
+    limit_value: limitValue,
+    limit_unit: limitUnit,
+    limit_period_days: limitPeriodDays ?? null,
+  })
+}
+
+export async function tgWgSetTrafficLimit(
+  clientName: string,
+  limitValue: number,
+  limitUnit = 'MB',
+  limitPeriodDays?: number | null,
+) {
+  return postClientAccess('/client-access/wireguard/set-traffic-limit', clientName, {
+    limit_value: limitValue,
+    limit_unit: limitUnit,
+    limit_period_days: limitPeriodDays ?? null,
+  })
+}
+
+export async function tgAwg2SetTrafficLimit(
+  clientName: string,
+  limitValue: number,
+  limitUnit = 'MB',
+  limitPeriodDays?: number | null,
+) {
+  return postClientAccess('/client-access/amneziawg2/set-traffic-limit', clientName, {
+    limit_value: limitValue,
+    limit_unit: limitUnit,
+    limit_period_days: limitPeriodDays ?? null,
+  })
+}
+
 export type UnlockCodeProtocol = 'openvpn' | 'wireguard' | 'amneziawg2'
 
 export async function setTgClientAccessUntil(

@@ -19,10 +19,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { createTgPanelConfig, applyTgClientTemplate, getTgClientTemplates, getTgPanelUsers, setTgClientAccessUntil } from '@/tg-mini/api'
+import {
+  createTgPanelConfig,
+  getTgPanelUsers,
+  setTgClientAccessUntil,
+  tgAwg2SetTrafficLimit,
+  tgOpenvpnSetTrafficLimit,
+  tgWgSetTrafficLimit,
+} from '@/tg-mini/api'
 import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
 import { cn } from '@/lib/utils'
-import type { ClientTemplate, SelfServiceQuota, User, VpnType } from '@/types'
+import type { SelfServiceQuota, User, VpnType } from '@/types'
 
 const PROTOCOL_ORDER: VpnType[] = ['openvpn', 'wireguard', 'amneziawg2']
 
@@ -30,6 +37,24 @@ function vpnLabel(type: VpnType): string {
   if (type === 'openvpn') return 'OpenVPN'
   if (type === 'wireguard') return 'WG/AWG 1.5'
   return 'AWG 2.0'
+}
+
+async function setTrafficLimitForProtocol(
+  protocol: VpnType,
+  clientName: string,
+  value: number,
+  unit: string,
+  periodDays: number | null,
+) {
+  if (protocol === 'openvpn') {
+    await tgOpenvpnSetTrafficLimit(clientName, value, unit, periodDays)
+    return
+  }
+  if (protocol === 'amneziawg2') {
+    await tgAwg2SetTrafficLimit(clientName, value, unit, periodDays)
+    return
+  }
+  await tgWgSetTrafficLimit(clientName, value, unit, periodDays)
 }
 
 interface CreateConfigDialogProps {
@@ -73,9 +98,11 @@ export default function CreateConfigDialog({
   const [accessUntilDate, setAccessUntilDate] = useState('')
   const [ownerId, setOwnerId] = useState<number | null>(currentUserId ?? null)
   const [users, setUsers] = useState<User[]>([])
-  const [templates, setTemplates] = useState<ClientTemplate[]>([])
+  const [trafficLimitEnabled, setTrafficLimitEnabled] = useState(false)
+  const [limitValue, setLimitValue] = useState('50')
+  const [limitUnit, setLimitUnit] = useState('GB')
+  const [limitPeriodDays, setLimitPeriodDays] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [applyingTemplateId, setApplyingTemplateId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -84,15 +111,12 @@ export default function CreateConfigDialog({
     setTtl('none')
     setAccessUntilDate('')
     setOwnerId(currentUserId ?? null)
+    setTrafficLimitEnabled(false)
+    setLimitValue('50')
+    setLimitUnit('GB')
+    setLimitPeriodDays('')
     setError(null)
   }, [open, availableProtocols, currentUserId])
-
-  useEffect(() => {
-    if (!open) return
-    void getTgClientTemplates()
-      .then(setTemplates)
-      .catch(() => setTemplates([]))
-  }, [open])
 
   useEffect(() => {
     if (!open || !isAdmin) return
@@ -109,6 +133,10 @@ export default function CreateConfigDialog({
     setTtl('none')
     setAccessUntilDate('')
     setOwnerId(currentUserId ?? null)
+    setTrafficLimitEnabled(false)
+    setLimitValue('50')
+    setLimitUnit('GB')
+    setLimitPeriodDays('')
     setError(null)
   }
 
@@ -152,12 +180,12 @@ export default function CreateConfigDialog({
     }
   }
 
-  const finishCreate = (accessErr: string | null) => {
+  const finishCreate = (extraErr: string | null) => {
     window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
     onCreated()
     handleClose()
-    if (accessErr) {
-      window.Telegram?.WebApp.showAlert?.(`Клиент создан, но срок доступа не сохранён: ${accessErr}`)
+    if (extraErr) {
+      window.Telegram?.WebApp.showAlert?.(extraErr)
     }
   }
 
@@ -165,34 +193,6 @@ export default function CreateConfigDialog({
     setSelectedProtocols((prev) =>
       prev.includes(type) ? prev.filter((item) => item !== type) : [...prev, type],
     )
-  }
-
-  const handleApplyTemplate = async (template: ClientTemplate) => {
-    const trimmedName = clientName.trim()
-    const nameError = validateClientName(trimmedName)
-    if (nameError) {
-      setError(nameError)
-      return
-    }
-    setApplyingTemplateId(template.id)
-    setError(null)
-    const accessDateSnapshot = accessUntilDate
-    try {
-      const created = await applyTgClientTemplate(template.id, {
-        client_name: trimmedName,
-        owner_id: isAdmin && ownerId ? ownerId : undefined,
-      })
-      const accessErr = await applyAccessUntilAfterCreate(
-        trimmedName,
-        created.vpn_type,
-        accessDateSnapshot,
-      )
-      finishCreate(accessErr)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Ошибка применения шаблона')
-    } finally {
-      setApplyingTemplateId(null)
-    }
   }
 
   const handleSubmit = async (e: FormEvent) => {
@@ -215,13 +215,27 @@ export default function CreateConfigDialog({
       setError('Срок сертификата: от 1 до 3650 дней')
       return
     }
+    let parsedLimit: number | null = null
+    let period: number | null = null
+    if (isAdmin && trafficLimitEnabled) {
+      parsedLimit = Number.parseFloat(limitValue)
+      if (!Number.isFinite(parsedLimit) || parsedLimit <= 0) {
+        setError('Укажите корректный лимит трафика')
+        return
+      }
+      period = limitPeriodDays ? Number.parseInt(limitPeriodDays, 10) : null
+      if (period != null && ![1, 7, 30].includes(period)) {
+        setError('Период лимита: 1, 7 или 30 дней')
+        return
+      }
+    }
 
     setSubmitting(true)
     setError(null)
     const accessDateSnapshot = accessUntilDate
     const ordered = PROTOCOL_ORDER.filter((type) => selectedProtocols.includes(type))
     const created: VpnType[] = []
-    let accessErr: string | null = null
+    let extraErr: string | null = null
     try {
       for (const vpnType of ordered) {
         try {
@@ -239,7 +253,9 @@ export default function CreateConfigDialog({
             vpnType,
             accessDateSnapshot,
           )
-          if (nextAccessErr) accessErr = nextAccessErr
+          if (nextAccessErr) {
+            extraErr = `Клиент создан, но срок доступа не сохранён: ${nextAccessErr}`
+          }
         } catch (err) {
           if (created.length === 0) throw err
           setError(
@@ -251,7 +267,28 @@ export default function CreateConfigDialog({
           return
         }
       }
-      finishCreate(accessErr)
+      if (parsedLimit != null && created.length > 0) {
+        const failed: string[] = []
+        for (const protocol of created) {
+          try {
+            await setTrafficLimitForProtocol(
+              protocol,
+              trimmedName,
+              parsedLimit,
+              limitUnit,
+              period,
+            )
+          } catch (err) {
+            failed.push(
+              `${vpnLabel(protocol)}: ${err instanceof ApiError ? err.message : 'ошибка'}`,
+            )
+          }
+        }
+        if (failed.length > 0) {
+          extraErr = `Профиль создан, но лимит трафика не полностью применён (${failed.join('; ')})`
+        }
+      }
+      finishCreate(extraErr)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка создания')
     } finally {
@@ -260,7 +297,7 @@ export default function CreateConfigDialog({
   }
 
   const quotaReached = quota != null && !quota.unlimited && !quota.can_create
-  const busy = submitting || applyingTemplateId != null
+  const busy = submitting
   const createLabel =
     selectedProtocols.length > 1 ? `Создать · ${selectedProtocols.length}` : 'Создать'
 
@@ -361,6 +398,70 @@ export default function CreateConfigDialog({
             )}
 
             {isAdmin && (
+              <div className="space-y-3 rounded-lg border border-border/80 p-3">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 rounded border-input"
+                    checked={trafficLimitEnabled}
+                    onChange={(e) => setTrafficLimitEnabled(e.target.checked)}
+                    disabled={busy || quotaReached}
+                  />
+                  <span>
+                    <span className="block text-sm font-medium">Лимит трафика</span>
+                    <span className="text-xs text-muted-foreground">
+                      На все выбранные конфигурации. Без периода — на весь срок; с периодом —
+                      обновление каждый день, раз в 7 дней или месяц.
+                    </span>
+                  </span>
+                </label>
+                {trafficLimitEnabled && (
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="tg-mini-limit-value">Объём</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="tg-mini-limit-value"
+                          type="number"
+                          min={0.01}
+                          step="any"
+                          value={limitValue}
+                          onChange={(e) => setLimitValue(e.target.value)}
+                          disabled={busy || quotaReached}
+                        />
+                        <select
+                          className="w-[5.5rem] shrink-0 rounded-md border border-input bg-background px-2 text-sm"
+                          value={limitUnit}
+                          onChange={(e) => setLimitUnit(e.target.value)}
+                          disabled={busy || quotaReached}
+                        >
+                          <option value="MB">MB</option>
+                          <option value="GB">GB</option>
+                          <option value="TB">TB</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="tg-mini-limit-period">Период</Label>
+                      <select
+                        id="tg-mini-limit-period"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={limitPeriodDays}
+                        onChange={(e) => setLimitPeriodDays(e.target.value)}
+                        disabled={busy || quotaReached}
+                      >
+                        <option value="">Всё время (без сброса)</option>
+                        <option value="1">1 день (календарный)</option>
+                        <option value="7">7 дней (пн–вс)</option>
+                        <option value="30">30 дней (месяц)</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isAdmin && (
               <div className="space-y-2">
                 <Label htmlFor="tg-mini-access-until">Доступ до</Label>
                 <Input
@@ -396,33 +497,6 @@ export default function CreateConfigDialog({
                 disabled={busy || quotaReached}
                 description="Владелец увидит все конфигурации профиля"
               />
-            )}
-
-            {templates.length > 0 && (
-              <div className="space-y-2">
-                <Label>Шаблоны</Label>
-                <p className="text-xs text-muted-foreground">
-                  Шаблон создаёт одну конфигурацию по пресету
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {templates.map((template) => (
-                    <Button
-                      key={template.id}
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      disabled={busy || quotaReached || !clientName.trim()}
-                      onClick={() => void handleApplyTemplate(template)}
-                    >
-                      {applyingTemplateId === template.id ? (
-                        <Loader2 size={14} className="animate-spin" aria-hidden />
-                      ) : (
-                        template.name
-                      )}
-                    </Button>
-                  ))}
-                </div>
-              </div>
             )}
 
             {error && <p className="text-destructive text-sm">{error}</p>}

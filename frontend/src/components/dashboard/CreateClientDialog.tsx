@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Loader2, Plus } from 'lucide-react'
 import {
   ApiError,
-  applyClientTemplate,
+  awg2SetTrafficLimit,
   createConfig,
+  openvpnSetTrafficLimit,
   setClientAccessUntil,
+  wgSetTrafficLimit,
 } from '@/api/client'
 import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
@@ -27,7 +29,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import type { ClientTemplate, User, VpnType } from '@/types'
+import type { User, VpnType } from '@/types'
 
 const PROTOCOL_ORDER: VpnType[] = ['openvpn', 'wireguard', 'amneziawg2']
 
@@ -51,6 +53,24 @@ function dateInputToIso(value: string): string | null {
   return next.toISOString()
 }
 
+async function setTrafficLimitForProtocol(
+  protocol: VpnType,
+  clientName: string,
+  value: number,
+  unit: string,
+  periodDays: number | null,
+) {
+  if (protocol === 'openvpn') {
+    await openvpnSetTrafficLimit(clientName, value, unit, periodDays)
+    return
+  }
+  if (protocol === 'amneziawg2') {
+    await awg2SetTrafficLimit(clientName, value, unit, periodDays)
+    return
+  }
+  await wgSetTrafficLimit(clientName, value, unit, periodDays)
+}
+
 export interface CreateClientDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -60,7 +80,6 @@ export interface CreateClientDialogProps {
   isAdmin: boolean
   currentUserId?: number
   panelUsers: User[]
-  templates: ClientTemplate[]
   haReplicaReadonly: boolean
   onCreated: () => Promise<void> | void
   onSuccess: (message: string) => void
@@ -78,7 +97,6 @@ export default function CreateClientDialog({
   isAdmin,
   currentUserId,
   panelUsers,
-  templates,
   haReplicaReadonly,
   onCreated,
   onSuccess,
@@ -103,6 +121,10 @@ export default function CreateClientDialog({
   const [awg2Ttl, setAwg2Ttl] = useState('none')
   const [accessUntilDate, setAccessUntilDate] = useState('')
   const [ownerId, setOwnerId] = useState<number | null>(currentUserId ?? null)
+  const [trafficLimitEnabled, setTrafficLimitEnabled] = useState(false)
+  const [limitValue, setLimitValue] = useState('50')
+  const [limitUnit, setLimitUnit] = useState('GB')
+  const [limitPeriodDays, setLimitPeriodDays] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -119,6 +141,10 @@ export default function CreateClientDialog({
     setAwg2Ttl('none')
     setAccessUntilDate('')
     setOwnerId(currentUserId ?? null)
+    setTrafficLimitEnabled(false)
+    setLimitValue('50')
+    setLimitUnit('GB')
+    setLimitPeriodDays('')
   }
 
   const closeForm = () => {
@@ -150,6 +176,35 @@ export default function CreateClientDialog({
     }
   }
 
+  const applyTrafficLimits = async (name: string, created: VpnType[]) => {
+    if (!isAdmin || !trafficLimitEnabled || created.length === 0) return null
+    const value = Number.parseFloat(limitValue)
+    if (!Number.isFinite(value) || value <= 0) {
+      return 'лимит трафика некорректный'
+    }
+    const period = limitPeriodDays ? Number.parseInt(limitPeriodDays, 10) : null
+    if (period != null && ![1, 7, 30].includes(period)) {
+      return 'период лимита: 1, 7 или 30 дней'
+    }
+    const failed: string[] = []
+    for (const protocol of created) {
+      try {
+        await setTrafficLimitForProtocol(protocol, name, value, limitUnit, period)
+      } catch (err) {
+        failed.push(
+          `${vpnLabel(protocol)}: ${err instanceof ApiError ? err.message : 'ошибка'}`,
+        )
+      }
+    }
+    if (failed.length === created.length) {
+      return `лимит трафика не применён (${failed.join('; ')})`
+    }
+    if (failed.length > 0) {
+      return `лимит частично не применён (${failed.join('; ')})`
+    }
+    return null
+  }
+
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault()
 
@@ -173,12 +228,25 @@ export default function CreateClientDialog({
       onError('Срок сертификата: от 1 до 3650 дней')
       return
     }
+    if (isAdmin && trafficLimitEnabled) {
+      const value = Number.parseFloat(limitValue)
+      if (!Number.isFinite(value) || value <= 0) {
+        onError('Укажите корректный лимит трафика')
+        return
+      }
+      const period = limitPeriodDays ? Number.parseInt(limitPeriodDays, 10) : null
+      if (period != null && ![1, 7, 30].includes(period)) {
+        onError('Период лимита: 1, 7 или 30 дней')
+        return
+      }
+    }
 
     const ordered = PROTOCOL_ORDER.filter((type) => selectedProtocols.includes(type))
     setSubmitting(true)
     const accessDateSnapshot = accessUntilDate
     const created: VpnType[] = []
     let lastHaWarning: string | undefined
+    let trafficWarning: string | null = null
 
     try {
       await withProgress(async () => {
@@ -206,52 +274,38 @@ export default function CreateClientDialog({
             break
           }
         }
+        trafficWarning = await applyTrafficLimits(trimmedName, created)
         closeForm()
         await onCreated()
       }, ordered.length > 1 ? `Создание профиля (${ordered.length} конф.)...` : 'Создание клиента...')
 
+      const limitNote =
+        isAdmin && trafficLimitEnabled && !trafficWarning
+          ? ` · лимит ${limitValue} ${limitUnit}${
+              limitPeriodDays === '7'
+                ? ' / 7 дн.'
+                : limitPeriodDays === '30'
+                  ? ' / мес'
+                  : limitPeriodDays === '1'
+                    ? ' / день'
+                    : ''
+            }`
+          : ''
       if (created.length === ordered.length && created.length > 0) {
         onSuccess(
           created.length === 1
-            ? `Клиент «${trimmedName}» создан (${vpnLabel(created[0])})`
-            : `Профиль «${trimmedName}»: ${created.map(vpnLabel).join(', ')}`,
+            ? `Клиент «${trimmedName}» создан (${vpnLabel(created[0])})${limitNote}`
+            : `Профиль «${trimmedName}»: ${created.map(vpnLabel).join(', ')}${limitNote}`,
         )
       } else if (created.length > 0) {
-        onSuccess(`Профиль «${trimmedName}»: создано ${created.map(vpnLabel).join(', ')}`)
+        onSuccess(`Профиль «${trimmedName}»: создано ${created.map(vpnLabel).join(', ')}${limitNote}`)
+      }
+      if (trafficWarning) {
+        onWarning(`Профиль создан, но ${trafficWarning}`)
       }
       if (lastHaWarning) onWarning(lastHaWarning)
     } catch (err) {
       onError(err instanceof ApiError ? err.message : 'Ошибка создания клиента')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const handleApplyTemplate = async (template: ClientTemplate) => {
-    const trimmedName = clientName.trim()
-    if (!trimmedName) {
-      onError('Укажите имя клиента для шаблона')
-      return
-    }
-    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(trimmedName)) {
-      onError('Имя: латиница, цифры, _ и -, до 32 символов')
-      return
-    }
-    setSubmitting(true)
-    const accessDateSnapshot = accessUntilDate
-    try {
-      await withProgress(async () => {
-        const created = await applyClientTemplate(template.id, {
-          client_name: trimmedName,
-          owner_id: isAdmin && ownerId ? ownerId : undefined,
-        })
-        await applyAccessUntil(trimmedName, created.vpn_type, accessDateSnapshot)
-        closeForm()
-        await onCreated()
-      }, `Создание: ${template.name}...`)
-      onSuccess(`Клиент «${trimmedName}» создан по шаблону`)
-    } catch (err) {
-      onError(err instanceof ApiError ? err.message : 'Ошибка применения шаблона')
     } finally {
       setSubmitting(false)
     }
@@ -262,8 +316,7 @@ export default function CreateClientDialog({
       ? `Создать · ${selectedProtocols.length}`
       : 'Создать'
 
-  const fieldClass =
-    'h-10 text-sm lg:h-11 lg:text-base xl:h-12 xl:text-base'
+  const fieldClass = 'h-10 text-sm lg:h-11 lg:text-base xl:h-12 xl:text-base'
   const hintClass = 'text-xs text-muted-foreground lg:text-sm'
   const showOpenVpnOpts = selectedProtocols.includes('openvpn')
   const showAwg2Opts = selectedProtocols.includes('amneziawg2')
@@ -278,17 +331,12 @@ export default function CreateClientDialog({
       <DialogContent
         className={cn(
           'flex w-[calc(100vw-1.25rem)] flex-col gap-0 overflow-hidden p-0',
-          // Phone / small tablet
           'max-h-[min(92dvh,34rem)] max-w-lg',
           'sm:max-w-xl sm:max-h-[min(90dvh,40rem)]',
           'md:max-w-2xl md:max-h-[min(88dvh,44rem)]',
-          // MacBook 13–14 (~1280–1512 CSS): fill more of the laptop width
           'lg:w-[min(100vw-2rem,52rem)] lg:max-w-[52rem] lg:max-h-[min(90dvh,50rem)]',
-          // MacBook 14–16 / laptop landscape
           'xl:w-[min(100vw-3rem,60rem)] xl:max-w-[60rem] xl:max-h-[min(88dvh,54rem)]',
-          // Large external / ultrawide — cap growth
           '2xl:w-[min(70vw,68rem)] 2xl:max-w-[68rem] 2xl:max-h-[min(85dvh,58rem)]',
-          // Short MacBook viewport (menu bar + Dock): keep usable height
           'max-[920px]:lg:max-h-[min(92dvh,calc(100dvh-1.5rem))]',
           'max-[820px]:md:max-h-[min(94dvh,calc(100dvh-1rem))]',
         )}
@@ -405,6 +453,83 @@ export default function CreateClientDialog({
               </div>
             )}
 
+            {isAdmin && (
+              <div className="space-y-3 rounded-lg border border-border/80 p-3 sm:p-4">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 rounded border-input"
+                    checked={trafficLimitEnabled}
+                    onChange={(e) => setTrafficLimitEnabled(e.target.checked)}
+                    disabled={submitting}
+                  />
+                  <span>
+                    <span className="block text-sm font-medium lg:text-base">Лимит трафика</span>
+                    <span className={hintClass}>
+                      Один лимит на все выбранные конфигурации. Без периода — на весь срок жизни
+                      конфига; с периодом — счётчик обновляется каждый день, раз в 7 дней или раз в
+                      месяц.
+                    </span>
+                  </span>
+                </label>
+                {trafficLimitEnabled && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="createTrafficLimit" className="lg:text-base">
+                        Объём
+                      </Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="createTrafficLimit"
+                          className={fieldClass}
+                          type="number"
+                          min={0.01}
+                          step="any"
+                          value={limitValue}
+                          onChange={(e) => setLimitValue(e.target.value)}
+                          disabled={submitting}
+                        />
+                        <select
+                          className={cn(
+                            'rounded-md border border-input bg-background px-2 text-sm',
+                            fieldClass,
+                            'w-[5.5rem] shrink-0',
+                          )}
+                          value={limitUnit}
+                          onChange={(e) => setLimitUnit(e.target.value)}
+                          disabled={submitting}
+                        >
+                          <option value="MB">MB</option>
+                          <option value="GB">GB</option>
+                          <option value="TB">TB</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="createTrafficPeriod" className="lg:text-base">
+                        Период
+                      </Label>
+                      <select
+                        id="createTrafficPeriod"
+                        className={cn(
+                          'w-full rounded-md border border-input bg-background px-3 text-sm',
+                          fieldClass,
+                        )}
+                        value={limitPeriodDays}
+                        onChange={(e) => setLimitPeriodDays(e.target.value)}
+                        disabled={submitting}
+                      >
+                        <option value="">Всё время (без сброса)</option>
+                        <option value="1">1 день (календарный)</option>
+                        <option value="7">7 дней (пн–вс)</option>
+                        <option value="30">30 дней (месяц)</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className={cn('grid gap-4', isAdmin ? 'md:grid-cols-2' : 'grid-cols-1')}>
               {isAdmin && (
                 <div className="space-y-2">
@@ -446,30 +571,6 @@ export default function CreateClientDialog({
                 disabled={submitting}
                 description="Владелец увидит все созданные конфигурации этого профиля."
               />
-            )}
-
-            {templates.length > 0 && (
-              <div className="space-y-2">
-                <Label className="lg:text-base">Шаблоны (one-click)</Label>
-                <p className={hintClass}>
-                  Шаблон создаёт одну конфигурацию по пресету — отдельно от мультивыбора выше.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {templates.map((tpl) => (
-                    <Button
-                      key={tpl.id}
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="lg:h-9 lg:px-3 lg:text-sm"
-                      disabled={submitting || haReplicaReadonly}
-                      onClick={() => void handleApplyTemplate(tpl)}
-                    >
-                      {tpl.name}
-                    </Button>
-                  ))}
-                </div>
-              </div>
             )}
           </div>
 

@@ -17,7 +17,6 @@ import {
   downloadProfile,
   fetchQrBlob,
   getClientPolicies,
-  getClientTemplates,
   getConfigProfileFiles,
   getConfigQuota,
   getConfigs,
@@ -59,7 +58,6 @@ import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { buildClientConnectionMap, type ClientConnectionMap } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
 import type {
-  ClientTemplate,
   DashboardSummary,
   SelfServiceQuota,
   User,
@@ -114,7 +112,6 @@ export default function DashboardPage() {
   const [policies, setPolicies] = useState<Record<string, import('../types').ClientPoliciesResponseEntry>>({})
   const [connectionMap, setConnectionMap] = useState<ClientConnectionMap | null>(null)
   const [panelUsers, setPanelUsers] = useState<User[]>([])
-  const [templates, setTemplates] = useState<ClientTemplate[]>([])
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
   const isAdmin = user?.role === 'admin'
   const awg2CreateEnabled = awg2Visible && awg2Installed
@@ -259,13 +256,6 @@ export default function DashboardPage() {
       cancelled = true
     }
   }, [isAdmin])
-
-  useEffect(() => {
-    if (!canCreateClient) return
-    void getClientTemplates()
-      .then(setTemplates)
-      .catch(() => setTemplates([]))
-  }, [canCreateClient, activeNode?.id])
 
   const handleDownload = async (config: VpnConfig, path: string, filename: string) => {
     try {
@@ -545,7 +535,6 @@ export default function DashboardPage() {
         isAdmin={isAdmin}
         currentUserId={user?.id}
         panelUsers={panelUsers}
-        templates={templates}
         haReplicaReadonly={haReplicaReadonly}
         onCreated={() => load({ silent: true })}
         onSuccess={success}
