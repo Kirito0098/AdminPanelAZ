@@ -27,11 +27,13 @@ def should_start_node_health() -> bool:
 
 
 def should_start_resource_metrics() -> bool:
-    return get_settings().resource_metrics_enabled
+    # Always spawn — loop re-checks resource_metrics_enabled each tick.
+    return True
 
 
 def should_start_panel_resource_metrics() -> bool:
-    return get_settings().panel_resource_metrics_enabled
+    # Always spawn — loop re-checks panel_resource_metrics_enabled each tick.
+    return True
 
 
 def should_start_backup_scheduler() -> bool:

@@ -20,15 +20,13 @@ def _is_resource_monitor_enabled() -> bool:
 
 
 async def run_panel_resource_metrics_loop():
-    settings = get_settings()
-    if not settings.panel_resource_metrics_enabled:
-        return
-
     while True:
         settings = get_settings()
         interval = max(5, int(settings.panel_resource_metrics_interval_seconds or 60))
         try:
-            if not _is_resource_monitor_enabled():
+            if not settings.panel_resource_metrics_enabled:
+                logger.debug("panel_resource_metrics skipped — panel_resource_metrics_enabled disabled")
+            elif not _is_resource_monitor_enabled():
                 logger.debug("panel_resource_metrics skipped — resource_monitor disabled")
             else:
                 await asyncio.to_thread(_collect_sample)
