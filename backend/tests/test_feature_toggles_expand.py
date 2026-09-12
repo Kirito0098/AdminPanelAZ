@@ -88,3 +88,30 @@ def test_env_keys_match_existing_settings_where_applicable():
     assert FEATURE_TOGGLE_BY_KEY["connection_history"].env_key == "FEATURE_CONNECTION_HISTORY_ENABLED"
     assert FEATURE_TOGGLE_BY_KEY["nodes"].env_key == "FEATURE_NODES_ENABLED"
     assert FEATURE_TOGGLE_BY_KEY["panel_ops"].env_key == "FEATURE_PANEL_OPS_ENABLED"
+
+
+def test_resource_profiles_cover_new_background_keys():
+    for profile_key, meta in RESOURCE_PROFILES.items():
+        toggles = meta["toggles"]
+        for key in NEW_BG:
+            assert key in toggles, f"{profile_key} missing {key}"
+        if profile_key == "minimal":
+            assert toggles["node_health"] is False
+            assert toggles["cert_sync"] is False
+            assert toggles["resource_metrics"] is False
+            assert toggles["panel_resource_metrics"] is False
+            assert toggles["cidr_scheduler"] is False
+            assert toggles["node_sync_reconcile"] is False
+            assert toggles["noc_reports"] is False
+            assert toggles["alert_rules"] is False
+            assert toggles["connection_history"] is False
+            # keep safety-ish on
+            assert toggles["retention"] is True
+            assert toggles["access_expiry"] is True
+            assert toggles["key_rotation"] is True
+            assert toggles["user_reminders"] is False
+            assert toggles["cloudflare_ips_update"] is False
+        else:
+            assert toggles["node_health"] is True
+            assert toggles["resource_metrics"] is True
+            assert toggles["cidr_scheduler"] is (profile_key == "full")
