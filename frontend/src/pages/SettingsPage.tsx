@@ -271,7 +271,7 @@ export default function SettingsPage() {
         titleAddon={<NodeBadge name={activeNode?.name ?? settings?.node_name} status={activeNode?.status} />}
         description={
           isAdmin
-            ? 'Настройте профиль, доступ, VPN и работу панели — разделы в боковом меню «Система»'
+            ? 'Профиль, доступ, VPN и работа панели'
             : 'Тема, пароль, Telegram и дополнительная защита при входе'
         }
       />

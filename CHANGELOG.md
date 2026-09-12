@@ -75,6 +75,7 @@
 
 ### 🔄 Changed
 
+- **Настройки: hub вместо flyout** — пункт «Настройки» ведёт на `/settings` с поиском и группами разделов; на `/settings/:section` — sticky secondary nav (desktop) и picker (mobile); hover-flyout удалён (`SettingsPage.tsx`, `SettingsSectionBrowser.tsx`, `Layout.tsx`).
 - **UX «Разделы панели»** — вместо сетки карточек: строки настроек в **2 колонки**, поиск по модулям, компактные профили ресурсов, sticky-бар с числом несохранённых изменений (`FeatureTogglesTab.tsx`).
 
 ### 🐛 Fixed
