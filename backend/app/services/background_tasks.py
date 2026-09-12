@@ -696,6 +696,37 @@ class BackgroundTaskService:
         elif requires_manual_restart:
             message += f". Перезапустите панель: {restart_cmd}"
 
+        portal_access_url = ""
+        if payload.get("configure_portal"):
+            portal_domain = str(payload.get("portal_domain") or "").strip().split(":")[0].lower()
+            if portal_domain:
+                if progress_updater:
+                    progress_updater(85, f"Настройка клиентского портала {portal_domain}…")
+                try:
+                    portal_result = self.task_portal_publish(
+                        {
+                            "portal_domain": portal_domain,
+                            "email": payload.get("email"),
+                            "domain": domain,
+                            "publish_mode": mode,
+                            "backend_port": backend_port,
+                            "https_public_port": payload.get("https_public_port") or 443,
+                            "http_acme_port": payload.get("http_acme_port") or 80,
+                            "ssl_cert": resolved_cert,
+                            "ssl_key": resolved_key,
+                        },
+                        None,
+                    )
+                    portal_access_url = str(portal_result.get("access_url") or "")
+                    message += f". Портал: {portal_domain}"
+                    if portal_access_url:
+                        message += f" ({portal_access_url}p/…)"
+                    log_output = "\n".join(
+                        part for part in [log_output, str(portal_result.get("log") or "")] if part
+                    ).strip()
+                except Exception as exc:
+                    message += f". Портал не настроен: {exc}"
+
         return {
             "message": message,
             "log": log_output,
@@ -704,6 +735,105 @@ class BackgroundTaskService:
             "restart_command": restart_cmd,
             "resolved_ssl_cert": resolved_cert,
             "resolved_ssl_key": resolved_key,
+            "access_url": access_url,
+            "publish_mode": mode,
+            "portal_access_url": portal_access_url,
+        }
+
+    def task_portal_publish(
+        self,
+        payload: dict[str, object],
+        progress_updater: Callable[[int, str, str | None], None] | None = None,
+    ) -> dict[str, str | bool]:
+        from app.services.env_file import EnvFileService
+        from app.services.panel_publish_info import panel_restart_command
+        from app.services.system_update import _systemd_unit_installed, schedule_controller_restart
+
+        portal_domain = str(payload.get("portal_domain") or "").strip().split(":")[0].lower()
+        if not portal_domain:
+            raise RuntimeError("portal_domain обязателен")
+
+        env_path = APP_ROOT / ".env"
+        env = EnvFileService(env_path)
+        mode = str(payload.get("publish_mode") or env.get_env_value("PUBLISH_MODE", "") or "").strip()
+        backend_port = str(payload.get("backend_port") or env.get_env_value("BACKEND_PORT", "8000") or "8000")
+        domain = str(payload.get("domain") or env.get_env_value("DOMAIN", "") or "").strip().split(":")[0]
+        ssl_cert = str(payload.get("ssl_cert") or env.get_env_value("SSL_CERT", "") or "").strip()
+        ssl_key = str(payload.get("ssl_key") or env.get_env_value("SSL_KEY", "") or "").strip()
+
+        if progress_updater:
+            progress_updater(15, "Подготовка настройки портала…")
+
+        cmd_env: dict[str, str] = {
+            "NON_INTERACTIVE": "true",
+            "PORTAL_DOMAIN": portal_domain,
+            "BACKEND_PORT": backend_port,
+            "HTTPS_PUBLIC_PORT": str(payload.get("https_public_port") or env.get_env_value("HTTPS_PUBLIC_PORT", "443") or "443"),
+            "HTTP_ACME_PORT": str(payload.get("http_acme_port") or env.get_env_value("HTTP_ACME_PORT", "80") or "80"),
+        }
+        if mode:
+            # Ensure script sees the intended mode even if .env lagging
+            cmd_env["PUBLISH_MODE"] = mode
+        if domain:
+            cmd_env["DOMAIN"] = domain
+        email = payload.get("email")
+        if email:
+            cmd_env["EMAIL"] = str(email)
+        if ssl_cert:
+            cmd_env["SSL_CERT"] = ssl_cert
+        if ssl_key:
+            cmd_env["SSL_KEY"] = ssl_key
+
+        script = PROJECT_ROOT / "scripts" / "nginx-setup-portal.sh"
+        if not script.is_file():
+            raise RuntimeError(f"Скрипт не найден: {script}")
+
+        if progress_updater:
+            progress_updater(40, f"Настройка портала {portal_domain}…")
+
+        stdout, stderr = self.run_checked_command(
+            ["bash", str(script)],
+            cwd=PROJECT_ROOT,
+            timeout=600,
+            env=cmd_env,
+        )
+
+        # Persist PUBLISH_MODE into env for script helpers that read via nginx_env_get
+        if mode:
+            env.set_env_value("PUBLISH_MODE", mode)
+
+        restart_cmd = panel_restart_command()
+        panel_restarted = False
+        requires_manual_restart = mode.startswith("uvicorn_") if mode else False
+
+        if requires_manual_restart and _systemd_unit_installed():
+            if progress_updater:
+                progress_updater(90, "Перезапуск панели (обновлён TLS)…")
+            schedule_controller_restart(PROJECT_ROOT)
+            panel_restarted = True
+            requires_manual_restart = False
+
+        log_output = "\n".join(part for part in [stdout, stderr] if part).strip()
+        access_url = ""
+        for line in log_output.splitlines():
+            if "PORTAL_ACCESS_URL=" in line:
+                access_url = line.split("PORTAL_ACCESS_URL=", 1)[-1].strip()
+
+        message = f"Клиентский портал настроен: {portal_domain}"
+        if access_url:
+            message += f". Откройте: {access_url}p/…"
+        if panel_restarted:
+            message += ". Панель перезапускается"
+        elif requires_manual_restart:
+            message += f". Перезапустите панель: {restart_cmd}"
+
+        return {
+            "message": message,
+            "log": log_output,
+            "panel_restarted": panel_restarted,
+            "requires_manual_restart": requires_manual_restart,
+            "restart_command": restart_cmd,
+            "portal_domain": portal_domain,
             "access_url": access_url,
             "publish_mode": mode,
         }

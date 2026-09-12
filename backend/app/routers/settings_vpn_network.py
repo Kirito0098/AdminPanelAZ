@@ -105,6 +105,35 @@ def get_vpn_network_settings(
     )
     uvicorn_warnings = [*subpath_warnings, *uvicorn_warnings]
     az_hosts = sorted(read_az_vpn_hosts())
+    portal_domain = ""
+    suggested_portal = ""
+    portal_ready = None
+    portal_dns_hint = None
+    try:
+        from app.database import SessionLocal
+        from app.services.client_portal import get_portal_domain, suggest_portal_domain
+        from app.services.panel_publish_info import build_portal_publish_status
+
+        suggested_portal = suggest_portal_domain(domain) or None
+        db = SessionLocal()
+        try:
+            portal_domain = get_portal_domain(db) or None
+        finally:
+            db.close()
+        portal_status = build_portal_publish_status(
+            portal_domain=portal_domain or "",
+            panel_domain=domain,
+            publish_mode=ctx.get("active_publish_mode"),
+            ssl_cert=ssl_cert,
+            backend_port=ctx["backend_port"],
+            https_public_port=int(env.get_env_value("HTTPS_PUBLIC_PORT", "443") or "443"),
+        )
+        portal_ready = portal_status.get("portal_ready")
+        portal_dns_hint = portal_status.get("dns_hint") or None
+    except Exception:
+        suggested_portal = None
+        portal_domain = None
+
     return VpnNetworkSettingsResponse(
         mode_key=ctx["mode_key"],
         mode_title=ctx["mode_title"],
@@ -133,6 +162,10 @@ def get_vpn_network_settings(
             if az_hosts
             else None
         ),
+        suggested_portal_domain=suggested_portal,
+        portal_domain=portal_domain,
+        portal_ready=portal_ready,
+        portal_dns_hint=portal_dns_hint,
     )
 
 
@@ -422,6 +455,22 @@ def publish_vpn_network(
     else:
         task_payload["access_path"] = None
     domain_host = (task_payload.get("domain") or env.get_env_value("DOMAIN", "") or "").strip().split(":")[0]
+
+    if task_payload.get("configure_portal"):
+        from app.services.client_portal import normalize_portal_domain, set_portal_domain, suggest_portal_domain
+
+        portal_raw = str(task_payload.get("portal_domain") or "").strip() or suggest_portal_domain(domain_host)
+        try:
+            portal_host = normalize_portal_domain(portal_raw)
+            if not portal_host:
+                raise ValueError("Укажите хост портала")
+            set_portal_domain(db, portal_host, panel_domain=domain_host)
+            db.commit()
+            task_payload["portal_domain"] = portal_host
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    else:
+        task_payload["portal_domain"] = None
 
     def _callable(progress_updater=None):
         return background_task_service.task_vpn_network_publish(task_payload, progress_updater)

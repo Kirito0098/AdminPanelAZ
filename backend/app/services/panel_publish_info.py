@@ -418,6 +418,9 @@ def build_panel_publish_context(
         ),
         "shared_domain_foreign_vhost": nginx_is_foreign_vhost_for_domain(domain) if domain else False,
         "shared_domain_status_openvpn": nginx_is_status_openvpn_on_domain(domain) if domain else False,
+        "domain": domain,
+        "ssl_cert": ssl_cert,
+        "publish_mode_raw": gv("PUBLISH_MODE", ""),
     }
 
 
@@ -901,6 +904,135 @@ def letsencrypt_cert_paths(domain: str) -> tuple[str, str]:
 def letsencrypt_exists_for_domain(domain: str) -> bool:
     cert, key = letsencrypt_cert_paths(domain)
     return Path(cert).is_file() and Path(key).is_file()
+
+
+def cert_covers_hostname(cert_path: str, hostname: str) -> bool:
+    """Best-effort: openssl text parse for DNS SAN / CN."""
+    host = (hostname or "").strip().lower().split(":")[0]
+    path = Path(cert_path or "")
+    if not host or not path.is_file():
+        return False
+    try:
+        result = subprocess.run(
+            ["openssl", "x509", "-in", str(path), "-noout", "-text"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    text = result.stdout or ""
+    if re.search(rf"DNS:{re.escape(host)}(,|\s|$)", text, re.IGNORECASE):
+        return True
+    # Wildcard *.parent
+    parts = host.split(".")
+    if len(parts) >= 2:
+        wild = r"DNS:\*\." + re.escape(".".join(parts[1:]))
+        if re.search(wild + r"(,|\s|$)", text, re.IGNORECASE):
+            return True
+    cn_match = re.search(r"Subject:.*\bCN\s*=\s*([^,/\n]+)", text, re.IGNORECASE)
+    if cn_match and cn_match.group(1).strip().lower() == host:
+        return True
+    return False
+
+
+def build_portal_publish_status(
+    *,
+    portal_domain: str,
+    panel_domain: str,
+    publish_mode: str | None,
+    ssl_cert: str = "",
+    backend_port: str = "8000",
+    https_public_port: int = 443,
+) -> dict:
+    """Status for Subscription / publish wizard portal provisioning."""
+    from app.services.client_portal import suggest_portal_domain
+
+    portal = (portal_domain or "").strip().lower().split(":")[0]
+    panel = (panel_domain or "").strip().lower().split(":")[0]
+    mode = (publish_mode or "").strip() or None
+    suggested = suggest_portal_domain(panel)
+
+    vhost_ok = bool(portal) and nginx_has_vhost_for_domain(portal)
+    cert_ok = False
+    warnings: list[str] = []
+    dns_hint = ""
+    primary_ip = server_primary_ip()
+    if portal and primary_ip:
+        dns_hint = f"Создайте DNS A-запись {portal} → {primary_ip} (или CNAME на домен панели)."
+    elif portal:
+        dns_hint = f"Создайте DNS A/AAAA или CNAME для {portal} на IP этого сервера."
+
+    if portal:
+        if mode in {"nginx_le", "nginx_selfsigned", "nginx_custom"}:
+            cert_path = nginx_ssl_cert_path_for_domain(portal) or ssl_cert
+            if not cert_path and mode == "nginx_le":
+                le_cert, _ = letsencrypt_cert_paths(portal)
+                cert_path = le_cert if Path(le_cert).is_file() else ""
+            if mode == "nginx_selfsigned" and SELF_SIGNED_CERT_PATH.is_file():
+                cert_path = cert_path or str(SELF_SIGNED_CERT_PATH)
+            cert_ok = bool(cert_path) and cert_covers_hostname(cert_path, portal)
+            if vhost_ok and not cert_ok:
+                warnings.append("Vhost портала есть, но сертификат не покрывает этот хост.")
+            if not vhost_ok:
+                warnings.append("Nginx vhost для портала ещё не настроен — нажмите «Настроить под текущую публикацию».")
+        elif mode in {"uvicorn_le", "uvicorn_selfsigned", "uvicorn_custom"}:
+            cert_path = ssl_cert
+            if not cert_path and mode == "uvicorn_le" and panel:
+                le_cert, _ = letsencrypt_cert_paths(panel)
+                cert_path = le_cert if Path(le_cert).is_file() else ""
+            if mode == "uvicorn_selfsigned" and SELF_SIGNED_CERT_PATH.is_file():
+                cert_path = cert_path or str(SELF_SIGNED_CERT_PATH)
+            cert_ok = bool(cert_path) and cert_covers_hostname(cert_path, portal)
+            vhost_ok = cert_ok  # no separate vhost; TLS on app
+            if not cert_ok:
+                warnings.append(
+                    "Сертификат uvicorn не покрывает хост портала (нужен SAN). "
+                    "Нажмите «Настроить под текущую публикацию»."
+                )
+        elif mode == "http_direct" or not mode:
+            cert_ok = False
+            vhost_ok = True  # nothing to provision beyond CORS
+            warnings.append(
+                f"Режим прямого HTTP: портал будет без TLS "
+                f"(http://{portal}:{backend_port}/p/…)."
+            )
+        else:
+            warnings.append(f"Неизвестный режим публикации: {mode}")
+
+    ready = bool(portal) and (
+        (mode == "http_direct" and True)
+        or (mode in {"nginx_le", "nginx_selfsigned", "nginx_custom"} and vhost_ok and cert_ok)
+        or (mode in {"uvicorn_le", "uvicorn_selfsigned", "uvicorn_custom"} and cert_ok)
+    )
+
+    access_url = ""
+    if portal:
+        if mode == "http_direct" or not mode:
+            access_url = f"http://{portal}:{backend_port}/"
+        elif mode and mode.startswith("uvicorn_"):
+            access_url = public_https_origin_url(portal, int(backend_port) if str(backend_port).isdigit() else 443) or ""
+            if access_url and not access_url.endswith("/"):
+                access_url += "/"
+        else:
+            access_url = public_https_origin_url(portal, https_public_port) or f"https://{portal}/"
+            if access_url and not access_url.endswith("/"):
+                access_url += "/"
+
+    return {
+        "portal_domain": portal,
+        "suggested_portal_domain": suggested,
+        "panel_domain": panel,
+        "active_publish_mode": mode,
+        "portal_vhost_ok": vhost_ok,
+        "portal_cert_ok": cert_ok,
+        "portal_ready": ready,
+        "server_primary_ip": primary_ip,
+        "dns_hint": dns_hint,
+        "warnings": warnings,
+        "portal_access_url": access_url,
+    }
 
 
 def _iter_letsencrypt_live_domains() -> list[str]:

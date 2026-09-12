@@ -1,7 +1,12 @@
-import { useEffect, useState } from 'react'
-import { Globe, KeyRound, Loader2, Save, Ticket, Trash2 } from 'lucide-react'
-import { ApiError, getSecuritySettings, updateSecuritySettings } from '@/api/client'
-import { getUnlockCodes, revokeUnlockCode, type UnlockCodeProtocol } from '@/api/unlockCodes'
+import { useCallback, useEffect, useState } from 'react'
+import { Globe, KeyRound, Loader2, Rocket, Save, Ticket, Trash2 } from 'lucide-react'
+import {
+  ApiError,
+  getPortalPublishStatus,
+  getSecuritySettings,
+  publishPortalDomain,
+  updateSecuritySettings,
+} from '@/api/client'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import Spinner from '@/components/ui/Spinner'
@@ -13,6 +18,7 @@ import { Label } from '@/components/ui/label'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useProgress } from '@/context/ProgressContext'
 import { formatDateTime } from '@/lib/datetime'
 import {
   isUnlockCodeExhausted,
@@ -20,10 +26,12 @@ import {
   unlockCodeStatusLabel,
 } from '@/lib/unlockCodeStatus'
 import { cn } from '@/lib/utils'
-import type { UnlockCodeRecord } from '@/types'
+import type { PortalPublishStatus, UnlockCodeRecord } from '@/types'
+import { getUnlockCodes, revokeUnlockCode, type UnlockCodeProtocol } from '@/api/unlockCodes'
 
 export default function SubscriptionPage() {
   const { success, error: notifyError } = useNotifications()
+  const { trackBackgroundTask } = useProgress()
   const { isEnabled } = useFeatureModules()
   const clientPortalEnabled = isEnabled('client_portal')
   const unlockCodesEnabled = isEnabled('unlock_codes')
@@ -32,22 +40,40 @@ export default function SubscriptionPage() {
   const awg2Enabled = isEnabled('awg2')
 
   const [portalDomain, setPortalDomain] = useState('')
+  const [portalStatus, setPortalStatus] = useState<PortalPublishStatus | null>(null)
   const [loading, setLoading] = useState(clientPortalEnabled)
   const [saving, setSaving] = useState(false)
+  const [provisioning, setProvisioning] = useState(false)
   const [unlockCodes, setUnlockCodes] = useState<UnlockCodeRecord[]>([])
   const [unlockCodesLoading, setUnlockCodesLoading] = useState(false)
   const [unlockCodesBusyId, setUnlockCodesBusyId] = useState<number | null>(null)
   const [unlockCreateOpen, setUnlockCreateOpen] = useState(false)
 
+  const refreshPortalStatus = useCallback(async () => {
+    if (!clientPortalEnabled) {
+      setPortalStatus(null)
+      return
+    }
+    try {
+      setPortalStatus(await getPortalPublishStatus())
+    } catch {
+      setPortalStatus(null)
+    }
+  }, [clientPortalEnabled])
+
   useEffect(() => {
     if (!clientPortalEnabled) {
       setPortalDomain('')
+      setPortalStatus(null)
       setLoading(false)
       return
     }
     setLoading(true)
-    getSecuritySettings()
-      .then((data) => setPortalDomain(data.portal_domain || ''))
+    Promise.all([getSecuritySettings(), getPortalPublishStatus()])
+      .then(([data, status]) => {
+        setPortalDomain(data.portal_domain || status.suggested_portal_domain || '')
+        setPortalStatus(status)
+      })
       .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки'))
       .finally(() => setLoading(false))
   }, [clientPortalEnabled, notifyError])
@@ -71,7 +97,9 @@ export default function SubscriptionPage() {
   if (awg2Enabled) availableUnlockProtocols.push('amneziawg2')
 
   const portalPreviewHost =
-    portalDomain.trim().replace(/^https?:\/\//i, '').split('/')[0] || 'sub.example.com'
+    portalDomain.trim().replace(/^https?:\/\//i, '').split('/')[0] ||
+    portalStatus?.suggested_portal_domain ||
+    'portal.example.com'
 
   const savePortal = async () => {
     setSaving(true)
@@ -81,10 +109,37 @@ export default function SubscriptionPage() {
       })
       setPortalDomain(updated.portal_domain || '')
       success('Настройки портала сохранены')
+      await refreshPortalStatus()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const provisionPortal = async () => {
+    const host = portalDomain.trim()
+    if (!host) {
+      notifyError('Укажите хост портала')
+      return
+    }
+    setProvisioning(true)
+    try {
+      const resp = await publishPortalDomain({ portal_domain: host, save_domain: true })
+      trackBackgroundTask(resp.task_id, {
+        onComplete: () => {
+          setProvisioning(false)
+          success(resp.message || 'Портал настроен')
+          void refreshPortalStatus()
+        },
+        onError: (_task, message) => {
+          setProvisioning(false)
+          notifyError(message || 'Не удалось настроить портал')
+        },
+      })
+    } catch (err) {
+      setProvisioning(false)
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка запуска настройки')
     }
   }
 
@@ -104,28 +159,31 @@ export default function SubscriptionPage() {
     setUnlockCodesBusyId(code.id)
     try {
       await revokeUnlockCode(code.id)
-      success(`Код «${code.code}» отозван`)
+      success('Ключ отозван')
       await refreshUnlockCodes()
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка отзыва unlock-ключа')
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось отозвать ключ')
     } finally {
       setUnlockCodesBusyId(null)
     }
   }
 
-  if (loading) {
-    return <Spinner label="Загрузка подписки..." className="py-12" />
+  if (loading && clientPortalEnabled) {
+    return <Spinner label="Загрузка…" className="py-12" />
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PageSectionHeader
         icon={Ticket}
         title="Подписка"
         description="Клиентский портал и unlock-ключи продления доступа"
       />
 
-      <InlineProgressBar active={saving} label="Сохранение настроек..." />
+      <InlineProgressBar
+        active={saving || provisioning}
+        label={provisioning ? 'Настройка портала…' : 'Сохранение настроек...'}
+      />
 
       {clientPortalEnabled && (
         <Card className="shadow-sm">
@@ -135,8 +193,9 @@ export default function SubscriptionPage() {
               Клиентский портал
             </CardTitle>
             <CardDescription>
-              Постоянные ссылки на отдельном поддомене: страница установки, OpenVPN import и скачивание
-              профилей. DNS и TLS настройте сами (прокси на эту панель).
+              Постоянные ссылки на отдельном поддомене. Панель сама настроит nginx/сертификат под
+              текущий способ публикации (Настройки → Адрес сайта и HTTPS). DNS-запись нужно создать
+              у регистратора.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -146,22 +205,74 @@ export default function SubscriptionPage() {
                 id="portal-domain"
                 value={portalDomain}
                 onChange={(e) => setPortalDomain(e.target.value)}
-                placeholder="sub.example.com"
+                placeholder={portalStatus?.suggested_portal_domain || 'portal.example.com'}
                 autoComplete="off"
               />
               <p className="text-xs text-muted-foreground">
-                Без схемы. Пример ссылки:{' '}
-                <code className="rounded bg-muted px-1 py-0.5">
-                  https://{portalPreviewHost}/p/…
-                </code>
-                . Не используйте домен самой панели. При заданном хосте одноразовые QR-ссылки тоже
-                строятся с него.
+                Без схемы. Пример:{' '}
+                <code className="rounded bg-muted px-1 py-0.5">https://{portalPreviewHost}/p/…</code>
+                . Не используйте домен самой панели
+                {portalStatus?.panel_domain ? ` (${portalStatus.panel_domain})` : ''}.
+                {portalStatus?.suggested_portal_domain &&
+                portalDomain.trim() !== portalStatus.suggested_portal_domain ? (
+                  <>
+                    {' '}
+                    <button
+                      type="button"
+                      className="text-primary underline-offset-2 hover:underline"
+                      onClick={() => setPortalDomain(portalStatus.suggested_portal_domain)}
+                    >
+                      Подставить {portalStatus.suggested_portal_domain}
+                    </button>
+                  </>
+                ) : null}
               </p>
             </div>
-            <div className="flex justify-end border-t pt-4">
-              <Button onClick={() => void savePortal()} disabled={saving} className="gap-1.5">
+
+            {portalStatus && (
+              <div className="space-y-2 rounded-xl border bg-muted/20 p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-muted-foreground">Статус:</span>
+                  {portalStatus.portal_ready ? (
+                    <Badge variant="success">Готов</Badge>
+                  ) : (
+                    <Badge variant="warning">Нужна настройка</Badge>
+                  )}
+                  {portalStatus.active_publish_mode ? (
+                    <Badge variant="outline">{portalStatus.active_publish_mode}</Badge>
+                  ) : null}
+                </div>
+                {portalStatus.dns_hint ? (
+                  <p className="text-xs text-muted-foreground">{portalStatus.dns_hint}</p>
+                ) : null}
+                {portalStatus.warnings.map((w) => (
+                  <p key={w} className="text-xs text-amber-700 dark:text-amber-400">
+                    {w}
+                  </p>
+                ))}
+                {portalStatus.portal_access_url ? (
+                  <p className="text-xs text-muted-foreground">
+                    URL:{' '}
+                    <code className="rounded bg-muted px-1 py-0.5">
+                      {portalStatus.portal_access_url}p/…
+                    </code>
+                  </p>
+                ) : null}
+              </div>
+            )}
+
+            <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:justify-end">
+              <Button onClick={() => void savePortal()} disabled={saving || provisioning} variant="outline" className="gap-1.5">
                 <Save size={16} />
-                {saving ? 'Сохранение...' : 'Сохранить портал'}
+                {saving ? 'Сохранение...' : 'Сохранить хост'}
+              </Button>
+              <Button
+                onClick={() => void provisionPortal()}
+                disabled={saving || provisioning || !portalDomain.trim()}
+                className="gap-1.5"
+              >
+                <Rocket size={16} />
+                {provisioning ? 'Настройка…' : 'Настроить под текущую публикацию'}
               </Button>
             </div>
           </CardContent>

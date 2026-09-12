@@ -150,6 +150,12 @@ export type PublishAccessWizardProps = {
   showOptionalDomain: boolean
   selfsignedDomainHint: boolean
   onPickSslSuggestion: (cert: string, key: string) => void
+  clientPortalEnabled?: boolean
+  configurePortal?: boolean
+  onConfigurePortalChange?: (checked: boolean) => void
+  portalDomain?: string
+  onPortalDomainChange?: (value: string) => void
+  suggestedPortalDomain?: string
 }
 
 export default function PublishAccessWizard({
@@ -193,6 +199,12 @@ export default function PublishAccessWizard({
   showOptionalDomain,
   selfsignedDomainHint,
   onPickSslSuggestion,
+  clientPortalEnabled = false,
+  configurePortal = false,
+  onConfigurePortalChange,
+  portalDomain = '',
+  onPortalDomainChange,
+  suggestedPortalDomain = '',
 }: PublishAccessWizardProps) {
   const [activeStack, setActiveStack] = useState<PublishStackId>(() => stackForMode(selectedMode))
   const domainLetsEncrypt = domainSslStatus?.has_letsencrypt ?? null
@@ -629,6 +641,49 @@ export default function PublishAccessWizard({
             <SettingsAlert variant="warning" title="Только HTTP">
               Домен из настроек не используется — панель откроется по IP-адресу сервера.
             </SettingsAlert>
+          ) : null}
+          {clientPortalEnabled ? (
+            <div className="space-y-3 rounded-xl border bg-muted/15 p-3">
+              <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={configurePortal}
+                  onChange={(e) => onConfigurePortalChange?.(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium">Также настроить клиентский портал</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Второй хост под текущий режим публикации (nginx vhost / SAN-сертификат). DNS A-запись
+                    создайте сами.
+                  </span>
+                </span>
+              </label>
+              {configurePortal ? (
+                <div className="space-y-2 pl-6">
+                  <Label htmlFor="vpn-portal-domain">Хост портала</Label>
+                  <Input
+                    id="vpn-portal-domain"
+                    value={portalDomain}
+                    onChange={(e) => onPortalDomainChange?.(e.target.value)}
+                    placeholder={suggestedPortalDomain || 'portal.example.com'}
+                    autoComplete="off"
+                  />
+                  {suggestedPortalDomain ? (
+                    <p className="text-xs text-muted-foreground">
+                      Рекомендуется:{' '}
+                      <button
+                        type="button"
+                        className="text-primary underline-offset-2 hover:underline"
+                        onClick={() => onPortalDomainChange?.(suggestedPortalDomain)}
+                      >
+                        {suggestedPortalDomain}
+                      </button>
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
         </div>

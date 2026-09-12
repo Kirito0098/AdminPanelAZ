@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import type {
   VpnNetworkPortStatus,
   VpnNetworkPublishMode,
@@ -102,6 +103,8 @@ function orderPublishModes(modes: VpnNetworkPublishMode[]): VpnNetworkPublishMod
 export default function VpnNetworkTab() {
   const { error: notifyError } = useNotifications()
   const { trackBackgroundTask, backgroundTaskPolling } = useProgress()
+  const { isEnabled } = useFeatureModules()
+  const clientPortalEnabled = isEnabled('client_portal')
   const { confirm, dialogProps } = useConfirmDialog()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeInnerTab = useMemo(() => {
@@ -136,6 +139,8 @@ export default function VpnNetworkTab() {
   const [sslKey, setSslKey] = useState('')
   const [accessPath, setAccessPath] = useState('')
   const [nginxSubpathIntegrate, setNginxSubpathIntegrate] = useState(false)
+  const [configurePortal, setConfigurePortal] = useState(false)
+  const [portalDomain, setPortalDomain] = useState('')
   const [publishAwait, setPublishAwait] = useState<PublishAwaitDialogState | null>(null)
   const [ddnsOpen, setDdnsOpen] = useState(false)
   const [manualSetupOpen, setManualSetupOpen] = useState(false)
@@ -178,6 +183,9 @@ export default function VpnNetworkTab() {
       suppressSslAutofillRef.current = Boolean(certVal && keyVal)
       const accessPathVal = envRowValue(data.env_rows, 'ACCESS_PATH')
       setAccessPath(accessPathVal)
+      if (data.portal_domain || data.suggested_portal_domain) {
+        setPortalDomain((current) => current.trim() || data.portal_domain || data.suggested_portal_domain || '')
+      }
       if (syncSelectedMode && !userPickedModeRef.current) {
         const active = data.active_publish_mode
         if (active && data.publish_modes?.some((m) => m.key === active)) {
@@ -505,6 +513,11 @@ export default function VpnNetworkTab() {
             ssl_key: sslKey.trim() || null,
             access_path: accessPath.trim() || null,
             nginx_subpath_integrate: nginxSubpathIntegrate,
+            configure_portal: clientPortalEnabled && configurePortal,
+            portal_domain:
+              clientPortalEnabled && configurePortal
+                ? portalDomain.trim().split(':')[0] || null
+                : null,
           })
           startPublishTracking(resp.task_id, resp.message)
         } catch (err) {
@@ -726,6 +739,12 @@ export default function VpnNetworkTab() {
                 if (suggestedDomain) setDomain(suggestedDomain)
               }
             }}
+            clientPortalEnabled={clientPortalEnabled}
+            configurePortal={configurePortal}
+            onConfigurePortalChange={setConfigurePortal}
+            portalDomain={portalDomain}
+            onPortalDomainChange={setPortalDomain}
+            suggestedPortalDomain={settings.suggested_portal_domain || ''}
           />
 
           <SettingsCollapsible

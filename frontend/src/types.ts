@@ -864,6 +864,24 @@ export interface VpnNetworkSettings {
   server_primary_ip?: string | null
   az_vpn_hosts?: string[]
   az_vpn_conflict_hint?: string | null
+  suggested_portal_domain?: string | null
+  portal_domain?: string | null
+  portal_ready?: boolean | null
+  portal_dns_hint?: string | null
+}
+
+export interface PortalPublishStatus {
+  portal_domain: string
+  suggested_portal_domain: string
+  panel_domain: string
+  active_publish_mode?: string | null
+  portal_vhost_ok: boolean
+  portal_cert_ok: boolean
+  portal_ready: boolean
+  server_primary_ip?: string | null
+  dns_hint: string
+  warnings: string[]
+  portal_access_url: string
 }
 
 export type VpnNetworkPublishModeKey =
@@ -886,6 +904,8 @@ export interface VpnNetworkPublishPayload {
   ssl_key?: string | null
   access_path?: string | null
   nginx_subpath_integrate?: boolean
+  configure_portal?: boolean
+  portal_domain?: string | null
 }
 
 export type DdnsProvider = 'none' | 'duckdns' | 'noip'

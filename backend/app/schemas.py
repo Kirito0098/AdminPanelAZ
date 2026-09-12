@@ -1059,6 +1059,28 @@ class VpnNetworkPublishRequest(BaseModel):
     ssl_key: str | None = Field(default=None, max_length=1024)
     access_path: str | None = Field(default=None, max_length=255)
     nginx_subpath_integrate: bool = False
+    configure_portal: bool = False
+    portal_domain: str | None = Field(default=None, max_length=255)
+
+
+class PortalPublishRequest(BaseModel):
+    portal_domain: str = Field(min_length=1, max_length=255)
+    email: str | None = Field(default=None, max_length=255)
+    save_domain: bool = True
+
+
+class PortalPublishStatusResponse(BaseModel):
+    portal_domain: str = ""
+    suggested_portal_domain: str = ""
+    panel_domain: str = ""
+    active_publish_mode: str | None = None
+    portal_vhost_ok: bool = False
+    portal_cert_ok: bool = False
+    portal_ready: bool = False
+    server_primary_ip: str | None = None
+    dns_hint: str = ""
+    warnings: list[str] = []
+    portal_access_url: str = ""
 
 
 class VpnNetworkSettingsResponse(BaseModel):
@@ -1083,6 +1105,10 @@ class VpnNetworkSettingsResponse(BaseModel):
     server_primary_ip: str | None = None
     az_vpn_hosts: list[str] = []
     az_vpn_conflict_hint: str | None = None
+    suggested_portal_domain: str | None = None
+    portal_domain: str | None = None
+    portal_ready: bool | None = None
+    portal_dns_hint: str | None = None
 
 
 class VpnNetworkDomainSslStatusResponse(BaseModel):

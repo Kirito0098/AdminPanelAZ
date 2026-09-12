@@ -35,6 +35,30 @@ _HOSTNAME_RE = re.compile(
 )
 
 
+def suggest_portal_domain(panel_domain: str | None) -> str:
+    """Suggest portal.<panel> unless the panel host already starts with portal."""
+    host = (panel_domain or "").strip().lower()
+    host = re.sub(r"^https?://", "", host)
+    host = host.split("/")[0].split(":")[0].strip()
+    if not host or not _HOSTNAME_RE.match(host):
+        return ""
+    if host.startswith("portal."):
+        # panel host already uses portal. — use clients.<rest>
+        rest = host[len("portal.") :]
+        return f"clients.{rest}" if rest else ""
+    return f"portal.{host}"
+
+
+def assert_portal_domain_not_panel(portal_host: str, panel_domain: str | None) -> None:
+    portal = (portal_host or "").strip().lower().split(":")[0]
+    panel = (panel_domain or "").strip().lower().split(":")[0]
+    if portal and panel and portal == panel:
+        raise ValueError(
+            "Хост портала не должен совпадать с доменом панели. "
+            f"Укажите поддомен, например {suggest_portal_domain(panel) or 'portal.example.com'}."
+        )
+
+
 def normalize_portal_domain(raw: str | None) -> str:
     value = (raw or "").strip().lower()
     if not value:
@@ -48,19 +72,30 @@ def normalize_portal_domain(raw: str | None) -> str:
     return value
 
 
-def get_portal_domain(db: Session) -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == "portal_domain").first()
-    return (row.value or "").strip() if row else ""
-
-
-def set_portal_domain(db: Session, raw: str | None) -> str:
+def set_portal_domain(db: Session, raw: str | None, *, panel_domain: str | None = None) -> str:
     host = normalize_portal_domain(raw) if raw is not None else ""
+    if host:
+        if panel_domain is None:
+            from app.config import get_settings
+
+            panel_domain = (get_settings().domain or "").strip()
+        assert_portal_domain_not_panel(host, panel_domain)
+        from app.services.antizapret_settings import format_az_panel_domain_conflict_message
+
+        az_conflict = format_az_panel_domain_conflict_message(host)
+        if az_conflict:
+            raise ValueError(az_conflict)
     row = db.query(AppSetting).filter(AppSetting.key == "portal_domain").first()
     if row:
         row.value = host
     else:
         db.add(AppSetting(key="portal_domain", value=host))
     return host
+
+
+def get_portal_domain(db: Session) -> str:
+    row = db.query(AppSetting).filter(AppSetting.key == "portal_domain").first()
+    return (row.value or "").strip() if row else ""
 
 
 def resolve_portal_base_url(db: Session) -> str | None:
