@@ -26,7 +26,7 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
               <span className="font-medium text-foreground">Vs стоковый AmneziaWG:</span> отдельный
               overlay (`/opt/antizapret-awg`), тип конфига <code className="text-xs">amneziawg2</code>,
               своя вкладка на Dashboard и клиенты через <code className="text-xs">awg-client</code>.
-              Вкладка «AmneziaWG» в Конфигурациях остаётся для стока AntiZapret.
+              Вкладка «AmneziaWG» в Клиентах остаётся для стока AntiZapret.
             </p>
             <p>
               <span className="font-medium text-foreground">Vs AZ-WARP:</span> WARP точечно гонит
@@ -42,7 +42,7 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
             <p>
               <span className="font-medium text-foreground">Клиенты:</span> создание, скачивание, блокировки
               и TTL — на странице{' '}
-              <strong className="text-foreground">Конфигурации</strong> (вкладка AmneziaWG 2.0). Отдельной
+              <strong className="text-foreground">Клиенты</strong> (вкладка AmneziaWG 2.0). Отдельной
               вкладки клиентов на `/awg2` нет.
             </p>
             <p>
@@ -58,7 +58,7 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
             <p>
               <span className="font-medium text-foreground">TTL клиентов:</span> для профилей{' '}
               <code className="text-xs">amneziawg2</code> можно задать автоистечение при создании на
-              Конфигурациях: нет / 30m / 2h / 6h / 7d.
+              Клиентах: нет / 30m / 2h / 6h / 7d.
             </p>
             <p>
               <span className="font-medium text-foreground">Backup:</span> вкладка «Бэкап» делает узкий
