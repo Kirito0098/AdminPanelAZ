@@ -1,7 +1,7 @@
 # Backup restore coverage matrix (A → B → C)
 
 **Дата:** 2026-09-12  
-**Статус:** written (awaiting user review)  
+**Статус:** approved (awaiting implementation)  
 **Ветка:** `feature/client-portal`  
 **Подход:** spec + checklist + точечные UX/тесты (не machine-image в tar)  
 **Связанные спеки:** `2026-09-12-backup-portal-restore-design.md`, `2026-08-17-backup-restore-parity-design.md`
