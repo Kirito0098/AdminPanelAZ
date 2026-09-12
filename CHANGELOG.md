@@ -104,6 +104,7 @@
 - **Telegram-доставка бэкапа** — create / авто-бэкап / тест отправляют документ синхронно (`run_async=False`); явная отправка отвечает ошибкой, если upload не удался.
 - **API restore панели** — SQLite-движки закрываются до записи `adminpanel.db` / `cidr.db` (`apply_backup_overlays` → dispose → apply sqlite → restart).
 - **CLI списки AntiZapret** — читает/пишет `$ANTIZAPRET_PATH` (как installer / `.env` / node agent), а не несуществующий `ANTIZAPRET_HOME`.
+- **Бэкап restore hints** — API/upload+restore подсказывают Push full при configs/AWG2; docs чеклист A/B/C и явное разделение полного AntiZapret-архива.
 
 
 ---

@@ -547,7 +547,7 @@ export default function BackupTab() {
                 <OptionCard
                   icon={Server}
                   label="Создать полный архив VPN"
-                  description="OpenVPN и WireGuard, сертификаты, DNS Knot Resolver и конфиги AntiZapret — восстановление только на VPN-сервере"
+                  description="Отдельный файл backup-*.tar.gz на VPN-узле (не в списке «Архивы» панели). Восстановление — на VPN-сервере, не через «Восстановить» panel-архива."
                   checked={includeAntizapretBackup}
                   onChange={setIncludeAntizapretBackup}
                 />
