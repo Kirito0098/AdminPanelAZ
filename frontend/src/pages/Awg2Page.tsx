@@ -109,7 +109,7 @@ export default function Awg2Page() {
           </TabsContent>
 
           <TabsContent value="backup" className="mt-0 focus-visible:outline-none">
-            <BackupTab onRestored={() => void load()} />
+            <BackupTab />
           </TabsContent>
 
           <TabsContent value="help" className="mt-0 focus-visible:outline-none">

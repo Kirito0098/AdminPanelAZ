@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 import secrets
+import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import HTTPException, status
@@ -33,6 +35,49 @@ from app.services.profile_download_name import build_profile_download_filename, 
 _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$"
 )
+
+PORTAL_RESTORE_HINT = (
+    "Данные портала и unlock восстановлены из БД. "
+    "Nginx/TLS портала не входят в архив — откройте Подписка и нажмите "
+    "«Настроить под текущую публикацию»."
+)
+
+
+def read_portal_domain_from_sqlite(db_path: Path | str) -> str:
+    """Read ``portal_domain`` from a restored SQLite file (no SQLAlchemy session)."""
+    path = Path(db_path)
+    if not path.is_file():
+        return ""
+    try:
+        conn = sqlite3.connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True)
+        try:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = ? LIMIT 1",
+                ("portal_domain",),
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return ""
+    return (row[0] or "").strip() if row else ""
+
+
+def sync_portal_domain_after_restore(*, db_path: Path | str, env_path: Path | str) -> dict:
+    """Align ``PORTAL_DOMAIN`` in ``.env`` with restored DB; do not run nginx/certbot."""
+    host = read_portal_domain_from_sqlite(db_path)
+    if not host:
+        return {
+            "portal_domain": None,
+            "portal_reprovision_needed": False,
+        }
+    from app.services.env_file import EnvFileService
+
+    EnvFileService(env_path).set_env_value("PORTAL_DOMAIN", host)
+    return {
+        "portal_domain": host,
+        "portal_reprovision_needed": True,
+        "portal_hint": PORTAL_RESTORE_HINT,
+    }
 
 
 def suggest_portal_domain(panel_domain: str | None) -> str:

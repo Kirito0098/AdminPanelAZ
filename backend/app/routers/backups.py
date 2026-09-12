@@ -27,6 +27,8 @@ from app.schemas import (
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
 from app.services.backup_manager import BackupManager
+from app.services.backup_overlays import apply_backup_overlays
+from app.services.backup_scheduler import collect_awg2_backup_archive
 from app.services.node_manager import get_active_adapter
 from app.services.node_update import resolve_repo_root
 from app.services.notify_time import get_client_timezone_from_request
@@ -39,6 +41,10 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 MAX_BACKUP_UPLOAD_BYTES = 200 * 1024 * 1024
 RESTORE_RESTART_MESSAGE = "Восстановление выполнено. Панель будет перезапущена через несколько секунд."
+RESTORE_APPLY_HINT = (
+    "Если восстановлены списки AntiZapret, выполните Применение, "
+    "иначе маршрутизация может остаться устаревшей."
+)
 
 
 def _project_root() -> Path:
@@ -64,10 +70,19 @@ def _schedule_panel_restart_after_restore() -> None:
 
 
 def _restore_response(restore_result: dict) -> MessageResponse:
-    _schedule_panel_restart_after_restore()
+    from app.services.client_portal import PORTAL_RESTORE_HINT
+
+    detail = {**restore_result, "restart_scheduled": True}
+    hints: list[str] = []
+    if "configs" in (restore_result.get("restored") or []):
+        hints.append(RESTORE_APPLY_HINT)
+    if restore_result.get("portal_reprovision_needed"):
+        hints.append(str(restore_result.get("portal_hint") or PORTAL_RESTORE_HINT))
+    if hints:
+        detail["hint"] = " ".join(hints)
     return MessageResponse(
         message=RESTORE_RESTART_MESSAGE,
-        detail={**restore_result, "restart_scheduled": True},
+        detail=detail,
     )
 
 
@@ -109,6 +124,7 @@ def get_backup_settings(db: Session = Depends(get_db), _: User = Depends(require
         auto_backup_days=int(_get_setting(db, "backup_auto_days", "7") or "7"),
         telegram_on_backup=_get_setting(db, "backup_telegram_enabled", "false") == "true",
         backup_az_enabled=_get_setting(db, "backup_az_enabled", "true") == "true",
+        backup_awg2_enabled=_get_setting(db, "backup_awg2_enabled", "true") == "true",
         retention_count=int(_get_setting(db, "backup_retention", "5") or "5"),
     )
 
@@ -127,6 +143,8 @@ def update_backup_settings(
         _set_setting(db, "backup_telegram_enabled", "true" if payload.telegram_on_backup else "false")
     if payload.backup_az_enabled is not None:
         _set_setting(db, "backup_az_enabled", "true" if payload.backup_az_enabled else "false")
+    if payload.backup_awg2_enabled is not None:
+        _set_setting(db, "backup_awg2_enabled", "true" if payload.backup_awg2_enabled else "false")
     if payload.retention_count is not None:
         _set_setting(db, "backup_retention", str(payload.retention_count))
     db.commit()
@@ -135,6 +153,7 @@ def update_backup_settings(
         auto_backup_days=int(_get_setting(db, "backup_auto_days", "7") or "7"),
         telegram_on_backup=_get_setting(db, "backup_telegram_enabled", "false") == "true",
         backup_az_enabled=_get_setting(db, "backup_az_enabled", "true") == "true",
+        backup_awg2_enabled=_get_setting(db, "backup_awg2_enabled", "true") == "true",
         retention_count=int(_get_setting(db, "backup_retention", "5") or "5"),
     )
 
@@ -152,6 +171,7 @@ def _create_backup_with_optional_telegram(
     *,
     include_configs: bool,
     include_antizapret_backup: bool,
+    include_awg2_backup: bool,
     send_to_telegram: bool,
     panel_caption_prefix: str,
     az_caption_prefix: str,
@@ -165,9 +185,20 @@ def _create_backup_with_optional_telegram(
             for fname in BackupManager.CONFIG_FILES
         }
 
+    awg2_archive = None
+    if include_awg2_backup:
+        try:
+            awg2_archive = collect_awg2_backup_archive(db)
+        except Exception as exc:
+            if send_to_telegram:
+                raise
+            logger.warning("AZ-AWG2 overlay backup failed: %s", exc)
+
     result = manager.create_backup(
         include_configs=include_configs,
         config_contents=config_contents,
+        retention=int(_get_setting(db, "backup_retention", "5") or "5"),
+        awg2_archive=awg2_archive,
     )
 
     send_tg = send_to_telegram or _get_setting(db, "backup_telegram_enabled", "false") == "true"
@@ -185,12 +216,20 @@ def _create_backup_with_optional_telegram(
         bot_token, chat_ids = tg
         archive_path = manager.get_backup_path(result["file_name"])
         for chat_id in chat_ids:
-            send_tg_document(
+            sent = send_tg_document(
                 bot_token,
                 chat_id,
                 str(archive_path),
                 caption=f"{panel_caption_prefix}: {result['file_name']}",
+                run_async=False,
             )
+            if not sent:
+                if send_to_telegram:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="Не удалось отправить архив в Telegram",
+                    )
+                logger.warning("Не удалось отправить архив в Telegram: chat_id=%s file=%s", chat_id, archive_path)
 
     if include_antizapret_backup:
         try:
@@ -199,12 +238,24 @@ def _create_backup_with_optional_telegram(
             if tg and az_result.get("archive_path"):
                 archive_name = az_result.get("archive_name") or Path(az_result["archive_path"]).name
                 for chat_id in tg[1]:
-                    send_tg_document(
+                    sent = send_tg_document(
                         tg[0],
                         chat_id,
                         az_result["archive_path"],
                         caption=f"{az_caption_prefix}: {archive_name}",
+                        run_async=False,
                     )
+                    if not sent:
+                        if send_to_telegram:
+                            raise HTTPException(
+                                status_code=status.HTTP_502_BAD_GATEWAY,
+                                detail="Не удалось отправить архив AntiZapret в Telegram",
+                            )
+                        logger.warning(
+                            "Не удалось отправить архив AntiZapret в Telegram: chat_id=%s file=%s",
+                            chat_id,
+                            az_result["archive_path"],
+                        )
         except Exception as exc:
             if send_to_telegram:
                 raise
@@ -224,6 +275,7 @@ def create_backup(
         db,
         include_configs=payload.include_configs,
         include_antizapret_backup=payload.include_antizapret_backup,
+        include_awg2_backup=payload.include_awg2_backup,
         send_to_telegram=payload.send_to_telegram,
         panel_caption_prefix="Бэкап AdminPanelAZ",
         az_caption_prefix="Бэкап AntiZapret",
@@ -278,7 +330,6 @@ async def upload_backup(
         tmp_path.unlink(missing_ok=True)
 
     if restore:
-        manager.restore_backup(result["file_name"])
         if settings.audit_log_enabled:
             log_action(
                 db,
@@ -295,7 +346,7 @@ async def upload_backup(
             subject_name=result["file_name"],
             client_timezone=get_client_timezone_from_request(request),
         )
-        _schedule_panel_restart_after_restore()
+        _restore_panel_and_restart(manager, result["file_name"], db)
         return BackupEntry(**result)
 
     admin_notify_service.send_settings_change(
@@ -309,6 +360,20 @@ async def upload_backup(
     return BackupEntry(**result)
 
 
+def _restore_panel_and_restart(manager: BackupManager, file_name: str, db: Session) -> dict:
+    from app.services.client_portal import sync_portal_domain_after_restore
+
+    payload = manager.load_restore_payload(file_name)
+    apply_backup_overlays(payload, mode="adapter", db=db)
+    _dispose_db_engines()
+    result = manager.apply_restore_payload(payload)
+    result.update(
+        sync_portal_domain_after_restore(db_path=manager.db_path, env_path=manager.env_path)
+    )
+    _schedule_panel_restart_after_restore()
+    return result
+
+
 @router.post("/restore", response_model=MessageResponse)
 def restore_backup(
     payload: BackupRestoreRequest,
@@ -316,7 +381,7 @@ def restore_backup(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    result = _get_backup_manager().restore_backup(payload.file_name)
+    manager = _get_backup_manager()
     if settings.audit_log_enabled:
         log_action(
             db,
@@ -333,6 +398,8 @@ def restore_backup(
         subject_name=payload.file_name,
         client_timezone=get_client_timezone_from_request(request),
     )
+    result = _restore_panel_and_restart(manager, payload.file_name, db)
+    result.pop("configs", None)
     return _restore_response(result)
 
 
@@ -370,6 +437,7 @@ def test_backup_telegram(
         )
 
     include_az = bool(payload.include_antizapret_backup)
+    include_awg2 = bool(payload.include_awg2_backup)
     include_configs = bool(payload.include_configs)
 
     def _task(progress_updater=None):
@@ -383,6 +451,7 @@ def test_backup_telegram(
                 task_db,
                 include_configs=include_configs,
                 include_antizapret_backup=include_az,
+                include_awg2_backup=include_awg2,
                 send_to_telegram=True,
                 panel_caption_prefix="Тест бэкапа AdminPanelAZ",
                 az_caption_prefix="Тест бэкапа AntiZapret",
