@@ -1,7 +1,7 @@
 # Sidebar IA + visual refresh
 
 **Дата:** 2026-09-12  
-**Статус:** approved design  
+**Статус:** implemented  
 **Ветка:** `feature/client-portal`  
 **Подход:** вариант **2** — перегруппировка по ролям работы + визуальный refresh сайдбара (не icon-rail, не collapse)
 
