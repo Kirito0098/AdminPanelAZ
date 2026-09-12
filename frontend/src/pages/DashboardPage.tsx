@@ -373,7 +373,7 @@ export default function DashboardPage() {
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Конфигурации</h2>
+                <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Клиенты</h2>
                 <NodeBadge name={activeNode?.name} status={activeNode?.status} />
               </div>
               <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">

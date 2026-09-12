@@ -43,7 +43,7 @@ export default function Awg2Hero({ health, loading, nodeLabel, onRefresh, onUpda
         <>
           AmneziaWG 2.0 на узле <strong className="font-medium text-foreground">{nodeLabel}</strong>
           {activeNode?.is_local ? ' (локальный controller)' : activeNode ? ' (удалённый node agent)' : ''}.
-          Клиенты — на странице Конфигурации; здесь обфускация и backup слоя.
+          Управление клиентами — в разделе Клиенты; здесь обфускация и backup слоя.
         </>
       }
       actions={

@@ -299,7 +299,7 @@ function SyncGroupCard({
       <div className="font-medium">{group.name}</div>
       {group.sync_mode === 'manual_full' ? (
         <p className="mt-1 text-xs text-muted-foreground">
-          После расформирования группы на реплике выполните Конфигурации → Синхронизировать.
+          После расформирования группы на реплике выполните Клиенты → Синхронизировать.
         </p>
       ) : group.sync_mode === 'auto' ? (
         <p className="mt-1 text-xs text-muted-foreground">
@@ -931,7 +931,7 @@ export default function NodeSyncGroupSection({
                           {group.name}
                           {group.sync_mode === 'manual_full' ? (
                             <p className="mt-1 text-xs font-normal text-muted-foreground">
-                              После расформирования группы на реплике выполните Конфигурации → Синхронизировать.
+                              После расформирования группы на реплике выполните Клиенты → Синхронизировать.
                             </p>
                           ) : group.sync_mode === 'auto' ? (
                             <p className="mt-1 text-xs font-normal text-muted-foreground">

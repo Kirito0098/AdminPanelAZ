@@ -51,12 +51,12 @@ export default function Awg2OverviewCards({
       <Link
         to="/"
         className="block transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        title="Открыть Конфигурации"
+        title="Открыть Клиенты"
       >
         <MetricCard
           label="Клиенты"
           value={formatAwg2ClientCount(status)}
-          sub="Конфигурации → AmneziaWG 2.0"
+          sub="Клиенты → AmneziaWG 2.0"
           icon={Users}
           accent="cyan"
         />

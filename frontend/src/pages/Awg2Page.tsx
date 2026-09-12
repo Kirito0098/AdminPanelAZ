@@ -74,7 +74,7 @@ export default function Awg2Page() {
           {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
           Клиенты — на странице{' '}
           <Link to="/" className="font-medium text-foreground underline-offset-2 hover:underline">
-            Конфигурации
+            Клиенты
           </Link>{' '}
           (вкладка AmneziaWG 2.0). install-base и перезагрузка — только по SSH.
         </SettingsAlert>
@@ -100,7 +100,7 @@ export default function Awg2Page() {
               </TabsTrigger>
             </TabsList>
             <Button asChild variant="outline" size="sm">
-              <Link to="/">Конфигурации · AmneziaWG 2.0</Link>
+              <Link to="/">Клиенты · AmneziaWG 2.0</Link>
             </Button>
           </div>
 
