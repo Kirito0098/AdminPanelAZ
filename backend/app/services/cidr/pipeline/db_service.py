@@ -1292,6 +1292,12 @@ class CidrDbUpdaterService:
         if candidate_cidr_count == previous_cidr_count and not asn_errors:
             return False
 
+        drop_ratio = 1.0 - (float(candidate_cidr_count) / float(previous_cidr_count))
+
+        # Align with critical anomaly (≥50%): preserve even without ASN errors.
+        if drop_ratio >= 0.5:
+            return True
+
         if candidate_cidr_count >= CIDR_FALLBACK_MIN_CANDIDATE and not asn_errors:
             return False
 
@@ -1302,7 +1308,6 @@ class CidrDbUpdaterService:
                 return False
             return True
 
-        drop_ratio = 1.0 - (float(candidate_cidr_count) / float(previous_cidr_count))
         if asn_errors and drop_ratio >= CIDR_FALLBACK_DROP_RATIO_WITH_ERRORS:
             return True
         return False
