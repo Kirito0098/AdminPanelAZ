@@ -13,6 +13,7 @@ from app.schemas import LatestChangelogResponse, MessageResponse
 from app.services.action_log import log_action
 from app.services.background_tasks import background_task_service
 from app.services.changelog_remote import build_changelog_response, fetch_remote_changelog_content
+from app.services.feature_guards import get_feature_service, module_disabled_message
 from app.services.system_update import schedule_controller_restart
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -122,6 +123,15 @@ def apply_update(db: Session = Depends(get_db), user: User = Depends(require_adm
 
 @router.post("/rebuild", status_code=status.HTTP_202_ACCEPTED)
 def rebuild_panel(db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    if not get_feature_service().is_enabled("panel_ops"):
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={
+                "detail": module_disabled_message("panel_ops"),
+                "success": False,
+                "message": module_disabled_message("panel_ops"),
+            },
+        )
     for task_type in ("update_system", "rebuild_frontend"):
         active = background_task_service.find_active_task(task_type)
         if active:

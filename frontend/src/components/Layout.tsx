@@ -95,7 +95,7 @@ const NAV_GROUPS: NavGroupDef[] = [
         featureAnyOf: ['logs_dashboard', 'action_logs'] as const,
       },
       { to: '/server-monitor', label: 'Сервер', icon: Cpu, end: false, adminOnly: true, featureKey: 'server_monitor' },
-      { to: '/nodes', label: 'Узлы', icon: Server, end: false, adminOnly: true, featureKey: null },
+      { to: '/nodes', label: 'Узлы', icon: Server, end: false, adminOnly: true, featureKey: 'nodes' },
     ],
   },
 ]

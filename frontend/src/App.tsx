@@ -100,7 +100,7 @@ export default function App() {
                   <Route path="edit-files" element={<LazyPage><FeatureGuardRoute feature="edit_files"><EditFilesPage /></FeatureGuardRoute></LazyPage>} />
                   <Route path="logs" element={<LazyPage><FeatureGuardRoute anyOf={['logs_dashboard', 'action_logs']}><LogsPage /></FeatureGuardRoute></LazyPage>} />
                   <Route path="server-monitor" element={<LazyPage><FeatureGuardRoute feature="server_monitor"><ServerMonitorPage /></FeatureGuardRoute></LazyPage>} />
-                  <Route path="nodes" element={<LazyPage><NodesPage /></LazyPage>} />
+                  <Route path="nodes" element={<LazyPage><FeatureGuardRoute feature="nodes"><NodesPage /></FeatureGuardRoute></LazyPage>} />
                   <Route path="settings/:section?" element={<LazyPage><SettingsPage /></LazyPage>} />
                 </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />

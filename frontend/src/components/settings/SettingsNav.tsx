@@ -32,6 +32,7 @@ export type SettingsSection =
 type SettingsTabKey =
   | 'backup'
   | 'maintenance'
+  | 'panel_ops'
   | 'security'
   | 'tests'
   | 'users'
@@ -112,7 +113,7 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
     items: [
       navItem('modules', Puzzle),
       navItem('updates', Download, { settingsTab: 'updates' }),
-      navItem('panel_ops', RefreshCw),
+      navItem('panel_ops', RefreshCw, { settingsTab: 'panel_ops' }),
       navItem('tests', FlaskConical, { settingsTab: 'tests' }),
     ],
   },
