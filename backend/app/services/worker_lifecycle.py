@@ -12,7 +12,7 @@ def should_start_traffic_collector() -> bool:
 
 
 def should_start_connection_history() -> bool:
-    # Always spawn — loop re-checks resource_metrics_enabled + resource_monitor each tick.
+    # Always spawn — loop re-checks FEATURE_CONNECTION_HISTORY_ENABLED + resource_monitor each tick.
     return True
 
 
@@ -65,7 +65,7 @@ def should_start_nightly_idle_restart() -> bool:
 
 
 def should_start_key_rotation() -> bool:
-    # Always spawn — loop re-checks node_api_key_rotation_days each tick.
+    # Always spawn — loop re-checks FEATURE_KEY_ROTATION_ENABLED and rotation-days each tick.
     return True
 
 
@@ -100,7 +100,7 @@ def should_start_awg2_expire() -> bool:
 
 
 def should_start_access_expiry() -> bool:
-    # Always spawn — loop re-checks access-until due rows each tick.
+    # Always spawn — loop re-checks FEATURE_ACCESS_EXPIRY_ENABLED each tick.
     return True
 
 

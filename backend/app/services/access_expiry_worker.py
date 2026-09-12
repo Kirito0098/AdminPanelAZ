@@ -12,6 +12,13 @@ logger = logging.getLogger(__name__)
 ACCESS_EXPIRY_INTERVAL_SECONDS = 60
 
 
+def _is_access_expiry_enabled() -> bool:
+    """Runtime gate — FEATURE_ACCESS_EXPIRY_ENABLED can flip without restart."""
+    from app.services.feature_guards import get_feature_service
+
+    return get_feature_service().is_enabled("access_expiry")
+
+
 def _run_once() -> dict[str, int]:
     db = SessionLocal()
     try:
@@ -23,6 +30,10 @@ def _run_once() -> dict[str, int]:
 async def run_access_expiry_loop() -> None:
     while True:
         try:
+            if not _is_access_expiry_enabled():
+                logger.debug("access_expiry skipped — FEATURE_ACCESS_EXPIRY_ENABLED disabled")
+                await asyncio.sleep(ACCESS_EXPIRY_INTERVAL_SECONDS)
+                continue
             result = await asyncio.to_thread(_run_once)
             if result.get("blocked") or result.get("errors"):
                 logger.info(
