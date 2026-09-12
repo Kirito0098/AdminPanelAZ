@@ -147,6 +147,24 @@ export function getVisibleNavGroups(
   })).filter((group) => group.items.length > 0)
 }
 
+export function filterNavGroupsByQuery(
+  groups: SettingsNavGroup[],
+  query: string,
+): SettingsNavGroup[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return groups
+  return groups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (item) =>
+          item.label.toLowerCase().includes(q) ||
+          item.description.toLowerCase().includes(q),
+      ),
+    }))
+    .filter((group) => group.items.length > 0)
+}
+
 export function getDefaultSection(_isAdmin: boolean): SettingsSection {
   return 'personal'
 }
