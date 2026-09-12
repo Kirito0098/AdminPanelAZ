@@ -1,7 +1,7 @@
 # Settings Hub (упрощение навигации настроек)
 
 **Дата:** 2026-09-12  
-**Статус:** approved design  
+**Статус:** implemented  
 **Ветка:** `feature/client-portal`  
 **Подход:** Settings hub (вариант A) — без hover-flyout; клик «Настройки» → `/settings`
 
