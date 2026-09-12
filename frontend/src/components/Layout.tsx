@@ -17,6 +17,7 @@ import {
   Radio,
   Send,
   Server,
+  Settings,
   Settings2,
   Shield,
   Sun,
@@ -34,7 +35,6 @@ import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useTheme } from '@/context/ThemeContext'
 import ForcePasswordChange from './ForcePasswordChange'
 import LiveClock from './noc/LiveClock'
-import SettingsSidebarSection from '@/components/settings/SettingsSidebarSection'
 import { ROLE_LABELS } from '@/components/settings/settingsLabels'
 
 type NavItemDef = {
@@ -85,6 +85,7 @@ const NAV_GROUPS: NavGroupDef[] = [
   {
     label: 'Система',
     items: [
+      { to: '/settings', label: 'Настройки', icon: Settings, end: false, adminOnly: true, featureKey: null },
       {
         to: '/logs',
         label: 'Журналы',
@@ -242,7 +243,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                   <SidebarNavLink item={item} onNavigate={onNavigate} />
                 </li>
               ))}
-              {group.label === 'Система' && isAdmin && <SettingsSidebarSection onNavigate={onNavigate} />}
             </ul>
           </div>
         ))}
