@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Settings, User as UserIcon } from 'lucide-react'
-import { Navigate, useParams } from 'react-router-dom'
+import { Navigate, NavLink, useParams } from 'react-router-dom'
 import { ApiError, changePassword, createUser, deleteUser, getSettings, getUsers } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
@@ -204,10 +204,11 @@ export default function SettingsPage() {
     )
   }
 
-  const sectionMeta = getSectionMeta(activeSection)
+  const section = activeSection as SettingsSection
+  const sectionMeta = getSectionMeta(section)
 
   const renderSection = () => {
-    switch (activeSection) {
+    switch (section) {
       case 'personal':
         return (
           <PersonalTab
@@ -275,19 +276,35 @@ export default function SettingsPage() {
         }
       />
 
-      <MobileSettingsSectionPicker value={activeSection} />
-
-      <div className="flex flex-col gap-4 orientation-compact-settings-section">
-        <div className="orientation-compact-settings-section-header">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h3 className="text-base font-semibold tracking-tight">{sectionMeta.title}</h3>
-            <p className="text-xs text-muted-foreground">{sectionMeta.description}</p>
-          </div>
-          {sectionMeta.hint ? (
-            <p className="mt-1 text-xs text-muted-foreground/80">{sectionMeta.hint}</p>
-          ) : null}
+      <div className="flex items-center justify-between gap-3 lg:hidden">
+        <div className="min-w-0 flex-1">
+          <MobileSettingsSectionPicker value={section} />
         </div>
-        {renderSection()}
+        <NavLink
+          to="/settings"
+          className="shrink-0 text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          Все настройки
+        </NavLink>
+      </div>
+
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+        <aside className="hidden w-56 shrink-0 lg:sticky lg:top-4 lg:block">
+          <SettingsSectionBrowser groups={visibleGroups} variant="nav" activeSection={section} />
+        </aside>
+
+        <div className="min-w-0 flex-1 flex flex-col gap-4 orientation-compact-settings-section">
+          <div className="orientation-compact-settings-section-header">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h3 className="text-base font-semibold tracking-tight">{sectionMeta.title}</h3>
+              <p className="text-xs text-muted-foreground">{sectionMeta.description}</p>
+            </div>
+            {sectionMeta.hint ? (
+              <p className="mt-1 text-xs text-muted-foreground/80">{sectionMeta.hint}</p>
+            ) : null}
+          </div>
+          {renderSection()}
+        </div>
       </div>
     </div>
   )
