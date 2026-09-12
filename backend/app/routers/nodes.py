@@ -57,7 +57,7 @@ from app.services.node_manager import (
 )
 from app.services.action_log import log_action
 from app.services.feature_guards import module_disabled_message
-from app.services.feature_toggles import is_proxy_nodes_enabled
+from app.services.feature_toggles import is_nodes_enabled, is_proxy_nodes_enabled
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_update_roll import enqueue_node_update_roll
 from app.services.background_tasks import background_task_service
@@ -105,6 +105,14 @@ def _validate_linked_vpn_node_id(
     return linked_vpn_node_id
 
 
+def _require_nodes_module(db) -> None:
+    if not is_nodes_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("nodes"),
+        )
+
+
 @router.post("/update-roll")
 def rolling_node_update(
     payload: NodeUpdateRollRequest,
@@ -112,6 +120,7 @@ def rolling_node_update(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     try:
         task_id = enqueue_node_update_roll(db, node_ids=payload.node_ids, actor_username=admin.username)
     except ValueError as exc:
@@ -194,16 +203,16 @@ def create_node(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    host = validate_node_host(payload.host)
-    if not payload.api_key:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API-ключ обязателен для удалённого узла")
-
+    _require_nodes_module(db)
     kind = (payload.node_kind or NODE_KIND_VPN).strip().lower()
     if kind not in (NODE_KIND_VPN, NODE_KIND_PROXY):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="node_kind должен быть vpn или proxy",
         )
+    host = validate_node_host(payload.host)
+    if not payload.api_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API-ключ обязателен для удалённого узла")
     # /api/nodes is ALWAYS_ALLOWED — enforce proxy_nodes toggle at handler level.
     if kind == NODE_KIND_PROXY and not is_proxy_nodes_enabled(db):
         raise HTTPException(
@@ -307,6 +316,7 @@ def update_node(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -375,6 +385,7 @@ def delete_node(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -512,6 +523,7 @@ def refresh_proxy_status(
     db: Session = Depends(get_db),
 ):
     """Refresh status from proxy_agent and sync cached destination_ip."""
+    _require_nodes_module(db)
     return get_proxy_status(node_id, _, db)
 
 
@@ -523,6 +535,7 @@ def put_proxy_destination(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = _require_proxy_node(node_id, db)
     try:
         from proxy_agent.iptables_dest import validate_destination_ip
@@ -581,6 +594,7 @@ def enable_node_mtls(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -614,6 +628,7 @@ def disable_node_mtls(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -653,6 +668,7 @@ def put_remote_hosts(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -698,6 +714,7 @@ def allow_first_remote_host(
     db: Session = Depends(get_db),
 ):
     """Append the first saved remote host to allow-ips.txt on the VPN node."""
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -778,6 +795,7 @@ def put_openvpn_multihome(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -831,6 +849,7 @@ def rotate_node_key(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -857,6 +876,7 @@ def activate_node(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -939,6 +959,7 @@ def apply_node_update_endpoint(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = _get_node_or_404(node_id, db)
     if node.status == NodeStatus.offline:
         health = check_node_health(node)
@@ -987,6 +1008,7 @@ def restart_node_agent_endpoint(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = _get_node_or_404(node_id, db)
     if node.status == NodeStatus.offline:
         health = check_node_health(node)
