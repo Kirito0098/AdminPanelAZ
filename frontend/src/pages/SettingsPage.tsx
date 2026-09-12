@@ -14,11 +14,12 @@ import MonitoringTab from '@/components/settings/MonitoringTab'
 import PersonalTab from '@/components/settings/PersonalTab'
 import SecurityTab from '@/components/settings/SecurityTab'
 import {
-  getDefaultSection,
+  getVisibleNavGroups,
   isSectionAvailable,
   isValidSettingsSection,
   type SettingsSection,
 } from '@/components/settings/SettingsNav'
+import SettingsSectionBrowser from '@/components/settings/SettingsSectionBrowser'
 import { getSectionMeta } from '@/components/settings/settingsLabels'
 import PanelOpsTab from '@/components/settings/PanelOpsTab'
 import RunbookTab from '@/components/settings/RunbookTab'
@@ -57,14 +58,17 @@ export default function SettingsPage() {
   const [newPwd, setNewPwd] = useState('')
   const isAdmin = user?.role === 'admin'
 
-  const defaultSection = getDefaultSection(isAdmin)
-
   const activeSection = useMemo((): SettingsSection | null => {
     if (!sectionParam) return null
     if (!isValidSettingsSection(sectionParam)) return null
     if (!isSectionAvailable(sectionParam, isAdmin, isSettingsTabEnabled, isEnabled)) return null
     return sectionParam
   }, [sectionParam, isAdmin, isSettingsTabEnabled, isEnabled])
+
+  const visibleGroups = useMemo(
+    () => getVisibleNavGroups(isAdmin, isSettingsTabEnabled, isEnabled),
+    [isAdmin, isSettingsTabEnabled, isEnabled],
+  )
 
   // GET /settings reads active-node config files — only maintenance uses the parent payload.
   // Users are panel-wide. Personal and other tabs self-fetch; skip reloads on node switch.
@@ -177,8 +181,27 @@ export default function SettingsPage() {
     return <Navigate to="/settings/vpn_network?tab=cloudflare" replace />
   }
 
-  if (!activeSection) {
-    return <Navigate to={`/settings/${defaultSection}`} replace />
+  if (sectionParam && !activeSection) {
+    return <Navigate to="/settings" replace />
+  }
+
+  if (!sectionParam) {
+    return (
+      <div className="flex flex-col gap-6 orientation-compact-settings-page">
+        <HaReplicaBanner />
+        <PageSectionHeader
+          icon={isAdmin ? Settings : UserIcon}
+          title={isAdmin ? 'Настройки' : 'Мой профиль'}
+          titleAddon={<NodeBadge name={activeNode?.name ?? settings?.node_name} status={activeNode?.status} />}
+          description={
+            isAdmin
+              ? 'Профиль, доступ, VPN и работа панели — выберите раздел'
+              : 'Тема, пароль, Telegram и дополнительная защита при входе'
+          }
+        />
+        <SettingsSectionBrowser groups={visibleGroups} variant="hub" />
+      </div>
+    )
   }
 
   const sectionMeta = getSectionMeta(activeSection)

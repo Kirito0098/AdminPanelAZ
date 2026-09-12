@@ -165,10 +165,6 @@ export function filterNavGroupsByQuery(
     .filter((group) => group.items.length > 0)
 }
 
-export function getDefaultSection(_isAdmin: boolean): SettingsSection {
-  return 'personal'
-}
-
 export function isValidSettingsSection(section: string | undefined): section is SettingsSection {
   if (!section) return false
   return SETTINGS_NAV_GROUPS.some((group) => group.items.some((item) => item.id === section))
