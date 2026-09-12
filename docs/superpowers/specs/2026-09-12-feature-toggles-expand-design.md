@@ -1,7 +1,7 @@
 # Expand Feature Toggles (Разделы панели)
 
 **Дата:** 2026-09-12  
-**Статус:** approved (design dialogue)  
+**Статус:** implemented  
 **Ветка:** `feature/client-portal`  
 **Подход:** расширить явный реестр `FEATURE_TOGGLES` (не автогенерация, не UI-only hide)
 

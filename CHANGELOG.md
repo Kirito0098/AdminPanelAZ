@@ -52,6 +52,7 @@
 
 ### ✨ Added
 
+- Расширены «Разделы панели»: тогглы Узлы, Операции панели и фоновых воркеров (health, cert sync, metrics, CIDR scheduler, retention, alerts, NOC reports, access-until expiry, …).
 - **Раздел «Подписка»** — пункт бокового меню `/subscription`: клиентский портал (`portal_domain`) и unlock-ключи перенесены из **Настройки → Выдача VPN-профилей**; QR/роутеры остаются в настройках.
 - **Клиентский портал** — постоянные шаринг-ссылки на админ-заданном поддомене (`portal_domain` в **Подписка**): страница `/p/{token}` в стиле Connection Kit (статус/срок/трафик, выбор ОС и протокола, шаги установка → профиль → подключение); для OpenVPN — `openvpn://import-profile/…` и скачивание `.ovpn`, для WG/AWG — скачивание конфига; create/rotate/revoke в карточке клиента. One-time QR при заданном хосте портала тоже строятся с него. Модуль `client_portal`.
 - **Unlock-коды и доступ до даты** — `access_until` стал главным сроком доступа в статусе портала; публичный redeem на `/api/public/portal/{token}/redeem` активирует ключи и возвращает новый срок; генерация unlock-кодов доступна из панели (**Подписка**), Telegram и Mini App. Публичный redeem идёт через отдельный public-download rate limit bucket.
