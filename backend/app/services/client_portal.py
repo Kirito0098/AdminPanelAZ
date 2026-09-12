@@ -99,19 +99,17 @@ def get_portal_domain(db: Session) -> str:
 
 
 def resolve_portal_base_url(db: Session) -> str | None:
+    """Origin for permanent portal links.
+
+    Always the portal host root — never panel ACCESS_PATH. The portal subdomain
+    (or dedicated host) is provisioned at ``/``; admin panel may live at
+    ``https://panel.example.com/panel`` on a shared domain.
+    """
     host = get_portal_domain(db)
     if not host:
         return None
     settings = get_settings()
-    origin = public_https_origin_url(host, settings.https_public_port)
-    if not origin:
-        return None
-    from app.services.panel_paths import access_path
-
-    prefix = access_path(settings)
-    if prefix:
-        return f"{origin}{prefix}"
-    return origin
+    return public_https_origin_url(host, settings.https_public_port)
 
 
 def portal_page_url(db: Session, token: str) -> str:

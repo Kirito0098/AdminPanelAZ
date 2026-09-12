@@ -49,6 +49,19 @@ def test_resolve_portal_base_url_with_domain():
         assert portal.resolve_portal_base_url(db) == "https://sub.example.com"
 
 
+def test_resolve_portal_base_url_ignores_panel_access_path():
+    """Portal host is always at /; panel ACCESS_PATH must not appear in portal links."""
+    db = MagicMock()
+    row = MagicMock()
+    row.value = "portal.example.com"
+    db.query.return_value.filter.return_value.first.return_value = row
+    with patch("app.services.client_portal.get_settings") as gs:
+        gs.return_value.https_public_port = 443
+        gs.return_value.access_path = "/panel"
+        assert portal.resolve_portal_base_url(db) == "https://portal.example.com"
+        assert "/panel" not in (portal.resolve_portal_base_url(db) or "")
+
+
 def test_assert_portal_host_mismatch():
     db = MagicMock()
     row = MagicMock()
