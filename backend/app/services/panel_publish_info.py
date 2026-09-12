@@ -322,6 +322,12 @@ def build_panel_publish_context(
             bullet_points.append(
                 "REFRESH_TOKEN_COOKIE_SECURE=true — типично для схемы «HTTPS снаружи, HTTP внутри»."
             )
+        if mode_key == "direct_http" and cookie_secure:
+            bullet_points.append(
+                "Внимание: при прямом HTTP Secure-cookie refresh браузер не сохранит — "
+                "выйдете при смене вкладки. Поставьте REFRESH_TOKEN_COOKIE_SECURE=false "
+                "или обновите панель (runtime уже учитывает схему запроса)."
+            )
         if trusted:
             bullet_points.append(f"Доверенные прокси (TRUSTED_PROXY_IPS): {trusted}.")
         bullet_points.append(

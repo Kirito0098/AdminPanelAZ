@@ -163,6 +163,9 @@ CLI fallback: `sudo ./scripts/ddns-update.sh update` · `status` · `install-tim
 **Панель открывается только по IP:8000**  
 Это нормальный режим сразу после установки (`http_direct`). Для домена и HTTPS настройте **Адрес сайта и HTTPS**.
 
+**Вылетает из панели при смене вкладки (HTTP)**  
+На чистом HTTP refresh-cookie больше не ставится с флагом Secure. После обновления панели один раз войдите снова. Если всё ещё вылетает — в `.env` должно быть `REFRESH_TOKEN_COOKIE_SECURE=false` при `PUBLISH_MODE=http_direct`.
+
 **Нужен StatusOpenVPN на том же домене**  
 См. [Совместно со StatusOpenVPN](#совместно-со-statusopenvpn-на-одном-домене): только через UI после `install.sh` (**Настройки → Адрес сайта и HTTPS**).
 
