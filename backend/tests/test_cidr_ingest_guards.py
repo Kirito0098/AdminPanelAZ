@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService as S
 
@@ -111,3 +112,50 @@ def test_update_provider_meta_clears_anomaly_reason_when_none_passed():
     )
     assert meta.anomaly_level == "none"
     assert meta.anomaly_reason is None
+
+
+def test_should_emit_global_skips_partial_refresh():
+    from app.services.cidr.pipeline.provider_sources import PROVIDER_SOURCES
+
+    last = SimpleNamespace(total_cidrs=32752, providers_updated=1)
+    prev = SimpleNamespace(total_cidrs=121539, providers_updated=len(PROVIDER_SOURCES))
+    assert (
+        S._should_emit_global_pool_drop_alert(
+            last_log=last,
+            prev_log=prev,
+            known_provider_count=len(PROVIDER_SOURCES),
+        )
+        is False
+    )
+
+
+def test_should_emit_global_on_full_drop():
+    from app.services.cidr.pipeline.provider_sources import PROVIDER_SOURCES
+
+    n = len(PROVIDER_SOURCES)
+    last = SimpleNamespace(total_cidrs=50000, providers_updated=n)
+    prev = SimpleNamespace(total_cidrs=150000, providers_updated=n)
+    assert (
+        S._should_emit_global_pool_drop_alert(
+            last_log=last,
+            prev_log=prev,
+            known_provider_count=n,
+        )
+        is True
+    )
+
+
+def test_should_not_emit_global_when_drop_below_threshold():
+    from app.services.cidr.pipeline.provider_sources import PROVIDER_SOURCES
+
+    n = len(PROVIDER_SOURCES)
+    last = SimpleNamespace(total_cidrs=120000, providers_updated=n)
+    prev = SimpleNamespace(total_cidrs=150000, providers_updated=n)
+    assert (
+        S._should_emit_global_pool_drop_alert(
+            last_log=last,
+            prev_log=prev,
+            known_provider_count=n,
+        )
+        is False
+    )
