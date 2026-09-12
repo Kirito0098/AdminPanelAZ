@@ -89,6 +89,9 @@
 - **Статус unlock-ключей** — в **Подписка** / Mini App у использованных кодов бейджи «Активирован» / «Исчерпан» / «Частично» и список активаций (клиент, узел, время).
 - **Копирование ссылки портала на карточке** — кнопка **Ссылка** в ряду с «Трафик» / «Ещё» копирует постоянную portal-ссылку (если модуль `client_portal` включён).
 - **Unlock-ключ для клиентов** — опциональный allowlist `allowed_client_names`: пустой = любой клиент по протоколам; непустой = ключ профиля: при redeem продлеваются все протоколы клиента на узле одной общей датой (от самого раннего текущего срока).
+- **CIDR safe-fallback** — при падении пула ≥50% предыдущий набор сохраняется даже без ASN-errors (кейс Akamai geo empty).
+- **CIDR global alert** — partial refresh больше не сравнивается с full-логом как «общий пул упал»; в журнал пишется сумма всех `provider_meta`.
+- **CIDR anomaly_reason** — при `anomaly_level=none` причина очищается.
 
 > **Кратко:** round-trip бэкапа панели после split `cidr.db` (WAL-safe sqlite, retention, `*.json`); узкий слой **AZ-AWG2** в `adminpanelaz_*.tar.gz`; CLI restore накатывает списки AntiZapret и overlay; вкладка `/awg2` Backup только скачивает; Telegram document/photo ждут upload; Endpoint AWG/WG из `WIREGUARD_HOST`.
 

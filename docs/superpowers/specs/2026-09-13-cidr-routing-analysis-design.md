@@ -1,7 +1,7 @@
 # CIDR / Routing — analysis + P0 fix designs
 
 **Дата:** 2026-09-13  
-**Статус:** approved design  
+**Статус:** implemented  
 **Ветка:** `feature/client-portal`  
 **Подход:** вариант **3** — карта «как есть» + audit + готовые решения **P0** (затем writing-plans); P1 UX точечно после P0
 
