@@ -1,29 +1,6 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import type { LucideIcon } from 'lucide-react'
-import {
-  Activity,
-  ClipboardList,
-  Cpu,
-  FileText,
-  GitBranch,
-  Globe,
-  HardDrive,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  Moon,
-  Network,
-  Radio,
-  Send,
-  Server,
-  Settings,
-  Settings2,
-  Shield,
-  Sun,
-  Ticket,
-  User,
-} from 'lucide-react'
+import { LogOut, Menu, Moon, Radio, Shield, Sun, User } from 'lucide-react'
 import NodeSelector from '@/components/NodeSelector'
 import HaScopeEnforcer from '@/components/HaScopeEnforcer'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -33,91 +10,17 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useTheme } from '@/context/ThemeContext'
+import {
+  getVisibleSidebarNavGroups,
+  type SidebarNavItem,
+} from '@/components/nav/sidebarNav'
 import ForcePasswordChange from './ForcePasswordChange'
 import LiveClock from './noc/LiveClock'
 import { ROLE_LABELS } from '@/components/settings/settingsLabels'
 
-type NavItemDef = {
-  to: string
-  label: string
-  icon: LucideIcon
-  end: boolean
-  adminOnly: boolean
-  featureKey: string | null
-  featureAnyOf?: readonly string[]
-}
-
-type NavGroupDef = {
-  label: string
-  items: NavItemDef[]
-}
-
-const NAV_GROUPS: NavGroupDef[] = [
-  {
-    label: 'Операции',
-    items: [
-      { to: '/', label: 'Конфигурации', icon: LayoutDashboard, end: true, adminOnly: false, featureKey: null },
-      {
-        to: '/subscription',
-        label: 'Подписка',
-        icon: Ticket,
-        end: false,
-        adminOnly: true,
-        featureKey: null,
-        featureAnyOf: ['client_portal', 'unlock_codes'] as const,
-      },
-      { to: '/monitoring', label: 'NOC Мониторинг', icon: Activity, end: false, adminOnly: true, featureKey: 'logs_dashboard' },
-      { to: '/traffic', label: 'Мониторинг трафика', icon: HardDrive, end: false, adminOnly: false, featureKey: 'traffic_sync' },
-      { to: '/routing', label: 'Маршрутизация / CIDR', icon: GitBranch, end: false, adminOnly: true, featureKey: 'routing' },
-    ],
-  },
-  {
-    label: 'Конфигурация',
-    items: [
-      { to: '/antizapret', label: 'Конфиг AntiZapret', icon: Settings2, end: false, adminOnly: true, featureKey: 'antizapret_config' },
-      { to: '/proxy', label: 'Прокси', icon: Network, end: false, adminOnly: true, featureKey: 'proxy_nodes' },
-      { to: '/warper', label: 'AZ-WARP', icon: Globe, end: false, adminOnly: true, featureKey: 'warper' },
-      { to: '/awg2', label: 'AZ-AWG2', icon: Shield, end: false, adminOnly: true, featureKey: 'awg2' },
-      { to: '/telegram', label: 'Telegram', icon: Send, end: false, adminOnly: true, featureKey: 'telegram' },
-      { to: '/edit-files', label: 'Редактор файлов', icon: FileText, end: false, adminOnly: true, featureKey: 'edit_files' },
-    ],
-  },
-  {
-    label: 'Система',
-    items: [
-      { to: '/settings', label: 'Настройки', icon: Settings, end: false, adminOnly: true, featureKey: null },
-      {
-        to: '/logs',
-        label: 'Журналы',
-        icon: ClipboardList,
-        end: false,
-        adminOnly: true,
-        featureKey: null,
-        featureAnyOf: ['logs_dashboard', 'action_logs'] as const,
-      },
-      { to: '/server-monitor', label: 'Сервер', icon: Cpu, end: false, adminOnly: true, featureKey: 'server_monitor' },
-      { to: '/nodes', label: 'Узлы', icon: Server, end: false, adminOnly: true, featureKey: 'nodes' },
-    ],
-  },
-]
-
-function isNavItemVisible(
-  item: NavItemDef,
-  userRole: string | undefined,
-  isEnabled: (key: string) => boolean,
-): boolean {
-  if (item.featureAnyOf?.length) {
-    if (!item.featureAnyOf.some((key) => isEnabled(key))) return false
-  } else if (item.featureKey && !isEnabled(item.featureKey)) {
-    return false
-  }
-  if (item.adminOnly) return userRole === 'admin'
-  return true
-}
-
 function NavGroupHeader({ label }: { label: string }) {
   return (
-    <p className="orientation-compact-sidebar-group-label px-3 pb-1 pt-3 text-xs font-medium text-muted-foreground first:pt-1">
+    <p className="orientation-compact-sidebar-group-label px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80 first:pt-1">
       {label}
     </p>
   )
@@ -127,7 +30,7 @@ function SidebarNavLink({
   item,
   onNavigate,
 }: {
-  item: NavItemDef
+  item: SidebarNavItem
   onNavigate?: () => void
 }) {
   const Icon = item.icon
@@ -141,7 +44,7 @@ function SidebarNavLink({
         cn(
           'orientation-compact-sidebar-link group relative flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-medium transition-colors',
           isActive
-            ? 'bg-primary/10 text-foreground ring-1 ring-primary/20'
+            ? 'bg-primary/10 text-foreground'
             : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
         )
       }
@@ -178,21 +81,26 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { theme, toggleTheme } = useTheme()
   const initials = user?.username?.slice(0, 2).toUpperCase() ?? '?'
   const isAdmin = user?.role === 'admin'
+  const profileItem: SidebarNavItem = {
+    to: '/settings/personal',
+    label: 'Мой профиль',
+    icon: User,
+    end: false,
+    adminOnly: false,
+    featureKey: null,
+  }
+  let visibleGroups = getVisibleSidebarNavGroups(user?.role, isEnabled)
 
-  const visibleGroups = NAV_GROUPS.map((group) => {
-    const items = group.items.filter((item) => isNavItemVisible(item, user?.role, isEnabled))
-    if (group.label === 'Система' && !isAdmin) {
-      items.push({
-        to: '/settings/personal',
-        label: 'Мой профиль',
-        icon: User,
-        end: false,
-        adminOnly: false,
-                featureKey: null,
-      })
+  if (!isAdmin) {
+    const panelIndex = visibleGroups.findIndex((group) => group.label === 'Панель')
+    if (panelIndex >= 0) {
+      visibleGroups = visibleGroups.map((group, index) =>
+        index === panelIndex ? { ...group, items: [...group.items, profileItem] } : group,
+      )
+    } else {
+      visibleGroups = [...visibleGroups, { label: 'Панель', items: [profileItem] }]
     }
-    return { ...group, items }
-  }).filter((group) => group.items.length > 0 || (group.label === 'Система' && isAdmin))
+  }
 
   const themeToggle = (
     <Button
@@ -234,8 +142,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         className="orientation-compact-sidebar-nav flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2"
         aria-label="Основная навигация"
       >
-        {visibleGroups.map((group) => (
-          <div key={group.label}>
+        {visibleGroups.map((group, index) => (
+          <div key={group.label} className={cn(index > 0 && 'mt-1 border-t border-border/40 pt-1')}>
             <NavGroupHeader label={group.label} />
             <ul className="space-y-0.5">
               {group.items.map((item) => (
