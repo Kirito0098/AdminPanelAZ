@@ -21,8 +21,15 @@ export function apiBaseForAccessPath(path: string | undefined | null): string {
 }
 
 function readAccessPath(): string {
-  if (typeof window !== 'undefined' && window.__PANEL_ACCESS_PATH__) {
-    return normalizeAccessPath(window.__PANEL_ACCESS_PATH__)
+  if (typeof window !== 'undefined') {
+    // Dedicated portal host serves /p/… at domain root; never inherit panel ACCESS_PATH.
+    const path = window.location.pathname || ''
+    if (path === '/p' || path.startsWith('/p/')) {
+      return ''
+    }
+    if (window.__PANEL_ACCESS_PATH__) {
+      return normalizeAccessPath(window.__PANEL_ACCESS_PATH__)
+    }
   }
   return normalizeAccessPath(import.meta.env.VITE_ACCESS_PATH as string | undefined)
 }

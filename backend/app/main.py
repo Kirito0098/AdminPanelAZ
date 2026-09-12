@@ -240,6 +240,10 @@ app.include_router(edit_files.router, prefix=_API_PREFIX)
 app.include_router(security.router, prefix=_API_PREFIX)
 app.include_router(public_download.router, prefix=_API_PREFIX)
 app.include_router(public_portal.router, prefix=_API_PREFIX)
+# Portal subdomain links are always https://portal…/api/… and /p/… (no ACCESS_PATH).
+# When the panel itself lives under ACCESS_PATH, also expose public portal API at root /api.
+if _ACCESS_PREFIX:
+    app.include_router(public_portal.router, prefix="/api")
 app.include_router(client_portal.router, prefix=_API_PREFIX)
 app.include_router(server_monitor.router, prefix=_API_PREFIX)
 app.include_router(logs.router, prefix=_API_PREFIX)
@@ -271,9 +275,9 @@ async def feature_guard_middleware(request, call_next):
 async def ip_restriction_middleware(request, call_next):
     path = request.url.path
     api = _API_PREFIX
-    portal_page_prefix = f"{_ACCESS_PREFIX}/p/" if _ACCESS_PREFIX else "/p/"
     exempt = (
         path.startswith(f"{api}/public/")
+        or path.startswith("/api/public/")
         or path.startswith(f"{api}/tg-mini")
         or path.startswith(f"{api}/telegram/webhook/")
         or path.startswith(f"{api}/ip-blocked")
@@ -281,7 +285,12 @@ async def ip_restriction_middleware(request, call_next):
         or path.startswith(f"{api}/auth/telegram")
         or path.startswith(f"{api}/auth/refresh")
         or path.startswith(f"{api}/auth/login")
-        or path.startswith(portal_page_prefix)
+        or path.startswith("/p/")
+        or path == "/p"
+        or (_ACCESS_PREFIX and (path.startswith(f"{_ACCESS_PREFIX}/p/") or path == f"{_ACCESS_PREFIX}/p"))
+        or path.startswith("/assets/")
+        or path == "/assets"
+        or (_ACCESS_PREFIX and path.startswith(f"{_ACCESS_PREFIX}/assets"))
         or path
         in (
             f"{api}/health",
@@ -410,6 +419,9 @@ def _mount_frontend(app: FastAPI) -> None:
     assets_mount = f"{_ACCESS_PREFIX}/assets" if _ACCESS_PREFIX else "/assets"
     if assets_dir.is_dir():
         app.mount(assets_mount, StaticFiles(directory=assets_dir), name="frontend-assets")
+        # Portal host serves /p/… at domain root and must load /assets without ACCESS_PATH.
+        if _ACCESS_PREFIX:
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets-portal-root")
 
     index_file = dist / "index.html"
     spa_prefix = _ACCESS_PREFIX or ""
@@ -418,6 +430,14 @@ def _mount_frontend(app: FastAPI) -> None:
         @app.get(_ACCESS_PREFIX, include_in_schema=False)
         async def redirect_access_path_trailing_slash():
             return RedirectResponse(url=f"{_ACCESS_PREFIX}/", status_code=301)
+
+        @app.get("/p", include_in_schema=False)
+        @app.get("/p/{full_path:path}", include_in_schema=False)
+        async def serve_portal_spa_root(request: Request, full_path: str = ""):
+            """Client portal pages on the portal host (ignore panel ACCESS_PATH)."""
+            from app.services.html_csp import serve_html_with_nonce
+
+            return serve_html_with_nonce(request, index_file, portal_root=True)
 
     @app.api_route(
         f"{_API_PREFIX}/{{rest:path}}",
@@ -440,11 +460,14 @@ def _mount_frontend(app: FastAPI) -> None:
             from fastapi import HTTPException
 
             raise HTTPException(status_code=404)
+        # When ACCESS_PATH is set, /p/… is handled by serve_portal_spa_root.
+        # Without ACCESS_PATH, portal pages share this catch-all at domain root.
+        portal_root = (not spa_prefix) and (full_path == "p" or full_path.startswith("p/"))
         if full_path:
             candidate = dist / full_path
             if candidate.is_file():
                 return FileResponse(candidate)
-        return serve_html_with_nonce(request, index_file)
+        return serve_html_with_nonce(request, index_file, portal_root=portal_root)
 
 
 if settings.serve_frontend:
