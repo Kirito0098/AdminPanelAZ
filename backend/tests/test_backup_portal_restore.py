@@ -48,15 +48,17 @@ def test_sync_portal_domain_after_restore_writes_env(tmp_path: Path):
     assert "OTHER=1" in text
 
 
-def test_sync_portal_domain_skips_when_empty(tmp_path: Path):
+def test_sync_portal_domain_clears_env_when_empty(tmp_path: Path):
     db = tmp_path / "adminpanel.db"
     env = tmp_path / ".env"
-    env.write_text("PORTAL_DOMAIN=keep.example.com\n", encoding="utf-8")
+    env.write_text("PORTAL_DOMAIN=keep.example.com\nOTHER=1\n", encoding="utf-8")
     sqlite3.connect(db).close()
     meta = sync_portal_domain_after_restore(db_path=db, env_path=env)
     assert meta["portal_reprovision_needed"] is False
     assert meta["portal_domain"] is None
-    assert env.read_text(encoding="utf-8") == "PORTAL_DOMAIN=keep.example.com\n"
+    text = env.read_text(encoding="utf-8")
+    assert "PORTAL_DOMAIN=" not in text
+    assert "OTHER=1" in text
 
 
 def test_backup_roundtrip_restores_portal_rows_and_env(tmp_path: Path):

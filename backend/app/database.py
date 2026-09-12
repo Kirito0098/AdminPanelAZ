@@ -1083,6 +1083,44 @@ def _migrate_user_traffic_sample_node_created_index() -> None:
     logger.info("DB migration: created ix_user_traffic_sample_node_created index")
 
 
+def _migrate_client_portal_tokens_active_unique() -> None:
+    """One active (revoked_at IS NULL) portal token per (node_id, client_name)."""
+    inspector = inspect(engine)
+    if "client_portal_tokens" not in inspector.get_table_names():
+        return
+    index_names = {idx.get("name") for idx in inspector.get_indexes("client_portal_tokens")}
+    if "uq_client_portal_tokens_active_node_client" in index_names:
+        return
+
+    with engine.begin() as conn:
+        # Keep newest active row per client; revoke older duplicates.
+        conn.execute(
+            text(
+                """
+                UPDATE client_portal_tokens
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE revoked_at IS NULL
+                  AND id NOT IN (
+                    SELECT MAX(id)
+                    FROM client_portal_tokens
+                    WHERE revoked_at IS NULL
+                    GROUP BY node_id, client_name
+                  )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX uq_client_portal_tokens_active_node_client
+                ON client_portal_tokens (node_id, client_name)
+                WHERE revoked_at IS NULL
+                """
+            )
+        )
+    logger.info("DB migration: unique active client_portal_tokens per node+client")
+
+
 def run_db_migrations() -> None:
     """Lightweight SQLite migrations for columns added after initial deploy."""
     _migrate_alert_rules_table()
@@ -1093,6 +1131,7 @@ def run_db_migrations() -> None:
     _migrate_access_policy_node_scope()
     _migrate_awg2_access_policy_table()
     _migrate_unlock_codes_tables()
+    _migrate_client_portal_tokens_active_unique()
     _migrate_node_resource_sample_table()
     _migrate_connection_count_samples_table()
     _migrate_connection_count_samples_awg2_column()

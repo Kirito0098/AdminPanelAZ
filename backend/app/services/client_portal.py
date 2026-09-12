@@ -27,7 +27,6 @@ from app.models import (
 )
 from app.services.node_manager import get_adapter_for_node, get_active_node
 from app.services.node_sync.groups import find_sync_group_containing_node
-from app.services.panel_publish_info import public_https_origin_url
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
 
@@ -64,15 +63,17 @@ def read_portal_domain_from_sqlite(db_path: Path | str) -> str:
 
 def sync_portal_domain_after_restore(*, db_path: Path | str, env_path: Path | str) -> dict:
     """Align ``PORTAL_DOMAIN`` in ``.env`` with restored DB; do not run nginx/certbot."""
+    from app.services.env_file import EnvFileService
+
     host = read_portal_domain_from_sqlite(db_path)
+    env = EnvFileService(env_path)
     if not host:
+        env.remove_env_key("PORTAL_DOMAIN")
         return {
             "portal_domain": None,
             "portal_reprovision_needed": False,
         }
-    from app.services.env_file import EnvFileService
-
-    EnvFileService(env_path).set_env_value("PORTAL_DOMAIN", host)
+    env.set_env_value("PORTAL_DOMAIN", host)
     return {
         "portal_domain": host,
         "portal_reprovision_needed": True,
@@ -144,17 +145,64 @@ def get_portal_domain(db: Session) -> str:
 
 
 def resolve_portal_base_url(db: Session) -> str | None:
-    """Origin for permanent portal links.
+    """Origin for permanent portal / QR / TG delivery links.
 
-    Always the portal host root — never panel ACCESS_PATH. The portal subdomain
-    (or dedicated host) is provisioned at ``/``; admin panel may live at
-    ``https://panel.example.com/panel`` on a shared domain.
+    Returns a URL only when the portal host is configured **and** publish status
+    is ready (nginx vhost+cert, uvicorn SAN, or http_direct). Until then callers
+    should fall back to the panel public URL so Save alone does not break delivery.
+
+    Always the portal host root — never panel ACCESS_PATH.
     """
     host = get_portal_domain(db)
     if not host:
         return None
+
+    from pathlib import Path
+
+    from app.services.env_file import EnvFileService
+    from app.services.panel_publish_info import (
+        build_portal_publish_status,
+        resolve_active_publish_mode_key,
+        resolve_panel_publish_mode,
+    )
+
     settings = get_settings()
-    return public_https_origin_url(host, settings.https_public_port)
+    env = EnvFileService(Path(__file__).resolve().parents[2] / ".env")
+    panel_domain = env.get_env_value("DOMAIN", "") or (settings.domain or "")
+    ssl_cert = env.get_env_value("SSL_CERT", "")
+    behind = (env.get_env_value("BEHIND_NGINX", "") or "").lower() in {"1", "true", "yes"}
+    use_https = (env.get_env_value("USE_HTTPS", "") or "").lower() in {"1", "true", "yes"}
+    backend_host = env.get_env_value("BACKEND_HOST", "127.0.0.1") or "127.0.0.1"
+    backend_port = env.get_env_value("BACKEND_PORT", "8000") or "8000"
+    https_port_raw = env.get_env_value("HTTPS_PUBLIC_PORT", "") or str(settings.https_public_port)
+    try:
+        https_public_port = int(https_port_raw)
+    except ValueError:
+        https_public_port = 443
+
+    mode_key = resolve_panel_publish_mode(
+        behind_nginx=behind,
+        backend_host=backend_host,
+        use_https=use_https,
+    )
+    active = resolve_active_publish_mode_key(
+        mode_key=mode_key,
+        ssl_cert=ssl_cert,
+        publish_mode=env.get_env_value("PUBLISH_MODE", ""),
+        domain=panel_domain,
+    )
+    status = build_portal_publish_status(
+        portal_domain=host,
+        panel_domain=panel_domain,
+        publish_mode=active,
+        ssl_cert=ssl_cert,
+        backend_port=backend_port,
+        https_public_port=https_public_port,
+    )
+    if not status.get("portal_ready"):
+        return None
+    access = (status.get("access_url") or "").strip().rstrip("/")
+    return access or None
 
 
 def portal_page_url(db: Session, token: str) -> str:
@@ -162,7 +210,10 @@ def portal_page_url(db: Session, token: str) -> str:
     if not base:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Задайте поддомен клиентского портала в настройках выдачи профилей",
+            detail=(
+                "Клиентский портал ещё не готов. Задайте поддомен и нажмите "
+                "«Настроить под текущую публикацию» в разделе Подписка."
+            ),
         )
     return f"{base}/p/{token}"
 
@@ -242,6 +293,8 @@ def get_or_create_portal_token(
     client_name: str,
     creator: User | None = None,
 ) -> ClientPortalToken:
+    from sqlalchemy.exc import IntegrityError
+
     configs = ensure_client_configs(db, client_name)
     node_id = configs[0].node_id
     name = configs[0].client_name
@@ -255,7 +308,14 @@ def get_or_create_portal_token(
         created_by_user_id=creator.id if creator else None,
     )
     db.add(row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raced = _active_token(db, node_id=node_id, client_name=name)
+        if raced:
+            return raced
+        raise
     db.refresh(row)
     return row
 
@@ -266,6 +326,8 @@ def rotate_portal_token(
     client_name: str,
     creator: User | None = None,
 ) -> ClientPortalToken:
+    from sqlalchemy.exc import IntegrityError
+
     configs = ensure_client_configs(db, client_name)
     node_id = configs[0].node_id
     name = configs[0].client_name
@@ -287,7 +349,14 @@ def rotate_portal_token(
         created_by_user_id=creator.id if creator else None,
     )
     db.add(new_row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Не удалось сменить ссылку портала — повторите попытку",
+        ) from None
     db.refresh(new_row)
     return new_row
 

@@ -34,7 +34,10 @@ def _require_portal_domain(db: Session) -> str:
     if not base:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Задайте поддомен клиентского портала в настройках выдачи профилей",
+            detail=(
+                "Клиентский портал ещё не готов. Задайте поддомен и нажмите "
+                "«Настроить под текущую публикацию» в разделе Подписка."
+            ),
         )
     return base
 

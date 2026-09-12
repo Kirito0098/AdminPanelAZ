@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -452,7 +453,17 @@ class ClientPortalToken(Base):
     """Permanent shareable client portal link (Remnawave-style), keyed by node + client_name."""
 
     __tablename__ = "client_portal_tokens"
-    __table_args__ = (UniqueConstraint("token", name="uq_client_portal_token"),)
+    __table_args__ = (
+        UniqueConstraint("token", name="uq_client_portal_token"),
+        # One non-revoked link per client on a node (SQLite partial unique index).
+        Index(
+            "uq_client_portal_tokens_active_node_client",
+            "node_id",
+            "client_name",
+            unique=True,
+            sqlite_where=text("revoked_at IS NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True)

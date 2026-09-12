@@ -61,6 +61,7 @@
 - **Portal URL без ACCESS_PATH** — ссылки портала всегда с корня хоста портала (`https://portal…/p/…`), даже если панель на общем домене с подпутём `/panel`.
 - **Portal + ACCESS_PATH** — при подпути панели (`/panel`) публичный API портала дублируется на `/api/public/…`, SPA `/p/…` и `/assets` отдаются с корня; IP-whitelist exempt для этих путей. Портал на отдельном хосте больше не 404.
 - **Portal после restore бэкапа** — `PORTAL_DOMAIN` в `.env` синхронизируется из DB `portal_domain`; API/CLI дают hint про **Подписка → Настроить под текущую публикацию** (nginx/TLS в tar не входят, авто-publish не запускается).
+- **Portal URL только когда ready** — QR/one-time/TG и постоянные ссылки берут хост портала лишь при `portal_ready` и схеме текущего `PUBLISH_MODE` (в т.ч. `http_direct`); до «Настроить…» остаётся URL панели. Пустой `portal_domain` при restore чистит stale `PORTAL_DOMAIN`. Один active portal-токен на `(node_id, client_name)`.
 
 ### 🐛 Fixed
 

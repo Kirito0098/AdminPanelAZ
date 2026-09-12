@@ -29,6 +29,17 @@ class EnvFileService:
         env_path.parent.mkdir(parents=True, exist_ok=True)
         env_path.write_text("".join(new_lines), encoding="utf-8")
 
+    def remove_env_key(self, key: str) -> None:
+        """Drop ``KEY=…`` lines from ``.env`` (no-op if file/key missing)."""
+        env_path = self.env_file_path
+        if not env_path.exists():
+            return
+        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        new_lines = [line for line in lines if not line.startswith(f"{key}=")]
+        if len(new_lines) == len(lines):
+            return
+        env_path.write_text("".join(new_lines), encoding="utf-8")
+
     def get_env_value(self, key: str, default: str = "") -> str:
         env_path = self.env_file_path
         if env_path.exists():
