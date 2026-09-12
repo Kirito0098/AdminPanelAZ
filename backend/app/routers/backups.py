@@ -45,6 +45,10 @@ RESTORE_APPLY_HINT = (
     "Если восстановлены списки AntiZapret, выполните Применение, "
     "иначе маршрутизация может остаться устаревшей."
 )
+RESTORE_PUSH_FULL_HINT = (
+    "Если есть HA-реплики, выполните Push full "
+    "(списки AntiZapret и/или слой AZ-AWG2 восстановлены на активном узле)."
+)
 
 
 def _project_root() -> Path:
@@ -73,9 +77,12 @@ def _restore_response(restore_result: dict) -> MessageResponse:
     from app.services.client_portal import PORTAL_RESTORE_HINT
 
     detail = {**restore_result, "restart_scheduled": True}
+    restored = list(restore_result.get("restored") or [])
     hints: list[str] = []
-    if "configs" in (restore_result.get("restored") or []):
+    if "configs" in restored:
         hints.append(RESTORE_APPLY_HINT)
+    if "configs" in restored or "awg2" in restored:
+        hints.append(RESTORE_PUSH_FULL_HINT)
     if restore_result.get("portal_reprovision_needed"):
         hints.append(str(restore_result.get("portal_hint") or PORTAL_RESTORE_HINT))
     if hints:

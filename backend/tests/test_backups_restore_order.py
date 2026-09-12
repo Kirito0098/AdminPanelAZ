@@ -11,6 +11,22 @@ def test_restore_response_includes_apply_hint_for_restored_configs():
     assert "Примен" in response.detail["hint"]
 
 
+def test_restore_response_includes_push_full_hint_for_configs():
+    response = backups_mod._restore_response(
+        {"restored": ["db", "configs"], "file_name": "panel.tar.gz"}
+    )
+    assert "Push full" in response.detail["hint"]
+    assert "Примен" in response.detail["hint"]
+
+
+def test_restore_response_includes_push_full_hint_for_awg2_only():
+    response = backups_mod._restore_response(
+        {"restored": ["db", "awg2"], "file_name": "panel.tar.gz"}
+    )
+    assert "Push full" in response.detail["hint"]
+    assert "Примен" not in response.detail.get("hint", "")
+
+
 def test_restore_panel_disposes_engines_before_applying_files(monkeypatch, tmp_path):
     order: list[str] = []
     db = tmp_path / "adminpanel.db"
