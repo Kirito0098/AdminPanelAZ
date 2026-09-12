@@ -52,7 +52,15 @@
 
 ### ✨ Added
 
-- Расширены «Разделы панели»: тогглы Узлы, Операции панели и фоновых воркеров (health, cert sync, metrics, CIDR scheduler, retention, alerts, NOC reports, access-until expiry, …).
+- **Разделы панели: больше отключаемых модулей** — в реестр `FEATURE_TOGGLES` добавлены:
+  - **Раздел приложения:** `nodes` (страница «Узлы»), `panel_ops` (вкладка «Операции панели» / rebuild);
+  - **Фоновая задача:** `node_health`, `cert_sync`, `resource_metrics`, `panel_resource_metrics`, `cidr_scheduler`, `node_sync_reconcile`, `retention`, `key_rotation`, `user_reminders`, `alert_rules`, `noc_reports`, `cloudflare_ips_update`, `access_expiry`, `connection_history`;
+  - новые ключи **default on** (upgrade не меняет поведение), кроме `cloudflare_ips_update` (**default off**, как текущий `CLOUDFLARE_IPS_AUTO_UPDATE`);
+  - always-on без тоггла: вход/сессия, «Конфигурации», Настройки → личное, Настройки → Разделы панели;
+  - `nodes`: меню и mutating API gated; `/api/nodes` остаётся в `ALWAYS_ALLOWED`, чтение/health доступны другим разделам;
+  - `panel_ops`: скрывает вкладку и `POST /api/system/rebuild`; `POST /api/system/restart` из баннера модулей **не** блокируется;
+  - профили Minimal/Standard/Full пишут новые background-ключи; карточка правил алертов скрывается при `alert_rules=off`;
+  - воркеры с runtime-gate (вкл. metrics): выключение в UI останавливает сбор без рестарта процесса после save (`feature_toggles.py`, `nodes.py`, `system.py`, workers, `Layout.tsx`, `App.tsx`, `SettingsNav.tsx`, `MonitoringTab.tsx`).
 - **Раздел «Подписка»** — пункт бокового меню `/subscription`: клиентский портал (`portal_domain`) и unlock-ключи перенесены из **Настройки → Выдача VPN-профилей**; QR/роутеры остаются в настройках.
 - **Клиентский портал** — постоянные шаринг-ссылки на админ-заданном поддомене (`portal_domain` в **Подписка**): страница `/p/{token}` в стиле Connection Kit (статус/срок/трафик, выбор ОС и протокола, шаги установка → профиль → подключение); для OpenVPN — `openvpn://import-profile/…` и скачивание `.ovpn`, для WG/AWG — скачивание конфига; create/rotate/revoke в карточке клиента. One-time QR при заданном хосте портала тоже строятся с него. Модуль `client_portal`.
 - **Unlock-коды и доступ до даты** — `access_until` стал главным сроком доступа в статусе портала; публичный redeem на `/api/public/portal/{token}/redeem` активирует ключи и возвращает новый срок; генерация unlock-кодов доступна из панели (**Подписка**), Telegram и Mini App. Публичный redeem идёт через отдельный public-download rate limit bucket.
@@ -64,6 +72,10 @@
 - **Portal после restore бэкапа** — `PORTAL_DOMAIN` в `.env` синхронизируется из DB `portal_domain`; API/CLI дают hint про **Подписка → Настроить под текущую публикацию** (nginx/TLS в tar не входят, авто-publish не запускается).
 - **Portal URL только когда ready** — QR/one-time/TG и постоянные ссылки берут хост портала лишь при `portal_ready` и схеме текущего `PUBLISH_MODE` (в т.ч. `http_direct`); до «Настроить…» остаётся URL панели. Пустой `portal_domain` при restore чистит stale `PORTAL_DOMAIN`. Один active portal-токен на `(node_id, client_name)`.
 - **HTTP refresh cookie** — на `http://` refresh больше не ставится с `Secure` (раньше `APP_ENV=production` + install ломали cookie → вылет при смене вкладки). HTTPS / `X-Forwarded-Proto` по-прежнему Secure.
+
+### 🔄 Changed
+
+- **UX «Разделы панели»** — вместо сетки карточек: строки настроек в **2 колонки**, поиск по модулям, компактные профили ресурсов, sticky-бар с числом несохранённых изменений (`FeatureTogglesTab.tsx`).
 
 ### 🐛 Fixed
 
