@@ -28,6 +28,8 @@ def _get_models():
     return _models
 
 
+_UNSET = object()
+
 from app.services.cidr.pipeline.download import _download_text as _download_cidr_text
 
 # Парсинг CIDR/ASN вынесен в db_extract.py; имена реэкспортируются для совместимости
@@ -1581,7 +1583,7 @@ class CidrDbUpdaterService:
         asn_count=None,
         active_asn_count=None,
         anomaly_level=None,
-        anomaly_reason=None,
+        anomaly_reason=_UNSET,
         commit=True,
     ):
         m = _get_models()
@@ -1601,8 +1603,11 @@ class CidrDbUpdaterService:
             meta.active_asn_count = int(active_asn_count)
         if anomaly_level is not None:
             meta.anomaly_level = str(anomaly_level)
-        if anomaly_reason is not None:
+        if anomaly_reason is not _UNSET:
             meta.anomaly_reason = str(anomaly_reason) if anomaly_reason else None
+        elif anomaly_level is not None and str(anomaly_level) in ("none", "info"):
+            # Belt-and-suspenders if a caller omits reason
+            meta.anomaly_reason = None
         meta.refresh_status = status
         meta.refresh_error = error
         meta.last_refreshed_at = datetime.now(timezone.utc)
