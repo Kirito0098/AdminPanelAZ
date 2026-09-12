@@ -695,6 +695,8 @@ class BackupEntry(BaseModel):
     created_at: str
     components: list[str] = []
     summary: str = ""
+    restore_message: str | None = None
+    restore_detail: dict[str, Any] | None = None
 
 
 class BackupCreateRequest(BaseModel):

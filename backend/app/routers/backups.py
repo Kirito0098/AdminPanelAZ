@@ -353,8 +353,18 @@ async def upload_backup(
             subject_name=result["file_name"],
             client_timezone=get_client_timezone_from_request(request),
         )
-        _restore_panel_and_restart(manager, result["file_name"], db)
-        return BackupEntry(**result)
+        restore_result = _restore_panel_and_restart(manager, result["file_name"], db)
+        restore_result.pop("configs", None)
+        msg = _restore_response(restore_result)
+        return BackupEntry(
+            file_name=result["file_name"],
+            size_bytes=result["size_bytes"],
+            created_at=result["created_at"],
+            components=result.get("components") or [],
+            summary=result.get("summary") or "",
+            restore_message=msg.message,
+            restore_detail=msg.detail if isinstance(msg.detail, dict) else None,
+        )
 
     admin_notify_service.send_settings_change(
         db,

@@ -378,11 +378,20 @@ export default function BackupTab() {
     pendingRestoreRef.current = false
     const runUpload = async () => {
       try {
-        await withInline(async () => {
-          await uploadBackup(file, restoreAfterUpload)
+        const uploaded = await withInline(async () => {
+          const entry = await uploadBackup(file, restoreAfterUpload)
           await load()
+          return entry
         }, restoreAfterUpload ? 'Загрузка, восстановление и перезапуск...' : 'Загрузка архива...')
-        success(restoreAfterUpload ? RESTORE_SUCCESS_MESSAGE : 'Архив загружен и добавлен в список')
+        if (restoreAfterUpload) {
+          const hint =
+            typeof uploaded.restore_detail?.hint === 'string' && uploaded.restore_detail.hint.trim()
+              ? ` ${uploaded.restore_detail.hint.trim()}`
+              : ''
+          success(`${uploaded.restore_message || RESTORE_SUCCESS_MESSAGE}${hint}`)
+        } else {
+          success('Архив загружен и добавлен в список')
+        }
       } catch (err) {
         notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки архива')
       }

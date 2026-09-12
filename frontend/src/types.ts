@@ -482,6 +482,8 @@ export interface BackupEntry {
   created_at: string
   components: string[]
   summary: string
+  restore_message?: string | null
+  restore_detail?: Record<string, unknown> | null
 }
 
 export interface BackupSettings {
