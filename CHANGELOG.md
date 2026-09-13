@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.25.0](#2250---2026-09-13) — 2026-09-13
 - [2.24.0](#2240---2026-09-10) — 2026-09-10
 - [2.23.1](#2231---2026-09-10) — 2026-09-10
 - [2.23.0](#2230---2026-09-09) — 2026-09-09
@@ -49,6 +50,12 @@
 ---
 
 ## [Unreleased]
+
+---
+
+## [2.25.0] - 2026-09-13
+
+> **Кратко:** клиентский портал и unlock-коды (раздел **Подписка**); hub настроек и сайдбар по ролям; расширяемые feature toggles; CIDR safe-fallback / корректные global alerts; round-trip бэкапа после split `cidr.db` (AWG2 overlay, restore hints, audit после replace БД).
 
 ### ✨ Added
 
@@ -92,8 +99,7 @@
 - **CIDR safe-fallback** — при падении пула ≥50% предыдущий набор сохраняется даже без ASN-errors (кейс Akamai geo empty).
 - **CIDR global alert** — partial refresh больше не сравнивается с full-логом как «общий пул упал»; в журнал пишется сумма всех `provider_meta`.
 - **CIDR anomaly_reason** — при `anomaly_level=none` причина очищается.
-
-> **Кратко:** round-trip бэкапа панели после split `cidr.db` (WAL-safe sqlite, retention, `*.json`); узкий слой **AZ-AWG2** в `adminpanelaz_*.tar.gz`; CLI restore накатывает списки AntiZapret и overlay; вкладка `/awg2` Backup только скачивает; Telegram document/photo ждут upload; Endpoint AWG/WG из `WIREGUARD_HOST`.
+- **Backup restore audit** — `backup_restore` и notify пишутся после подмены `adminpanel.db` (свежая сессия), чтобы запись не затиралась restore'ом.
 
 ### ✨ Added
 
@@ -2509,7 +2515,9 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.1...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.25.0...HEAD
+[2.25.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.24.0...v2.25.0
+[2.24.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.1...v2.24.0
 [2.23.1]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.0...v2.23.1
 [2.23.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.21.0...v2.22.0
