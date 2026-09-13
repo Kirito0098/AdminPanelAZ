@@ -255,10 +255,11 @@ class AccessPolicyService:
         traffic_state = self._ovpn_traffic_state(row)
         traffic_exceeded = bool(traffic_state.get("traffic_limit_exceeded"))
         blocked = access_expired or temp or perm or traffic_exceeded
-        if access_expired:
-            block_mode = "access_expired"
-        elif perm:
+        # Permanent admin ban outranks schedule expiry for block_mode / block_reason.
+        if perm:
             block_mode = "permanent"
+        elif access_expired:
+            block_mode = "access_expired"
         elif temp:
             block_mode = "temp"
         elif traffic_exceeded:
@@ -599,10 +600,11 @@ class AccessPolicyService:
         traffic_state = self._awg2_traffic_state(row)
         traffic_exceeded = bool(traffic_state.get("traffic_limit_exceeded"))
         blocked = access_expired or temp or perm or traffic_exceeded
-        if access_expired:
-            block_mode = "access_expired"
-        elif perm:
+        # Permanent admin ban outranks schedule expiry for block_mode / block_reason.
+        if perm:
             block_mode = "permanent"
+        elif access_expired:
+            block_mode = "access_expired"
         elif temp:
             block_mode = "temp"
         elif traffic_exceeded:
@@ -821,10 +823,11 @@ class AccessPolicyService:
         traffic_state = self._wg_traffic_state(row)
         traffic_exceeded = bool(traffic_state.get("traffic_limit_exceeded"))
         blocked = access_expired or temp or perm or traffic_exceeded
-        if access_expired:
-            block_mode = "access_expired"
-        elif perm:
+        # Permanent admin ban outranks schedule expiry for block_mode / block_reason.
+        if perm:
             block_mode = "permanent"
+        elif access_expired:
+            block_mode = "access_expired"
         elif temp:
             block_mode = "temp"
         elif traffic_exceeded:
