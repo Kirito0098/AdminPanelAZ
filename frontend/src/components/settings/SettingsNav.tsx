@@ -32,6 +32,7 @@ export type SettingsSection =
 type SettingsTabKey =
   | 'backup'
   | 'maintenance'
+  | 'panel_ops'
   | 'security'
   | 'tests'
   | 'users'
@@ -112,7 +113,7 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
     items: [
       navItem('modules', Puzzle),
       navItem('updates', Download, { settingsTab: 'updates' }),
-      navItem('panel_ops', RefreshCw),
+      navItem('panel_ops', RefreshCw, { settingsTab: 'panel_ops' }),
       navItem('tests', FlaskConical, { settingsTab: 'tests' }),
     ],
   },
@@ -146,8 +147,22 @@ export function getVisibleNavGroups(
   })).filter((group) => group.items.length > 0)
 }
 
-export function getDefaultSection(_isAdmin: boolean): SettingsSection {
-  return 'personal'
+export function filterNavGroupsByQuery(
+  groups: SettingsNavGroup[],
+  query: string,
+): SettingsNavGroup[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return groups
+  return groups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (item) =>
+          item.label.toLowerCase().includes(q) ||
+          item.description.toLowerCase().includes(q),
+      ),
+    }))
+    .filter((group) => group.items.length > 0)
 }
 
 export function isValidSettingsSection(section: string | undefined): section is SettingsSection {

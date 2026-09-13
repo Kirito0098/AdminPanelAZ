@@ -19,9 +19,43 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { createTgPanelConfig, applyTgClientTemplate, getTgClientTemplates, getTgPanelUsers } from '@/tg-mini/api'
+import {
+  createTgPanelConfig,
+  getTgPanelUsers,
+  setTgClientAccessUntil,
+  tgAwg2SetTrafficLimit,
+  tgOpenvpnSetTrafficLimit,
+  tgWgSetTrafficLimit,
+} from '@/tg-mini/api'
 import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
-import type { ClientTemplate, SelfServiceQuota, User, VpnType } from '@/types'
+import { cn } from '@/lib/utils'
+import type { SelfServiceQuota, User, VpnType } from '@/types'
+
+const PROTOCOL_ORDER: VpnType[] = ['openvpn', 'wireguard', 'amneziawg2']
+
+function vpnLabel(type: VpnType): string {
+  if (type === 'openvpn') return 'OpenVPN'
+  if (type === 'wireguard') return 'WG/AWG 1.5'
+  return 'AWG 2.0'
+}
+
+async function setTrafficLimitForProtocol(
+  protocol: VpnType,
+  clientName: string,
+  value: number,
+  unit: string,
+  periodDays: number | null,
+) {
+  if (protocol === 'openvpn') {
+    await tgOpenvpnSetTrafficLimit(clientName, value, unit, periodDays)
+    return
+  }
+  if (protocol === 'amneziawg2') {
+    await tgAwg2SetTrafficLimit(clientName, value, unit, periodDays)
+    return
+  }
+  await tgWgSetTrafficLimit(clientName, value, unit, periodDays)
+}
 
 interface CreateConfigDialogProps {
   open: boolean
@@ -46,39 +80,43 @@ export default function CreateConfigDialog({
   quota,
   onCreated,
 }: CreateConfigDialogProps) {
-  const defaultVpnType = useMemo((): VpnType => {
-    if (openvpnEnabled) return 'openvpn'
-    if (wireguardEnabled) return 'wireguard'
-    if (awg2Enabled) return 'amneziawg2'
-    return 'openvpn'
-  }, [openvpnEnabled, wireguardEnabled, awg2Enabled])
+  const availableProtocols = useMemo(
+    () =>
+      PROTOCOL_ORDER.filter((type) => {
+        if (type === 'openvpn') return openvpnEnabled
+        if (type === 'wireguard') return wireguardEnabled
+        return awg2Enabled
+      }),
+    [openvpnEnabled, wireguardEnabled, awg2Enabled],
+  )
 
   const [clientName, setClientName] = useState('')
   const [description, setDescription] = useState('')
-  const [vpnType, setVpnType] = useState<VpnType>(defaultVpnType)
+  const [selectedProtocols, setSelectedProtocols] = useState<VpnType[]>([])
   const [certDays, setCertDays] = useState('3650')
   const [ttl, setTtl] = useState<string>('none')
+  const [accessUntilDate, setAccessUntilDate] = useState('')
   const [ownerId, setOwnerId] = useState<number | null>(currentUserId ?? null)
   const [users, setUsers] = useState<User[]>([])
-  const [templates, setTemplates] = useState<ClientTemplate[]>([])
+  const [trafficLimitEnabled, setTrafficLimitEnabled] = useState(false)
+  const [limitValue, setLimitValue] = useState('50')
+  const [limitUnit, setLimitUnit] = useState('GB')
+  const [limitPeriodDays, setLimitPeriodDays] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [applyingTemplateId, setApplyingTemplateId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
-    setVpnType(defaultVpnType)
+    setSelectedProtocols(availableProtocols)
     setTtl('none')
+    setAccessUntilDate('')
     setOwnerId(currentUserId ?? null)
+    setTrafficLimitEnabled(false)
+    setLimitValue('50')
+    setLimitUnit('GB')
+    setLimitPeriodDays('')
     setError(null)
-  }, [open, defaultVpnType, currentUserId])
-
-  useEffect(() => {
-    if (!open) return
-    void getTgClientTemplates()
-      .then(setTemplates)
-      .catch(() => setTemplates([]))
-  }, [open])
+  }, [open, availableProtocols, currentUserId])
 
   useEffect(() => {
     if (!open || !isAdmin) return
@@ -90,10 +128,15 @@ export default function CreateConfigDialog({
   const resetForm = () => {
     setClientName('')
     setDescription('')
-    setVpnType(defaultVpnType)
+    setSelectedProtocols(availableProtocols)
     setCertDays('3650')
     setTtl('none')
+    setAccessUntilDate('')
     setOwnerId(currentUserId ?? null)
+    setTrafficLimitEnabled(false)
+    setLimitValue('50')
+    setLimitUnit('GB')
+    setLimitPeriodDays('')
     setError(null)
   }
 
@@ -110,28 +153,46 @@ export default function CreateConfigDialog({
     return null
   }
 
-  const handleApplyTemplate = async (template: ClientTemplate) => {
-    const trimmedName = clientName.trim()
-    const nameError = validateClientName(trimmedName)
-    if (nameError) {
-      setError(nameError)
-      return
+  const dateInputToIso = (value: string) => {
+    if (!value) return null
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+    if (!match) return null
+    const next = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
+    return next.toISOString()
+  }
+
+  const applyAccessUntilAfterCreate = async (
+    name: string,
+    protocol: VpnType,
+    dateValue: string,
+  ): Promise<string | null> => {
+    if (!isAdmin || !dateValue) return null
+    if (protocol !== 'openvpn' && protocol !== 'wireguard' && protocol !== 'amneziawg2') {
+      return 'дата доступа не применена для этого протокола'
     }
-    setApplyingTemplateId(template.id)
-    setError(null)
+    const iso = dateInputToIso(dateValue)
+    if (!iso) return 'некорректная дата доступа'
     try {
-      await applyTgClientTemplate(template.id, {
-        client_name: trimmedName,
-        owner_id: isAdmin && ownerId ? ownerId : undefined,
-      })
-      window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
-      onCreated()
-      handleClose()
+      await setTgClientAccessUntil(protocol, name, iso)
+      return null
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Ошибка применения шаблона')
-    } finally {
-      setApplyingTemplateId(null)
+      return err instanceof ApiError ? err.message : 'срок доступа не сохранён'
     }
+  }
+
+  const finishCreate = (extraErr: string | null) => {
+    window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
+    onCreated()
+    handleClose()
+    if (extraErr) {
+      window.Telegram?.WebApp.showAlert?.(extraErr)
+    }
+  }
+
+  const toggleProtocol = (type: VpnType) => {
+    setSelectedProtocols((prev) =>
+      prev.includes(type) ? prev.filter((item) => item !== type) : [...prev, type],
+    )
   }
 
   const handleSubmit = async (e: FormEvent) => {
@@ -142,26 +203,92 @@ export default function CreateConfigDialog({
       setError(nameError)
       return
     }
+    if (selectedProtocols.length === 0) {
+      setError('Выберите хотя бы одну конфигурацию')
+      return
+    }
     const parsedCertDays = Number(certDays)
-    if (vpnType === 'openvpn' && (!Number.isFinite(parsedCertDays) || parsedCertDays < 1 || parsedCertDays > 3650)) {
+    if (
+      selectedProtocols.includes('openvpn') &&
+      (!Number.isFinite(parsedCertDays) || parsedCertDays < 1 || parsedCertDays > 3650)
+    ) {
       setError('Срок сертификата: от 1 до 3650 дней')
       return
+    }
+    let parsedLimit: number | null = null
+    let period: number | null = null
+    if (isAdmin && trafficLimitEnabled) {
+      parsedLimit = Number.parseFloat(limitValue)
+      if (!Number.isFinite(parsedLimit) || parsedLimit <= 0) {
+        setError('Укажите корректный лимит трафика')
+        return
+      }
+      period = limitPeriodDays ? Number.parseInt(limitPeriodDays, 10) : null
+      if (period != null && ![1, 7, 30].includes(period)) {
+        setError('Период лимита: 1, 7 или 30 дней')
+        return
+      }
     }
 
     setSubmitting(true)
     setError(null)
+    const accessDateSnapshot = accessUntilDate
+    const ordered = PROTOCOL_ORDER.filter((type) => selectedProtocols.includes(type))
+    const created: VpnType[] = []
+    let extraErr: string | null = null
     try {
-      await createTgPanelConfig({
-        client_name: trimmedName,
-        vpn_type: vpnType,
-        cert_expire_days: vpnType === 'openvpn' ? parsedCertDays : undefined,
-        description: description.trim() || undefined,
-        owner_id: isAdmin && ownerId ? ownerId : undefined,
-        ttl: vpnType === 'amneziawg2' && ttl !== 'none' ? ttl : undefined,
-      })
-      window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
-      onCreated()
-      handleClose()
+      for (const vpnType of ordered) {
+        try {
+          await createTgPanelConfig({
+            client_name: trimmedName,
+            vpn_type: vpnType,
+            cert_expire_days: vpnType === 'openvpn' ? parsedCertDays : undefined,
+            description: description.trim() || undefined,
+            owner_id: isAdmin && ownerId ? ownerId : undefined,
+            ttl: vpnType === 'amneziawg2' && ttl !== 'none' ? ttl : undefined,
+          })
+          created.push(vpnType)
+          const nextAccessErr = await applyAccessUntilAfterCreate(
+            trimmedName,
+            vpnType,
+            accessDateSnapshot,
+          )
+          if (nextAccessErr) {
+            extraErr = `Клиент создан, но срок доступа не сохранён: ${nextAccessErr}`
+          }
+        } catch (err) {
+          if (created.length === 0) throw err
+          setError(
+            `Создано: ${created.map(vpnLabel).join(', ')}. Не удалось: ${vpnLabel(vpnType)} — ${
+              err instanceof ApiError ? err.message : 'ошибка'
+            }`,
+          )
+          onCreated()
+          return
+        }
+      }
+      if (parsedLimit != null && created.length > 0) {
+        const failed: string[] = []
+        for (const protocol of created) {
+          try {
+            await setTrafficLimitForProtocol(
+              protocol,
+              trimmedName,
+              parsedLimit,
+              limitUnit,
+              period,
+            )
+          } catch (err) {
+            failed.push(
+              `${vpnLabel(protocol)}: ${err instanceof ApiError ? err.message : 'ошибка'}`,
+            )
+          }
+        }
+        if (failed.length > 0) {
+          extraErr = `Профиль создан, но лимит трафика не полностью применён (${failed.join('; ')})`
+        }
+      }
+      finishCreate(extraErr)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка создания')
     } finally {
@@ -170,7 +297,9 @@ export default function CreateConfigDialog({
   }
 
   const quotaReached = quota != null && !quota.unlimited && !quota.can_create
-  const busy = submitting || applyingTemplateId != null
+  const busy = submitting
+  const createLabel =
+    selectedProtocols.length > 1 ? `Создать · ${selectedProtocols.length}` : 'Создать'
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : handleClose())}>
@@ -179,9 +308,9 @@ export default function CreateConfigDialog({
 
         <form onSubmit={(e) => void handleSubmit(e)} className="tg-mini-config-sheet-form">
           <DialogHeader className="shrink-0 space-y-2 px-4 pb-3 pt-2 text-left">
-            <DialogTitle className="text-base font-semibold">Новый конфиг</DialogTitle>
+            <DialogTitle className="text-base font-semibold">Новый профиль</DialogTitle>
             <DialogDescription className="text-xs leading-relaxed">
-              Создайте VPN-профиль на активном узле. После создания его можно сразу отправить в Telegram.
+              Одно имя — несколько конфигураций на активном узле.
             </DialogDescription>
           </DialogHeader>
 
@@ -194,7 +323,7 @@ export default function CreateConfigDialog({
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="tg-mini-client-name">Имя клиента</Label>
+              <Label htmlFor="tg-mini-client-name">Имя профиля</Label>
               <Input
                 id="tg-mini-client-name"
                 value={clientName}
@@ -206,26 +335,38 @@ export default function CreateConfigDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="tg-mini-vpn-type">Протокол</Label>
-              <Select
-                value={vpnType}
-                onValueChange={(value) => setVpnType(value as VpnType)}
-                disabled={busy || quotaReached}
-              >
-                <SelectTrigger id="tg-mini-vpn-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="z-[100]">
-                  {openvpnEnabled && <SelectItem value="openvpn">OpenVPN</SelectItem>}
-                  {wireguardEnabled && <SelectItem value="wireguard">WG/AWG 1.5</SelectItem>}
-                  {awg2Enabled && <SelectItem value="amneziawg2">AWG 2.0</SelectItem>}
-                </SelectContent>
-              </Select>
+              <div className="flex items-baseline justify-between gap-2">
+                <Label>Конфигурации</Label>
+                <span className="text-xs text-muted-foreground">можно несколько</span>
+              </div>
+              <div className="grid gap-2 grid-cols-1">
+                {availableProtocols.map((type) => {
+                  const checked = selectedProtocols.includes(type)
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      disabled={busy || quotaReached}
+                      onClick={() => toggleProtocol(type)}
+                      aria-pressed={checked}
+                      className={cn(
+                        'rounded-lg border px-3 py-2.5 text-left text-sm transition-colors',
+                        checked ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted/50',
+                      )}
+                    >
+                      <span className="block font-medium">{vpnLabel(type)}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {checked ? 'Выбрано' : 'Не выбрано'}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
-            {vpnType === 'openvpn' && (
+            {selectedProtocols.includes('openvpn') && (
               <div className="space-y-2">
-                <Label htmlFor="tg-mini-cert-days">Срок сертификата (дней)</Label>
+                <Label htmlFor="tg-mini-cert-days">Срок сертификата OpenVPN (дней)</Label>
                 <Input
                   id="tg-mini-cert-days"
                   type="number"
@@ -238,9 +379,9 @@ export default function CreateConfigDialog({
               </div>
             )}
 
-            {vpnType === 'amneziawg2' && (
+            {selectedProtocols.includes('amneziawg2') && (
               <div className="space-y-2">
-                <Label htmlFor="tg-mini-awg2-ttl">TTL</Label>
+                <Label htmlFor="tg-mini-awg2-ttl">TTL AWG 2.0</Label>
                 <Select value={ttl} onValueChange={setTtl} disabled={busy || quotaReached}>
                   <SelectTrigger id="tg-mini-awg2-ttl">
                     <SelectValue />
@@ -253,6 +394,87 @@ export default function CreateConfigDialog({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+
+            {isAdmin && (
+              <div className="space-y-3 rounded-lg border border-border/80 p-3">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 rounded border-input"
+                    checked={trafficLimitEnabled}
+                    onChange={(e) => setTrafficLimitEnabled(e.target.checked)}
+                    disabled={busy || quotaReached}
+                  />
+                  <span>
+                    <span className="block text-sm font-medium">Лимит трафика</span>
+                    <span className="text-xs text-muted-foreground">
+                      На все выбранные конфигурации. Без периода — на весь срок; с периодом —
+                      обновление каждый день, раз в 7 дней или месяц.
+                    </span>
+                  </span>
+                </label>
+                {trafficLimitEnabled && (
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="tg-mini-limit-value">Объём</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="tg-mini-limit-value"
+                          type="number"
+                          min={0.01}
+                          step="any"
+                          value={limitValue}
+                          onChange={(e) => setLimitValue(e.target.value)}
+                          disabled={busy || quotaReached}
+                        />
+                        <select
+                          className="w-[5.5rem] shrink-0 rounded-md border border-input bg-background px-2 text-sm"
+                          value={limitUnit}
+                          onChange={(e) => setLimitUnit(e.target.value)}
+                          disabled={busy || quotaReached}
+                        >
+                          <option value="MB">MB</option>
+                          <option value="GB">GB</option>
+                          <option value="TB">TB</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="tg-mini-limit-period">Период</Label>
+                      <select
+                        id="tg-mini-limit-period"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={limitPeriodDays}
+                        onChange={(e) => setLimitPeriodDays(e.target.value)}
+                        disabled={busy || quotaReached}
+                      >
+                        <option value="">Всё время (без сброса)</option>
+                        <option value="1">1 день (календарный)</option>
+                        <option value="7">7 дней (пн–вс)</option>
+                        <option value="30">30 дней (месяц)</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isAdmin && (
+              <div className="space-y-2">
+                <Label htmlFor="tg-mini-access-until">Доступ до</Label>
+                <Input
+                  id="tg-mini-access-until"
+                  type="date"
+                  value={accessUntilDate}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setAccessUntilDate(e.target.value)}
+                  disabled={busy || quotaReached}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Необязательно. Одна дата для всех выбранных конфигураций.
+                </p>
               </div>
             )}
 
@@ -274,44 +496,26 @@ export default function CreateConfigDialog({
                 value={ownerId}
                 onChange={setOwnerId}
                 disabled={busy || quotaReached}
-                description="Пользователь увидит конфиг в своём списке"
+                description="Владелец увидит все конфигурации профиля"
               />
-            )}
-
-            {templates.length > 0 && (
-              <div className="space-y-2">
-                <Label>Шаблоны</Label>
-                <p className="text-xs text-muted-foreground">
-                  Укажите имя клиента и нажмите шаблон для быстрого создания
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {templates.map((template) => (
-                    <Button
-                      key={template.id}
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      disabled={busy || quotaReached || !clientName.trim()}
-                      onClick={() => void handleApplyTemplate(template)}
-                    >
-                      {applyingTemplateId === template.id ? (
-                        <Loader2 size={14} className="animate-spin" aria-hidden />
-                      ) : (
-                        template.name
-                      )}
-                    </Button>
-                  ))}
-                </div>
-              </div>
             )}
 
             {error && <p className="text-destructive text-sm">{error}</p>}
           </div>
 
           <footer className="tg-mini-config-sheet-footer">
-            <Button type="submit" className="w-full gap-2" size="lg" disabled={busy || quotaReached}>
-              {submitting ? <Loader2 size={18} className="animate-spin" aria-hidden /> : <Plus size={18} aria-hidden />}
-              Создать
+            <Button
+              type="submit"
+              className="w-full gap-2"
+              size="lg"
+              disabled={busy || quotaReached || selectedProtocols.length === 0}
+            >
+              {submitting ? (
+                <Loader2 size={18} className="animate-spin" aria-hidden />
+              ) : (
+                <Plus size={18} aria-hidden />
+              )}
+              {createLabel}
             </Button>
             <Button type="button" variant="outline" className="w-full" onClick={handleClose} disabled={submitting}>
               Отмена

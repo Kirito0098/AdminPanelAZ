@@ -1,3 +1,4 @@
+import json
 import logging
 
 from pathlib import Path
@@ -58,6 +59,7 @@ def _migrate_vpn_configs_node_scope() -> None:
     from app.models import Node, VpnType
     from app.services.node_adapter import LocalNodeAdapter, RemoteNodeAdapter
     from app.services.node_manager import get_active_node_id, get_api_key_plain
+    from app.services.node_transport import node_uses_tls
 
     db = SessionLocal()
     try:
@@ -83,7 +85,7 @@ def _migrate_vpn_configs_node_scope() -> None:
                     host=node.host,
                     port=node.port,
                     api_key=api_key,
-                    mtls_enabled=bool(node.mtls_enabled),
+                    mtls_enabled=node_uses_tls(node),
                 )
                 node_clients[node.id] = (
                     set(adapter.list_openvpn_clients()),
@@ -270,6 +272,11 @@ def _migrate_access_policy_node_scope() -> None:
 def _migrate_awg2_access_policy_table() -> None:
     inspector = inspect(engine)
     if "amneziawg2_access_policies" in inspector.get_table_names():
+        cols = {col["name"] for col in inspector.get_columns("amneziawg2_access_policies")}
+        if "access_until" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE amneziawg2_access_policies ADD COLUMN access_until DATETIME"))
+            logger.info("DB migration: added amneziawg2_access_policies.access_until")
         return
     with engine.begin() as conn:
         conn.execute(
@@ -279,6 +286,7 @@ def _migrate_awg2_access_policy_table() -> None:
                     id INTEGER NOT NULL PRIMARY KEY,
                     node_id INTEGER NOT NULL,
                     client_name VARCHAR(64) NOT NULL,
+                    access_until DATETIME,
                     is_temp_blocked BOOLEAN,
                     is_permanent_blocked BOOLEAN,
                     block_reason VARCHAR(32),
@@ -308,6 +316,238 @@ def _migrate_awg2_access_policy_table() -> None:
             )
         )
     logger.info("DB migration: created amneziawg2_access_policies table")
+
+
+def _migrate_unlock_codes_tables() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    if "unlock_codes" not in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE unlock_codes (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        code VARCHAR(32) NOT NULL,
+                        grant_days INTEGER NOT NULL,
+                        protocols TEXT NOT NULL DEFAULT '[]',
+                        mode VARCHAR(8) NOT NULL,
+                        max_redemptions INTEGER NOT NULL,
+                        redemption_count INTEGER NOT NULL DEFAULT 0,
+                        allowed_client_names TEXT NOT NULL DEFAULT '[]',
+                        code_expires_at DATETIME,
+                        created_by_user_id INTEGER,
+                        created_at DATETIME,
+                        revoked_at DATETIME,
+                        CONSTRAINT uq_unlock_codes_code UNIQUE (code),
+                        CONSTRAINT ck_unlock_codes_code_len CHECK (length(code) BETWEEN 8 AND 32),
+                        CONSTRAINT ck_unlock_codes_mode CHECK (mode IN ('single', 'multi')),
+                        FOREIGN KEY(created_by_user_id) REFERENCES users (id)
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_unlock_codes_code ON unlock_codes (code)"))
+        logger.info("DB migration: created unlock_codes table")
+    else:
+        unlock_cols = {col["name"] for col in inspector.get_columns("unlock_codes")}
+        if "redemption_count" not in unlock_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE unlock_codes "
+                        "ADD COLUMN redemption_count INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+                if "unlock_code_redemptions" in tables:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE unlock_codes
+                            SET redemption_count = (
+                                SELECT COUNT(*)
+                                FROM unlock_code_redemptions
+                                WHERE unlock_code_redemptions.code_id = unlock_codes.id
+                            )
+                            """
+                        )
+                    )
+            logger.info("DB migration: added unlock_codes.redemption_count")
+
+        inspector = inspect(engine)
+        unlock_cols = {col["name"] for col in inspector.get_columns("unlock_codes")}
+        if "allowed_client_names" not in unlock_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE unlock_codes "
+                        "ADD COLUMN allowed_client_names TEXT NOT NULL DEFAULT '[]'"
+                    )
+                )
+            logger.info("DB migration: added unlock_codes.allowed_client_names")
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    if "unlock_code_redemptions" not in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE unlock_code_redemptions (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        code_id INTEGER NOT NULL,
+                        client_name VARCHAR(64) NOT NULL,
+                        node_id INTEGER NOT NULL,
+                        redeemed_at DATETIME,
+                        CONSTRAINT uq_unlock_code_redemptions_code_client_node
+                            UNIQUE (code_id, client_name, node_id),
+                        FOREIGN KEY(code_id) REFERENCES unlock_codes (id) ON DELETE CASCADE,
+                        FOREIGN KEY(node_id) REFERENCES nodes (id)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_code_id "
+                    "ON unlock_code_redemptions (code_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_client_name "
+                    "ON unlock_code_redemptions (client_name)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_node_id "
+                    "ON unlock_code_redemptions (node_id)"
+                )
+            )
+        logger.info("DB migration: created unlock_code_redemptions table")
+    else:
+        _migrate_unlock_redemptions_unique_include_node()
+
+
+def _unlock_redemptions_unique_includes_node(inspector) -> bool:
+    for constraint in inspector.get_unique_constraints("unlock_code_redemptions"):
+        cols = list(constraint.get("column_names") or [])
+        if cols == ["code_id", "client_name", "node_id"] or set(cols) == {
+            "code_id",
+            "client_name",
+            "node_id",
+        }:
+            return True
+        if constraint.get("name") == "uq_unlock_code_redemptions_code_client_node":
+            return True
+    # SQLite may expose the unique as an index instead of a constraint.
+    for index in inspector.get_indexes("unlock_code_redemptions"):
+        if not index.get("unique"):
+            continue
+        cols = list(index.get("column_names") or [])
+        if set(cols) == {"code_id", "client_name", "node_id"}:
+            return True
+    return False
+
+
+def _migrate_unlock_redemptions_unique_include_node() -> None:
+    """Scope unlock redemption uniqueness by node (code_id, client_name, node_id)."""
+    inspector = inspect(engine)
+    if "unlock_code_redemptions" not in inspector.get_table_names():
+        return
+    if _unlock_redemptions_unique_includes_node(inspector):
+        return
+
+    from app.models import Node
+
+    db = SessionLocal()
+    try:
+        fallback_node = db.query(Node).filter(Node.is_local.is_(True)).first()
+        if fallback_node is None:
+            fallback_node = db.query(Node).order_by(Node.id).first()
+        fallback_node_id = fallback_node.id if fallback_node is not None else None
+    finally:
+        db.close()
+
+    with engine.begin() as conn:
+        if fallback_node_id is not None:
+            conn.execute(
+                text(
+                    """
+                    UPDATE unlock_code_redemptions
+                    SET node_id = :node_id
+                    WHERE node_id IS NULL
+                    """
+                ),
+                {"node_id": fallback_node_id},
+            )
+        # Drop rows that still cannot satisfy NOT NULL node_id.
+        conn.execute(text("DELETE FROM unlock_code_redemptions WHERE node_id IS NULL"))
+        # Keep one row per (code_id, client_name, node_id) if duplicates somehow exist.
+        conn.execute(
+            text(
+                """
+                DELETE FROM unlock_code_redemptions
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM unlock_code_redemptions
+                    GROUP BY code_id, client_name, node_id
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE unlock_code_redemptions_new (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    code_id INTEGER NOT NULL,
+                    client_name VARCHAR(64) NOT NULL,
+                    node_id INTEGER NOT NULL,
+                    redeemed_at DATETIME,
+                    CONSTRAINT uq_unlock_code_redemptions_code_client_node
+                        UNIQUE (code_id, client_name, node_id),
+                    FOREIGN KEY(code_id) REFERENCES unlock_codes (id) ON DELETE CASCADE,
+                    FOREIGN KEY(node_id) REFERENCES nodes (id)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO unlock_code_redemptions_new (
+                    id, code_id, client_name, node_id, redeemed_at
+                )
+                SELECT id, code_id, client_name, node_id, redeemed_at
+                FROM unlock_code_redemptions
+                """
+            )
+        )
+        conn.execute(text("DROP TABLE unlock_code_redemptions"))
+        conn.execute(text("ALTER TABLE unlock_code_redemptions_new RENAME TO unlock_code_redemptions"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_code_id "
+                "ON unlock_code_redemptions (code_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_client_name "
+                "ON unlock_code_redemptions (client_name)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_node_id "
+                "ON unlock_code_redemptions (node_id)"
+            )
+        )
+    logger.info("DB migration: unlock_code_redemptions unique scoped by node_id")
 
 
 def _migrate_node_resource_sample_table() -> None:
@@ -845,6 +1085,44 @@ def _migrate_user_traffic_sample_node_created_index() -> None:
     logger.info("DB migration: created ix_user_traffic_sample_node_created index")
 
 
+def _migrate_client_portal_tokens_active_unique() -> None:
+    """One active (revoked_at IS NULL) portal token per (node_id, client_name)."""
+    inspector = inspect(engine)
+    if "client_portal_tokens" not in inspector.get_table_names():
+        return
+    index_names = {idx.get("name") for idx in inspector.get_indexes("client_portal_tokens")}
+    if "uq_client_portal_tokens_active_node_client" in index_names:
+        return
+
+    with engine.begin() as conn:
+        # Keep newest active row per client; revoke older duplicates.
+        conn.execute(
+            text(
+                """
+                UPDATE client_portal_tokens
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE revoked_at IS NULL
+                  AND id NOT IN (
+                    SELECT MAX(id)
+                    FROM client_portal_tokens
+                    WHERE revoked_at IS NULL
+                    GROUP BY node_id, client_name
+                  )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX uq_client_portal_tokens_active_node_client
+                ON client_portal_tokens (node_id, client_name)
+                WHERE revoked_at IS NULL
+                """
+            )
+        )
+    logger.info("DB migration: unique active client_portal_tokens per node+client")
+
+
 def run_db_migrations() -> None:
     """Lightweight SQLite migrations for columns added after initial deploy."""
     _migrate_alert_rules_table()
@@ -854,6 +1132,8 @@ def run_db_migrations() -> None:
     _migrate_vpn_configs_node_scope()
     _migrate_access_policy_node_scope()
     _migrate_awg2_access_policy_table()
+    _migrate_unlock_codes_tables()
+    _migrate_client_portal_tokens_active_unique()
     _migrate_node_resource_sample_table()
     _migrate_connection_count_samples_table()
     _migrate_connection_count_samples_awg2_column()
@@ -872,10 +1152,12 @@ def run_db_migrations() -> None:
             ("traffic_limit_period_days", "INTEGER"),
         ],
         "amneziawg2_access_policies": [
+            ("access_until", "DATETIME"),
             ("traffic_limit_bytes", "BIGINT"),
             ("traffic_limit_period_days", "INTEGER"),
         ],
         "openvpn_access_policy": [
+            ("access_until", "DATETIME"),
             ("traffic_limit_bytes", "BIGINT"),
             ("traffic_limit_period_days", "INTEGER"),
         ],
@@ -930,6 +1212,8 @@ def run_db_migrations() -> None:
     _migrate_viewer_role_to_user()
     _migrate_user_telegram_backfill()
     _migrate_nodes_mtls_enabled()
+    _migrate_nodes_transport()
+    _migrate_nodes_ssh_fields()
     _migrate_nodes_openvpn_remote_hosts()
     _migrate_nodes_wireguard_use_first_remote()
     _migrate_nodes_openvpn_multihome()
@@ -971,7 +1255,7 @@ def _migrate_viewer_role_to_user() -> None:
 
 
 def _migrate_nodes_mtls_enabled() -> None:
-    """Add per-node mTLS flag and backfill from deprecated global NODE_AGENT_MTLS_ENABLED."""
+    """Add per-node mTLS flag and one-shot backfill from deprecated global NODE_AGENT_MTLS_ENABLED."""
     inspector = inspect(engine)
     if "nodes" not in inspector.get_table_names():
         return
@@ -980,11 +1264,112 @@ def _migrate_nodes_mtls_enabled() -> None:
         if "mtls_enabled" not in cols:
             conn.execute(text("ALTER TABLE nodes ADD COLUMN mtls_enabled INTEGER DEFAULT 0"))
             logger.info("DB migration: added nodes.mtls_enabled")
-        if get_settings().node_agent_mtls_enabled:
+            cols.add("mtls_enabled")
+            if get_settings().node_agent_mtls_enabled:
+                conn.execute(
+                    text("UPDATE nodes SET mtls_enabled = 1 WHERE is_local = 0")
+                )
+                logger.info("DB migration: backfilled nodes.mtls_enabled for remote nodes")
+        # After transport column exists, never force mtls_enabled from the deprecated global flag —
+        # transport is the source of truth (see _migrate_nodes_transport / _sync_nodes_transport_flags).
+
+
+def _migrate_nodes_transport() -> None:
+    """Add nodes.transport and one-shot backfill from mtls_enabled."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "transport" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN transport VARCHAR(16) DEFAULT 'http'"))
             conn.execute(
-                text("UPDATE nodes SET mtls_enabled = 1 WHERE is_local = 0")
+                text(
+                    "UPDATE nodes SET transport = CASE WHEN mtls_enabled = 1 THEN 'mtls' ELSE 'http' END"
+                )
             )
-            logger.info("DB migration: backfilled nodes.mtls_enabled for remote nodes")
+            logger.info("DB migration: added nodes.transport and backfilled from mtls_enabled")
+    _sync_nodes_transport_flags()
+
+
+def _migrate_nodes_ssh_fields() -> None:
+    """Add SSH transport columns for node connection settings."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    with engine.begin() as conn:
+        if "ssh_host" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_host VARCHAR(255)"))
+            logger.info("DB migration: added nodes.ssh_host")
+        if "ssh_port" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_port INTEGER NOT NULL DEFAULT 22"))
+            logger.info("DB migration: added nodes.ssh_port")
+        if "ssh_username" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_username VARCHAR(128)"))
+            logger.info("DB migration: added nodes.ssh_username")
+        if "ssh_private_key_encrypted" not in cols:
+            conn.execute(
+                text("ALTER TABLE nodes ADD COLUMN ssh_private_key_encrypted TEXT NOT NULL DEFAULT ''")
+            )
+            logger.info("DB migration: added nodes.ssh_private_key_encrypted")
+        if "ssh_passphrase_encrypted" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_passphrase_encrypted TEXT NOT NULL DEFAULT ''"))
+            logger.info("DB migration: added nodes.ssh_passphrase_encrypted")
+        if "ssh_remote_agent_host" not in cols:
+            conn.execute(
+                text("ALTER TABLE nodes ADD COLUMN ssh_remote_agent_host VARCHAR(255) NOT NULL DEFAULT '127.0.0.1'")
+            )
+            logger.info("DB migration: added nodes.ssh_remote_agent_host")
+        if "ssh_remote_agent_port" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_remote_agent_port INTEGER"))
+            logger.info("DB migration: added nodes.ssh_remote_agent_port")
+        if "ssh_host_key" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_host_key TEXT NOT NULL DEFAULT ''"))
+            logger.info("DB migration: added nodes.ssh_host_key")
+            # One-shot: lift pins previously stored in node_metadata.ssh_host_key
+            try:
+                rows = conn.execute(text("SELECT id, node_metadata FROM nodes")).mappings().all()
+                for row in rows:
+                    raw = row.get("node_metadata") or "{}"
+                    try:
+                        meta = json.loads(raw) if isinstance(raw, str) else {}
+                    except Exception:
+                        continue
+                    if not isinstance(meta, dict):
+                        continue
+                    pinned = str(meta.get("ssh_host_key") or "").strip()
+                    if not pinned:
+                        continue
+                    conn.execute(
+                        text("UPDATE nodes SET ssh_host_key = :key WHERE id = :id"),
+                        {"key": pinned, "id": row["id"]},
+                    )
+            except Exception:
+                logger.debug("DB migration: skip ssh_host_key metadata backfill", exc_info=True)
+
+
+def _sync_nodes_transport_flags() -> None:
+    """Keep transport and mtls_enabled aligned; heal empty transport from legacy flag."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "transport" not in cols or "mtls_enabled" not in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE nodes SET transport = CASE WHEN mtls_enabled = 1 THEN 'mtls' ELSE 'http' END "
+                "WHERE transport IS NULL OR TRIM(transport) = ''"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE nodes SET mtls_enabled = CASE WHEN LOWER(TRIM(transport)) = 'mtls' THEN 1 ELSE 0 END "
+                "WHERE LOWER(TRIM(transport)) IN ('http', 'mtls')"
+            )
+        )
 
 
 def _migrate_nodes_openvpn_remote_hosts() -> None:

@@ -203,7 +203,11 @@ def _persist_api_key(new_key: str) -> None:
 
 @app.get("/health")
 def health(_: None = Depends(verify_api_key)):
-    payload = build_health_payload(service, agent_version=app.version)
+    payload = build_health_payload(
+        service,
+        agent_version=app.version,
+        listen_tls=bool(_uvicorn_ssl_kwargs()),
+    )
     payload["status"] = "online"
     payload["timestamp"] = datetime.utcnow().isoformat()
     return payload

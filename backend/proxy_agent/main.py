@@ -9,6 +9,7 @@ import ipaddress
 import os
 import secrets
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
@@ -155,7 +156,19 @@ def _status_from_rules(rules_text: str) -> dict:
 
 @app.get("/health")
 def health(_: None = Depends(verify_api_key)):
-    return {"ok": True, "version": PROXY_AGENT_VERSION}
+    started = getattr(app.state, "started_at", None)
+    if started is None:
+        started = datetime.now(timezone.utc)
+        app.state.started_at = started
+    now = datetime.now(timezone.utc)
+    return {
+        "ok": True,
+        "version": PROXY_AGENT_VERSION,
+        "agent_version": PROXY_AGENT_VERSION,
+        "started_at": started.isoformat().replace("+00:00", "Z"),
+        "uptime_sec": max(0, int((now - started).total_seconds())),
+        "listen_tls": bool(_uvicorn_ssl_kwargs()),
+    }
 
 
 @app.get("/proxy/status")

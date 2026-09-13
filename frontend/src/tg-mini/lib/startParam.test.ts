@@ -9,6 +9,7 @@ describe('mapTelegramStartParam', () => {
     expect(mapTelegramStartParam('nodes')).toBe('/nodes')
     expect(mapTelegramStartParam('configs')).toBe('/configs')
     expect(mapTelegramStartParam('settings')).toBe('/settings')
+    expect(mapTelegramStartParam('unlock-codes')).toBe('/unlock-codes')
   })
 
   it('returns null for unsupported or empty values', () => {

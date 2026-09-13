@@ -28,6 +28,8 @@ def _get_models():
     return _models
 
 
+_UNSET = object()
+
 from app.services.cidr.pipeline.download import _download_text as _download_cidr_text
 
 # Парсинг CIDR/ASN вынесен в db_extract.py; имена реэкспортируются для совместимости
@@ -741,7 +743,12 @@ class CidrDbUpdaterService:
                 log_entry.status = final_status
                 log_entry.providers_updated = providers_updated
                 log_entry.providers_failed = providers_failed
-                log_entry.total_cidrs = total_cidrs
+                m = _get_models()
+                full_pool_total = int(
+                    sum(int(pm.cidr_count or 0) for pm in self.db.query(m.ProviderMeta).all())
+                )
+                log_entry.total_cidrs = full_pool_total
+                total_cidrs = full_pool_total
                 log_entry.details_json = json.dumps(per_provider, ensure_ascii=False)
                 _commit_db_with_retry()
             except Exception as exc:
@@ -1292,6 +1299,12 @@ class CidrDbUpdaterService:
         if candidate_cidr_count == previous_cidr_count and not asn_errors:
             return False
 
+        drop_ratio = 1.0 - (float(candidate_cidr_count) / float(previous_cidr_count))
+
+        # Align with critical anomaly (≥50%): preserve even without ASN errors.
+        if drop_ratio >= 0.5:
+            return True
+
         if candidate_cidr_count >= CIDR_FALLBACK_MIN_CANDIDATE and not asn_errors:
             return False
 
@@ -1302,7 +1315,6 @@ class CidrDbUpdaterService:
                 return False
             return True
 
-        drop_ratio = 1.0 - (float(candidate_cidr_count) / float(previous_cidr_count))
         if asn_errors and drop_ratio >= CIDR_FALLBACK_DROP_RATIO_WITH_ERRORS:
             return True
         return False
@@ -1322,8 +1334,23 @@ class CidrDbUpdaterService:
         merged_reason = "; ".join(chunk for chunk in reasons if chunk) or None
         return merged_level, merged_reason
 
+    @staticmethod
+    def _should_emit_global_pool_drop_alert(*, last_log, prev_log, known_provider_count: int) -> bool:
+        if not last_log or not prev_log:
+            return False
+        if int(getattr(prev_log, "total_cidrs", 0) or 0) <= 0:
+            return False
+        updated = int(getattr(last_log, "providers_updated", 0) or 0)
+        if updated < int(known_provider_count):
+            return False  # partial ingest
+        previous_total = int(prev_log.total_cidrs or 0)
+        current_total = int(last_log.total_cidrs or 0)
+        return current_total < int(previous_total * 0.7)
+
     def _build_degradation_alerts(self, last_log, metas):
         """Build compact alert list for UI based on provider anomaly flags and global drops."""
+        from app.services.cidr.pipeline.provider_sources import PROVIDER_SOURCES
+
         m = _get_models()
         alerts = []
 
@@ -1345,14 +1372,14 @@ class CidrDbUpdaterService:
                 .order_by(m.CidrDbRefreshLog.started_at.desc())
                 .first()
             )
-            if (
-                prev_log
-                and str(prev_log.status or "") != "cleared"
-                and int(prev_log.total_cidrs or 0) > 0
-            ):
-                previous_total = int(prev_log.total_cidrs or 0)
-                current_total = int(last_log.total_cidrs or 0)
-                if current_total < int(previous_total * 0.7):
+            if prev_log and str(prev_log.status or "") != "cleared":
+                if self._should_emit_global_pool_drop_alert(
+                    last_log=last_log,
+                    prev_log=prev_log,
+                    known_provider_count=len(PROVIDER_SOURCES),
+                ):
+                    previous_total = int(prev_log.total_cidrs or 0)
+                    current_total = int(last_log.total_cidrs or 0)
                     alerts.append({
                         "scope": "global",
                         "provider_key": None,
@@ -1576,7 +1603,7 @@ class CidrDbUpdaterService:
         asn_count=None,
         active_asn_count=None,
         anomaly_level=None,
-        anomaly_reason=None,
+        anomaly_reason=_UNSET,
         commit=True,
     ):
         m = _get_models()
@@ -1596,8 +1623,11 @@ class CidrDbUpdaterService:
             meta.active_asn_count = int(active_asn_count)
         if anomaly_level is not None:
             meta.anomaly_level = str(anomaly_level)
-        if anomaly_reason is not None:
+        if anomaly_reason is not _UNSET:
             meta.anomaly_reason = str(anomaly_reason) if anomaly_reason else None
+        elif anomaly_level is not None and str(anomaly_level) in ("none", "info"):
+            # Belt-and-suspenders if a caller omits reason
+            meta.anomaly_reason = None
         meta.refresh_status = status
         meta.refresh_error = error
         meta.last_refreshed_at = datetime.now(timezone.utc)

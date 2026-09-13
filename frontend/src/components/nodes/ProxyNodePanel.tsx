@@ -21,10 +21,10 @@ import {
   resolveProxyLinkSelectorValue,
 } from '@/lib/proxyLinkTarget'
 import type { Node, NodeSyncGroup, ProxyStatusResponse } from '@/types'
+import { AZ_PROXY_SH_DOCS_URL } from '@/lib/docsUrls'
 
 /** AntiZapret upstream docs — admin installs proxy.sh manually; panel never does. */
-export const AZ_PROXY_SH_DOCS_URL =
-  'https://github.com/GubernievS/AntiZapret-VPN#настроить-прокси-сервер'
+export { AZ_PROXY_SH_DOCS_URL } from '@/lib/docsUrls'
 
 type ProxyNodePanelProps = {
   node: Node

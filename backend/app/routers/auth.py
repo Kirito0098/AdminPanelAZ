@@ -66,6 +66,7 @@ from app.services.admin_notify import admin_notify_service
 from app.services.user_agent_format import user_agent_from_request
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.panel_paths import auth_cookie_path, with_access_path
+from app.services.auth_cookies import refresh_token_cookie_secure
 from app.services.panel_publish_info import resolve_request_url_root
 from app.services.telegram_oidc import (
     build_authorization_url,
@@ -201,8 +202,8 @@ def _verify_telegram_login(payload: dict[str, str], bot_token: str, max_age: int
     return True, ""
 
 
-def _set_refresh_cookie(response: Response, raw_token: str) -> None:
-    secure = settings.refresh_token_cookie_secure or settings.is_production or settings.enforce_https
+def _set_refresh_cookie(response: Response, raw_token: str, request: Request | None = None) -> None:
+    secure = refresh_token_cookie_secure(settings, request)
     response.set_cookie(
         key=settings.refresh_token_cookie_name,
         value=raw_token,
@@ -211,6 +212,42 @@ def _set_refresh_cookie(response: Response, raw_token: str) -> None:
         samesite=settings.refresh_token_cookie_samesite,
         max_age=settings.refresh_token_expire_days * 86400,
         path=auth_cookie_path(settings),
+    )
+
+
+def _issue_token_pair(
+    user: User,
+    db: Session,
+    response: Response | None = None,
+    request: Request | None = None,
+) -> Token:
+    access = create_access_token(
+        data={"sub": user.username, "role": user.role.value},
+        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
+    )
+    raw_refresh, _ = create_refresh_token(db, user)
+    web_session_id = active_web_session_service.generate_session_id()
+    if response is not None:
+        _set_refresh_cookie(response, raw_refresh, request)
+    if request is not None:
+        active_web_session_service.touch_active_web_session(
+            db,
+            user.username,
+            request=request,
+            session_id=web_session_id,
+            force=True,
+        )
+    return Token(access_token=access, web_session_id=web_session_id)
+
+
+def _clear_refresh_cookie(response: Response, request: Request | None = None) -> None:
+    secure = refresh_token_cookie_secure(settings, request)
+    response.delete_cookie(
+        key=settings.refresh_token_cookie_name,
+        path=auth_cookie_path(settings),
+        httponly=True,
+        secure=secure,
+        samesite=settings.refresh_token_cookie_samesite,
     )
 
 
@@ -254,42 +291,6 @@ def _complete_2fa_login(user: User, db: Session, request: Request, response: Res
     )
     db.commit()
     return _issue_token_pair(user, db, response, request)
-
-
-def _issue_token_pair(
-    user: User,
-    db: Session,
-    response: Response | None = None,
-    request: Request | None = None,
-) -> Token:
-    access = create_access_token(
-        data={"sub": user.username, "role": user.role.value},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-    )
-    raw_refresh, _ = create_refresh_token(db, user)
-    web_session_id = active_web_session_service.generate_session_id()
-    if response is not None:
-        _set_refresh_cookie(response, raw_refresh)
-    if request is not None:
-        active_web_session_service.touch_active_web_session(
-            db,
-            user.username,
-            request=request,
-            session_id=web_session_id,
-            force=True,
-        )
-    return Token(access_token=access, web_session_id=web_session_id)
-
-
-def _clear_refresh_cookie(response: Response) -> None:
-    secure = settings.refresh_token_cookie_secure or settings.is_production or settings.enforce_https
-    response.delete_cookie(
-        key=settings.refresh_token_cookie_name,
-        path=auth_cookie_path(settings),
-        httponly=True,
-        secure=secure,
-        samesite=settings.refresh_token_cookie_samesite,
-    )
 
 
 def _login_with_checks(
@@ -585,7 +586,7 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
         data={"sub": user.username, "role": user.role.value},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
-    _set_refresh_cookie(response, new_raw)
+    _set_refresh_cookie(response, new_raw, request)
     return Token(access_token=access)
 
 
@@ -600,7 +601,7 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     raw = request.cookies.get(settings.refresh_token_cookie_name)
     if raw:
         revoke_refresh_token(db, raw)
-    _clear_refresh_cookie(response)
+    _clear_refresh_cookie(response, request)
     return MessageResponse(message="Выход выполнен")
 
 

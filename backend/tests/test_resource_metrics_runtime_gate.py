@@ -8,27 +8,29 @@ from unittest.mock import patch
 import app.services.resource_metrics_worker as worker
 
 
-def test_resource_metrics_loop_skips_collect_when_monitor_disabled(monkeypatch):
-    monkeypatch.setattr(worker, "_is_resource_monitor_enabled", lambda: False)
+def test_resource_metrics_loop_skips_then_resumes_when_enabled(monkeypatch):
+    monkeypatch.setattr(worker, "_is_resource_monitor_enabled", lambda: True)
     called = {"n": 0}
 
-    def boom():
+    def collect():
         called["n"] += 1
-        raise AssertionError("collect must not run while resource_monitor is disabled")
 
-    monkeypatch.setattr(worker, "_collect_all_nodes", boom)
+    monkeypatch.setattr(worker, "_collect_all_nodes", collect)
 
     class _Settings:
-        resource_metrics_enabled = True
+        resource_metrics_enabled = False
         resource_metrics_interval_seconds = 0
 
-    monkeypatch.setattr(worker, "get_settings", lambda: _Settings())
+    settings = _Settings()
+    monkeypatch.setattr(worker, "get_settings", lambda: settings)
 
     sleeps = 0
 
     async def fake_sleep(_seconds):
         nonlocal sleeps
         sleeps += 1
+        if sleeps == 1:
+            settings.resource_metrics_enabled = True
         if sleeps >= 2:
             raise asyncio.CancelledError()
 
@@ -41,7 +43,7 @@ def test_resource_metrics_loop_skips_collect_when_monitor_disabled(monkeypatch):
     except asyncio.CancelledError:
         pass
 
-    assert called["n"] == 0
+    assert called["n"] == 1
     assert sleeps >= 2
 
 
@@ -56,6 +58,12 @@ def test_is_resource_monitor_enabled_delegates(monkeypatch):
         lambda: SimpleEnabled(True),
     )
     assert worker._is_resource_monitor_enabled() is True
+
+
+def test_should_start_resource_metrics_always_true():
+    from app.services import worker_lifecycle as lifecycle
+
+    assert lifecycle.should_start_resource_metrics() is True
 
 
 class SimpleEnabled:

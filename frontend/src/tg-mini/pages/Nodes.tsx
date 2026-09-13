@@ -117,8 +117,21 @@ function NodeTransportBadge({ node }: { node: TgMiniNode }) {
         <Globe size={10} aria-hidden />
         Удалённый
       </Badge>
-      <Badge variant={node.mtls_enabled ? 'default' : 'outline'} className="text-[10px] font-normal">
-        {node.mtls_enabled ? 'mTLS' : 'HTTP'}
+      <Badge
+        variant={
+          ['mtls', 'ssh'].includes(
+            (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase(),
+          )
+            ? 'default'
+            : 'outline'
+        }
+        className="text-[10px] font-normal"
+      >
+        {(node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase() === 'mtls'
+          ? 'mTLS'
+          : (node.transport || '').toLowerCase() === 'ssh'
+            ? 'SSH'
+            : 'HTTP'}
       </Badge>
     </>
   )

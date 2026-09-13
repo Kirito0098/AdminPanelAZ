@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile, status
 
 from app.routers import awg2 as awg2_router
 from app.services import awg2
@@ -271,3 +271,29 @@ def test_awg2_restore_route_calls_runtime_and_ha_sync():
     assert result["ha"]["errors"][0]["node_name"] == "replica-1"
     assert result["node_id"] == 1
     adapter.restore_awg2_backup.assert_called_once_with(b"payload", "narrow-backup.tar.gz")
+
+
+def test_awg2_restore_route_raises_when_runtime_fails():
+    adapter = MagicMock()
+    adapter.restore_awg2_backup.return_value = {
+        "success": False,
+        "synced": [],
+        "errors": [{"interface": "antizapret-awg", "stderr": "awg-quick failed"}],
+    }
+    node = SimpleNamespace(id=1, name="node-1", host="10.0.0.1")
+    upload = UploadFile(filename="narrow-backup.tar.gz", file=io.BytesIO(b"payload"))
+    ha_mock = MagicMock()
+
+    with (
+        patch.object(awg2_router, "get_active_node", return_value=node),
+        patch.object(awg2_router, "get_active_adapter", return_value=adapter),
+        patch.object(awg2_router, "_ha_sync_awg2_from_active", ha_mock),
+    ):
+        try:
+            asyncio.run(awg2_router.awg2_restore(archive=upload, db=MagicMock(), _=SimpleNamespace()))
+            raise AssertionError("expected HTTPException")
+        except HTTPException as exc:
+            assert exc.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "awg-quick failed" in str(exc.detail)
+
+    ha_mock.assert_not_called()

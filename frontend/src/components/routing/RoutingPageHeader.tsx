@@ -2,6 +2,8 @@ import { GitBranch, Play, RefreshCw } from 'lucide-react'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import { NodeBadge } from '@/components/NodeSelector'
 import { Button } from '@/components/ui/button'
+import DocsLink from '@/components/shared/DocsLink'
+import { DOCS } from '@/lib/docsUrls'
 import { REFRESH_INTERVAL } from './useRoutingPage'
 
 interface RoutingPageHeaderProps {
@@ -49,6 +51,7 @@ export default function RoutingPageHeader({
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <DocsLink href={DOCS.routing} variant="button" />
         <AutoRefreshControl
           enabled={autoRefresh}
           countdown={countdown}

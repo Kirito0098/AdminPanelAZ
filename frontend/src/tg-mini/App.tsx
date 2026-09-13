@@ -9,6 +9,7 @@ import Configs from '@/tg-mini/pages/Configs'
 import Cidr from '@/tg-mini/pages/Cidr'
 import Dashboard from '@/tg-mini/pages/Dashboard'
 import Nodes from '@/tg-mini/pages/Nodes'
+import UnlockCodes from '@/tg-mini/pages/UnlockCodes'
 import Settings from '@/tg-mini/pages/Settings'
 import Warper from '@/tg-mini/pages/Warper'
 
@@ -59,6 +60,14 @@ export default function TgMiniApp() {
               element={
                 <FeatureGate featureKey="awg2">
                   <Awg2 />
+                </FeatureGate>
+              }
+            />
+            <Route
+              path="unlock-codes"
+              element={
+                <FeatureGate featureKey="unlock_codes">
+                  <UnlockCodes />
                 </FeatureGate>
               }
             />

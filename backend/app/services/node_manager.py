@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app.auth import get_password_hash, verify_password
 from app.config import get_settings
@@ -31,6 +31,7 @@ from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.antizapret import AntiZapretService
 from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
 from app.services.node_health import HEALTH_METADATA_KEYS
+from app.services.node_transport import TRANSPORT_SSH, get_transport, node_uses_tls, resolve_transport_id
 from app.services.proxy_node_adapter import ProxyNodeAdapter
 
 settings = get_settings()
@@ -228,6 +229,26 @@ def _node_kind(node: Node) -> str:
     return (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
 
 
+def _remote_http_endpoint(node: Node) -> tuple[str, int, bool]:
+    if resolve_transport_id(node) == TRANSPORT_SSH:
+        from app.services.ssh_tunnel_pool import SshTunnelPool, get_ssh_tunnel_pool
+
+        ensured = get_ssh_tunnel_pool().ensure(node)
+        local_port = ensured.local_port if hasattr(ensured, "local_port") else int(ensured)
+        discovered_host_key_text = (
+            ensured.discovered_host_key_text if hasattr(ensured, "discovered_host_key_text") else None
+        )
+        if discovered_host_key_text and SshTunnelPool.store_expected_host_key_text(node, discovered_host_key_text):
+            session = object_session(node)
+            if session is not None:
+                session.add(node)
+                session.commit()
+                session.refresh(node)
+        return "127.0.0.1", local_port, False
+    transport = get_transport(node)
+    return node.host, node.port, transport.is_tls
+
+
 def get_proxy_adapter(node: Node, api_key_override: str | None = None) -> ProxyNodeAdapter:
     """HTTP adapter for ``node_kind=proxy`` (proxy_agent). Not a NodeAdapter."""
     if _node_kind(node) != NODE_KIND_PROXY:
@@ -246,11 +267,12 @@ def get_proxy_adapter(node: Node, api_key_override: str | None = None) -> ProxyN
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"API-ключ узла '{node.name}' недоступен",
         )
+    host, port, mtls_enabled = _remote_http_endpoint(node)
     return ProxyNodeAdapter(
-        host=node.host,
-        port=node.port,
+        host=host,
+        port=port,
         api_key=api_key,
-        mtls_enabled=bool(node.mtls_enabled),
+        mtls_enabled=mtls_enabled,
     )
 
 
@@ -271,11 +293,12 @@ def get_adapter_for_node(node: Node) -> NodeAdapter:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"API-ключ узла '{node.name}' недоступен",
         )
+    host, port, mtls_enabled = _remote_http_endpoint(node)
     return RemoteNodeAdapter(
-        host=node.host,
-        port=node.port,
+        host=host,
+        port=port,
         api_key=api_key,
-        mtls_enabled=bool(node.mtls_enabled),
+        mtls_enabled=mtls_enabled,
     )
 
 
@@ -394,17 +417,60 @@ def check_node_health(node: Node, api_key_override: str | None = None) -> dict:
         else:
             api_key = api_key_override or get_api_key_plain(node)
             if not api_key:
-                return {"status": "offline", "error": "API-ключ не задан"}
+                return {
+                    "status": "offline",
+                    "error": "API-ключ не задан",
+                    "error_code": "node_auth",
+                    "link_error": {
+                        "code": "node_auth",
+                        "message": "API-ключ не задан",
+                        "hint": "Задайте API-ключ узла.",
+                    },
+                }
+            host, port, mtls_enabled = _remote_http_endpoint(node)
             adapter = RemoteNodeAdapter(
-                host=node.host,
-                port=node.port,
+                host=host,
+                port=port,
                 api_key=api_key,
-                mtls_enabled=bool(node.mtls_enabled),
+                mtls_enabled=mtls_enabled,
             )
         health = adapter.health_check()
         health["status"] = "online"
         return health
+    except ValueError as exc:
+        from app.services.node_link_errors import classify_ssh_error, link_error_detail
+
+        ssh_error = classify_ssh_error(exc)
+        if ssh_error:
+            code, message = ssh_error
+            return {
+                "status": "offline",
+                "error": message,
+                "error_code": code,
+                "link_error": link_error_detail(code, message),
+            }
+        # Unsupported/corrupt transport — fail closed without killing the health loop.
+        return {
+            "status": "offline",
+            "error": str(exc),
+            "error_code": "node_error",
+            "link_error": {
+                "code": "node_error",
+                "message": str(exc),
+                "hint": "Проверьте поле transport узла (http/mtls).",
+            },
+        }
     except HTTPException as exc:
+        from app.services.node_link_errors import parse_link_error_from_http_detail
+
+        parsed = parse_link_error_from_http_detail(exc.detail)
+        if parsed:
+            return {
+                "status": "offline",
+                "error": parsed["message"],
+                "error_code": parsed["code"],
+                "link_error": parsed,
+            }
         return {"status": "offline", "error": str(exc.detail)}
     except Exception as exc:
         return {"status": "offline", "error": str(exc)}
@@ -417,20 +483,46 @@ def update_node_from_health(node: Node, health: dict, db: Session) -> None:
     status_str = health.get("status", "offline")
     new_status = NodeStatus.online if status_str == "online" else NodeStatus.offline
     node.status = new_status
+    now_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     if status_str == "online":
         node.last_seen_at = datetime.utcnow()
         meta = node_metadata_dict(node)
         for key in HEALTH_METADATA_KEYS:
             if key in health and health[key] is not None:
                 meta[key] = health[key]
+        meta["last_health_ok_at"] = now_iso
+        meta.pop("last_link_error", None)
         if health.get("error"):
             meta["last_error"] = health["error"]
         elif "last_error" in meta:
             meta.pop("last_error", None)
+        expected_tls = node_uses_tls(node)
+        meta["expected_tls"] = expected_tls
+        if "listen_tls" in health and health["listen_tls"] is not None:
+            meta["tls_mismatch"] = bool(expected_tls) != bool(health["listen_tls"])
+        else:
+            meta.pop("tls_mismatch", None)
         node.node_metadata = json.dumps(meta)
-    elif health.get("error"):
+    elif health.get("error") or health.get("link_error"):
         meta = node_metadata_dict(node)
-        meta["last_error"] = health["error"]
+        link_error = health.get("link_error")
+        if isinstance(link_error, dict) and link_error.get("code"):
+            meta["last_link_error"] = {
+                "code": str(link_error.get("code")),
+                "message": str(link_error.get("message") or health.get("error") or ""),
+                "hint": str(link_error.get("hint") or ""),
+                "at": now_iso,
+            }
+            meta["last_error"] = meta["last_link_error"]["message"]
+        else:
+            message = str(health.get("error") or "offline")
+            meta["last_error"] = message
+            meta["last_link_error"] = {
+                "code": str(health.get("error_code") or "node_error"),
+                "message": message,
+                "hint": "",
+                "at": now_iso,
+            }
         node.node_metadata = json.dumps(meta)
     node.updated_at = datetime.utcnow()
     db.add(node)

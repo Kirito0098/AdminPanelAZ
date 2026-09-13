@@ -6,6 +6,7 @@ import {
   RefreshCw,
   Rocket,
   Save,
+  Search,
   Server,
 } from 'lucide-react'
 import {
@@ -26,7 +27,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
-import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
@@ -85,7 +86,18 @@ function impactBadgeClass(level: string) {
   }
 }
 
-function ModuleToggleCard({
+function matchesQuery(item: FeatureToggleItem, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  const haystack = [item.label, item.description, item.key, item.env_key, item.resource_impact_label]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+  return haystack.includes(q)
+}
+
+/** Linear/Clerk-style preference row: label + description left, switch right. */
+function ModuleToggleRow({
   item,
   enabled,
   onChange,
@@ -94,64 +106,72 @@ function ModuleToggleCard({
   enabled: boolean
   onChange: (enabled: boolean) => void
 }) {
+  const switchId = `module-${item.key}`
   return (
     <div
       className={cn(
-        'flex flex-col gap-3 rounded-xl border p-4 transition-all',
-        enabled ? 'border-primary/25 bg-primary/5 shadow-sm' : 'bg-card/50',
+        'group relative border-b border-border/80 px-1 py-3.5 transition-colors sm:px-2',
+        !enabled && 'opacity-90',
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 gap-3">
-          <div
-            className={cn(
-              'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg',
-              enabled ? 'bg-primary/15' : 'bg-muted/80',
+      <div className="flex items-start gap-3">
+        <div
+          className={cn(
+            'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-base',
+            enabled ? 'bg-primary/10' : 'bg-muted/70',
+          )}
+          aria-hidden
+        >
+          {item.icon}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <label
+              htmlFor={switchId}
+              className="cursor-pointer text-sm font-medium leading-snug text-foreground"
+            >
+              {item.label}
+            </label>
+            {item.resource_impact_level !== 'minimal' && item.resource_impact_level !== 'low' && (
+              <Badge
+                variant="outline"
+                className={cn('h-5 px-1.5 text-[10px] font-normal', impactBadgeClass(item.resource_impact_level))}
+              >
+                {item.resource_impact_label}
+              </Badge>
             )}
-            aria-hidden
-          >
-            {item.icon}
           </div>
-          <div className="min-w-0">
-            <p className="font-medium leading-tight">{item.label}</p>
-            <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{item.env_key}</p>
-          </div>
+          <p className="mt-0.5 line-clamp-2 text-sm leading-relaxed text-muted-foreground" title={item.description}>
+            {item.description}
+          </p>
+
+          {item.key === 'proxy_nodes' && (
+            <p className="mt-2 rounded-md border border-amber-500/25 bg-amber-500/8 px-2.5 py-1.5 text-xs text-amber-950 dark:text-amber-100">
+              Включайте только если уже установили proxy.sh сами. Панель не ставит и не запускает
+              proxy.sh.
+            </p>
+          )}
+
+          {!enabled && item.disable_hint && (
+            <p className="mt-2 text-xs leading-snug text-muted-foreground">{item.disable_hint}</p>
+          )}
+
+          {enabled && item.resource_savings && (
+            <p className="mt-1.5 line-clamp-1 text-xs text-muted-foreground" title={item.resource_savings}>
+              Экономия при выключении: {item.resource_savings}
+            </p>
+          )}
         </div>
-        <Badge variant="outline" className={cn('shrink-0 text-[10px]', impactBadgeClass(item.resource_impact_level))}>
-          {item.resource_impact_label}
-        </Badge>
+
+        <Switch
+          id={switchId}
+          checked={enabled}
+          onCheckedChange={onChange}
+          className="mt-1 shrink-0"
+          aria-label={item.label}
+        />
       </div>
-
-      <p className="text-sm leading-relaxed text-muted-foreground">{item.description}</p>
-
-      {item.key === 'proxy_nodes' && (
-        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
-          Включайте только если уже установили proxy.sh сами. Панель не ставит и не запускает
-          proxy.sh.
-        </p>
-      )}
-
-      {item.resource_savings && (
-        <p className="text-xs text-muted-foreground">Экономия: {item.resource_savings}</p>
-      )}
-
-      <div className="flex items-center justify-between gap-3 border-t pt-3">
-        <div className="flex items-center gap-2">
-          <Switch id={`module-${item.key}`} checked={enabled} onCheckedChange={onChange} />
-          <Label htmlFor={`module-${item.key}`} className="cursor-pointer text-sm">
-            {enabled ? 'Включён' : 'Выключен'}
-          </Label>
-        </div>
-        <Badge variant={enabled ? 'default' : 'secondary'} className="text-[10px]">
-          {enabled ? 'Вкл.' : 'Выкл.'}
-        </Badge>
-      </div>
-
-      {!enabled && item.disable_hint && (
-        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
-          {item.disable_hint}
-        </p>
-      )}
     </div>
   )
 }
@@ -186,71 +206,69 @@ function ProfileCard({
       : formatComparedProfileHint(profile, ramSummary, currentProfileKey)
 
   return (
-    <div
+    <button
+      type="button"
+      disabled={applying || current}
+      onClick={onApply}
       className={cn(
-        'relative flex h-full flex-col overflow-hidden rounded-xl border transition-all',
-        current ? 'border-primary/40 bg-primary/5 shadow-sm ring-1 ring-primary/20' : 'bg-card/50 hover:border-primary/30',
+        'relative flex h-full w-full flex-col overflow-hidden rounded-xl border p-3 text-left transition-all',
+        current
+          ? 'cursor-default border-primary/40 bg-primary/5 shadow-sm ring-1 ring-primary/20'
+          : 'bg-card/50 hover:border-primary/35 hover:bg-muted/30 disabled:opacity-60',
       )}
     >
-      <div className="flex flex-1 flex-col p-3">
-        <div className="mb-2 flex shrink-0 items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <div
-              className={cn(
-                'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
-                current ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
-              )}
-            >
-              <Icon size={18} />
-            </div>
-            <div className="min-w-0">
-              <p className="font-semibold leading-tight">{profile.label}</p>
-              {subtitle && <p className="text-xs text-primary">{subtitle}</p>}
-            </div>
-          </div>
-          {current && (
-            <Badge variant="default" className="shrink-0 text-[10px]">
-              Текущий
-            </Badge>
-          )}
-        </div>
-
-        <div className="flex min-h-0 flex-1 flex-col">
-          <p className="line-clamp-2 text-sm leading-snug text-muted-foreground">{description}</p>
-
-          {(impactRam || impactCpuDisk || impactNote) && (
-            <div className="mt-2 space-y-0.5 rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs leading-snug text-muted-foreground">
-              {impactRam && <p className="line-clamp-2">RAM: {impactRam}</p>}
-              {impactCpuDisk && <p className="line-clamp-1">CPU/диск: {impactCpuDisk}</p>}
-              {impactNote && <p className="line-clamp-2 text-foreground/80">{impactNote}</p>}
-            </div>
-          )}
-
-          <div className="mt-2 text-xs leading-snug">
-            {workers.length > 0 ? (
-              <p className="line-clamp-2 text-amber-700 dark:text-amber-400" title={workers.map(workerLabel).join(', ')}>
-                Не запускаются: {workers.map(workerLabel).join(', ')}
-              </p>
-            ) : (
-              <p className="text-muted-foreground">Все фоновые задачи включены</p>
+      <div className="mb-2 flex shrink-0 items-start justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div
+            className={cn(
+              'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+              current ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
             )}
+          >
+            <Icon size={16} />
           </div>
-
-          <div className="flex-1" aria-hidden />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold leading-tight">{profile.label}</p>
+            {subtitle && <p className="text-[11px] text-primary">{subtitle}</p>}
+          </div>
         </div>
-
-        <Button
-          type="button"
-          size="sm"
-          className="mt-2 w-full shrink-0"
-          variant={current ? 'secondary' : 'default'}
-          disabled={applying || current}
-          onClick={onApply}
-        >
-          {applying ? 'Применение…' : current ? 'Активен' : 'Применить'}
-        </Button>
+        {current ? (
+          <Badge variant="default" className="shrink-0 text-[10px]">
+            Текущий
+          </Badge>
+        ) : applying ? (
+          <span className="text-[11px] text-muted-foreground">…</span>
+        ) : null}
       </div>
-    </div>
+
+      <p className="line-clamp-2 text-xs leading-snug text-muted-foreground">{description}</p>
+
+      {(impactRam || impactCpuDisk || impactNote) && (
+        <div className="mt-2 space-y-0.5 text-[11px] leading-snug text-muted-foreground">
+          {impactRam && <p className="line-clamp-1">RAM: {impactRam}</p>}
+          {impactCpuDisk && <p className="line-clamp-1">CPU/диск: {impactCpuDisk}</p>}
+        </div>
+      )}
+
+      <div className="mt-2 text-[11px] leading-snug">
+        {workers.length > 0 ? (
+          <p
+            className="line-clamp-2 text-amber-700 dark:text-amber-400"
+            title={workers.map(workerLabel).join(', ')}
+          >
+            Не запускаются: {workers.map(workerLabel).join(', ')}
+          </p>
+        ) : (
+          <p className="text-muted-foreground">Все фоновые задачи включены</p>
+        )}
+      </div>
+
+      {!current && (
+        <span className="mt-2 text-[11px] font-medium text-primary">
+          {applying ? 'Применение…' : 'Нажмите, чтобы применить'}
+        </span>
+      )}
+    </button>
   )
 }
 
@@ -282,6 +300,7 @@ export default function FeatureTogglesTab() {
   const [profiles, setProfiles] = useState<ResourceProfileItem[]>([])
   const [currentProfile, setCurrentProfile] = useState('standard')
   const [draft, setDraft] = useState<Record<string, boolean>>({})
+  const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [applyingProfile, setApplyingProfile] = useState<string | null>(null)
@@ -373,10 +392,15 @@ export default function FeatureTogglesTab() {
     void load()
   }, [])
 
+  const filteredItems = useMemo(
+    () => items.filter((item) => matchesQuery(item, query)),
+    [items, query],
+  )
+
   const grouped = useMemo(() => {
     const order = ['background', 'app_module']
     const map = new Map<string, FeatureToggleItem[]>()
-    for (const item of items) {
+    for (const item of filteredItems) {
       const list = map.get(item.group) || []
       list.push(item)
       map.set(item.group, list)
@@ -384,16 +408,16 @@ export default function FeatureTogglesTab() {
     return order
       .filter((g) => map.has(g))
       .map((g) => [g, map.get(g)!] as const)
-      .concat(
-        [...map.entries()].filter(([g]) => !order.includes(g)),
-      )
-  }, [items])
+      .concat([...map.entries()].filter(([g]) => !order.includes(g)))
+  }, [filteredItems])
 
   const activeProfileMeta = profiles.find((p) => p.key === currentProfile)
   const profileLabel = activeProfileMeta?.label ?? currentProfile
 
   const enabledCount = Object.values(draft).filter(Boolean).length
-  const dirty = items.some((item) => draft[item.key] !== item.enabled)
+  const dirtyCount = items.filter((item) => draft[item.key] !== item.enabled).length
+  const dirty = dirtyCount > 0
+  const queryActive = query.trim().length > 0
 
   const save = async () => {
     setSaving(true)
@@ -440,7 +464,10 @@ export default function FeatureTogglesTab() {
               variant="outline"
               size="sm"
               className="h-9 gap-1.5"
-              onClick={() => { void load(); void loadPanelRam() }}
+              onClick={() => {
+                void load()
+                void loadPanelRam()
+              }}
               disabled={saving}
             >
               <RefreshCw size={14} />
@@ -484,12 +511,11 @@ export default function FeatureTogglesTab() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Профили ресурсов</CardTitle>
           <CardDescription>
-            Minimal и Standard экономят RAM панели (меньше collectors); VPN на том же хосте почти не меняется.
-            Цифры — живой замер на карточке текущего профиля.
+            Быстрые пресеты нагрузки. Minimal и Standard экономят RAM панели; VPN на том же хосте почти не меняется.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 md:items-stretch">
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
             {profiles.map((profile) => (
               <ProfileCard
                 key={profile.key}
@@ -511,41 +537,79 @@ export default function FeatureTogglesTab() {
         </CardContent>
       </Card>
 
-      {grouped.map(([group, groupItems]) => (
-        <Card key={group} className="shadow-sm">
-          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-            <div>
-              <CardTitle className="text-base">
-                {groupItems[0]?.group_meta?.badge || 'Модули'}
-              </CardTitle>
-              <CardDescription className="mt-1.5">
-                {groupItems[0]?.group_meta?.description ||
-                  (group === 'app_module'
-                    ? 'Скрывают пункты меню и страницы панели'
-                    : 'Работают в фоне — разделы в интерфейсе остаются')}
-              </CardDescription>
-            </div>
-            <Badge variant="secondary" className="shrink-0">
-              {groupItems.filter((i) => draft[i.key]).length} / {groupItems.length} вкл.
-            </Badge>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {groupItems.map((item) => (
-                <ModuleToggleCard
-                  key={item.key}
-                  item={item}
-                  enabled={draft[item.key] ?? false}
-                  onChange={(checked) => setDraft((prev) => ({ ...prev, [item.key]: checked }))}
-                />
-              ))}
-            </div>
+      <div className="relative">
+        <Search
+          size={14}
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+          aria-hidden
+        />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Найти модуль: портал, unlock, трафик…"
+          className="h-10 pl-9"
+          aria-label="Поиск модулей"
+        />
+      </div>
+
+      {grouped.length === 0 ? (
+        <Card className="shadow-sm">
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            Ничего не найдено по запросу «{query.trim()}».
+            <button
+              type="button"
+              className="mt-2 block w-full text-primary hover:underline"
+              onClick={() => setQuery('')}
+            >
+              Сбросить поиск
+            </button>
           </CardContent>
         </Card>
-      ))}
+      ) : (
+        grouped.map(([group, groupItems]) => {
+          const enabledInGroup = groupItems.filter((i) => draft[i.key]).length
+          return (
+            <Card key={group} className="shadow-sm">
+              <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-2">
+                <div className="min-w-0">
+                  <CardTitle className="text-base">
+                    {groupItems[0]?.group_meta?.badge || 'Модули'}
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    {groupItems[0]?.group_meta?.description ||
+                      (group === 'app_module'
+                        ? 'Скрывают пункты меню и страницы панели'
+                        : 'Работают в фоне — разделы в интерфейсе остаются')}
+                  </CardDescription>
+                </div>
+                <Badge variant="secondary" className="shrink-0 tabular-nums">
+                  {enabledInGroup} / {groupItems.length}
+                  {queryActive ? '' : ' вкл.'}
+                </Badge>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="grid grid-cols-1 gap-x-8 md:grid-cols-2">
+                  {groupItems.map((item) => (
+                    <ModuleToggleRow
+                      key={item.key}
+                      item={item}
+                      enabled={draft[item.key] ?? false}
+                      onChange={(checked) => setDraft((prev) => ({ ...prev, [item.key]: checked }))}
+                    />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })
+      )}
 
       {dirty && (
-        <div className="sticky bottom-2 z-10 flex flex-col-reverse gap-2 pb-safe sm:flex-row sm:justify-end">
+        <div className="sticky bottom-2 z-10 flex flex-col-reverse items-stretch gap-2 pb-safe sm:flex-row sm:items-center sm:justify-end">
+          <p className="text-center text-xs text-muted-foreground sm:mr-auto sm:text-left">
+            Несохранено: {dirtyCount}{' '}
+            {dirtyCount === 1 ? 'изменение' : dirtyCount < 5 ? 'изменения' : 'изменений'}
+          </p>
           <Button type="button" className="gap-1.5 shadow-lg" onClick={() => void save()} disabled={saving}>
             <Save size={16} />
             {saving ? 'Сохранение...' : 'Сохранить изменения'}

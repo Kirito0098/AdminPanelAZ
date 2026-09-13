@@ -1139,7 +1139,14 @@ apply_wiz_env_settings() {
     env_set AUTH_RATE_LIMIT_ENABLED "true"
     env_set SECURITY_HEADERS_ENABLED "true"
     env_set AUDIT_LOG_ENABLED "true"
-    env_set REFRESH_TOKEN_COOKIE_SECURE "true"
+    # Secure refresh cookie only when the browser will see HTTPS. http_direct is plain HTTP —
+    # Secure=true makes the browser drop the cookie and kicks users out on tab focus / refresh.
+    local publish_mode="${WIZ_NGINX_MODE:-http_direct}"
+    if [[ "$publish_mode" == "http_direct" || "$publish_mode" == "none" || -z "$publish_mode" ]]; then
+      env_set REFRESH_TOKEN_COOKIE_SECURE "false"
+    else
+      env_set REFRESH_TOKEN_COOKIE_SECURE "true"
+    fi
   fi
   if _wiz_should_apply WIZ_NODE_AGENT_API_KEY; then
     env_set NODE_AGENT_API_KEY "$WIZ_NODE_AGENT_API_KEY"

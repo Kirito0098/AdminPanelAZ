@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import DocsLink from '@/components/shared/DocsLink'
+import { DOCS } from '@/lib/docsUrls'
 import { cn } from '@/lib/utils'
 import type { TelegramSettingsHook } from './useTelegramSettings'
 
@@ -69,6 +71,7 @@ export default function TelegramHero({ tg }: TelegramHeroProps) {
         </div>
 
         <div className="flex shrink-0 flex-wrap gap-2">
+          <DocsLink href={DOCS.telegram} variant="button" />
           <Button variant="outline" size="sm" onClick={() => void tg.load()} disabled={tg.loading}>
             <RefreshCw className={cn('mr-1.5 h-4 w-4', tg.loading && 'animate-spin')} />
             Обновить

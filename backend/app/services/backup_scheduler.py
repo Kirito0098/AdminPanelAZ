@@ -9,6 +9,7 @@ from app.database import SessionLocal
 from app.models import AppSetting
 from app.services.backup_manager import BackupManager
 from app.services.cidr.pipeline.file_pipeline import _prune_runtime_backups
+from app.services.feature_guards import get_feature_service
 from app.services.feature_toggles import FeatureToggleService
 from app.services.node_manager import get_active_adapter
 from app.services.telegram import send_tg_document
@@ -41,7 +42,39 @@ def _should_run(last_run_key: str, interval_days: int, db) -> bool:
     return elapsed >= interval_days * 86400
 
 
-async def run_backup_scheduler_loop(app_root: Path, backup_root: Path, db_path: Path, env_path: Path):
+def collect_backup_config_contents(db) -> dict[str, str] | None:
+    try:
+        adapter = get_active_adapter(db)
+        return {
+            fname: adapter.read_config_file(fname)
+            for fname in BackupManager.CONFIG_FILES
+        }
+    except Exception as exc:
+        logger.warning("Could not read AntiZapret lists for auto-backup: %s", exc)
+        return None
+
+
+def collect_awg2_backup_archive(db) -> bytes | None:
+    if not get_feature_service().is_enabled("awg2"):
+        return None
+    try:
+        adapter = get_active_adapter(db)
+        health = adapter.get_awg2_health()
+        if not isinstance(health, dict) or not health.get("installed"):
+            return None
+        return adapter.export_awg2_backup()
+    except Exception as exc:
+        logger.warning("Could not export AZ-AWG2 overlay for backup: %s", exc)
+        return None
+
+
+async def run_backup_scheduler_loop(
+    app_root: Path,
+    backup_root: Path,
+    db_path: Path,
+    env_path: Path,
+    cidr_db_path: Path | None = None,
+):
     """Background loop: check every hour if auto-backup should run."""
     while True:
         try:
@@ -61,21 +94,25 @@ async def run_backup_scheduler_loop(app_root: Path, backup_root: Path, db_path: 
                     backup_root=backup_root,
                     db_path=db_path,
                     env_path=env_path,
+                    cidr_db_path=cidr_db_path,
                 )
-                result = manager.create_backup(include_configs=True)
+                retention = int(_get_setting(db, "backup_retention", "5") or "5")
+                config_contents = collect_backup_config_contents(db)
+                awg2_archive = None
+                if _get_setting(db, "backup_awg2_enabled", "true") == "true":
+                    awg2_archive = collect_awg2_backup_archive(db)
+                result = manager.create_backup(
+                    include_configs=bool(config_contents),
+                    config_contents=config_contents,
+                    retention=retention,
+                    awg2_archive=awg2_archive,
+                )
                 row = db.query(AppSetting).filter(AppSetting.key == "backup_auto_last_run").first()
                 now_str = datetime.now(timezone.utc).isoformat()
                 if row:
                     row.value = now_str
                 else:
                     db.add(AppSetting(key="backup_auto_last_run", value=now_str))
-                retention = int(_get_setting(db, "backup_retention", "5") or "5")
-                backups = manager.list_backups()
-                for old in backups[retention:]:
-                    try:
-                        manager.delete_backup(old["file_name"])
-                    except Exception:
-                        pass
                 if _get_setting(db, "backup_telegram_enabled", "false") == "true":
                     from app.services.feature_guards import get_feature_service
 
@@ -85,12 +122,19 @@ async def run_backup_scheduler_loop(app_root: Path, backup_root: Path, db_path: 
                         if token and chat_ids:
                             backup_path = str(manager.get_backup_path(result["file_name"]))
                             for chat_id in chat_ids:
-                                send_tg_document(
+                                sent = send_tg_document(
                                     token,
                                     chat_id,
                                     backup_path,
                                     caption=f"Авто-бэкап: {result['file_name']}",
+                                    run_async=False,
                                 )
+                                if not sent:
+                                    logger.warning(
+                                        "Auto-backup Telegram send failed: chat_id=%s file=%s",
+                                        chat_id,
+                                        backup_path,
+                                    )
                 if _get_setting(db, "backup_az_enabled", "true") == "true":
                     try:
                         adapter = get_active_adapter(db)
@@ -105,12 +149,19 @@ async def run_backup_scheduler_loop(app_root: Path, backup_root: Path, db_path: 
                                 )
                                 if token and chat_ids and az_result.get("archive_path"):
                                     for chat_id in chat_ids:
-                                        send_tg_document(
+                                        sent = send_tg_document(
                                             token,
                                             chat_id,
                                             az_result["archive_path"],
                                             caption=f"Авто-бэкап AntiZapret: {az_result.get('archive_name', '')}",
+                                            run_async=False,
                                         )
+                                        if not sent:
+                                            logger.warning(
+                                                "Auto AntiZapret backup Telegram send failed: chat_id=%s file=%s",
+                                                chat_id,
+                                                az_result["archive_path"],
+                                            )
                     except Exception as exc:
                         logger.warning("Auto AntiZapret backup (client.sh 8) failed: %s", exc)
                 db.commit()

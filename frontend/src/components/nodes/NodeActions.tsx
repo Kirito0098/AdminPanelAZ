@@ -6,12 +6,12 @@ import {
   Pencil,
   Power,
   RefreshCw,
-  Shield,
   Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import type { Node } from '@/types'
+import type { Node, NodeTransportId } from '@/types'
+import NodeTransportSelect from './NodeTransportSelect'
 
 export type NodeActionsProps = {
   node: Node
@@ -24,8 +24,7 @@ export type NodeActionsProps = {
   onUpdate: () => void
   onRestart: () => void
   onRotateKey: () => void
-  onEnableMtls: () => void
-  onDisableMtls: () => void
+  onTransportChange: (transport: NodeTransportId) => void
   onEdit: () => void
   onDelete: () => void
   compact?: boolean
@@ -42,8 +41,7 @@ export default function NodeActions({
   onUpdate,
   onRestart,
   onRotateKey,
-  onEnableMtls,
-  onDisableMtls,
+  onTransportChange,
   onEdit,
   onDelete,
   compact = false,
@@ -72,7 +70,7 @@ export default function NodeActions({
       <Button
         variant={compact ? 'ghost' : 'outline'}
         size={btnSize}
-        title="Проверка здоровья"
+        title="Проверить связь"
         disabled={healthLoading}
         onClick={onHealth}
       >
@@ -107,28 +105,11 @@ export default function NodeActions({
       )}
       {!node.is_local && (
         <>
-          {!node.mtls_enabled && (
-            <Button
-              variant={compact ? 'ghost' : 'outline'}
-              size={btnSize}
-              title={isProxy ? 'Отметить mTLS (сертификаты вручную)' : 'Включить mTLS'}
-              onClick={onEnableMtls}
-            >
-              <Shield size={iconSize} />
-              {!compact && (isProxy ? 'Отметить mTLS' : 'Включить mTLS')}
-            </Button>
-          )}
-          {node.mtls_enabled && (
-            <Button
-              variant={compact ? 'ghost' : 'outline'}
-              size={btnSize}
-              title="Сбросить флаг mTLS в панели"
-              onClick={onDisableMtls}
-            >
-              <Shield size={iconSize} />
-              {!compact && 'Отключить mTLS'}
-            </Button>
-          )}
+          <NodeTransportSelect
+            node={node}
+            compact={compact}
+            onChange={onTransportChange}
+          />
           {!isProxy && (
             <Button
               variant={compact ? 'ghost' : 'outline'}
@@ -140,26 +121,28 @@ export default function NodeActions({
               {!compact && 'Ключ'}
             </Button>
           )}
-          <Button
-            variant={compact ? 'ghost' : 'outline'}
-            size={btnSize}
-            title="Редактировать"
-            onClick={onEdit}
-          >
-            <Pencil size={iconSize} />
-            {!compact && 'Изменить'}
-          </Button>
-          <Button
-            variant={compact ? 'ghost' : 'outline'}
-            size={btnSize}
-            title="Удалить"
-            className="text-destructive hover:text-destructive"
-            onClick={onDelete}
-          >
-            <Trash2 size={iconSize} />
-            {!compact && 'Удалить'}
-          </Button>
         </>
+      )}
+      <Button
+        variant={compact ? 'ghost' : 'outline'}
+        size={btnSize}
+        title={node.is_local ? 'Переименовать' : 'Редактировать'}
+        onClick={onEdit}
+      >
+        <Pencil size={iconSize} />
+        {!compact && (node.is_local ? 'Имя' : 'Изменить')}
+      </Button>
+      {!node.is_local && (
+        <Button
+          variant={compact ? 'ghost' : 'outline'}
+          size={btnSize}
+          title="Удалить"
+          className="text-destructive hover:text-destructive"
+          onClick={onDelete}
+        >
+          <Trash2 size={iconSize} />
+          {!compact && 'Удалить'}
+        </Button>
       )}
     </div>
   )

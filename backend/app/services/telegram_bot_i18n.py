@@ -94,6 +94,7 @@ BTN_MENU_NODES = "🖥 Узлы"
 BTN_MENU_CIDR = "🗂 CIDR"
 BTN_MENU_WARPER = "🌐 WARP"
 BTN_MENU_AWG2 = "🛡️ AWG2"
+BTN_MENU_UNLOCK_CODES = "🎟 Коды доступа"
 
 MENU_KEYBOARD_PLACEHOLDER = "Конфиги, статус или Ещё…"
 MENU_MORE_TITLE = "📋 <b>Дополнительно</b>\n\n<i>Остальные разделы — кнопками ниже.</i>"
@@ -124,6 +125,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("configs", "Список VPN-конфигов"),
     ("config", "Карточка конфига"),
     ("settings", "Настройки панели (admin)"),
+    ("unlock", "Генерация unlock-кода (admin)"),
     ("nodes", "VPN-узлы (admin)"),
     ("cidr", "Статус CIDR pipeline (admin)"),
     ("warper", "Статус AZ-WARP (admin)"),
@@ -176,6 +178,7 @@ HELP_LINES_ADMIN = (
 HELP_FOOTER = "<i>💡 Кнопки внизу чата — основной способ навигации.</i>"
 HELP_ADMIN_CIDR = "• /cidr — статус CIDR pipeline"
 HELP_ADMIN_NODES = "• /nodes — VPN-узлы (health, активация)"
+HELP_ADMIN_UNLOCK = "• /unlock — генерация unlock-ключа"
 HELP_ADMIN_WARPER = "• /warper — статус AZ-WARP"
 HELP_ADMIN_AWG2 = "• /awg2 — статус AZ-AWG2"
 HELP_ADMIN_SETTINGS = "/settings — настройки панели (inline-меню)"

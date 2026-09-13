@@ -24,6 +24,9 @@ from app.schemas import (
     NodeRemoteHostsResponse,
     NodeResponse,
     NodeRotateKeyResponse,
+    NodeTransportUpdate,
+    NodeTransportPreflightResponse,
+    NodeTransportsResponse,
     NodeUpdate,
     NodeUpdateRequest,
     NodeUpdateResult,
@@ -40,6 +43,13 @@ from app.services.resource_metrics import VALID_PERIODS, query_history
 from app.services.node_key_rotation import rotate_node_api_key
 from app.services.node_mtls_certs import get_panel_mtls_status
 from app.services.node_mtls_provision import disable_mtls, enable_mtls
+from app.services.node_transport import (
+    TRANSPORT_HTTP,
+    TRANSPORT_MTLS,
+    TRANSPORT_SSH,
+    list_transports,
+    resolve_transport_id,
+)
 from app.services.node_manager import (
     check_node_health,
     clear_active_node_id,
@@ -56,12 +66,15 @@ from app.services.node_manager import (
     validate_node_host,
 )
 from app.services.action_log import log_action
+from app.services.crypto import encrypt_secret
 from app.services.feature_guards import module_disabled_message
-from app.services.feature_toggles import is_proxy_nodes_enabled
+from app.services.feature_toggles import is_node_ssh_transport_enabled, is_nodes_enabled, is_proxy_nodes_enabled
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_update_roll import enqueue_node_update_roll
 from app.services.background_tasks import background_task_service
 from app.services.geo_routing_hint import build_geo_routing_hint
+from app.services.ssh_tunnel_pool import get_ssh_tunnel_pool
+from app.services.node_transport_preflight import preflight_transport_switch
 from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import build_ha_node_context, find_group_for_node
 from app.services.openvpn_remote_hosts import (
@@ -105,6 +118,14 @@ def _validate_linked_vpn_node_id(
     return linked_vpn_node_id
 
 
+def _require_nodes_module(db) -> None:
+    if not is_nodes_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("nodes"),
+        )
+
+
 @router.post("/update-roll")
 def rolling_node_update(
     payload: NodeUpdateRollRequest,
@@ -112,6 +133,7 @@ def rolling_node_update(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     try:
         task_id = enqueue_node_update_roll(db, node_ids=payload.node_ids, actor_username=admin.username)
     except ValueError as exc:
@@ -137,7 +159,15 @@ def rolling_node_update(
     )
 
 
+def _node_transport_value(node: Node) -> str:
+    try:
+        return resolve_transport_id(node)
+    except ValueError:
+        return TRANSPORT_HTTP
+
+
 def _to_response(node: Node) -> NodeResponse:
+    transport = _node_transport_value(node)
     return NodeResponse(
         id=node.id,
         name=node.name,
@@ -146,7 +176,14 @@ def _to_response(node: Node) -> NodeResponse:
         node_kind=getattr(node, "node_kind", None) or NODE_KIND_VPN,
         status=node.status,
         is_local=node.is_local,
-        mtls_enabled=False if node.is_local else bool(node.mtls_enabled),
+        transport=transport,
+        mtls_enabled=False if node.is_local else (transport == TRANSPORT_MTLS),
+        ssh_host=getattr(node, "ssh_host", None),
+        ssh_port=int(getattr(node, "ssh_port", 22) or 22),
+        ssh_username=getattr(node, "ssh_username", None),
+        ssh_key_configured=bool(str(getattr(node, "ssh_private_key_encrypted", "") or "").strip()),
+        ssh_remote_agent_host=getattr(node, "ssh_remote_agent_host", None),
+        ssh_remote_agent_port=getattr(node, "ssh_remote_agent_port", None),
         destination_ip=getattr(node, "destination_ip", None),
         linked_vpn_node_id=getattr(node, "linked_vpn_node_id", None),
         last_seen_at=node.last_seen_at,
@@ -154,6 +191,153 @@ def _to_response(node: Node) -> NodeResponse:
         created_at=node.created_at,
         updated_at=node.updated_at,
     )
+
+
+def _drop_ssh_tunnel_if_needed(node_id: int, current_transport: str) -> None:
+    if current_transport == TRANSPORT_SSH:
+        get_ssh_tunnel_pool().drop(node_id)
+
+
+def _abort_failed_node_create(db: Session, node: Node, *, made_active: bool) -> None:
+    """Remove a just-created node if post-create transport setup failed."""
+    node_id = int(node.id)
+    try:
+        get_ssh_tunnel_pool().drop(node_id)
+    except Exception:
+        pass
+    try:
+        db.rollback()
+    except Exception:
+        pass
+    row = db.query(Node).filter(Node.id == node_id).first()
+    if row is not None:
+        db.delete(row)
+        db.commit()
+    if made_active and get_active_node_id(db) == node_id:
+        clear_active_node_id(db)
+        db.commit()
+
+
+def _normalize_optional_text(value: str | None) -> str:
+    if value is None:
+        return ""
+    return value.strip()
+
+
+def _resolve_ssh_remote_agent_host(value: str | None, *, current: str | None) -> str:
+    host = _normalize_optional_text(value) or _normalize_optional_text(current) or "127.0.0.1"
+    if not host:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ssh_remote_agent_host обязателен для SSH transport",
+        )
+    if len(host) > 255:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ssh_remote_agent_host слишком длинный",
+        )
+    if host.lower().startswith(("http://", "https://", "ftp://", "file://")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ssh_remote_agent_host укажите без схемы URL",
+        )
+    return host
+
+
+def _apply_ssh_transport_update(node: Node, body: NodeTransportUpdate, db: Session) -> Node:
+    if not is_node_ssh_transport_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("node_ssh_transport"),
+        )
+
+    updates = body.model_dump(exclude_unset=True)
+    has_ssh_field_updates = any(
+        key in updates
+        for key in (
+            "ssh_host",
+            "ssh_port",
+            "ssh_username",
+            "ssh_private_key",
+            "ssh_passphrase",
+            "ssh_remote_agent_host",
+            "ssh_remote_agent_port",
+        )
+    )
+    if _node_transport_value(node) == TRANSPORT_SSH and not has_ssh_field_updates:
+        return node
+
+    ssh_host_raw = body.ssh_host if "ssh_host" in updates else getattr(node, "ssh_host", None)
+    ssh_host = _normalize_optional_text(ssh_host_raw)
+    if not ssh_host:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ssh_host обязателен для SSH transport",
+        )
+    ssh_host = validate_node_host(ssh_host)
+
+    ssh_username_raw = body.ssh_username if "ssh_username" in updates else getattr(node, "ssh_username", None)
+    ssh_username = _normalize_optional_text(ssh_username_raw)
+    if not ssh_username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ssh_username обязателен для SSH transport",
+        )
+
+    ssh_port = body.ssh_port if "ssh_port" in updates else getattr(node, "ssh_port", None)
+    ssh_port = int(ssh_port or 22)
+
+    ssh_remote_agent_host = _resolve_ssh_remote_agent_host(
+        body.ssh_remote_agent_host if "ssh_remote_agent_host" in updates else None,
+        current=getattr(node, "ssh_remote_agent_host", None),
+    )
+    ssh_remote_agent_port = (
+        body.ssh_remote_agent_port
+        if "ssh_remote_agent_port" in updates
+        else getattr(node, "ssh_remote_agent_port", None)
+    )
+    ssh_remote_agent_port = int(ssh_remote_agent_port or node.port)
+    if ssh_remote_agent_port <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ssh_remote_agent_port обязателен для SSH transport",
+        )
+
+    if "ssh_private_key" in updates:
+        ssh_private_key = _normalize_optional_text(body.ssh_private_key)
+        if not ssh_private_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Для SSH transport нужен приватный ключ",
+            )
+        node.ssh_private_key_encrypted = encrypt_secret(ssh_private_key, settings.secret_key)
+    elif not str(getattr(node, "ssh_private_key_encrypted", "") or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Для SSH transport сначала задайте приватный ключ",
+        )
+
+    if "ssh_passphrase" in updates:
+        ssh_passphrase = _normalize_optional_text(body.ssh_passphrase)
+        if ssh_passphrase:
+            node.ssh_passphrase_encrypted = encrypt_secret(ssh_passphrase, settings.secret_key)
+
+    previous_ssh_host = _normalize_optional_text(getattr(node, "ssh_host", None))
+    node.ssh_host = ssh_host
+    node.ssh_port = ssh_port
+    node.ssh_username = ssh_username
+    node.ssh_remote_agent_host = ssh_remote_agent_host
+    node.ssh_remote_agent_port = ssh_remote_agent_port
+    if previous_ssh_host and previous_ssh_host != ssh_host:
+        node.ssh_host_key = ""
+    node.transport = TRANSPORT_SSH
+    node.mtls_enabled = False
+    node.updated_at = datetime.utcnow()
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+    get_ssh_tunnel_pool().drop(node.id)
+    return node
 
 
 def _active_node_response(db: Session, node: Node) -> ActiveNodeResponse:
@@ -194,16 +378,16 @@ def create_node(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    host = validate_node_host(payload.host)
-    if not payload.api_key:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API-ключ обязателен для удалённого узла")
-
+    _require_nodes_module(db)
     kind = (payload.node_kind or NODE_KIND_VPN).strip().lower()
     if kind not in (NODE_KIND_VPN, NODE_KIND_PROXY):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="node_kind должен быть vpn или proxy",
         )
+    host = validate_node_host(payload.host)
+    if not payload.api_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API-ключ обязателен для удалённого узла")
     # /api/nodes is ALWAYS_ALLOWED — enforce proxy_nodes toggle at handler level.
     if kind == NODE_KIND_PROXY and not is_proxy_nodes_enabled(db):
         raise HTTPException(
@@ -224,6 +408,31 @@ def create_node(
         node_kind=kind,
     )
 
+    wanted_transport = (payload.transport or TRANSPORT_HTTP).strip().lower()
+    if wanted_transport not in (TRANSPORT_HTTP, TRANSPORT_MTLS, TRANSPORT_SSH):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Неизвестный transport: {payload.transport}",
+        )
+
+    # Fail fast before insert so a rejected SSH/mTLS request never leaves an HTTP orphan.
+    if wanted_transport == TRANSPORT_SSH:
+        if not is_node_ssh_transport_enabled(db):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=module_disabled_message("node_ssh_transport"),
+            )
+        if not (payload.ssh_username or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ssh_username обязателен для SSH transport",
+            )
+        if not (payload.ssh_private_key or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Для SSH transport нужен приватный ключ",
+            )
+
     key_hash, key_encrypted = store_api_key("", payload.api_key)
     node = Node(
         name=payload.name.strip(),
@@ -232,6 +441,8 @@ def create_node(
         api_key_hash=key_hash,
         api_key_encrypted=key_encrypted,
         is_local=False,
+        transport=TRANSPORT_HTTP,
+        mtls_enabled=False,
         node_kind=kind,
         destination_ip=(payload.destination_ip or None),
         linked_vpn_node_id=linked_vpn_node_id,
@@ -243,9 +454,55 @@ def create_node(
     db.refresh(node)
 
     # Proxy nodes must never become the active VPN node.
+    made_active = False
     if kind == NODE_KIND_VPN and not get_active_node_id(db):
         set_active_node_id(db, node.id)
         db.commit()
+        made_active = True
+
+    try:
+        if wanted_transport == TRANSPORT_SSH:
+            ssh_data: dict = {
+                "transport": TRANSPORT_SSH,
+                "ssh_host": payload.ssh_host or host,
+            }
+            if payload.ssh_port is not None:
+                ssh_data["ssh_port"] = payload.ssh_port
+            if payload.ssh_username is not None:
+                ssh_data["ssh_username"] = payload.ssh_username
+            if payload.ssh_private_key is not None:
+                ssh_data["ssh_private_key"] = payload.ssh_private_key
+            if payload.ssh_passphrase is not None:
+                ssh_data["ssh_passphrase"] = payload.ssh_passphrase
+            if payload.ssh_remote_agent_host is not None:
+                ssh_data["ssh_remote_agent_host"] = payload.ssh_remote_agent_host
+            if payload.ssh_remote_agent_port is not None:
+                ssh_data["ssh_remote_agent_port"] = payload.ssh_remote_agent_port
+            node = _apply_ssh_transport_update(node, NodeTransportUpdate(**ssh_data), db)
+        elif wanted_transport == TRANSPORT_MTLS:
+            try:
+                node = enable_mtls(db, node, admin)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Не удалось включить mTLS: {exc}",
+                ) from exc
+    except HTTPException:
+        _abort_failed_node_create(db, node, made_active=made_active)
+        raise
+    except Exception as exc:
+        _abort_failed_node_create(db, node, made_active=made_active)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Не удалось настроить способ связи: {exc}",
+        ) from exc
 
     health = check_node_health(node, api_key_override=payload.api_key)
     update_node_from_health(node, health, db)
@@ -256,7 +513,10 @@ def create_node(
             user_id=admin.id,
             username=admin.username,
             remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"name={node.name}, host={node.host}, kind={kind}",
+            details=(
+                f"name={node.name}, host={node.host}, kind={kind}, "
+                f"transport={_node_transport_value(node)}"
+            ),
         )
     return _to_response(node)
 
@@ -291,6 +551,11 @@ def node_mtls_status(_: User = Depends(require_admin)):
     return NodeMtlsStatusResponse(**get_panel_mtls_status())
 
 
+@router.get("/transports", response_model=NodeTransportsResponse)
+def list_node_transports(_: User = Depends(require_admin)):
+    return NodeTransportsResponse(items=list_transports())
+
+
 @router.get("/{node_id}", response_model=NodeResponse)
 def get_node(node_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     node = db.query(Node).filter(Node.id == node_id).first()
@@ -307,6 +572,7 @@ def update_node(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -375,6 +641,7 @@ def delete_node(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -407,6 +674,7 @@ def delete_node(
                 f"(Узлы → Группы синхронизации)."
             ),
         ) from exc
+    get_ssh_tunnel_pool().drop(node_id)
 
     if active_id == node_id:
         fallback = sync_local_node(db)
@@ -512,6 +780,7 @@ def refresh_proxy_status(
     db: Session = Depends(get_db),
 ):
     """Refresh status from proxy_agent and sync cached destination_ip."""
+    _require_nodes_module(db)
     return get_proxy_status(node_id, _, db)
 
 
@@ -523,6 +792,7 @@ def put_proxy_destination(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = _require_proxy_node(node_id, db)
     try:
         from proxy_agent.iptables_dest import validate_destination_ip
@@ -575,16 +845,118 @@ def get_proxy_mappings(
     return ProxyMappingsResponse(mappings=raw)
 
 
+@router.patch("/{node_id}/transport", response_model=NodeResponse)
+def patch_node_transport(
+    node_id: int,
+    body: NodeTransportUpdate,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    _require_nodes_module(db)
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    if node.is_local:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Способ связи не применим к локальному узлу",
+        )
+
+    wanted = (body.transport or "").strip().lower()
+    if wanted not in (TRANSPORT_HTTP, TRANSPORT_MTLS, TRANSPORT_SSH):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Неизвестный transport: {body.transport}",
+        )
+
+    current = _node_transport_value(node)
+    if current == wanted and wanted != TRANSPORT_SSH:
+        return _to_response(node)
+
+    preflight = preflight_transport_switch(db, node, body)
+    if not preflight.ok:
+        detail = preflight.message
+        if preflight.hint:
+            detail = f"{detail}. {preflight.hint}"
+        if preflight.probe_error:
+            detail = f"{detail} ({preflight.probe_error})"
+        raise HTTPException(status_code=preflight.http_status, detail=detail)
+
+    if wanted == TRANSPORT_SSH:
+        node = _apply_ssh_transport_update(node, body, db)
+        return _to_response(node)
+
+    # mTLS provision talks to node.host:port directly (not via SSH tunnel). SSH-only
+    # agents listening on 127.0.0.1 cannot be enrolled this way.
+    if current == TRANSPORT_SSH and wanted == TRANSPORT_MTLS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Нельзя включить mTLS напрямую с SSH: агент обычно слушает только 127.0.0.1. "
+                "Сначала переключите на HTTP (публичный host:port), затем на HTTPS + mTLS."
+            ),
+        )
+
+    try:
+        if wanted == TRANSPORT_MTLS:
+            node = enable_mtls(db, node, admin)
+        else:
+            node = disable_mtls(db, node, admin)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Не удалось сменить способ связи",
+        ) from exc
+    _drop_ssh_tunnel_if_needed(node.id, current)
+
+    return _to_response(node)
+
+
+@router.post("/{node_id}/transport/preflight", response_model=NodeTransportPreflightResponse)
+def preflight_node_transport(
+    node_id: int,
+    body: NodeTransportUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Probe whether switching this node to the requested transport is possible."""
+    _require_nodes_module(db)
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    result = preflight_transport_switch(db, node, body)
+    return NodeTransportPreflightResponse(
+        ok=result.ok,
+        current=result.current,
+        wanted=result.wanted,
+        message=result.message,
+        hint=result.hint,
+        probe_status=result.probe_status,
+        probe_error=result.probe_error,
+    )
+
+
 @router.post("/{node_id}/enable-mtls", response_model=NodeMtlsEnableResponse)
 def enable_node_mtls(
     node_id: int,
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
     kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+    current = _node_transport_value(node)
+    if current == TRANSPORT_SSH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SSH transport уже включён. Смените transport через picker узла.",
+        )
     try:
         node = enable_mtls(db, node, admin)
     except ValueError as exc:
@@ -596,6 +968,7 @@ def enable_node_mtls(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Не удалось включить mTLS на узле: {exc}",
         ) from exc
+    _drop_ssh_tunnel_if_needed(node.id, current)
     message = (
         "Флаг mTLS отмечен — сертификаты на proxy_agent настройте вручную (docs/proxy-agent.md)"
         if kind == NODE_KIND_PROXY
@@ -614,14 +987,22 @@ def disable_node_mtls(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
     kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+    current = _node_transport_value(node)
+    if current == TRANSPORT_SSH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SSH transport уже включён. Смените transport через picker узла.",
+        )
     try:
-        node = disable_mtls(db, node)
+        node = disable_mtls(db, node, admin)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    _drop_ssh_tunnel_if_needed(node.id, current)
     agent_name = "proxy_agent" if kind == NODE_KIND_PROXY else "Node agent"
     return NodeMtlsDisableResponse(
         message="Флаг mTLS в панели сброшен",
@@ -653,6 +1034,7 @@ def put_remote_hosts(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -698,6 +1080,7 @@ def allow_first_remote_host(
     db: Session = Depends(get_db),
 ):
     """Append the first saved remote host to allow-ips.txt on the VPN node."""
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -778,6 +1161,7 @@ def put_openvpn_multihome(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -831,6 +1215,7 @@ def rotate_node_key(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -857,6 +1242,7 @@ def activate_node(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
@@ -939,6 +1325,7 @@ def apply_node_update_endpoint(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = _get_node_or_404(node_id, db)
     if node.status == NodeStatus.offline:
         health = check_node_health(node)
@@ -987,6 +1374,7 @@ def restart_node_agent_endpoint(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _require_nodes_module(db)
     node = _get_node_or_404(node_id, db)
     if node.status == NodeStatus.offline:
         health = check_node_health(node)

@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.25.0](#2250---2026-09-13) — 2026-09-13
 - [2.24.0](#2240---2026-09-10) — 2026-09-10
 - [2.23.1](#2231---2026-09-10) — 2026-09-10
 - [2.23.0](#2230---2026-09-09) — 2026-09-09
@@ -49,6 +50,120 @@
 ---
 
 ## [Unreleased]
+
+---
+
+## [2.25.0] - 2026-09-13
+
+> **Кратко:** клиентский портал и unlock-коды (раздел **Подписка**); способ связи узлов (HTTP / mTLS / SSH) и preflight; диагностика связи / Push full; hub настроек и сайдбар по ролям; расширяемые feature toggles; CIDR safe-fallback; round-trip бэкапа после split `cidr.db`; ссылки на руководства из панели.
+
+### ✨ Added
+
+- **Ссылки на руководства в панели** — кнопки «Инструкция» / «Руководства» ведут на `docs/*.md` и `docs/nastrojki/*` на GitHub (разделы, настройки, сайдбар, GeoIP, proxy_agent, HA/Node Sync); новые гайды [podpiska.md](docs/podpiska.md) и [perezapusk-i-peresborka.md](docs/nastrojki/perezapusk-i-peresborka.md).
+- **Промо-баннеры Подписки** — `docs/assets/telegram-promo/11-client-portal.png` и `12-unlock-keys.png` в README и [podpiska.md](docs/podpiska.md).
+- **Узлы: блок «Связь»** — TLS (ожидание vs факт), uptime агента, последний успешный health, структурированная `last_link_error`; кнопка проверки связи как раньше.
+- **Node agent 1.8.0 / proxy agent 1.1.0** — `/health` отдаёт `started_at`, `uptime_sec`, `listen_tls` (после обновления перезапустите агенты на узлах).
+- **Способ связи узла (`transport`)** — HTTP / HTTPS+mTLS / SSH (SSH при включённом модуле) для VPN и proxy через picker; `mtls_enabled` derived; `GET /nodes/transports`, `PATCH /nodes/{id}/transport`.
+- **SSH transport узлов** (opt-in `node_ssh_transport`, **Настройки → Модули**) — панель поднимает SSH local forward и ходит к agent по HTTP через localhost; приватный ключ хранится зашифрованным; при **первом** подключении сохраняется отпечаток SSH host key (TOFU), дальше сверка только с сохранённым ключом.
+- **Добавление узла: выбор transport** — в диалоге «Добавить узел» можно сразу указать HTTP / HTTPS+mTLS / SSH (для SSH — host/user/ключ в той же форме); `POST /nodes` принимает `transport` и SSH-поля.
+- **Preflight перед сменой transport** — `POST /nodes/{id}/transport/preflight` (+ тот же check в `PATCH`): probe HTTP/SSH до применения; UI блокирует переход с понятной ошибкой.
+- **Узлы UI** — сводка флота (всего / online / offline / активный), фильтр по статусу, акценты активного и офлайн-рядов; компактнее блоки mTLS / Telegram offline / HA; переименование локального узла.
+- **SSH transport: инструкция** — `docs/node-ssh-transport.md` + ссылка «Инструкция» в диалоге переключения на SSH и при добавлении узла; обновлён `docs/uzly.md`.
+- **Диалог «Добавить узел»** — секции «Узел» / «SSH-туннель», сетка хост+порт, короткие подсказки вместо info-блоков, sticky footer; тот же паттерн в «Переключить на SSH».
+
+- **Разделы панели: больше отключаемых модулей** — в реестр `FEATURE_TOGGLES` добавлены:
+  - **Раздел приложения:** `nodes` (страница «Узлы»), `panel_ops` (вкладка «Операции панели» / rebuild);
+  - **Фоновая задача:** `node_health`, `cert_sync`, `resource_metrics`, `panel_resource_metrics`, `cidr_scheduler`, `node_sync_reconcile`, `retention`, `key_rotation`, `user_reminders`, `alert_rules`, `noc_reports`, `cloudflare_ips_update`, `access_expiry`, `connection_history`;
+  - новые ключи **default on** (upgrade не меняет поведение), кроме `cloudflare_ips_update` (**default off**, как текущий `CLOUDFLARE_IPS_AUTO_UPDATE`);
+  - always-on без тоггла: вход/сессия, «Конфигурации», Настройки → личное, Настройки → Разделы панели;
+  - `nodes`: меню и mutating API gated; `/api/nodes` остаётся в `ALWAYS_ALLOWED`, чтение/health доступны другим разделам;
+  - `panel_ops`: скрывает вкладку и `POST /api/system/rebuild`; `POST /api/system/restart` из баннера модулей **не** блокируется;
+  - профили Minimal/Standard/Full пишут новые background-ключи; карточка правил алертов скрывается при `alert_rules=off`;
+  - воркеры с runtime-gate (вкл. metrics): выключение в UI останавливает сбор без рестарта процесса после save (`feature_toggles.py`, `nodes.py`, `system.py`, workers, `Layout.tsx`, `App.tsx`, `SettingsNav.tsx`, `MonitoringTab.tsx`).
+- **Раздел «Подписка»** — пункт бокового меню `/subscription`: клиентский портал (`portal_domain`) и unlock-ключи перенесены из **Настройки → Выдача VPN-профилей**; QR/роутеры остаются в настройках.
+- **Клиентский портал** — постоянные шаринг-ссылки на админ-заданном поддомене (`portal_domain` в **Подписка**): страница `/p/{token}` в стиле Connection Kit (статус/срок/трафик, выбор ОС и протокола, шаги установка → профиль → подключение); для OpenVPN — `openvpn://import-profile/…` и скачивание `.ovpn`, для WG/AWG — скачивание конфига; create/rotate/revoke в карточке клиента. One-time QR при заданном хосте портала тоже строятся с него. Модуль `client_portal`.
+- **Unlock-коды и доступ до даты** — `access_until` стал главным сроком доступа в статусе портала; публичный redeem на `/api/public/portal/{token}/redeem` активирует ключи и возвращает новый срок; генерация unlock-кодов доступна из панели (**Подписка**), Telegram и Mini App. Публичный redeem идёт через отдельный public-download rate limit bucket.
+- **Доступ до при создании клиента** — в диалоге «Новый клиент» (панель и Mini App) админ может сразу задать дату отключения; после create вызывается `PATCH …/access-until`.
+- **Мультиконфиг при создании профиля** — в «Новый клиент» можно выбрать несколько протоколов (OpenVPN / WG / AWG2) под одним именем; диалог с прокруткой и закреплённым футером, чтобы не уезжал за экран. Адаптивная ширина/высота: телефон → MacBook 13–16 (`lg`/`xl` по `vw`) → большие мониторы с потолком; на низкой высоте учитываются Dock/меню. Вместо one-click шаблонов — ручной **лимит трафика** на все выбранные конфигурации: без сброса / 1 день / 7 дней / месяц. В карточке клиента установка/снятие лимита и **доступ до** тоже применяются ко **всем** конфигурациям того же профиля на активном узле; в HA auto-sync policies уходят на реплики с primary. Поле даты «Доступ до» — тёмный DatePicker панели вместо системного светлого календаря. В меню конфигурации («Ещё») описание можно изменить после создания; сам диалог — секции-карточки в стиле settings (основное / управление / доступ / опасная зона).
+- **Автонастройка клиентского портала** — поддомен `portal.<DOMAIN>` (или свой), кнопка «Настроить под текущую публикацию» в **Подписка**, опция в мастере HTTPS; nginx vhost / LE / SAN под текущий `PUBLISH_MODE`. DNS A-запись — у регистратора.
+- **Portal URL без ACCESS_PATH** — ссылки портала всегда с корня хоста портала (`https://portal…/p/…`), даже если панель на общем домене с подпутём `/panel`.
+- **Portal + ACCESS_PATH** — при подпути панели (`/panel`) публичный API портала дублируется на `/api/public/…`, SPA `/p/…` и `/assets` отдаются с корня; IP-whitelist exempt для этих путей. Портал на отдельном хосте больше не 404.
+- **Portal после restore бэкапа** — `PORTAL_DOMAIN` в `.env` синхронизируется из DB `portal_domain`; API/CLI дают hint про **Подписка → Настроить под текущую публикацию** (nginx/TLS в tar не входят, авто-publish не запускается).
+- **Portal URL только когда ready** — QR/one-time/TG и постоянные ссылки берут хост портала лишь при `portal_ready` и схеме текущего `PUBLISH_MODE` (в т.ч. `http_direct`); до «Настроить…» остаётся URL панели. Пустой `portal_domain` при restore чистит stale `PORTAL_DOMAIN`. Один active portal-токен на `(node_id, client_name)`.
+- **HTTP refresh cookie** — на `http://` refresh больше не ставится с `Secure` (раньше `APP_ENV=production` + install ломали cookie → вылет при смене вкладки). HTTPS / `X-Forwarded-Proto` по-прежнему Secure.
+
+### 🔄 Changed
+
+- **Ошибки связи с агентом** — единый классификатор (`node_auth` / `node_tls_mismatch` / `node_unreachable` / `node_timeout`) → HTTP 502/504 с `detail.code` (не сессия панели).
+- **Push full** — префлайт связи primary/реплик; фазы прогресса; `failed_step` в итоге; после успеха — refresh health узлов.
+- **Сайдбар: группы по ролям** — Клиенты / Сеть / Наблюдение / Панель; домашний пункт и дашборд переименованы в **Клиенты**; лёгкий visual refresh заголовков/active (`sidebarNav.ts`, `Layout.tsx`, `DashboardPage.tsx`).
+- **Настройки: hub вместо flyout** — пункт «Настройки» ведёт на `/settings` с поиском и группами разделов; на `/settings/:section` — sticky secondary nav (desktop) и picker (mobile); hover-flyout удалён (`SettingsPage.tsx`, `SettingsSectionBrowser.tsx`, `Layout.tsx`).
+- **UX «Разделы панели»** — вместо сетки карточек: строки настроек в **2 колонки**, поиск по модулям, компактные профили ресурсов, sticky-бар с числом несохранённых изменений (`FeatureTogglesTab.tsx`).
+
+### 🐛 Fixed
+
+- **Portal «Готов», но ссылка не создаётся** — `resolve_portal_base_url` читал несуществующий ключ `access_url` вместо `portal_access_url` из статуса публикации; UI показывал Ready, а «Ссылка» / create token отвечали «портал ещё не готов».
+- **Портал: скачивание AmneziaWG для Windows** — кнопка ведёт на [релизы amneziawg-windows-client](https://github.com/amnezia-vpn/amneziawg-windows-client/releases), а не на общую страницу amnezia.org.
+- **CI backend** — Push full unit-тесты мокают link-preflight; agent 4xx (кроме 401/403) сохраняют upstream status; redeem-happy-path без `manual_temp` в фикстурах.
+- **Create node + transport** — при ошибке SSH/mTLS после insert узел удаляется (нет HTTP-сирот); SSH валидируется до commit.
+- **SSH → mTLS** — `PATCH /nodes/{id}/transport` отклоняет прямой переход (provision идёт на публичный host:port); в UI — подсказка сначала HTTP; `enable`/`disable-mtls` при уже SSH тоже отклоняются.
+- **SSH → HTTP UI** — confirm/toast про переключение на HTTP, без ложного «сбросить mTLS».
+- **Переключение transport на существующих узлах** — bulk mTLS только для HTTP (не SSH); предупреждение при mTLS→SSH.
+- **Unlock + ручной бан** — ввод unlock-ключа отклоняется с сообщением «заблокирован администратором вручную…»; бан не снимается и слот активации не тратится (в т.ч. если `block_reason` был `access_expired` при живом permanent ban).
+- **Node transport SoT** — единый `resolve_transport_id` для API/adapters/ротации ключа; `mtls_enabled` больше не перетирается deprecated global flag на каждом старте; audit на disable mTLS; adapters default HTTP (без global env); VPN-config migration и bulk FE фильтр по `transport`.
+- **Unlock redeem + HA** — после активации unlock-кода на портале `access_until` реплицируется на HA-replica тем же `set_access_until`, что и ручной PATCH в панели (раньше продлевался только primary).
+- **Portal security** — скачивание профилей идёт через адаптер узла токена (не active node); Host=`portal_domain` больше не обходит IP-whitelist целиком (exempt только `/p/` и `/api/public/…`); WG/AWG2 policy на портале ищется по lowercased имени; unlock redeem не снимает `manual_permanent` бан.
+- **HA policy copy** — `_WG_POLICY_FIELDS` больше не наследует несуществующий `access_until` (дедлайн WG — `expires_at`); в `_AWG2_POLICY_FIELDS` добавлены traffic-limit поля для heal/Push-full copy.
+- **Access expiry TOCTOU** — воркер больше не затирает concurrent redeem/PATCH: claim через `UPDATE … WHERE deadline <= now`, иначе skip (SQLite snapshot isolation).
+- **Unlock redeem по узлу** — уникальность активации `(code, client_name, node_id)`: одноимённые клиенты на разных узлах могут активировать один multi-код независимо; повтор на том же узле по-прежнему запрещён.
+- **Статус unlock-ключей** — в **Подписка** / Mini App у использованных кодов бейджи «Активирован» / «Исчерпан» / «Частично» и список активаций (клиент, узел, время).
+- **Копирование ссылки портала на карточке** — кнопка **Ссылка** в ряду с «Трафик» / «Ещё» копирует постоянную portal-ссылку (если модуль `client_portal` включён).
+- **Unlock-ключ для клиентов** — опциональный allowlist `allowed_client_names`: пустой = любой клиент по протоколам; непустой = ключ профиля: при redeem продлеваются все протоколы клиента на узле одной общей датой (от самого раннего текущего срока).
+- **CIDR safe-fallback** — при падении пула ≥50% предыдущий набор сохраняется даже без ASN-errors (кейс Akamai geo empty).
+- **CIDR global alert** — partial refresh больше не сравнивается с full-логом как «общий пул упал»; в журнал пишется сумма всех `provider_meta`.
+- **CIDR anomaly_reason** — при `anomaly_level=none` причина очищается.
+- **Backup restore audit** — `backup_restore` и notify пишутся после подмены `adminpanel.db` (свежая сессия), чтобы запись не затиралась restore'ом.
+
+### ✨ Added
+
+- **Слой AZ-AWG2 в бэкапе панели** — тот же узкий overlay, что `POST /api/awg2/backup` (`awg2/az-awg2-backup.tar.gz` внутри `adminpanelaz_*.tar.gz`), не полный VPN-архив и не третье вложение в Telegram:
+  - создание копии: галочка в UI, если модуль `awg2` включён;
+  - авто-бэкап: `backup_awg2_enabled`;
+  - CLI: `--include-awg2`;
+  - если слой не установлен — шаг пропускается, архив панели всё равно создаётся;
+  - API restore пишет overlay через активный адаптер до dispose SQLite (как списки маршрутизации), затем best-effort HA-sync.
+
+### 🔄 Changed
+
+- **CLI restore** — `stop` → load → sqlite/`.env` → local overlays → `start` в `finally` (в том числе при ошибке sqlite). Overlay best-effort: ошибка списков/AWG2 не откатывает БД и не меняет код выхода. CLI **не** делает Push full — печатает подсказку. Списки пишутся в `$ANTIZAPRET_PATH/config` (env, иначе `backend/.env` относительно `--install-dir`, иначе `/root/antizapret`); `--install-dir` — корень панели, не дерево AntiZapret.
+- **HA Push full** — если на primary установлен слой AZ-AWG2, overlay копируется на replica (`sync_amneziawg2_state_from_primary`); ошибка синка валит эту replica.
+- **Вкладка Backup на `/awg2`** — только скачивание узкого overlay. Restore слоя — через Настройки → Бэкапы, если архив панели содержит компонент AWG2. `POST /api/awg2/restore` и node-agent `/awg2/restore` сохранены (HA / аварийный overlay без архива панели).
+- **Telegram document/photo** — `send_tg_document` / `send_tg_photo` по умолчанию ждут конец upload (`run_async=False`). Inline-выдача конфига показывает ошибку в чате (или «Не удалось отправить конфиг в Telegram»). `send_tg_message` по-прежнему может уходить асинхронно.
+- **Restore списков AntiZapret** — файлы пишутся, `apply_config_changes` не вызывается (панель сразу перезапускается). API кладёт `detail.hint` про Применение; CLI печатает ту же мысль в stdout.
+
+### 🗑️ Removed
+
+- Кнопка «Загрузить и восстановить» на вкладке Backup `/awg2` (file input, `handleRestore`, `onRestored`). Клиентский `restoreAwg2Backup` в API-слое оставлен.
+
+### 🐛 Fixed
+
+- **Бэкапы панели** — авто-бэкап и `backup-cli.py` снова включают `cidr.db` (после выделения CIDR из `adminpanel.db`); restore CLI/API пишет CIDR; имя метаданных `*.json` вместо `*.tar.json`; retention из настроек реально ограничивает число копий (в т.ч. пресет 10); SQLite копируется через `sqlite3.backup` (WAL); списки маршрутизации пакуются в авто-бэкапе/CLI и восстанавливаются через адаптер.
+- **AntiZapret restore** — архив `client.sh 8` распаковывается во временный каталог, не в `/root`.
+- **AZ-AWG2 restore (узкий API)** — если `apply_runtime` не удался, `POST /api/awg2/restore` отвечает 500 (без ложного успеха и без HA-sync). Overlay из архива панели в CLI/API: `success is False` — warning, sqlite не откатывается.
+- **Telegram-доставка бэкапа** — create / авто-бэкап / тест отправляют документ синхронно (`run_async=False`); явная отправка отвечает ошибкой, если upload не удался.
+- **API restore панели** — SQLite-движки закрываются до записи `adminpanel.db` / `cidr.db` (`apply_backup_overlays` → dispose → apply sqlite → restart).
+- **CLI списки AntiZapret** — читает/пишет `$ANTIZAPRET_PATH` (как installer / `.env` / node agent), а не несуществующий `ANTIZAPRET_HOME`.
+- **Бэкап restore hints** — API/upload+restore подсказывают Push full при configs/AWG2; docs чеклист A/B/C и явное разделение полного AntiZapret-архива.
+
+### 🔒 Security
+
+- **SSH host-key pin** — exclusive `known_hosts` (без fallback на `~/.ssh/known_hosts`); pin в колонке `nodes.ssh_host_key` (без гонки с `node_metadata`).
+
+### 🧪 Tests
+
+- Link diagnostics / Push full: `test_node_link_errors.py`, `test_push_full_link_preflight.py`.
+- Transport / SSH: `test_node_transport.py`, `test_node_transport_api.py` (create/orphan, ssh↔http / mtls↔http / mtls→ssh / ssh→mtls reject, preflight), `test_node_ssh_toggle.py`, `test_ssh_tunnel_pool.py`; proxy SSH — `test_proxy_node_adapter.py`.
+- Unlock permanent ban: расширения в `test_unlock_codes.py`.
 
 ---
 
@@ -171,6 +286,12 @@
 - **Имя файла при скачивании** — `test_file_download.py`: `application/octet-stream` и RFC 5987 `filename*`.
 - **Telegram Mini App** — regression pytest: `test_tg_mini_unlink.py`, `test_tg_mini_access_path.py`, `test_awg2_telegram.py`, `test_tg_unlinked_notify_dedup.py`, `test_telegram_oidc.py` (24 passed); vitest `src/tg-mini/lib/startParam.test.ts` (2 passed).
 - **Frontend CI** — vitest в pipeline; `npm run typecheck` обязателен; high-severity `npm audit` на lockfile.
+
+### 🧪 Tests
+
+- **Бэкапы / overlay** — `apply_backup_overlays` (local + adapter), порядок API restore, CLI restore (sqlite затем local, start при ошибке), scheduler/`--include-configs` через `ANTIZAPRET_PATH` (`test_backup_overlays.py`, `test_backup_cli.py`, `test_backups_restore_order.py`, `test_backup_manager.py`, `test_backup_scheduler.py`).
+- **Telegram files** — default sync document/photo; inline chosen-result пишет ошибку в чат (`test_telegram_send_document.py`, `test_telegram_inline_chosen.py`).
+- **AWG2 backup API** — узкий download/restore и adapter parity без регрессии (`test_awg2_backup.py`, `test_node_adapter_parity.py`).
 
 ---
 
@@ -2426,7 +2547,9 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.1...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.25.0...HEAD
+[2.25.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.24.0...v2.25.0
+[2.24.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.1...v2.24.0
 [2.23.1]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.0...v2.23.1
 [2.23.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.21.0...v2.22.0

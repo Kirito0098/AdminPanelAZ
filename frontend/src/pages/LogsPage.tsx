@@ -32,6 +32,7 @@ import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import { DOCS } from '@/lib/docsUrls'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
@@ -838,6 +839,7 @@ export default function LogsPage() {
       <PageSectionHeader
         icon={ScrollText}
         title="Журналы"
+        docsHref={DOCS.logs}
         titleAddon={<NodeBadge name={activeNode?.name} status={activeNode?.status} />}
         description={
           <>

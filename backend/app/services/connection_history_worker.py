@@ -19,13 +19,24 @@ def _is_resource_monitor_enabled() -> bool:
     return get_feature_service().is_enabled("resource_monitor")
 
 
+def _is_connection_history_enabled() -> bool:
+    """Runtime gate — FEATURE_CONNECTION_HISTORY_ENABLED can flip without restart."""
+    from app.services.feature_guards import get_feature_service
+
+    return get_feature_service().is_enabled("connection_history")
+
+
 async def run_connection_history_loop():
     while True:
         settings = get_settings()
         interval = max(5, int(settings.resource_metrics_interval_seconds or 60))
         try:
-            if not settings.resource_metrics_enabled or not _is_resource_monitor_enabled():
-                logger.debug("connection_history skipped — resource_monitor disabled")
+            if (
+                not settings.resource_metrics_enabled
+                or not _is_resource_monitor_enabled()
+                or not _is_connection_history_enabled()
+            ):
+                logger.debug("connection_history skipped — resource_monitor or FEATURE_CONNECTION_HISTORY_ENABLED disabled")
             else:
                 await asyncio.to_thread(_collect_once)
         except Exception as exc:

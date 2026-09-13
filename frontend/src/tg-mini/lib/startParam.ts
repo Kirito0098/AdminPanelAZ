@@ -5,6 +5,7 @@ const START_PARAM_ROUTES: Record<string, string> = {
   nodes: '/nodes',
   configs: '/configs',
   settings: '/settings',
+  'unlock-codes': '/unlock-codes',
 }
 
 export function mapTelegramStartParam(startParam: string | null | undefined): string | null {

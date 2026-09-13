@@ -1,5 +1,6 @@
 import logging
 import os
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -12,6 +13,7 @@ from app.models import AmneziaWg2AccessPolicy, User, UserRole, VpnType
 from app.services.access_policy import (
     AccessPolicyService,
 )
+from app.services.access_until import set_access_until as set_policy_access_until
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
@@ -63,6 +65,10 @@ class TrafficLimitRequest(BaseModel):
     limit_period_days: int | None = Field(default=None)
 
 
+class AccessUntilRequest(BaseModel):
+    access_until: datetime | None = None
+
+
 def _service(db: Session) -> AccessPolicyService:
     node = get_active_node(db)
     require_ha_primary_for_client_ops(db, node=node)
@@ -73,6 +79,19 @@ def _service(db: Session) -> AccessPolicyService:
         node_name=node.name,
         adapter=get_active_adapter(db),
     )
+
+
+def _set_access_until(
+    db: Session,
+    *,
+    protocol: str,
+    client_name: str,
+    access_until: datetime | None,
+    actor: str,
+) -> dict:
+    node = get_active_node(db)
+    require_ha_primary_for_client_ops(db, node=node)
+    return set_policy_access_until(db, protocol, node.id, client_name, access_until, actor=actor)
 
 
 def _client_ban_details(
@@ -300,6 +319,108 @@ def wg_set_expiry(payload: ExpiryRequest, request: Request, db: Session = Depend
         actor=user.username,
         days=payload.days,
         extend=payload.extend,
+    )
+    return result
+
+
+@router.patch("/openvpn/{client_name}/access-until")
+def openvpn_set_access_until(
+    client_name: str,
+    payload: AccessUntilRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    result = _set_access_until(
+        db,
+        protocol="openvpn",
+        client_name=client_name,
+        access_until=payload.access_until,
+        actor=user.username,
+    )
+    log_action(
+        db,
+        action="openvpn_set_access_until",
+        user_id=user.id,
+        username=user.username,
+        details=f"{client_name} {payload.access_until.isoformat() if payload.access_until else 'null'}",
+        remote_addr=request.client.host,
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=client_name,
+        vpn_type=VpnType.openvpn,
+        op="set_access_until",
+        actor=user.username,
+        access_until=payload.access_until,
+    )
+    return result
+
+
+@router.patch("/wireguard/{client_name}/access-until")
+def wg_set_access_until(
+    client_name: str,
+    payload: AccessUntilRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    result = _set_access_until(
+        db,
+        protocol="wireguard",
+        client_name=client_name,
+        access_until=payload.access_until,
+        actor=user.username,
+    )
+    log_action(
+        db,
+        action="wg_set_access_until",
+        user_id=user.id,
+        username=user.username,
+        details=f"{client_name} {payload.access_until.isoformat() if payload.access_until else 'null'}",
+        remote_addr=request.client.host,
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=client_name,
+        vpn_type=VpnType.wireguard,
+        op="set_access_until",
+        actor=user.username,
+        access_until=payload.access_until,
+    )
+    return result
+
+
+@router.patch("/amneziawg2/{client_name}/access-until")
+def awg2_set_access_until(
+    client_name: str,
+    payload: AccessUntilRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    result = _set_access_until(
+        db,
+        protocol="amneziawg2",
+        client_name=client_name,
+        access_until=payload.access_until,
+        actor=user.username,
+    )
+    log_action(
+        db,
+        action="awg2_set_access_until",
+        user_id=user.id,
+        username=user.username,
+        details=f"{client_name} {payload.access_until.isoformat() if payload.access_until else 'null'}",
+        remote_addr=request.client.host,
+    )
+    _replicate_policy_after_success(
+        db,
+        client_name=client_name,
+        vpn_type=VpnType.amneziawg2,
+        op="set_access_until",
+        actor=user.username,
+        access_until=payload.access_until,
     )
     return result
 

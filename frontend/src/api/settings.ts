@@ -244,6 +244,21 @@ export async function updateSecuritySettings(
   })
 }
 
+export async function getPortalPublishStatus() {
+  return apiFetch<import('../types').PortalPublishStatus>('/security/portal-publish-status')
+}
+
+export async function publishPortalDomain(data: {
+  portal_domain: string
+  email?: string | null
+  save_domain?: boolean
+}) {
+  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/security/portal-publish', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
 export async function addTempWhitelist(ip: string, hours: number) {
   return apiFetch<import('../types').SecuritySettings>('/security/temp-whitelist', {
     method: 'POST',

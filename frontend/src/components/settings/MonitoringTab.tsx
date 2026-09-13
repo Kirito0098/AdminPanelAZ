@@ -4,8 +4,11 @@ import MonitorSettingsCard from '@/components/settings/MonitorSettingsCard'
 import AlertRulesCard from '@/components/settings/AlertRulesCard'
 import { SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { Button } from '@/components/ui/button'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 
 export default function MonitoringTab() {
+  const { isEnabled } = useFeatureModules()
+
   return (
     <div className="space-y-4">
       <SettingsToolbar
@@ -22,7 +25,7 @@ export default function MonitoringTab() {
       />
 
       <MonitorSettingsCard />
-      <AlertRulesCard />
+      {isEnabled('alert_rules') && <AlertRulesCard />}
     </div>
   )
 }

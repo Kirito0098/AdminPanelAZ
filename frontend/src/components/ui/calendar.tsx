@@ -5,15 +5,24 @@ import { cn } from '@/lib/utils'
 
 export type DateRange = { from?: Date; to?: Date }
 
-export type CalendarProps = {
-  mode: 'range'
-  selected?: DateRange
-  onSelect?: (range: DateRange | undefined) => void
+type CalendarBaseProps = {
   disabled?: (date: Date) => boolean
   fromDate?: Date
   toDate?: Date
   className?: string
 }
+
+export type CalendarProps =
+  | (CalendarBaseProps & {
+      mode: 'range'
+      selected?: DateRange
+      onSelect?: (range: DateRange | undefined) => void
+    })
+  | (CalendarBaseProps & {
+      mode: 'single'
+      selected?: Date
+      onSelect?: (date: Date | undefined) => void
+    })
 
 const WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'] as const
 
@@ -68,29 +77,32 @@ function isInSelectedRange(day: Date, selected?: DateRange): boolean {
   return t >= Math.min(a, b) && t <= Math.max(a, b)
 }
 
-export function Calendar({
-  mode: _mode,
-  selected,
-  onSelect,
-  disabled,
-  fromDate,
-  toDate,
-  className,
-}: CalendarProps) {
-  const initial = selected?.to ?? selected?.from ?? toDate ?? new Date()
+export function Calendar(props: CalendarProps) {
+  const { disabled, fromDate, toDate, className, mode } = props
+  const initial =
+    mode === 'single'
+      ? (props.selected ?? toDate ?? new Date())
+      : (props.selected?.to ?? props.selected?.from ?? toDate ?? new Date())
   const [view, setView] = React.useState(
     () => new Date(initial.getFullYear(), initial.getMonth(), 1),
   )
 
-  const selectedFromKey = selected?.from ? formatLocalDayKey(selected.from) : ''
-  const selectedToKey = selected?.to ? formatLocalDayKey(selected.to) : ''
+  const selectedKey =
+    mode === 'single'
+      ? props.selected
+        ? formatLocalDayKey(props.selected)
+        : ''
+      : `${props.selected?.from ? formatLocalDayKey(props.selected.from) : ''}|${
+          props.selected?.to ? formatLocalDayKey(props.selected.to) : ''
+        }`
 
   React.useEffect(() => {
-    const anchor = selected?.to ?? selected?.from
+    const anchor =
+      mode === 'single' ? props.selected : (props.selected?.to ?? props.selected?.from)
     if (!anchor) return
     setView(new Date(anchor.getFullYear(), anchor.getMonth(), 1))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sync month when selection keys change
-  }, [selectedFromKey, selectedToKey])
+  }, [selectedKey, mode])
 
   const cells = React.useMemo(() => buildMonthCells(view), [view])
 
@@ -99,17 +111,22 @@ export function Calendar({
   }
 
   const handleDayClick = (day: Date) => {
-    if (!onSelect) return
     const clicked = startOfLocalDay(day)
+    if (mode === 'single') {
+      props.onSelect?.(clicked)
+      return
+    }
+    if (!props.onSelect) return
+    const selected = props.selected
     if (!selected?.from || (selected.from && selected.to)) {
-      onSelect({ from: clicked, to: undefined })
+      props.onSelect({ from: clicked, to: undefined })
       return
     }
     const start = startOfLocalDay(selected.from)
     if (clicked.getTime() < start.getTime()) {
-      onSelect({ from: clicked, to: start })
+      props.onSelect({ from: clicked, to: start })
     } else {
-      onSelect({ from: start, to: clicked })
+      props.onSelect({ from: start, to: clicked })
     }
   }
 
@@ -154,9 +171,14 @@ export function Calendar({
           const fnDisabled = disabled?.(day) ?? false
           const muted = outOfBounds || !inMonth
           const clickDisabled = outOfBounds || fnDisabled
-          const isStart = selected?.from ? sameDay(day, selected.from) : false
-          const isEnd = selected?.to ? sameDay(day, selected.to) : false
-          const inRange = isInSelectedRange(day, selected)
+          const isSingleSelected =
+            mode === 'single' && props.selected ? sameDay(day, props.selected) : false
+          const isStart =
+            mode === 'range' && props.selected?.from ? sameDay(day, props.selected.from) : false
+          const isEnd =
+            mode === 'range' && props.selected?.to ? sameDay(day, props.selected.to) : false
+          const inRange = mode === 'range' ? isInSelectedRange(day, props.selected) : false
+          const isToday = sameDay(day, new Date())
 
           return (
             <button
@@ -171,7 +193,9 @@ export function Calendar({
                 outOfBounds && 'pointer-events-none',
                 !clickDisabled && 'hover:bg-accent hover:text-accent-foreground',
                 inRange && !isStart && !isEnd && 'bg-accent/60',
-                (isStart || isEnd) && 'bg-primary text-primary-foreground hover:bg-primary/90',
+                (isStart || isEnd || isSingleSelected) &&
+                  'bg-primary text-primary-foreground hover:bg-primary/90',
+                isToday && !isStart && !isEnd && !isSingleSelected && 'ring-1 ring-primary/40',
                 clickDisabled && 'cursor-not-allowed opacity-40',
               )}
             >

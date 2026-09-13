@@ -18,6 +18,7 @@
 | Мониторинг и алерты | ✓ | — |
 | Модули | ✓ | — |
 | Обновления | ✓ | — |
+| Перезапуск и пересборка | ✓ | — |
 | Диагностика | ✓ | — |
 
 ---
@@ -36,6 +37,7 @@
 | **Мониторинг и алерты** | Пороги CPU/RAM | [monitoring-i-alerty.md](monitoring-i-alerty.md) |
 | **Модули** | Разделы панели, профили | [moduli.md](moduli.md) |
 | **Обновления** | Обновление панели | [obnovleniya.md](obnovleniya.md) |
+| **Перезапуск и пересборка** | Restart / rebuild UI | [perezapusk-i-peresborka.md](perezapusk-i-peresborka.md) |
 | **Диагностика** | Проверка работы | [diagnostika.md](diagnostika.md) |
 
 [← Вернуться к оглавлению](../README.md)

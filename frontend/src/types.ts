@@ -2,6 +2,35 @@ export type UserRole = 'admin' | 'user'
 export type VpnType = 'openvpn' | 'wireguard' | 'amneziawg2'
 export type NodeStatus = 'online' | 'offline' | 'unknown'
 export type NodeKind = 'vpn' | 'proxy'
+export type NodeTransportId = 'http' | 'mtls' | 'ssh'
+
+export interface NodeTransportOption {
+  id: NodeTransportId
+  label: string
+  available: boolean
+}
+
+export interface NodeTransportSshFields {
+  ssh_host?: string | null
+  ssh_port?: number | null
+  ssh_username?: string | null
+  ssh_private_key?: string | null
+  ssh_passphrase?: string | null
+}
+
+export interface NodeTransportPatchBody extends NodeTransportSshFields {
+  transport: NodeTransportId
+}
+
+export interface NodeTransportPreflightResult {
+  ok: boolean
+  current: string
+  wanted: string
+  message: string
+  hint?: string | null
+  probe_status?: string | null
+  probe_error?: string | null
+}
 
 export interface Node {
   id: number
@@ -10,7 +39,14 @@ export interface Node {
   port: number
   status: NodeStatus
   is_local: boolean
+  transport?: NodeTransportId | string
   mtls_enabled: boolean
+  ssh_host?: string | null
+  ssh_port?: number | null
+  ssh_username?: string | null
+  ssh_key_configured?: boolean
+  ssh_remote_agent_host?: string | null
+  ssh_remote_agent_port?: number | null
   node_kind?: NodeKind | string
   destination_ip?: string | null
   linked_vpn_node_id?: number | null
@@ -482,6 +518,8 @@ export interface BackupEntry {
   created_at: string
   components: string[]
   summary: string
+  restore_message?: string | null
+  restore_detail?: Record<string, unknown> | null
 }
 
 export interface BackupSettings {
@@ -489,6 +527,7 @@ export interface BackupSettings {
   auto_backup_days: number
   telegram_on_backup: boolean
   backup_az_enabled: boolean
+  backup_awg2_enabled: boolean
   retention_count: number
 }
 
@@ -864,6 +903,24 @@ export interface VpnNetworkSettings {
   server_primary_ip?: string | null
   az_vpn_hosts?: string[]
   az_vpn_conflict_hint?: string | null
+  suggested_portal_domain?: string | null
+  portal_domain?: string | null
+  portal_ready?: boolean | null
+  portal_dns_hint?: string | null
+}
+
+export interface PortalPublishStatus {
+  portal_domain: string
+  suggested_portal_domain: string
+  panel_domain: string
+  active_publish_mode?: string | null
+  portal_vhost_ok: boolean
+  portal_cert_ok: boolean
+  portal_ready: boolean
+  server_primary_ip?: string | null
+  dns_hint: string
+  warnings: string[]
+  portal_access_url: string
 }
 
 export type VpnNetworkPublishModeKey =
@@ -886,6 +943,8 @@ export interface VpnNetworkPublishPayload {
   ssl_key?: string | null
   access_path?: string | null
   nginx_subpath_integrate?: boolean
+  configure_portal?: boolean
+  portal_domain?: string | null
 }
 
 export type DdnsProvider = 'none' | 'duckdns' | 'noip'
@@ -1370,13 +1429,16 @@ export interface TrafficNeverConnectedResponse {
 export interface ClientAccessPolicy {
   is_blocked: boolean
   block_mode: string
+  block_reason?: string | null
   node_id?: number | null
   node_name?: string | null
   access_days_left?: number | null
   blocked_days_left?: number | null
   block_duration_days?: number | null
+  access_until?: string | null
   expires_at?: string | null
   expired?: boolean
+  access_expired?: boolean
   traffic_limit_bytes?: number | null
   traffic_limit_period_days?: number | null
   traffic_limit_period_label?: string | null
@@ -1392,6 +1454,31 @@ export interface ClientAccessPolicy {
   traffic_limit_exceeded?: boolean
   traffic_limit_unblock_at?: string | null
   traffic_limit_unblock_label?: string | null
+}
+
+export interface UnlockCodeRedemptionRecord {
+  id: number
+  client_name: string
+  node_id: number
+  node_name?: string | null
+  redeemed_at: string | null
+}
+
+export interface UnlockCodeRecord {
+  id: number
+  code: string
+  grant_days: number
+  protocols: string[]
+  mode: 'single' | 'multi' | string
+  max_redemptions: number
+  redemption_count?: number
+  exhausted?: boolean
+  allowed_client_names?: string[]
+  redemptions?: UnlockCodeRedemptionRecord[]
+  code_expires_at: string | null
+  created_by_user_id: number | null
+  created_at: string | null
+  revoked_at: string | null
 }
 
 export interface ClientPoliciesResponseEntry {
@@ -1455,6 +1542,7 @@ export interface SecuritySettings {
   qr_download_max_downloads: number
   qr_download_pin_set: boolean
   public_download_enabled: boolean
+  portal_domain: string
 }
 
 export interface SecretRotationItem {

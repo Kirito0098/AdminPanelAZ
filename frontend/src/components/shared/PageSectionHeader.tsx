@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
+import DocsLink from '@/components/shared/DocsLink'
 import { cn } from '@/lib/utils'
 
 export interface PageSectionHeaderProps {
@@ -10,6 +11,9 @@ export interface PageSectionHeaderProps {
   titleAddon?: ReactNode
   /** Toolbar controls; wraps below the title on narrow screens. */
   actions?: ReactNode
+  /** GitHub docs URL — shows «Инструкция» next to actions. */
+  docsHref?: string
+  docsLabel?: string
   className?: string
   iconClassName?: string
 }
@@ -24,11 +28,22 @@ export default function PageSectionHeader({
   description,
   titleAddon,
   actions,
+  docsHref,
+  docsLabel,
   className,
   iconClassName,
 }: PageSectionHeaderProps) {
+  const docsControl = docsHref ? (
+    <DocsLink href={docsHref} label={docsLabel} variant="button" />
+  ) : null
+
   return (
-    <div className={cn('flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between', className)}>
+    <div
+      className={cn(
+        'flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between',
+        className,
+      )}
+    >
       <div className="flex items-start gap-3">
         <div
           className={cn(
@@ -46,8 +61,9 @@ export default function PageSectionHeader({
           {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
         </div>
       </div>
-      {actions ? (
+      {actions || docsControl ? (
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+          {docsControl}
           {actions}
         </div>
       ) : null}

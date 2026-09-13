@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   Ban,
@@ -15,30 +15,35 @@ import {
   Zap,
 } from 'lucide-react'
 import {
-  awg2ClearTrafficLimit,
   awg2PermanentBlock,
-  awg2SetTrafficLimit,
   awg2TempBlock,
   awg2Unblock,
   ApiError,
   createOneTimeLink,
   deleteConfig,
-  openvpnClearTrafficLimit,
+  createPortalLink,
+  rotatePortalLink,
+  revokePortalLink,
   openvpnDisconnect,
   openvpnPermanentBlock,
-  openvpnSetTrafficLimit,
   openvpnTempBlock,
   openvpnUnblock,
   setConfigTags,
   updateConfig,
-  wgClearTrafficLimit,
   wgPermanentBlock,
-  wgSetTrafficLimit,
   wgSetExpiry,
   wgTempBlock,
   wgUnblock,
 } from '@/api/client'
+import { setClientAccessUntil, type UnlockCodeProtocol } from '@/api/unlockCodes'
+import {
+  clearProfileTrafficLimits,
+  formatProfileProtocols,
+  orderedProfileProtocols,
+  setProfileTrafficLimits,
+} from '@/lib/profileTrafficLimit'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
+import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -52,6 +57,8 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import DatePickerField from '@/components/ui/DatePickerField'
+import { panelToday } from '@/lib/trafficPeriod'
 import {
   getConfigStatus,
   getDownloadFilename,
@@ -64,6 +71,8 @@ import {
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
+import { formatDate, parseTimestamp } from '@/lib/datetime'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import type { ClientAccessPolicy, ConfigTag, User, UserRole, VpnConfig } from '@/types'
@@ -72,6 +81,8 @@ interface ClientActionsDialogProps {
   config: VpnConfig | null
   tab: ProtocolTab
   policy?: ClientAccessPolicy
+  /** All panel configs — used to limit unlock protocols to this client_name. */
+  allConfigs?: VpnConfig[]
   userRole: UserRole
   currentUserId?: number
   ownerCandidates?: User[]
@@ -128,24 +139,56 @@ function ActionButton({
       title={action.title ?? action.label}
       onClick={action.onClick}
       className={cn(
-        'h-9 justify-start gap-2 text-left text-xs',
+        'h-auto min-h-11 flex-col items-start justify-center gap-1.5 px-3 py-2.5 text-left text-xs shadow-none',
+        'hover:bg-accent/60',
         fullWidth && 'col-span-2',
         destructive &&
-          'border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive',
+          'border-destructive/35 text-destructive hover:bg-destructive/10 hover:text-destructive',
       )}
     >
-      {isBusy ? <Loader2 size={14} className="shrink-0 animate-spin" /> : action.icon}
-      <span className="truncate">{action.label}</span>
+      <span className="flex items-center gap-2">
+        {isBusy ? <Loader2 size={14} className="shrink-0 animate-spin" /> : action.icon}
+        <span className="line-clamp-2 font-medium leading-snug">{action.label}</span>
+      </span>
     </Button>
   )
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+function ProfileSection({
+  title,
+  description,
+  children,
+  tone = 'default',
+}: {
+  title: string
+  description?: React.ReactNode
+  children: React.ReactNode
+  tone?: 'default' | 'danger'
+}) {
   return (
-    <div className="flex items-center gap-3">
-      <h3 className="shrink-0 text-sm font-medium text-foreground">{children}</h3>
-      <div className="h-px flex-1 bg-border" />
-    </div>
+    <section
+      className={cn(
+        'space-y-3 rounded-xl border p-4',
+        tone === 'danger'
+          ? 'border-destructive/30 bg-destructive/[0.04]'
+          : 'border-border/70 bg-muted/15',
+      )}
+    >
+      <div className="space-y-1">
+        <h3
+          className={cn(
+            'text-sm font-medium tracking-tight',
+            tone === 'danger' ? 'text-destructive' : 'text-foreground',
+          )}
+        >
+          {title}
+        </h3>
+        {description ? (
+          <div className="text-xs leading-relaxed text-muted-foreground">{description}</div>
+        ) : null}
+      </div>
+      {children}
+    </section>
   )
 }
 
@@ -153,6 +196,7 @@ export default function ClientActionsDialog({
   config,
   tab,
   policy,
+  allConfigs = [],
   userRole,
   currentUserId,
   ownerCandidates = [],
@@ -167,6 +211,12 @@ export default function ClientActionsDialog({
   showQrDownloads = true,
 }: ClientActionsDialogProps) {
   const { activeNode } = useNode()
+  const { isEnabled } = useFeatureModules()
+  const clientPortalEnabled = isEnabled('client_portal')
+  const unlockCodesEnabled = isEnabled('unlock_codes')
+  const openvpnEnabled = isEnabled('openvpn')
+  const wireguardFamilyEnabled = isEnabled('wireguard') || isEnabled('amneziawg')
+  const awg2Enabled = isEnabled('awg2')
   const haReplicaReadonly = useHaReplicaReadonly()
   const [promptMode, setPromptMode] = useState<PromptMode>(null)
   const [promptTitle, setPromptTitle] = useState('')
@@ -179,11 +229,137 @@ export default function ClientActionsDialog({
   const [limitPeriodDays, setLimitPeriodDays] = useState('7')
   const [pendingAction, setPendingAction] = useState<((days?: number) => Promise<void>) | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
-
-  if (!config) return null
+  const [portalUrl, setPortalUrl] = useState<string | null>(null)
+  const [accessUntilValue, setAccessUntilValue] = useState('')
+  const [descriptionValue, setDescriptionValue] = useState('')
+  const [unlockCodeDialogOpen, setUnlockCodeDialogOpen] = useState(false)
 
   const isAdmin = userRole === 'admin'
   const policyNodeName = policy?.node_name ?? activeNode?.name
+
+  useEffect(() => {
+    if (!open) return
+    if (!config) return
+    const value = policy?.access_until ?? null
+    setAccessUntilValue(value ? toDateInputValue(value) : '')
+    setDescriptionValue(config.description ?? '')
+    setUnlockCodeDialogOpen(false)
+  }, [open, config?.id, config?.description, policy?.access_until])
+
+  const profileVpnTypes = useMemo(() => {
+    if (!config) return new Set<import('@/types').VpnType>()
+    const clientNameKey = config.client_name.toLowerCase()
+    const types = new Set(
+      (allConfigs.length > 0 ? allConfigs : [config])
+        .filter((item) => item.client_name.toLowerCase() === clientNameKey)
+        .map((item) => item.vpn_type),
+    )
+    types.add(config.vpn_type)
+    return types
+  }, [allConfigs, config])
+
+  if (!config) return null
+
+  const profileProtocolsLabel = formatProfileProtocols(profileVpnTypes)
+  const haGroupHint = config.ha
+    ? 'В HA-группе изменение уйдёт на реплики (auto-sync policies), если узел — primary.'
+    : null
+
+  const applyProfileTrafficLimit = async (
+    value: number,
+    unit: string,
+    period: number | null,
+  ) => {
+    const { applied, failed } = await setProfileTrafficLimits(
+      config.client_name,
+      profileVpnTypes,
+      value,
+      unit,
+      period,
+    )
+    if (applied.length === 0) {
+      throw new Error(
+        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+          'Не удалось установить лимит',
+      )
+    }
+    if (failed.length > 0) {
+      onNotifyError(
+        `Лимит частично не применён: ${failed
+          .map((item) => `${item.protocol}: ${item.message}`)
+          .join('; ')}`,
+      )
+    }
+    onNotifySuccess(
+      applied.length > 1
+        ? `Лимит трафика установлен для профиля (${formatProfileProtocols(applied)})`
+        : 'Лимит трафика установлен',
+    )
+  }
+
+  const clearProfileTrafficLimit = async () => {
+    const { cleared, failed } = await clearProfileTrafficLimits(
+      config.client_name,
+      profileVpnTypes,
+    )
+    if (cleared.length === 0) {
+      throw new Error(
+        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+          'Не удалось снять лимит',
+      )
+    }
+    if (failed.length > 0) {
+      onNotifyError(
+        `Лимит частично не снят: ${failed
+          .map((item) => `${item.protocol}: ${item.message}`)
+          .join('; ')}`,
+      )
+    }
+    onNotifySuccess(
+      cleared.length > 1
+        ? `Лимит трафика снят для профиля (${formatProfileProtocols(cleared)})`
+        : 'Лимит трафика снят',
+    )
+  }
+
+  const applyProfileAccessUntil = async (iso: string | null) => {
+    const protocols = orderedProfileProtocols(profileVpnTypes)
+    const applied: typeof protocols = []
+    const failed: Array<{ protocol: (typeof protocols)[number]; message: string }> = []
+    for (const protocol of protocols) {
+      try {
+        await setClientAccessUntil(protocol, config.client_name, iso)
+        applied.push(protocol)
+      } catch (err) {
+        failed.push({
+          protocol,
+          message: err instanceof ApiError ? err.message : 'ошибка',
+        })
+      }
+    }
+    if (applied.length === 0) {
+      throw new Error(
+        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+          'Не удалось обновить срок доступа',
+      )
+    }
+    if (failed.length > 0) {
+      onNotifyError(
+        `Срок доступа частично не обновлён: ${failed
+          .map((item) => `${item.protocol}: ${item.message}`)
+          .join('; ')}`,
+      )
+    }
+    onNotifySuccess(
+      applied.length > 1
+        ? iso
+          ? `Срок доступа обновлён для профиля (${formatProfileProtocols(applied)})`
+          : `Срок доступа сброшен для профиля (${formatProfileProtocols(applied)})`
+        : iso
+          ? 'Срок доступа обновлён'
+          : 'Срок доступа сброшен',
+    )
+  }
 
   const toggleConfigTag = async (tagId: number) => {
     if (!isAdmin) return
@@ -211,15 +387,29 @@ export default function ClientActionsDialog({
   const isAwg2 = config.vpn_type === 'amneziawg2'
   const isBlocked = policy?.is_blocked ?? false
   const blockMode = (policy?.block_mode || 'none').toLowerCase()
-  const wgExpired = Boolean(policy?.expired) || blockMode === 'expired'
+  const blockReason = (policy?.block_reason || '').toLowerCase()
+  const wgAccessExpired = blockMode === 'access_expired' || blockReason === 'access_expired'
+  const wgCertExpired = Boolean(policy?.expired) || blockMode === 'expired'
   const hasTrafficLimit = Boolean(policy?.traffic_limit_human || policy?.traffic_limit_bytes)
   const trafficLimitExceeded = Boolean(policy?.traffic_limit_exceeded) || blockMode === 'traffic_limit'
   const status = getConfigStatus(config, tab, policy)
   const StatusIcon = statusIcons[status.variant]
 
-  const todayStr = () => {
-    const now = new Date()
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const toDateInputValue = (value: string) => {
+    const date = parseTimestamp(value)
+    if (!date) return ''
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  const dateInputToIso = (value: string) => {
+    if (!value) return null
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+    if (!match) return null
+    const next = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
+    return next.toISOString()
   }
 
   const runAction = async (key: string, fn: () => Promise<void>) => {
@@ -266,6 +456,47 @@ export default function ClientActionsDialog({
       onNotifySuccess('Одноразовая ссылка скопирована в буфер')
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка формирования ссылки')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const handlePortalCopy = async () => {
+    setBusyAction('portal-copy')
+    try {
+      const link = await createPortalLink(config.client_name)
+      setPortalUrl(link.url)
+      await navigator.clipboard.writeText(link.url)
+      onNotifySuccess('Ссылка портала скопирована')
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка ссылки портала')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const handlePortalRotate = async () => {
+    setBusyAction('portal-rotate')
+    try {
+      const link = await rotatePortalLink(config.client_name)
+      setPortalUrl(link.url)
+      await navigator.clipboard.writeText(link.url)
+      onNotifySuccess('Ссылка портала перевыпущена и скопирована')
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка перевыпуска')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const handlePortalRevoke = async () => {
+    setBusyAction('portal-revoke')
+    try {
+      await revokePortalLink(config.client_name)
+      setPortalUrl(null)
+      onNotifySuccess('Ссылка портала отозвана')
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка отзыва')
     } finally {
       setBusyAction(null)
     }
@@ -318,6 +549,22 @@ export default function ClientActionsDialog({
     })
   }
 
+  const handleDescriptionSave = async () => {
+    const next = descriptionValue.trim()
+    const current = (config.description ?? '').trim()
+    if (next === current) return
+    await runAction('save-description', async () => {
+      await updateConfig(config.id, { description: next })
+      onNotifySuccess(next ? 'Описание сохранено' : 'Описание очищено')
+    })
+  }
+
+  const handleAccessUntilSave = async () => {
+    await runAction('access-until', async () => {
+      await applyProfileAccessUntil(dateInputToIso(accessUntilValue))
+    })
+  }
+
   const submitRenew = async () => {
     const days = Number.parseInt(renewDays, 10)
     if (!Number.isFinite(days) || days < 1 || days > 3650) {
@@ -333,13 +580,18 @@ export default function ClientActionsDialog({
   }
 
   const handleWgUnblock = async () => {
-    if (wgExpired) {
+    // Cert/TTL expiry still opens renew prompt; access_expired allows temporary runtime unblock.
+    if (wgCertExpired && !wgAccessExpired) {
       setPromptMode('expired-wg')
       return
     }
     await runAction('unblock', async () => {
       await wgUnblock(config.client_name)
-      onNotifySuccess('Блокировка снята')
+      onNotifySuccess(
+        wgAccessExpired
+          ? 'Блокировка снята временно; при истёкшем доступе воркер снова отключит'
+          : 'Блокировка снята',
+      )
     })
   }
 
@@ -369,7 +621,11 @@ export default function ClientActionsDialog({
           onClick: () =>
             runAction('unblock', async () => {
               await openvpnUnblock(config.client_name)
-              onNotifySuccess('Блокировка снята')
+              onNotifySuccess(
+                blockMode === 'access_expired'
+                  ? 'Блокировка снята временно; при истёкшем доступе воркер снова отключит'
+                  : 'Блокировка снята',
+              )
             }),
         },
         {
@@ -404,8 +660,12 @@ export default function ClientActionsDialog({
             setLimitValue('10')
             setLimitUnit('GB')
             setLimitPeriodDays('7')
-            setPromptTitle('Лимит трафика')
-            setPromptMessage(`Укажите лимит для клиента «${config.client_name}»`)
+            setPromptTitle('Лимит трафика профиля')
+            setPromptMessage(
+              profileVpnTypes.size > 1
+                ? `Лимит для «${config.client_name}» применится ко всем конфигурациям: ${profileProtocolsLabel}`
+                : `Укажите лимит для клиента «${config.client_name}»`,
+            )
             setPromptMode('traffic-limit')
           },
         },
@@ -417,10 +677,11 @@ export default function ClientActionsDialog({
           onClick: () =>
             askConfirm(
               'Снять лимит трафика',
-              `Снять лимит трафика для «${config.client_name}»?`,
+              profileVpnTypes.size > 1
+                ? `Снять лимит у профиля «${config.client_name}» на всех конфигурациях (${profileProtocolsLabel})?`
+                : `Снять лимит трафика для «${config.client_name}»?`,
               async () => {
-                await openvpnClearTrafficLimit(config.client_name)
-                onNotifySuccess('Лимит трафика снят')
+                await clearProfileTrafficLimit()
               },
             ),
         },
@@ -448,11 +709,15 @@ export default function ClientActionsDialog({
             label: 'Снять блокировку',
             icon: <Unlock size={14} />,
             // Like WG: hide for traffic_limit — operator clears limit instead
-            hidden: !canManage || !['temp', 'permanent'].includes(blockMode) || haReplicaReadonly,
+            hidden: !canManage || !['temp', 'permanent', 'access_expired'].includes(blockMode) || haReplicaReadonly,
             onClick: () =>
               runAction('unblock', async () => {
                 await awg2Unblock(config.client_name)
-                onNotifySuccess('Блокировка снята')
+                onNotifySuccess(
+                  blockMode === 'access_expired'
+                    ? 'Блокировка снята временно; при истёкшем доступе воркер снова отключит'
+                    : 'Блокировка снята',
+                )
               }),
           },
           {
@@ -464,8 +729,12 @@ export default function ClientActionsDialog({
               setLimitValue('10')
               setLimitUnit('GB')
               setLimitPeriodDays('7')
-              setPromptTitle('Лимит трафика')
-              setPromptMessage(`Укажите лимит для клиента «${config.client_name}»`)
+              setPromptTitle('Лимит трафика профиля')
+              setPromptMessage(
+                profileVpnTypes.size > 1
+                  ? `Лимит для «${config.client_name}» применится ко всем конфигурациям: ${profileProtocolsLabel}`
+                  : `Укажите лимит для клиента «${config.client_name}»`,
+              )
               setPromptMode('traffic-limit')
             },
           },
@@ -477,10 +746,11 @@ export default function ClientActionsDialog({
             onClick: () =>
               askConfirm(
                 'Снять лимит трафика',
-                `Снять лимит трафика для «${config.client_name}»?`,
+                profileVpnTypes.size > 1
+                  ? `Снять лимит у профиля «${config.client_name}» на всех конфигурациях (${profileProtocolsLabel})?`
+                  : `Снять лимит трафика для «${config.client_name}»?`,
                 async () => {
-                  await awg2ClearTrafficLimit(config.client_name)
-                  onNotifySuccess('Лимит трафика снят')
+                  await clearProfileTrafficLimit()
                 },
               ),
           },
@@ -506,7 +776,11 @@ export default function ClientActionsDialog({
           key: 'unblock',
           label: 'Снять блокировку',
           icon: <Unlock size={14} />,
-          hidden: !canManage || !['temp', 'permanent', 'expired'].includes(blockMode) || haReplicaReadonly,
+          hidden:
+            !canManage ||
+            (!['temp', 'permanent', 'expired', 'access_expired'].includes(blockMode) &&
+              blockReason !== 'access_expired') ||
+            haReplicaReadonly,
           onClick: handleWgUnblock,
         },
         {
@@ -534,8 +808,12 @@ export default function ClientActionsDialog({
             setLimitValue('10')
             setLimitUnit('GB')
             setLimitPeriodDays('7')
-            setPromptTitle('Лимит трафика')
-            setPromptMessage(`Укажите лимит для клиента «${config.client_name}»`)
+            setPromptTitle('Лимит трафика профиля')
+            setPromptMessage(
+              profileVpnTypes.size > 1
+                ? `Лимит для «${config.client_name}» применится ко всем конфигурациям: ${profileProtocolsLabel}`
+                : `Укажите лимит для клиента «${config.client_name}»`,
+            )
             setPromptMode('traffic-limit')
           },
         },
@@ -547,14 +825,15 @@ export default function ClientActionsDialog({
           onClick: () =>
             askConfirm(
               'Снять лимит трафика',
-              `Снять лимит трафика для «${config.client_name}»?`,
+              profileVpnTypes.size > 1
+                ? `Снять лимит у профиля «${config.client_name}» на всех конфигурациях (${profileProtocolsLabel})?`
+                : `Снять лимит трафика для «${config.client_name}»?`,
               async () => {
-                await wgClearTrafficLimit(config.client_name)
-                onNotifySuccess('Лимит трафика снят')
+                await clearProfileTrafficLimit()
               },
             ),
         },
-        ]
+      ]
 
   const dangerActions: ActionItem[] = [
     {
@@ -596,6 +875,13 @@ export default function ClientActionsDialog({
 
   const visibleManagement = managementActions.filter((a) => !a.hidden)
   const visibleDanger = dangerActions.filter((a) => !a.hidden)
+  // Only protocols this client_name actually has ( ∩ enabled modules), not all panel modules.
+  const availableUnlockProtocols: UnlockCodeProtocol[] = []
+  if (openvpnEnabled && profileVpnTypes.has('openvpn')) availableUnlockProtocols.push('openvpn')
+  // Portal may list AmneziaWG separately; access policy / unlock target is still `wireguard`.
+  if (wireguardFamilyEnabled && profileVpnTypes.has('wireguard')) availableUnlockProtocols.push('wireguard')
+  if (awg2Enabled && profileVpnTypes.has('amneziawg2')) availableUnlockProtocols.push('amneziawg2')
+  const unlockCodeInitialProtocols: UnlockCodeProtocol[] = availableUnlockProtocols
 
   type FileRow = {
     key: string
@@ -639,7 +925,7 @@ export default function ClientActionsDialog({
   }
 
   const handleMainOpenChange = (next: boolean) => {
-    if (!next && (busyAction !== null || promptMode !== null)) return
+    if (!next && (busyAction !== null || promptMode !== null || unlockCodeDialogOpen)) return
     onOpenChange(next)
   }
 
@@ -655,14 +941,17 @@ export default function ClientActionsDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={handleMainOpenChange}>
-        <DialogContent className="flex max-h-[min(90dvh,40rem)] max-w-md flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
-          <DialogHeader className="shrink-0 space-y-3 border-b px-6 pb-4 pt-6">
-            <div className="pr-6">
-              <DialogTitle className="text-xl font-semibold tracking-tight">{config.client_name}</DialogTitle>
-              <DialogDescription
-                className={config.description ? 'mt-1 line-clamp-2' : 'sr-only'}
-              >
-                {config.description || 'Управление VPN-конфигурацией клиента'}
+        <DialogContent className="flex max-h-[min(92dvh,52rem)] w-[calc(100vw-1.5rem)] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
+          <DialogHeader className="shrink-0 space-y-3 border-b bg-muted/10 px-6 pb-4 pt-6">
+            <div className="pr-8">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                Профиль конфигурации
+              </p>
+              <DialogTitle className="mt-1 text-xl font-semibold tracking-tight">
+                {config.client_name}
+              </DialogTitle>
+              <DialogDescription className="mt-1.5 line-clamp-2 text-sm text-muted-foreground">
+                {config.description?.trim() || 'Без описания — можно добавить ниже'}
               </DialogDescription>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -692,45 +981,230 @@ export default function ClientActionsDialog({
             </div>
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
-            {isAdmin && ownerCandidates.length > 0 && (
-              <section className="space-y-3">
-                <SectionTitle>Владелец</SectionTitle>
-                <ConfigOwnerSelect
-                  id={`owner-${config.id}`}
-                  users={ownerCandidates}
-                  value={config.owner_id}
-                  onChange={(ownerId) => void handleOwnerChange(ownerId)}
-                  disabled={busyAction !== null}
-                  currentOwner={
-                    config.owner_username
-                      ? { id: config.owner_id, username: config.owner_username }
-                      : undefined
-                  }
-                  description="Назначьте пользователя, который будет видеть этот конфиг в своём списке."
-                />
-              </section>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-5">
+            {(isOwner || (isAdmin && ownerCandidates.length > 0)) && (
+              <ProfileSection
+                title="Основное"
+                description="Описание видно на карточке. Владелец определяет, кто видит конфиг в своём списке."
+              >
+                <div className="space-y-4">
+                  {isOwner && (
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <Label htmlFor={`description-${config.id}`}>Описание</Label>
+                        <Input
+                          id={`description-${config.id}`}
+                          value={descriptionValue}
+                          onChange={(e) => setDescriptionValue(e.target.value)}
+                          placeholder="Необязательно"
+                          maxLength={255}
+                          disabled={busyAction !== null || haReplicaReadonly}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="shrink-0"
+                        disabled={
+                          busyAction !== null ||
+                          haReplicaReadonly ||
+                          descriptionValue.trim() === (config.description ?? '').trim()
+                        }
+                        onClick={() => void handleDescriptionSave()}
+                      >
+                        {busyAction === 'save-description' ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : null}
+                        Сохранить
+                      </Button>
+                    </div>
+                  )}
+                  {isAdmin && ownerCandidates.length > 0 && (
+                    <ConfigOwnerSelect
+                      id={`owner-${config.id}`}
+                      users={ownerCandidates}
+                      value={config.owner_id}
+                      onChange={(ownerId) => void handleOwnerChange(ownerId)}
+                      disabled={busyAction !== null}
+                      currentOwner={
+                        config.owner_username
+                          ? { id: config.owner_id, username: config.owner_username }
+                          : undefined
+                      }
+                    />
+                  )}
+                </div>
+              </ProfileSection>
             )}
 
             {visibleManagement.length > 0 && (
-              <section className="space-y-3">
-                <SectionTitle>Управление</SectionTitle>
-                <div className="grid grid-cols-2 gap-2">
+              <ProfileSection title="Управление" description="Быстрые действия для этого протокола.">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                   {visibleManagement.map((action) => (
                     <ActionButton key={action.key} action={action} busyAction={busyAction} />
                   ))}
                 </div>
-              </section>
+              </ProfileSection>
+            )}
+
+            {canManage && (
+              <ProfileSection
+                title="Доступ до"
+                description={
+                  <>
+                    {profileVpnTypes.size > 1
+                      ? `Дата отключения для всего профиля «${config.client_name}» (${profileProtocolsLabel}). Пустое значение убирает ограничение.`
+                      : `Дата отключения для протокола ${protocolLabel(tab)}. Пустое значение убирает ограничение.`}
+                    {haGroupHint ? (
+                      <>
+                        <br />
+                        {haGroupHint}
+                      </>
+                    ) : null}
+                  </>
+                }
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Label htmlFor="access-until">Дата</Label>
+                    <DatePickerField
+                      id="access-until"
+                      value={accessUntilValue}
+                      onChange={setAccessUntilValue}
+                      disabled={busyAction !== null || haReplicaReadonly}
+                      fromDate={panelToday()}
+                    />
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={busyAction !== null || haReplicaReadonly}
+                      onClick={() => void handleAccessUntilSave()}
+                    >
+                      {busyAction === 'access-until' ? <Loader2 size={14} className="animate-spin" /> : null}
+                      Сохранить
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={busyAction !== null || haReplicaReadonly || !accessUntilValue}
+                      onClick={() => setAccessUntilValue('')}
+                    >
+                      Сбросить
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  {policy?.access_until ? (
+                    <>
+                      Сейчас: <span className="font-mono">{formatDate(policy.access_until)}</span>
+                    </>
+                  ) : (
+                    'Сейчас ограничение не задано.'
+                  )}
+                </p>
+              </ProfileSection>
+            )}
+
+            {unlockCodesEnabled && availableUnlockProtocols.length > 0 && (
+              <ProfileSection
+                title="Unlock-ключ"
+                description="Создайте ключ продления с протоколами этого клиента."
+              >
+                <Button
+                  type="button"
+                  className="w-full sm:w-auto"
+                  variant="secondary"
+                  disabled={busyAction !== null || haReplicaReadonly}
+                  onClick={() => setUnlockCodeDialogOpen(true)}
+                >
+                  <Unlock size={14} />
+                  Создать unlock-ключ
+                </Button>
+              </ProfileSection>
+            )}
+
+            {clientPortalEnabled && (
+              <ProfileSection
+                title="Клиентский портал"
+                description={
+                  <>
+                    Постоянная ссылка на страницу установки для{' '}
+                    <span className="font-medium text-foreground">{config.client_name}</span>.
+                    {portalUrl ? (
+                      <>
+                        {' '}
+                        Текущая:{' '}
+                        <span className="break-all font-mono text-[11px] text-foreground/80">
+                          {portalUrl}
+                        </span>
+                      </>
+                    ) : null}
+                  </>
+                }
+              >
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={busyAction !== null || haReplicaReadonly}
+                    onClick={() => void handlePortalCopy()}
+                  >
+                    {busyAction === 'portal-copy' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Link2 size={14} />
+                    )}
+                    Скопировать ссылку
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={busyAction !== null || haReplicaReadonly}
+                    onClick={() => void handlePortalRotate()}
+                  >
+                    {busyAction === 'portal-rotate' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <RefreshCw size={14} />
+                    )}
+                    Перевыпустить
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={busyAction !== null || haReplicaReadonly}
+                    onClick={() =>
+                      askConfirm('Отозвать ссылку портала?', 'Старая ссылка перестанет открываться.', () =>
+                        handlePortalRevoke(),
+                      )
+                    }
+                  >
+                    {busyAction === 'portal-revoke' ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Ban size={14} />
+                    )}
+                    Отозвать
+                  </Button>
+                </div>
+              </ProfileSection>
             )}
 
             {fileRows.length > 0 && showQrDownloads && (
-              <section className="space-y-3">
-                <SectionTitle>Файлы и доступ</SectionTitle>
+              <ProfileSection title="Файлы и доступ" description="Скачивание, QR и одноразовые ссылки.">
                 <div className="space-y-2">
                   {fileRows.map((row) => (
                     <div
                       key={row.key}
-                      className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/50 px-3 py-2.5"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{row.label}</p>
@@ -786,28 +1260,11 @@ export default function ClientActionsDialog({
                     </div>
                   ))}
                 </div>
-              </section>
-            )}
-
-            {visibleDanger.length > 0 && (
-              <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-                <h3 className="mb-2.5 text-sm font-medium text-destructive">Опасные действия</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  {visibleDanger.map((action) => (
-                    <ActionButton
-                      key={action.key}
-                      action={action}
-                      busyAction={busyAction}
-                      destructive
-                    />
-                  ))}
-                </div>
-              </section>
+              </ProfileSection>
             )}
 
             {isAdmin && allTags.length > 0 && (
-              <section className="rounded-lg border p-3">
-                <h3 className="mb-2.5 text-sm font-medium">Теги</h3>
+              <ProfileSection title="Теги" description="Метки для фильтрации и группировки.">
                 <div className="flex flex-wrap gap-2">
                   {allTags.map((tag) => {
                     const active = (config.tags ?? []).some((t) => t.id === tag.id)
@@ -826,7 +1283,22 @@ export default function ClientActionsDialog({
                     )
                   })}
                 </div>
-              </section>
+              </ProfileSection>
+            )}
+
+            {visibleDanger.length > 0 && (
+              <ProfileSection title="Опасная зона" tone="danger">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {visibleDanger.map((action) => (
+                    <ActionButton
+                      key={action.key}
+                      action={action}
+                      busyAction={busyAction}
+                      destructive
+                    />
+                  ))}
+                </div>
+              </ProfileSection>
             )}
 
             {visibleManagement.length === 0 && fileRows.length === 0 && visibleDanger.length === 0 && (
@@ -928,18 +1400,17 @@ export default function ClientActionsDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="renewDate">Дата окончания сертификата</Label>
-              <Input
+              <DatePickerField
                 id="renewDate"
-                type="date"
-                min={todayStr()}
                 value={renewDate}
-                onChange={(e) => {
-                  setRenewDate(e.target.value)
-                  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(e.target.value)
+                allowClear={false}
+                fromDate={panelToday()}
+                onChange={(next) => {
+                  setRenewDate(next)
+                  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(next)
                   if (!match) return
                   const target = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
-                  const today = new Date()
-                  today.setHours(0, 0, 0, 0)
+                  const today = panelToday()
                   const diff = Math.round((target.getTime() - today.getTime()) / 86400000)
                   if (diff >= 1 && diff <= 3650) setRenewDays(String(diff))
                 }}
@@ -980,14 +1451,7 @@ export default function ClientActionsDialog({
               }
               setPromptMode(null)
               void runAction('traffic-limit', async () => {
-                if (isOpenVpn) {
-                  await openvpnSetTrafficLimit(config.client_name, value, limitUnit, period)
-                } else if (isAwg2) {
-                  await awg2SetTrafficLimit(config.client_name, value, limitUnit, period)
-                } else {
-                  await wgSetTrafficLimit(config.client_name, value, limitUnit, period)
-                }
-                onNotifySuccess('Лимит трафика установлен')
+                await applyProfileTrafficLimit(value, limitUnit, period)
               })
             }}
             className="space-y-4"
@@ -1028,6 +1492,12 @@ export default function ClientActionsDialog({
                 <option value="7">7 дней (пн–вс)</option>
                 <option value="30">30 дней (месяц)</option>
               </select>
+              {profileVpnTypes.size > 1 && (
+                <p className="text-xs text-muted-foreground">
+                  Применится ко всем конфигурациям профиля: {profileProtocolsLabel}
+                </p>
+              )}
+              {haGroupHint && <p className="text-xs text-muted-foreground">{haGroupHint}</p>}
             </div>
             {trafficLimitExceeded && (
               <p className="text-sm text-destructive">Клиент сейчас заблокирован по превышению лимита.</p>
@@ -1080,6 +1550,14 @@ export default function ClientActionsDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <UnlockCodeCreateDialog
+        open={unlockCodeDialogOpen}
+        onOpenChange={setUnlockCodeDialogOpen}
+        initialProtocols={unlockCodeInitialProtocols}
+        availableProtocols={availableUnlockProtocols}
+        initialClientNames={config.client_name ? [config.client_name] : []}
+      />
     </>
   )
 }

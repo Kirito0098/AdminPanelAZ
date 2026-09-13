@@ -10,6 +10,7 @@ import {
   Download,
   Gauge,
   KeyRound,
+  Link2,
   Loader2,
   MoreHorizontal,
   Network,
@@ -55,7 +56,7 @@ import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { cn } from '@/lib/utils'
 
-type ActionKey = 'download' | 'qr' | 'block' | 'unblock' | 'delete'
+type ActionKey = 'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy'
 
 interface ConfigCardProps {
   config: VpnConfig
@@ -70,6 +71,7 @@ interface ConfigCardProps {
   onSelectChange?: (checked: boolean) => void
   onOpenDetails: () => void
   onCopyName: () => void
+  onCopyPortalLink?: () => void
   onDownload: (path: string, filename: string) => void
   onQr: (path: string, filename: string) => void
   onBlock?: () => void
@@ -422,6 +424,7 @@ export default function ConfigCard({
   onSelectChange,
   onOpenDetails,
   onCopyName,
+  onCopyPortalLink,
   onDownload,
   onQr,
   onBlock,
@@ -733,6 +736,20 @@ export default function ConfigCard({
                 >
                   <BarChart3 size={14} className="shrink-0" />
                 </IconActionLink>
+              )}
+
+              {onCopyPortalLink && (
+                <IconActionButton
+                  title="Копировать ссылку портала"
+                  label="Ссылка"
+                  disabled={actionBusy}
+                  loading={loadingAction === 'portal-copy'}
+                  className={actionAccent?.className}
+                  style={actionAccent?.style}
+                  onClick={onCopyPortalLink}
+                >
+                  <Link2 size={14} className="shrink-0" />
+                </IconActionButton>
               )}
 
               <IconActionButton

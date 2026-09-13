@@ -1,11 +1,13 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Settings, User as UserIcon } from 'lucide-react'
-import { Navigate, useParams } from 'react-router-dom'
+import { Navigate, NavLink, useParams } from 'react-router-dom'
 import { ApiError, changePassword, createUser, deleteUser, getSettings, getUsers } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import MobileSettingsSectionPicker from '@/components/settings/MobileSettingsSectionPicker'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import DocsLink from '@/components/shared/DocsLink'
+import { DOCS } from '@/lib/docsUrls'
 import BackupTab from '@/components/settings/BackupTab'
 import ConfigDeliveryTab from '@/components/settings/ConfigDeliveryTab'
 import FeatureTogglesTab from '@/components/settings/FeatureTogglesTab'
@@ -14,11 +16,12 @@ import MonitoringTab from '@/components/settings/MonitoringTab'
 import PersonalTab from '@/components/settings/PersonalTab'
 import SecurityTab from '@/components/settings/SecurityTab'
 import {
-  getDefaultSection,
+  getVisibleNavGroups,
   isSectionAvailable,
   isValidSettingsSection,
   type SettingsSection,
 } from '@/components/settings/SettingsNav'
+import SettingsSectionBrowser from '@/components/settings/SettingsSectionBrowser'
 import { getSectionMeta } from '@/components/settings/settingsLabels'
 import PanelOpsTab from '@/components/settings/PanelOpsTab'
 import RunbookTab from '@/components/settings/RunbookTab'
@@ -57,14 +60,17 @@ export default function SettingsPage() {
   const [newPwd, setNewPwd] = useState('')
   const isAdmin = user?.role === 'admin'
 
-  const defaultSection = getDefaultSection(isAdmin)
-
   const activeSection = useMemo((): SettingsSection | null => {
     if (!sectionParam) return null
     if (!isValidSettingsSection(sectionParam)) return null
     if (!isSectionAvailable(sectionParam, isAdmin, isSettingsTabEnabled, isEnabled)) return null
     return sectionParam
   }, [sectionParam, isAdmin, isSettingsTabEnabled, isEnabled])
+
+  const visibleGroups = useMemo(
+    () => getVisibleNavGroups(isAdmin, isSettingsTabEnabled, isEnabled),
+    [isAdmin, isSettingsTabEnabled, isEnabled],
+  )
 
   // GET /settings reads active-node config files — only maintenance uses the parent payload.
   // Users are panel-wide. Personal and other tabs self-fetch; skip reloads on node switch.
@@ -177,14 +183,35 @@ export default function SettingsPage() {
     return <Navigate to="/settings/vpn_network?tab=cloudflare" replace />
   }
 
-  if (!activeSection) {
-    return <Navigate to={`/settings/${defaultSection}`} replace />
+  if (sectionParam && !activeSection) {
+    return <Navigate to="/settings" replace />
   }
 
-  const sectionMeta = getSectionMeta(activeSection)
+  if (!sectionParam) {
+    return (
+      <div className="flex flex-col gap-6 orientation-compact-settings-page">
+        <HaReplicaBanner />
+        <PageSectionHeader
+          icon={isAdmin ? Settings : UserIcon}
+          title={isAdmin ? 'Настройки' : 'Мой профиль'}
+          titleAddon={<NodeBadge name={activeNode?.name ?? settings?.node_name} status={activeNode?.status} />}
+          description={
+            isAdmin
+              ? 'Профиль, доступ, VPN и работа панели — выберите раздел'
+              : 'Тема, пароль, Telegram и дополнительная защита при входе'
+          }
+          docsHref={isAdmin ? DOCS.settings : DOCS.profile}
+        />
+        <SettingsSectionBrowser groups={visibleGroups} variant="hub" />
+      </div>
+    )
+  }
+
+  const section = activeSection as SettingsSection
+  const sectionMeta = getSectionMeta(section)
 
   const renderSection = () => {
-    switch (activeSection) {
+    switch (section) {
       case 'personal':
         return (
           <PersonalTab
@@ -247,24 +274,44 @@ export default function SettingsPage() {
         titleAddon={<NodeBadge name={activeNode?.name ?? settings?.node_name} status={activeNode?.status} />}
         description={
           isAdmin
-            ? 'Настройте профиль, доступ, VPN и работу панели — разделы в боковом меню «Система»'
+            ? 'Профиль, доступ, VPN и работа панели'
             : 'Тема, пароль, Telegram и дополнительная защита при входе'
         }
+        docsHref={isAdmin ? DOCS.settings : DOCS.profile}
       />
 
-      <MobileSettingsSectionPicker value={activeSection} />
-
-      <div className="flex flex-col gap-4 orientation-compact-settings-section">
-        <div className="orientation-compact-settings-section-header">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h3 className="text-base font-semibold tracking-tight">{sectionMeta.title}</h3>
-            <p className="text-xs text-muted-foreground">{sectionMeta.description}</p>
-          </div>
-          {sectionMeta.hint ? (
-            <p className="mt-1 text-xs text-muted-foreground/80">{sectionMeta.hint}</p>
-          ) : null}
+      <div className="flex items-center justify-between gap-3 lg:hidden">
+        <div className="min-w-0 flex-1">
+          <MobileSettingsSectionPicker value={section} />
         </div>
-        {renderSection()}
+        <NavLink
+          to="/settings"
+          className="shrink-0 text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          Все настройки
+        </NavLink>
+      </div>
+
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+        <aside className="hidden w-56 shrink-0 lg:sticky lg:top-4 lg:block">
+          <SettingsSectionBrowser groups={visibleGroups} variant="nav" activeSection={section} />
+        </aside>
+
+        <div className="min-w-0 flex-1 flex flex-col gap-4 orientation-compact-settings-section">
+          <div className="orientation-compact-settings-section-header">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h3 className="text-base font-semibold tracking-tight">{sectionMeta.title}</h3>
+              <p className="text-xs text-muted-foreground">{sectionMeta.description}</p>
+              {sectionMeta.docsHref ? (
+                <DocsLink href={sectionMeta.docsHref} className="shrink-0" />
+              ) : null}
+            </div>
+            {sectionMeta.hint ? (
+              <p className="mt-1 text-xs text-muted-foreground/80">{sectionMeta.hint}</p>
+            ) : null}
+          </div>
+          {renderSection()}
+        </div>
       </div>
     </div>
   )

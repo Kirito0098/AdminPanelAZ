@@ -15,6 +15,7 @@ from app.models import Node
 from app.services.action_log import log_action
 from app.services.node_adapter import RemoteNodeAdapter
 from app.services.node_manager import get_api_key_plain, store_api_key
+from app.services.node_transport import get_transport
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def rotate_node_api_key(db: Session, node: Node, *, actor_username: str | None =
         host=node.host,
         port=node.port,
         api_key=old_key,
-        mtls_enabled=bool(node.mtls_enabled),
+        mtls_enabled=get_transport(node).is_tls,
     )
     adapter.rotate_api_key(new_key)
 
@@ -71,15 +72,23 @@ def _nodes_due_for_rotation(db: Session) -> list[Node]:
     )
 
 
+def _is_key_rotation_enabled() -> bool:
+    """Runtime gate — FEATURE_KEY_ROTATION_ENABLED can flip without restart."""
+    from app.services.feature_guards import get_feature_service
+
+    settings = get_settings()
+    return bool(settings.node_api_key_rotation_days > 0) and get_feature_service().is_enabled("key_rotation")
+
+
 async def run_node_key_rotation_loop() -> None:
-    """Key rotation loop — re-checks node_api_key_rotation_days each tick."""
+    """Key rotation loop — re-checks FEATURE_KEY_ROTATION_ENABLED and settings each tick."""
     while True:
         settings = get_settings()
         interval = max(3600, int(settings.node_api_key_rotation_check_hours or 24) * 3600)
         await asyncio.sleep(interval)
         settings = get_settings()
-        if settings.node_api_key_rotation_days <= 0:
-            logger.debug("node_key_rotation skipped — rotation days disabled")
+        if not _is_key_rotation_enabled():
+            logger.debug("node_key_rotation skipped — FEATURE_KEY_ROTATION_ENABLED disabled or rotation days off")
             continue
         db = SessionLocal()
         try:

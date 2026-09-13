@@ -123,6 +123,52 @@ class NodeMtlsStatusResponse(BaseModel):
     agent_certs_count: int = 0
 
 
+class NodeTransportItem(BaseModel):
+    id: str
+    label: str
+    available: bool
+
+
+class NodeTransportsResponse(BaseModel):
+    items: list[NodeTransportItem]
+
+
+class NodeTransportUpdate(BaseModel):
+    transport: str
+    ssh_host: str | None = Field(default=None, max_length=255)
+    ssh_port: int | None = Field(default=None, ge=1, le=65535)
+    ssh_username: str | None = Field(default=None, max_length=128)
+    ssh_private_key: str | None = None
+    ssh_passphrase: str | None = None
+    ssh_remote_agent_host: str | None = Field(default=None, max_length=255)
+    ssh_remote_agent_port: int | None = Field(default=None, ge=1, le=65535)
+
+    @field_validator(
+        "transport",
+        "ssh_host",
+        "ssh_username",
+        "ssh_private_key",
+        "ssh_passphrase",
+        "ssh_remote_agent_host",
+        mode="before",
+    )
+    @classmethod
+    def _strip_transport_strings(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+
+class NodeTransportPreflightResponse(BaseModel):
+    ok: bool
+    current: str
+    wanted: str
+    message: str
+    hint: str | None = None
+    probe_status: str | None = None
+    probe_error: str | None = None
+
+
 class NodeRemoteHostsBody(BaseModel):
     hosts: list[str] = Field(default_factory=list)
     apply_to_wireguard: bool = False
@@ -695,17 +741,21 @@ class BackupEntry(BaseModel):
     created_at: str
     components: list[str] = []
     summary: str = ""
+    restore_message: str | None = None
+    restore_detail: dict[str, Any] | None = None
 
 
 class BackupCreateRequest(BaseModel):
     include_configs: bool = False
     include_antizapret_backup: bool = False
+    include_awg2_backup: bool = False
     send_to_telegram: bool = False
 
 
 class BackupTestTelegramRequest(BaseModel):
     include_configs: bool = False
     include_antizapret_backup: bool = False
+    include_awg2_backup: bool = False
 
 
 class BackupRestoreRequest(BaseModel):
@@ -717,6 +767,7 @@ class BackupSettingsResponse(BaseModel):
     auto_backup_days: int = 7
     telegram_on_backup: bool = False
     backup_az_enabled: bool = True
+    backup_awg2_enabled: bool = True
     retention_count: int = 5
 
 
@@ -725,6 +776,7 @@ class BackupSettingsUpdate(BaseModel):
     auto_backup_days: int | None = Field(default=None, ge=1, le=90)
     telegram_on_backup: bool | None = None
     backup_az_enabled: bool | None = None
+    backup_awg2_enabled: bool | None = None
     retention_count: int | None = Field(default=None, ge=1, le=30)
 
 
@@ -1059,6 +1111,28 @@ class VpnNetworkPublishRequest(BaseModel):
     ssl_key: str | None = Field(default=None, max_length=1024)
     access_path: str | None = Field(default=None, max_length=255)
     nginx_subpath_integrate: bool = False
+    configure_portal: bool = False
+    portal_domain: str | None = Field(default=None, max_length=255)
+
+
+class PortalPublishRequest(BaseModel):
+    portal_domain: str = Field(min_length=1, max_length=255)
+    email: str | None = Field(default=None, max_length=255)
+    save_domain: bool = True
+
+
+class PortalPublishStatusResponse(BaseModel):
+    portal_domain: str = ""
+    suggested_portal_domain: str = ""
+    panel_domain: str = ""
+    active_publish_mode: str | None = None
+    portal_vhost_ok: bool = False
+    portal_cert_ok: bool = False
+    portal_ready: bool = False
+    server_primary_ip: str | None = None
+    dns_hint: str = ""
+    warnings: list[str] = []
+    portal_access_url: str = ""
 
 
 class VpnNetworkSettingsResponse(BaseModel):
@@ -1083,6 +1157,10 @@ class VpnNetworkSettingsResponse(BaseModel):
     server_primary_ip: str | None = None
     az_vpn_hosts: list[str] = []
     az_vpn_conflict_hint: str | None = None
+    suggested_portal_domain: str | None = None
+    portal_domain: str | None = None
+    portal_ready: bool | None = None
+    portal_dns_hint: str | None = None
 
 
 class VpnNetworkDomainSslStatusResponse(BaseModel):
@@ -1233,6 +1311,30 @@ class NodeCreate(NodeBase):
     api_key: str | None = Field(default=None, min_length=8)
     destination_ip: str | None = Field(default=None, max_length=64)
     linked_vpn_node_id: int | None = None
+    # Connection method at create time (default HTTP). SSH needs credentials below.
+    transport: str = Field(default="http", max_length=16)
+    ssh_host: str | None = Field(default=None, max_length=255)
+    ssh_port: int | None = Field(default=None, ge=1, le=65535)
+    ssh_username: str | None = Field(default=None, max_length=128)
+    ssh_private_key: str | None = None
+    ssh_passphrase: str | None = None
+    ssh_remote_agent_host: str | None = Field(default=None, max_length=255)
+    ssh_remote_agent_port: int | None = Field(default=None, ge=1, le=65535)
+
+    @field_validator(
+        "transport",
+        "ssh_host",
+        "ssh_username",
+        "ssh_private_key",
+        "ssh_passphrase",
+        "ssh_remote_agent_host",
+        mode="before",
+    )
+    @classmethod
+    def _strip_create_transport_strings(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
 
 class NodeUpdate(BaseModel):
@@ -1248,7 +1350,14 @@ class NodeResponse(NodeBase):
     id: int
     status: NodeStatus
     is_local: bool
+    transport: str = "http"
     mtls_enabled: bool = False
+    ssh_host: str | None = None
+    ssh_port: int = 22
+    ssh_username: str | None = None
+    ssh_key_configured: bool = False
+    ssh_remote_agent_host: str | None = None
+    ssh_remote_agent_port: int | None = None
     destination_ip: str | None = None
     linked_vpn_node_id: int | None = None
     last_seen_at: datetime | None = None

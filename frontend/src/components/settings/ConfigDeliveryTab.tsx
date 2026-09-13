@@ -153,7 +153,12 @@ export default function ConfigDeliveryTab() {
           ? 'Файлы маршрутов для роутеров и временные QR-ссылки на профили'
           : openvpnEnabled
             ? 'Готовые конфиги маршрутизации для домашних роутеров'
-            : 'Временные ссылки и QR-коды для передачи профиля клиенту'}
+            : 'Временные ссылки и QR-коды для передачи профиля клиенту'}{' '}
+        Портал и unlock-ключи — в разделе{' '}
+        <Link to="/subscription" className="font-medium text-foreground underline-offset-2 hover:underline">
+          Подписка
+        </Link>
+        .
       </p>
 
       <div
@@ -163,154 +168,154 @@ export default function ConfigDeliveryTab() {
         )}
       >
         {openvpnEnabled && (
-            <Card className="flex h-full flex-col shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Router size={18} />
-                  Скачивание маршрутов
-                </CardTitle>
-                <CardDescription>
-                  Keenetic, MikroTik и TP-Link — после настройки маршрутизации
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-1 flex-col space-y-4">
-                <ToggleRow
-                  id="public-download"
-                  label="Ссылка для клиента без входа в панель"
-                  description="Если выключено — файлы можно скачать только здесь, будучи авторизованным"
-                  checked={settings.public_download_enabled}
-                  onCheckedChange={(checked) => saveWithPatch({ public_download_enabled: checked })}
-                />
+          <Card className="flex h-full flex-col shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Router size={18} />
+                Скачивание маршрутов
+              </CardTitle>
+              <CardDescription>
+                Keenetic, MikroTik и TP-Link — после настройки маршрутизации
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-1 flex-col space-y-4">
+              <ToggleRow
+                id="public-download"
+                label="Ссылка для клиента без входа в панель"
+                description="Если выключено — файлы можно скачать только здесь, будучи авторизованным"
+                checked={settings.public_download_enabled}
+                onCheckedChange={(checked) => saveWithPatch({ public_download_enabled: checked })}
+              />
 
-                {settings.public_download_enabled && (
-                  <SettingsAlert variant="warning" title="Публичный доступ">
-                    Любой с ссылкой сможет скачать маршруты. Не публикуйте ссылку в открытых чатах.
-                  </SettingsAlert>
-                )}
+              {settings.public_download_enabled && (
+                <SettingsAlert variant="warning" title="Публичный доступ">
+                  Любой с ссылкой сможет скачать маршруты. Не публикуйте ссылку в открытых чатах.
+                </SettingsAlert>
+              )}
 
-                <RouteResultsPanel showPublicLinks={settings.public_download_enabled} />
-              </CardContent>
-            </Card>
+              <RouteResultsPanel showPublicLinks={settings.public_download_enabled} />
+            </CardContent>
+          </Card>
         )}
 
         {qrDownloadsEnabled && (
-            <Card className="flex h-full flex-col shadow-sm">
-              <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <QrCode size={18} />
-                    {bothSections ? 'QR-ссылки' : 'Ссылки и QR-коды'}
-                  </CardTitle>
-                  <CardDescription className="mt-1.5">
-                    Срок, лимит скачиваний и опциональный PIN
-                  </CardDescription>
+          <Card className="flex h-full flex-col shadow-sm">
+            <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <QrCode size={18} />
+                  {bothSections ? 'QR-ссылки' : 'Ссылки и QR-коды'}
+                </CardTitle>
+                <CardDescription className="mt-1.5">
+                  Срок, лимит скачиваний и опциональный PIN
+                </CardDescription>
+              </div>
+              <Button variant="outline" size="sm" className="shrink-0 gap-1.5" asChild>
+                <Link to="/logs?tab=qr-downloads">
+                  <ClipboardList size={14} />
+                  Журнал
+                </Link>
+              </Button>
+            </CardHeader>
+            <CardContent className="flex flex-1 flex-col space-y-4">
+              <div className="rounded-xl border bg-muted/20 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <Timer size={14} className="text-muted-foreground" />
+                  <Label className="text-sm">Срок действия ссылки</Label>
                 </div>
-                <Button variant="outline" size="sm" className="shrink-0 gap-1.5" asChild>
-                  <Link to="/logs?tab=qr-downloads">
-                    <ClipboardList size={14} />
-                    Журнал
-                  </Link>
-                </Button>
-              </CardHeader>
-              <CardContent className="flex flex-1 flex-col space-y-4">
-                <div className="rounded-xl border bg-muted/20 p-4">
-                  <div className="mb-3 flex items-center gap-2">
-                    <Timer size={14} className="text-muted-foreground" />
-                    <Label className="text-sm">Срок действия ссылки</Label>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {TTL_PRESETS_MIN.map((min) => (
-                      <button
-                        key={min}
-                        type="button"
-                        onClick={() => setSettings({ ...settings, qr_download_ttl_seconds: min * 60 })}
-                        className={cn(
-                          'rounded-lg border px-3 py-2 text-sm font-medium transition-all',
-                          ttlMinutes === min
-                            ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
-                            : 'hover:border-muted-foreground/30 hover:bg-muted/50',
-                        )}
-                      >
-                        {min < 60 ? `${min} мин` : `${min / 60} ч`}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min={1}
-                      max={1440}
-                      className="h-9 w-24"
-                      value={ttlMinutes}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          qr_download_ttl_seconds: Math.max(60, Number(e.target.value) * 60),
-                        })
-                      }
-                    />
-                    <span className="text-sm text-muted-foreground">минут</span>
-                  </div>
+                <div className="flex flex-wrap gap-2">
+                  {TTL_PRESETS_MIN.map((min) => (
+                    <button
+                      key={min}
+                      type="button"
+                      onClick={() => setSettings({ ...settings, qr_download_ttl_seconds: min * 60 })}
+                      className={cn(
+                        'rounded-lg border px-3 py-2 text-sm font-medium transition-all',
+                        ttlMinutes === min
+                          ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+                          : 'hover:border-muted-foreground/30 hover:bg-muted/50',
+                      )}
+                    >
+                      {min < 60 ? `${min} мин` : `${min / 60} ч`}
+                    </button>
+                  ))}
                 </div>
-
-                <div className="rounded-xl border bg-muted/20 p-4">
-                  <div className="mb-3 flex items-center gap-2">
-                    <Download size={14} className="text-muted-foreground" />
-                    <Label className="text-sm">Сколько раз можно скачать по одной ссылке</Label>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {MAX_DOWNLOAD_OPTIONS.map((n) => (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => setSettings({ ...settings, qr_download_max_downloads: n })}
-                        className={cn(
-                          'rounded-lg border px-4 py-2 text-sm font-medium transition-all',
-                          settings.qr_download_max_downloads === n
-                            ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
-                            : 'hover:border-muted-foreground/30 hover:bg-muted/50',
-                        )}
-                      >
-                        {n} {n === 1 ? 'раз' : 'раза'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border bg-muted/20 p-4">
-                  <div className="mb-3 flex items-center gap-2">
-                    <Shield size={14} className="text-muted-foreground" />
-                    <Label htmlFor="qr-pin" className="text-sm">
-                      PIN-код (необязательно)
-                    </Label>
-                    {settings.qr_download_pin_set && (
-                      <Badge variant="secondary" className="text-[10px]">
-                        задан
-                      </Badge>
-                    )}
-                  </div>
+                <div className="mt-3 flex items-center gap-2">
                   <Input
-                    id="qr-pin"
-                    type="password"
-                    value={qrPin}
-                    onChange={(e) => setQrPin(e.target.value)}
-                    placeholder={settings.qr_download_pin_set ? '••••••••' : 'Без PIN — ссылка откроется сразу'}
+                    type="number"
+                    min={1}
+                    max={1440}
+                    className="h-9 w-24"
+                    value={ttlMinutes}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        qr_download_ttl_seconds: Math.max(60, Number(e.target.value) * 60),
+                      })
+                    }
                   />
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Клиент введёт PIN при открытии ссылки. Оставьте пустым, чтобы не менять текущий PIN.
-                  </p>
+                  <span className="text-sm text-muted-foreground">минут</span>
                 </div>
+              </div>
 
-                <div className="mt-auto flex justify-end border-t pt-4">
-                  <Button onClick={save} disabled={saving} className="gap-1.5">
-                    <Save size={16} />
-                    {saving ? 'Сохранение...' : 'Сохранить'}
-                  </Button>
+              <div className="rounded-xl border bg-muted/20 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <Download size={14} className="text-muted-foreground" />
+                  <Label className="text-sm">Сколько раз можно скачать по одной ссылке</Label>
                 </div>
-              </CardContent>
-            </Card>
+                <div className="flex flex-wrap gap-2">
+                  {MAX_DOWNLOAD_OPTIONS.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setSettings({ ...settings, qr_download_max_downloads: n })}
+                      className={cn(
+                        'rounded-lg border px-4 py-2 text-sm font-medium transition-all',
+                        settings.qr_download_max_downloads === n
+                          ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+                          : 'hover:border-muted-foreground/30 hover:bg-muted/50',
+                      )}
+                    >
+                      {n} {n === 1 ? 'раз' : 'раза'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border bg-muted/20 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <Shield size={14} className="text-muted-foreground" />
+                  <Label htmlFor="qr-pin" className="text-sm">
+                    PIN-код (необязательно)
+                  </Label>
+                  {settings.qr_download_pin_set && (
+                    <Badge variant="secondary" className="text-[10px]">
+                      задан
+                    </Badge>
+                  )}
+                </div>
+                <Input
+                  id="qr-pin"
+                  type="password"
+                  value={qrPin}
+                  onChange={(e) => setQrPin(e.target.value)}
+                  placeholder={settings.qr_download_pin_set ? '••••••••' : 'Без PIN — ссылка откроется сразу'}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Клиент введёт PIN при открытии ссылки. Оставьте пустым, чтобы не менять текущий PIN.
+                </p>
+              </div>
+
+              <div className="mt-auto flex justify-end border-t pt-4">
+                <Button onClick={save} disabled={saving} className="gap-1.5">
+                  <Save size={16} />
+                  {saving ? 'Сохранение...' : 'Сохранить'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         )}
-        </div>
+      </div>
     </div>
   )
 }

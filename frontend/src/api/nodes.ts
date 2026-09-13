@@ -19,6 +19,37 @@ export async function enableNodeMtls(nodeId: number) {
   )
 }
 
+export async function listNodeTransports() {
+  return apiFetch<{ items: import('../types').NodeTransportOption[] }>('/nodes/transports')
+}
+
+export async function patchNodeTransport(
+  nodeId: number,
+  transportOrBody: import('../types').NodeTransportId | import('../types').NodeTransportPatchBody,
+) {
+  const body =
+    typeof transportOrBody === 'string' ? { transport: transportOrBody } : transportOrBody
+  return apiFetch<import('../types').Node>(`/nodes/${nodeId}/transport`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function preflightNodeTransport(
+  nodeId: number,
+  transportOrBody: import('../types').NodeTransportId | import('../types').NodeTransportPatchBody,
+) {
+  const body =
+    typeof transportOrBody === 'string' ? { transport: transportOrBody } : transportOrBody
+  return apiFetch<import('../types').NodeTransportPreflightResult>(
+    `/nodes/${nodeId}/transport/preflight`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  )
+}
+
 export async function getNodeMtlsStatus() {
   return apiFetch<import('../types').NodeMtlsStatus>('/nodes/mtls/status')
 }
@@ -39,6 +70,14 @@ export async function createNode(data: {
   node_kind?: import('../types').NodeKind | string
   destination_ip?: string | null
   linked_vpn_node_id?: number | null
+  transport?: import('../types').NodeTransportId
+  ssh_host?: string | null
+  ssh_port?: number | null
+  ssh_username?: string | null
+  ssh_private_key?: string | null
+  ssh_passphrase?: string | null
+  ssh_remote_agent_host?: string | null
+  ssh_remote_agent_port?: number | null
 }) {
   return apiFetch<import('../types').Node>('/nodes', {
     method: 'POST',

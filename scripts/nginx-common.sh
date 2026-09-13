@@ -1022,3 +1022,318 @@ nginx_remove_site() {
     nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null || true
   fi
 }
+
+# Добавить origin в CORS_ORIGINS (.env), не затирая существующие.
+nginx_cors_add_origin() {
+  local origin="$1"
+  [[ -n "$origin" ]] || return 0
+  local current
+  current="$(nginx_env_get CORS_ORIGINS)"
+  if [[ -z "$current" ]]; then
+    nginx_env_set CORS_ORIGINS "$origin"
+    return 0
+  fi
+  case ",${current}," in
+    *",${origin},"*) return 0 ;;
+  esac
+  nginx_env_set CORS_ORIGINS "${current},${origin}"
+}
+
+nginx_cors_add_portal_origins() {
+  local portal_domain="$1"
+  local scheme="${2:-https}"
+  local port="${3:-}"
+  portal_domain="$(nginx_normalize_host "$portal_domain")"
+  [[ -n "$portal_domain" ]] || return 0
+  local host="$portal_domain"
+  if [[ -n "$port" && "$port" != "443" && "$scheme" == "https" ]]; then
+    host="${portal_domain}:${port}"
+  elif [[ -n "$port" && "$port" != "80" && "$scheme" == "http" ]]; then
+    host="${portal_domain}:${port}"
+  fi
+  nginx_cors_add_origin "${scheme}://${host}"
+  if [[ "$scheme" == "https" ]]; then
+    nginx_cors_add_origin "http://${host}"
+  fi
+}
+
+# 0 = cert covers hostname (CN or SAN).
+nginx_cert_covers_host() {
+  local cert="$1"
+  local host="$2"
+  host="$(nginx_normalize_host "$host")"
+  [[ -f "$cert" && -n "$host" ]] || return 1
+  local text
+  text="$(openssl x509 -in "$cert" -noout -text 2>/dev/null)" || return 1
+  echo "$text" | grep -Eiq "DNS:${host}(,|$| )" && return 0
+  echo "$text" | grep -Eiq "DNS:\\*\\.${host#*.}" && return 0
+  local cn
+  cn="$(openssl x509 -in "$cert" -noout -subject 2>/dev/null | sed -n 's/.*CN *= *\([^/,]*\).*/\1/p')"
+  [[ "$(nginx_normalize_host "$cn")" == "$host" ]]
+}
+
+# Let's Encrypt for one or more -d names. First domain is the cert lineage directory name.
+nginx_obtain_letsencrypt_cert_hosts() {
+  local email="$1"
+  shift
+  local -a hosts=("$@")
+  [[ ${#hosts[@]} -ge 1 ]] || nginx_die "nginx_obtain_letsencrypt_cert_hosts: нет доменов"
+  local primary="${hosts[0]}"
+  local cert_path="/etc/letsencrypt/live/${primary}/fullchain.pem"
+  local -a d_args=()
+  local h
+  for h in "${hosts[@]}"; do
+    h="$(nginx_normalize_host "$h")"
+    [[ -n "$h" ]] || continue
+    d_args+=(-d "$h")
+  done
+  [[ ${#d_args[@]} -ge 1 ]] || nginx_die "nginx_obtain_letsencrypt_cert_hosts: пустые домены"
+
+  local need_issue=true
+  if [[ -f "$cert_path" ]]; then
+    need_issue=false
+    for h in "${hosts[@]}"; do
+      h="$(nginx_normalize_host "$h")"
+      if ! nginx_cert_covers_host "$cert_path" "$h"; then
+        need_issue=true
+        break
+      fi
+    done
+  fi
+  if [[ "$need_issue" != "true" ]]; then
+    nginx_log "Сертификат Let's Encrypt уже покрывает: ${hosts[*]}"
+    return 0
+  fi
+
+  nginx_ensure_certbot || nginx_die "Не удалось установить certbot"
+  mkdir -p /var/www/html/.well-known/acme-challenge
+
+  local certbot_ok=false
+  local expand_flag=()
+  [[ -f "$cert_path" ]] && expand_flag=(--expand)
+
+  if systemctl is-active nginx >/dev/null 2>&1; then
+    nginx_log "certbot webroot для: ${hosts[*]}"
+    if [[ -n "$email" ]]; then
+      certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos -m "$email" \
+        "${expand_flag[@]}" "${d_args[@]}" && certbot_ok=true || true
+    else
+      certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos --register-unsafely-without-email \
+        "${expand_flag[@]}" "${d_args[@]}" && certbot_ok=true || true
+    fi
+  fi
+
+  if [[ "$certbot_ok" == "true" && -f "$cert_path" ]]; then
+    nginx_log "Let's Encrypt получен (webroot): ${hosts[*]}"
+    return 0
+  fi
+
+  nginx_log "Webroot не сработал — certbot standalone для: ${hosts[*]}"
+  systemctl stop nginx 2>/dev/null || true
+  nginx_temp_clear_port80_nat
+
+  if [[ -n "$email" ]]; then
+    certbot certonly --standalone --non-interactive --agree-tos -m "$email" \
+      "${expand_flag[@]}" "${d_args[@]}" || {
+      nginx_restore_port80_nat
+      systemctl start nginx 2>/dev/null || true
+      nginx_die "Не удалось получить сертификат Let's Encrypt для ${hosts[*]}"
+    }
+  else
+    certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email \
+      "${expand_flag[@]}" "${d_args[@]}" || {
+      nginx_restore_port80_nat
+      systemctl start nginx 2>/dev/null || true
+      nginx_die "Не удалось получить сертификат Let's Encrypt для ${hosts[*]}"
+    }
+  fi
+
+  nginx_restore_port80_nat
+  systemctl start nginx 2>/dev/null || true
+  [[ -f "$cert_path" ]] || nginx_die "Сертификат не найден после certbot: $cert_path"
+}
+
+nginx_generate_selfsigned_hosts() {
+  local cert_out="$1"
+  local key_out="$2"
+  shift 2
+  local -a hosts=("$@")
+  [[ ${#hosts[@]} -ge 1 ]] || nginx_die "nginx_generate_selfsigned_hosts: нет имён"
+  local primary="${hosts[0]}"
+  mkdir -p "$(dirname "$cert_out")" "$(dirname "$key_out")"
+  local san="" h
+  for h in "${hosts[@]}"; do
+    h="$(nginx_normalize_host "$h")"
+    [[ -n "$h" ]] || continue
+    if [[ -n "$san" ]]; then
+      san="${san},DNS:${h}"
+    else
+      san="DNS:${h}"
+    fi
+  done
+  local tmp
+  tmp="$(mktemp)"
+  cat >"$tmp" <<EOF
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_req
+prompt = no
+[req_distinguished_name]
+CN = ${primary}
+[v3_req]
+subjectAltName = ${san}
+EOF
+  openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout "$key_out" -out "$cert_out" \
+    -config "$tmp" -extensions v3_req >/dev/null 2>&1 || {
+    rm -f "$tmp"
+    nginx_die "Не удалось создать самоподписанный сертификат"
+  }
+  rm -f "$tmp"
+  nginx_log "Самоподписанный сертификат: ${hosts[*]} → ${cert_out}"
+}
+
+nginx_render_portal_template() {
+  local portal_domain="$1"
+  local backend_port="$2"
+  local ssl_cert="$3"
+  local ssl_key="$4"
+  local https_port="${5:-443}"
+  local http_port="${6:-80}"
+  # Portal subdomain always serves at root (not panel ACCESS_PATH).
+  ACCESS_PATH="" nginx_render_template \
+    "$NGINX_TEMPLATE_DIR/adminpanelaz-portal.conf.template" \
+    "$portal_domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port"
+}
+
+nginx_install_portal_vhost() {
+  local portal_domain="$1"
+  local backend_port="$2"
+  local ssl_cert="$3"
+  local ssl_key="$4"
+  local https_port="${5:-443}"
+  local http_port="${6:-80}"
+  local conf
+  conf="$(nginx_render_portal_template "$portal_domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")"
+  nginx_install_site "$conf" "$portal_domain" "true"
+}
+
+# Main entry: provision portal host for current PUBLISH_MODE.
+# Env: PORTAL_DOMAIN (required), DOMAIN, EMAIL, BACKEND_PORT, HTTPS_PUBLIC_PORT, HTTP_ACME_PORT, SSL_CERT, SSL_KEY
+nginx_provision_portal_domain() {
+  local portal_domain
+  portal_domain="$(nginx_normalize_host "${1:-${PORTAL_DOMAIN:-}}")"
+  [[ -n "$portal_domain" ]] || nginx_die "PORTAL_DOMAIN не задан"
+
+  local panel_domain
+  panel_domain="$(nginx_normalize_host "$(nginx_env_get DOMAIN)")"
+  [[ -z "$panel_domain" ]] && panel_domain="$(nginx_normalize_host "${DOMAIN:-}")"
+
+  if [[ -n "$panel_domain" && "$portal_domain" == "$panel_domain" ]]; then
+    nginx_die "Хост портала не должен совпадать с доменом панели (${panel_domain})"
+  fi
+  nginx_assert_domain_not_az_vpn_host "$portal_domain"
+
+  local mode
+  mode="${PUBLISH_MODE:-}"
+  if [[ -z "$mode" ]]; then
+    mode="$(nginx_env_get PUBLISH_MODE)"
+  fi
+  mode="${mode:-}"
+  local backend_port https_port http_port email
+  backend_port="${BACKEND_PORT:-$(nginx_env_get BACKEND_PORT)}"
+  backend_port="${backend_port:-8000}"
+  https_port="${HTTPS_PUBLIC_PORT:-$(nginx_env_get HTTPS_PUBLIC_PORT)}"
+  https_port="${https_port:-443}"
+  http_port="${HTTP_ACME_PORT:-$(nginx_env_get HTTP_ACME_PORT)}"
+  http_port="${http_port:-80}"
+  email="${EMAIL:-}"
+
+  local ssl_cert ssl_key
+  ssl_cert="${SSL_CERT:-$(nginx_env_get SSL_CERT)}"
+  ssl_key="${SSL_KEY:-$(nginx_env_get SSL_KEY)}"
+
+  case "$mode" in
+    nginx_le)
+      nginx_ensure_nginx || nginx_die "Не удалось установить nginx"
+      nginx_obtain_letsencrypt_cert_hosts "$email" "$portal_domain"
+      ssl_cert="/etc/letsencrypt/live/${portal_domain}/fullchain.pem"
+      ssl_key="/etc/letsencrypt/live/${portal_domain}/privkey.pem"
+      nginx_install_portal_vhost "$portal_domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port"
+      nginx_cors_add_portal_origins "$portal_domain" "https" "$https_port"
+      ;;
+    nginx_selfsigned)
+      nginx_ensure_nginx || nginx_die "Не удалось установить nginx"
+      if [[ -n "$panel_domain" ]]; then
+        nginx_generate_selfsigned_hosts "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" "$panel_domain" "$portal_domain"
+      else
+        nginx_generate_selfsigned_hosts "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" "$portal_domain"
+      fi
+      nginx_install_portal_vhost "$portal_domain" "$backend_port" \
+        "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" "$https_port" "$http_port"
+      nginx_cors_add_portal_origins "$portal_domain" "https" "$https_port"
+      ;;
+    nginx_custom)
+      nginx_ensure_nginx || nginx_die "Не удалось установить nginx"
+      [[ -n "$ssl_cert" && -n "$ssl_key" ]] || nginx_die "Для nginx_custom нужны SSL_CERT и SSL_KEY"
+      [[ -f "$ssl_cert" && -f "$ssl_key" ]] || nginx_die "Файлы сертификата не найдены: $ssl_cert / $ssl_key"
+      if ! nginx_cert_covers_host "$ssl_cert" "$portal_domain"; then
+        nginx_die "Сертификат не покрывает хост портала ${portal_domain}. Добавьте SAN или укажите другой cert."
+      fi
+      nginx_install_portal_vhost "$portal_domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port"
+      nginx_cors_add_portal_origins "$portal_domain" "https" "$https_port"
+      ;;
+    uvicorn_le)
+      [[ -n "$panel_domain" ]] || nginx_die "DOMAIN панели обязателен для uvicorn_le + портал"
+      nginx_obtain_letsencrypt_cert_hosts "$email" "$panel_domain" "$portal_domain"
+      ssl_cert="/etc/letsencrypt/live/${panel_domain}/fullchain.pem"
+      ssl_key="/etc/letsencrypt/live/${panel_domain}/privkey.pem"
+      nginx_env_set SSL_CERT "$ssl_cert"
+      nginx_env_set SSL_KEY "$ssl_key"
+      nginx_cors_add_portal_origins "$portal_domain" "https" "$backend_port"
+      nginx_log "SAN-сертификат обновлён для uvicorn; перезапустите панель"
+      ;;
+    uvicorn_selfsigned)
+      local names=()
+      [[ -n "$panel_domain" ]] && names+=("$panel_domain")
+      names+=("$portal_domain")
+      nginx_generate_selfsigned_hosts "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" "${names[@]}"
+      nginx_env_set SSL_CERT "$NGINX_SELF_SIGNED_CERT"
+      nginx_env_set SSL_KEY "$NGINX_SELF_SIGNED_KEY"
+      nginx_cors_add_portal_origins "$portal_domain" "https" "$backend_port"
+      ;;
+    uvicorn_custom)
+      [[ -n "$ssl_cert" && -n "$ssl_key" ]] || nginx_die "Для uvicorn_custom нужны SSL_CERT и SSL_KEY"
+      [[ -f "$ssl_cert" && -f "$ssl_key" ]] || nginx_die "Файлы сертификата не найдены"
+      if ! nginx_cert_covers_host "$ssl_cert" "$portal_domain"; then
+        nginx_die "Сертификат не покрывает хост портала ${portal_domain}. Добавьте SAN."
+      fi
+      nginx_cors_add_portal_origins "$portal_domain" "https" "$backend_port"
+      ;;
+    http_direct|"")
+      if [[ -z "$mode" || "$mode" == "http_direct" ]]; then
+        nginx_cors_add_portal_origins "$portal_domain" "http" "$backend_port"
+        nginx_warn "Режим http_direct: TLS не настраивается. Портал: http://${portal_domain}:${backend_port}/p/…"
+      else
+        nginx_die "Неизвестный PUBLISH_MODE=${mode}"
+      fi
+      ;;
+    *)
+      nginx_die "Неподдерживаемый PUBLISH_MODE для портала: ${mode:-<пусто>}"
+      ;;
+  esac
+
+  nginx_env_set PORTAL_DOMAIN "$portal_domain"
+  local access_url
+  if [[ "$mode" == "http_direct" || -z "$mode" ]]; then
+    access_url="http://${portal_domain}:${backend_port}/"
+  elif [[ "$mode" == uvicorn_le || "$mode" == uvicorn_selfsigned || "$mode" == uvicorn_custom ]]; then
+    access_url="https://${portal_domain}:${backend_port}/"
+  elif [[ "$https_port" != "443" ]]; then
+    access_url="https://${portal_domain}:${https_port}/"
+  else
+    access_url="https://${portal_domain}/"
+  fi
+  echo "PORTAL_ACCESS_URL=${access_url}"
+  nginx_log "Портал настроен: ${portal_domain} (режим ${mode:-http_direct})"
+}

@@ -43,6 +43,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useNode } from '@/context/NodeContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import { DOCS } from '@/lib/docsUrls'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { cn } from '@/lib/utils'
 import type { AppSettings, GeoIpStatus, Node, RetentionSettings, ServerRebootPendingItem } from '@/types'
@@ -616,7 +617,7 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
                 Для офлайн-режима: GeoLite2 в <code className="text-foreground">data/geoip/</code>, затем перезапуск
                 панели.{' '}
                 <a
-                  href="https://github.com/Kirito0098/AdminPanelAZ/blob/main/docs/GeoIP.md"
+                  href={DOCS.geoIp}
                   target="_blank"
                   rel="noreferrer"
                   className="text-primary underline-offset-4 hover:underline"
