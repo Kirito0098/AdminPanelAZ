@@ -28,6 +28,8 @@ import {
   syncConfigs,
 } from '@/api/client'
 import { buildDashboardSummary } from '@/lib/dashboardSummary'
+import DocsLink from '@/components/shared/DocsLink'
+import { DOCS } from '@/lib/docsUrls'
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
 import CreateClientDialog from '@/components/dashboard/CreateClientDialog'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
@@ -386,6 +388,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex w-full flex-wrap gap-2 lg:max-w-xl lg:justify-end">
+            <DocsLink href={DOCS.configurations} variant="button" />
             {user?.role === 'admin' && (
               <>
                 <ToolbarButton

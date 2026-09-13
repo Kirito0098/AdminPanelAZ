@@ -10,6 +10,8 @@ import { firstNonEmptyRemoteHost } from '@/components/proxy/RemoteHostsCard'
 import OpenVpnPanelTab from '@/components/routing/OpenVpnPanelTab'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import ConfirmDialog, { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
+import DocsLink from '@/components/shared/DocsLink'
+import { DOCS } from '@/lib/docsUrls'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -960,6 +962,7 @@ export default function AntizapretConfigTab() {
                   </div>
 
                   <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap lg:justify-end">
+                    <DocsLink href={DOCS.antizapretConfig} variant="button" />
                     <div className="grid w-full grid-cols-2 gap-2 sm:contents">
                       <Button
                         type="button"

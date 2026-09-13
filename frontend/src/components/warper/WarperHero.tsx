@@ -3,7 +3,9 @@ import { postWarperToggle } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import DocsLink from '@/components/shared/DocsLink'
 import { useNotifications } from '@/context/NotificationContext'
+import { DOCS } from '@/lib/docsUrls'
 import type { WarperHealthResponse } from '@/types'
 import { cn } from '@/lib/utils'
 
@@ -80,6 +82,7 @@ export default function WarperHero({ health, loading, nodeLabel, onRefresh, onTo
         </div>
 
         <div className="flex shrink-0 flex-wrap gap-2">
+          <DocsLink href={DOCS.warper} variant="button" />
           <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
             <RefreshCw className={cn('mr-1.5 h-4 w-4', loading && 'animate-spin')} />
             Обновить

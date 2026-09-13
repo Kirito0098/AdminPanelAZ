@@ -34,6 +34,7 @@
 | Узлы | [uzly.md](uzly.md) | Только админ |
 | SSH-транспорт узлов | [node-ssh-transport.md](node-ssh-transport.md) | Только админ (модуль `node_ssh_transport`) |
 | proxy_agent (установка на RU) | [proxy-agent.md](proxy-agent.md) | Только админ |
+| Подписка | [podpiska.md](podpiska.md) | Только админ (модули `client_portal` / `unlock_codes`) |
 | Настройки | [nastrojki/README.md](nastrojki/README.md) | Все (часть — только админ) |
 
 ---
@@ -54,6 +55,7 @@
 | Мониторинг и алерты | [monitoring-i-alerty.md](nastrojki/monitoring-i-alerty.md) |
 | Модули | [moduli.md](nastrojki/moduli.md) |
 | Обновления | [obnovleniya.md](nastrojki/obnovleniya.md) |
+| Перезапуск и пересборка | [perezapusk-i-peresborka.md](nastrojki/perezapusk-i-peresborka.md) |
 | Диагностика | [diagnostika.md](nastrojki/diagnostika.md) |
 
 ---

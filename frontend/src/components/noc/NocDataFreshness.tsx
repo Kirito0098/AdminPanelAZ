@@ -1,4 +1,5 @@
 import { Badge } from '@/components/ui/badge'
+import { DOCS } from '@/lib/docsUrls'
 import { cn } from '@/lib/utils'
 
 type NocDataFreshnessProps = {
@@ -50,9 +51,17 @@ export default function NocDataFreshness({
 
   return (
     <div className={cn('flex flex-wrap items-center gap-1.5', className)}>
-      <Badge variant="outline" className="text-[10px]" title="См. docs/GeoIP.md">
-        {geoipLabel(geoipMode)}
-      </Badge>
+      <a
+        href={DOCS.geoIp}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex"
+        title="Инструкция GeoIP"
+      >
+        <Badge variant="outline" className="text-[10px] hover:border-primary/40">
+          {geoipLabel(geoipMode)}
+        </Badge>
+      </a>
       <Badge variant={dataSource === 'management_socket' ? 'default' : 'secondary'} className="text-[10px]">
         {sourceLabel(dataSource)}
       </Badge>

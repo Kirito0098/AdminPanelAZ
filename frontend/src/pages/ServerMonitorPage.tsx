@@ -26,6 +26,8 @@ import {
 } from 'recharts'
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import ResourceHistoryCharts from '@/components/monitoring/ResourceHistoryCharts'
+import DocsLink from '@/components/shared/DocsLink'
+import { DOCS } from '@/lib/docsUrls'
 import { Navigate } from 'react-router-dom'
 import { ApiError, getBandwidthChart, getResourceHistory, getServerInterfaces, getServerMetrics } from '@/api/client'
 import { NodeBadge } from '@/components/NodeSelector'
@@ -467,10 +469,13 @@ export default function ServerMonitorPage() {
             </p>
           </div>
         </div>
-        <Button variant="outline" className="w-full sm:w-auto" onClick={handleRefresh} disabled={refreshing}>
-          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-          Обновить
-        </Button>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <DocsLink href={DOCS.serverMonitor} variant="button" />
+          <Button variant="outline" className="w-full sm:w-auto" onClick={handleRefresh} disabled={refreshing}>
+            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+            Обновить
+          </Button>
+        </div>
       </div>
 
       <SettingsAlert variant="info" title="Данные активного узла">

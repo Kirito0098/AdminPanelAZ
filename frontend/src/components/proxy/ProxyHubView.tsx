@@ -13,6 +13,7 @@ import { ApiError } from '@/api/client'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import { NodeStatusBadge } from '@/components/NodeSelector'
 import ProxyNodePanel, { AZ_PROXY_SH_DOCS_URL } from '@/components/nodes/ProxyNodePanel'
+import { DOCS } from '@/lib/docsUrls'
 import { isProxyNode } from '@/components/nodes/nodeKind'
 import ProxyLinkBadge from '@/components/proxy/ProxyLinkBadge'
 import RemoteHostsCard from '@/components/proxy/RemoteHostsCard'
@@ -26,8 +27,6 @@ import Spinner from '@/components/ui/Spinner'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 
-const PROXY_NODES_DOCS_URL =
-  'https://github.com/Kirito0098/AdminPanelAZ/blob/main/docs/proxy-nodes.md'
 
 const ANTIZAPRET_REMOTES_HASH = encodeURIComponent('section-Адреса подключения')
 
@@ -108,6 +107,8 @@ export default function ProxyHubView() {
       <PageSectionHeader
         icon={Network}
         title="Прокси"
+        docsHref={DOCS.proxyNodes}
+        docsLabel="Инструкция"
         description={
           <>
             Сводка по прокси-узлам и адресам OpenVPN активного VPN. У каждого прокси можно указать,
@@ -124,12 +125,6 @@ export default function ProxyHubView() {
             <Button type="button" variant="outline" size="sm" asChild>
               <a href={AZ_PROXY_SH_DOCS_URL} target="_blank" rel="noopener noreferrer">
                 AntiZapret proxy.sh
-                <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
-              </a>
-            </Button>
-            <Button type="button" variant="outline" size="sm" asChild>
-              <a href={PROXY_NODES_DOCS_URL} target="_blank" rel="noopener noreferrer">
-                docs/proxy-nodes.md
                 <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
               </a>
             </Button>

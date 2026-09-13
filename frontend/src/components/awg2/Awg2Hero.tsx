@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import { DOCS } from '@/lib/docsUrls'
 import { NodeBadge } from '@/components/NodeSelector'
 import { useNode } from '@/context/NodeContext'
 import type { Awg2HealthResponse } from '@/types'
@@ -26,6 +27,7 @@ export default function Awg2Hero({ health, loading, nodeLabel, onRefresh, onUpda
     <PageSectionHeader
       icon={Shield}
       title="AZ-AWG2"
+      docsHref={DOCS.awg2}
       titleAddon={
         <>
           <NodeBadge name={activeNode?.name} status={activeNode?.status} />

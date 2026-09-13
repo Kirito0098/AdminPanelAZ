@@ -31,6 +31,8 @@ import { Badge } from '@/components/ui/badge'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import DocsLink from '@/components/shared/DocsLink'
+import { DOCS } from '@/lib/docsUrls'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -868,6 +870,7 @@ export default function NodeSyncGroupSection({
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
+            <DocsLink href={DOCS.nodeSync} variant="button" label="HA / Node Sync" />
             <Button variant="outline" size="sm" onClick={() => void load()} disabled={refreshing}>
               {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
               Обновить

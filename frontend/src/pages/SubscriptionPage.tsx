@@ -9,6 +9,7 @@ import {
 } from '@/api/client'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import { DOCS } from '@/lib/docsUrls'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -178,6 +179,7 @@ export default function SubscriptionPage() {
         icon={Ticket}
         title="Подписка"
         description="Клиентский портал и unlock-ключи продления доступа"
+        docsHref={DOCS.subscription}
       />
 
       <InlineProgressBar

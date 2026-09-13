@@ -37,6 +37,7 @@ import {
   ResourceMetricInline,
 } from '@/components/monitoring/nodeSummaryMetrics'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import { DOCS } from '@/lib/docsUrls'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import { getConnectionDisplayAddress, getConnectionGeoLabel } from '@/components/monitoring/ConnectionAddress'
@@ -725,6 +726,7 @@ export default function MonitoringPage() {
       <PageSectionHeader
         icon={Radio}
         title="NOC Мониторинг"
+        docsHref={DOCS.noc}
         titleAddon={
           <NodeBadge
             name={

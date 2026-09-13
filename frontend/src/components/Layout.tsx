@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
+import { DOCS, FEEDBACK_URL } from '@/lib/docsUrls'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useTheme } from '@/context/ThemeContext'
@@ -183,6 +184,22 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             <LogOut size={16} />
             Выйти
           </Button>
+          <a
+            href={DOCS.index}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block px-1 text-center text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Руководства
+          </a>
+          <a
+            href={FEEDBACK_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block px-1 pb-1 text-center text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Обратная связь
+          </a>
         </div>
 
         <div className="orientation-compact-sidebar-footer-inline hidden items-center gap-2">

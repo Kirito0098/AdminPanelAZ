@@ -106,12 +106,12 @@ import type {
   NodeTransportPatchBody,
 } from '@/types'
 import { Navigate } from 'react-router-dom'
+import { DOCS } from '@/lib/docsUrls'
 
 export { isProxyNode }
 
 /** User guide for SSH node transport (GitHub). */
-export const NODE_SSH_TRANSPORT_DOCS_URL =
-  'https://github.com/Kirito0098/AdminPanelAZ/blob/main/docs/node-ssh-transport.md'
+export const NODE_SSH_TRANSPORT_DOCS_URL = DOCS.nodeSsh
 
 type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | 'switch-http' | 'restart-agent' | null
 type BulkConfirmAction = 'delete' | 'enable-mtls' | null
@@ -926,6 +926,7 @@ export default function NodesPage() {
             ? 'VPN-узлы (node agent) и прокси-узлы (proxy_agent). Операции панели идут на активном узле.'
             : 'VPN-серверы с node agent. Операции панели идут на активном узле.'
         }
+        docsHref={DOCS.nodes}
         actions={
           <>
             <Button variant="outline" onClick={() => void load()} disabled={loading}>
@@ -1828,8 +1829,21 @@ export default function NodesPage() {
                   ? {
                       variant: 'info',
                       title: 'Только флаг в панели',
-                      children:
-                        'Панель начнёт ходить к proxy_agent по HTTPS. Сертификаты на RU-прокси ставятся вручную (docs/proxy-agent.md) — панель их не provision’ит.',
+                      children: (
+                        <>
+                          Панель начнёт ходить к proxy_agent по HTTPS. Сертификаты на RU-прокси
+                          ставятся вручную — панель их не provision’ит.{' '}
+                          <a
+                            href={DOCS.proxyAgent}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-medium underline underline-offset-2"
+                          >
+                            Инструкция proxy_agent
+                          </a>
+                          .
+                        </>
+                      ),
                     }
                   : {
                       variant: 'warning',

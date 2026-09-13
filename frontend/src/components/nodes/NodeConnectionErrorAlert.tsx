@@ -1,4 +1,6 @@
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import DocsLink from '@/components/shared/DocsLink'
+import { DOCS } from '@/lib/docsUrls'
 import type { Node } from '@/types'
 import { isProxyNode } from './nodeKind'
 import { isWrongVersionSslError } from './nodeHelpers'
@@ -24,7 +26,7 @@ export default function NodeConnectionErrorAlert({
           <>
             Узел отвечает по HTTPS (mTLS), а панель — по HTTP. Нажмите{' '}
             <strong>«Отметить mTLS»</strong> в меню узла после ручной настройки сертификатов
-            proxy_agent (docs/proxy-agent.md).
+            proxy_agent. <DocsLink href={DOCS.proxyAgent} label="Инструкция proxy_agent" />
           </>
         ) : (
           <>

@@ -6,6 +6,8 @@ import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import MobileSettingsSectionPicker from '@/components/settings/MobileSettingsSectionPicker'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import DocsLink from '@/components/shared/DocsLink'
+import { DOCS } from '@/lib/docsUrls'
 import BackupTab from '@/components/settings/BackupTab'
 import ConfigDeliveryTab from '@/components/settings/ConfigDeliveryTab'
 import FeatureTogglesTab from '@/components/settings/FeatureTogglesTab'
@@ -198,6 +200,7 @@ export default function SettingsPage() {
               ? 'Профиль, доступ, VPN и работа панели — выберите раздел'
               : 'Тема, пароль, Telegram и дополнительная защита при входе'
           }
+          docsHref={isAdmin ? DOCS.settings : DOCS.profile}
         />
         <SettingsSectionBrowser groups={visibleGroups} variant="hub" />
       </div>
@@ -274,6 +277,7 @@ export default function SettingsPage() {
             ? 'Профиль, доступ, VPN и работа панели'
             : 'Тема, пароль, Telegram и дополнительная защита при входе'
         }
+        docsHref={isAdmin ? DOCS.settings : DOCS.profile}
       />
 
       <div className="flex items-center justify-between gap-3 lg:hidden">
@@ -298,6 +302,9 @@ export default function SettingsPage() {
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h3 className="text-base font-semibold tracking-tight">{sectionMeta.title}</h3>
               <p className="text-xs text-muted-foreground">{sectionMeta.description}</p>
+              {sectionMeta.docsHref ? (
+                <DocsLink href={sectionMeta.docsHref} className="shrink-0" />
+              ) : null}
             </div>
             {sectionMeta.hint ? (
               <p className="mt-1 text-xs text-muted-foreground/80">{sectionMeta.hint}</p>

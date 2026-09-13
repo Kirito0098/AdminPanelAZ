@@ -34,6 +34,7 @@ import { SettingsCollapsible } from '@/components/settings/SettingsChrome'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import ConfirmDialog, { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import { DOCS } from '@/lib/docsUrls'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
@@ -454,6 +455,7 @@ export default function EditFilesPage() {
       <PageSectionHeader
         icon={FileEdit}
         title="Редактор файлов"
+        docsHref={DOCS.editFiles}
         titleAddon={
           <>
             <NodeBadge name={activeNode?.name} status={activeNode?.status} />

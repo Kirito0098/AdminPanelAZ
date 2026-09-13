@@ -51,6 +51,10 @@
 
 ## [Unreleased]
 
+### ✨ Added
+
+- **Ссылки на руководства в панели** — кнопки «Инструкция» / «Руководства» ведут на `docs/*.md` и `docs/nastrojki/*` на GitHub (разделы, настройки, сайдбар, GeoIP, proxy_agent, HA/Node Sync); новые гайды [podpiska.md](docs/podpiska.md) и [perezapusk-i-peresborka.md](docs/nastrojki/perezapusk-i-peresborka.md).
+
 ---
 
 ## [2.25.0] - 2026-09-13
