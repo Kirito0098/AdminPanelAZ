@@ -201,7 +201,9 @@ def resolve_portal_base_url(db: Session) -> str | None:
     )
     if not status.get("portal_ready"):
         return None
-    access = (status.get("access_url") or "").strip().rstrip("/")
+    access = (
+        status.get("portal_access_url") or status.get("access_url") or ""
+    ).strip().rstrip("/")
     return access or None
 
 

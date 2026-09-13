@@ -63,7 +63,7 @@ def test_resolve_portal_base_url_none_when_not_ready():
             "HTTPS_PUBLIC_PORT": "443",
             "PUBLISH_MODE": "nginx_le",
         }.get(key, default)
-        bps.return_value = {"portal_ready": False, "access_url": ""}
+        bps.return_value = {"portal_ready": False, "portal_access_url": ""}
         assert portal.resolve_portal_base_url(db) is None
 
 
@@ -93,8 +93,39 @@ def test_resolve_portal_base_url_with_domain_when_ready():
             "HTTPS_PUBLIC_PORT": "443",
             "PUBLISH_MODE": "nginx_le",
         }.get(key, default)
-        bps.return_value = {"portal_ready": True, "access_url": "https://sub.example.com/"}
+        bps.return_value = {"portal_ready": True, "portal_access_url": "https://sub.example.com/"}
         assert portal.resolve_portal_base_url(db) == "https://sub.example.com"
+
+
+def test_resolve_portal_base_url_accepts_legacy_access_url_key():
+    """Older mocks / callers may still pass access_url; prefer portal_access_url."""
+    db = MagicMock()
+    row = MagicMock()
+    row.value = "sub.example.com"
+    db.query.return_value.filter.return_value.first.return_value = row
+    with (
+        patch("app.services.client_portal.get_settings") as gs,
+        patch("app.services.env_file.EnvFileService") as env_cls,
+        patch("app.services.panel_publish_info.resolve_panel_publish_mode", return_value="behind_nginx"),
+        patch("app.services.panel_publish_info.resolve_active_publish_mode_key", return_value="nginx_le"),
+        patch("app.services.panel_publish_info.build_portal_publish_status") as bps,
+    ):
+        gs.return_value.domain = "panel.example.com"
+        gs.return_value.https_public_port = 443
+        gs.return_value.access_path = ""
+        env = env_cls.return_value
+        env.get_env_value.side_effect = lambda key, default="": {
+            "DOMAIN": "panel.example.com",
+            "SSL_CERT": "/etc/ssl/cert.pem",
+            "BEHIND_NGINX": "1",
+            "USE_HTTPS": "1",
+            "BACKEND_HOST": "127.0.0.1",
+            "BACKEND_PORT": "8000",
+            "HTTPS_PUBLIC_PORT": "443",
+            "PUBLISH_MODE": "nginx_le",
+        }.get(key, default)
+        bps.return_value = {"portal_ready": True, "access_url": "https://legacy.example.com/"}
+        assert portal.resolve_portal_base_url(db) == "https://legacy.example.com"
 
 
 def test_resolve_portal_base_url_http_direct_scheme():
@@ -124,7 +155,7 @@ def test_resolve_portal_base_url_http_direct_scheme():
         }.get(key, default)
         bps.return_value = {
             "portal_ready": True,
-            "access_url": "http://portal.example.com:8000/",
+            "portal_access_url": "http://portal.example.com:8000/",
         }
         assert portal.resolve_portal_base_url(db) == "http://portal.example.com:8000"
 
@@ -156,7 +187,7 @@ def test_resolve_portal_base_url_ignores_panel_access_path():
             "HTTPS_PUBLIC_PORT": "443",
             "PUBLISH_MODE": "nginx_le",
         }.get(key, default)
-        bps.return_value = {"portal_ready": True, "access_url": "https://portal.example.com/"}
+        bps.return_value = {"portal_ready": True, "portal_access_url": "https://portal.example.com/"}
         assert portal.resolve_portal_base_url(db) == "https://portal.example.com"
         assert "/panel" not in (portal.resolve_portal_base_url(db) or "")
 
@@ -260,7 +291,7 @@ def test_link_response_builds_page_url():
             "HTTPS_PUBLIC_PORT": "443",
             "PUBLISH_MODE": "nginx_le",
         }.get(key, default)
-        bps.return_value = {"portal_ready": True, "access_url": "https://sub.example.com/"}
+        bps.return_value = {"portal_ready": True, "portal_access_url": "https://sub.example.com/"}
         payload = portal.link_response(db, token)
     assert payload["url"] == "https://sub.example.com/p/XxYy"
     assert payload["token"] == "XxYy"
