@@ -471,6 +471,17 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         frontend_paths=("/nodes",),
     ),
     FeatureToggleDefinition(
+        key="node_ssh_transport",
+        env_key="FEATURE_NODE_SSH_TRANSPORT_ENABLED",
+        label="SSH transport узлов",
+        description="Способ связи SSH (local forward) на странице «Узлы». Требует модуль «Узлы».",
+        icon="🔐",
+        disable_hint="SSH в picker станет недоступен; http/mtls без изменений.",
+        resource_impact_level="low",
+        default=False,
+        group="app_module",
+    ),
+    FeatureToggleDefinition(
         key="panel_ops",
         env_key="FEATURE_PANEL_OPS_ENABLED",
         label="Операции панели",
@@ -1037,6 +1048,14 @@ def is_nodes_enabled(db=None) -> bool:
 
     _ = db
     return get_feature_service().is_enabled("nodes")
+
+
+def is_node_ssh_transport_enabled(db=None) -> bool:
+    """Return whether the SSH transport option is enabled for nodes."""
+    from app.services.feature_guards import get_feature_service
+
+    _ = db
+    return get_feature_service().is_enabled("node_ssh_transport")
 
 
 def is_awg2_enabled(db=None) -> bool:

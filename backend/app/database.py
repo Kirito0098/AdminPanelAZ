@@ -1212,6 +1212,7 @@ def run_db_migrations() -> None:
     _migrate_user_telegram_backfill()
     _migrate_nodes_mtls_enabled()
     _migrate_nodes_transport()
+    _migrate_nodes_ssh_fields()
     _migrate_nodes_openvpn_remote_hosts()
     _migrate_nodes_wireguard_use_first_remote()
     _migrate_nodes_openvpn_multihome()
@@ -1288,6 +1289,40 @@ def _migrate_nodes_transport() -> None:
             )
             logger.info("DB migration: added nodes.transport and backfilled from mtls_enabled")
     _sync_nodes_transport_flags()
+
+
+def _migrate_nodes_ssh_fields() -> None:
+    """Add SSH transport columns for node connection settings."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    with engine.begin() as conn:
+        if "ssh_host" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_host VARCHAR(255)"))
+            logger.info("DB migration: added nodes.ssh_host")
+        if "ssh_port" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_port INTEGER NOT NULL DEFAULT 22"))
+            logger.info("DB migration: added nodes.ssh_port")
+        if "ssh_username" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_username VARCHAR(128)"))
+            logger.info("DB migration: added nodes.ssh_username")
+        if "ssh_private_key_encrypted" not in cols:
+            conn.execute(
+                text("ALTER TABLE nodes ADD COLUMN ssh_private_key_encrypted TEXT NOT NULL DEFAULT ''")
+            )
+            logger.info("DB migration: added nodes.ssh_private_key_encrypted")
+        if "ssh_passphrase_encrypted" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_passphrase_encrypted TEXT NOT NULL DEFAULT ''"))
+            logger.info("DB migration: added nodes.ssh_passphrase_encrypted")
+        if "ssh_remote_agent_host" not in cols:
+            conn.execute(
+                text("ALTER TABLE nodes ADD COLUMN ssh_remote_agent_host VARCHAR(255) NOT NULL DEFAULT '127.0.0.1'")
+            )
+            logger.info("DB migration: added nodes.ssh_remote_agent_host")
+        if "ssh_remote_agent_port" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_remote_agent_port INTEGER"))
+            logger.info("DB migration: added nodes.ssh_remote_agent_port")
 
 
 def _sync_nodes_transport_flags() -> None:

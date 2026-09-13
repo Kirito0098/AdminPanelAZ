@@ -265,6 +265,13 @@ class Node(Base):
     is_local: Mapped[bool] = mapped_column(Boolean, default=False)
     mtls_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     transport: Mapped[str] = mapped_column(String(16), default="http")
+    ssh_host: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    ssh_port: Mapped[int] = mapped_column(Integer, default=22)
+    ssh_username: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
+    ssh_private_key_encrypted: Mapped[str] = mapped_column(Text, default="")
+    ssh_passphrase_encrypted: Mapped[str] = mapped_column(Text, default="")
+    ssh_remote_agent_host: Mapped[str] = mapped_column(String(255), default="127.0.0.1")
+    ssh_remote_agent_port: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     node_kind: Mapped[str] = mapped_column(String(16), default="vpn")
     destination_ip: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     linked_vpn_node_id: Mapped[int | None] = mapped_column(
