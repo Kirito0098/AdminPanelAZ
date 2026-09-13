@@ -31,6 +31,7 @@ from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.antizapret import AntiZapretService
 from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
 from app.services.node_health import HEALTH_METADATA_KEYS
+from app.services.node_transport import get_transport, node_uses_tls
 from app.services.proxy_node_adapter import ProxyNodeAdapter
 
 settings = get_settings()
@@ -250,7 +251,7 @@ def get_proxy_adapter(node: Node, api_key_override: str | None = None) -> ProxyN
         host=node.host,
         port=node.port,
         api_key=api_key,
-        mtls_enabled=bool(node.mtls_enabled),
+        mtls_enabled=get_transport(node).is_tls,
     )
 
 
@@ -275,7 +276,7 @@ def get_adapter_for_node(node: Node) -> NodeAdapter:
         host=node.host,
         port=node.port,
         api_key=api_key,
-        mtls_enabled=bool(node.mtls_enabled),
+        mtls_enabled=get_transport(node).is_tls,
     )
 
 
@@ -408,11 +409,23 @@ def check_node_health(node: Node, api_key_override: str | None = None) -> dict:
                 host=node.host,
                 port=node.port,
                 api_key=api_key,
-                mtls_enabled=bool(node.mtls_enabled),
+                mtls_enabled=get_transport(node).is_tls,
             )
         health = adapter.health_check()
         health["status"] = "online"
         return health
+    except ValueError as exc:
+        # Unsupported/corrupt transport — fail closed without killing the health loop.
+        return {
+            "status": "offline",
+            "error": str(exc),
+            "error_code": "node_error",
+            "link_error": {
+                "code": "node_error",
+                "message": str(exc),
+                "hint": "Проверьте поле transport узла (http/mtls).",
+            },
+        }
     except HTTPException as exc:
         from app.services.node_link_errors import parse_link_error_from_http_detail
 
@@ -449,7 +462,7 @@ def update_node_from_health(node: Node, health: dict, db: Session) -> None:
             meta["last_error"] = health["error"]
         elif "last_error" in meta:
             meta.pop("last_error", None)
-        expected_tls = bool(getattr(node, "mtls_enabled", False)) and not bool(node.is_local)
+        expected_tls = node_uses_tls(node)
         meta["expected_tls"] = expected_tls
         if "listen_tls" in health and health["listen_tls"] is not None:
             meta["tls_mismatch"] = bool(expected_tls) != bool(health["listen_tls"])

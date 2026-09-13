@@ -72,3 +72,23 @@ def test_apply_transport_syncs_mtls_flag():
     nt.apply_transport_value(n, "http")
     assert n.transport == "http"
     assert n.mtls_enabled is False
+
+
+def test_node_uses_tls_follows_transport():
+    class N:
+        transport = "mtls"
+        is_local = False
+
+    assert nt.node_uses_tls(N()) is True
+
+    class Local:
+        transport = "mtls"
+        is_local = True
+
+    assert nt.node_uses_tls(Local()) is False
+
+    class Bad:
+        transport = "wire"
+        is_local = False
+
+    assert nt.node_uses_tls(Bad()) is False

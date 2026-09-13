@@ -103,3 +103,13 @@ def apply_transport_value(node: Any, transport: str) -> None:
         raise ValueError(f"unsupported transport: {t}")
     node.transport = t
     sync_mtls_flag(node)
+
+
+def node_uses_tls(node: Any) -> bool:
+    """Whether panel should speak TLS to this node (False for local / resolve errors)."""
+    if bool(getattr(node, "is_local", False)):
+        return False
+    try:
+        return get_transport(node).is_tls
+    except ValueError:
+        return False
