@@ -809,7 +809,7 @@ def test_redeem_profile_bound_code_extends_all_client_protocols(db):
     assert len(set_calls) == 3
 
 
-def test_redeem_unlock_code_preserves_manual_permanent_ban(db):
+def test_redeem_unlock_rejects_manual_permanent_ban_with_message(db):
     node = _make_node(db)
     admin = _make_user(db)
     _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn, VpnType.wireguard])
@@ -833,7 +833,7 @@ def test_redeem_unlock_code_preserves_manual_permanent_ban(db):
         )
     )
     db.commit()
-    create_unlock_code(
+    created = create_unlock_code(
         db,
         grant_days=7,
         protocols=["openvpn", "wireguard"],
@@ -846,15 +846,10 @@ def test_redeem_unlock_code_preserves_manual_permanent_ban(db):
 
     with (
         patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
-        patch("app.services.unlock_codes.get_access_until", return_value=None),
-        patch(
-            "app.services.unlock_codes.set_access_until",
-            return_value={"access_until": datetime(2030, 1, 8, tzinfo=timezone.utc).isoformat()},
-        ),
-        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
         patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
     ):
-        redeem_unlock_code(db, code="PERM-BAN-01", client_name="Alice", node_id=node.id)
+        with pytest.raises(ValueError, match="заблокирован администратором вручную"):
+            redeem_unlock_code(db, code="PERM-BAN-01", client_name="Alice", node_id=node.id)
 
     ovpn = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
     wg = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
@@ -862,9 +857,12 @@ def test_redeem_unlock_code_preserves_manual_permanent_ban(db):
     assert ovpn.block_reason == "manual_permanent"
     assert wg.is_permanent_blocked is True
     assert wg.block_reason == "manual_permanent"
+    db.refresh(created)
+    assert created.redemption_count == 0
+    assert db.query(UnlockCodeRedemption).filter_by(code_id=created.id).count() == 0
 
 
-def test_redeem_unlock_preserves_permanent_ban_when_reason_rewritten_to_access_expired(db):
+def test_redeem_unlock_rejects_permanent_ban_when_reason_rewritten_to_access_expired(db):
     """Reconcile may set block_reason=access_expired while is_permanent_blocked stays true."""
     node = _make_node(db)
     admin = _make_user(db)
@@ -904,15 +902,10 @@ def test_redeem_unlock_preserves_permanent_ban_when_reason_rewritten_to_access_e
 
     with (
         patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
-        patch("app.services.unlock_codes.get_access_until", return_value=past),
-        patch(
-            "app.services.unlock_codes.set_access_until",
-            return_value={"access_until": datetime(2030, 1, 8, tzinfo=timezone.utc).isoformat()},
-        ),
-        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
         patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
     ):
-        redeem_unlock_code(db, code="PERM-BAN-EXPIRED-REASON", client_name="Alice", node_id=node.id)
+        with pytest.raises(ValueError, match="заблокирован администратором вручную"):
+            redeem_unlock_code(db, code="PERM-BAN-EXPIRED-REASON", client_name="Alice", node_id=node.id)
 
     ovpn = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
     wg = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()

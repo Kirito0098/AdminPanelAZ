@@ -44,6 +44,9 @@ _REDEEM_LIMIT_MESSAGE = "Лимит активаций unlock-ключа исч�
 _REDEEM_ALREADY_USED_MESSAGE = "Этот unlock-ключ уже использован вами"
 _REDEEM_CLIENT_NOT_ALLOWED_MESSAGE = "Этот unlock-ключ не предназначен для вашего клиента"
 _REDEEM_PROTOCOL_MISMATCH_MESSAGE = "Нет пересечения протоколов клиента и unlock-ключа"
+_REDEEM_MANUAL_BLOCK_MESSAGE = (
+    "Данный пользователь заблокирован администратором вручную. Обратитесь к администратору."
+)
 _REDEEM_GENERIC_ERROR_MESSAGE = "Не удалось активировать unlock-ключ"
 
 
@@ -388,6 +391,19 @@ def _clear_policy_block(row, *, actor: str) -> None:
     row.updated_by = actor
 
 
+def _is_manual_admin_block(row) -> bool:
+    if row is None:
+        return False
+    if bool(getattr(row, "is_permanent_blocked", False)):
+        return True
+    reason = (getattr(row, "block_reason", None) or "").strip().lower()
+    if reason in ("manual_permanent", "manual_temp"):
+        return True
+    if bool(getattr(row, "is_temp_blocked", False)) and reason.startswith("manual"):
+        return True
+    return False
+
+
 def _require_unlock_codes_enabled() -> None:
     if not get_feature_service().is_enabled("unlock_codes"):
         raise ValueError(module_disabled_message("unlock_codes"))
@@ -465,6 +481,14 @@ def redeem_unlock_code(
         if not protocols_applied:
             raise ValueError(_REDEEM_PROTOCOL_MISMATCH_MESSAGE)
 
+        policy_rows = {
+            "openvpn": _policy_rows_for_client(db, node_id, canonical_client_name)["openvpn"],
+            "wireguard": _policy_rows_for_client(db, node_id, canonical_client_name.lower())["wireguard"],
+            "amneziawg2": _policy_rows_for_client(db, node_id, canonical_client_name.lower())["amneziawg2"],
+        }
+        if any(_is_manual_admin_block(policy_rows.get(protocol)) for protocol in protocols_applied):
+            raise ValueError(_REDEEM_MANUAL_BLOCK_MESSAGE)
+
         # Atomic slot reservation — works on SQLite (page write lock) and Postgres.
         reserved = db.execute(
             text(
@@ -488,11 +512,6 @@ def redeem_unlock_code(
             raise ValueError(_REDEEM_LIMIT_MESSAGE)
 
         grant_days = int(row.grant_days)
-        policy_rows = {
-            "openvpn": _policy_rows_for_client(db, node_id, canonical_client_name)["openvpn"],
-            "wireguard": _policy_rows_for_client(db, node_id, canonical_client_name.lower())["wireguard"],
-            "amneziawg2": _policy_rows_for_client(db, node_id, canonical_client_name.lower())["amneziawg2"],
-        }
         grant_until_base = now
         granted_until_by_protocol = {}
         profile_grant_until: datetime | None = None
