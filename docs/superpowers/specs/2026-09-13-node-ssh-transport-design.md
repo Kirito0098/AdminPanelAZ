@@ -1,7 +1,7 @@
 # Node SSH transport (local forward)
 
 **Дата:** 2026-09-13  
-**Статус:** drafted  
+**Статус:** implemented  
 **Ветка:** `feature/client-portal`  
 **Подход:** вариант **A** — in-process SSH (asyncssh/paramiko) + tunnel pool; HTTP к agent через local forward  
 **Базовый spec:** [2026-09-13-node-transport-framework-design.md](./2026-09-13-node-transport-framework-design.md)

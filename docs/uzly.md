@@ -106,6 +106,12 @@ ALLOW_INTERNAL_NODES=true
 - **mTLS** — per-node из UI (**Узлы → Включить mTLS**). Глобальный `NODE_AGENT_MTLS_ENABLED` в `.env` устарел.
 - **Авторотация ключа** — в `backend/.env`: `NODE_API_KEY_ROTATION_DAYS=N` (`0` = выкл., дефолт install). Ручная смена ключа — кнопка **Сменить API-ключ**.
 
+### SSH-туннель (модуль `node_ssh_transport`, по умолчанию выкл.)
+
+1. **Настройки → Модули** → включите **SSH transport узлов**.
+2. На узле `node_agent` / `proxy_agent` слушает **127.0.0.1** (порты **9100** / **9101**); в `~/.ssh/authorized_keys` SSH-пользователя добавьте **публичный ключ**, парный приватному ключу из формы панели.
+3. В карточке узла выберите transport **SSH**, укажите SSH host/port/user и приватный ключ; панель поднимает local forward и ходит к API агента по HTTP через localhost.
+
 ---
 
 ## Резервный сервер (HA — высокая доступность)

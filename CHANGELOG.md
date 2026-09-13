@@ -55,7 +55,8 @@
 
 - **Узлы: блок «Связь»** — TLS (ожидание vs факт), uptime агента, последний успешный health, структурированная `last_link_error`; кнопка проверки связи как раньше.
 - **Node agent 1.8.0 / proxy agent 1.1.0** — `/health` отдаёт `started_at`, `uptime_sec`, `listen_tls` (после обновления перезапустите агенты на узлах).
-- **Способ связи узла (`transport`)** — HTTP / HTTPS+mTLS для VPN и proxy через picker; registry под будущий SSH (stub `transport_not_implemented`); `mtls_enabled` derived.
+- **Способ связи узла (`transport`)** — HTTP / HTTPS+mTLS / SSH (SSH при включённом модуле) для VPN и proxy через picker; `mtls_enabled` derived.
+- **SSH transport узлов** (opt-in `node_ssh_transport`, **Настройки → Модули**) — панель поднимает SSH local forward и ходит к agent по HTTP через localhost; при **первом** подключении к узлу сохраняется отпечаток SSH host key (TOFU), дальше сверка только с сохранённым ключом.
 
 ### 🔄 Changed
 
