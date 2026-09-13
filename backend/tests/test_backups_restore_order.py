@@ -84,3 +84,79 @@ def test_restore_panel_disposes_engines_before_applying_files(monkeypatch, tmp_p
     assert result["file_name"] == "panel.tar.gz"
     assert result["portal_reprovision_needed"] is False
     assert order == ["load", "overlays:adapter:1:1", "dispose", "apply", "restart"]
+
+
+def test_restore_backup_records_audit_after_db_replace(monkeypatch):
+    order: list[str] = []
+
+    monkeypatch.setattr(backups_mod, "_get_backup_manager", lambda: object())
+    monkeypatch.setattr(
+        backups_mod,
+        "_restore_panel_and_restart",
+        lambda manager, file_name, db: order.append("restore") or {
+            "restored": ["db"],
+            "file_name": file_name,
+        },
+    )
+    monkeypatch.setattr(
+        backups_mod,
+        "_record_backup_restore_side_effects",
+        lambda **kwargs: order.append(f"audit:{kwargs['details']}"),
+    )
+
+    response = backups_mod.restore_backup(
+        MagicMock(file_name="panel.tar.gz"),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(id=1, username="admin"),
+    )
+
+    assert order == ["restore", "audit:panel.tar.gz"]
+    assert response.message == backups_mod.RESTORE_RESTART_MESSAGE
+
+
+def test_record_backup_restore_side_effects_uses_fresh_session(monkeypatch):
+    """After dispose+replace, request-scoped db is stale — open SessionLocal."""
+    fake_db = MagicMock()
+    closed: list[bool] = []
+
+    class FakeSessionLocal:
+        def __call__(self):
+            return fake_db
+
+    fake_db.close = lambda: closed.append(True)
+
+    calls: list[str] = []
+
+    monkeypatch.setattr("app.database.SessionLocal", FakeSessionLocal())
+    monkeypatch.setattr(backups_mod.settings, "audit_log_enabled", True)
+    monkeypatch.setattr(
+        backups_mod,
+        "log_action",
+        lambda db, **kwargs: calls.append(f"log:{kwargs['details']}") or None,
+    )
+    monkeypatch.setattr(
+        backups_mod.admin_notify_service,
+        "send_settings_change",
+        lambda db, **kwargs: calls.append(f"notify:{kwargs['subject_name']}"),
+    )
+    monkeypatch.setattr(
+        backups_mod.ip_restriction_service,
+        "get_client_ip",
+        lambda request: "127.0.0.1",
+    )
+    monkeypatch.setattr(
+        backups_mod,
+        "get_client_timezone_from_request",
+        lambda request: "UTC",
+    )
+
+    backups_mod._record_backup_restore_side_effects(
+        admin=MagicMock(id=7, username="ops"),
+        request=MagicMock(),
+        file_name="panel.tar.gz",
+        details="upload:panel.tar.gz",
+    )
+
+    assert calls == ["log:upload:panel.tar.gz", "notify:panel.tar.gz"]
+    assert closed == [True]

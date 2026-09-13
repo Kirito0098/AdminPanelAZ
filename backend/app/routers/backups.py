@@ -337,23 +337,13 @@ async def upload_backup(
         tmp_path.unlink(missing_ok=True)
 
     if restore:
-        if settings.audit_log_enabled:
-            log_action(
-                db,
-                action="backup_restore",
-                user_id=admin.id,
-                username=admin.username,
-                remote_addr=ip_restriction_service.get_client_ip(request),
-                details=f"upload:{result['file_name']}",
-            )
-        admin_notify_service.send_settings_change(
-            db,
-            actor_username=admin.username,
-            settings_key="settings_backup_restore",
-            subject_name=result["file_name"],
-            client_timezone=get_client_timezone_from_request(request),
-        )
         restore_result = _restore_panel_and_restart(manager, result["file_name"], db)
+        _record_backup_restore_side_effects(
+            admin=admin,
+            request=request,
+            file_name=result["file_name"],
+            details=f"upload:{result['file_name']}",
+        )
         restore_result.pop("configs", None)
         msg = _restore_response(restore_result)
         return BackupEntry(
@@ -391,6 +381,40 @@ def _restore_panel_and_restart(manager: BackupManager, file_name: str, db: Sessi
     return result
 
 
+def _record_backup_restore_side_effects(
+    *,
+    admin: User,
+    request: Request,
+    file_name: str,
+    details: str,
+) -> None:
+    """Persist audit/notify into the restored DB (after file replace + engine dispose)."""
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        if settings.audit_log_enabled:
+            log_action(
+                db,
+                action="backup_restore",
+                user_id=admin.id,
+                username=admin.username,
+                remote_addr=ip_restriction_service.get_client_ip(request),
+                details=details,
+            )
+        admin_notify_service.send_settings_change(
+            db,
+            actor_username=admin.username,
+            settings_key="settings_backup_restore",
+            subject_name=file_name,
+            client_timezone=get_client_timezone_from_request(request),
+        )
+    except Exception:
+        logger.exception("Failed to record backup restore audit/notify for %s", file_name)
+    finally:
+        db.close()
+
+
 @router.post("/restore", response_model=MessageResponse)
 def restore_backup(
     payload: BackupRestoreRequest,
@@ -399,23 +423,13 @@ def restore_backup(
     admin: User = Depends(require_admin),
 ):
     manager = _get_backup_manager()
-    if settings.audit_log_enabled:
-        log_action(
-            db,
-            action="backup_restore",
-            user_id=admin.id,
-            username=admin.username,
-            remote_addr=ip_restriction_service.get_client_ip(request),
-            details=payload.file_name,
-        )
-    admin_notify_service.send_settings_change(
-        db,
-        actor_username=admin.username,
-        settings_key="settings_backup_restore",
-        subject_name=payload.file_name,
-        client_timezone=get_client_timezone_from_request(request),
-    )
     result = _restore_panel_and_restart(manager, payload.file_name, db)
+    _record_backup_restore_side_effects(
+        admin=admin,
+        request=request,
+        file_name=payload.file_name,
+        details=payload.file_name,
+    )
     result.pop("configs", None)
     return _restore_response(result)
 
