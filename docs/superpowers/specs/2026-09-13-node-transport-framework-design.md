@@ -1,7 +1,7 @@
 # Node transport framework + picker
 
 **Дата:** 2026-09-13  
-**Статус:** drafted  
+**Статус:** implemented  
 **Ветка:** `feature/client-portal`  
 **Подход:** вариант **A** — Transport registry + колонка `transport`; P0: `http`/`mtls`; `ssh` — stub API/UI
 

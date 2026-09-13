@@ -55,6 +55,7 @@
 
 - **Узлы: блок «Связь»** — TLS (ожидание vs факт), uptime агента, последний успешный health, структурированная `last_link_error`; кнопка проверки связи как раньше.
 - **Node agent 1.8.0 / proxy agent 1.1.0** — `/health` отдаёт `started_at`, `uptime_sec`, `listen_tls` (после обновления перезапустите агенты на узлах).
+- **Способ связи узла (`transport`)** — HTTP / HTTPS+mTLS для VPN и proxy через picker; registry под будущий SSH (stub `transport_not_implemented`); `mtls_enabled` derived.
 
 ### 🔄 Changed
 
