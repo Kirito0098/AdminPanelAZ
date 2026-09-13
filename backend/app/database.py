@@ -1252,7 +1252,7 @@ def _migrate_viewer_role_to_user() -> None:
 
 
 def _migrate_nodes_mtls_enabled() -> None:
-    """Add per-node mTLS flag and backfill from deprecated global NODE_AGENT_MTLS_ENABLED."""
+    """Add per-node mTLS flag and one-shot backfill from deprecated global NODE_AGENT_MTLS_ENABLED."""
     inspector = inspect(engine)
     if "nodes" not in inspector.get_table_names():
         return
@@ -1261,11 +1261,14 @@ def _migrate_nodes_mtls_enabled() -> None:
         if "mtls_enabled" not in cols:
             conn.execute(text("ALTER TABLE nodes ADD COLUMN mtls_enabled INTEGER DEFAULT 0"))
             logger.info("DB migration: added nodes.mtls_enabled")
-        if get_settings().node_agent_mtls_enabled:
-            conn.execute(
-                text("UPDATE nodes SET mtls_enabled = 1 WHERE is_local = 0")
-            )
-            logger.info("DB migration: backfilled nodes.mtls_enabled for remote nodes")
+            cols.add("mtls_enabled")
+            if get_settings().node_agent_mtls_enabled:
+                conn.execute(
+                    text("UPDATE nodes SET mtls_enabled = 1 WHERE is_local = 0")
+                )
+                logger.info("DB migration: backfilled nodes.mtls_enabled for remote nodes")
+        # After transport column exists, never force mtls_enabled from the deprecated global flag —
+        # transport is the source of truth (see _migrate_nodes_transport / _sync_nodes_transport_flags).
 
 
 def _migrate_nodes_transport() -> None:
@@ -1274,16 +1277,39 @@ def _migrate_nodes_transport() -> None:
     if "nodes" not in inspector.get_table_names():
         return
     cols = {col["name"] for col in inspector.get_columns("nodes")}
-    if "transport" in cols:
+    if "transport" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN transport VARCHAR(16) DEFAULT 'http'"))
+            conn.execute(
+                text(
+                    "UPDATE nodes SET transport = CASE WHEN mtls_enabled = 1 THEN 'mtls' ELSE 'http' END"
+                )
+            )
+            logger.info("DB migration: added nodes.transport and backfilled from mtls_enabled")
+    _sync_nodes_transport_flags()
+
+
+def _sync_nodes_transport_flags() -> None:
+    """Keep transport and mtls_enabled aligned; heal empty transport from legacy flag."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "transport" not in cols or "mtls_enabled" not in cols:
         return
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE nodes ADD COLUMN transport VARCHAR(16) DEFAULT 'http'"))
         conn.execute(
             text(
-                "UPDATE nodes SET transport = CASE WHEN mtls_enabled = 1 THEN 'mtls' ELSE 'http' END"
+                "UPDATE nodes SET transport = CASE WHEN mtls_enabled = 1 THEN 'mtls' ELSE 'http' END "
+                "WHERE transport IS NULL OR TRIM(transport) = ''"
             )
         )
-        logger.info("DB migration: added nodes.transport and backfilled from mtls_enabled")
+        conn.execute(
+            text(
+                "UPDATE nodes SET mtls_enabled = CASE WHEN LOWER(TRIM(transport)) = 'mtls' THEN 1 ELSE 0 END "
+                "WHERE LOWER(TRIM(transport)) IN ('http', 'mtls')"
+            )
+        )
 
 
 def _migrate_nodes_openvpn_remote_hosts() -> None:

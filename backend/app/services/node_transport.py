@@ -11,6 +11,7 @@ TRANSPORT_HTTP = "http"
 TRANSPORT_MTLS = "mtls"
 TRANSPORT_SSH = "ssh"
 SUPPORTED_WRITABLE = frozenset({TRANSPORT_HTTP, TRANSPORT_MTLS})
+KNOWN_TRANSPORTS = frozenset({TRANSPORT_HTTP, TRANSPORT_MTLS, TRANSPORT_SSH})
 
 
 @runtime_checkable
@@ -77,22 +78,35 @@ def list_transports() -> list[dict[str, Any]]:
     ]
 
 
-def sync_mtls_flag(node: Any) -> None:
-    node.mtls_enabled = (getattr(node, "transport", None) or TRANSPORT_HTTP) == TRANSPORT_MTLS
-
-
-def get_transport(node: Any) -> NodeTransport:
-    raw = (getattr(node, "transport", None) or TRANSPORT_HTTP)
+def resolve_transport_id(node: Any) -> str:
+    """Single source of truth for a node's transport id (display + adapters)."""
+    if bool(getattr(node, "is_local", False)):
+        return TRANSPORT_HTTP
+    raw = getattr(node, "transport", None)
     if isinstance(raw, str):
         raw = raw.strip().lower()
     else:
-        raw = TRANSPORT_HTTP
-    if raw == TRANSPORT_HTTP:
+        raw = ""
+    if raw in KNOWN_TRANSPORTS:
+        return raw
+    if not raw:
+        # Legacy rows before/without transport column value
+        return TRANSPORT_MTLS if bool(getattr(node, "mtls_enabled", False)) else TRANSPORT_HTTP
+    raise ValueError(f"unsupported node transport: {raw}")
+
+
+def sync_mtls_flag(node: Any) -> None:
+    node.mtls_enabled = resolve_transport_id(node) == TRANSPORT_MTLS
+
+
+def get_transport(node: Any) -> NodeTransport:
+    tid = resolve_transport_id(node)
+    if tid == TRANSPORT_HTTP:
         return HttpTransport()
-    if raw == TRANSPORT_MTLS:
+    if tid == TRANSPORT_MTLS:
         return MtlsTransport()
     # Fail closed: ssh-in-DB and unknown values
-    raise ValueError(f"unsupported node transport: {raw}")
+    raise ValueError(f"unsupported node transport: {tid}")
 
 
 def apply_transport_value(node: Any, transport: str) -> None:
@@ -102,7 +116,7 @@ def apply_transport_value(node: Any, transport: str) -> None:
     if t not in SUPPORTED_WRITABLE:
         raise ValueError(f"unsupported transport: {t}")
     node.transport = t
-    sync_mtls_flag(node)
+    node.mtls_enabled = t == TRANSPORT_MTLS
 
 
 def node_uses_tls(node: Any) -> bool:

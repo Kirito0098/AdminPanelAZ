@@ -15,6 +15,7 @@ from app.services.node_manager import (
     sync_local_node,
     update_node_from_health,
 )
+from app.services.node_transport import TRANSPORT_MTLS, resolve_transport_id
 from app.services.telegram_api import edit_message_text, send_message
 from app.services.telegram_bot_handlers.base import (
     BotContext,
@@ -73,7 +74,9 @@ def _format_node_card(node: Node, *, active_id: int | None) -> str:
     active_mark = i18n.NODES_ACTIVE_MARK if active_id == node.id else ""
     local_mark = i18n.NODES_LOCAL_MARK if node.is_local else ""
     transport = i18n.NODES_TRANSPORT_LOCAL if node.is_local else (
-        i18n.NODES_TRANSPORT_MTLS if node.mtls_enabled else i18n.NODES_TRANSPORT_HTTP
+        i18n.NODES_TRANSPORT_MTLS
+        if resolve_transport_id(node) == TRANSPORT_MTLS
+        else i18n.NODES_TRANSPORT_HTTP
     )
     lines = [
         i18n.NODES_CARD.format(

@@ -47,6 +47,7 @@ from app.services.node_transport import (
     TRANSPORT_MTLS,
     TRANSPORT_SSH,
     list_transports,
+    resolve_transport_id,
 )
 from app.services.node_manager import (
     check_node_health,
@@ -155,12 +156,10 @@ def rolling_node_update(
 
 
 def _node_transport_value(node: Node) -> str:
-    if node.is_local:
+    try:
+        return resolve_transport_id(node)
+    except ValueError:
         return TRANSPORT_HTTP
-    raw = (getattr(node, "transport", None) or "").strip().lower()
-    if raw in (TRANSPORT_HTTP, TRANSPORT_MTLS, TRANSPORT_SSH):
-        return raw
-    return TRANSPORT_MTLS if bool(node.mtls_enabled) else TRANSPORT_HTTP
 
 
 def _to_response(node: Node) -> NodeResponse:
@@ -654,7 +653,7 @@ def patch_node_transport(
         if wanted == TRANSPORT_MTLS:
             node = enable_mtls(db, node, admin)
         else:
-            node = disable_mtls(db, node)
+            node = disable_mtls(db, node, admin)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except HTTPException:
@@ -662,7 +661,7 @@ def patch_node_transport(
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Не удалось сменить способ связи: {exc}",
+            detail="Не удалось сменить способ связи",
         ) from exc
 
     return _to_response(node)
@@ -714,7 +713,7 @@ def disable_node_mtls(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
     kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
     try:
-        node = disable_mtls(db, node)
+        node = disable_mtls(db, node, admin)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     agent_name = "proxy_agent" if kind == NODE_KIND_PROXY else "Node agent"

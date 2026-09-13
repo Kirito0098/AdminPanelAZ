@@ -15,6 +15,7 @@ from app.models import Node
 from app.services.action_log import log_action
 from app.services.node_adapter import RemoteNodeAdapter
 from app.services.node_manager import get_api_key_plain, store_api_key
+from app.services.node_transport import get_transport
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def rotate_node_api_key(db: Session, node: Node, *, actor_username: str | None =
         host=node.host,
         port=node.port,
         api_key=old_key,
-        mtls_enabled=bool(node.mtls_enabled),
+        mtls_enabled=get_transport(node).is_tls,
     )
     adapter.rotate_api_key(new_key)
 

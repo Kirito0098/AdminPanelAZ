@@ -92,3 +92,23 @@ def test_node_uses_tls_follows_transport():
         is_local = False
 
     assert nt.node_uses_tls(Bad()) is False
+
+
+def test_resolve_empty_transport_matches_legacy_mtls_flag():
+    class N:
+        transport = ""
+        mtls_enabled = True
+        is_local = False
+
+    assert nt.resolve_transport_id(N()) == "mtls"
+    assert nt.get_transport(N()).is_tls is True
+
+
+def test_resolve_transport_wins_over_stale_mtls_flag():
+    class N:
+        transport = "http"
+        mtls_enabled = True
+        is_local = False
+
+    assert nt.resolve_transport_id(N()) == "http"
+    assert nt.get_transport(N()).is_tls is False
