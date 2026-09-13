@@ -5,7 +5,7 @@ import { NodeStatusBadge } from '@/components/NodeSelector'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import type { Node, NodeSyncGroup } from '@/types'
+import type { Node, NodeSyncGroup, NodeTransportId } from '@/types'
 import NodeActions from './NodeActions'
 import NodeConnectionErrorAlert from './NodeConnectionErrorAlert'
 import NodeTransportBadge from './NodeTransportBadge'
@@ -27,8 +27,7 @@ export type NodeCardProps = {
   onUpdate: () => void
   onRestart: () => void
   onRotateKey: () => void
-  onEnableMtls: () => void
-  onDisableMtls: () => void
+  onTransportChange: (transport: NodeTransportId) => void
   onEdit: () => void
   onDelete: () => void
   onProxyUpdated?: () => void | Promise<void>
@@ -49,8 +48,7 @@ export default function NodeCard({
   onUpdate,
   onRestart,
   onRotateKey,
-  onEnableMtls,
-  onDisableMtls,
+  onTransportChange,
   onEdit,
   onDelete,
   onProxyUpdated,
@@ -197,8 +195,7 @@ export default function NodeCard({
           onUpdate={onUpdate}
           onRestart={onRestart}
           onRotateKey={onRotateKey}
-          onEnableMtls={onEnableMtls}
-          onDisableMtls={onDisableMtls}
+          onTransportChange={onTransportChange}
           onEdit={onEdit}
           onDelete={onDelete}
         />

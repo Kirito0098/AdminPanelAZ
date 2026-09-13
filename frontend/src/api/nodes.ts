@@ -19,6 +19,20 @@ export async function enableNodeMtls(nodeId: number) {
   )
 }
 
+export async function listNodeTransports() {
+  return apiFetch<{ items: import('../types').NodeTransportOption[] }>('/nodes/transports')
+}
+
+export async function patchNodeTransport(
+  nodeId: number,
+  transport: import('../types').NodeTransportId,
+) {
+  return apiFetch<import('../types').Node>(`/nodes/${nodeId}/transport`, {
+    method: 'PATCH',
+    body: JSON.stringify({ transport }),
+  })
+}
+
 export async function getNodeMtlsStatus() {
   return apiFetch<import('../types').NodeMtlsStatus>('/nodes/mtls/status')
 }

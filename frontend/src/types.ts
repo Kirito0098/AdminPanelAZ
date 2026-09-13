@@ -2,6 +2,13 @@ export type UserRole = 'admin' | 'user'
 export type VpnType = 'openvpn' | 'wireguard' | 'amneziawg2'
 export type NodeStatus = 'online' | 'offline' | 'unknown'
 export type NodeKind = 'vpn' | 'proxy'
+export type NodeTransportId = 'http' | 'mtls' | 'ssh'
+
+export interface NodeTransportOption {
+  id: NodeTransportId
+  label: string
+  available: boolean
+}
 
 export interface Node {
   id: number
@@ -10,6 +17,7 @@ export interface Node {
   port: number
   status: NodeStatus
   is_local: boolean
+  transport?: NodeTransportId | string
   mtls_enabled: boolean
   node_kind?: NodeKind | string
   destination_ip?: string | null

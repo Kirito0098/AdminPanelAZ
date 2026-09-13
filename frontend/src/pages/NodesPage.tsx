@@ -14,8 +14,7 @@ import {
   checkNodeHealth,
   createNode,
   deleteNode,
-  disableNodeMtls,
-  enableNodeMtls,
+  patchNodeTransport,
   getNodeMtlsStatus,
   rollingNodeUpdate,
   rotateNodeApiKey,
@@ -88,7 +87,7 @@ import {
   resolveProxyLinkSelectorValue,
 } from '@/lib/proxyLinkTarget'
 import { cn } from '@/lib/utils'
-import type { Node, NodeKind, NodeMtlsStatus } from '@/types'
+import type { Node, NodeKind, NodeMtlsStatus, NodeTransportId } from '@/types'
 import { Navigate } from 'react-router-dom'
 
 export { isProxyNode }
@@ -332,12 +331,15 @@ export default function NodesPage() {
     openConfirm('rotate-key', node)
   }
 
-  const handleEnableMtls = (node: Node) => {
-    openConfirm('enable-mtls', node)
-  }
-
-  const handleDisableMtls = (node: Node) => {
-    openConfirm('disable-mtls', node)
+  const handleTransportChange = (node: Node, transport: NodeTransportId) => {
+    if (transport === 'ssh') return
+    const current = (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase()
+    if (transport === current) return
+    if (transport === 'mtls') {
+      openConfirm('enable-mtls', node)
+    } else {
+      openConfirm('disable-mtls', node)
+    }
   }
 
   const handleRestartAgent = (node: Node) => {
@@ -364,9 +366,13 @@ export default function NodesPage() {
         await load()
         await refresh()
       } else if (action === 'enable-mtls') {
-        const result = await enableNodeMtls(target.id)
+        await patchNodeTransport(target.id, 'mtls')
         closeConfirm()
-        success(result.message || `mTLS включён для узла «${target.name}»`)
+        success(
+          isProxyNode(target)
+            ? `Способ связи «${target.name}»: HTTPS + mTLS (сертификаты proxy_agent вручную)`
+            : `Способ связи «${target.name}»: HTTPS + mTLS`,
+        )
         await load()
         await refresh()
         setHealthLoading(target.id)
@@ -391,12 +397,12 @@ export default function NodesPage() {
           setHealthLoading(null)
         }
       } else if (action === 'disable-mtls') {
-        const result = await disableNodeMtls(target.id)
+        await patchNodeTransport(target.id, 'http')
         closeConfirm()
-        success(result.message || `mTLS отключён для узла «${target.name}»`)
-        if (result.warning) {
-          warning(result.warning)
-        }
+        success(`Способ связи «${target.name}»: HTTP`)
+        warning(
+          'Агент по-прежнему может работать с mTLS. Для полного отключения настройте узел вручную.',
+        )
         await load()
         await refresh()
       } else if (action === 'restart-agent') {
@@ -642,7 +648,7 @@ export default function NodesPage() {
         const failed: string[] = []
         for (const node of mtlsCandidates) {
           try {
-            await enableNodeMtls(node.id)
+            await patchNodeTransport(node.id, 'mtls')
             enabled += 1
             try {
               await checkNodeHealth(node.id)
@@ -825,8 +831,7 @@ export default function NodesPage() {
                     onUpdate={() => setUpdateNodeTarget(node)}
                     onRestart={() => handleRestartAgent(node)}
                     onRotateKey={() => handleRotateKey(node)}
-                    onEnableMtls={() => handleEnableMtls(node)}
-                    onDisableMtls={() => handleDisableMtls(node)}
+                    onTransportChange={(transport) => handleTransportChange(node, transport)}
                     onEdit={() => openEdit(node)}
                     onDelete={() => handleDelete(node)}
                     onProxyUpdated={() => void load()}
@@ -960,8 +965,7 @@ export default function NodesPage() {
                               onUpdate={() => setUpdateNodeTarget(node)}
                               onRestart={() => handleRestartAgent(node)}
                               onRotateKey={() => handleRotateKey(node)}
-                              onEnableMtls={() => handleEnableMtls(node)}
-                              onDisableMtls={() => handleDisableMtls(node)}
+                              onTransportChange={(transport) => handleTransportChange(node, transport)}
                               onEdit={() => openEdit(node)}
                               onDelete={() => handleDelete(node)}
                               compact
