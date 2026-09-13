@@ -79,9 +79,9 @@ def test_install_root_antizapret_name_does_not_false_positive_vpn_wg():
 @pytest.mark.parametrize(
     "rel",
     [
-        "wireguard/antizapret/antizapret-123-(vpn.claymore-it.ru)-wg.conf",
-        "amneziawg/antizapret/antizapret-123-(vpn.claymore-it.ru)-am.conf",
-        "openvpn/antizapret/antizapret-AN_Claymore-(vpn.claymore-it.ru).ovpn",
+        "wireguard/antizapret/antizapret-123-(vpn.example.com)-wg.conf",
+        "amneziawg/antizapret/antizapret-123-(vpn.example.com)-am.conf",
+        "openvpn/antizapret/antizapret-client1-(vpn.example.com).ovpn",
     ],
 )
 def test_real_az_disk_profiles_prefer_download_link(rel: str):

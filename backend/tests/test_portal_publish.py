@@ -13,7 +13,7 @@ from app.services.panel_publish_info import build_portal_publish_status
 
 
 def test_suggest_portal_domain_from_panel():
-    assert suggest_portal_domain("claymore-dev.com") == "portal.claymore-dev.com"
+    assert suggest_portal_domain("example.com") == "portal.example.com"
     assert suggest_portal_domain("https://Panel.Example.com/") == "portal.panel.example.com"
     assert suggest_portal_domain("portal.example.com") == "clients.example.com"
     assert suggest_portal_domain("") == ""
@@ -22,8 +22,8 @@ def test_suggest_portal_domain_from_panel():
 
 def test_assert_portal_not_same_as_panel():
     with pytest.raises(ValueError, match="не должен совпадать"):
-        assert_portal_domain_not_panel("claymore-dev.com", "claymore-dev.com")
-    assert_portal_domain_not_panel("portal.claymore-dev.com", "claymore-dev.com")
+        assert_portal_domain_not_panel("example.com", "example.com")
+    assert_portal_domain_not_panel("portal.example.com", "example.com")
 
 
 def test_normalize_portal_domain_strips_scheme_port():

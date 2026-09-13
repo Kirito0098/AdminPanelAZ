@@ -18,13 +18,13 @@ def test_normalize_hostname_strips_scheme_port_path():
 def test_az_hosts_matching_domain(tmp_path: Path):
     setup = tmp_path / "setup"
     setup.write_text(
-        "OPENVPN_HOST=vpn.claymore-it.ru\nWIREGUARD_HOST=vpn.claymore-it.ru\n",
+        "OPENVPN_HOST=vpn.example.com\nWIREGUARD_HOST=vpn.example.com\n",
         encoding="utf-8",
     )
-    assert az_hosts_matching_domain("VPN.Claymore-IT.ru", setup) == ["vpn.claymore-it.ru"]
-    assert az_hosts_matching_domain("panel.claymore-it.ru", setup) == []
-    assert format_az_panel_domain_conflict_message("vpn.claymore-it.ru", setup_path=setup)
-    assert format_az_panel_domain_conflict_message("panel.claymore-it.ru", setup_path=setup) is None
+    assert az_hosts_matching_domain("VPN.Example.com", setup) == ["vpn.example.com"]
+    assert az_hosts_matching_domain("panel.example.com", setup) == []
+    assert format_az_panel_domain_conflict_message("vpn.example.com", setup_path=setup)
+    assert format_az_panel_domain_conflict_message("panel.example.com", setup_path=setup) is None
 
 
 def test_az_host_updates_conflict_with_panel_domain():
