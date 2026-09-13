@@ -36,6 +36,62 @@ logger = logging.getLogger(__name__)
 
 HOST_SETTING_KEYS = ("openvpn_host", "wireguard_host")
 
+BLOCKING_LINK_CODES = frozenset({"node_auth", "node_tls_mismatch", "node_unreachable", "node_timeout"})
+
+
+def preflight_push_full_links(db: Session, group: NodeSyncGroup) -> list[dict[str, Any]]:
+    """Health-check primary + replicas before wipe. Returns blocking issues."""
+    from app.services.node_manager import check_node_health
+
+    blockers: list[dict[str, Any]] = []
+    node_ids = [group.primary_node_id, *parse_replica_node_ids(group.replica_node_ids)]
+    for node_id in node_ids:
+        node = db.get(Node, node_id)
+        name = node.name if node else str(node_id)
+        if node is None:
+            blockers.append(
+                {
+                    "node_id": node_id,
+                    "node_name": name,
+                    "code": "node_unreachable",
+                    "message": "Узел не найден",
+                    "hint": "Проверьте состав HA-группы.",
+                }
+            )
+            continue
+        health = check_node_health(node)
+        if health.get("status") == "online":
+            continue
+        link_error = health.get("link_error") if isinstance(health.get("link_error"), dict) else None
+        code = str((link_error or {}).get("code") or health.get("error_code") or "node_unreachable")
+        message = str((link_error or {}).get("message") or health.get("error") or "offline")
+        hint = str((link_error or {}).get("hint") or "")
+        if code in BLOCKING_LINK_CODES or health.get("status") != "online":
+            blockers.append(
+                {
+                    "node_id": node_id,
+                    "node_name": name,
+                    "code": code,
+                    "message": message,
+                    "hint": hint,
+                }
+            )
+    return blockers
+
+
+def _refresh_group_node_health(db: Session, group: NodeSyncGroup) -> None:
+    from app.services.node_manager import check_node_health, update_node_from_health
+
+    for node_id in [group.primary_node_id, *parse_replica_node_ids(group.replica_node_ids)]:
+        node = db.get(Node, node_id)
+        if node is None:
+            continue
+        try:
+            health = check_node_health(node)
+            update_node_from_health(node, health, db)
+        except Exception as exc:
+            logger.debug("Push full post-health refresh failed for node %s: %s", node_id, exc)
+
 
 def _read_backup_bytes(primary_adapter, backup_info: dict[str, str]) -> bytes:
     archive_path = backup_info.get("archive_path") or ""
@@ -85,16 +141,25 @@ def run_push_full(
     if errors:
         raise RuntimeError("; ".join(errors))
 
+    progress(5, "Проверка связи primary и реплик…", "preflight")
+    link_blockers = preflight_push_full_links(db, group)
+    if link_blockers:
+        parts = [
+            f"{item.get('node_name')}: {item.get('code')} — {item.get('message')}"
+            for item in link_blockers
+        ]
+        raise RuntimeError("Push full прерван: проблемы связи. " + "; ".join(parts))
+
     group.sync_status = SyncStatus.pending
     group.last_sync_error = None
     db.commit()
 
-    progress(10, "Создание бэкапа на primary…")
+    progress(10, "Создание бэкапа на primary…", "backup_primary")
     primary_node = db.get(Node, group.primary_node_id)
     primary_adapter = get_adapter_for_node(primary_node)
     backup_info = primary_adapter.create_antizapret_backup()
 
-    progress(30, "Чтение архива…")
+    progress(30, "Чтение архива…", "backup_primary")
     archive_bytes = _read_backup_bytes(primary_adapter, backup_info)
     archive_name = backup_info.get("archive_name") or "backup.tar.gz"
 
@@ -113,7 +178,8 @@ def run_push_full(
         percent = 40 + int((index / max(len(replica_ids), 1)) * 45)
         replica_node = db.get(Node, replica_id)
         replica_name = replica_node.name if replica_node else str(replica_id)
-        progress(percent, f"HA restore на {replica_name}…")
+        current_step = "restore_replica"
+        progress(percent, f"HA restore на {replica_name}…", current_step)
 
         replica_adapter = get_adapter_for_node(replica_node)
         if primary_host_settings:
@@ -146,7 +212,8 @@ def run_push_full(
             else:
                 result = _restore_ha_replica(replica_adapter, archive_bytes, archive_name, None)
 
-            progress(percent, f"Копия OpenVPN-профилей primary → {replica_name}…")
+            current_step = "profiles"
+            progress(percent, f"Копия OpenVPN-профилей primary → {replica_name}…", current_step)
             copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter)
             replica_profile_validation = validate_all_openvpn_profiles(replica_adapter)
             if not replica_profile_validation.ready:
@@ -160,7 +227,8 @@ def run_push_full(
                 )
             openvpn_profile_copy.append({"node_id": replica_id, "node_name": replica_name, "success": True})
 
-            progress(percent, f"Очистка лишних VPN-клиентов на {replica_name}…")
+            current_step = "prune"
+            progress(percent, f"Очистка лишних VPN-клиентов на {replica_name}…", current_step)
             prune_result = prune_replica_vpn_clients(primary_adapter, replica_adapter)
             replica_prune.append({"node_id": replica_id, "node_name": replica_name, **prune_result})
             if not prune_result.get("success"):
@@ -169,7 +237,8 @@ def run_push_full(
                     or "prune failed"
                 )
 
-            progress(percent, f"Перезапуск OpenVPN на {replica_name}…")
+            current_step = "restart_apply"
+            progress(percent, f"Перезапуск OpenVPN на {replica_name}…", current_step)
             if replica_node is not None and bool(getattr(replica_node, "openvpn_multihome", False)):
                 from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
 
@@ -199,7 +268,8 @@ def run_push_full(
                     or "OpenVPN restart failed"
                 )
 
-            progress(percent, f"Применение WireGuard на {replica_name}…")
+            current_step = "restart_apply"
+            progress(percent, f"Применение WireGuard на {replica_name}…", current_step)
             wg_runtime = replica_adapter.apply_wireguard_runtime()
             if not wg_runtime.get("success"):
                 wg_errors = wg_runtime.get("errors") or []
@@ -241,7 +311,8 @@ def run_push_full(
                         exc,
                     )
         except Exception as exc:
-            failed.append({"node_id": replica_id, "node_name": replica_name, "error": str(exc)})
+            failed.append({"node_id": replica_id, "node_name": replica_name, "failed_step": current_step,
+                        "error": str(exc)})
             logger.warning("Push full: replica sync failed on %s: %s", replica_name, exc)
             if openvpn_profile_copy and openvpn_profile_copy[-1].get("node_id") == replica_id:
                 if openvpn_profile_copy[-1].get("success"):
@@ -264,7 +335,7 @@ def run_push_full(
     db.commit()
 
     if auto_verify and all_restored:
-        progress(90, "Verify после sync…")
+        progress(90, "Verify после sync…", "verify")
         verify_result = verify_sync_group(db, group)
 
     shadow_warning = format_shadow_link_warning(shadow_link_result) if shadow_link_result else None
@@ -288,7 +359,10 @@ def run_push_full(
         message = "Полная синхронизация завершена"
 
     db.commit()
-    progress(100, "Push full завершён" if success else "Push full завершился с ошибкой")
+    if success:
+        progress(98, "Обновление статуса узлов…", "health_refresh")
+        _refresh_group_node_health(db, group)
+    progress(100, "Push full завершён" if success else "Push full завершился с ошибкой", "done")
     restart_names = [item.get("node_name") for item in openvpn_restart if item.get("restarted")]
     if success and restart_names:
         message += f". OpenVPN перезапущен на: {', '.join(str(n) for n in restart_names if n)}"

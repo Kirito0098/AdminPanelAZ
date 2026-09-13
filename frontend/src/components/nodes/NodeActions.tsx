@@ -72,7 +72,7 @@ export default function NodeActions({
       <Button
         variant={compact ? 'ghost' : 'outline'}
         size={btnSize}
-        title="Проверка здоровья"
+        title="Проверить связь"
         disabled={healthLoading}
         onClick={onHealth}
       >

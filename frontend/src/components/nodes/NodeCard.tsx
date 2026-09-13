@@ -123,6 +123,46 @@ export default function NodeCard({
             <p className="font-mono text-xs">{meta.agentVersion ?? '—'}</p>
           </div>
         </div>
+        <div className="rounded-md border border-border/60 bg-muted/20 p-3 space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">Связь</p>
+          <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+            <div>
+              <span className="text-muted-foreground">TLS </span>
+              {meta.listenTls === null && meta.expectedTls === null ? (
+                <span>— (обновите агент ≥1.8)</span>
+              ) : (
+                <span>
+                  факт {meta.listenTls == null ? '—' : meta.listenTls ? 'HTTPS' : 'HTTP'}
+                  {' / '}
+                  ожид. {meta.expectedTls == null ? '—' : meta.expectedTls ? 'HTTPS' : 'HTTP'}
+                  {meta.tlsMismatch ? ' · mismatch' : ''}
+                </span>
+              )}
+            </div>
+            <div>
+              <span className="text-muted-foreground">Uptime </span>
+              <span>
+                {meta.uptimeSec == null
+                  ? '—'
+                  : meta.uptimeSec < 120
+                    ? `${meta.uptimeSec} с`
+                    : `${Math.floor(meta.uptimeSec / 60)} мин`}
+              </span>
+            </div>
+            <div className="sm:col-span-2">
+              <span className="text-muted-foreground">Последний ok </span>
+              <span>{meta.lastHealthOkAt ? formatLastSeen(meta.lastHealthOkAt) : '—'}</span>
+            </div>
+            {meta.lastLinkError?.message && (
+              <div className="sm:col-span-2 text-amber-800 dark:text-amber-100">
+                <span className="font-mono">{meta.lastLinkError.code ?? 'error'}</span>
+                {': '}
+                {meta.lastLinkError.message}
+                {meta.lastLinkError.hint ? ` — ${meta.lastLinkError.hint}` : ''}
+              </div>
+            )}
+          </div>
+        </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           {node.is_local ? (
             <Badge variant="secondary">Локальный</Badge>

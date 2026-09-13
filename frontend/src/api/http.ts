@@ -20,14 +20,20 @@ export function getToken(): string | null {
 }
 
 export function isNodeAgentAuthFailureDetail(detail: unknown): boolean {
+  if (typeof detail === 'object' && detail && 'code' in detail) {
+    const code = (detail as { code?: unknown }).code
+    if (code === 'node_auth') return true
+  }
   const text =
     typeof detail === 'string'
       ? detail
       : Array.isArray(detail) && detail.length > 0 && typeof detail[0] === 'string'
         ? detail[0]
-        : typeof detail === 'object' && detail && 'msg' in detail && typeof (detail as { msg: unknown }).msg === 'string'
-          ? (detail as { msg: string }).msg
-          : ''
+        : typeof detail === 'object' && detail && 'message' in detail && typeof (detail as { message: unknown }).message === 'string'
+          ? (detail as { message: string }).message
+          : typeof detail === 'object' && detail && 'msg' in detail && typeof (detail as { msg: unknown }).msg === 'string'
+            ? (detail as { msg: string }).msg
+            : ''
   if (!text) return false
   return text.includes('X-Node-Key') || text.includes('Неверный API-ключ')
 }

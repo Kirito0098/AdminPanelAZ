@@ -60,90 +60,35 @@ class ProxyNodeAdapter:
         return kwargs
 
     def _format_ssl_error(self, msg: str) -> str | None:
-        mark_hint = (
-            "Отметьте mTLS для прокси-узла на странице «Узлы» "
-            "(сертификаты proxy_agent — вручную, см. docs/proxy-agent.md)."
-        )
-        if "wrong version number" in msg or "wrong_version_number" in msg:
-            if self._mtls_enabled:
-                return (
-                    "Ошибка SSL (WRONG_VERSION_NUMBER): proxy_agent, вероятно, отвечает по HTTP, "
-                    "а панель подключается по HTTPS. Сбросьте флаг mTLS для узла или настройте "
-                    "HTTPS на proxy_agent."
+        from app.services.node_link_errors import _ssl_message
+
+        # Prefer shared classifier wording; keep proxy-specific mTLS mark hint in TLS mismatch paths.
+        base = _ssl_message(msg, mtls_enabled=self._mtls_enabled)
+        if base is None:
+            return None
+        if "Включите mTLS для узла" in base:
+            return (
+                base.replace(
+                    "Включите mTLS для узла на странице «Узлы».",
+                    "Отметьте mTLS для прокси-узла на странице «Узлы» "
+                    "(сертификаты proxy_agent — вручную, см. docs/proxy-agent.md).",
                 )
-            return (
-                "Ошибка SSL (WRONG_VERSION_NUMBER): proxy_agent, вероятно, отвечает по HTTPS (mTLS), "
-                f"а панель подключается по HTTP. {mark_hint}"
             )
-        if "certificate verify failed" in msg or "certificate_verify_failed" in msg:
-            return (
-                "Ошибка проверки сертификата proxy_agent. Проверьте CA и клиентский сертификат панели "
-                "или заново отметьте mTLS после обновления сертификатов (docs/proxy-agent.md)."
-            )
-        if (
-            "certificate has expired" in msg
-            or "certificate expired" in msg
-            or "certificate_expired" in msg
-        ):
-            return (
-                "Сертификат mTLS истёк. Обновите сертификаты proxy_agent вручную "
-                "(docs/proxy-agent.md) и проверьте CA панели."
-            )
-        if "self signed certificate" in msg or "self-signed certificate" in msg:
-            return (
-                "proxy_agent использует самоподписанный или неизвестный сертификат. "
-                "Убедитесь, что CA панели совпадает с CA на узле (docs/proxy-agent.md)."
-            )
-        if "unknown ca" in msg or "tlsv1_alert_unknown_ca" in msg:
-            return (
-                "proxy_agent не доверяет клиентскому сертификату панели (unknown CA). "
-                "Проверьте CA на агенте (docs/proxy-agent.md)."
-            )
-        if (
-            "handshake failure" in msg
-            or "sslv3_alert_handshake_failure" in msg
-            or "alert handshake failure" in msg
-        ):
-            if self._mtls_enabled:
-                return (
-                    "Ошибка TLS handshake с proxy_agent. Проверьте, что на узле включён mTLS, "
-                    "сертификаты выданы одним CA, и порт доступен с IP панели."
-                )
-            return f"Ошибка TLS handshake: узел, вероятно, ожидает mTLS. {mark_hint}"
-        if "ssl" in msg or "tls" in msg:
-            if self._mtls_enabled:
-                return (
-                    "Ошибка SSL/mTLS при подключении к proxy_agent. Проверьте сертификаты панели "
-                    "и что узел отвечает по HTTPS."
-                )
-            return (
-                "Ошибка SSL при подключении по HTTP — узел, вероятно, отвечает по HTTPS (mTLS). "
-                f"{mark_hint}"
-            )
-        return None
+        return base.replace("node agent", "proxy_agent").replace("агенту узла", "proxy_agent")
 
     def _format_connection_error(self, exc: httpx.RequestError) -> str:
-        msg = str(exc).lower()
-        if isinstance(exc, httpx.TimeoutException):
-            return "Таймаут подключения к proxy_agent — проверьте firewall и доступность порта"
-        ssl_hint = self._format_ssl_error(msg)
-        if ssl_hint is not None:
-            return ssl_hint
-        if isinstance(exc, httpx.ConnectError):
-            return f"Не удалось подключиться к proxy_agent: {exc}"
-        if isinstance(exc, httpx.RemoteProtocolError) or "disconnected without sending a response" in msg:
-            if not self._mtls_enabled:
-                return (
-                    "Сервер закрыл соединение без ответа. Вероятно, на узле включён mTLS (HTTPS), "
-                    "а панель обращается по HTTP. Отметьте mTLS для прокси-узла на странице «Узлы» "
-                    "(сертификаты — вручную, docs/proxy-agent.md)."
-                )
-            return (
-                "Сервер закрыл соединение без ответа. Проверьте mTLS-сертификаты панели."
-            )
-        return f"Прокси-узел недоступен: {exc}"
+        from app.services.node_link_errors import classify_request_error
+
+        _code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
+        return message.replace("агенту узла", "proxy_agent").replace("агента узла", "proxy_agent")
 
     def _request(self, method: str, path: str, **kwargs) -> Any:
+        from app.services.node_link_errors import (
+            classify_http_status,
+            classify_request_error,
+            raise_link_error,
+        )
+
         url = f"{self.base_url}{path}"
         timeout = kwargs.pop("timeout", HTTP_TIMEOUT)
         try:
@@ -156,10 +101,8 @@ class ProxyNodeAdapter:
                 **kwargs,
             )
         except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=self._format_connection_error(exc),
-            ) from exc
+            code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
+            raise_link_error(code, message)
 
         if response.status_code >= 400:
             detail = response.text
@@ -168,21 +111,15 @@ class ProxyNodeAdapter:
                 detail = data.get("detail", detail)
             except Exception:
                 pass
-            if response.status_code == status.HTTP_401_UNAUTHORIZED:
-                detail = "Неверный API-ключ узла (заголовок X-Node-Key)"
-            elif response.status_code == status.HTTP_403_FORBIDDEN:
-                detail = detail or "Доступ запрещён — проверьте allowlist IP на proxy_agent"
-            out_status = response.status_code
-            if response.status_code in (
-                status.HTTP_401_UNAUTHORIZED,
-                status.HTTP_403_FORBIDDEN,
-            ):
-                out_status = status.HTTP_502_BAD_GATEWAY
-            raise HTTPException(status_code=out_status, detail=detail)
+            code, message = classify_http_status(
+                response.status_code, detail, mtls_enabled=self._mtls_enabled
+            )
+            raise_link_error(code, message)
 
         if response.status_code == 204 or not response.content:
             return None
         return response.json()
+
 
     def health(self) -> dict[str, Any]:
         """GET /health → { ok, version }."""

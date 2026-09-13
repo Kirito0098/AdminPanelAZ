@@ -394,7 +394,16 @@ def check_node_health(node: Node, api_key_override: str | None = None) -> dict:
         else:
             api_key = api_key_override or get_api_key_plain(node)
             if not api_key:
-                return {"status": "offline", "error": "API-ключ не задан"}
+                return {
+                    "status": "offline",
+                    "error": "API-ключ не задан",
+                    "error_code": "node_auth",
+                    "link_error": {
+                        "code": "node_auth",
+                        "message": "API-ключ не задан",
+                        "hint": "Задайте API-ключ узла.",
+                    },
+                }
             adapter = RemoteNodeAdapter(
                 host=node.host,
                 port=node.port,
@@ -405,6 +414,16 @@ def check_node_health(node: Node, api_key_override: str | None = None) -> dict:
         health["status"] = "online"
         return health
     except HTTPException as exc:
+        from app.services.node_link_errors import parse_link_error_from_http_detail
+
+        parsed = parse_link_error_from_http_detail(exc.detail)
+        if parsed:
+            return {
+                "status": "offline",
+                "error": parsed["message"],
+                "error_code": parsed["code"],
+                "link_error": parsed,
+            }
         return {"status": "offline", "error": str(exc.detail)}
     except Exception as exc:
         return {"status": "offline", "error": str(exc)}
@@ -417,20 +436,46 @@ def update_node_from_health(node: Node, health: dict, db: Session) -> None:
     status_str = health.get("status", "offline")
     new_status = NodeStatus.online if status_str == "online" else NodeStatus.offline
     node.status = new_status
+    now_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     if status_str == "online":
         node.last_seen_at = datetime.utcnow()
         meta = node_metadata_dict(node)
         for key in HEALTH_METADATA_KEYS:
             if key in health and health[key] is not None:
                 meta[key] = health[key]
+        meta["last_health_ok_at"] = now_iso
+        meta.pop("last_link_error", None)
         if health.get("error"):
             meta["last_error"] = health["error"]
         elif "last_error" in meta:
             meta.pop("last_error", None)
+        expected_tls = bool(getattr(node, "mtls_enabled", False)) and not bool(node.is_local)
+        meta["expected_tls"] = expected_tls
+        if "listen_tls" in health and health["listen_tls"] is not None:
+            meta["tls_mismatch"] = bool(expected_tls) != bool(health["listen_tls"])
+        else:
+            meta.pop("tls_mismatch", None)
         node.node_metadata = json.dumps(meta)
-    elif health.get("error"):
+    elif health.get("error") or health.get("link_error"):
         meta = node_metadata_dict(node)
-        meta["last_error"] = health["error"]
+        link_error = health.get("link_error")
+        if isinstance(link_error, dict) and link_error.get("code"):
+            meta["last_link_error"] = {
+                "code": str(link_error.get("code")),
+                "message": str(link_error.get("message") or health.get("error") or ""),
+                "hint": str(link_error.get("hint") or ""),
+                "at": now_iso,
+            }
+            meta["last_error"] = meta["last_link_error"]["message"]
+        else:
+            message = str(health.get("error") or "offline")
+            meta["last_error"] = message
+            meta["last_link_error"] = {
+                "code": str(health.get("error_code") or "node_error"),
+                "message": message,
+                "hint": "",
+                "at": now_iso,
+            }
         node.node_metadata = json.dumps(meta)
     node.updated_at = datetime.utcnow()
     db.add(node)

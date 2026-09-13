@@ -65,8 +65,20 @@ export function parseHttpErrorBody(
   try {
     const data = JSON.parse(body) as { detail?: unknown; message?: unknown }
     if (data.detail != null) {
-      const detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
-      return normalizeHttpErrorDetail(detail, status, fallback)
+      let detailText: string
+      if (typeof data.detail === 'string') {
+        detailText = data.detail
+      } else if (
+        typeof data.detail === 'object' &&
+        data.detail &&
+        'message' in data.detail &&
+        typeof (data.detail as { message: unknown }).message === 'string'
+      ) {
+        detailText = (data.detail as { message: string }).message
+      } else {
+        detailText = JSON.stringify(data.detail)
+      }
+      return normalizeHttpErrorDetail(detailText, status, fallback)
     }
     if (typeof data.message === 'string') {
       return normalizeHttpErrorDetail(data.message, status, fallback)

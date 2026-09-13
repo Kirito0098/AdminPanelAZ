@@ -14,6 +14,10 @@ describe('isNodeAgentAuthFailureDetail', () => {
     expect(isNodeAgentAuthFailureDetail('X-Node-Key rejected')).toBe(true)
   })
 
+  it('detects structured node_auth code', () => {
+    expect(isNodeAgentAuthFailureDetail({ code: 'node_auth', message: 'bad key' })).toBe(true)
+  })
+
   it('ignores ordinary session messages', () => {
     expect(isNodeAgentAuthFailureDetail('Not authenticated')).toBe(false)
     expect(isNodeAgentAuthFailureDetail('Неверный токен авторизации')).toBe(false)

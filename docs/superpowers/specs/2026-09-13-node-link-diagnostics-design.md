@@ -1,7 +1,7 @@
 # Node link diagnostics + Push full UX
 
 **Дата:** 2026-09-13  
-**Статус:** approved design  
+**Статус:** implemented  
 **Ветка:** `feature/client-portal`  
 **Подход:** вариант **A** — диагностический слой (health 1.8.0 + meta панели) + единый классификатор ошибок адаптера + UX Push full без смены wipe-логики
 

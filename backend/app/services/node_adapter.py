@@ -425,7 +425,7 @@ class LocalNodeAdapter(NodeAdapter):
         self._monitor = get_server_monitor()
 
     def health_check(self) -> dict[str, Any]:
-        return build_health_payload(self._service, agent_version=NODE_AGENT_VERSION)
+        return build_health_payload(self._service, agent_version=NODE_AGENT_VERSION, listen_tls=False)
 
     def add_openvpn_client(self, client_name: str, cert_expire_days: int = 3650) -> str:
         return self._service.add_openvpn_client(client_name, cert_expire_days)
@@ -978,91 +978,23 @@ class RemoteNodeAdapter(NodeAdapter):
         return kwargs
 
     def _format_ssl_error(self, msg: str) -> str | None:
-        if "wrong version number" in msg or "wrong_version_number" in msg:
-            if self._mtls_enabled:
-                return (
-                    "Ошибка SSL (WRONG_VERSION_NUMBER): узел, вероятно, отвечает по HTTP, "
-                    "а панель подключается по HTTPS. Отключите mTLS для узла или настройте "
-                    "HTTPS на node agent."
-                )
-            return (
-                "Ошибка SSL (WRONG_VERSION_NUMBER): узел, вероятно, отвечает по HTTPS (mTLS), "
-                "а панель подключается по HTTP. Включите mTLS для узла на странице «Узлы»."
-            )
-        if "certificate verify failed" in msg or "certificate_verify_failed" in msg:
-            return (
-                "Ошибка проверки сертификата node agent. Проверьте CA и клиентский сертификат панели "
-                "(NODE_AGENT_MTLS_CA_CERT, NODE_AGENT_MTLS_CLIENT_CERT, NODE_AGENT_MTLS_CLIENT_KEY) "
-                "или повторно включите mTLS для узла в панели."
-            )
-        if (
-            "certificate has expired" in msg
-            or "certificate expired" in msg
-            or "certificate_expired" in msg
-        ):
-            return (
-                "Сертификат mTLS истёк. Повторно включите mTLS для узла на странице «Узлы» "
-                "или обновите сертификаты вручную."
-            )
-        if "self signed certificate" in msg or "self-signed certificate" in msg:
-            return (
-                "Node agent использует самоподписанный или неизвестный сертификат. "
-                "Убедитесь, что CA панели совпадает с CA на узле (включите mTLS через панель)."
-            )
-        if "unknown ca" in msg or "tlsv1_alert_unknown_ca" in msg:
-            return (
-                "Node agent не доверяет клиентскому сертификату панели (unknown CA). "
-                "Повторно включите mTLS для узла или проверьте NODE_AGENT_MTLS_CA_CERT на агенте."
-            )
-        if (
-            "handshake failure" in msg
-            or "sslv3_alert_handshake_failure" in msg
-            or "alert handshake failure" in msg
-        ):
-            if self._mtls_enabled:
-                return (
-                    "Ошибка TLS handshake с node agent. Проверьте, что на узле включён mTLS, "
-                    "сертификаты панели и агента выданы одним CA, и порт 9100 доступен с IP панели."
-                )
-            return (
-                "Ошибка TLS handshake: узел, вероятно, ожидает mTLS. "
-                "Включите mTLS для узла на странице «Узлы»."
-            )
-        if "ssl" in msg or "tls" in msg:
-            if self._mtls_enabled:
-                return (
-                    "Ошибка SSL/mTLS при подключении к node agent. Проверьте сертификаты панели, "
-                    "что узел отвечает по HTTPS и NODE_AGENT_ALLOWED_IPS не блокирует панель."
-                )
-            return (
-                "Ошибка SSL при подключении по HTTP — узел, вероятно, отвечает по HTTPS (mTLS). "
-                "Включите mTLS для узла на странице «Узлы»."
-            )
-        return None
+        from app.services.node_link_errors import _ssl_message
+
+        return _ssl_message(msg, mtls_enabled=self._mtls_enabled)
 
     def _format_connection_error(self, exc: httpx.RequestError) -> str:
-        msg = str(exc).lower()
-        if isinstance(exc, httpx.TimeoutException):
-            return "Таймаут подключения к node agent — проверьте firewall и доступность порта"
-        ssl_hint = self._format_ssl_error(msg)
-        if ssl_hint is not None:
-            return ssl_hint
-        if isinstance(exc, httpx.ConnectError):
-            return f"Не удалось подключиться к node agent: {exc}"
-        if isinstance(exc, httpx.RemoteProtocolError) or "disconnected without sending a response" in msg:
-            if not self._mtls_enabled:
-                return (
-                    "Сервер закрыл соединение без ответа. Вероятно, на узле включён mTLS (HTTPS), "
-                    "а панель обращается по HTTP. Включите mTLS для узла на странице «Узлы» "
-                    "или отключите mTLS на node agent."
-                )
-            return (
-                "Сервер закрыл соединение без ответа. Проверьте mTLS-сертификаты панели "
-                "(NODE_AGENT_MTLS_CA_CERT, NODE_AGENT_MTLS_CLIENT_CERT, NODE_AGENT_MTLS_CLIENT_KEY)."
-            )
-        return f"Узел недоступен: {exc}"
+        from app.services.node_link_errors import classify_request_error
+
+        _code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
+        return message
 
     def _request(self, method: str, path: str, **kwargs) -> Any:
+        from app.services.node_link_errors import (
+            classify_http_status,
+            classify_request_error,
+            raise_link_error,
+        )
+
         url = f"{self.base_url}{path}"
         timeout = kwargs.pop("timeout", HTTP_TIMEOUT)
         try:
@@ -1075,10 +1007,8 @@ class RemoteNodeAdapter(NodeAdapter):
                 **kwargs,
             )
         except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=self._format_connection_error(exc),
-            ) from exc
+            code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
+            raise_link_error(code, message)
 
         if response.status_code >= 400:
             detail = response.text
@@ -1087,23 +1017,22 @@ class RemoteNodeAdapter(NodeAdapter):
                 detail = data.get("detail", detail)
             except Exception:
                 pass
-            if response.status_code == status.HTTP_401_UNAUTHORIZED:
-                detail = "Неверный API-ключ узла (заголовок X-Node-Key)"
-            elif response.status_code == status.HTTP_403_FORBIDDEN:
-                detail = detail or "Доступ запрещён — проверьте NODE_AGENT_ALLOWED_IPS на узле"
-            out_status = response.status_code
-            if response.status_code in (
-                status.HTTP_401_UNAUTHORIZED,
-                status.HTTP_403_FORBIDDEN,
-            ):
-                out_status = status.HTTP_502_BAD_GATEWAY
-            raise HTTPException(status_code=out_status, detail=detail)
+            code, message = classify_http_status(
+                response.status_code, detail, mtls_enabled=self._mtls_enabled
+            )
+            raise_link_error(code, message)
 
         if response.status_code == 204 or not response.content:
             return None
         return response.json()
 
     def _request_bytes(self, method: str, path: str, **kwargs) -> bytes:
+        from app.services.node_link_errors import (
+            classify_http_status,
+            classify_request_error,
+            raise_link_error,
+        )
+
         url = f"{self.base_url}{path}"
         timeout = kwargs.pop("timeout", HTTP_TIMEOUT)
         try:
@@ -1116,10 +1045,8 @@ class RemoteNodeAdapter(NodeAdapter):
                 **kwargs,
             )
         except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=self._format_connection_error(exc),
-            ) from exc
+            code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
+            raise_link_error(code, message)
 
         if response.status_code >= 400:
             detail = response.text
@@ -1128,17 +1055,10 @@ class RemoteNodeAdapter(NodeAdapter):
                 detail = data.get("detail", detail)
             except Exception:
                 pass
-            if response.status_code == status.HTTP_401_UNAUTHORIZED:
-                detail = "Неверный API-ключ узла (заголовок X-Node-Key)"
-            elif response.status_code == status.HTTP_403_FORBIDDEN:
-                detail = detail or "Доступ запрещён — проверьте NODE_AGENT_ALLOWED_IPS на узле"
-            out_status = response.status_code
-            if response.status_code in (
-                status.HTTP_401_UNAUTHORIZED,
-                status.HTTP_403_FORBIDDEN,
-            ):
-                out_status = status.HTTP_502_BAD_GATEWAY
-            raise HTTPException(status_code=out_status, detail=detail)
+            code, message = classify_http_status(
+                response.status_code, detail, mtls_enabled=self._mtls_enabled
+            )
+            raise_link_error(code, message)
         return response.content
 
     def health_check(self) -> dict[str, Any]:
