@@ -31,7 +31,7 @@ from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.antizapret import AntiZapretService
 from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
 from app.services.node_health import HEALTH_METADATA_KEYS
-from app.services.node_transport import get_transport, node_uses_tls
+from app.services.node_transport import TRANSPORT_SSH, get_transport, node_uses_tls, resolve_transport_id
 from app.services.proxy_node_adapter import ProxyNodeAdapter
 
 settings = get_settings()
@@ -229,6 +229,15 @@ def _node_kind(node: Node) -> str:
     return (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
 
 
+def _remote_http_endpoint(node: Node) -> tuple[str, int, bool]:
+    if resolve_transport_id(node) == TRANSPORT_SSH:
+        from app.services.ssh_tunnel_pool import get_ssh_tunnel_pool
+
+        return "127.0.0.1", get_ssh_tunnel_pool().ensure(node), False
+    transport = get_transport(node)
+    return node.host, node.port, transport.is_tls
+
+
 def get_proxy_adapter(node: Node, api_key_override: str | None = None) -> ProxyNodeAdapter:
     """HTTP adapter for ``node_kind=proxy`` (proxy_agent). Not a NodeAdapter."""
     if _node_kind(node) != NODE_KIND_PROXY:
@@ -247,11 +256,12 @@ def get_proxy_adapter(node: Node, api_key_override: str | None = None) -> ProxyN
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"API-ключ узла '{node.name}' недоступен",
         )
+    host, port, mtls_enabled = _remote_http_endpoint(node)
     return ProxyNodeAdapter(
-        host=node.host,
-        port=node.port,
+        host=host,
+        port=port,
         api_key=api_key,
-        mtls_enabled=get_transport(node).is_tls,
+        mtls_enabled=mtls_enabled,
     )
 
 
@@ -272,11 +282,12 @@ def get_adapter_for_node(node: Node) -> NodeAdapter:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"API-ключ узла '{node.name}' недоступен",
         )
+    host, port, mtls_enabled = _remote_http_endpoint(node)
     return RemoteNodeAdapter(
-        host=node.host,
-        port=node.port,
+        host=host,
+        port=port,
         api_key=api_key,
-        mtls_enabled=get_transport(node).is_tls,
+        mtls_enabled=mtls_enabled,
     )
 
 
@@ -405,16 +416,28 @@ def check_node_health(node: Node, api_key_override: str | None = None) -> dict:
                         "hint": "Задайте API-ключ узла.",
                     },
                 }
+            host, port, mtls_enabled = _remote_http_endpoint(node)
             adapter = RemoteNodeAdapter(
-                host=node.host,
-                port=node.port,
+                host=host,
+                port=port,
                 api_key=api_key,
-                mtls_enabled=get_transport(node).is_tls,
+                mtls_enabled=mtls_enabled,
             )
         health = adapter.health_check()
         health["status"] = "online"
         return health
     except ValueError as exc:
+        from app.services.node_link_errors import classify_ssh_error, link_error_detail
+
+        ssh_error = classify_ssh_error(exc)
+        if ssh_error:
+            code, message = ssh_error
+            return {
+                "status": "offline",
+                "error": message,
+                "error_code": code,
+                "link_error": link_error_detail(code, message),
+            }
         # Unsupported/corrupt transport — fail closed without killing the health loop.
         return {
             "status": "offline",

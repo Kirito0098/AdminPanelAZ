@@ -71,6 +71,7 @@ from app.services.ip_restriction import ip_restriction_service
 from app.services.node_update_roll import enqueue_node_update_roll
 from app.services.background_tasks import background_task_service
 from app.services.geo_routing_hint import build_geo_routing_hint
+from app.services.ssh_tunnel_pool import get_ssh_tunnel_pool
 from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import build_ha_node_context, find_group_for_node
 from app.services.openvpn_remote_hosts import (
@@ -181,6 +182,11 @@ def _to_response(node: Node) -> NodeResponse:
         created_at=node.created_at,
         updated_at=node.updated_at,
     )
+
+
+def _drop_ssh_tunnel_if_needed(node_id: int, current_transport: str) -> None:
+    if current_transport == TRANSPORT_SSH:
+        get_ssh_tunnel_pool().drop(node_id)
 
 
 def _active_node_response(db: Session, node: Node) -> ActiveNodeResponse:
@@ -443,6 +449,7 @@ def delete_node(
                 f"(Узлы → Группы синхронизации)."
             ),
         ) from exc
+    get_ssh_tunnel_pool().drop(node_id)
 
     if active_id == node_id:
         fallback = sync_local_node(db)
@@ -663,6 +670,7 @@ def patch_node_transport(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Не удалось сменить способ связи",
         ) from exc
+    _drop_ssh_tunnel_if_needed(node.id, current)
 
     return _to_response(node)
 
@@ -678,6 +686,7 @@ def enable_node_mtls(
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
     kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+    current = _node_transport_value(node)
     try:
         node = enable_mtls(db, node, admin)
     except ValueError as exc:
@@ -689,6 +698,7 @@ def enable_node_mtls(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Не удалось включить mTLS на узле: {exc}",
         ) from exc
+    _drop_ssh_tunnel_if_needed(node.id, current)
     message = (
         "Флаг mTLS отмечен — сертификаты на proxy_agent настройте вручную (docs/proxy-agent.md)"
         if kind == NODE_KIND_PROXY
@@ -712,10 +722,12 @@ def disable_node_mtls(
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
     kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+    current = _node_transport_value(node)
     try:
         node = disable_mtls(db, node, admin)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    _drop_ssh_tunnel_if_needed(node.id, current)
     agent_name = "proxy_agent" if kind == NODE_KIND_PROXY else "Node agent"
     return NodeMtlsDisableResponse(
         message="Флаг mTLS в панели сброшен",

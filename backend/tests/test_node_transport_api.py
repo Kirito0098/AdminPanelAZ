@@ -130,6 +130,36 @@ def test_patch_transport_noop_same_value(db, monkeypatch):
     enable.assert_not_called()
 
 
+def test_patch_transport_drops_ssh_tunnel_when_switching_to_http(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    node = _add_node(db, transport="ssh")
+    admin = SimpleNamespace(id=1, username="admin")
+    pool = MagicMock()
+    monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: pool)
+
+    def _fake_disable(db_session, n, actor):
+        n.transport = "http"
+        n.mtls_enabled = False
+        db_session.add(n)
+        db_session.commit()
+        db_session.refresh(n)
+        return n
+
+    monkeypatch.setattr(nodes_router, "disable_mtls", _fake_disable)
+
+    resp = nodes_router.patch_node_transport(
+        node.id,
+        NodeTransportUpdate(transport="http"),
+        admin=admin,
+        db=db,
+    )
+    assert resp.transport == "http"
+    pool.drop.assert_called_once_with(node.id)
+
+
 def test_patch_transport_local_rejected(db, monkeypatch):
     from app.routers import nodes as nodes_router
 
@@ -157,3 +187,22 @@ def test_to_response_derives_mtls_from_transport(db):
     resp = nodes_router._to_response(node)
     assert resp.transport == "mtls"
     assert resp.mtls_enabled is True
+
+
+def test_delete_node_drops_ssh_tunnel(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "find_group_for_node", lambda _db, _id: None)
+    monkeypatch.setattr(nodes_router, "sync_local_node", lambda _db: None)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    pool = MagicMock()
+    monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: pool)
+    node = _add_node(db, transport="ssh")
+    admin = SimpleNamespace(id=1, username="admin")
+    request = MagicMock()
+
+    resp = nodes_router.delete_node(node.id, request, admin=admin, db=db)
+
+    assert "удалён" in resp.message
+    pool.drop.assert_called_once_with(node.id)
