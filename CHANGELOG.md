@@ -103,6 +103,7 @@
 ### 🐛 Fixed
 
 - **Portal «Готов», но ссылка не создаётся** — `resolve_portal_base_url` читал несуществующий ключ `access_url` вместо `portal_access_url` из статуса публикации; UI показывал Ready, а «Ссылка» / create token отвечали «портал ещё не готов».
+- **Портал: скачивание AmneziaWG для Windows** — кнопка ведёт на [релизы amneziawg-windows-client](https://github.com/amnezia-vpn/amneziawg-windows-client/releases), а не на общую страницу amnezia.org.
 - **Create node + transport** — при ошибке SSH/mTLS после insert узел удаляется (нет HTTP-сирот); SSH валидируется до commit.
 - **SSH → mTLS** — `PATCH /nodes/{id}/transport` отклоняет прямой переход (provision идёт на публичный host:port); в UI — подсказка сначала HTTP; `enable`/`disable-mtls` при уже SSH тоже отклоняются.
 - **SSH → HTTP UI** — confirm/toast про переключение на HTTP, без ложного «сбросить mTLS».

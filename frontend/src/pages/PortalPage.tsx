@@ -56,14 +56,20 @@ const APP_DOWNLOADS: Record<string, Partial<Record<OsId, { label: string; url: s
     ios: { label: 'WireGuard', url: 'https://apps.apple.com/app/wireguard/id1441195209' },
   },
   amneziawg: {
-    windows: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
+    windows: {
+      label: 'AmneziaWG',
+      url: 'https://github.com/amnezia-vpn/amneziawg-windows-client/releases',
+    },
     mac: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
     linux: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
     android: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
     ios: { label: 'AmneziaWG', url: 'https://apps.apple.com/app/amneziawg/id6478942365' },
   },
   amneziawg2: {
-    windows: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
+    windows: {
+      label: 'AmneziaWG',
+      url: 'https://github.com/amnezia-vpn/amneziawg-windows-client/releases',
+    },
     mac: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
     linux: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
     android: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
