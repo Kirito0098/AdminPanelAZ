@@ -386,3 +386,100 @@ def test_disable_mtls_endpoint_rejects_ssh_transport(db, monkeypatch):
     assert exc.value.status_code == 400
     assert "transport" in str(exc.value.detail).lower()
     assert "picker" in str(exc.value.detail).lower()
+
+
+def test_create_node_with_ssh_transport(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+    from app.schemas import NodeCreate
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "validate_node_host", lambda host: host)
+    monkeypatch.setattr(nodes_router, "store_api_key", lambda _h, key: ("hash", "enc"))
+    monkeypatch.setattr(nodes_router, "check_node_health", lambda *a, **k: {"status": "online"})
+    monkeypatch.setattr(nodes_router, "update_node_from_health", lambda *a, **k: None)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    monkeypatch.setattr(nodes_router, "get_active_node_id", lambda _db: 1)
+    monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: MagicMock())
+
+    admin = SimpleNamespace(id=1, username="admin")
+    request = MagicMock()
+    payload = NodeCreate(
+        name="vpn-ssh-1",
+        host="10.0.0.5",
+        api_key="secret-key-1",
+        transport="ssh",
+        ssh_username="root",
+        ssh_private_key="PRIVATE KEY MATERIAL",
+        ssh_port=22,
+    )
+    resp = nodes_router.create_node(payload, request, admin=admin, db=db)
+    assert resp.transport == "ssh"
+    assert resp.ssh_host == "10.0.0.5"
+    assert resp.ssh_username == "root"
+    assert resp.ssh_key_configured is True
+    stored = db.query(Node).filter(Node.id == resp.id).one()
+    assert stored.transport == "ssh"
+    assert stored.ssh_private_key_encrypted
+
+
+def test_create_node_ssh_rejected_when_toggle_off(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+    from app.schemas import NodeCreate
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: False)
+    monkeypatch.setattr(nodes_router, "validate_node_host", lambda host: host)
+    monkeypatch.setattr(nodes_router, "store_api_key", lambda _h, key: ("hash", "enc"))
+    monkeypatch.setattr(nodes_router, "get_active_node_id", lambda _db: 1)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+
+    admin = SimpleNamespace(id=1, username="admin")
+    request = MagicMock()
+    payload = NodeCreate(
+        name="vpn-ssh-2",
+        host="10.0.0.6",
+        api_key="secret-key-1",
+        transport="ssh",
+        ssh_username="root",
+        ssh_private_key="PRIVATE KEY",
+    )
+    with pytest.raises(HTTPException) as exc:
+        nodes_router.create_node(payload, request, admin=admin, db=db)
+    assert exc.value.status_code == 403
+    assert "SSH transport узлов" in str(exc.value.detail)
+
+
+def test_create_node_with_mtls_transport(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+    from app.schemas import NodeCreate
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "validate_node_host", lambda host: host)
+    monkeypatch.setattr(nodes_router, "store_api_key", lambda _h, key: ("hash", "enc"))
+    monkeypatch.setattr(nodes_router, "check_node_health", lambda *a, **k: {"status": "online"})
+    monkeypatch.setattr(nodes_router, "update_node_from_health", lambda *a, **k: None)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    monkeypatch.setattr(nodes_router, "get_active_node_id", lambda _db: 1)
+
+    def _enable(db_session, node, _admin):
+        node.transport = "mtls"
+        node.mtls_enabled = True
+        db_session.add(node)
+        db_session.commit()
+        db_session.refresh(node)
+        return node
+
+    monkeypatch.setattr(nodes_router, "enable_mtls", _enable)
+
+    admin = SimpleNamespace(id=1, username="admin")
+    request = MagicMock()
+    payload = NodeCreate(
+        name="vpn-mtls-1",
+        host="10.0.0.7",
+        api_key="secret-key-1",
+        transport="mtls",
+    )
+    resp = nodes_router.create_node(payload, request, admin=admin, db=db)
+    assert resp.transport == "mtls"
+    assert resp.mtls_enabled is True

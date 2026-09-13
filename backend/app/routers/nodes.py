@@ -386,6 +386,13 @@ def create_node(
         node_kind=kind,
     )
 
+    wanted_transport = (payload.transport or TRANSPORT_HTTP).strip().lower()
+    if wanted_transport not in (TRANSPORT_HTTP, TRANSPORT_MTLS, TRANSPORT_SSH):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Неизвестный transport: {payload.transport}",
+        )
+
     key_hash, key_encrypted = store_api_key("", payload.api_key)
     node = Node(
         name=payload.name.strip(),
@@ -411,6 +418,37 @@ def create_node(
         set_active_node_id(db, node.id)
         db.commit()
 
+    if wanted_transport == TRANSPORT_SSH:
+        ssh_data: dict = {
+            "transport": TRANSPORT_SSH,
+            "ssh_host": payload.ssh_host or host,
+        }
+        if payload.ssh_port is not None:
+            ssh_data["ssh_port"] = payload.ssh_port
+        if payload.ssh_username is not None:
+            ssh_data["ssh_username"] = payload.ssh_username
+        if payload.ssh_private_key is not None:
+            ssh_data["ssh_private_key"] = payload.ssh_private_key
+        if payload.ssh_passphrase is not None:
+            ssh_data["ssh_passphrase"] = payload.ssh_passphrase
+        if payload.ssh_remote_agent_host is not None:
+            ssh_data["ssh_remote_agent_host"] = payload.ssh_remote_agent_host
+        if payload.ssh_remote_agent_port is not None:
+            ssh_data["ssh_remote_agent_port"] = payload.ssh_remote_agent_port
+        node = _apply_ssh_transport_update(node, NodeTransportUpdate(**ssh_data), db)
+    elif wanted_transport == TRANSPORT_MTLS:
+        try:
+            node = enable_mtls(db, node, admin)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Узел создан, но не удалось включить mTLS: {exc}",
+            ) from exc
+
     health = check_node_health(node, api_key_override=payload.api_key)
     update_node_from_health(node, health, db)
     if settings.audit_log_enabled:
@@ -420,7 +458,10 @@ def create_node(
             user_id=admin.id,
             username=admin.username,
             remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"name={node.name}, host={node.host}, kind={kind}",
+            details=(
+                f"name={node.name}, host={node.host}, kind={kind}, "
+                f"transport={_node_transport_value(node)}"
+            ),
         )
     return _to_response(node)
 

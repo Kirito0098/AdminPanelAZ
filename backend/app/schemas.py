@@ -1301,6 +1301,30 @@ class NodeCreate(NodeBase):
     api_key: str | None = Field(default=None, min_length=8)
     destination_ip: str | None = Field(default=None, max_length=64)
     linked_vpn_node_id: int | None = None
+    # Connection method at create time (default HTTP). SSH needs credentials below.
+    transport: str = Field(default="http", max_length=16)
+    ssh_host: str | None = Field(default=None, max_length=255)
+    ssh_port: int | None = Field(default=None, ge=1, le=65535)
+    ssh_username: str | None = Field(default=None, max_length=128)
+    ssh_private_key: str | None = None
+    ssh_passphrase: str | None = None
+    ssh_remote_agent_host: str | None = Field(default=None, max_length=255)
+    ssh_remote_agent_port: int | None = Field(default=None, ge=1, le=65535)
+
+    @field_validator(
+        "transport",
+        "ssh_host",
+        "ssh_username",
+        "ssh_private_key",
+        "ssh_passphrase",
+        "ssh_remote_agent_host",
+        mode="before",
+    )
+    @classmethod
+    def _strip_create_transport_strings(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
 
 class NodeUpdate(BaseModel):

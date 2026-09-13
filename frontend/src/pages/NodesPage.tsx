@@ -14,6 +14,7 @@ import {
   checkNodeHealth,
   createNode,
   deleteNode,
+  listNodeTransports,
   patchNodeTransport,
   getNodeMtlsStatus,
   rollingNodeUpdate,
@@ -88,7 +89,14 @@ import {
   resolveProxyLinkSelectorValue,
 } from '@/lib/proxyLinkTarget'
 import { cn } from '@/lib/utils'
-import type { Node, NodeKind, NodeMtlsStatus, NodeTransportId, NodeTransportPatchBody } from '@/types'
+import type {
+  Node,
+  NodeKind,
+  NodeMtlsStatus,
+  NodeTransportId,
+  NodeTransportOption,
+  NodeTransportPatchBody,
+} from '@/types'
 import { Navigate } from 'react-router-dom'
 
 export { isProxyNode }
@@ -137,6 +145,13 @@ export default function NodesPage() {
   const [port, setPort] = useState(VPN_DEFAULT_PORT)
   const [nodeKind, setNodeKind] = useState<NodeKind>('vpn')
   const [apiKey, setApiKey] = useState('')
+  const [createTransport, setCreateTransport] = useState<NodeTransportId>('http')
+  const [createSshForm, setCreateSshForm] = useState<SshTransportFormState>(EMPTY_SSH_FORM)
+  const [transportOptions, setTransportOptions] = useState<NodeTransportOption[]>([
+    { id: 'http', label: 'HTTP', available: true },
+    { id: 'mtls', label: 'HTTPS + mTLS', available: true },
+    { id: 'ssh', label: 'SSH tunnel', available: false },
+  ])
   const [linkSelectorValue, setLinkSelectorValue] = useState(PROXY_LINK_NONE)
   const [submitting, setSubmitting] = useState(false)
   const [healthLoading, setHealthLoading] = useState<number | null>(null)
@@ -199,6 +214,23 @@ export default function NodesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role])
 
+  useEffect(() => {
+    if (!showDialog || editing) return
+    let cancelled = false
+    listNodeTransports()
+      .then((res) => {
+        if (!cancelled && Array.isArray(res.items) && res.items.length > 0) {
+          setTransportOptions(res.items)
+        }
+      })
+      .catch(() => {
+        /* keep defaults */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [showDialog, editing])
+
   if (user?.role !== 'admin') {
     return <Navigate to="/" replace />
   }
@@ -210,6 +242,8 @@ export default function NodesPage() {
     setPort(VPN_DEFAULT_PORT)
     setNodeKind('vpn')
     setApiKey('')
+    setCreateTransport('http')
+    setCreateSshForm(EMPTY_SSH_FORM)
     setLinkSelectorValue(PROXY_LINK_NONE)
   }
 
@@ -273,6 +307,48 @@ export default function NodesPage() {
       return
     }
 
+    let createSshPayload:
+      | {
+          ssh_host: string
+          ssh_port: number
+          ssh_username: string
+          ssh_private_key: string
+          ssh_passphrase?: string
+        }
+      | undefined
+    if (!editing && createTransport === 'ssh') {
+      const sshHost = (createSshForm.ssh_host.trim() || trimmedHost).trim()
+      const sshUsername = createSshForm.ssh_username.trim()
+      const sshPrivateKey = createSshForm.ssh_private_key.trim()
+      const sshPort = Number(createSshForm.ssh_port)
+      if (!sshHost) {
+        notifyError('Укажите SSH-хост')
+        return
+      }
+      if (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535) {
+        notifyError('Укажите корректный SSH-порт (1–65535)')
+        return
+      }
+      if (!sshUsername) {
+        notifyError('Укажите SSH-пользователя')
+        return
+      }
+      if (!sshPrivateKey) {
+        notifyError('Добавьте приватный SSH-ключ')
+        return
+      }
+      createSshPayload = {
+        ssh_host: sshHost,
+        ssh_port: sshPort,
+        ssh_username: sshUsername,
+        ssh_private_key: sshPrivateKey,
+      }
+      const sshPassphrase = createSshForm.ssh_passphrase.trim()
+      if (sshPassphrase) {
+        createSshPayload.ssh_passphrase = sshPassphrase
+      }
+    }
+
     setSubmitting(true)
     try {
       const isProxyForm =
@@ -304,6 +380,8 @@ export default function NodesPage() {
           port,
           api_key: apiKey,
           node_kind: kind,
+          transport: createTransport,
+          ...(createSshPayload || {}),
           ...(kind === 'proxy' ? { linked_vpn_node_id: linkedVpnNodeId ?? null } : {}),
         })
         closeDialog()
@@ -1109,7 +1187,7 @@ export default function NodesPage() {
           if (!open && !submitting) closeDialog()
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className={createTransport === 'ssh' && !editing ? 'max-w-xl' : 'max-w-md'}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {editing ? <Pencil size={18} /> : <Plus size={18} />}
@@ -1145,12 +1223,67 @@ export default function NodesPage() {
                   </Select>
                 </div>
               )}
-              {!editing && nodeKind === 'vpn' && (
+              {!editing && (
+                <div className="grid gap-2">
+                  <Label htmlFor="node-transport">Способ связи</Label>
+                  <Select
+                    value={createTransport}
+                    onValueChange={(value) => {
+                      const next = value as NodeTransportId
+                      const opt = transportOptions.find((item) => item.id === next)
+                      if (!opt?.available) return
+                      setCreateTransport(next)
+                      if (next === 'ssh') {
+                        setCreateSshForm((prev) => ({
+                          ...prev,
+                          ssh_host: prev.ssh_host || host.trim(),
+                        }))
+                      }
+                    }}
+                    disabled={submitting}
+                  >
+                    <SelectTrigger id="node-transport">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {transportOptions.map((item) => (
+                        <SelectItem
+                          key={item.id}
+                          value={item.id}
+                          disabled={!item.available}
+                          title={item.available ? item.label : 'Модуль отключён'}
+                        >
+                          {item.label}
+                          {!item.available ? ' (выключено)' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Как панель будет достучаться до агента. SSH — только при включённом модуле.
+                  </p>
+                </div>
+              )}
+              {!editing && nodeKind === 'vpn' && createTransport === 'http' && (
                 <SettingsAlert variant="info">
                   Сначала на VPN-сервере установите и запустите <strong>node agent</strong> (
                   <code className="text-xs">systemctl start adminpanelaz-node</code>), затем укажите его{' '}
                   <strong>публичный IP или домен</strong> (не 127.0.0.1) и тот же API-ключ. Порт —{' '}
                   <strong>{VPN_DEFAULT_PORT}</strong>.
+                </SettingsAlert>
+              )}
+              {!editing && nodeKind === 'vpn' && createTransport === 'mtls' && (
+                <SettingsAlert variant="info">
+                  После добавления панель попытается выдать сертификаты агенту по HTTP. Агент должен быть
+                  уже доступен по адресу и ключу ниже; порт — <strong>{VPN_DEFAULT_PORT}</strong>.
+                </SettingsAlert>
+              )}
+              {!editing && nodeKind === 'vpn' && createTransport === 'ssh' && (
+                <SettingsAlert variant="info">
+                  Агент лучше слушать на <strong>127.0.0.1:{VPN_DEFAULT_PORT}</strong>. В{' '}
+                  <code className="text-xs">authorized_keys</code> SSH-пользователя добавьте публичный
+                  ключ, парный приватному ключу ниже. Хост узла — для отображения; SSH-хост — куда
+                  панель откроет туннель.
                 </SettingsAlert>
               )}
               {!editing && proxyNodesEnabled && nodeKind === 'proxy' && (
@@ -1191,11 +1324,21 @@ export default function NodesPage() {
                   <Input
                     id="node-host"
                     value={host}
-                    onChange={(e) => setHost(e.target.value)}
+                    onChange={(e) => {
+                      const next = e.target.value
+                      setHost(next)
+                      if (!editing && createTransport === 'ssh' && !createSshForm.ssh_host.trim()) {
+                        setCreateSshForm((prev) => ({ ...prev, ssh_host: next }))
+                      }
+                    }}
                     placeholder="vpn.example.com"
                     disabled={!!editing?.is_local}
                   />
-                  <p className="text-xs text-muted-foreground">Домен или IP, доступный с controller</p>
+                  <p className="text-xs text-muted-foreground">
+                    {createTransport === 'ssh' && !editing
+                      ? 'Отображаемый адрес узла (может совпадать с SSH-хостом)'
+                      : 'Домен или IP, доступный с controller'}
+                  </p>
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="node-port">Порт агента</Label>
@@ -1222,6 +1365,77 @@ export default function NodesPage() {
                     <p className="text-xs text-muted-foreground">Секретный ключ для аутентификации агента</p>
                   )}
                 </div>
+                {!editing && createTransport === 'ssh' && (
+                  <>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="grid gap-2">
+                        <Label htmlFor="create-ssh-host">SSH-хост</Label>
+                        <Input
+                          id="create-ssh-host"
+                          value={createSshForm.ssh_host}
+                          onChange={(e) =>
+                            setCreateSshForm((prev) => ({ ...prev, ssh_host: e.target.value }))
+                          }
+                          placeholder={host || '203.0.113.10'}
+                          disabled={submitting}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="create-ssh-port">SSH-порт</Label>
+                        <Input
+                          id="create-ssh-port"
+                          type="number"
+                          min={1}
+                          max={65535}
+                          value={createSshForm.ssh_port}
+                          onChange={(e) =>
+                            setCreateSshForm((prev) => ({ ...prev, ssh_port: e.target.value }))
+                          }
+                          placeholder="22"
+                          disabled={submitting}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="create-ssh-username">SSH-пользователь</Label>
+                      <Input
+                        id="create-ssh-username"
+                        value={createSshForm.ssh_username}
+                        onChange={(e) =>
+                          setCreateSshForm((prev) => ({ ...prev, ssh_username: e.target.value }))
+                        }
+                        placeholder="root"
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="create-ssh-private-key">Приватный SSH-ключ</Label>
+                      <Textarea
+                        id="create-ssh-private-key"
+                        value={createSshForm.ssh_private_key}
+                        onChange={(e) =>
+                          setCreateSshForm((prev) => ({ ...prev, ssh_private_key: e.target.value }))
+                        }
+                        placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                        className="min-h-40 font-mono text-xs"
+                        disabled={submitting}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="create-ssh-passphrase">Passphrase ключа</Label>
+                      <Input
+                        id="create-ssh-passphrase"
+                        type="password"
+                        value={createSshForm.ssh_passphrase}
+                        onChange={(e) =>
+                          setCreateSshForm((prev) => ({ ...prev, ssh_passphrase: e.target.value }))
+                        }
+                        placeholder="Необязательно"
+                        disabled={submitting}
+                      />
+                    </div>
+                  </>
+                )}
                 {((editing && isProxyNode(editing)) ||
                   (!editing && proxyNodesEnabled && nodeKind === 'proxy')) && (
                   <ProxyLinkSelect

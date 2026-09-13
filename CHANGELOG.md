@@ -57,6 +57,7 @@
 - **Node agent 1.8.0 / proxy agent 1.1.0** — `/health` отдаёт `started_at`, `uptime_sec`, `listen_tls` (после обновления перезапустите агенты на узлах).
 - **Способ связи узла (`transport`)** — HTTP / HTTPS+mTLS / SSH (SSH при включённом модуле) для VPN и proxy через picker; `mtls_enabled` derived.
 - **SSH transport узлов** (opt-in `node_ssh_transport`, **Настройки → Модули**) — панель поднимает SSH local forward и ходит к agent по HTTP через localhost; при **первом** подключении к узлу сохраняется отпечаток SSH host key (TOFU), дальше сверка только с сохранённым ключом.
+- **Добавление узла: выбор transport** — в диалоге «Добавить узел» можно сразу указать HTTP / HTTPS+mTLS / SSH (для SSH — host/user/ключ в той же форме); `POST /nodes` принимает `transport` и SSH-поля.
 
 ### 🔄 Changed
 
