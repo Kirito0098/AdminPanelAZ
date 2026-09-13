@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import asyncio
+import json
 import logging
 import threading
 import time
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import asyncssh
+from sqlalchemy.orm import object_session
 
 from app.config import get_settings
 from app.services.crypto import decrypt_secret
@@ -23,6 +25,7 @@ DEFAULT_IDLE_TIMEOUT_SECONDS = 600.0
 DEFAULT_OPERATION_TIMEOUT_SECONDS = 30.0
 DEFAULT_CLEANUP_INTERVAL_SECONDS = 30.0
 _LOOP_START_TIMEOUT_SECONDS = 5.0
+_SSH_HOST_KEY_METADATA_KEY = "ssh_host_key"
 
 
 class SshTunnelError(ValueError):
@@ -40,6 +43,25 @@ class _TunnelSession:
     listener: Any
     local_port: int
     last_used: float
+
+
+class _PinnedHostKeyClient(asyncssh.SSHClient):
+    def __init__(self, *, expected_host_key: Any):
+        self._expected_host_key = expected_host_key
+
+    def validate_host_public_key(self, host: str, addr: str, port: int, key: Any) -> bool:
+        del host, addr, port
+        try:
+            return self._export_public_key_bytes(key) == self._export_public_key_bytes(self._expected_host_key)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _export_public_key_bytes(key: Any) -> bytes:
+        exported = key.export_public_key()
+        if isinstance(exported, bytes):
+            return exported.strip()
+        return str(exported).encode("utf-8").strip()
 
 
 class SshTunnelPool:
@@ -215,16 +237,20 @@ class SshTunnelPool:
             ) from exc
 
         connection = None
+        expected_host_key, persist_host_key = await self._resolve_expected_host_key(node=node, host=host, port=port)
         try:
             connection = await asyncssh.connect(
                 host,
                 port=port,
                 username=username,
                 client_keys=[client_key],
-                known_hosts=None,
+                client_factory=lambda: _PinnedHostKeyClient(expected_host_key=expected_host_key),
+                server_host_key_algs="default",
             )
             listener = await connection.forward_local("127.0.0.1", 0, remote_host, remote_port)
             local_port = int(listener.get_port())
+            if persist_host_key:
+                self._store_expected_host_key(node, expected_host_key)
             return _TunnelSession(
                 signature=signature,
                 connection=connection,
@@ -232,6 +258,10 @@ class SshTunnelPool:
                 local_port=local_port,
                 last_used=now,
             )
+        except asyncssh.HostKeyNotVerifiable as exc:
+            if connection is not None:
+                await self._close_connection_only(connection)
+            raise SshTunnelError(CODE_SSH_AUTH, f"SSH host key verification failed: {exc}") from exc
         except asyncssh.PermissionDenied as exc:
             if connection is not None:
                 await self._close_connection_only(connection)
@@ -288,6 +318,62 @@ class SshTunnelPool:
             str(getattr(node, "ssh_remote_agent_host", "") or "127.0.0.1").strip(),
             int(getattr(node, "ssh_remote_agent_port", None) or getattr(node, "port", 0) or 0),
         )
+
+    async def _resolve_expected_host_key(self, *, node: Any, host: str, port: int) -> tuple[Any, bool]:
+        stored_host_key = self._stored_host_key_text(node)
+        if stored_host_key:
+            try:
+                return asyncssh.import_public_key(stored_host_key), False
+            except Exception as exc:
+                raise SshTunnelError(CODE_SSH_AUTH, "Stored SSH host key is invalid") from exc
+        try:
+            host_key = await asyncssh.get_server_host_key(host, port=port)
+            if host_key is None:
+                raise SshTunnelError(CODE_SSH_TUNNEL, "SSH host key discovery returned no host key")
+            return host_key, True
+        except asyncssh.HostKeyNotVerifiable as exc:
+            raise SshTunnelError(CODE_SSH_AUTH, f"SSH host key verification failed: {exc}") from exc
+        except SshTunnelError:
+            raise
+        except (asyncssh.ConnectionLost, asyncssh.DisconnectError, OSError, asyncio.TimeoutError) as exc:
+            raise SshTunnelError(CODE_SSH_UNREACHABLE, f"SSH host is unreachable: {exc}") from exc
+        except Exception as exc:
+            raise SshTunnelError(CODE_SSH_TUNNEL, f"SSH host key discovery failed: {exc}") from exc
+
+    def _stored_host_key_text(self, node: Any) -> str:
+        raw_metadata = str(getattr(node, "node_metadata", "") or "").strip()
+        if not raw_metadata:
+            return ""
+        try:
+            metadata = json.loads(raw_metadata)
+        except json.JSONDecodeError:
+            return ""
+        if not isinstance(metadata, dict):
+            return ""
+        return str(metadata.get(_SSH_HOST_KEY_METADATA_KEY, "") or "").strip()
+
+    def _store_expected_host_key(self, node: Any, host_key: Any) -> None:
+        raw_metadata = str(getattr(node, "node_metadata", "") or "").strip()
+        try:
+            metadata = json.loads(raw_metadata) if raw_metadata else {}
+        except json.JSONDecodeError:
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        exported_key = host_key.export_public_key()
+        if isinstance(exported_key, bytes):
+            metadata[_SSH_HOST_KEY_METADATA_KEY] = exported_key.decode("utf-8").strip()
+        else:
+            metadata[_SSH_HOST_KEY_METADATA_KEY] = str(exported_key).strip()
+        setattr(node, "node_metadata", json.dumps(metadata))
+
+        try:
+            session = object_session(node)
+        except Exception:
+            session = None
+        if session is not None:
+            session.add(node)
+            session.commit()
 
 
 _pool_singleton: SshTunnelPool | None = None
