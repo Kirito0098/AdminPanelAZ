@@ -861,14 +861,10 @@ export default function NodeSyncGroupSection({
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
               <GitCompare size={18} />
-              Группы синхронизации (HA)
+              HA · синхронизация
             </CardTitle>
             <CardDescription>
-              Один домен на два узла: при падении основного DNS переключает на реплику. «Синхронизировать» —
-              полный цикл (домен + копия VPN/crypto на реплику + проверка); «Домен» — только хосты в setup;
-              «Проверить» — диагностика без изменений. Runbook:{' '}
-              <code className="text-xs">docs/NodeSync.md</code>,{' '}
-              <code className="text-xs">reviews/HA-sync-remediation-plan.md</code>.
+              Один домен на два узла. Полный цикл, только домен или проверка — в действиях группы.
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -891,10 +887,9 @@ export default function NodeSyncGroupSection({
           {loading ? (
             <Spinner label="Загрузка групп синхронизации..." className="py-6" />
           ) : groups.length === 0 ? (
-            <SettingsAlert variant="info">
-              HA-группа даёт отказоустойчивость: два узла отвечают на один домен с одинаковыми
-              ключами. Нажмите «Создать группу» — мастер подскажет, что вводить, и сам выполнит
-              первичную синхронизацию.
+            <SettingsAlert variant="info" className="py-3">
+              Нет групп. Создайте HA-группу для отказоустойчивости на одном домене — мастер проведёт первичную
+              синхронизацию.
             </SettingsAlert>
           ) : (
             <ResponsiveDataView
@@ -929,14 +924,10 @@ export default function NodeSyncGroupSection({
                       <TableRow key={group.id}>
                         <TableCell className="font-medium">
                           {group.name}
-                          {group.sync_mode === 'manual_full' ? (
-                            <p className="mt-1 text-xs font-normal text-muted-foreground">
-                              После расформирования группы на реплике выполните Клиенты → Синхронизировать.
-                            </p>
-                          ) : group.sync_mode === 'auto' ? (
-                            <p className="mt-1 text-xs font-normal text-muted-foreground">
-                              Авто: правки с основного на реплику (см. режим синхронизации при редактировании).
-                            </p>
+                          {group.sync_mode === 'auto' ? (
+                            <p className="mt-0.5 text-[11px] font-normal text-muted-foreground">авто</p>
+                          ) : group.sync_mode === 'manual_full' ? (
+                            <p className="mt-0.5 text-[11px] font-normal text-muted-foreground">вручную</p>
                           ) : null}
                         </TableCell>
                         <TableCell>

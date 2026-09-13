@@ -110,6 +110,8 @@ ALLOW_INTERNAL_NODES=true
 
 ### SSH-туннель (модуль `node_ssh_transport`, по умолчанию выкл.)
 
+Подробная инструкция с примерами ключей: **[node-ssh-transport.md](node-ssh-transport.md)**.
+
 1. **Настройки → Модули** → включите **SSH transport узлов**.
 2. На узле `node_agent` / `proxy_agent` слушает **127.0.0.1** (порты **9100** / **9101**); в `~/.ssh/authorized_keys` SSH-пользователя добавьте **публичный ключ**, парный приватному ключу из формы панели.
 3. При **Добавить узел** выберите transport **SSH** и укажите SSH host/port/user и приватный ключ — либо переключите уже существующий узел в picker карточки. Панель поднимает local forward и ходит к API агента по HTTP через localhost.

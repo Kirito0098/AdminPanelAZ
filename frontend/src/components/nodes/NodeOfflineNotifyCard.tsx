@@ -4,13 +4,12 @@ import { Link } from 'react-router-dom'
 import { ApiError, getAdminNotifySettings, updateAdminNotifySettings } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
-import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useNotifications } from '@/context/NotificationContext'
+import { cn } from '@/lib/utils'
 
 const GRACE_PRESETS = [1, 3, 5, 10] as const
 
@@ -71,75 +70,82 @@ export default function NodeOfflineNotifyCard() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Bell size={18} />
-          Telegram: узел offline
-        </CardTitle>
-        <CardDescription>
-          Алерт придёт только после непрерывного offline дольше порога. То же значение — во вкладке{' '}
-          <Link to="/telegram?tab=notify" className="underline underline-offset-2">
-            Telegram → Уведомления
-          </Link>
-          .
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
+    <Card className="border-border/70">
+      <CardContent className="p-4">
         {loading ? (
-          <div className="flex justify-center py-6">
+          <div className="flex justify-center py-4">
             <Spinner />
           </div>
         ) : (
-          <form onSubmit={(e) => void handleSave(e)} className="space-y-4">
-            <InlineProgressBar active={saving} label={saving ? 'Сохранение...' : undefined} />
+          <form onSubmit={(e) => void handleSave(e)} className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <Bell size={16} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold tracking-tight">Telegram · offline</p>
+                  <p className="text-xs text-muted-foreground">
+                    Алерт после порога ·{' '}
+                    <Link to="/telegram?tab=notify" className="underline underline-offset-2">
+                      все уведомления
+                    </Link>
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Вкл.</span>
+                <Switch checked={enabled} onCheckedChange={setEnabled} aria-label="Уведомлять об offline" />
+              </div>
+            </div>
+
             {(!notifyGlobalEnabled || !botTokenSet) && (
-              <SettingsAlert variant="warning" title="Telegram-уведомления не готовы">
+              <SettingsAlert variant="warning" className="py-2.5">
                 {!botTokenSet
                   ? 'Задайте токен бота в разделе Telegram.'
-                  : 'Включите «Отправлять уведомления администратору» в Telegram → Уведомления.'}
+                  : 'Включите отправку уведомлений администратору в Telegram.'}
               </SettingsAlert>
             )}
-            <div className="flex items-start justify-between gap-3 rounded-lg border p-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium">Уведомлять об offline / восстановлении</p>
-                <p className="text-xs text-muted-foreground">
-                  Событие AdminNotify «Узел offline / восстановление»
-                </p>
-              </div>
-              <Switch checked={enabled} onCheckedChange={setEnabled} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="nodesOfflineGraceMinutes">Порог offline (мин)</Label>
-              <div className="flex flex-wrap items-center gap-2">
-                <Input
-                  id="nodesOfflineGraceMinutes"
-                  type="number"
-                  min={1}
-                  max={1440}
-                  className="w-24"
-                  value={graceMinutes}
-                  onChange={(e) => setGraceMinutes(e.target.value)}
-                  disabled={!enabled}
-                />
+
+            <div
+              className={cn(
+                'flex flex-wrap items-center gap-2',
+                !enabled && 'pointer-events-none opacity-50',
+              )}
+            >
+              <span className="text-xs text-muted-foreground">Порог</span>
+              <Input
+                id="nodesOfflineGraceMinutes"
+                type="number"
+                min={1}
+                max={1440}
+                className="h-8 w-16 tabular-nums"
+                value={graceMinutes}
+                onChange={(e) => setGraceMinutes(e.target.value)}
+                disabled={!enabled}
+                aria-label="Порог offline в минутах"
+              />
+              <span className="text-xs text-muted-foreground">мин</span>
+              <div className="flex flex-wrap gap-1">
                 {GRACE_PRESETS.map((mins) => (
                   <Button
                     key={mins}
                     type="button"
                     size="sm"
-                    variant={graceMinutes === String(mins) ? 'default' : 'outline'}
+                    variant={graceMinutes === String(mins) ? 'secondary' : 'ghost'}
+                    className="h-8 px-2.5 text-xs"
                     disabled={!enabled}
                     onClick={() => setGraceMinutes(String(mins))}
                   >
-                    {mins} мин
+                    {mins}
                   </Button>
                 ))}
               </div>
+              <Button type="submit" size="sm" className="ml-auto h-8" disabled={saving || !enabled}>
+                <Save size={14} />
+                {saving ? '…' : 'Сохранить'}
+              </Button>
             </div>
-            <Button type="submit" disabled={saving}>
-              <Save size={16} />
-              Сохранить
-            </Button>
           </form>
         )}
       </CardContent>

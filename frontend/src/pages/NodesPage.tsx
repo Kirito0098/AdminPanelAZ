@@ -1,6 +1,8 @@
 import { FormEvent, Fragment, useEffect, useState } from 'react'
 import {
+  Activity,
   Check,
+  ExternalLink,
   Globe,
   Loader2,
   MoreHorizontal,
@@ -8,6 +10,8 @@ import {
   Plus,
   RefreshCw,
   Server,
+  Wifi,
+  WifiOff,
 } from 'lucide-react'
 import {
   ApiError,
@@ -42,11 +46,13 @@ import ProxyLinkBadge from '@/components/proxy/ProxyLinkBadge'
 import ProxyLinkSelect from '@/components/proxy/ProxyLinkSelect'
 import { NodeBadge, NodeStatusBadge, statusLabels } from '@/components/NodeSelector'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
+import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import Spinner from '@/components/ui/Spinner'
+import MetricCard from '@/components/noc/MetricCard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -93,6 +99,7 @@ import type {
   Node,
   NodeKind,
   NodeMtlsStatus,
+  NodeStatus,
   NodeTransportId,
   NodeTransportOption,
   NodeTransportPatchBody,
@@ -100,6 +107,10 @@ import type {
 import { Navigate } from 'react-router-dom'
 
 export { isProxyNode }
+
+/** User guide for SSH node transport (GitHub). */
+export const NODE_SSH_TRANSPORT_DOCS_URL =
+  'https://github.com/Kirito0098/AdminPanelAZ/blob/main/docs/node-ssh-transport.md'
 
 type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | 'disable-mtls' | 'restart-agent' | null
 type BulkConfirmAction = 'delete' | 'enable-mtls' | null
@@ -169,6 +180,7 @@ export default function NodesPage() {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkConfirmAction, setBulkConfirmAction] = useState<BulkConfirmAction>(null)
   const [haDeleteBlockedNodes, setHaDeleteBlockedNodes] = useState<Node[]>([])
+  const [statusFilter, setStatusFilter] = useState<'all' | NodeStatus>('all')
   const { task: rollTask, polling: rollPolling, startPoll: startRollPoll } = useBackgroundTaskPoll()
 
   const getNodeDeleteBlockedReason = (node: Node): string | null => {
@@ -294,7 +306,7 @@ export default function NodesPage() {
       notifyError('Укажите хост')
       return
     }
-    if (!Number.isFinite(port) || port < 1 || port > 65535) {
+    if (!editing?.is_local && (!Number.isFinite(port) || port < 1 || port > 65535)) {
       notifyError('Укажите корректный порт (1–65535)')
       return
     }
@@ -302,7 +314,7 @@ export default function NodesPage() {
       notifyError('API-ключ обязателен (минимум 8 символов)')
       return
     }
-    if (editing && apiKey && apiKey.length < 8) {
+    if (editing && !editing.is_local && apiKey && apiKey.length < 8) {
       notifyError('API-ключ должен содержать минимум 8 символов')
       return
     }
@@ -358,20 +370,24 @@ export default function NodesPage() {
         : undefined
 
       if (editing) {
-        const payload: {
-          name: string
-          host: string
-          port: number
-          api_key?: string
-          linked_vpn_node_id?: number | null
-        } = { name: trimmedName, host: trimmedHost, port }
-        if (apiKey) payload.api_key = apiKey
-        if (isProxyForm) payload.linked_vpn_node_id = linkedVpnNodeId ?? null
-        await updateNode(editing.id, payload)
+        if (editing.is_local) {
+          await updateNode(editing.id, { name: trimmedName })
+        } else {
+          const payload: {
+            name: string
+            host: string
+            port: number
+            api_key?: string
+            linked_vpn_node_id?: number | null
+          } = { name: trimmedName, host: trimmedHost, port }
+          if (apiKey) payload.api_key = apiKey
+          if (isProxyForm) payload.linked_vpn_node_id = linkedVpnNodeId ?? null
+          await updateNode(editing.id, payload)
+        }
         closeDialog()
         await load()
         await refresh()
-        success('Узел обновлён')
+        success(editing.is_local ? 'Имя узла обновлено' : 'Узел обновлён')
       } else {
         const kind = proxyNodesEnabled && nodeKind === 'proxy' ? 'proxy' : 'vpn'
         const created = await createNode({
@@ -637,20 +653,8 @@ export default function NodesPage() {
     )
   }
 
-  const selectAllNodes = () => {
-    setSelectedNodeIds(nodes.map((node) => node.id))
-  }
-
   const clearNodeSelection = () => {
     setSelectedNodeIds([])
-  }
-
-  const toggleSelectAllNodes = () => {
-    if (selectedNodeIds.length === nodes.length) {
-      clearNodeSelection()
-    } else {
-      selectAllNodes()
-    }
   }
 
   const handleRollingUpdate = async (nodeIds: number[]) => {
@@ -861,49 +865,75 @@ export default function NodesPage() {
   }
 
   const onlineCount = nodes.filter((n) => n.status === 'online').length
-  const hasRemoteNodes = nodes.some((n) => !n.is_local)
-  const showMtlsStatus =
-    mtlsStatus &&
-    (hasRemoteNodes || mtlsStatus.ready || !mtlsStatus.writable)
+  const offlineCount = nodes.filter((n) => n.status === 'offline').length
+  const unknownCount = nodes.filter((n) => n.status === 'unknown').length
+  const filteredNodes =
+    statusFilter === 'all' ? nodes : nodes.filter((n) => n.status === statusFilter)
+  const showMtlsStatus = Boolean(mtlsStatus && (!mtlsStatus.ready || !mtlsStatus.writable))
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Server size={22} />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-2xl font-bold tracking-tight">Узлы</h2>
-              <NodeBadge name={activeNode?.name} status={activeNode?.status} />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {proxyNodesEnabled
-                ? 'VPN-узлы (node agent) и прокси-узлы (proxy_agent)'
-                : 'Управление VPN-серверами (node agent)'}
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => void load()} disabled={loading}>
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            Обновить
-          </Button>
-          <Button onClick={openCreate}>
-            <Plus size={16} />
-            Добавить узел
-          </Button>
-        </div>
-      </div>
+      <PageSectionHeader
+        icon={Server}
+        title="Узлы"
+        titleAddon={<NodeBadge name={activeNode?.name} status={activeNode?.status} />}
+        description={
+          proxyNodesEnabled
+            ? 'VPN-узлы (node agent) и прокси-узлы (proxy_agent). Операции панели идут на активном узле.'
+            : 'VPN-серверы с node agent. Операции панели идут на активном узле.'
+        }
+        actions={
+          <>
+            <Button variant="outline" onClick={() => void load()} disabled={loading}>
+              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+              Обновить
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus size={16} />
+              Добавить узел
+            </Button>
+          </>
+        }
+      />
 
-      <SettingsAlert variant="info" title="Активный узел">
-        Все операции панели (VPN, маршрутизация, мониторинг) выполняются на{' '}
-        <strong>{activeNode?.name ?? 'не выбранном узле'}</strong>. Переключите активный узел кнопкой
-        «Активировать» или через селектор в шапке.
-      </SettingsAlert>
+      {nodes.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="Всего"
+            value={<span className="tabular-nums">{nodes.length}</span>}
+            icon={Server}
+            accent="cyan"
+            sub={proxyNodesEnabled ? 'VPN + прокси' : 'VPN-узлы'}
+          />
+          <MetricCard
+            label="В сети"
+            value={<span className="tabular-nums">{onlineCount}</span>}
+            icon={Wifi}
+            accent="green"
+            sub={
+              nodes.length > 0
+                ? `${Math.round((onlineCount / nodes.length) * 100)}% флота`
+                : undefined
+            }
+          />
+          <MetricCard
+            label="Не в сети"
+            value={<span className="tabular-nums">{offlineCount}</span>}
+            icon={WifiOff}
+            accent={offlineCount > 0 ? 'red' : 'default'}
+            sub={unknownCount > 0 ? `+${unknownCount} неизвестно` : 'по health check'}
+          />
+          <MetricCard
+            label="Активный"
+            value={activeNode?.name ?? '—'}
+            icon={Activity}
+            accent="amber"
+            sub={activeNode ? statusLabels[activeNode.status] : 'не выбран'}
+          />
+        </div>
+      )}
 
-      {showMtlsStatus && <MtlsCaStatusAlert status={mtlsStatus} />}
+      {showMtlsStatus && mtlsStatus && <MtlsCaStatusAlert status={mtlsStatus} />}
 
       <NodeOfflineNotifyCard />
 
@@ -949,21 +979,58 @@ export default function NodesPage() {
         }
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <MoreHorizontal size={18} />
-            Список узлов
-          </CardTitle>
-          <CardDescription>
-            {loading
-              ? 'Загрузка...'
-              : nodes.length > 0
-                ? `${nodes.length} узл${nodes.length === 1 ? '' : nodes.length < 5 ? 'а' : 'ов'} · ${onlineCount} в сети`
-                : 'Узлы не найдены'}
-          </CardDescription>
+      <Card className="overflow-hidden border-border/70">
+        <CardHeader className="border-b border-border/60 bg-muted/15 pb-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-1">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <MoreHorizontal size={18} className="text-muted-foreground" />
+                Список узлов
+              </CardTitle>
+              <CardDescription>
+                {loading
+                  ? 'Загрузка...'
+                  : nodes.length > 0
+                    ? `${filteredNodes.length} из ${nodes.length} · ${onlineCount} в сети`
+                    : 'Узлы не найдены'}
+              </CardDescription>
+            </div>
+            {nodes.length > 0 && (
+              <div
+                className="flex flex-wrap gap-1 rounded-lg border border-border/60 bg-background/80 p-1"
+                role="tablist"
+                aria-label="Фильтр по статусу"
+              >
+                {(
+                  [
+                    { value: 'all' as const, label: 'Все', count: nodes.length },
+                    { value: 'online' as const, label: 'В сети', count: onlineCount },
+                    { value: 'offline' as const, label: 'Офлайн', count: offlineCount },
+                    { value: 'unknown' as const, label: '?', count: unknownCount },
+                  ] as const
+                ).map((item) => (
+                  <Button
+                    key={item.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={statusFilter === item.value}
+                    size="sm"
+                    variant={statusFilter === item.value ? 'secondary' : 'ghost'}
+                    className={cn(
+                      'h-8 gap-1.5 px-2.5 text-xs',
+                      statusFilter === item.value && 'shadow-sm',
+                    )}
+                    onClick={() => setStatusFilter(item.value)}
+                  >
+                    {item.label}
+                    <span className="tabular-nums text-muted-foreground">{item.count}</span>
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-4">
           {loading ? (
             <Spinner label="Загрузка узлов..." className="py-12" />
           ) : nodes.length === 0 ? (
@@ -979,15 +1046,27 @@ export default function NodesPage() {
               }
               className="py-8"
             />
+          ) : filteredNodes.length === 0 ? (
+            <EmptyState
+              icon={WifiOff}
+              title="Нет узлов с таким статусом"
+              description="Сбросьте фильтр или проверьте здоровье агентов"
+              action={
+                <Button variant="outline" onClick={() => setStatusFilter('all')}>
+                  Показать все
+                </Button>
+              }
+              className="py-8"
+            />
           ) : (
             <>
               <NodeBulkActionsBar
-                nodes={nodes}
+                nodes={filteredNodes}
                 selectedNodeIds={selectedNodeIds}
                 bulkBusy={bulkBusy}
                 rollingUpdating={rollingUpdating}
                 rollPolling={rollPolling}
-                onSelectAll={selectAllNodes}
+                onSelectAll={() => setSelectedNodeIds(filteredNodes.map((n) => n.id))}
                 onClearSelection={clearNodeSelection}
                 onBulkHealth={() => void handleBulkHealth()}
                 onBulkRollingUpdate={handleRollingUpdateSelected}
@@ -997,7 +1076,7 @@ export default function NodesPage() {
 
               <ResponsiveDataView
                 breakpoint="xl"
-                mobile={nodes.map((node) => (
+                mobile={filteredNodes.map((node) => (
                   <NodeCard
                     key={node.id}
                     node={node}
@@ -1021,160 +1100,202 @@ export default function NodesPage() {
                   />
                 ))}
                 desktop={
-                  <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-10">
-                        <input
-                          type="checkbox"
-                          checked={nodes.length > 0 && selectedNodeIds.length === nodes.length}
-                          ref={(el) => {
-                            if (el) {
-                              el.indeterminate =
-                                selectedNodeIds.length > 0 && selectedNodeIds.length < nodes.length
-                            }
-                          }}
-                          onChange={toggleSelectAllNodes}
-                          aria-label="Выбрать все узлы"
-                          className="h-4 w-4 rounded border"
-                        />
-                      </TableHead>
-                      <TableHead>Имя</TableHead>
-                      <TableHead>Адрес</TableHead>
-                      <TableHead>IP сервера</TableHead>
-                      <TableHead>Agent</TableHead>
-                      <TableHead>Службы</TableHead>
-                      <TableHead>Статус</TableHead>
-                      <TableHead>Тип</TableHead>
-                      <TableHead>Транспорт</TableHead>
-                      <TableHead className="text-right">Действия</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {nodes.map((node) => {
-                      const isActive = activeNode?.id === node.id
-                      const meta = getNodeMeta(node)
-                      const lastSeen = formatLastSeen(node.last_seen_at)
-                      const address = node.is_local ? 'local' : `${node.host}:${node.port}`
-                      const isProxy = isProxyNode(node)
-                      const showProxyAffordance = proxyNodesEnabled && isProxy
-
-                      return (
-                        <Fragment key={node.id}>
-                        <TableRow className={cn(isActive && 'bg-primary/5')}>
-                          <TableCell>
+                  <div className="overflow-x-auto rounded-lg border border-border/50">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead className="w-10 bg-muted/30">
                             <input
                               type="checkbox"
-                              checked={selectedNodeIds.includes(node.id)}
-                              onChange={() => toggleNodeSelection(node.id)}
-                              aria-label={`Выбрать ${node.name}`}
+                              checked={
+                                filteredNodes.length > 0 &&
+                                filteredNodes.every((n) => selectedNodeIds.includes(n.id))
+                              }
+                              ref={(el) => {
+                                if (el) {
+                                  const selectedVisible = filteredNodes.filter((n) =>
+                                    selectedNodeIds.includes(n.id),
+                                  ).length
+                                  el.indeterminate =
+                                    selectedVisible > 0 && selectedVisible < filteredNodes.length
+                                }
+                              }}
+                              onChange={() => {
+                                const allVisibleSelected =
+                                  filteredNodes.length > 0 &&
+                                  filteredNodes.every((n) => selectedNodeIds.includes(n.id))
+                                if (allVisibleSelected) {
+                                  const visibleIds = new Set(filteredNodes.map((n) => n.id))
+                                  setSelectedNodeIds((prev) =>
+                                    prev.filter((id) => !visibleIds.has(id)),
+                                  )
+                                } else {
+                                  setSelectedNodeIds((prev) => [
+                                    ...new Set([...prev, ...filteredNodes.map((n) => n.id)]),
+                                  ])
+                                }
+                              }}
+                              aria-label="Выбрать все узлы"
                               className="h-4 w-4 rounded border"
                             />
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            <div className="flex flex-wrap items-center gap-2">
-                              {node.name}
-                              {isProxy && (
-                                <Badge
-                                  variant="outline"
-                                  className="border-amber-500/40 text-[10px] text-amber-800 dark:text-amber-100"
-                                >
-                                  Прокси
-                                </Badge>
-                              )}
-                              {isProxy && !proxyNodesEnabled && (
-                                <Badge variant="secondary" className="text-[10px]">
-                                  модуль выкл
-                                </Badge>
-                              )}
-                              {showProxyAffordance && (
-                                <ProxyLinkBadge
-                                  linkedVpnNodeId={node.linked_vpn_node_id}
-                                  nodes={nodes}
-                                  syncGroups={syncGroups}
-                                  showUnlinked
-                                />
-                              )}
-                              {isActive && (
-                                <Badge variant="default" className="text-[10px]">
-                                  <Check size={10} />
-                                  активный
-                                </Badge>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{address}</TableCell>
-                          <TableCell className="font-mono text-xs">{meta.serverIp ?? '—'}</TableCell>
-                          <TableCell className="font-mono text-xs">{meta.agentVersion ?? '—'}</TableCell>
-                          <TableCell className="text-xs">{meta.servicesLabel ?? '—'}</TableCell>
-                          <TableCell>
-                            <NodeStatusBadge status={node.status} />
-                            {lastSeen && (
-                              <div className="mt-1 text-[10px] text-muted-foreground">{lastSeen}</div>
-                            )}
-                            {node.status === 'offline' && meta.lastError && (
-                              <div
-                                className="mt-1 max-w-xs text-[10px] text-destructive"
-                                title={meta.lastError}
-                              >
-                                {isWrongVersionSslError(meta.lastError)
-                                  ? 'Несовпадение протокола HTTP/HTTPS — см. подсказку при раскрытии карточки'
-                                  : meta.lastError}
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {node.is_local ? (
-                              <Badge variant="secondary">Локальный</Badge>
-                            ) : (
-                              <Badge variant="outline">
-                                <Globe size={10} />
-                                Удалённый
-                              </Badge>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <NodeTransportBadge node={node} />
-                          </TableCell>
-                          <TableCell>
-                            <NodeActions
-                              node={node}
-                              isActive={isActive}
-                              isProxy={isProxy}
-                              healthLoading={healthLoading === node.id}
-                              activateLoading={activateLoading === node.id}
-                              onActivate={() => handleActivate(node)}
-                              onHealth={() => handleHealth(node)}
-                              onUpdate={() => setUpdateNodeTarget(node)}
-                              onRestart={() => handleRestartAgent(node)}
-                              onRotateKey={() => handleRotateKey(node)}
-                              onTransportChange={(transport) => handleTransportChange(node, transport)}
-                              onEdit={() => openEdit(node)}
-                              onDelete={() => handleDelete(node)}
-                              compact
-                            />
-                          </TableCell>
+                          </TableHead>
+                          <TableHead className="bg-muted/30">Имя</TableHead>
+                          <TableHead className="bg-muted/30">Адрес</TableHead>
+                          <TableHead className="bg-muted/30">IP сервера</TableHead>
+                          <TableHead className="bg-muted/30">Agent</TableHead>
+                          <TableHead className="bg-muted/30">Службы</TableHead>
+                          <TableHead className="bg-muted/30">Статус</TableHead>
+                          <TableHead className="bg-muted/30">Тип</TableHead>
+                          <TableHead className="bg-muted/30">Транспорт</TableHead>
+                          <TableHead className="bg-muted/30 text-right">Действия</TableHead>
                         </TableRow>
-                        {showProxyAffordance && (
-                          <TableRow>
-                            <TableCell colSpan={10} className="bg-muted/20 py-3">
-                              <ProxyNodePanel
-                                node={node}
-                                nodes={nodes}
-                                syncGroups={syncGroups}
-                                onUpdated={() => void load()}
-                              />
-                            </TableCell>
-                          </TableRow>
-                        )}
-                        </Fragment>
-                      )
-                    })}
-                  </TableBody>
-                </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredNodes.map((node) => {
+                          const isActive = activeNode?.id === node.id
+                          const meta = getNodeMeta(node)
+                          const lastSeen = formatLastSeen(node.last_seen_at)
+                          const address = node.is_local ? 'local' : `${node.host}:${node.port}`
+                          const isProxy = isProxyNode(node)
+                          const showProxyAffordance = proxyNodesEnabled && isProxy
+
+                          return (
+                            <Fragment key={node.id}>
+                              <TableRow
+                                className={cn(
+                                  'border-l-2 border-l-transparent transition-colors',
+                                  isActive && 'border-l-primary bg-primary/[0.06]',
+                                  node.status === 'offline' && !isActive && 'bg-destructive/[0.03]',
+                                )}
+                              >
+                                <TableCell>
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedNodeIds.includes(node.id)}
+                                    onChange={() => toggleNodeSelection(node.id)}
+                                    aria-label={`Выбрать ${node.name}`}
+                                    className="h-4 w-4 rounded border"
+                                  />
+                                </TableCell>
+                                <TableCell className="font-medium">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-[15px] font-semibold tracking-tight">
+                                      {node.name}
+                                    </span>
+                                    {isProxy && (
+                                      <Badge
+                                        variant="outline"
+                                        className="border-amber-500/40 text-[10px] text-amber-800 dark:text-amber-100"
+                                      >
+                                        Прокси
+                                      </Badge>
+                                    )}
+                                    {isProxy && !proxyNodesEnabled && (
+                                      <Badge variant="secondary" className="text-[10px]">
+                                        модуль выкл
+                                      </Badge>
+                                    )}
+                                    {showProxyAffordance && (
+                                      <ProxyLinkBadge
+                                        linkedVpnNodeId={node.linked_vpn_node_id}
+                                        nodes={nodes}
+                                        syncGroups={syncGroups}
+                                        showUnlinked
+                                      />
+                                    )}
+                                    {isActive && (
+                                      <Badge variant="default" className="text-[10px]">
+                                        <Check size={10} />
+                                        активный
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
+                                  {address}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs tabular-nums">
+                                  {meta.serverIp ?? '—'}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs tabular-nums">
+                                  {meta.agentVersion ?? '—'}
+                                </TableCell>
+                                <TableCell className="text-xs tabular-nums">
+                                  {meta.servicesLabel ?? '—'}
+                                </TableCell>
+                                <TableCell>
+                                  <NodeStatusBadge status={node.status} />
+                                  {lastSeen && (
+                                    <div className="mt-1 text-[10px] text-muted-foreground">
+                                      {lastSeen}
+                                    </div>
+                                  )}
+                                  {node.status === 'offline' && meta.lastError && (
+                                    <div
+                                      className="mt-1 max-w-xs text-[10px] text-destructive"
+                                      title={meta.lastError}
+                                    >
+                                      {isWrongVersionSslError(meta.lastError)
+                                        ? 'Несовпадение протокола HTTP/HTTPS — см. подсказку при раскрытии карточки'
+                                        : meta.lastError}
+                                    </div>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  {node.is_local ? (
+                                    <Badge variant="secondary">Локальный</Badge>
+                                  ) : (
+                                    <Badge variant="outline">
+                                      <Globe size={10} />
+                                      Удалённый
+                                    </Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <NodeTransportBadge node={node} />
+                                </TableCell>
+                                <TableCell>
+                                  <NodeActions
+                                    node={node}
+                                    isActive={isActive}
+                                    isProxy={isProxy}
+                                    healthLoading={healthLoading === node.id}
+                                    activateLoading={activateLoading === node.id}
+                                    onActivate={() => handleActivate(node)}
+                                    onHealth={() => handleHealth(node)}
+                                    onUpdate={() => setUpdateNodeTarget(node)}
+                                    onRestart={() => handleRestartAgent(node)}
+                                    onRotateKey={() => handleRotateKey(node)}
+                                    onTransportChange={(transport) =>
+                                      handleTransportChange(node, transport)
+                                    }
+                                    onEdit={() => openEdit(node)}
+                                    onDelete={() => handleDelete(node)}
+                                    compact
+                                  />
+                                </TableCell>
+                              </TableRow>
+                              {showProxyAffordance && (
+                                <TableRow>
+                                  <TableCell colSpan={10} className="bg-muted/20 py-3">
+                                    <ProxyNodePanel
+                                      node={node}
+                                      nodes={nodes}
+                                      syncGroups={syncGroups}
+                                      onUpdated={() => void load()}
+                                    />
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </Fragment>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
                 }
                 mobileClassName="space-y-4"
-                desktopClassName="overflow-x-auto rounded-md border"
+                desktopClassName="overflow-x-auto"
               />
             </>
           )}
@@ -1195,9 +1316,11 @@ export default function NodesPage() {
             </DialogTitle>
             <DialogDescription>
               {editing
-                ? isProxyNode(editing)
-                  ? 'Измените параметры подключения к proxy_agent'
-                  : 'Измените параметры подключения к удалённому node agent'
+                ? editing.is_local
+                  ? 'Можно изменить отображаемое имя локального узла'
+                  : isProxyNode(editing)
+                    ? 'Измените параметры подключения к proxy_agent'
+                    : 'Измените параметры подключения к удалённому node agent'
                 : proxyNodesEnabled && nodeKind === 'proxy'
                   ? 'Подключение к proxy_agent на RU-прокси'
                   : 'Подключение к node agent на VPN-сервере'}
@@ -1282,8 +1405,16 @@ export default function NodesPage() {
                 <SettingsAlert variant="info">
                   Агент лучше слушать на <strong>127.0.0.1:{VPN_DEFAULT_PORT}</strong>. В{' '}
                   <code className="text-xs">authorized_keys</code> SSH-пользователя добавьте публичный
-                  ключ, парный приватному ключу ниже. Хост узла — для отображения; SSH-хост — куда
-                  панель откроет туннель.
+                  ключ, парный приватному ключу ниже.{' '}
+                  <a
+                    href={NODE_SSH_TRANSPORT_DOCS_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-medium underline underline-offset-2"
+                  >
+                    Инструкция
+                    <ExternalLink size={12} aria-hidden />
+                  </a>
                 </SettingsAlert>
               )}
               {!editing && proxyNodesEnabled && nodeKind === 'proxy' && (
@@ -1301,6 +1432,12 @@ export default function NodesPage() {
                   <strong>{PROXY_DEFAULT_PORT}</strong>). Панель не ставит и не запускает proxy.sh.
                 </SettingsAlert>
               )}
+              {editing?.is_local && (
+                <SettingsAlert variant="info">
+                  Хост и порт локального узла задаются панелью. Меняется только{' '}
+                  <strong>имя</strong> в списке и селекторе.
+                </SettingsAlert>
+              )}
               {editing && !editing.is_local && (
                 <SettingsAlert variant="warning" title="API-ключ">
                   Оставьте поле ключа пустым, если не хотите его менять. Новый ключ нужно прописать в
@@ -1315,10 +1452,18 @@ export default function NodesPage() {
                     id="node-name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder={nodeKind === 'proxy' ? 'proxy-ru-1' : 'vpn-eu-1'}
+                    placeholder={
+                      editing?.is_local
+                        ? 'Локальный сервер'
+                        : nodeKind === 'proxy'
+                          ? 'proxy-ru-1'
+                          : 'vpn-eu-1'
+                    }
                   />
                   <p className="text-xs text-muted-foreground">Отображаемое имя в панели и селекторе узлов</p>
                 </div>
+                {!editing?.is_local && (
+                  <>
                 <div className="grid gap-2">
                   <Label htmlFor="node-host">Хост</Label>
                   <Input
@@ -1332,7 +1477,6 @@ export default function NodesPage() {
                       }
                     }}
                     placeholder="vpn.example.com"
-                    disabled={!!editing?.is_local}
                   />
                   <p className="text-xs text-muted-foreground">
                     {createTransport === 'ssh' && !editing
@@ -1349,7 +1493,6 @@ export default function NodesPage() {
                     max={65535}
                     value={port}
                     onChange={(e) => setPort(Number(e.target.value))}
-                    disabled={!!editing?.is_local}
                   />
                 </div>
                 <div className="grid gap-2">
@@ -1365,6 +1508,8 @@ export default function NodesPage() {
                     <p className="text-xs text-muted-foreground">Секретный ключ для аутентификации агента</p>
                   )}
                 </div>
+                  </>
+                )}
                 {!editing && createTransport === 'ssh' && (
                   <>
                     <div className="grid gap-2 sm:grid-cols-2">
@@ -1490,8 +1635,21 @@ export default function NodesPage() {
         alert={{
           variant: 'info',
           title: 'Туннель от controller к agent',
-          children:
-            'Панель подключится по SSH к серверу и будет обращаться к node agent через туннель. Внутренний адрес agent по умолчанию останется 127.0.0.1 и текущий порт узла.',
+          children: (
+            <>
+              Панель подключится по SSH к серверу и будет обращаться к node agent через туннель.
+              Внутренний адрес agent по умолчанию — 127.0.0.1 и текущий порт узла.{' '}
+              <a
+                href={NODE_SSH_TRANSPORT_DOCS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-2"
+              >
+                Инструкция
+                <ExternalLink size={12} aria-hidden />
+              </a>
+            </>
+          ),
         }}
         confirmLabel="Сохранить SSH"
         loading={sshSubmitting}

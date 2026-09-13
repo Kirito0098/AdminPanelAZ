@@ -121,26 +121,28 @@ export default function NodeActions({
               {!compact && 'Ключ'}
             </Button>
           )}
-          <Button
-            variant={compact ? 'ghost' : 'outline'}
-            size={btnSize}
-            title="Редактировать"
-            onClick={onEdit}
-          >
-            <Pencil size={iconSize} />
-            {!compact && 'Изменить'}
-          </Button>
-          <Button
-            variant={compact ? 'ghost' : 'outline'}
-            size={btnSize}
-            title="Удалить"
-            className="text-destructive hover:text-destructive"
-            onClick={onDelete}
-          >
-            <Trash2 size={iconSize} />
-            {!compact && 'Удалить'}
-          </Button>
         </>
+      )}
+      <Button
+        variant={compact ? 'ghost' : 'outline'}
+        size={btnSize}
+        title={node.is_local ? 'Переименовать' : 'Редактировать'}
+        onClick={onEdit}
+      >
+        <Pencil size={iconSize} />
+        {!compact && (node.is_local ? 'Имя' : 'Изменить')}
+      </Button>
+      {!node.is_local && (
+        <Button
+          variant={compact ? 'ghost' : 'outline'}
+          size={btnSize}
+          title="Удалить"
+          className="text-destructive hover:text-destructive"
+          onClick={onDelete}
+        >
+          <Trash2 size={iconSize} />
+          {!compact && 'Удалить'}
+        </Button>
       )}
     </div>
   )

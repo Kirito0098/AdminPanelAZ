@@ -60,7 +60,26 @@ export default function NodeCard({
   const showProxyAffordance = showProxyUi && isProxy
 
   return (
-    <Card className={cn(isActive && 'border-primary/40 bg-primary/5')}>
+    <Card
+      className={cn(
+        'overflow-hidden border-border/70 transition-colors',
+        isActive && 'border-primary/40 bg-primary/[0.04]',
+        node.status === 'offline' && !isActive && 'border-destructive/20',
+      )}
+    >
+      <div
+        className={cn(
+          'h-1 w-full',
+          isActive
+            ? 'bg-primary'
+            : node.status === 'online'
+              ? 'bg-emerald-500/70'
+              : node.status === 'offline'
+                ? 'bg-destructive/70'
+                : 'bg-muted-foreground/30',
+        )}
+        aria-hidden
+      />
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 space-y-1">
@@ -75,7 +94,7 @@ export default function NodeCard({
                 />
               )}
               <Server size={16} className="shrink-0 text-muted-foreground" />
-              <span className="truncate">{node.name}</span>
+              <span className="truncate font-semibold tracking-tight">{node.name}</span>
               {isProxy && (
                 <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-800 dark:text-amber-100">
                   Прокси
@@ -101,7 +120,9 @@ export default function NodeCard({
                 </Badge>
               )}
             </CardTitle>
-            <CardDescription className="font-mono text-xs">{address}</CardDescription>
+            <CardDescription className="font-mono text-xs tabular-nums text-muted-foreground">
+              {address}
+            </CardDescription>
           </div>
           <NodeStatusBadge status={node.status} />
         </div>

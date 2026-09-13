@@ -58,6 +58,8 @@
 - **Способ связи узла (`transport`)** — HTTP / HTTPS+mTLS / SSH (SSH при включённом модуле) для VPN и proxy через picker; `mtls_enabled` derived.
 - **SSH transport узлов** (opt-in `node_ssh_transport`, **Настройки → Модули**) — панель поднимает SSH local forward и ходит к agent по HTTP через localhost; при **первом** подключении к узлу сохраняется отпечаток SSH host key (TOFU), дальше сверка только с сохранённым ключом.
 - **Добавление узла: выбор transport** — в диалоге «Добавить узел» можно сразу указать HTTP / HTTPS+mTLS / SSH (для SSH — host/user/ключ в той же форме); `POST /nodes` принимает `transport` и SSH-поля.
+- **Узлы UI** — сводка флота (всего / online / offline / активный), фильтр по статусу, акценты активного и офлайн-рядов (Lazyweb refs: Portainer / Cosmic / Depot); компактнее блоки mTLS / Telegram offline / HA; переименование локального узла.
+- **SSH transport: инструкция** — `docs/node-ssh-transport.md` + ссылка «Инструкция» в диалоге переключения на SSH и при добавлении узла.
 
 ### 🔄 Changed
 
