@@ -6,11 +6,13 @@ import ssl
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+from app.services.feature_toggles import is_node_ssh_transport_enabled
+from app.services.ssh_tunnel_pool import get_ssh_tunnel_pool
 
 TRANSPORT_HTTP = "http"
 TRANSPORT_MTLS = "mtls"
 TRANSPORT_SSH = "ssh"
-SUPPORTED_WRITABLE = frozenset({TRANSPORT_HTTP, TRANSPORT_MTLS})
+SUPPORTED_WRITABLE = frozenset({TRANSPORT_HTTP, TRANSPORT_MTLS, TRANSPORT_SSH})
 KNOWN_TRANSPORTS = frozenset({TRANSPORT_HTTP, TRANSPORT_MTLS, TRANSPORT_SSH})
 
 
@@ -57,24 +59,26 @@ class MtlsTransport:
 
 @dataclass(frozen=True)
 class SshTransport:
-    """Stub — not available in P0."""
-
     id: str = TRANSPORT_SSH
     display_name: str = "SSH tunnel"
     is_tls: bool = False
 
     def base_scheme(self) -> str:
-        raise NotImplementedError("SSH transport is not implemented")
+        return "http"
 
     def ssl_context(self) -> ssl.SSLContext | bool | None:
-        raise NotImplementedError("SSH transport is not implemented")
+        return None
+
+    def local_base_url(self, node: Any) -> str:
+        port = get_ssh_tunnel_pool().ensure(node)
+        return f"http://127.0.0.1:{port}"
 
 
 def list_transports() -> list[dict[str, Any]]:
     return [
         {"id": TRANSPORT_HTTP, "label": "HTTP", "available": True},
         {"id": TRANSPORT_MTLS, "label": "HTTPS + mTLS", "available": True},
-        {"id": TRANSPORT_SSH, "label": "SSH tunnel", "available": False},
+        {"id": TRANSPORT_SSH, "label": "SSH tunnel", "available": is_node_ssh_transport_enabled()},
     ]
 
 
@@ -105,18 +109,27 @@ def get_transport(node: Any) -> NodeTransport:
         return HttpTransport()
     if tid == TRANSPORT_MTLS:
         return MtlsTransport()
-    # Fail closed: ssh-in-DB and unknown values
+    if tid == TRANSPORT_SSH:
+        return SshTransport()
     raise ValueError(f"unsupported node transport: {tid}")
 
 
 def apply_transport_value(node: Any, transport: str) -> None:
     t = (transport or "").strip().lower()
-    if t == TRANSPORT_SSH:
-        raise ValueError("transport_not_implemented")
     if t not in SUPPORTED_WRITABLE:
         raise ValueError(f"unsupported transport: {t}")
+    if t == TRANSPORT_SSH and not _has_ssh_credentials(node):
+        raise ValueError("ssh transport requires configured credentials")
     node.transport = t
     node.mtls_enabled = t == TRANSPORT_MTLS
+
+
+def _has_ssh_credentials(node: Any) -> bool:
+    return bool(
+        str(getattr(node, "ssh_host", "") or "").strip()
+        and str(getattr(node, "ssh_username", "") or "").strip()
+        and str(getattr(node, "ssh_private_key_encrypted", "") or "").strip()
+    )
 
 
 def node_uses_tls(node: Any) -> bool:

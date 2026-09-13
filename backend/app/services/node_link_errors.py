@@ -12,6 +12,9 @@ CODE_TLS_MISMATCH = "node_tls_mismatch"
 CODE_UNREACHABLE = "node_unreachable"
 CODE_TIMEOUT = "node_timeout"
 CODE_ERROR = "node_error"
+CODE_SSH_AUTH = "node_ssh_auth"
+CODE_SSH_UNREACHABLE = "node_ssh_unreachable"
+CODE_SSH_TUNNEL = "node_ssh_tunnel"
 
 _HINTS = {
     CODE_AUTH: "Проверьте API-ключ узла (X-Node-Key) и NODE_AGENT_ALLOWED_IPS.",
@@ -19,6 +22,9 @@ _HINTS = {
     CODE_UNREACHABLE: "Проверьте host:port, firewall и что агент запущен.",
     CODE_TIMEOUT: "Проверьте сеть и доступность порта агента.",
     CODE_ERROR: "Смотрите сообщение агента; при повторе — логи node agent.",
+    CODE_SSH_AUTH: "Проверьте SSH username, private key и passphrase для узла.",
+    CODE_SSH_UNREACHABLE: "Проверьте SSH host:port, firewall и доступность узла по SSH.",
+    CODE_SSH_TUNNEL: "Проверьте SSH tunnel и remote agent host:port на узле.",
 }
 
 
@@ -82,6 +88,14 @@ def parse_link_error_from_http_detail(detail: Any) -> dict[str, str] | None:
             "message": str(detail["message"]),
             "hint": str(detail.get("hint") or _HINTS.get(str(detail["code"]), "")),
         }
+    return None
+
+
+def classify_ssh_error(exc: Exception) -> tuple[str, str] | None:
+    code = str(getattr(exc, "code", "") or "").strip()
+    if code in {CODE_SSH_AUTH, CODE_SSH_UNREACHABLE, CODE_SSH_TUNNEL}:
+        message = str(exc).strip() or "SSH transport error"
+        return code, message
     return None
 
 

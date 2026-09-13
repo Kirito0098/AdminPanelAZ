@@ -59,3 +59,21 @@ def test_raise_link_error_uses_502_for_auth():
     exc = ei.value
     assert exc.status_code == status.HTTP_502_BAD_GATEWAY
     assert exc.detail["code"] == link.CODE_AUTH
+
+
+def test_raise_link_error_supports_ssh_codes():
+    with pytest.raises(Exception) as ei:
+        link.raise_link_error(link.CODE_SSH_UNREACHABLE, "ssh down")
+    exc = ei.value
+    assert exc.status_code == status.HTTP_502_BAD_GATEWAY
+    assert exc.detail["code"] == link.CODE_SSH_UNREACHABLE
+    assert exc.detail["hint"]
+
+
+def test_classify_ssh_error_from_code_attr():
+    class _Exc(Exception):
+        code = link.CODE_SSH_AUTH
+
+    code, message = link.classify_ssh_error(_Exc("bad key")) or ("", "")
+    assert code == link.CODE_SSH_AUTH
+    assert "bad key" in message
