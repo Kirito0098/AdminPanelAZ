@@ -1,5 +1,13 @@
 # Подписка
 
+<p align="center">
+  <img src="assets/telegram-promo/11-client-portal.png" alt="Клиентский портал" width="900">
+</p>
+
+<p align="center">
+  <img src="assets/telegram-promo/12-unlock-keys.png" alt="Unlock-ключи" width="900">
+</p>
+
 ## Зачем этот раздел
 
 Настройка **клиентского портала** (отдельный хост со ссылками на конфиги) и **unlock-ключей** для продления доступа клиентам.

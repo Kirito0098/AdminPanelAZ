@@ -113,6 +113,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 | --- | --- | --- |
 | [<img src="docs/assets/telegram-promo/10-configurations.png" alt="Конфигурации" width="400">](docs/konfiguracii.md) | [<img src="docs/assets/telegram-promo/09-nodes.png" alt="Узлы VPN" width="400">](docs/uzly.md) | [<img src="docs/assets/telegram-promo/07-routing-cidr.png" alt="Маршрутизация CIDR" width="400">](docs/routing-cidr.md) |
 | [<img src="docs/assets/telegram-promo/08-routing-az-warp.png" alt="AZ-WARP" width="400">](docs/warper.md) | [<img src="docs/assets/telegram-promo/04-monitoring-noc.png" alt="Мониторинг и NOC" width="400">](docs/noc-monitoring.md) | [<img src="docs/assets/telegram-promo/03-telegram-integration.png" alt="Telegram" width="400">](docs/Telegram.md) |
+| [<img src="docs/assets/telegram-promo/11-client-portal.png" alt="Клиентский портал" width="400">](docs/podpiska.md) | [<img src="docs/assets/telegram-promo/12-unlock-keys.png" alt="Unlock-ключи" width="400">](docs/podpiska.md) | |
 
 ## ✨ Возможности
 
@@ -124,8 +125,17 @@ sudo ./install.sh --proxy-only --with-systemd -y
 
 - OpenVPN, WireGuard, AmneziaWG — создание, скачивание, QR-коды ([инструкция](docs/konfiguracii.md))
 - Блокировка, срок действия, лимиты трафика
-- **Подписка** — отдельный раздел меню (`/subscription`): unlock-коды и доступ до даты, настройка клиентского портала
+- **Подписка** — отдельный раздел меню (`/subscription`): unlock-коды и доступ до даты, настройка клиентского портала ([инструкция](docs/podpiska.md))
 - **Клиентский портал** — постоянные ссылки `https://portal…/p/…` для клиентов (статус, срок, трафик, установка профиля); автонастройка поддомена под текущий HTTPS
+
+<p align="center">
+  <img src="docs/assets/telegram-promo/11-client-portal.png" alt="Клиентский портал — постоянные ссылки для клиентов" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/assets/telegram-promo/12-unlock-keys.png" alt="Unlock-ключи — продление доступа клиентов" width="900">
+</p>
+
 - Несколько VPN-серверов (узлов) из одной панели ([инструкция](docs/uzly.md))
 - **Способ связи с агентом** — HTTP, HTTPS+mTLS или **SSH-туннель** (модуль, по умолчанию выкл.); preflight перед сменой ([SSH](docs/node-ssh-transport.md))
 - **Прокси-узлы** (модуль, по умолчанию выкл.) — RU `proxy.sh` + `proxy_agent`, DESTINATION из панели, домашний IP в NOC ([прокси](docs/proxy-nodes.md))

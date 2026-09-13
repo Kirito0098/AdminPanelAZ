@@ -60,6 +60,7 @@
 ### ✨ Added
 
 - **Ссылки на руководства в панели** — кнопки «Инструкция» / «Руководства» ведут на `docs/*.md` и `docs/nastrojki/*` на GitHub (разделы, настройки, сайдбар, GeoIP, proxy_agent, HA/Node Sync); новые гайды [podpiska.md](docs/podpiska.md) и [perezapusk-i-peresborka.md](docs/nastrojki/perezapusk-i-peresborka.md).
+- **Промо-баннеры Подписки** — `docs/assets/telegram-promo/11-client-portal.png` и `12-unlock-keys.png` в README и [podpiska.md](docs/podpiska.md).
 - **Узлы: блок «Связь»** — TLS (ожидание vs факт), uptime агента, последний успешный health, структурированная `last_link_error`; кнопка проверки связи как раньше.
 - **Node agent 1.8.0 / proxy agent 1.1.0** — `/health` отдаёт `started_at`, `uptime_sec`, `listen_tls` (после обновления перезапустите агенты на узлах).
 - **Способ связи узла (`transport`)** — HTTP / HTTPS+mTLS / SSH (SSH при включённом модуле) для VPN и proxy через picker; `mtls_enabled` derived; `GET /nodes/transports`, `PATCH /nodes/{id}/transport`.
