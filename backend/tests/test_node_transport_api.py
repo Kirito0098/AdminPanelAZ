@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -14,7 +15,8 @@ from app.config import get_settings
 from app.database import Base
 from app.models import Node, NodeStatus
 from app.schemas import NodeTransportUpdate
-from app.services.crypto import decrypt_secret
+from app.services.crypto import decrypt_secret, encrypt_secret
+from app.services.ssh_tunnel_pool import EnsureResult
 
 
 @pytest.fixture()
@@ -169,6 +171,42 @@ def test_patch_ssh_stores_encrypted_key_not_in_response(db, monkeypatch):
     pool.drop.assert_called_once_with(node.id)
 
 
+def test_patch_ssh_blank_passphrase_keeps_existing_secret(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: True)
+    pool = MagicMock()
+    monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: pool)
+    existing_passphrase = "existing-secret"
+    node = _add_node(db, transport="ssh")
+    node.ssh_host = "8.8.8.8"
+    node.ssh_username = "root"
+    node.ssh_private_key_encrypted = "enc-key"
+    node.ssh_passphrase_encrypted = encrypt_secret(existing_passphrase, get_settings().secret_key)
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+    admin = SimpleNamespace(id=1, username="admin")
+
+    resp = nodes_router.patch_node_transport(
+        node.id,
+        NodeTransportUpdate(
+            transport="ssh",
+            ssh_host="8.8.8.8",
+            ssh_username="root",
+            ssh_passphrase="   ",
+        ),
+        admin=admin,
+        db=db,
+    )
+
+    assert resp.transport == "ssh"
+    db.refresh(node)
+    assert decrypt_secret(node.ssh_passphrase_encrypted, get_settings().secret_key) == existing_passphrase
+    pool.drop.assert_called_once_with(node.id)
+
+
 def test_patch_transport_proxy_http_to_mtls(db, monkeypatch):
     from app.routers import nodes as nodes_router
 
@@ -267,6 +305,31 @@ def test_patch_transport_local_rejected(db, monkeypatch):
     assert exc.value.status_code == 400
 
 
+def test_remote_http_endpoint_persists_discovered_host_key_on_caller_thread(db, monkeypatch):
+    from app.services import node_manager
+
+    node = _add_node(db, transport="ssh")
+    node.node_metadata = "{}"
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+
+    class _Pool:
+        def ensure(self, _node):
+            return EnsureResult(
+                local_port=45123,
+                discovered_host_key_text="ssh-ed25519 AAAAC3NzaPersisted",
+            )
+
+    monkeypatch.setattr("app.services.ssh_tunnel_pool.get_ssh_tunnel_pool", lambda: _Pool())
+
+    host, port, uses_tls = node_manager._remote_http_endpoint(node)
+
+    assert (host, port, uses_tls) == ("127.0.0.1", 45123, False)
+    db.refresh(node)
+    assert json.loads(node.node_metadata)["ssh_host_key"] == "ssh-ed25519 AAAAC3NzaPersisted"
+
+
 def test_to_response_derives_mtls_from_transport(db):
     from app.routers import nodes as nodes_router
 
@@ -293,3 +356,33 @@ def test_delete_node_drops_ssh_tunnel(db, monkeypatch):
 
     assert "удалён" in resp.message
     pool.drop.assert_called_once_with(node.id)
+
+
+def test_enable_mtls_endpoint_rejects_ssh_transport(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    node = _add_node(db, transport="ssh")
+    admin = SimpleNamespace(id=1, username="admin")
+
+    with pytest.raises(HTTPException) as exc:
+        nodes_router.enable_node_mtls(node.id, admin=admin, db=db)
+
+    assert exc.value.status_code == 400
+    assert "transport" in str(exc.value.detail).lower()
+    assert "picker" in str(exc.value.detail).lower()
+
+
+def test_disable_mtls_endpoint_rejects_ssh_transport(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    node = _add_node(db, transport="ssh")
+    admin = SimpleNamespace(id=1, username="admin")
+
+    with pytest.raises(HTTPException) as exc:
+        nodes_router.disable_node_mtls(node.id, admin=admin, db=db)
+
+    assert exc.value.status_code == 400
+    assert "transport" in str(exc.value.detail).lower()
+    assert "picker" in str(exc.value.detail).lower()

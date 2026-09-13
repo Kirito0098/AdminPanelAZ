@@ -7,7 +7,7 @@ import asyncssh
 import pytest
 
 from app.services.crypto import encrypt_secret
-from app.services.ssh_tunnel_pool import SshTunnelError, SshTunnelPool
+from app.services.ssh_tunnel_pool import EnsureResult, SshTunnelError, SshTunnelPool
 
 
 class _FakeListener:
@@ -71,7 +71,7 @@ def _node(secret_key: str, **overrides):
     )
 
 
-def test_ensure_persists_discovered_host_key_and_reuses_tunnel(monkeypatch):
+def test_ensure_returns_discovered_host_key_and_reuses_tunnel(monkeypatch):
     secret_key = "test-secret-key"
     imported_keys: list[tuple[str, str | None]] = []
     connections: list[_FakeConnection] = []
@@ -112,13 +112,16 @@ def test_ensure_persists_discovered_host_key_and_reuses_tunnel(monkeypatch):
     finally:
         pool.shutdown()
 
-    assert first == 45123
-    assert second == 45123
+    assert first == EnsureResult(
+        local_port=45123,
+        discovered_host_key_text="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFirstKey",
+    )
+    assert second == EnsureResult(local_port=45123)
     assert imported_keys == [("PRIVATE KEY", None)]
     assert discovered == [("203.0.113.10", 22)]
     assert len(connections) == 1
     assert connections[0].forward_calls == [("127.0.0.1", 0, "127.0.0.1", 9100)]
-    assert json.loads(node.node_metadata)["ssh_host_key"] == "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFirstKey"
+    assert json.loads(node.node_metadata) == {}
 
 
 def test_drop_closes_session(monkeypatch):
@@ -149,7 +152,7 @@ def test_drop_closes_session(monkeypatch):
     pool = SshTunnelPool(start_cleaner=False)
     node = _node(secret_key, id=8)
     try:
-        assert pool.ensure(node) == 45124
+        assert pool.ensure(node).local_port == 45124
         pool.drop(node.id)
     finally:
         pool.shutdown()
@@ -197,7 +200,7 @@ def test_ensure_uses_stored_host_key_without_refetch(monkeypatch):
     pool = SshTunnelPool(start_cleaner=False)
     node = _node(secret_key, node_metadata=json.dumps({"ssh_host_key": stored_key}))
     try:
-        assert pool.ensure(node) == 45125
+        assert pool.ensure(node) == EnsureResult(local_port=45125)
     finally:
         pool.shutdown()
 
@@ -245,3 +248,14 @@ def test_ensure_raises_auth_error_on_host_key_mismatch(monkeypatch):
 
     assert exc.value.code == "node_ssh_auth"
     assert "host key verification failed" in str(exc.value).lower()
+
+
+def test_store_expected_host_key_text_updates_metadata_once():
+    node = _node("test-secret-key")
+
+    changed = SshTunnelPool.store_expected_host_key_text(node, "ssh-ed25519 AAAAC3NzaStored")
+    unchanged = SshTunnelPool.store_expected_host_key_text(node, "ssh-ed25519 AAAAC3NzaStored")
+
+    assert changed is True
+    assert unchanged is False
+    assert json.loads(node.node_metadata)["ssh_host_key"] == "ssh-ed25519 AAAAC3NzaStored"

@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app.auth import get_password_hash, verify_password
 from app.config import get_settings
@@ -231,9 +231,20 @@ def _node_kind(node: Node) -> str:
 
 def _remote_http_endpoint(node: Node) -> tuple[str, int, bool]:
     if resolve_transport_id(node) == TRANSPORT_SSH:
-        from app.services.ssh_tunnel_pool import get_ssh_tunnel_pool
+        from app.services.ssh_tunnel_pool import SshTunnelPool, get_ssh_tunnel_pool
 
-        return "127.0.0.1", get_ssh_tunnel_pool().ensure(node), False
+        ensured = get_ssh_tunnel_pool().ensure(node)
+        local_port = ensured.local_port if hasattr(ensured, "local_port") else int(ensured)
+        discovered_host_key_text = (
+            ensured.discovered_host_key_text if hasattr(ensured, "discovered_host_key_text") else None
+        )
+        if discovered_host_key_text and SshTunnelPool.store_expected_host_key_text(node, discovered_host_key_text):
+            session = object_session(node)
+            if session is not None:
+                session.add(node)
+                session.commit()
+                session.refresh(node)
+        return "127.0.0.1", local_port, False
     transport = get_transport(node)
     return node.host, node.port, transport.is_tls
 

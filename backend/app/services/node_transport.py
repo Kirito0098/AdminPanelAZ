@@ -70,7 +70,8 @@ class SshTransport:
         return None
 
     def local_base_url(self, node: Any) -> str:
-        port = get_ssh_tunnel_pool().ensure(node)
+        ensured = get_ssh_tunnel_pool().ensure(node)
+        port = ensured.local_port if hasattr(ensured, "local_port") else int(ensured)
         return f"http://127.0.0.1:{port}"
 
 

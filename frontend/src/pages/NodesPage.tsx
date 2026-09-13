@@ -414,10 +414,13 @@ export default function NodesPage() {
         ssh_host: sshHost,
         ssh_port: sshPort,
         ssh_username: sshUsername,
-        ssh_passphrase: sshForm.ssh_passphrase,
       }
+      const sshPassphrase = sshForm.ssh_passphrase.trim()
       if (sshPrivateKey) {
         body.ssh_private_key = sshPrivateKey
+      }
+      if (sshPassphrase) {
+        body.ssh_passphrase = sshPassphrase
       }
       await patchNodeTransport(target.id, body)
       closeSshDialog()

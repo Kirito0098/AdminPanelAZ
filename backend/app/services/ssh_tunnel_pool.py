@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import asyncssh
-from sqlalchemy.orm import object_session
 
 from app.config import get_settings
 from app.services.crypto import decrypt_secret
@@ -43,6 +42,12 @@ class _TunnelSession:
     listener: Any
     local_port: int
     last_used: float
+
+
+@dataclass(frozen=True)
+class EnsureResult:
+    local_port: int
+    discovered_host_key_text: str | None = None
 
 
 class _PinnedHostKeyClient(asyncssh.SSHClient):
@@ -103,7 +108,7 @@ class SshTunnelPool:
             )
             self._cleaner_thread.start()
 
-    def ensure(self, node: Any) -> int:
+    def ensure(self, node: Any) -> EnsureResult:
         now = self._time()
         signature = self._node_signature(node)
         with self._lock:
@@ -112,15 +117,18 @@ class SshTunnelPool:
             current = self._sessions.get(int(node.id))
             if current and current.signature == signature:
                 current.last_used = now
-                return current.local_port
+                return EnsureResult(local_port=current.local_port)
             if current:
                 self._close_session_locked(int(node.id), current)
-            session = self._run_coroutine(
+            session, discovered_host_key_text = self._run_coroutine(
                 self._open_session(node=node, signature=signature, now=now),
                 timeout=self._operation_timeout_seconds,
             )
             self._sessions[int(node.id)] = session
-            return session.local_port
+            return EnsureResult(
+                local_port=session.local_port,
+                discovered_host_key_text=discovered_host_key_text,
+            )
 
     def drop(self, node_id: int) -> None:
         with self._lock:
@@ -214,7 +222,13 @@ class SshTunnelPool:
                 "SSH tunnel operation timed out",
             ) from exc
 
-    async def _open_session(self, *, node: Any, signature: tuple[Any, ...], now: float) -> _TunnelSession:
+    async def _open_session(
+        self,
+        *,
+        node: Any,
+        signature: tuple[Any, ...],
+        now: float,
+    ) -> tuple[_TunnelSession, str | None]:
         host = str(getattr(node, "ssh_host", "") or "").strip()
         username = str(getattr(node, "ssh_username", "") or "").strip()
         port = int(getattr(node, "ssh_port", 22) or 22)
@@ -249,14 +263,15 @@ class SshTunnelPool:
             )
             listener = await connection.forward_local("127.0.0.1", 0, remote_host, remote_port)
             local_port = int(listener.get_port())
-            if persist_host_key:
-                self._store_expected_host_key(node, expected_host_key)
-            return _TunnelSession(
-                signature=signature,
-                connection=connection,
-                listener=listener,
-                local_port=local_port,
-                last_used=now,
+            return (
+                _TunnelSession(
+                    signature=signature,
+                    connection=connection,
+                    listener=listener,
+                    local_port=local_port,
+                    last_used=now,
+                ),
+                self._export_host_key_text(expected_host_key) if persist_host_key else None,
             )
         except asyncssh.HostKeyNotVerifiable as exc:
             if connection is not None:
@@ -352,7 +367,18 @@ class SshTunnelPool:
             return ""
         return str(metadata.get(_SSH_HOST_KEY_METADATA_KEY, "") or "").strip()
 
-    def _store_expected_host_key(self, node: Any, host_key: Any) -> None:
+    @staticmethod
+    def _export_host_key_text(host_key: Any) -> str:
+        exported_key = host_key.export_public_key()
+        if isinstance(exported_key, bytes):
+            return exported_key.decode("utf-8").strip()
+        return str(exported_key).strip()
+
+    @staticmethod
+    def store_expected_host_key_text(node: Any, host_key_text: str | None) -> bool:
+        host_key_text = str(host_key_text or "").strip()
+        if not host_key_text:
+            return False
         raw_metadata = str(getattr(node, "node_metadata", "") or "").strip()
         try:
             metadata = json.loads(raw_metadata) if raw_metadata else {}
@@ -360,20 +386,11 @@ class SshTunnelPool:
             metadata = {}
         if not isinstance(metadata, dict):
             metadata = {}
-        exported_key = host_key.export_public_key()
-        if isinstance(exported_key, bytes):
-            metadata[_SSH_HOST_KEY_METADATA_KEY] = exported_key.decode("utf-8").strip()
-        else:
-            metadata[_SSH_HOST_KEY_METADATA_KEY] = str(exported_key).strip()
+        if str(metadata.get(_SSH_HOST_KEY_METADATA_KEY, "") or "").strip() == host_key_text:
+            return False
+        metadata[_SSH_HOST_KEY_METADATA_KEY] = host_key_text
         setattr(node, "node_metadata", json.dumps(metadata))
-
-        try:
-            session = object_session(node)
-        except Exception:
-            session = None
-        if session is not None:
-            session.add(node)
-            session.commit()
+        return True
 
 
 _pool_singleton: SshTunnelPool | None = None

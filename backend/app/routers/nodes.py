@@ -297,9 +297,8 @@ def _apply_ssh_transport_update(node: Node, body: NodeTransportUpdate, db: Sessi
 
     if "ssh_passphrase" in updates:
         ssh_passphrase = _normalize_optional_text(body.ssh_passphrase)
-        node.ssh_passphrase_encrypted = (
-            encrypt_secret(ssh_passphrase, settings.secret_key) if ssh_passphrase else ""
-        )
+        if ssh_passphrase:
+            node.ssh_passphrase_encrypted = encrypt_secret(ssh_passphrase, settings.secret_key)
 
     node.ssh_host = ssh_host
     node.ssh_port = ssh_port
@@ -810,6 +809,11 @@ def enable_node_mtls(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
     kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
     current = _node_transport_value(node)
+    if current == TRANSPORT_SSH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SSH transport уже включён. Смените transport через picker узла.",
+        )
     try:
         node = enable_mtls(db, node, admin)
     except ValueError as exc:
@@ -846,6 +850,11 @@ def disable_node_mtls(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
     kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
     current = _node_transport_value(node)
+    if current == TRANSPORT_SSH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SSH transport уже включён. Смените transport через picker узла.",
+        )
     try:
         node = disable_mtls(db, node, admin)
     except ValueError as exc:
