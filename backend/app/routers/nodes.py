@@ -196,6 +196,26 @@ def _drop_ssh_tunnel_if_needed(node_id: int, current_transport: str) -> None:
         get_ssh_tunnel_pool().drop(node_id)
 
 
+def _abort_failed_node_create(db: Session, node: Node, *, made_active: bool) -> None:
+    """Remove a just-created node if post-create transport setup failed."""
+    node_id = int(node.id)
+    try:
+        get_ssh_tunnel_pool().drop(node_id)
+    except Exception:
+        pass
+    try:
+        db.rollback()
+    except Exception:
+        pass
+    row = db.query(Node).filter(Node.id == node_id).first()
+    if row is not None:
+        db.delete(row)
+        db.commit()
+    if made_active and get_active_node_id(db) == node_id:
+        clear_active_node_id(db)
+        db.commit()
+
+
 def _normalize_optional_text(value: str | None) -> str:
     if value is None:
         return ""
@@ -393,6 +413,24 @@ def create_node(
             detail=f"Неизвестный transport: {payload.transport}",
         )
 
+    # Fail fast before insert so a rejected SSH/mTLS request never leaves an HTTP orphan.
+    if wanted_transport == TRANSPORT_SSH:
+        if not is_node_ssh_transport_enabled(db):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=module_disabled_message("node_ssh_transport"),
+            )
+        if not (payload.ssh_username or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ssh_username обязателен для SSH transport",
+            )
+        if not (payload.ssh_private_key or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Для SSH transport нужен приватный ключ",
+            )
+
     key_hash, key_encrypted = store_api_key("", payload.api_key)
     node = Node(
         name=payload.name.strip(),
@@ -414,40 +452,55 @@ def create_node(
     db.refresh(node)
 
     # Proxy nodes must never become the active VPN node.
+    made_active = False
     if kind == NODE_KIND_VPN and not get_active_node_id(db):
         set_active_node_id(db, node.id)
         db.commit()
+        made_active = True
 
-    if wanted_transport == TRANSPORT_SSH:
-        ssh_data: dict = {
-            "transport": TRANSPORT_SSH,
-            "ssh_host": payload.ssh_host or host,
-        }
-        if payload.ssh_port is not None:
-            ssh_data["ssh_port"] = payload.ssh_port
-        if payload.ssh_username is not None:
-            ssh_data["ssh_username"] = payload.ssh_username
-        if payload.ssh_private_key is not None:
-            ssh_data["ssh_private_key"] = payload.ssh_private_key
-        if payload.ssh_passphrase is not None:
-            ssh_data["ssh_passphrase"] = payload.ssh_passphrase
-        if payload.ssh_remote_agent_host is not None:
-            ssh_data["ssh_remote_agent_host"] = payload.ssh_remote_agent_host
-        if payload.ssh_remote_agent_port is not None:
-            ssh_data["ssh_remote_agent_port"] = payload.ssh_remote_agent_port
-        node = _apply_ssh_transport_update(node, NodeTransportUpdate(**ssh_data), db)
-    elif wanted_transport == TRANSPORT_MTLS:
-        try:
-            node = enable_mtls(db, node, admin)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Узел создан, но не удалось включить mTLS: {exc}",
-            ) from exc
+    try:
+        if wanted_transport == TRANSPORT_SSH:
+            ssh_data: dict = {
+                "transport": TRANSPORT_SSH,
+                "ssh_host": payload.ssh_host or host,
+            }
+            if payload.ssh_port is not None:
+                ssh_data["ssh_port"] = payload.ssh_port
+            if payload.ssh_username is not None:
+                ssh_data["ssh_username"] = payload.ssh_username
+            if payload.ssh_private_key is not None:
+                ssh_data["ssh_private_key"] = payload.ssh_private_key
+            if payload.ssh_passphrase is not None:
+                ssh_data["ssh_passphrase"] = payload.ssh_passphrase
+            if payload.ssh_remote_agent_host is not None:
+                ssh_data["ssh_remote_agent_host"] = payload.ssh_remote_agent_host
+            if payload.ssh_remote_agent_port is not None:
+                ssh_data["ssh_remote_agent_port"] = payload.ssh_remote_agent_port
+            node = _apply_ssh_transport_update(node, NodeTransportUpdate(**ssh_data), db)
+        elif wanted_transport == TRANSPORT_MTLS:
+            try:
+                node = enable_mtls(db, node, admin)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Не удалось включить mTLS: {exc}",
+                ) from exc
+    except HTTPException:
+        _abort_failed_node_create(db, node, made_active=made_active)
+        raise
+    except Exception as exc:
+        _abort_failed_node_create(db, node, made_active=made_active)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Не удалось настроить способ связи: {exc}",
+        ) from exc
 
     health = check_node_health(node, api_key_override=payload.api_key)
     update_node_from_health(node, health, db)
@@ -821,6 +874,17 @@ def patch_node_transport(
     if wanted == TRANSPORT_SSH:
         node = _apply_ssh_transport_update(node, body, db)
         return _to_response(node)
+
+    # mTLS provision talks to node.host:port directly (not via SSH tunnel). SSH-only
+    # agents listening on 127.0.0.1 cannot be enrolled this way.
+    if current == TRANSPORT_SSH and wanted == TRANSPORT_MTLS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Нельзя включить mTLS напрямую с SSH: агент обычно слушает только 127.0.0.1. "
+                "Сначала переключите на HTTP (публичный host:port), затем на HTTPS + mTLS."
+            ),
+        )
 
     try:
         if wanted == TRANSPORT_MTLS:

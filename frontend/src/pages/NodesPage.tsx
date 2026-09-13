@@ -112,7 +112,7 @@ export { isProxyNode }
 export const NODE_SSH_TRANSPORT_DOCS_URL =
   'https://github.com/Kirito0098/AdminPanelAZ/blob/main/docs/node-ssh-transport.md'
 
-type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | 'disable-mtls' | 'restart-agent' | null
+type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | 'switch-http' | 'restart-agent' | null
 type BulkConfirmAction = 'delete' | 'enable-mtls' | null
 
 type SshTransportFormState = {
@@ -469,10 +469,16 @@ export default function NodesPage() {
       return
     }
     if (transport === 'mtls') {
+      if (current === 'ssh') {
+        notifyError(
+          'Сначала переключите на HTTP (агент на публичном host:port), затем включите mTLS.',
+        )
+        return
+      }
       openConfirm('enable-mtls', node)
-    } else {
-      openConfirm('disable-mtls', node)
+      return
     }
+    openConfirm('switch-http', node)
   }
 
   const handleSshSubmit = async () => {
@@ -586,13 +592,16 @@ export default function NodesPage() {
         } finally {
           setHealthLoading(null)
         }
-      } else if (action === 'disable-mtls') {
+      } else if (action === 'switch-http') {
+        const wasMtls = (target.transport || (target.mtls_enabled ? 'mtls' : 'http')).toLowerCase() === 'mtls'
         await patchNodeTransport(target.id, 'http')
         closeConfirm()
         success(`Способ связи «${target.name}»: HTTP`)
-        warning(
-          'Агент по-прежнему может работать с mTLS. Для полного отключения настройте узел вручную.',
-        )
+        if (wasMtls) {
+          warning(
+            'Агент по-прежнему может работать с mTLS. Для полного отключения настройте узел вручную.',
+          )
+        }
         await load()
         await refresh()
       } else if (action === 'restart-agent') {
@@ -1748,8 +1757,12 @@ export default function NodesPage() {
                 ? confirmTarget && isProxyNode(confirmTarget)
                   ? 'Отметить mTLS?'
                   : 'Включить mTLS?'
-                : confirmAction === 'disable-mtls'
-                  ? 'Сбросить mTLS в панели?'
+                : confirmAction === 'switch-http'
+                  ? confirmTarget &&
+                    (confirmTarget.transport || (confirmTarget.mtls_enabled ? 'mtls' : 'http')).toLowerCase() ===
+                      'ssh'
+                    ? 'Переключить на HTTP?'
+                    : 'Сбросить mTLS в панели?'
                   : confirmAction === 'restart-agent'
                     ? 'Перезапустить node agent?'
                     : ''
@@ -1789,15 +1802,24 @@ export default function NodesPage() {
                       children:
                         'Будет сгенерирован сертификат, node agent перезапустится ~5–30 сек. Связь может кратковременно прерваться.',
                     }
-                : confirmAction === 'disable-mtls'
-                  ? {
-                      variant: 'warning',
-                      title: 'Только флаг в панели',
-                      children:
-                        confirmTarget && isProxyNode(confirmTarget)
-                          ? 'Сбрасывается флаг mTLS в базе панели. proxy_agent может продолжать работать с mTLS — для полного отключения настройте узел вручную.'
-                          : 'Сбрасывается флаг mTLS в базе панели. Node agent может продолжать работать с mTLS — для полного отключения настройте узел вручную.',
-                    }
+                : confirmAction === 'switch-http'
+                  ? confirmTarget &&
+                    (confirmTarget.transport || (confirmTarget.mtls_enabled ? 'mtls' : 'http')).toLowerCase() ===
+                      'ssh'
+                    ? {
+                        variant: 'info',
+                        title: 'SSH-туннель будет закрыт',
+                        children:
+                          'Панель начнёт ходить к агенту напрямую по host:port узла. Агент должен слушать публичный адрес.',
+                      }
+                    : {
+                        variant: 'warning',
+                        title: 'Только флаг в панели',
+                        children:
+                          confirmTarget && isProxyNode(confirmTarget)
+                            ? 'Сбрасывается флаг mTLS в базе панели. proxy_agent может продолжать работать с mTLS — для полного отключения настройте узел вручную.'
+                            : 'Сбрасывается флаг mTLS в базе панели. Node agent может продолжать работать с mTLS — для полного отключения настройте узел вручную.',
+                      }
                   : confirmAction === 'restart-agent'
                     ? {
                         variant: 'warning',
@@ -1816,8 +1838,12 @@ export default function NodesPage() {
                 ? confirmTarget && isProxyNode(confirmTarget)
                   ? 'Отметить mTLS'
                   : 'Включить mTLS'
-                : confirmAction === 'disable-mtls'
-                  ? 'Сбросить mTLS'
+                : confirmAction === 'switch-http'
+                  ? confirmTarget &&
+                    (confirmTarget.transport || (confirmTarget.mtls_enabled ? 'mtls' : 'http')).toLowerCase() ===
+                      'ssh'
+                    ? 'Переключить на HTTP'
+                    : 'Сбросить mTLS'
                   : confirmAction === 'restart-agent'
                     ? 'Перезапустить'
                     : 'Подтвердить'
