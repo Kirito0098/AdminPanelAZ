@@ -264,6 +264,7 @@ class Node(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_local: Mapped[bool] = mapped_column(Boolean, default=False)
     mtls_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    transport: Mapped[str] = mapped_column(String(16), default="http")
     node_kind: Mapped[str] = mapped_column(String(16), default="vpn")
     destination_ip: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     linked_vpn_node_id: Mapped[int | None] = mapped_column(

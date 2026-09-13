@@ -1210,6 +1210,7 @@ def run_db_migrations() -> None:
     _migrate_viewer_role_to_user()
     _migrate_user_telegram_backfill()
     _migrate_nodes_mtls_enabled()
+    _migrate_nodes_transport()
     _migrate_nodes_openvpn_remote_hosts()
     _migrate_nodes_wireguard_use_first_remote()
     _migrate_nodes_openvpn_multihome()
@@ -1265,6 +1266,24 @@ def _migrate_nodes_mtls_enabled() -> None:
                 text("UPDATE nodes SET mtls_enabled = 1 WHERE is_local = 0")
             )
             logger.info("DB migration: backfilled nodes.mtls_enabled for remote nodes")
+
+
+def _migrate_nodes_transport() -> None:
+    """Add nodes.transport and one-shot backfill from mtls_enabled."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "transport" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE nodes ADD COLUMN transport VARCHAR(16) DEFAULT 'http'"))
+        conn.execute(
+            text(
+                "UPDATE nodes SET transport = CASE WHEN mtls_enabled = 1 THEN 'mtls' ELSE 'http' END"
+            )
+        )
+        logger.info("DB migration: added nodes.transport and backfilled from mtls_enabled")
 
 
 def _migrate_nodes_openvpn_remote_hosts() -> None:
