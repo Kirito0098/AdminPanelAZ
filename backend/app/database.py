@@ -58,6 +58,7 @@ def _migrate_vpn_configs_node_scope() -> None:
     from app.models import Node, VpnType
     from app.services.node_adapter import LocalNodeAdapter, RemoteNodeAdapter
     from app.services.node_manager import get_active_node_id, get_api_key_plain
+    from app.services.node_transport import node_uses_tls
 
     db = SessionLocal()
     try:
@@ -83,7 +84,7 @@ def _migrate_vpn_configs_node_scope() -> None:
                     host=node.host,
                     port=node.port,
                     api_key=api_key,
-                    mtls_enabled=bool(node.mtls_enabled),
+                    mtls_enabled=node_uses_tls(node),
                 )
                 node_clients[node.id] = (
                     set(adapter.list_openvpn_clients()),

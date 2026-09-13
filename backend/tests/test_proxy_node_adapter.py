@@ -273,6 +273,7 @@ def test_enable_mtls_proxy_already_enabled(db, monkeypatch):
     from app.services import node_mtls_provision as provision
 
     node = _add_node(db)
+    node.transport = "mtls"
     node.mtls_enabled = True
     db.commit()
     actor = SimpleNamespace(id=1, username="admin")

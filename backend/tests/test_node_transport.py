@@ -112,3 +112,13 @@ def test_resolve_transport_wins_over_stale_mtls_flag():
 
     assert nt.resolve_transport_id(N()) == "http"
     assert nt.get_transport(N()).is_tls is False
+
+
+def test_remote_adapter_defaults_to_http_not_global_flag(monkeypatch):
+    from app.services.node_adapter import RemoteNodeAdapter
+    from app.services import node_mtls
+
+    monkeypatch.setattr(node_mtls, "node_agent_mtls_enabled", lambda: True)
+    adapter = RemoteNodeAdapter("10.0.0.2", 9100, "k" * 32)
+    assert adapter.base_url.startswith("http://")
+    assert adapter._mtls_enabled is False

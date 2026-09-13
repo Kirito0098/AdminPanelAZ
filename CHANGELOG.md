@@ -65,7 +65,7 @@
 ### 🐛 Fixed
 
 - **Unlock + ручной бан** — ввод unlock-ключа отклоняется с сообщением «заблокирован администратором вручную…»; бан не снимается и слот активации не тратится (в т.ч. если `block_reason` был `access_expired` при живом permanent ban).
-- **Node transport SoT** — единый `resolve_transport_id` для API/adapters/ротации ключа; `mtls_enabled` больше не перетирается deprecated global flag на каждом старте; audit на disable mTLS.
+- **Node transport SoT** — единый `resolve_transport_id` для API/adapters/ротации ключа; `mtls_enabled` больше не перетирается deprecated global flag на каждом старте; audit на disable mTLS; adapters default HTTP (без global env); VPN-config migration и bulk FE фильтр по `transport`.
 
 ---
 

@@ -14,7 +14,6 @@ from fastapi import HTTPException, status
 from app.services.node_mtls import (
     build_node_agent_ssl_context,
     node_agent_base_scheme,
-    node_agent_mtls_enabled,
 )
 
 HTTP_TIMEOUT = 30.0
@@ -29,10 +28,8 @@ class ProxyNodeAdapter:
         port: int,
         api_key: str,
         *,
-        mtls_enabled: bool | None = None,
+        mtls_enabled: bool = False,
     ):
-        if mtls_enabled is None:
-            mtls_enabled = node_agent_mtls_enabled()
         self._mtls_enabled = mtls_enabled
         scheme = node_agent_base_scheme(mtls_enabled=mtls_enabled)
         self.base_url = f"{scheme}://{host}:{port}"

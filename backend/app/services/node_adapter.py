@@ -11,7 +11,7 @@ from app.services.profile_files import profile_files_batch_key
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.config import get_settings
 from app.paths import get_cidr_list_dir
-from app.services.node_mtls import build_node_agent_ssl_context, node_agent_base_scheme, node_agent_mtls_enabled
+from app.services.node_mtls import build_node_agent_ssl_context, node_agent_base_scheme
 from app.services.node_mtls_certs import MtlsProvisionBundle
 from app.services.antizapret import AntiZapretService
 from app.services.antizapret_settings import read_antizapret_settings, update_antizapret_settings
@@ -937,10 +937,8 @@ class RemoteNodeAdapter(NodeAdapter):
         port: int,
         api_key: str,
         *,
-        mtls_enabled: bool | None = None,
+        mtls_enabled: bool = False,
     ):
-        if mtls_enabled is None:
-            mtls_enabled = node_agent_mtls_enabled()
         self._mtls_enabled = mtls_enabled
         scheme = node_agent_base_scheme(mtls_enabled=mtls_enabled)
         self.base_url = f"{scheme}://{host}:{port}"

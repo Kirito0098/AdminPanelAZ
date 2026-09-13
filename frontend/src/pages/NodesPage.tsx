@@ -581,7 +581,10 @@ export default function NodesPage() {
     }
     if (action === 'enable-mtls') {
       const mtlsCandidates = selected.filter(
-        (node) => !node.is_local && !isProxyNode(node) && !node.mtls_enabled,
+        (node) =>
+          !node.is_local &&
+          !isProxyNode(node) &&
+          (node.transport || (node.mtls_enabled ? 'mtls' : 'http')) !== 'mtls',
       )
       if (mtlsCandidates.length === 0) {
         notifyError('Нет удалённых VPN-узлов без mTLS среди выбранных')
@@ -642,7 +645,10 @@ export default function NodesPage() {
         }
       } else if (action === 'enable-mtls') {
         const mtlsCandidates = selected.filter(
-          (node) => !node.is_local && !isProxyNode(node) && !node.mtls_enabled,
+          (node) =>
+            !node.is_local &&
+            !isProxyNode(node) &&
+            (node.transport || (node.mtls_enabled ? 'mtls' : 'http')) !== 'mtls',
         )
         let enabled = 0
         const failed: string[] = []
@@ -1259,7 +1265,10 @@ export default function NodesPage() {
             : bulkConfirmAction === 'enable-mtls'
               ? `Включить mTLS на ${
                   getSelectedNodes(nodes, selectedNodeIds).filter(
-                    (n) => !n.is_local && !isProxyNode(n) && !n.mtls_enabled,
+                    (n) =>
+                      !n.is_local &&
+                      !isProxyNode(n) &&
+                      (n.transport || (n.mtls_enabled ? 'mtls' : 'http')) !== 'mtls',
                   ).length
                 } узл(ах)?`
               : ''

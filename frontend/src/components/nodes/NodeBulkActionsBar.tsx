@@ -48,7 +48,7 @@ export default function NodeBulkActionsBar({
   const selected = getSelectedNodes(nodes, selectedNodeIds)
   const remoteSelected = selected.filter((node) => !node.is_local)
   const mtlsCandidates = remoteSelected.filter(
-    (node) => !isProxyNode(node) && !node.mtls_enabled,
+    (node) => !isProxyNode(node) && (node.transport || (node.mtls_enabled ? 'mtls' : 'http')) !== 'mtls',
   )
   const allSelected = nodes.length > 0 && selectedNodeIds.length === nodes.length
   const busy = bulkBusy || rollingUpdating || rollPolling
