@@ -55,6 +55,7 @@ def _enable_proxy_mtls_flag(db: Session, node: Node, actor: User) -> Node:
     meta = node_metadata_dict(node)
     meta["mtls_flag_only_at"] = datetime.utcnow().isoformat() + "Z"
     node.node_metadata = json.dumps(meta)
+    node.transport = "mtls"
     node.mtls_enabled = True
     node.updated_at = datetime.utcnow()
     db.add(node)
@@ -76,7 +77,7 @@ def _enable_proxy_mtls_flag(db: Session, node: Node, actor: User) -> Node:
 def enable_mtls(db: Session, node: Node, actor: User) -> Node:
     if node.is_local:
         raise ValueError("Локальный узел не поддерживает mTLS")
-    if node.mtls_enabled:
+    if node.mtls_enabled or (getattr(node, "transport", None) or "") == "mtls":
         raise ValueError("mTLS уже включён для этого узла")
 
     if _node_kind(node) == NODE_KIND_PROXY:
@@ -118,6 +119,7 @@ def enable_mtls(db: Session, node: Node, actor: User) -> Node:
     meta = node_metadata_dict(node)
     meta["mtls_provisioned_at"] = datetime.utcnow().isoformat() + "Z"
     node.node_metadata = json.dumps(meta)
+    node.transport = "mtls"
     node.mtls_enabled = True
     node.updated_at = datetime.utcnow()
     db.add(node)
@@ -126,6 +128,7 @@ def enable_mtls(db: Session, node: Node, actor: User) -> Node:
 
     post_health = _wait_for_mtls_health(node)
     if post_health.get("status") != "online":
+        node.transport = "http"
         node.mtls_enabled = False
         node.updated_at = datetime.utcnow()
         db.add(node)
@@ -158,6 +161,7 @@ def disable_mtls(db: Session, node: Node) -> Node:
     if node.is_local:
         raise ValueError("Локальный узел не поддерживает mTLS")
 
+    node.transport = "http"
     node.mtls_enabled = False
     node.updated_at = datetime.utcnow()
     db.add(node)

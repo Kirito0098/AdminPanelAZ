@@ -24,6 +24,8 @@ from app.schemas import (
     NodeRemoteHostsResponse,
     NodeResponse,
     NodeRotateKeyResponse,
+    NodeTransportUpdate,
+    NodeTransportsResponse,
     NodeUpdate,
     NodeUpdateRequest,
     NodeUpdateResult,
@@ -40,6 +42,12 @@ from app.services.resource_metrics import VALID_PERIODS, query_history
 from app.services.node_key_rotation import rotate_node_api_key
 from app.services.node_mtls_certs import get_panel_mtls_status
 from app.services.node_mtls_provision import disable_mtls, enable_mtls
+from app.services.node_transport import (
+    TRANSPORT_HTTP,
+    TRANSPORT_MTLS,
+    TRANSPORT_SSH,
+    list_transports,
+)
 from app.services.node_manager import (
     check_node_health,
     clear_active_node_id,
@@ -146,7 +154,17 @@ def rolling_node_update(
     )
 
 
+def _node_transport_value(node: Node) -> str:
+    if node.is_local:
+        return TRANSPORT_HTTP
+    raw = (getattr(node, "transport", None) or "").strip().lower()
+    if raw in (TRANSPORT_HTTP, TRANSPORT_MTLS, TRANSPORT_SSH):
+        return raw
+    return TRANSPORT_MTLS if bool(node.mtls_enabled) else TRANSPORT_HTTP
+
+
 def _to_response(node: Node) -> NodeResponse:
+    transport = _node_transport_value(node)
     return NodeResponse(
         id=node.id,
         name=node.name,
@@ -155,7 +173,8 @@ def _to_response(node: Node) -> NodeResponse:
         node_kind=getattr(node, "node_kind", None) or NODE_KIND_VPN,
         status=node.status,
         is_local=node.is_local,
-        mtls_enabled=False if node.is_local else bool(node.mtls_enabled),
+        transport=transport,
+        mtls_enabled=False if node.is_local else (transport == TRANSPORT_MTLS),
         destination_ip=getattr(node, "destination_ip", None),
         linked_vpn_node_id=getattr(node, "linked_vpn_node_id", None),
         last_seen_at=node.last_seen_at,
@@ -241,6 +260,8 @@ def create_node(
         api_key_hash=key_hash,
         api_key_encrypted=key_encrypted,
         is_local=False,
+        transport=TRANSPORT_HTTP,
+        mtls_enabled=False,
         node_kind=kind,
         destination_ip=(payload.destination_ip or None),
         linked_vpn_node_id=linked_vpn_node_id,
@@ -298,6 +319,11 @@ def get_active(
 @router.get("/mtls/status", response_model=NodeMtlsStatusResponse)
 def node_mtls_status(_: User = Depends(require_admin)):
     return NodeMtlsStatusResponse(**get_panel_mtls_status())
+
+
+@router.get("/transports", response_model=NodeTransportsResponse)
+def list_node_transports(_: User = Depends(require_admin)):
+    return NodeTransportsResponse(items=list_transports())
 
 
 @router.get("/{node_id}", response_model=NodeResponse)
@@ -586,6 +612,60 @@ def get_proxy_mappings(
     if not isinstance(raw, list):
         raw = []
     return ProxyMappingsResponse(mappings=raw)
+
+
+@router.patch("/{node_id}/transport", response_model=NodeResponse)
+def patch_node_transport(
+    node_id: int,
+    body: NodeTransportUpdate,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    _require_nodes_module(db)
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    if node.is_local:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Способ связи не применим к локальному узлу",
+        )
+
+    wanted = (body.transport or "").strip().lower()
+    if wanted == TRANSPORT_SSH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "transport_not_implemented",
+                "message": "SSH transport ещё не реализован",
+            },
+        )
+    if wanted not in (TRANSPORT_HTTP, TRANSPORT_MTLS):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Неизвестный transport: {body.transport}",
+        )
+
+    current = _node_transport_value(node)
+    if current == wanted:
+        return _to_response(node)
+
+    try:
+        if wanted == TRANSPORT_MTLS:
+            node = enable_mtls(db, node, admin)
+        else:
+            node = disable_mtls(db, node)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Не удалось сменить способ связи: {exc}",
+        ) from exc
+
+    return _to_response(node)
 
 
 @router.post("/{node_id}/enable-mtls", response_model=NodeMtlsEnableResponse)

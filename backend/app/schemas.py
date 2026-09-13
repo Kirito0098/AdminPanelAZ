@@ -123,6 +123,20 @@ class NodeMtlsStatusResponse(BaseModel):
     agent_certs_count: int = 0
 
 
+class NodeTransportItem(BaseModel):
+    id: str
+    label: str
+    available: bool
+
+
+class NodeTransportsResponse(BaseModel):
+    items: list[NodeTransportItem]
+
+
+class NodeTransportUpdate(BaseModel):
+    transport: str
+
+
 class NodeRemoteHostsBody(BaseModel):
     hosts: list[str] = Field(default_factory=list)
     apply_to_wireguard: bool = False
@@ -1280,6 +1294,7 @@ class NodeResponse(NodeBase):
     id: int
     status: NodeStatus
     is_local: bool
+    transport: str = "http"
     mtls_enabled: bool = False
     destination_ip: str | None = None
     linked_vpn_node_id: int | None = None
