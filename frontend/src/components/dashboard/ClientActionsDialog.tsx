@@ -390,7 +390,6 @@ export default function ClientActionsDialog({
   const blockReason = (policy?.block_reason || '').toLowerCase()
   const wgAccessExpired = blockMode === 'access_expired' || blockReason === 'access_expired'
   const wgCertExpired = Boolean(policy?.expired) || blockMode === 'expired'
-  const wgExpired = wgCertExpired || wgAccessExpired
   const hasTrafficLimit = Boolean(policy?.traffic_limit_human || policy?.traffic_limit_bytes)
   const trafficLimitExceeded = Boolean(policy?.traffic_limit_exceeded) || blockMode === 'traffic_limit'
   const status = getConfigStatus(config, tab, policy)

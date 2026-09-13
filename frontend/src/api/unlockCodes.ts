@@ -12,7 +12,7 @@ export interface UnlockCodeCreateInput {
   allowed_client_names?: string[]
 }
 
-export interface UnlockCodeCreateResponse extends UnlockCodeRecord {}
+export type UnlockCodeCreateResponse = UnlockCodeRecord
 
 export async function setClientAccessUntil(
   protocol: 'openvpn' | 'wireguard' | 'amneziawg2',
