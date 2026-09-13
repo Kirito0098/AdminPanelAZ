@@ -41,7 +41,8 @@ AntiZapret ставится **отдельно** на VPN-сервер — см.
 | Порт | Назначение | Куда открывать |
 | --- | --- | --- |
 | **8000** (или выбранный) | Панель | LAN / интернет — пока панель на этом порту |
-| **9100** | Node agent | localhost или между панелью и VPN-узлом |
+| **9100** | Node agent | localhost или между панелью и VPN-узлом (при **SSH-транспорте** агент может слушать только `127.0.0.1`) |
+| **22** (типично) | SSH к VPN-узлу | только если включён модуль **SSH transport узлов** |
 | **80** / **443** | HTTP ACME / HTTPS | после публикации в **Настройки → Адрес сайта и HTTPS** |
 
 Порты **OpenVPN / WireGuard / AmneziaWG** задаёт **AntiZapret**, не панель.
@@ -123,9 +124,12 @@ sudo ./install.sh --proxy-only --with-systemd -y
 
 - OpenVPN, WireGuard, AmneziaWG — создание, скачивание, QR-коды ([инструкция](docs/konfiguracii.md))
 - Блокировка, срок действия, лимиты трафика
+- **Подписка** — отдельный раздел меню (`/subscription`): unlock-коды и доступ до даты, настройка клиентского портала
+- **Клиентский портал** — постоянные ссылки `https://portal…/p/…` для клиентов (статус, срок, трафик, установка профиля); автонастройка поддомена под текущий HTTPS
 - Несколько VPN-серверов (узлов) из одной панели ([инструкция](docs/uzly.md))
+- **Способ связи с агентом** — HTTP, HTTPS+mTLS или **SSH-туннель** (модуль, по умолчанию выкл.); preflight перед сменой ([SSH](docs/node-ssh-transport.md))
 - **Прокси-узлы** (модуль, по умолчанию выкл.) — RU `proxy.sh` + `proxy_agent`, DESTINATION из панели, домашний IP в NOC ([прокси](docs/proxy-nodes.md))
-- **HA (отказоустойчивость)** — группы синхронизации primary + replica, один домен, Push full, verify и авто-репликация с primary ([Node Sync](docs/NodeSync.md), UI: **Узлы → Группы синхронизации**)
+- **HA (отказоустойчивость)** — группы синхронизации primary + replica, один домен, Push full (с префлайтом связи), verify и авто-репликация с primary ([Node Sync](docs/NodeSync.md), UI: **Узлы → Группы синхронизации**)
 
 <p align="center">
   <img src="docs/assets/telegram-promo/09-nodes.png" alt="Узлы VPN — несколько серверов из одной панели" width="900">
@@ -190,10 +194,11 @@ sudo ./install.sh --proxy-only --with-systemd -y
 2. Войдите под созданным администратором
 3. **Смените пароль** и включите **2FA** — [Настройки → Профиль](docs/nastrojki/profil.md)
 4. **Переключите панель на HTTPS** — **Настройки → Адрес сайта и HTTPS** (домен или DDNS + Let's Encrypt). HTTP удобен для первого входа, но для постоянной работы HTTPS надёжнее и безопаснее — [инструкция](docs/nastrojki/set-i-publikaciya.md)
-5. Если VPN на другом сервере — добавьте узел — [Узлы](docs/uzly.md)
+5. Если VPN на другом сервере — добавьте узел (HTTP / mTLS / SSH) — [Узлы](docs/uzly.md) · [SSH-транспорт](docs/node-ssh-transport.md)
 6. На **Конфигурации** нажмите **Синхронизировать** — [инструкция](docs/konfiguracii.md)
-7. **Telegram** — раздел уже в меню; укажите bot token в UI — [инструкция](docs/Telegram.md)
-8. Для **HA** (два сервера на один домен): создайте группу синхронизации на **Узлах**, выполните **Настройку** (домен → Push full → verify) — [Node Sync](docs/NodeSync.md). После обновления панели перезапустите **node agent** на VPN-узлах (`systemctl restart adminpanelaz-node`), чтобы в «Узлах» отображалась версия **1.7.0**
+7. **Подписка** — unlock-коды и **клиентский портал** (поддомен + «Настроить под текущую публикацию»)
+8. **Telegram** — раздел уже в меню; укажите bot token в UI — [инструкция](docs/Telegram.md)
+9. Для **HA** (два сервера на один домен): создайте группу синхронизации на **Узлах**, выполните **Настройку** (домен → Push full → verify) — [Node Sync](docs/NodeSync.md). После обновления панели перезапустите **node agent** на VPN-узлах (`systemctl restart adminpanelaz-node`), чтобы в «Узлах» отображалась версия **1.8.0**
 
 > [!NOTE]
 > **Вход по умолчанию** (если не задавали в мастере): `admin` / `admin` — смените сразу.
@@ -213,7 +218,8 @@ AntiZapret и VPN-конфиги при удалении панели **не т�
 Полный список инструкций: **[docs/README.md](docs/README.md)**
 
 - **VPN-клиенты** — [docs/konfiguracii.md](docs/konfiguracii.md)
-- **Несколько серверов и HA** — [docs/uzly.md](docs/uzly.md) · [docs/NodeSync.md](docs/NodeSync.md)
+- **Подписка и клиентский портал** — раздел меню **Подписка** (`/subscription`): unlock-коды, доступ до даты, постоянные ссылки `/p/…` (см. [CHANGELOG 2.25.0](CHANGELOG.md#2250---2026-09-13))
+- **Несколько серверов и HA** — [docs/uzly.md](docs/uzly.md) · [docs/NodeSync.md](docs/NodeSync.md) · [docs/node-ssh-transport.md](docs/node-ssh-transport.md)
 - **Прокси AntiZapret** — [docs/proxy-nodes.md](docs/proxy-nodes.md) · [docs/proxy-agent.md](docs/proxy-agent.md)
 - **NOC и трафик** — [docs/noc-monitoring.md](docs/noc-monitoring.md) · [docs/traffic-monitoring.md](docs/traffic-monitoring.md)
 - **Настройки и бэкапы** — [docs/nastrojki/README.md](docs/nastrojki/README.md)
@@ -262,11 +268,11 @@ CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|
 
 **Workers > 1:** в `backend/.env` задайте `UVICORN_WORKERS=N` и Redis (`AUTH_RATE_LIMIT_BACKEND=redis`, `API_RATE_LIMIT_BACKEND=redis`, `REDIS_URL=redis://127.0.0.1:6379/0`), затем перезапустите панель. См. [SECURITY.md](SECURITY.md).
 
-**LAN-ноды / mTLS:** приватные IP узлов — `ALLOW_INTERNAL_NODES=true` в `.env`; mTLS — per-node в UI **Узлы**. Подробнее: [docs/uzly.md](docs/uzly.md).
+**LAN-ноды / mTLS / SSH:** приватные IP узлов — `ALLOW_INTERNAL_NODES=true` в `.env`; mTLS и SSH — per-node в UI **Узлы** (SSH — модуль **SSH transport узлов**). Подробнее: [docs/uzly.md](docs/uzly.md) · [docs/node-ssh-transport.md](docs/node-ssh-transport.md).
 
 - **Health** — `GET /api/health`, `GET /api/health/deep`
 - **Метрики** — `GET /metrics` (Prometheus)
-- **Node agent** — **1.7.0** (для HA: ≥ 1.3.0; byte-copy `.ovpn` при Push full: ≥ 1.5.0; сроки сертификатов: ≥ 1.6.0; AZ-AWG2 / reboot: ≥ 1.7.0)
+- **Node agent** — **1.8.0** (для HA: ≥ 1.3.0; byte-copy `.ovpn` при Push full: ≥ 1.5.0; сроки сертификатов: ≥ 1.6.0; AZ-AWG2 / reboot: ≥ 1.7.0; uptime / `listen_tls` в `/health`: ≥ 1.8.0)
 
 ## 🔐 Безопасность
 
@@ -299,6 +305,8 @@ sudo ./scripts/nginx-repair.sh      # восстановить nginx (напри
 </p>
 
 **Текущая версия: панель 2.25.0 · node agent 1.8.0** (2026-09-13)
+
+> **В 2.25.0:** раздел **Подписка** и **клиентский портал** (постоянные ссылки, unlock-коды); способ связи узлов HTTP / mTLS / SSH + preflight; диагностика связи и Push full; hub настроек и сайдбар по ролям; расширяемые модули; CIDR safe-fallback; бэкап после split `cidr.db`.
 
 После установки панель сразу открывается по `http://IP:порт/`; домен и HTTPS — в **Настройки → Адрес сайта и HTTPS**. Python **3.12** (Ubuntu) / **3.13** (Debian) выбирается автоматически.
 
