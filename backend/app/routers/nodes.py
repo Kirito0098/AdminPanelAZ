@@ -65,8 +65,9 @@ from app.services.node_manager import (
     validate_node_host,
 )
 from app.services.action_log import log_action
+from app.services.crypto import encrypt_secret
 from app.services.feature_guards import module_disabled_message
-from app.services.feature_toggles import is_nodes_enabled, is_proxy_nodes_enabled
+from app.services.feature_toggles import is_node_ssh_transport_enabled, is_nodes_enabled, is_proxy_nodes_enabled
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_update_roll import enqueue_node_update_roll
 from app.services.background_tasks import background_task_service
@@ -175,6 +176,12 @@ def _to_response(node: Node) -> NodeResponse:
         is_local=node.is_local,
         transport=transport,
         mtls_enabled=False if node.is_local else (transport == TRANSPORT_MTLS),
+        ssh_host=getattr(node, "ssh_host", None),
+        ssh_port=int(getattr(node, "ssh_port", 22) or 22),
+        ssh_username=getattr(node, "ssh_username", None),
+        ssh_key_configured=bool(str(getattr(node, "ssh_private_key_encrypted", "") or "").strip()),
+        ssh_remote_agent_host=getattr(node, "ssh_remote_agent_host", None),
+        ssh_remote_agent_port=getattr(node, "ssh_remote_agent_port", None),
         destination_ip=getattr(node, "destination_ip", None),
         linked_vpn_node_id=getattr(node, "linked_vpn_node_id", None),
         last_seen_at=node.last_seen_at,
@@ -187,6 +194,126 @@ def _to_response(node: Node) -> NodeResponse:
 def _drop_ssh_tunnel_if_needed(node_id: int, current_transport: str) -> None:
     if current_transport == TRANSPORT_SSH:
         get_ssh_tunnel_pool().drop(node_id)
+
+
+def _normalize_optional_text(value: str | None) -> str:
+    if value is None:
+        return ""
+    return value.strip()
+
+
+def _resolve_ssh_remote_agent_host(value: str | None, *, current: str | None) -> str:
+    host = _normalize_optional_text(value) or _normalize_optional_text(current) or "127.0.0.1"
+    if not host:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ssh_remote_agent_host обязателен для SSH transport",
+        )
+    if len(host) > 255:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ssh_remote_agent_host слишком длинный",
+        )
+    if host.lower().startswith(("http://", "https://", "ftp://", "file://")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ssh_remote_agent_host укажите без схемы URL",
+        )
+    return host
+
+
+def _apply_ssh_transport_update(node: Node, body: NodeTransportUpdate, db: Session) -> Node:
+    if not is_node_ssh_transport_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=module_disabled_message("node_ssh_transport"),
+        )
+
+    updates = body.model_dump(exclude_unset=True)
+    has_ssh_field_updates = any(
+        key in updates
+        for key in (
+            "ssh_host",
+            "ssh_port",
+            "ssh_username",
+            "ssh_private_key",
+            "ssh_passphrase",
+            "ssh_remote_agent_host",
+            "ssh_remote_agent_port",
+        )
+    )
+    if _node_transport_value(node) == TRANSPORT_SSH and not has_ssh_field_updates:
+        return node
+
+    ssh_host_raw = body.ssh_host if "ssh_host" in updates else getattr(node, "ssh_host", None)
+    ssh_host = _normalize_optional_text(ssh_host_raw)
+    if not ssh_host:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ssh_host обязателен для SSH transport",
+        )
+    ssh_host = validate_node_host(ssh_host)
+
+    ssh_username_raw = body.ssh_username if "ssh_username" in updates else getattr(node, "ssh_username", None)
+    ssh_username = _normalize_optional_text(ssh_username_raw)
+    if not ssh_username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ssh_username обязателен для SSH transport",
+        )
+
+    ssh_port = body.ssh_port if "ssh_port" in updates else getattr(node, "ssh_port", None)
+    ssh_port = int(ssh_port or 22)
+
+    ssh_remote_agent_host = _resolve_ssh_remote_agent_host(
+        body.ssh_remote_agent_host if "ssh_remote_agent_host" in updates else None,
+        current=getattr(node, "ssh_remote_agent_host", None),
+    )
+    ssh_remote_agent_port = (
+        body.ssh_remote_agent_port
+        if "ssh_remote_agent_port" in updates
+        else getattr(node, "ssh_remote_agent_port", None)
+    )
+    ssh_remote_agent_port = int(ssh_remote_agent_port or node.port)
+    if ssh_remote_agent_port <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ssh_remote_agent_port обязателен для SSH transport",
+        )
+
+    if "ssh_private_key" in updates:
+        ssh_private_key = _normalize_optional_text(body.ssh_private_key)
+        if not ssh_private_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Для SSH transport нужен приватный ключ",
+            )
+        node.ssh_private_key_encrypted = encrypt_secret(ssh_private_key, settings.secret_key)
+    elif not str(getattr(node, "ssh_private_key_encrypted", "") or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Для SSH transport сначала задайте приватный ключ",
+        )
+
+    if "ssh_passphrase" in updates:
+        ssh_passphrase = _normalize_optional_text(body.ssh_passphrase)
+        node.ssh_passphrase_encrypted = (
+            encrypt_secret(ssh_passphrase, settings.secret_key) if ssh_passphrase else ""
+        )
+
+    node.ssh_host = ssh_host
+    node.ssh_port = ssh_port
+    node.ssh_username = ssh_username
+    node.ssh_remote_agent_host = ssh_remote_agent_host
+    node.ssh_remote_agent_port = ssh_remote_agent_port
+    node.transport = TRANSPORT_SSH
+    node.mtls_enabled = False
+    node.updated_at = datetime.utcnow()
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+    get_ssh_tunnel_pool().drop(node.id)
+    return node
 
 
 def _active_node_response(db: Session, node: Node) -> ActiveNodeResponse:
@@ -638,22 +765,18 @@ def patch_node_transport(
         )
 
     wanted = (body.transport or "").strip().lower()
-    if wanted == TRANSPORT_SSH:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "transport_not_implemented",
-                "message": "SSH transport ещё не реализован",
-            },
-        )
-    if wanted not in (TRANSPORT_HTTP, TRANSPORT_MTLS):
+    if wanted not in (TRANSPORT_HTTP, TRANSPORT_MTLS, TRANSPORT_SSH):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Неизвестный transport: {body.transport}",
         )
 
     current = _node_transport_value(node)
-    if current == wanted:
+    if current == wanted and wanted != TRANSPORT_SSH:
+        return _to_response(node)
+
+    if wanted == TRANSPORT_SSH:
+        node = _apply_ssh_transport_update(node, body, db)
         return _to_response(node)
 
     try:

@@ -135,6 +135,28 @@ class NodeTransportsResponse(BaseModel):
 
 class NodeTransportUpdate(BaseModel):
     transport: str
+    ssh_host: str | None = Field(default=None, max_length=255)
+    ssh_port: int | None = Field(default=None, ge=1, le=65535)
+    ssh_username: str | None = Field(default=None, max_length=128)
+    ssh_private_key: str | None = None
+    ssh_passphrase: str | None = None
+    ssh_remote_agent_host: str | None = Field(default=None, max_length=255)
+    ssh_remote_agent_port: int | None = Field(default=None, ge=1, le=65535)
+
+    @field_validator(
+        "transport",
+        "ssh_host",
+        "ssh_username",
+        "ssh_private_key",
+        "ssh_passphrase",
+        "ssh_remote_agent_host",
+        mode="before",
+    )
+    @classmethod
+    def _strip_transport_strings(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
 
 class NodeRemoteHostsBody(BaseModel):
@@ -1296,6 +1318,12 @@ class NodeResponse(NodeBase):
     is_local: bool
     transport: str = "http"
     mtls_enabled: bool = False
+    ssh_host: str | None = None
+    ssh_port: int = 22
+    ssh_username: str | None = None
+    ssh_key_configured: bool = False
+    ssh_remote_agent_host: str | None = None
+    ssh_remote_agent_port: int | None = None
     destination_ip: str | None = None
     linked_vpn_node_id: int | None = None
     last_seen_at: datetime | None = None

@@ -195,7 +195,7 @@ git commit -m "Route node adapters through SSH local forward when transport=ssh.
 - PATCH `ssh` without key when not configured → 400
 - PATCH `ssh` with key → encrypt via `encrypt_secret`, set `transport=ssh`, `mtls_enabled=False`, `drop` old tunnel
 
-- [ ] **Step 1: Failing API tests**
+- [x] **Step 1: Failing API tests**
 
 ```python
 def test_patch_ssh_rejected_when_toggle_off(...): ...
@@ -203,11 +203,11 @@ def test_patch_ssh_stores_encrypted_key_not_in_response(...): ...
 def test_list_transports_ssh_available_follows_toggle(...): ...
 ```
 
-- [ ] **Step 2: Implement router validation + encrypt**; reuse `store`-style helpers from `node_manager.store_api_key` pattern with `get_settings().secret_key` / existing crypto key
+- [x] **Step 2: Implement router validation + encrypt**; reuse `store`-style helpers from `node_manager.store_api_key` pattern with `get_settings().secret_key` / existing crypto key
 
-- [ ] **Step 3: Update `_to_response` / `_node_transport_value`** — ssh is first-class; `mtls_enabled` false when ssh
+- [x] **Step 3: Update `_to_response` / `_node_transport_value`** — ssh is first-class; `mtls_enabled` false when ssh
 
-- [ ] **Step 4: pytest; commit**
+- [x] **Step 4: pytest; commit**
 
 ```bash
 git commit -m "Expose SSH transport PATCH API with encrypted key storage."

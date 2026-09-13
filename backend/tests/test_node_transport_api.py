@@ -10,9 +10,11 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.config import get_settings
 from app.database import Base
 from app.models import Node, NodeStatus
 from app.schemas import NodeTransportUpdate
+from app.services.crypto import decrypt_secret
 
 
 @pytest.fixture()
@@ -58,28 +60,113 @@ def test_list_node_transports():
     assert by_id["http"].available is True
 
 
-def test_patch_transport_ssh_returns_400_without_db_write(db, monkeypatch):
+def test_list_transports_ssh_available_follows_toggle(monkeypatch):
+    from app.routers import nodes as nodes_router
+    from app.services import node_transport as nt
+
+    monkeypatch.setattr(nt, "is_node_ssh_transport_enabled", lambda _db=None: False)
+    resp = nodes_router.list_node_transports(SimpleNamespace())
+    assert {item.id: item.available for item in resp.items}["ssh"] is False
+
+    monkeypatch.setattr(nt, "is_node_ssh_transport_enabled", lambda _db=None: True)
+    resp = nodes_router.list_node_transports(SimpleNamespace())
+    assert {item.id: item.available for item in resp.items}["ssh"] is True
+
+
+def test_patch_ssh_rejected_when_toggle_off(db, monkeypatch):
     from app.routers import nodes as nodes_router
 
     monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: False)
     node = _add_node(db, transport="http")
     admin = SimpleNamespace(id=1, username="admin")
 
     with pytest.raises(HTTPException) as exc:
         nodes_router.patch_node_transport(
             node.id,
-            NodeTransportUpdate(transport="ssh"),
+            NodeTransportUpdate(
+                transport="ssh",
+                ssh_host="8.8.8.8",
+                ssh_username="root",
+                ssh_private_key="PRIVATE KEY",
+            ),
             admin=admin,
             db=db,
         )
-    assert exc.value.status_code == 400
-    detail = exc.value.detail
-    assert isinstance(detail, dict)
-    assert detail["code"] == "transport_not_implemented"
+    assert exc.value.status_code == 403
+    assert "SSH transport узлов" in str(exc.value.detail)
 
     db.refresh(node)
     assert node.transport == "http"
     assert node.mtls_enabled is False
+
+
+def test_patch_ssh_requires_key_when_not_configured(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: True)
+    node = _add_node(db, transport="http")
+    admin = SimpleNamespace(id=1, username="admin")
+
+    with pytest.raises(HTTPException) as exc:
+        nodes_router.patch_node_transport(
+            node.id,
+            NodeTransportUpdate(
+                transport="ssh",
+                ssh_host="8.8.8.8",
+                ssh_username="root",
+            ),
+            admin=admin,
+            db=db,
+        )
+    assert exc.value.status_code == 400
+    assert "приватный ключ" in str(exc.value.detail)
+
+
+def test_patch_ssh_stores_encrypted_key_not_in_response(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: True)
+    pool = MagicMock()
+    monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: pool)
+    node = _add_node(db, transport="http")
+    admin = SimpleNamespace(id=1, username="admin")
+    private_key = "-----BEGIN OPENSSH PRIVATE KEY-----\nabc123\n-----END OPENSSH PRIVATE KEY-----"
+    passphrase = "secret-passphrase"
+
+    resp = nodes_router.patch_node_transport(
+        node.id,
+        NodeTransportUpdate(
+            transport="ssh",
+            ssh_host="8.8.8.8",
+            ssh_port=2222,
+            ssh_username="root",
+            ssh_private_key=private_key,
+            ssh_passphrase=passphrase,
+            ssh_remote_agent_host="127.0.0.1",
+        ),
+        admin=admin,
+        db=db,
+    )
+
+    assert resp.transport == "ssh"
+    assert resp.mtls_enabled is False
+    assert resp.ssh_host == "8.8.8.8"
+    assert resp.ssh_port == 2222
+    assert resp.ssh_username == "root"
+    assert resp.ssh_key_configured is True
+    assert "ssh_private_key" not in resp.model_dump()
+    assert "ssh_passphrase" not in resp.model_dump()
+
+    db.refresh(node)
+    assert node.transport == "ssh"
+    assert node.ssh_private_key_encrypted
+    assert node.ssh_private_key_encrypted != private_key
+    assert decrypt_secret(node.ssh_private_key_encrypted, get_settings().secret_key) == private_key
+    assert decrypt_secret(node.ssh_passphrase_encrypted, get_settings().secret_key) == passphrase
+    pool.drop.assert_called_once_with(node.id)
 
 
 def test_patch_transport_proxy_http_to_mtls(db, monkeypatch):
