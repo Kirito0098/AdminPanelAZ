@@ -10,6 +10,12 @@ import {
 import { cn } from '@/lib/utils'
 import type { Node, NodeTransportId, NodeTransportOption } from '@/types'
 
+const DEFAULT_ITEMS: NodeTransportOption[] = [
+  { id: 'http', label: 'HTTP', available: true },
+  { id: 'mtls', label: 'HTTPS + mTLS', available: true },
+  { id: 'ssh', label: 'SSH tunnel', available: false },
+]
+
 function resolveTransport(node: Node): NodeTransportId {
   const raw = (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase()
   if (raw === 'mtls' || raw === 'ssh') return raw
@@ -29,12 +35,11 @@ export default function NodeTransportSelect({
   disabled = false,
   onChange,
 }: NodeTransportSelectProps) {
-  const [items, setItems] = useState<NodeTransportOption[]>([
-    { id: 'http', label: 'HTTP', available: true },
-    { id: 'mtls', label: 'HTTPS + mTLS', available: true },
-    { id: 'ssh', label: 'SSH tunnel', available: false },
-  ])
+  const [items, setItems] = useState<NodeTransportOption[]>(DEFAULT_ITEMS)
   const current = resolveTransport(node)
+  const currentFallback = DEFAULT_ITEMS.find((item) => item.id === current)
+  const allItems = items.some((item) => item.id === current) || !currentFallback ? items : [...items, currentFallback]
+  const visibleItems = allItems.filter((item) => item.available || item.id === current)
 
   useEffect(() => {
     let cancelled = false
@@ -71,15 +76,15 @@ export default function NodeTransportSelect({
         <SelectValue placeholder="Способ связи" />
       </SelectTrigger>
       <SelectContent>
-        {items.map((item) => (
+        {visibleItems.map((item) => (
           <SelectItem
             key={item.id}
             value={item.id}
             disabled={!item.available}
-            title={item.available ? item.label : 'Скоро'}
+            title={item.available ? item.label : 'Модуль отключён'}
           >
             {item.label}
-            {!item.available ? ' (скоро)' : ''}
+            {!item.available ? ' (выключено)' : ''}
           </SelectItem>
         ))}
       </SelectContent>

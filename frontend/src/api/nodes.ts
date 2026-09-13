@@ -25,11 +25,13 @@ export async function listNodeTransports() {
 
 export async function patchNodeTransport(
   nodeId: number,
-  transport: import('../types').NodeTransportId,
+  transportOrBody: import('../types').NodeTransportId | import('../types').NodeTransportPatchBody,
 ) {
+  const body =
+    typeof transportOrBody === 'string' ? { transport: transportOrBody } : transportOrBody
   return apiFetch<import('../types').Node>(`/nodes/${nodeId}/transport`, {
     method: 'PATCH',
-    body: JSON.stringify({ transport }),
+    body: JSON.stringify(body),
   })
 }
 

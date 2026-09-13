@@ -10,6 +10,18 @@ export interface NodeTransportOption {
   available: boolean
 }
 
+export interface NodeTransportSshFields {
+  ssh_host?: string | null
+  ssh_port?: number | null
+  ssh_username?: string | null
+  ssh_private_key?: string | null
+  ssh_passphrase?: string | null
+}
+
+export interface NodeTransportPatchBody extends NodeTransportSshFields {
+  transport: NodeTransportId
+}
+
 export interface Node {
   id: number
   name: string
@@ -19,6 +31,12 @@ export interface Node {
   is_local: boolean
   transport?: NodeTransportId | string
   mtls_enabled: boolean
+  ssh_host?: string | null
+  ssh_port?: number | null
+  ssh_username?: string | null
+  ssh_key_configured?: boolean
+  ssh_remote_agent_host?: string | null
+  ssh_remote_agent_port?: number | null
   node_kind?: NodeKind | string
   destination_ip?: string | null
   linked_vpn_node_id?: number | null

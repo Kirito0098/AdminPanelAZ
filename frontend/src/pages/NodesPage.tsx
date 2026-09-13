@@ -66,6 +66,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Table,
   TableBody,
@@ -87,13 +88,29 @@ import {
   resolveProxyLinkSelectorValue,
 } from '@/lib/proxyLinkTarget'
 import { cn } from '@/lib/utils'
-import type { Node, NodeKind, NodeMtlsStatus, NodeTransportId } from '@/types'
+import type { Node, NodeKind, NodeMtlsStatus, NodeTransportId, NodeTransportPatchBody } from '@/types'
 import { Navigate } from 'react-router-dom'
 
 export { isProxyNode }
 
 type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | 'disable-mtls' | 'restart-agent' | null
 type BulkConfirmAction = 'delete' | 'enable-mtls' | null
+
+type SshTransportFormState = {
+  ssh_host: string
+  ssh_port: string
+  ssh_username: string
+  ssh_private_key: string
+  ssh_passphrase: string
+}
+
+const EMPTY_SSH_FORM: SshTransportFormState = {
+  ssh_host: '',
+  ssh_port: '22',
+  ssh_username: 'root',
+  ssh_private_key: '',
+  ssh_passphrase: '',
+}
 
 export default function NodesPage() {
   const { user } = useAuth()
@@ -128,6 +145,9 @@ export default function NodesPage() {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
   const [confirmTarget, setConfirmTarget] = useState<Node | null>(null)
   const [confirmLoading, setConfirmLoading] = useState(false)
+  const [sshDialogNode, setSshDialogNode] = useState<Node | null>(null)
+  const [sshForm, setSshForm] = useState<SshTransportFormState>(EMPTY_SSH_FORM)
+  const [sshSubmitting, setSshSubmitting] = useState(false)
   const [mtlsStatus, setMtlsStatus] = useState<NodeMtlsStatus | null>(null)
   const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([])
   const [rollingUpdating, setRollingUpdating] = useState(false)
@@ -319,6 +339,22 @@ export default function NodesPage() {
     setConfirmTarget(null)
   }
 
+  const closeSshDialog = () => {
+    setSshDialogNode(null)
+    setSshForm(EMPTY_SSH_FORM)
+  }
+
+  const openSshDialog = (node: Node) => {
+    setSshDialogNode(node)
+    setSshForm({
+      ssh_host: (node.ssh_host || node.host || '').trim(),
+      ssh_port: String(node.ssh_port || 22),
+      ssh_username: (node.ssh_username || 'root').trim() || 'root',
+      ssh_private_key: '',
+      ssh_passphrase: '',
+    })
+  }
+
   const handleDelete = (node: Node) => {
     if (getNodeDeleteBlockedReason(node)) {
       showHaDeleteBlockedDialog([node])
@@ -332,13 +368,70 @@ export default function NodesPage() {
   }
 
   const handleTransportChange = (node: Node, transport: NodeTransportId) => {
-    if (transport === 'ssh') return
     const current = (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase()
     if (transport === current) return
+    if (transport === 'ssh') {
+      openSshDialog(node)
+      return
+    }
     if (transport === 'mtls') {
       openConfirm('enable-mtls', node)
     } else {
       openConfirm('disable-mtls', node)
+    }
+  }
+
+  const handleSshSubmit = async () => {
+    const target = sshDialogNode
+    if (!target) return
+
+    const sshHost = sshForm.ssh_host.trim()
+    const sshUsername = sshForm.ssh_username.trim()
+    const sshPrivateKey = sshForm.ssh_private_key.trim()
+    const sshPort = Number(sshForm.ssh_port)
+
+    if (!sshHost) {
+      notifyError('Укажите SSH-хост')
+      return
+    }
+    if (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535) {
+      notifyError('Укажите корректный SSH-порт (1–65535)')
+      return
+    }
+    if (!sshUsername) {
+      notifyError('Укажите SSH-пользователя')
+      return
+    }
+    if (!target.ssh_key_configured && !sshPrivateKey) {
+      notifyError('Добавьте приватный SSH-ключ')
+      return
+    }
+
+    setSshSubmitting(true)
+    try {
+      const body: NodeTransportPatchBody = {
+        transport: 'ssh',
+        ssh_host: sshHost,
+        ssh_port: sshPort,
+        ssh_username: sshUsername,
+        ssh_passphrase: sshForm.ssh_passphrase,
+      }
+      if (sshPrivateKey) {
+        body.ssh_private_key = sshPrivateKey
+      }
+      await patchNodeTransport(target.id, body)
+      closeSshDialog()
+      success(`Способ связи «${target.name}»: SSH`)
+      await load()
+      await refresh()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        notifyError('SSH transport выключен в разделе модулей панели')
+      } else {
+        notifyError(err instanceof ApiError ? err.message : 'Ошибка переключения на SSH')
+      }
+    } finally {
+      setSshSubmitting(false)
     }
   }
 
@@ -753,12 +846,15 @@ export default function NodesPage() {
           healthLoading !== null ||
           confirmLoading ||
           submitting ||
+          sshSubmitting ||
           rollingUpdating ||
           rollPolling ||
           bulkBusy
         }
         label={
-          submitting
+          sshSubmitting
+            ? 'Сохранение SSH...'
+            : submitting
             ? 'Сохранение узла...'
             : bulkBusy
               ? 'Массовая операция...'
@@ -1160,6 +1256,99 @@ export default function NodesPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!sshDialogNode}
+        onOpenChange={(open) => {
+          if (!open && !sshSubmitting) closeSshDialog()
+        }}
+        title="Переключить на SSH?"
+        description={
+          sshDialogNode ? (
+            <>
+              Узел: <strong>{sshDialogNode.name}</strong>
+            </>
+          ) : undefined
+        }
+        alert={{
+          variant: 'info',
+          title: 'Туннель от controller к agent',
+          children:
+            'Панель подключится по SSH к серверу и будет обращаться к node agent через туннель. Внутренний адрес agent по умолчанию останется 127.0.0.1 и текущий порт узла.',
+        }}
+        confirmLabel="Сохранить SSH"
+        loading={sshSubmitting}
+        onConfirm={handleSshSubmit}
+        className="max-w-xl"
+      >
+        <div className="grid gap-4">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="ssh-host">SSH-хост</Label>
+              <Input
+                id="ssh-host"
+                value={sshForm.ssh_host}
+                onChange={(e) => setSshForm((prev) => ({ ...prev, ssh_host: e.target.value }))}
+                placeholder={sshDialogNode?.host || '203.0.113.10'}
+                disabled={sshSubmitting}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="ssh-port">SSH-порт</Label>
+              <Input
+                id="ssh-port"
+                type="number"
+                min={1}
+                max={65535}
+                value={sshForm.ssh_port}
+                onChange={(e) => setSshForm((prev) => ({ ...prev, ssh_port: e.target.value }))}
+                placeholder="22"
+                disabled={sshSubmitting}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="ssh-username">SSH-пользователь</Label>
+            <Input
+              id="ssh-username"
+              value={sshForm.ssh_username}
+              onChange={(e) => setSshForm((prev) => ({ ...prev, ssh_username: e.target.value }))}
+              placeholder="root"
+              disabled={sshSubmitting}
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="ssh-private-key">Приватный ключ</Label>
+            <Textarea
+              id="ssh-private-key"
+              value={sshForm.ssh_private_key}
+              onChange={(e) => setSshForm((prev) => ({ ...prev, ssh_private_key: e.target.value }))}
+              placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+              className="min-h-40 font-mono text-xs"
+              disabled={sshSubmitting}
+            />
+            <p className="text-xs text-muted-foreground">
+              {sshDialogNode?.ssh_key_configured
+                ? 'Ключ уже сохранён. Оставьте поле пустым, если не хотите его менять.'
+                : 'Ключ обязателен для первого переключения на SSH transport.'}
+            </p>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="ssh-passphrase">Passphrase ключа</Label>
+            <Input
+              id="ssh-passphrase"
+              type="password"
+              value={sshForm.ssh_passphrase}
+              onChange={(e) => setSshForm((prev) => ({ ...prev, ssh_passphrase: e.target.value }))}
+              placeholder="Необязательно"
+              disabled={sshSubmitting}
+            />
+          </div>
+        </div>
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={!!confirmAction}

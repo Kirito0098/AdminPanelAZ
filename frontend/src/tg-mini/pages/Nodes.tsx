@@ -119,7 +119,9 @@ function NodeTransportBadge({ node }: { node: TgMiniNode }) {
       </Badge>
       <Badge
         variant={
-          (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase() === 'mtls'
+          ['mtls', 'ssh'].includes(
+            (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase(),
+          )
             ? 'default'
             : 'outline'
         }
