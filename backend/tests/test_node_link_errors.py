@@ -61,6 +61,14 @@ def test_raise_link_error_uses_502_for_auth():
     assert exc.detail["code"] == link.CODE_AUTH
 
 
+def test_raise_link_error_preserves_upstream_404_for_node_error():
+    with pytest.raises(Exception) as ei:
+        link.raise_link_error(link.CODE_ERROR, "missing", upstream_status=404)
+    exc = ei.value
+    assert exc.status_code == 404
+    assert exc.detail["code"] == link.CODE_ERROR
+
+
 def test_raise_link_error_supports_ssh_codes():
     with pytest.raises(Exception) as ei:
         link.raise_link_error(link.CODE_SSH_UNREACHABLE, "ssh down")

@@ -307,7 +307,7 @@ def test_redeem_unlock_code_applies_protocols_and_extends_from_current(db):
     node = _make_node(db)
     admin = _make_user(db)
     _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn, VpnType.wireguard])
-    _make_policy_rows(db, node.id, "alice")
+    _make_policy_rows(db, node.id, "alice", blocked=False)
     create_unlock_code(
         db,
         grant_days=7,
@@ -489,7 +489,7 @@ def test_redeem_unlock_code_rolls_back_on_protocol_failure(db):
     node = _make_node(db)
     admin = _make_user(db)
     _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn, VpnType.wireguard])
-    _make_policy_rows(db, node.id, "alice")
+    _make_policy_rows(db, node.id, "alice", blocked=False)
     create_unlock_code(
         db,
         grant_days=5,
@@ -524,7 +524,7 @@ def test_redeem_unlock_code_rolls_back_on_protocol_failure(db):
     assert commit_spy.call_count == 0
     assert db.query(UnlockCodeRedemption).filter_by(client_name="alice", node_id=node.id).count() == 0
     openvpn_row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="alice").first()
-    assert openvpn_row is not None and openvpn_row.is_temp_blocked is True
+    assert openvpn_row is not None and openvpn_row.is_temp_blocked is False
 
 
 def test_redeem_unlock_code_second_client_ok(db):

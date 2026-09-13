@@ -35,6 +35,12 @@ def _ready_profile_validation() -> ProfileValidationResult:
     return ProfileValidationResult(ready=True, issues=())
 
 
+def _run_push_full(*args, **kwargs):
+    """Skip live link preflight — these unit tests mock adapters, not node health."""
+    with patch.object(push_full, "preflight_push_full_links", return_value=[]):
+        return push_full.run_push_full(*args, **kwargs)
+
+
 def test_push_full_continue_on_error_processes_all_replicas():
     group = _make_group(replica_ids=[2, 3, 4])
     primary = _make_node(1, "primary-1")
@@ -103,7 +109,7 @@ def test_push_full_continue_on_error_processes_all_replicas():
                                                         "link_shadow_configs_for_group",
                                                         return_value={"linked": [], "conflicts": [], "orphan_replica": []},
                                                     ) as link_shadow:
-                                                        result = push_full.run_push_full(db, group, auto_verify=False)
+                                                        result = _run_push_full(db, group, auto_verify=False)
 
     assert len(result["restored"]) == 2
     assert {item["node_id"] for item in result["restored"]} == {2, 4}
@@ -172,7 +178,7 @@ def test_push_full_uses_ha_restore_and_prune():
                                             with patch.object(push_full, "collect_traffic_snapshot_for_node"):
                                                 with patch.object(push_full, "is_auto_sync_enabled", return_value=False):
                                                     with patch.object(push_full, "link_primary_configs_to_group"):
-                                                        result = push_full.run_push_full(db, group, auto_verify=False)
+                                                        result = _run_push_full(db, group, auto_verify=False)
 
     replica_adapter.restore_antizapret_backup.assert_called_once()
     assert replica_adapter.restore_antizapret_backup.call_args.kwargs.get("ha_replica") is True
@@ -226,8 +232,8 @@ def _run_single_replica_push(*, primary_adapter, replica_adapter, awg2_sync=None
                                                     with patch.object(push_full, "link_primary_configs_to_group"):
                                                         if awg2_sync is not None:
                                                             with extra["sync"]:
-                                                                return push_full.run_push_full(db, group, auto_verify=False)
-                                                        return push_full.run_push_full(db, group, auto_verify=False)
+                                                                return _run_push_full(db, group, auto_verify=False)
+                                                        return _run_push_full(db, group, auto_verify=False)
 
 
 def test_push_full_syncs_awg2_when_primary_has_layer():
@@ -324,7 +330,7 @@ def test_push_full_fails_when_profile_copy_raises():
                         MagicMock(side_effect=RuntimeError("profile copy failed")),
                     ):
                         with patch.object(push_full, "is_auto_sync_enabled", return_value=False):
-                            result = push_full.run_push_full(db, group, auto_verify=False)
+                            result = _run_push_full(db, group, auto_verify=False)
 
     assert result["success"] is False
     assert len(result["failed"]) == 1
@@ -379,7 +385,7 @@ def test_push_full_fails_when_replica_profile_certs_invalid():
                             return_value=bad_validation,
                         ):
                             with patch.object(push_full, "is_auto_sync_enabled", return_value=False):
-                                result = push_full.run_push_full(db, group, auto_verify=False)
+                                result = _run_push_full(db, group, auto_verify=False)
 
     assert result["success"] is False
     assert "client-a:revoked" in result["failed"][0]["error"]

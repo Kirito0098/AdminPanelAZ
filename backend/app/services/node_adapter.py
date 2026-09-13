@@ -1018,7 +1018,7 @@ class RemoteNodeAdapter(NodeAdapter):
             code, message = classify_http_status(
                 response.status_code, detail, mtls_enabled=self._mtls_enabled
             )
-            raise_link_error(code, message)
+            raise_link_error(code, message, upstream_status=response.status_code)
 
         if response.status_code == 204 or not response.content:
             return None
@@ -1056,7 +1056,7 @@ class RemoteNodeAdapter(NodeAdapter):
             code, message = classify_http_status(
                 response.status_code, detail, mtls_enabled=self._mtls_enabled
             )
-            raise_link_error(code, message)
+            raise_link_error(code, message, upstream_status=response.status_code)
         return response.content
 
     def health_check(self) -> dict[str, Any]:

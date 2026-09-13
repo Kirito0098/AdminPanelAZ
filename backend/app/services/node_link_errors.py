@@ -32,15 +32,24 @@ def link_error_detail(code: str, message: str) -> dict[str, str]:
     return {"code": code, "message": message, "hint": _HINTS.get(code, _HINTS[CODE_ERROR])}
 
 
-def http_status_for_code(code: str) -> int:
+def http_status_for_code(code: str, *, upstream_status: int | None = None) -> int:
     if code == CODE_TIMEOUT:
         return status.HTTP_504_GATEWAY_TIMEOUT
+    # Preserve agent 4xx (except auth) so callers can still distinguish 404 vs generic 502.
+    if (
+        code == CODE_ERROR
+        and upstream_status is not None
+        and 400 <= upstream_status < 500
+        and upstream_status
+        not in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+    ):
+        return upstream_status
     return status.HTTP_502_BAD_GATEWAY
 
 
-def raise_link_error(code: str, message: str) -> None:
+def raise_link_error(code: str, message: str, *, upstream_status: int | None = None) -> None:
     raise HTTPException(
-        status_code=http_status_for_code(code),
+        status_code=http_status_for_code(code, upstream_status=upstream_status),
         detail=link_error_detail(code, message),
     )
 
