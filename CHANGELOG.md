@@ -56,10 +56,9 @@
 - **Узлы: блок «Связь»** — TLS (ожидание vs факт), uptime агента, последний успешный health, структурированная `last_link_error`; кнопка проверки связи как раньше.
 - **Node agent 1.8.0 / proxy agent 1.1.0** — `/health` отдаёт `started_at`, `uptime_sec`, `listen_tls` (после обновления перезапустите агенты на узлах).
 
-### 🔄 Changed
+### 🐛 Fixed
 
-- **Ошибки связи с агентом** — единый классификатор (`node_auth` / `node_tls_mismatch` / `node_unreachable` / `node_timeout`) → HTTP 502/504 с `detail.code` (не сессия панели).
-- **Push full** — префлайт связи primary/реплик; фазы прогресса; `failed_step` в итоге; после успеха — refresh health узлов.
+- **Unlock + ручной бан** — ввод unlock-ключа больше не снимает admin permanent ban, даже если `block_reason` был переписан в `access_expired`; постоянный бан приоритетнее истечения срока в `block_mode`.
 
 ---
 
