@@ -259,6 +259,9 @@ class SshTunnelPool:
                 username=username,
                 client_keys=[client_key],
                 client_factory=lambda: _PinnedHostKeyClient(expected_host_key=expected_host_key),
+                # Truthy empty known_hosts: do NOT fall back to ~/.ssh/known_hosts.
+                # Pin validation is exclusively via _PinnedHostKeyClient.
+                known_hosts=([], [], []),
                 server_host_key_algs="default",
             )
             listener = await connection.forward_local("127.0.0.1", 0, remote_host, remote_port)
@@ -356,6 +359,10 @@ class SshTunnelPool:
             raise SshTunnelError(CODE_SSH_TUNNEL, f"SSH host key discovery failed: {exc}") from exc
 
     def _stored_host_key_text(self, node: Any) -> str:
+        column = str(getattr(node, "ssh_host_key", "") or "").strip()
+        if column:
+            return column
+        # Legacy pins stored in node_metadata before dedicated column existed.
         raw_metadata = str(getattr(node, "node_metadata", "") or "").strip()
         if not raw_metadata:
             return ""
@@ -376,20 +383,14 @@ class SshTunnelPool:
 
     @staticmethod
     def store_expected_host_key_text(node: Any, host_key_text: str | None) -> bool:
+        """Persist pin on dedicated column (avoids node_metadata RMW races)."""
         host_key_text = str(host_key_text or "").strip()
         if not host_key_text:
             return False
-        raw_metadata = str(getattr(node, "node_metadata", "") or "").strip()
-        try:
-            metadata = json.loads(raw_metadata) if raw_metadata else {}
-        except json.JSONDecodeError:
-            metadata = {}
-        if not isinstance(metadata, dict):
-            metadata = {}
-        if str(metadata.get(_SSH_HOST_KEY_METADATA_KEY, "") or "").strip() == host_key_text:
+        current = str(getattr(node, "ssh_host_key", "") or "").strip()
+        if current == host_key_text:
             return False
-        metadata[_SSH_HOST_KEY_METADATA_KEY] = host_key_text
-        setattr(node, "node_metadata", json.dumps(metadata))
+        setattr(node, "ssh_host_key", host_key_text)
         return True
 
 

@@ -300,11 +300,14 @@ def _apply_ssh_transport_update(node: Node, body: NodeTransportUpdate, db: Sessi
         if ssh_passphrase:
             node.ssh_passphrase_encrypted = encrypt_secret(ssh_passphrase, settings.secret_key)
 
+    previous_ssh_host = _normalize_optional_text(getattr(node, "ssh_host", None))
     node.ssh_host = ssh_host
     node.ssh_port = ssh_port
     node.ssh_username = ssh_username
     node.ssh_remote_agent_host = ssh_remote_agent_host
     node.ssh_remote_agent_port = ssh_remote_agent_port
+    if previous_ssh_host and previous_ssh_host != ssh_host:
+        node.ssh_host_key = ""
     node.transport = TRANSPORT_SSH
     node.mtls_enabled = False
     node.updated_at = datetime.utcnow()

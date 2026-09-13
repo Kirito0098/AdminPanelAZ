@@ -66,6 +66,7 @@ def _node(secret_key: str, **overrides):
         ssh_passphrase_encrypted=overrides.pop("ssh_passphrase_encrypted", ""),
         ssh_remote_agent_host=overrides.pop("ssh_remote_agent_host", "127.0.0.1"),
         ssh_remote_agent_port=overrides.pop("ssh_remote_agent_port", None),
+        ssh_host_key=overrides.pop("ssh_host_key", ""),
         node_metadata=overrides.pop("node_metadata", "{}"),
         **overrides,
     )
@@ -82,12 +83,15 @@ def test_ensure_returns_discovered_host_key_and_reuses_tunnel(monkeypatch):
         discovered.append((host, port))
         return discovered_key
 
-    async def _fake_connect(host, *, port, username, client_keys, client_factory, server_host_key_algs):
+    async def _fake_connect(
+        host, *, port, username, client_keys, client_factory, server_host_key_algs, known_hosts
+    ):
         assert host == "203.0.113.10"
         assert port == 22
         assert username == "root"
         assert client_keys == ["parsed-key"]
         assert server_host_key_algs == "default"
+        assert known_hosts == ([], [], [])
         assert client_factory().validate_host_public_key(host, host, port, discovered_key) is True
         conn = _FakeConnection(45123)
         connections.append(conn)
@@ -129,8 +133,9 @@ def test_drop_closes_session(monkeypatch):
     connection = _FakeConnection(45124)
     discovered_key = _FakeHostKey("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStoredKey")
 
-    async def _fake_connect(*args, client_factory, server_host_key_algs, **kwargs):
+    async def _fake_connect(*args, client_factory, server_host_key_algs, known_hosts, **kwargs):
         assert server_host_key_algs == "default"
+        assert known_hosts == ([], [], [])
         assert client_factory().validate_host_public_key("203.0.113.10", "203.0.113.10", 22, discovered_key) is True
         return connection
 
@@ -168,12 +173,15 @@ def test_ensure_uses_stored_host_key_without_refetch(monkeypatch):
     stored_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStoredKey"
     imported_public_keys: list[str] = []
 
-    async def _fake_connect(host, *, port, username, client_keys, client_factory, server_host_key_algs):
+    async def _fake_connect(
+        host, *, port, username, client_keys, client_factory, server_host_key_algs, known_hosts
+    ):
         assert host == "203.0.113.10"
         assert port == 22
         assert username == "root"
         assert client_keys == ["parsed-key"]
         assert server_host_key_algs == "default"
+        assert known_hosts == ([], [], [])
         presented_key = _FakeHostKey(stored_key)
         assert client_factory().validate_host_public_key(host, host, port, presented_key) is True
         return _FakeConnection(45125)
@@ -198,14 +206,14 @@ def test_ensure_uses_stored_host_key_without_refetch(monkeypatch):
     monkeypatch.setattr("app.services.ssh_tunnel_pool.asyncssh.connect", _fake_connect)
 
     pool = SshTunnelPool(start_cleaner=False)
-    node = _node(secret_key, node_metadata=json.dumps({"ssh_host_key": stored_key}))
+    node = _node(secret_key, ssh_host_key=stored_key)
     try:
         assert pool.ensure(node) == EnsureResult(local_port=45125)
     finally:
         pool.shutdown()
 
     assert imported_public_keys == [stored_key]
-    assert json.loads(node.node_metadata)["ssh_host_key"] == stored_key
+    assert node.ssh_host_key == stored_key
 
 
 def test_ensure_raises_auth_error_on_host_key_mismatch(monkeypatch):
@@ -213,8 +221,11 @@ def test_ensure_raises_auth_error_on_host_key_mismatch(monkeypatch):
     stored_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStoredKey"
     presented_key = _FakeHostKey("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDifferentKey")
 
-    async def _fake_connect(host, *, port, username, client_keys, client_factory, server_host_key_algs):
+    async def _fake_connect(
+        host, *, port, username, client_keys, client_factory, server_host_key_algs, known_hosts
+    ):
         assert server_host_key_algs == "default"
+        assert known_hosts == ([], [], [])
         if not client_factory().validate_host_public_key(host, host, port, presented_key):
             raise asyncssh.HostKeyNotVerifiable("Host key is not trusted")
         raise AssertionError("connect should reject mismatched host key")
@@ -239,7 +250,7 @@ def test_ensure_raises_auth_error_on_host_key_mismatch(monkeypatch):
     monkeypatch.setattr("app.services.ssh_tunnel_pool.asyncssh.connect", _fake_connect)
 
     pool = SshTunnelPool(start_cleaner=False)
-    node = _node(secret_key, node_metadata=json.dumps({"ssh_host_key": stored_key}))
+    node = _node(secret_key, ssh_host_key=stored_key)
     try:
         with pytest.raises(SshTunnelError) as exc:
             pool.ensure(node)
@@ -250,7 +261,7 @@ def test_ensure_raises_auth_error_on_host_key_mismatch(monkeypatch):
     assert "host key verification failed" in str(exc.value).lower()
 
 
-def test_store_expected_host_key_text_updates_metadata_once():
+def test_store_expected_host_key_text_updates_column_once():
     node = _node("test-secret-key")
 
     changed = SshTunnelPool.store_expected_host_key_text(node, "ssh-ed25519 AAAAC3NzaStored")
@@ -258,4 +269,17 @@ def test_store_expected_host_key_text_updates_metadata_once():
 
     assert changed is True
     assert unchanged is False
-    assert json.loads(node.node_metadata)["ssh_host_key"] == "ssh-ed25519 AAAAC3NzaStored"
+    assert node.ssh_host_key == "ssh-ed25519 AAAAC3NzaStored"
+
+
+def test_stored_host_key_falls_back_to_metadata_legacy():
+    pool = SshTunnelPool(start_cleaner=False)
+    try:
+        node = _node(
+            "test-secret-key",
+            ssh_host_key="",
+            node_metadata=json.dumps({"ssh_host_key": "ssh-ed25519 AAAAC3NzaLegacy"}),
+        )
+        assert pool._stored_host_key_text(node) == "ssh-ed25519 AAAAC3NzaLegacy"
+    finally:
+        pool.shutdown()

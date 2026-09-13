@@ -327,7 +327,7 @@ def test_remote_http_endpoint_persists_discovered_host_key_on_caller_thread(db, 
 
     assert (host, port, uses_tls) == ("127.0.0.1", 45123, False)
     db.refresh(node)
-    assert json.loads(node.node_metadata)["ssh_host_key"] == "ssh-ed25519 AAAAC3NzaPersisted"
+    assert node.ssh_host_key == "ssh-ed25519 AAAAC3NzaPersisted"
 
 
 def test_to_response_derives_mtls_from_transport(db):

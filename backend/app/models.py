@@ -272,6 +272,7 @@ class Node(Base):
     ssh_passphrase_encrypted: Mapped[str] = mapped_column(Text, default="")
     ssh_remote_agent_host: Mapped[str] = mapped_column(String(255), default="127.0.0.1")
     ssh_remote_agent_port: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    ssh_host_key: Mapped[str] = mapped_column(Text, default="")
     node_kind: Mapped[str] = mapped_column(String(16), default="vpn")
     destination_ip: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     linked_vpn_node_id: Mapped[int | None] = mapped_column(

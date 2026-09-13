@@ -1,3 +1,4 @@
+import json
 import logging
 
 from pathlib import Path
@@ -1323,6 +1324,29 @@ def _migrate_nodes_ssh_fields() -> None:
         if "ssh_remote_agent_port" not in cols:
             conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_remote_agent_port INTEGER"))
             logger.info("DB migration: added nodes.ssh_remote_agent_port")
+        if "ssh_host_key" not in cols:
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_host_key TEXT NOT NULL DEFAULT ''"))
+            logger.info("DB migration: added nodes.ssh_host_key")
+            # One-shot: lift pins previously stored in node_metadata.ssh_host_key
+            try:
+                rows = conn.execute(text("SELECT id, node_metadata FROM nodes")).mappings().all()
+                for row in rows:
+                    raw = row.get("node_metadata") or "{}"
+                    try:
+                        meta = json.loads(raw) if isinstance(raw, str) else {}
+                    except Exception:
+                        continue
+                    if not isinstance(meta, dict):
+                        continue
+                    pinned = str(meta.get("ssh_host_key") or "").strip()
+                    if not pinned:
+                        continue
+                    conn.execute(
+                        text("UPDATE nodes SET ssh_host_key = :key WHERE id = :id"),
+                        {"key": pinned, "id": row["id"]},
+                    )
+            except Exception:
+                logger.debug("DB migration: skip ssh_host_key metadata backfill", exc_info=True)
 
 
 def _sync_nodes_transport_flags() -> None:
