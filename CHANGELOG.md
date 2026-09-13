@@ -51,40 +51,23 @@
 
 ## [Unreleased]
 
-### ✨ Added
-
-- **Узлы: блок «Связь»** — TLS (ожидание vs факт), uptime агента, последний успешный health, структурированная `last_link_error`; кнопка проверки связи как раньше.
-- **Node agent 1.8.0 / proxy agent 1.1.0** — `/health` отдаёт `started_at`, `uptime_sec`, `listen_tls` (после обновления перезапустите агенты на узлах).
-- **Способ связи узла (`transport`)** — HTTP / HTTPS+mTLS / SSH (SSH при включённом модуле) для VPN и proxy через picker; `mtls_enabled` derived.
-- **SSH transport узлов** (opt-in `node_ssh_transport`, **Настройки → Модули**) — панель поднимает SSH local forward и ходит к agent по HTTP через localhost; при **первом** подключении к узлу сохраняется отпечаток SSH host key (TOFU), дальше сверка только с сохранённым ключом.
-- **Добавление узла: выбор transport** — в диалоге «Добавить узел» можно сразу указать HTTP / HTTPS+mTLS / SSH (для SSH — host/user/ключ в той же форме); `POST /nodes` принимает `transport` и SSH-поля.
-- **Узлы UI** — сводка флота (всего / online / offline / активный), фильтр по статусу, акценты активного и офлайн-рядов (Lazyweb refs: Portainer / Cosmic / Depot); компактнее блоки mTLS / Telegram offline / HA; переименование локального узла.
-- **SSH transport: инструкция** — `docs/node-ssh-transport.md` + ссылка «Инструкция» в диалоге переключения на SSH и при добавлении узла.
-- **Диалог «Добавить узел»** — секции «Узел» / «SSH-туннель», сетка хост+порт, короткие подсказки вместо info-блоков, sticky footer; тот же паттерн в «Переключить на SSH».
-
-### 🔄 Changed
-
-- **Ошибки связи с агентом** — единый классификатор (`node_auth` / `node_tls_mismatch` / `node_unreachable` / `node_timeout`) → HTTP 502/504 с `detail.code` (не сессия панели).
-- **Push full** — префлайт связи primary/реплик; фазы прогресса; `failed_step` в итоге; после успеха — refresh health узлов.
-
-### 🐛 Fixed
-
-- **Create node + transport** — при ошибке SSH/mTLS после insert узел удаляется (нет HTTP-сирот); SSH валидируется до commit.
-- **SSH → mTLS** — `PATCH /nodes/{id}/transport` отклоняет прямой переход (provision идёт на публичный host:port); в UI — подсказка сначала HTTP.
-- **SSH → HTTP UI** — confirm/toast про переключение на HTTP, без ложного «сбросить mTLS».
-- **Переключение transport на существующих узлах** — bulk mTLS только для HTTP (не SSH); предупреждение при mTLS→SSH; тесты ssh↔http / mtls↔http / mtls→ssh / ssh→mtls reject.
-- **Preflight перед сменой transport** — `POST /nodes/{id}/transport/preflight` (+ тот же check в PATCH): probe HTTP/SSH до применения; UI блокирует переход с понятной ошибкой.
-- **Unlock + ручной бан** — ввод unlock-ключа отклоняется с сообщением «заблокирован администратором вручную…»; бан не снимается и слот активации не тратится (в т.ч. если `block_reason` был `access_expired` при живом permanent ban).
-- **Node transport SoT** — единый `resolve_transport_id` для API/adapters/ротации ключа; `mtls_enabled` больше не перетирается deprecated global flag на каждом старте; audit на disable mTLS; adapters default HTTP (без global env); VPN-config migration и bulk FE фильтр по `transport`.
-- **SSH host-key pin** — exclusive `known_hosts` (без fallback на `~/.ssh/known_hosts`); pin в колонке `nodes.ssh_host_key` (без гонки с `node_metadata`).
-
 ---
 
 ## [2.25.0] - 2026-09-13
 
-> **Кратко:** клиентский портал и unlock-коды (раздел **Подписка**); hub настроек и сайдбар по ролям; расширяемые feature toggles; CIDR safe-fallback / корректные global alerts; round-trip бэкапа после split `cidr.db` (AWG2 overlay, restore hints, audit после replace БД).
+> **Кратко:** клиентский портал и unlock-коды (раздел **Подписка**); способ связи узлов (HTTP / mTLS / SSH) и preflight; диагностика связи / Push full; hub настроек и сайдбар по ролям; расширяемые feature toggles; CIDR safe-fallback; round-trip бэкапа после split `cidr.db`.
 
 ### ✨ Added
+
+- **Узлы: блок «Связь»** — TLS (ожидание vs факт), uptime агента, последний успешный health, структурированная `last_link_error`; кнопка проверки связи как раньше.
+- **Node agent 1.8.0 / proxy agent 1.1.0** — `/health` отдаёт `started_at`, `uptime_sec`, `listen_tls` (после обновления перезапустите агенты на узлах).
+- **Способ связи узла (`transport`)** — HTTP / HTTPS+mTLS / SSH (SSH при включённом модуле) для VPN и proxy через picker; `mtls_enabled` derived; `GET /nodes/transports`, `PATCH /nodes/{id}/transport`.
+- **SSH transport узлов** (opt-in `node_ssh_transport`, **Настройки → Модули**) — панель поднимает SSH local forward и ходит к agent по HTTP через localhost; приватный ключ хранится зашифрованным; при **первом** подключении сохраняется отпечаток SSH host key (TOFU), дальше сверка только с сохранённым ключом.
+- **Добавление узла: выбор transport** — в диалоге «Добавить узел» можно сразу указать HTTP / HTTPS+mTLS / SSH (для SSH — host/user/ключ в той же форме); `POST /nodes` принимает `transport` и SSH-поля.
+- **Preflight перед сменой transport** — `POST /nodes/{id}/transport/preflight` (+ тот же check в `PATCH`): probe HTTP/SSH до применения; UI блокирует переход с понятной ошибкой.
+- **Узлы UI** — сводка флота (всего / online / offline / активный), фильтр по статусу, акценты активного и офлайн-рядов; компактнее блоки mTLS / Telegram offline / HA; переименование локального узла.
+- **SSH transport: инструкция** — `docs/node-ssh-transport.md` + ссылка «Инструкция» в диалоге переключения на SSH и при добавлении узла; обновлён `docs/uzly.md`.
+- **Диалог «Добавить узел»** — секции «Узел» / «SSH-туннель», сетка хост+порт, короткие подсказки вместо info-блоков, sticky footer; тот же паттерн в «Переключить на SSH».
 
 - **Разделы панели: больше отключаемых модулей** — в реестр `FEATURE_TOGGLES` добавлены:
   - **Раздел приложения:** `nodes` (страница «Узлы»), `panel_ops` (вкладка «Операции панели» / rebuild);
@@ -109,12 +92,20 @@
 
 ### 🔄 Changed
 
+- **Ошибки связи с агентом** — единый классификатор (`node_auth` / `node_tls_mismatch` / `node_unreachable` / `node_timeout`) → HTTP 502/504 с `detail.code` (не сессия панели).
+- **Push full** — префлайт связи primary/реплик; фазы прогресса; `failed_step` в итоге; после успеха — refresh health узлов.
 - **Сайдбар: группы по ролям** — Клиенты / Сеть / Наблюдение / Панель; домашний пункт и дашборд переименованы в **Клиенты**; лёгкий visual refresh заголовков/active (`sidebarNav.ts`, `Layout.tsx`, `DashboardPage.tsx`).
 - **Настройки: hub вместо flyout** — пункт «Настройки» ведёт на `/settings` с поиском и группами разделов; на `/settings/:section` — sticky secondary nav (desktop) и picker (mobile); hover-flyout удалён (`SettingsPage.tsx`, `SettingsSectionBrowser.tsx`, `Layout.tsx`).
 - **UX «Разделы панели»** — вместо сетки карточек: строки настроек в **2 колонки**, поиск по модулям, компактные профили ресурсов, sticky-бар с числом несохранённых изменений (`FeatureTogglesTab.tsx`).
 
 ### 🐛 Fixed
 
+- **Create node + transport** — при ошибке SSH/mTLS после insert узел удаляется (нет HTTP-сирот); SSH валидируется до commit.
+- **SSH → mTLS** — `PATCH /nodes/{id}/transport` отклоняет прямой переход (provision идёт на публичный host:port); в UI — подсказка сначала HTTP; `enable`/`disable-mtls` при уже SSH тоже отклоняются.
+- **SSH → HTTP UI** — confirm/toast про переключение на HTTP, без ложного «сбросить mTLS».
+- **Переключение transport на существующих узлах** — bulk mTLS только для HTTP (не SSH); предупреждение при mTLS→SSH.
+- **Unlock + ручной бан** — ввод unlock-ключа отклоняется с сообщением «заблокирован администратором вручную…»; бан не снимается и слот активации не тратится (в т.ч. если `block_reason` был `access_expired` при живом permanent ban).
+- **Node transport SoT** — единый `resolve_transport_id` для API/adapters/ротации ключа; `mtls_enabled` больше не перетирается deprecated global flag на каждом старте; audit на disable mTLS; adapters default HTTP (без global env); VPN-config migration и bulk FE фильтр по `transport`.
 - **Unlock redeem + HA** — после активации unlock-кода на портале `access_until` реплицируется на HA-replica тем же `set_access_until`, что и ручной PATCH в панели (раньше продлевался только primary).
 - **Portal security** — скачивание профилей идёт через адаптер узла токена (не active node); Host=`portal_domain` больше не обходит IP-whitelist целиком (exempt только `/p/` и `/api/public/…`); WG/AWG2 policy на портале ищется по lowercased имени; unlock redeem не снимает `manual_permanent` бан.
 - **HA policy copy** — `_WG_POLICY_FIELDS` больше не наследует несуществующий `access_until` (дедлайн WG — `expires_at`); в `_AWG2_POLICY_FIELDS` добавлены traffic-limit поля для heal/Push-full copy.
@@ -159,6 +150,15 @@
 - **CLI списки AntiZapret** — читает/пишет `$ANTIZAPRET_PATH` (как installer / `.env` / node agent), а не несуществующий `ANTIZAPRET_HOME`.
 - **Бэкап restore hints** — API/upload+restore подсказывают Push full при configs/AWG2; docs чеклист A/B/C и явное разделение полного AntiZapret-архива.
 
+### 🔒 Security
+
+- **SSH host-key pin** — exclusive `known_hosts` (без fallback на `~/.ssh/known_hosts`); pin в колонке `nodes.ssh_host_key` (без гонки с `node_metadata`).
+
+### 🧪 Tests
+
+- Link diagnostics / Push full: `test_node_link_errors.py`, `test_push_full_link_preflight.py`.
+- Transport / SSH: `test_node_transport.py`, `test_node_transport_api.py` (create/orphan, ssh↔http / mtls↔http / mtls→ssh / ssh→mtls reject, preflight), `test_node_ssh_toggle.py`, `test_ssh_tunnel_pool.py`; proxy SSH — `test_proxy_node_adapter.py`.
+- Unlock permanent ban: расширения в `test_unlock_codes.py`.
 
 ---
 
