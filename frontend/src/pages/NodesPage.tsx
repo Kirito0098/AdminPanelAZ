@@ -1308,8 +1308,13 @@ export default function NodesPage() {
           if (!open && !submitting) closeDialog()
         }}
       >
-        <DialogContent className={createTransport === 'ssh' && !editing ? 'max-w-xl' : 'max-w-md'}>
-          <DialogHeader>
+        <DialogContent
+          className={cn(
+            'gap-0 overflow-hidden p-0 sm:max-w-lg',
+            !editing && createTransport === 'ssh' && 'sm:max-w-xl',
+          )}
+        >
+          <DialogHeader className="space-y-1 border-b border-border/60 px-6 py-4">
             <DialogTitle className="flex items-center gap-2">
               {editing ? <Pencil size={18} /> : <Plus size={18} />}
               {editing ? 'Редактировать узел' : 'Добавить узел'}
@@ -1317,285 +1322,293 @@ export default function NodesPage() {
             <DialogDescription>
               {editing
                 ? editing.is_local
-                  ? 'Можно изменить отображаемое имя локального узла'
+                  ? 'Только отображаемое имя'
                   : isProxyNode(editing)
-                    ? 'Измените параметры подключения к proxy_agent'
-                    : 'Измените параметры подключения к удалённому node agent'
+                    ? 'Параметры proxy_agent'
+                    : 'Параметры node agent'
                 : proxyNodesEnabled && nodeKind === 'proxy'
-                  ? 'Подключение к proxy_agent на RU-прокси'
-                  : 'Подключение к node agent на VPN-сервере'}
+                  ? 'Подключение к proxy_agent'
+                  : 'Подключение к node agent'}
             </DialogDescription>
           </DialogHeader>
 
-          <form noValidate onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-4">
-              {!editing && proxyNodesEnabled && (
-                <div className="grid gap-2">
-                  <Label htmlFor="node-kind">Тип узла</Label>
-                  <Select
-                    value={nodeKind}
-                    onValueChange={(value) => handleNodeKindChange(value as NodeKind)}
-                  >
-                    <SelectTrigger id="node-kind">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="vpn">VPN (node agent)</SelectItem>
-                      <SelectItem value="proxy">Прокси (proxy_agent)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+          <form noValidate onSubmit={handleSubmit} className="flex max-h-[min(80vh,720px)] flex-col">
+            <div className="space-y-5 overflow-y-auto px-6 py-4">
               {!editing && (
-                <div className="grid gap-2">
-                  <Label htmlFor="node-transport">Способ связи</Label>
-                  <Select
-                    value={createTransport}
-                    onValueChange={(value) => {
-                      const next = value as NodeTransportId
-                      const opt = transportOptions.find((item) => item.id === next)
-                      if (!opt?.available) return
-                      setCreateTransport(next)
-                      if (next === 'ssh') {
-                        setCreateSshForm((prev) => ({
-                          ...prev,
-                          ssh_host: prev.ssh_host || host.trim(),
-                        }))
-                      }
-                    }}
-                    disabled={submitting}
-                  >
-                    <SelectTrigger id="node-transport">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {transportOptions.map((item) => (
-                        <SelectItem
-                          key={item.id}
-                          value={item.id}
-                          disabled={!item.available}
-                          title={item.available ? item.label : 'Модуль отключён'}
-                        >
-                          {item.label}
-                          {!item.available ? ' (выключено)' : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Как панель будет достучаться до агента. SSH — только при включённом модуле.
-                  </p>
+                <div
+                  className={cn(
+                    'grid gap-3',
+                    proxyNodesEnabled ? 'sm:grid-cols-2' : 'grid-cols-1',
+                  )}
+                >
+                  {proxyNodesEnabled && (
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="node-kind" className="text-xs text-muted-foreground">
+                        Тип
+                      </Label>
+                      <Select
+                        value={nodeKind}
+                        onValueChange={(value) => handleNodeKindChange(value as NodeKind)}
+                      >
+                        <SelectTrigger id="node-kind">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="vpn">VPN</SelectItem>
+                          <SelectItem value="proxy">Прокси</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="node-transport" className="text-xs text-muted-foreground">
+                      Способ связи
+                    </Label>
+                    <Select
+                      value={createTransport}
+                      onValueChange={(value) => {
+                        const next = value as NodeTransportId
+                        const opt = transportOptions.find((item) => item.id === next)
+                        if (!opt?.available) return
+                        setCreateTransport(next)
+                        if (next === 'ssh') {
+                          setCreateSshForm((prev) => ({
+                            ...prev,
+                            ssh_host: prev.ssh_host || host.trim(),
+                          }))
+                        }
+                      }}
+                      disabled={submitting}
+                    >
+                      <SelectTrigger id="node-transport">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {transportOptions.map((item) => (
+                          <SelectItem
+                            key={item.id}
+                            value={item.id}
+                            disabled={!item.available}
+                            title={item.available ? item.label : 'Модуль отключён'}
+                          >
+                            {item.label}
+                            {!item.available ? ' (выкл.)' : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
+
               {!editing && nodeKind === 'vpn' && createTransport === 'http' && (
-                <SettingsAlert variant="info">
-                  Сначала на VPN-сервере установите и запустите <strong>node agent</strong> (
-                  <code className="text-xs">systemctl start adminpanelaz-node</code>), затем укажите его{' '}
-                  <strong>публичный IP или домен</strong> (не 127.0.0.1) и тот же API-ключ. Порт —{' '}
-                  <strong>{VPN_DEFAULT_PORT}</strong>.
-                </SettingsAlert>
+                <p className="text-xs text-muted-foreground">
+                  Агент на VPN должен слушать публичный IP · порт {VPN_DEFAULT_PORT} · тот же API-ключ.
+                </p>
               )}
               {!editing && nodeKind === 'vpn' && createTransport === 'mtls' && (
-                <SettingsAlert variant="info">
-                  После добавления панель попытается выдать сертификаты агенту по HTTP. Агент должен быть
-                  уже доступен по адресу и ключу ниже; порт — <strong>{VPN_DEFAULT_PORT}</strong>.
-                </SettingsAlert>
-              )}
-              {!editing && nodeKind === 'vpn' && createTransport === 'ssh' && (
-                <SettingsAlert variant="info">
-                  Агент лучше слушать на <strong>127.0.0.1:{VPN_DEFAULT_PORT}</strong>. В{' '}
-                  <code className="text-xs">authorized_keys</code> SSH-пользователя добавьте публичный
-                  ключ, парный приватному ключу ниже.{' '}
-                  <a
-                    href={NODE_SSH_TRANSPORT_DOCS_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 font-medium underline underline-offset-2"
-                  >
-                    Инструкция
-                    <ExternalLink size={12} aria-hidden />
-                  </a>
-                </SettingsAlert>
+                <p className="text-xs text-muted-foreground">
+                  После добавления панель попробует выдать сертификаты по HTTP (порт {VPN_DEFAULT_PORT}).
+                </p>
               )}
               {!editing && proxyNodesEnabled && nodeKind === 'proxy' && (
-                <SettingsAlert variant="warning" title="Прокси-узел">
-                  Сначала сами установите{' '}
+                <p className="text-xs text-muted-foreground">
+                  Сначала{' '}
                   <a
                     href={AZ_PROXY_SH_DOCS_URL}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="font-medium underline underline-offset-2"
                   >
-                    proxy.sh по инструкции AntiZapret
+                    proxy.sh
                   </a>
-                  , затем запустите <strong>proxy_agent</strong> (порт{' '}
-                  <strong>{PROXY_DEFAULT_PORT}</strong>). Панель не ставит и не запускает proxy.sh.
-                </SettingsAlert>
+                  , затем proxy_agent на порту {PROXY_DEFAULT_PORT}.
+                </p>
               )}
               {editing?.is_local && (
-                <SettingsAlert variant="info">
-                  Хост и порт локального узла задаются панелью. Меняется только{' '}
-                  <strong>имя</strong> в списке и селекторе.
-                </SettingsAlert>
+                <p className="text-xs text-muted-foreground">Хост и порт локального узла задаёт панель.</p>
               )}
               {editing && !editing.is_local && (
-                <SettingsAlert variant="warning" title="API-ключ">
-                  Оставьте поле ключа пустым, если не хотите его менять. Новый ключ нужно прописать в
-                  конфигурации {isProxyNode(editing) ? 'proxy_agent' : 'node agent'} на сервере.
-                </SettingsAlert>
+                <p className="text-xs text-muted-foreground">
+                  API-ключ оставьте пустым, если не меняете.
+                </p>
               )}
 
-              <div className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="node-name">Имя</Label>
-                  <Input
-                    id="node-name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder={
-                      editing?.is_local
-                        ? 'Локальный сервер'
-                        : nodeKind === 'proxy'
-                          ? 'proxy-ru-1'
-                          : 'vpn-eu-1'
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">Отображаемое имя в панели и селекторе узлов</p>
-                </div>
-                {!editing?.is_local && (
-                  <>
-                <div className="grid gap-2">
-                  <Label htmlFor="node-host">Хост</Label>
-                  <Input
-                    id="node-host"
-                    value={host}
-                    onChange={(e) => {
-                      const next = e.target.value
-                      setHost(next)
-                      if (!editing && createTransport === 'ssh' && !createSshForm.ssh_host.trim()) {
-                        setCreateSshForm((prev) => ({ ...prev, ssh_host: next }))
+              <section className="space-y-3">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Узел
+                </p>
+                <div className="grid gap-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="node-name">Имя</Label>
+                    <Input
+                      id="node-name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder={
+                        editing?.is_local
+                          ? 'Локальный сервер'
+                          : nodeKind === 'proxy'
+                            ? 'proxy-ru-1'
+                            : 'vpn-eu-1'
                       }
-                    }}
-                    placeholder="vpn.example.com"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {createTransport === 'ssh' && !editing
-                      ? 'Отображаемый адрес узла (может совпадать с SSH-хостом)'
-                      : 'Домен или IP, доступный с controller'}
-                  </p>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="node-port">Порт агента</Label>
-                  <Input
-                    id="node-port"
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={port}
-                    onChange={(e) => setPort(Number(e.target.value))}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="node-key">API-ключ (X-Node-Key)</Label>
-                  <Input
-                    id="node-key"
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={editing ? 'Оставьте пустым, чтобы не менять' : 'Минимум 8 символов'}
-                  />
-                  {!editing && (
-                    <p className="text-xs text-muted-foreground">Секретный ключ для аутентификации агента</p>
+                    />
+                  </div>
+                  {!editing?.is_local && (
+                    <>
+                      <div className="grid gap-3 sm:grid-cols-[1fr_7rem]">
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="node-host">
+                            {createTransport === 'ssh' && !editing ? 'Адрес (отображение)' : 'Хост'}
+                          </Label>
+                          <Input
+                            id="node-host"
+                            value={host}
+                            onChange={(e) => {
+                              const next = e.target.value
+                              setHost(next)
+                              if (
+                                !editing &&
+                                createTransport === 'ssh' &&
+                                !createSshForm.ssh_host.trim()
+                              ) {
+                                setCreateSshForm((prev) => ({ ...prev, ssh_host: next }))
+                              }
+                            }}
+                            placeholder="vpn.example.com"
+                          />
+                        </div>
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="node-port">Порт</Label>
+                          <Input
+                            id="node-port"
+                            type="number"
+                            min={1}
+                            max={65535}
+                            value={port}
+                            onChange={(e) => setPort(Number(e.target.value))}
+                            className="tabular-nums"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid gap-1.5">
+                        <Label htmlFor="node-key">API-ключ</Label>
+                        <Input
+                          id="node-key"
+                          type="password"
+                          value={apiKey}
+                          onChange={(e) => setApiKey(e.target.value)}
+                          placeholder={editing ? 'Не менять' : 'Минимум 8 символов'}
+                        />
+                      </div>
+                    </>
+                  )}
+                  {((editing && isProxyNode(editing)) ||
+                    (!editing && proxyNodesEnabled && nodeKind === 'proxy')) && (
+                    <ProxyLinkSelect
+                      value={linkSelectorValue}
+                      onChange={setLinkSelectorValue}
+                      nodes={nodes}
+                      syncGroups={syncGroups}
+                      disabled={submitting}
+                      orphanNodeId={editing?.linked_vpn_node_id ?? null}
+                    />
                   )}
                 </div>
-                  </>
-                )}
-                {!editing && createTransport === 'ssh' && (
-                  <>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <div className="grid gap-2">
-                        <Label htmlFor="create-ssh-host">SSH-хост</Label>
-                        <Input
-                          id="create-ssh-host"
-                          value={createSshForm.ssh_host}
-                          onChange={(e) =>
-                            setCreateSshForm((prev) => ({ ...prev, ssh_host: e.target.value }))
-                          }
-                          placeholder={host || '203.0.113.10'}
-                          disabled={submitting}
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="create-ssh-port">SSH-порт</Label>
-                        <Input
-                          id="create-ssh-port"
-                          type="number"
-                          min={1}
-                          max={65535}
-                          value={createSshForm.ssh_port}
-                          onChange={(e) =>
-                            setCreateSshForm((prev) => ({ ...prev, ssh_port: e.target.value }))
-                          }
-                          placeholder="22"
-                          disabled={submitting}
-                        />
-                      </div>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="create-ssh-username">SSH-пользователь</Label>
+              </section>
+
+              {!editing && createTransport === 'ssh' && (
+                <section className="space-y-3 rounded-lg border border-border/70 bg-muted/15 p-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      SSH-туннель
+                    </p>
+                    <a
+                      href={NODE_SSH_TRANSPORT_DOCS_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
+                    >
+                      Инструкция
+                      <ExternalLink size={11} aria-hidden />
+                    </a>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Агент на 127.0.0.1:{VPN_DEFAULT_PORT} · публичный ключ в authorized_keys
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-[1fr_5.5rem]">
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="create-ssh-host">SSH-хост</Label>
                       <Input
-                        id="create-ssh-username"
-                        value={createSshForm.ssh_username}
+                        id="create-ssh-host"
+                        value={createSshForm.ssh_host}
                         onChange={(e) =>
-                          setCreateSshForm((prev) => ({ ...prev, ssh_username: e.target.value }))
+                          setCreateSshForm((prev) => ({ ...prev, ssh_host: e.target.value }))
                         }
-                        placeholder="root"
+                        placeholder={host || '203.0.113.10'}
                         disabled={submitting}
                       />
                     </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="create-ssh-private-key">Приватный SSH-ключ</Label>
-                      <Textarea
-                        id="create-ssh-private-key"
-                        value={createSshForm.ssh_private_key}
-                        onChange={(e) =>
-                          setCreateSshForm((prev) => ({ ...prev, ssh_private_key: e.target.value }))
-                        }
-                        placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                        className="min-h-40 font-mono text-xs"
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="create-ssh-passphrase">Passphrase ключа</Label>
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="create-ssh-port">Порт</Label>
                       <Input
-                        id="create-ssh-passphrase"
-                        type="password"
-                        value={createSshForm.ssh_passphrase}
+                        id="create-ssh-port"
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={createSshForm.ssh_port}
                         onChange={(e) =>
-                          setCreateSshForm((prev) => ({ ...prev, ssh_passphrase: e.target.value }))
+                          setCreateSshForm((prev) => ({ ...prev, ssh_port: e.target.value }))
                         }
-                        placeholder="Необязательно"
+                        placeholder="22"
+                        className="tabular-nums"
                         disabled={submitting}
                       />
                     </div>
-                  </>
-                )}
-                {((editing && isProxyNode(editing)) ||
-                  (!editing && proxyNodesEnabled && nodeKind === 'proxy')) && (
-                  <ProxyLinkSelect
-                    value={linkSelectorValue}
-                    onChange={setLinkSelectorValue}
-                    nodes={nodes}
-                    syncGroups={syncGroups}
-                    disabled={submitting}
-                    orphanNodeId={editing?.linked_vpn_node_id ?? null}
-                  />
-                )}
-              </div>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="create-ssh-username">Пользователь</Label>
+                    <Input
+                      id="create-ssh-username"
+                      value={createSshForm.ssh_username}
+                      onChange={(e) =>
+                        setCreateSshForm((prev) => ({ ...prev, ssh_username: e.target.value }))
+                      }
+                      placeholder="root"
+                      disabled={submitting}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="create-ssh-private-key">Приватный ключ</Label>
+                    <Textarea
+                      id="create-ssh-private-key"
+                      value={createSshForm.ssh_private_key}
+                      onChange={(e) =>
+                        setCreateSshForm((prev) => ({ ...prev, ssh_private_key: e.target.value }))
+                      }
+                      placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                      className="min-h-28 font-mono text-xs"
+                      disabled={submitting}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="create-ssh-passphrase">Passphrase</Label>
+                    <Input
+                      id="create-ssh-passphrase"
+                      type="password"
+                      value={createSshForm.ssh_passphrase}
+                      onChange={(e) =>
+                        setCreateSshForm((prev) => ({ ...prev, ssh_passphrase: e.target.value }))
+                      }
+                      placeholder="Необязательно"
+                      disabled={submitting}
+                    />
+                  </div>
+                </section>
+              )}
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="border-t border-border/60 bg-muted/10 px-6 py-3 sm:justify-end">
               <Button type="button" variant="outline" onClick={closeDialog} disabled={submitting}>
                 Отмена
               </Button>
@@ -1632,33 +1645,28 @@ export default function NodesPage() {
             </>
           ) : undefined
         }
-        alert={{
-          variant: 'info',
-          title: 'Туннель от controller к agent',
-          children: (
-            <>
-              Панель подключится по SSH к серверу и будет обращаться к node agent через туннель.
-              Внутренний адрес agent по умолчанию — 127.0.0.1 и текущий порт узла.{' '}
-              <a
-                href={NODE_SSH_TRANSPORT_DOCS_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 font-medium text-foreground underline underline-offset-2"
-              >
-                Инструкция
-                <ExternalLink size={12} aria-hidden />
-              </a>
-            </>
-          ),
-        }}
         confirmLabel="Сохранить SSH"
         loading={sshSubmitting}
         onConfirm={handleSshSubmit}
         className="max-w-xl"
       >
-        <div className="grid gap-4">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="grid gap-2">
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              Туннель к agent на 127.0.0.1 · порт узла
+            </p>
+            <a
+              href={NODE_SSH_TRANSPORT_DOCS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
+            >
+              Инструкция
+              <ExternalLink size={11} aria-hidden />
+            </a>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[1fr_5.5rem]">
+            <div className="grid gap-1.5">
               <Label htmlFor="ssh-host">SSH-хост</Label>
               <Input
                 id="ssh-host"
@@ -1668,8 +1676,8 @@ export default function NodesPage() {
                 disabled={sshSubmitting}
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="ssh-port">SSH-порт</Label>
+            <div className="grid gap-1.5">
+              <Label htmlFor="ssh-port">Порт</Label>
               <Input
                 id="ssh-port"
                 type="number"
@@ -1678,13 +1686,14 @@ export default function NodesPage() {
                 value={sshForm.ssh_port}
                 onChange={(e) => setSshForm((prev) => ({ ...prev, ssh_port: e.target.value }))}
                 placeholder="22"
+                className="tabular-nums"
                 disabled={sshSubmitting}
               />
             </div>
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="ssh-username">SSH-пользователь</Label>
+          <div className="grid gap-1.5">
+            <Label htmlFor="ssh-username">Пользователь</Label>
             <Input
               id="ssh-username"
               value={sshForm.ssh_username}
@@ -1694,25 +1703,25 @@ export default function NodesPage() {
             />
           </div>
 
-          <div className="grid gap-2">
+          <div className="grid gap-1.5">
             <Label htmlFor="ssh-private-key">Приватный ключ</Label>
             <Textarea
               id="ssh-private-key"
               value={sshForm.ssh_private_key}
               onChange={(e) => setSshForm((prev) => ({ ...prev, ssh_private_key: e.target.value }))}
               placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-              className="min-h-40 font-mono text-xs"
+              className="min-h-28 font-mono text-xs"
               disabled={sshSubmitting}
             />
             <p className="text-xs text-muted-foreground">
               {sshDialogNode?.ssh_key_configured
-                ? 'Ключ уже сохранён. Оставьте поле пустым, если не хотите его менять.'
-                : 'Ключ обязателен для первого переключения на SSH transport.'}
+                ? 'Ключ сохранён — оставьте пустым, чтобы не менять'
+                : 'Обязателен при первом переключении на SSH'}
             </p>
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="ssh-passphrase">Passphrase ключа</Label>
+          <div className="grid gap-1.5">
+            <Label htmlFor="ssh-passphrase">Passphrase</Label>
             <Input
               id="ssh-passphrase"
               type="password"
