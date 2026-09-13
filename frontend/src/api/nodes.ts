@@ -35,6 +35,21 @@ export async function patchNodeTransport(
   })
 }
 
+export async function preflightNodeTransport(
+  nodeId: number,
+  transportOrBody: import('../types').NodeTransportId | import('../types').NodeTransportPatchBody,
+) {
+  const body =
+    typeof transportOrBody === 'string' ? { transport: transportOrBody } : transportOrBody
+  return apiFetch<import('../types').NodeTransportPreflightResult>(
+    `/nodes/${nodeId}/transport/preflight`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  )
+}
+
 export async function getNodeMtlsStatus() {
   return apiFetch<import('../types').NodeMtlsStatus>('/nodes/mtls/status')
 }

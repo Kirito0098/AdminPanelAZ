@@ -5,7 +5,8 @@ from __future__ import annotations
 from app.services import node_transport as nt
 
 
-def test_list_transports_marks_ssh_unavailable():
+def test_list_transports_marks_ssh_unavailable(monkeypatch):
+    monkeypatch.setattr(nt, "is_node_ssh_transport_enabled", lambda _db=None: False)
     items = {i["id"]: i for i in nt.list_transports()}
     assert items["http"]["available"] is True
     assert items["mtls"]["available"] is True
@@ -13,7 +14,7 @@ def test_list_transports_marks_ssh_unavailable():
 
 
 def test_list_transports_marks_ssh_available_when_toggle_enabled(monkeypatch):
-    monkeypatch.setattr(nt, "is_node_ssh_transport_enabled", lambda: True)
+    monkeypatch.setattr(nt, "is_node_ssh_transport_enabled", lambda _db=None: True)
     items = {i["id"]: i for i in nt.list_transports()}
     assert items["ssh"]["available"] is True
 

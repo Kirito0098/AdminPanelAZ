@@ -20,6 +20,7 @@ import {
   deleteNode,
   listNodeTransports,
   patchNodeTransport,
+  preflightNodeTransport,
   getNodeMtlsStatus,
   rollingNodeUpdate,
   rotateNodeApiKey,
@@ -465,6 +466,11 @@ export default function NodesPage() {
     const current = (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase()
     if (transport === current) return
     if (transport === 'ssh') {
+      if (current === 'mtls') {
+        warning(
+          'SSH ходит к агенту по HTTP через туннель. Если агент ещё на mTLS — сначала переведите его на обычный HTTP.',
+        )
+      }
       openSshDialog(node)
       return
     }
@@ -522,6 +528,14 @@ export default function NodesPage() {
       if (sshPassphrase) {
         body.ssh_passphrase = sshPassphrase
       }
+      const preflight = await preflightNodeTransport(target.id, body)
+      if (!preflight.ok) {
+        const detail = [preflight.message, preflight.hint, preflight.probe_error]
+          .filter(Boolean)
+          .join(' — ')
+        notifyError(detail || 'Переключение на SSH сейчас невозможно')
+        return
+      }
       await patchNodeTransport(target.id, body)
       closeSshDialog()
       success(`Способ связи «${target.name}»: SSH`)
@@ -562,6 +576,14 @@ export default function NodesPage() {
         await load()
         await refresh()
       } else if (action === 'enable-mtls') {
+        const preflight = await preflightNodeTransport(target.id, 'mtls')
+        if (!preflight.ok) {
+          const detail = [preflight.message, preflight.hint, preflight.probe_error]
+            .filter(Boolean)
+            .join(' — ')
+          notifyError(detail || 'Включение mTLS сейчас невозможно')
+          return
+        }
         await patchNodeTransport(target.id, 'mtls')
         closeConfirm()
         success(
@@ -594,6 +616,14 @@ export default function NodesPage() {
         }
       } else if (action === 'switch-http') {
         const wasMtls = (target.transport || (target.mtls_enabled ? 'mtls' : 'http')).toLowerCase() === 'mtls'
+        const preflight = await preflightNodeTransport(target.id, 'http')
+        if (!preflight.ok) {
+          const detail = [preflight.message, preflight.hint, preflight.probe_error]
+            .filter(Boolean)
+            .join(' — ')
+          notifyError(detail || 'Переключение на HTTP сейчас невозможно')
+          return
+        }
         await patchNodeTransport(target.id, 'http')
         closeConfirm()
         success(`Способ связи «${target.name}»: HTTP`)
@@ -767,14 +797,13 @@ export default function NodesPage() {
       }
     }
     if (action === 'enable-mtls') {
-      const mtlsCandidates = selected.filter(
-        (node) =>
-          !node.is_local &&
-          !isProxyNode(node) &&
-          (node.transport || (node.mtls_enabled ? 'mtls' : 'http')) !== 'mtls',
-      )
+      const mtlsCandidates = selected.filter((node) => {
+        if (node.is_local || isProxyNode(node)) return false
+        const transport = (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase()
+        return transport === 'http'
+      })
       if (mtlsCandidates.length === 0) {
-        notifyError('Нет удалённых VPN-узлов без mTLS среди выбранных')
+        notifyError('Нет удалённых VPN-узлов на HTTP среди выбранных (SSH → сначала HTTP)')
         return
       }
     }
@@ -831,16 +860,22 @@ export default function NodesPage() {
           notifyError(`Удалено ${deletedCount} из ${remoteSelected.length}. ${failed[0]}`)
         }
       } else if (action === 'enable-mtls') {
-        const mtlsCandidates = selected.filter(
-          (node) =>
-            !node.is_local &&
-            !isProxyNode(node) &&
-            (node.transport || (node.mtls_enabled ? 'mtls' : 'http')) !== 'mtls',
-        )
+        const mtlsCandidates = selected.filter((node) => {
+          if (node.is_local || isProxyNode(node)) return false
+          const transport = (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase()
+          return transport === 'http'
+        })
         let enabled = 0
         const failed: string[] = []
         for (const node of mtlsCandidates) {
           try {
+            const preflight = await preflightNodeTransport(node.id, 'mtls')
+            if (!preflight.ok) {
+              failed.push(
+                `${node.name}: ${[preflight.message, preflight.hint].filter(Boolean).join(' — ')}`,
+              )
+              continue
+            }
             await patchNodeTransport(node.id, 'mtls')
             enabled += 1
             try {

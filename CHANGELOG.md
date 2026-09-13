@@ -72,6 +72,8 @@
 - **Create node + transport** — при ошибке SSH/mTLS после insert узел удаляется (нет HTTP-сирот); SSH валидируется до commit.
 - **SSH → mTLS** — `PATCH /nodes/{id}/transport` отклоняет прямой переход (provision идёт на публичный host:port); в UI — подсказка сначала HTTP.
 - **SSH → HTTP UI** — confirm/toast про переключение на HTTP, без ложного «сбросить mTLS».
+- **Переключение transport на существующих узлах** — bulk mTLS только для HTTP (не SSH); предупреждение при mTLS→SSH; тесты ssh↔http / mtls↔http / mtls→ssh / ssh→mtls reject.
+- **Preflight перед сменой transport** — `POST /nodes/{id}/transport/preflight` (+ тот же check в PATCH): probe HTTP/SSH до применения; UI блокирует переход с понятной ошибкой.
 - **Unlock + ручной бан** — ввод unlock-ключа отклоняется с сообщением «заблокирован администратором вручную…»; бан не снимается и слот активации не тратится (в т.ч. если `block_reason` был `access_expired` при живом permanent ban).
 - **Node transport SoT** — единый `resolve_transport_id` для API/adapters/ротации ключа; `mtls_enabled` больше не перетирается deprecated global flag на каждом старте; audit на disable mTLS; adapters default HTTP (без global env); VPN-config migration и bulk FE фильтр по `transport`.
 - **SSH host-key pin** — exclusive `known_hosts` (без fallback на `~/.ssh/known_hosts`); pin в колонке `nodes.ssh_host_key` (без гонки с `node_metadata`).

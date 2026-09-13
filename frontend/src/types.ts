@@ -22,6 +22,16 @@ export interface NodeTransportPatchBody extends NodeTransportSshFields {
   transport: NodeTransportId
 }
 
+export interface NodeTransportPreflightResult {
+  ok: boolean
+  current: string
+  wanted: string
+  message: string
+  hint?: string | null
+  probe_status?: string | null
+  probe_error?: string | null
+}
+
 export interface Node {
   id: number
   name: string

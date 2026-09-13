@@ -31,6 +31,30 @@ def db():
         engine.dispose()
 
 
+
+def _ok_preflight(current: str = "http", wanted: str = "http"):
+    return SimpleNamespace(
+        ok=True,
+        current=current,
+        wanted=wanted,
+        message="ok",
+        hint=None,
+        probe_status="online",
+        probe_error=None,
+        http_status=200,
+    )
+
+
+def _allow_preflight(monkeypatch, nodes_router, *, current: str = "http", wanted: str = "http"):
+    monkeypatch.setattr(
+        nodes_router,
+        "preflight_transport_switch",
+        lambda _db, _node, body: _ok_preflight(
+            current=current,
+            wanted=(body.transport or wanted),
+        ),
+    )
+
 def _add_node(db, *, name: str = "n1", kind: str = "vpn", transport: str = "http") -> Node:
     node = Node(
         name=name,
@@ -51,9 +75,11 @@ def _add_node(db, *, name: str = "n1", kind: str = "vpn", transport: str = "http
     return node
 
 
-def test_list_node_transports():
+def test_list_node_transports(monkeypatch):
     from app.routers import nodes as nodes_router
+    from app.services import node_transport as nt
 
+    monkeypatch.setattr(nt, "is_node_ssh_transport_enabled", lambda _db=None: False)
     resp = nodes_router.list_node_transports(SimpleNamespace())
     ids = [i.id for i in resp.items]
     assert ids == ["http", "mtls", "ssh"]
@@ -77,9 +103,11 @@ def test_list_transports_ssh_available_follows_toggle(monkeypatch):
 
 def test_patch_ssh_rejected_when_toggle_off(db, monkeypatch):
     from app.routers import nodes as nodes_router
+    from app.services import node_transport_preflight as pf
 
     monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
     monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: False)
+    monkeypatch.setattr(pf, "is_node_ssh_transport_enabled", lambda _db=None: False)
     node = _add_node(db, transport="http")
     admin = SimpleNamespace(id=1, username="admin")
 
@@ -105,9 +133,11 @@ def test_patch_ssh_rejected_when_toggle_off(db, monkeypatch):
 
 def test_patch_ssh_requires_key_when_not_configured(db, monkeypatch):
     from app.routers import nodes as nodes_router
+    from app.services import node_transport_preflight as pf
 
     monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
     monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: True)
+    monkeypatch.setattr(pf, "is_node_ssh_transport_enabled", lambda _db=None: True)
     node = _add_node(db, transport="http")
     admin = SimpleNamespace(id=1, username="admin")
 
@@ -130,6 +160,7 @@ def test_patch_ssh_stores_encrypted_key_not_in_response(db, monkeypatch):
     from app.routers import nodes as nodes_router
 
     monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    _allow_preflight(monkeypatch, nodes_router, current="http", wanted="ssh")
     monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: True)
     pool = MagicMock()
     monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: pool)
@@ -175,6 +206,7 @@ def test_patch_ssh_blank_passphrase_keeps_existing_secret(db, monkeypatch):
     from app.routers import nodes as nodes_router
 
     monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    _allow_preflight(monkeypatch, nodes_router, current="http", wanted="ssh")
     monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: True)
     pool = MagicMock()
     monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: pool)
@@ -211,6 +243,7 @@ def test_patch_transport_proxy_http_to_mtls(db, monkeypatch):
     from app.routers import nodes as nodes_router
 
     monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    _allow_preflight(monkeypatch, nodes_router, current="http", wanted="mtls")
     node = _add_node(db, kind="proxy", transport="http")
     admin = SimpleNamespace(id=1, username="admin")
 
@@ -259,6 +292,7 @@ def test_patch_transport_drops_ssh_tunnel_when_switching_to_http(db, monkeypatch
     from app.routers import nodes as nodes_router
 
     monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    _allow_preflight(monkeypatch, nodes_router, current="ssh", wanted="http")
     monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
     node = _add_node(db, transport="ssh")
     admin = SimpleNamespace(id=1, username="admin")
@@ -537,6 +571,122 @@ def test_patch_transport_ssh_to_mtls_rejected(db, monkeypatch):
     assert node.transport == "ssh"
 
 
+def test_patch_existing_ssh_to_http_real_disable(db, monkeypatch):
+    """Existing SSH node → HTTP must not 500 and must drop the tunnel."""
+    from app.routers import nodes as nodes_router
+    from app.services import node_mtls_provision
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    _allow_preflight(monkeypatch, nodes_router, current="ssh", wanted="http")
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    monkeypatch.setattr(node_mtls_provision, "get_settings", lambda: SimpleNamespace(audit_log_enabled=False))
+    node = _add_node(db, transport="ssh")
+    admin = SimpleNamespace(id=1, username="admin")
+    pool = MagicMock()
+    monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: pool)
+
+    resp = nodes_router.patch_node_transport(
+        node.id,
+        NodeTransportUpdate(transport="http"),
+        admin=admin,
+        db=db,
+    )
+    assert resp.transport == "http"
+    assert resp.mtls_enabled is False
+    db.refresh(node)
+    assert node.transport == "http"
+    assert node.mtls_enabled is False
+    pool.drop.assert_called_once_with(node.id)
+
+
+def test_patch_existing_mtls_to_http(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+    from app.services import node_mtls_provision
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    _allow_preflight(monkeypatch, nodes_router, current="mtls", wanted="http")
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    monkeypatch.setattr(node_mtls_provision, "get_settings", lambda: SimpleNamespace(audit_log_enabled=False))
+    node = _add_node(db, transport="mtls")
+    admin = SimpleNamespace(id=1, username="admin")
+    pool = MagicMock()
+    monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: pool)
+
+    resp = nodes_router.patch_node_transport(
+        node.id,
+        NodeTransportUpdate(transport="http"),
+        admin=admin,
+        db=db,
+    )
+    assert resp.transport == "http"
+    assert resp.mtls_enabled is False
+    db.refresh(node)
+    assert node.transport == "http"
+    pool.drop.assert_not_called()
+
+
+def test_patch_existing_mtls_to_ssh(db, monkeypatch):
+    """mTLS → SSH is allowed (agent may already be demoted to HTTP); clears mtls flag."""
+    from app.routers import nodes as nodes_router
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    _allow_preflight(monkeypatch, nodes_router, current="mtls", wanted="ssh")
+    monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "validate_node_host", lambda host: host)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: MagicMock())
+    node = _add_node(db, transport="mtls")
+    admin = SimpleNamespace(id=1, username="admin")
+
+    resp = nodes_router.patch_node_transport(
+        node.id,
+        NodeTransportUpdate(
+            transport="ssh",
+            ssh_host="203.0.113.10",
+            ssh_username="root",
+            ssh_private_key="PRIVATE KEY MATERIAL",
+        ),
+        admin=admin,
+        db=db,
+    )
+    assert resp.transport == "ssh"
+    assert resp.mtls_enabled is False
+    db.refresh(node)
+    assert node.transport == "ssh"
+    assert node.mtls_enabled is False
+
+
+def test_patch_existing_http_to_ssh(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    _allow_preflight(monkeypatch, nodes_router, current="http", wanted="ssh")
+    monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "validate_node_host", lambda host: host)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: MagicMock())
+    node = _add_node(db, transport="http")
+    admin = SimpleNamespace(id=1, username="admin")
+
+    resp = nodes_router.patch_node_transport(
+        node.id,
+        NodeTransportUpdate(
+            transport="ssh",
+            ssh_host="203.0.113.11",
+            ssh_username="deploy",
+            ssh_private_key="PRIVATE KEY MATERIAL",
+            ssh_port=2222,
+        ),
+        admin=admin,
+        db=db,
+    )
+    assert resp.transport == "ssh"
+    assert resp.ssh_username == "deploy"
+    assert resp.ssh_port == 2222
+    db.refresh(node)
+    assert node.transport == "ssh"
+
+
 def test_create_node_with_mtls_transport(db, monkeypatch):
     from app.routers import nodes as nodes_router
     from app.schemas import NodeCreate
@@ -570,3 +720,95 @@ def test_create_node_with_mtls_transport(db, monkeypatch):
     resp = nodes_router.create_node(payload, request, admin=admin, db=db)
     assert resp.transport == "mtls"
     assert resp.mtls_enabled is True
+
+def test_preflight_ssh_to_mtls_blocked(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    node = _add_node(db, transport="ssh")
+    admin = SimpleNamespace(id=1, username="admin")
+
+    resp = nodes_router.preflight_node_transport(
+        node.id,
+        NodeTransportUpdate(transport="mtls"),
+        admin,
+        db=db,
+    )
+    assert resp.ok is False
+    assert "mTLS" in resp.message or "SSH" in resp.message
+
+
+def test_preflight_http_ok_when_probe_online(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+    from app.services import node_transport_preflight as pf
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(pf, "get_api_key_plain", lambda _n: "secret")
+    monkeypatch.setattr(pf, "_probe_direct", lambda *a, **k: (True, "online", None))
+    node = _add_node(db, transport="ssh")
+
+    resp = nodes_router.preflight_node_transport(
+        node.id,
+        NodeTransportUpdate(transport="http"),
+        SimpleNamespace(id=1, username="admin"),
+        db=db,
+    )
+    assert resp.ok is True
+    assert resp.probe_status == "online"
+
+
+def test_preflight_http_blocks_when_probe_offline(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+    from app.services import node_transport_preflight as pf
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    monkeypatch.setattr(pf, "get_api_key_plain", lambda _n: "secret")
+    monkeypatch.setattr(pf, "_probe_direct", lambda *a, **k: (False, "offline", "connection refused"))
+    node = _add_node(db, transport="ssh")
+
+    resp = nodes_router.preflight_node_transport(
+        node.id,
+        NodeTransportUpdate(transport="http"),
+        SimpleNamespace(id=1, username="admin"),
+        db=db,
+    )
+    assert resp.ok is False
+    assert resp.probe_error == "connection refused"
+
+
+def test_patch_blocked_when_preflight_fails(db, monkeypatch):
+    from app.routers import nodes as nodes_router
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    node = _add_node(db, transport="ssh")
+    admin = SimpleNamespace(id=1, username="admin")
+    monkeypatch.setattr(
+        nodes_router,
+        "preflight_transport_switch",
+        lambda *_a, **_k: SimpleNamespace(
+            ok=False,
+            current="ssh",
+            wanted="http",
+            message="Агент не отвечает",
+            hint="hint",
+            probe_status="offline",
+            probe_error="refused",
+            http_status=400,
+        ),
+    )
+    disable = MagicMock()
+    monkeypatch.setattr(nodes_router, "disable_mtls", disable)
+
+    with pytest.raises(HTTPException) as exc:
+        nodes_router.patch_node_transport(
+            node.id,
+            NodeTransportUpdate(transport="http"),
+            admin=admin,
+            db=db,
+        )
+    assert exc.value.status_code == 400
+    assert "Агент не отвечает" in str(exc.value.detail)
+    disable.assert_not_called()
+    db.refresh(node)
+    assert node.transport == "ssh"
+

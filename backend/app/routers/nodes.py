@@ -25,6 +25,7 @@ from app.schemas import (
     NodeResponse,
     NodeRotateKeyResponse,
     NodeTransportUpdate,
+    NodeTransportPreflightResponse,
     NodeTransportsResponse,
     NodeUpdate,
     NodeUpdateRequest,
@@ -73,6 +74,7 @@ from app.services.node_update_roll import enqueue_node_update_roll
 from app.services.background_tasks import background_task_service
 from app.services.geo_routing_hint import build_geo_routing_hint
 from app.services.ssh_tunnel_pool import get_ssh_tunnel_pool
+from app.services.node_transport_preflight import preflight_transport_switch
 from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import build_ha_node_context, find_group_for_node
 from app.services.openvpn_remote_hosts import (
@@ -871,6 +873,15 @@ def patch_node_transport(
     if current == wanted and wanted != TRANSPORT_SSH:
         return _to_response(node)
 
+    preflight = preflight_transport_switch(db, node, body)
+    if not preflight.ok:
+        detail = preflight.message
+        if preflight.hint:
+            detail = f"{detail}. {preflight.hint}"
+        if preflight.probe_error:
+            detail = f"{detail} ({preflight.probe_error})"
+        raise HTTPException(status_code=preflight.http_status, detail=detail)
+
     if wanted == TRANSPORT_SSH:
         node = _apply_ssh_transport_update(node, body, db)
         return _to_response(node)
@@ -903,6 +914,30 @@ def patch_node_transport(
     _drop_ssh_tunnel_if_needed(node.id, current)
 
     return _to_response(node)
+
+
+@router.post("/{node_id}/transport/preflight", response_model=NodeTransportPreflightResponse)
+def preflight_node_transport(
+    node_id: int,
+    body: NodeTransportUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Probe whether switching this node to the requested transport is possible."""
+    _require_nodes_module(db)
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+    result = preflight_transport_switch(db, node, body)
+    return NodeTransportPreflightResponse(
+        ok=result.ok,
+        current=result.current,
+        wanted=result.wanted,
+        message=result.message,
+        hint=result.hint,
+        probe_status=result.probe_status,
+        probe_error=result.probe_error,
+    )
 
 
 @router.post("/{node_id}/enable-mtls", response_model=NodeMtlsEnableResponse)

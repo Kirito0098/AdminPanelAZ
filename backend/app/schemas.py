@@ -159,6 +159,16 @@ class NodeTransportUpdate(BaseModel):
         return value
 
 
+class NodeTransportPreflightResponse(BaseModel):
+    ok: bool
+    current: str
+    wanted: str
+    message: str
+    hint: str | None = None
+    probe_status: str | None = None
+    probe_error: str | None = None
+
+
 class NodeRemoteHostsBody(BaseModel):
     hosts: list[str] = Field(default_factory=list)
     apply_to_wireguard: bool = False
