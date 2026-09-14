@@ -14,7 +14,8 @@ from app.services.panel_publish_info import build_portal_publish_status
 
 def test_suggest_portal_domain_from_panel():
     assert suggest_portal_domain("example.com") == "portal.example.com"
-    assert suggest_portal_domain("https://Panel.Example.com/") == "portal.panel.example.com"
+    assert suggest_portal_domain("https://Panel.Example.com/") == "portal.example.com"
+    assert suggest_portal_domain("admin.vpn.example.com") == "portal.vpn.example.com"
     assert suggest_portal_domain("portal.example.com") == "clients.example.com"
     assert suggest_portal_domain("") == ""
     assert suggest_portal_domain("not a host") == ""
@@ -52,3 +53,60 @@ def test_build_portal_publish_status_nginx_needs_vhost():
     assert status["portal_ready"] is False
     assert status["portal_vhost_ok"] is False
     assert status["dns_hint"]
+
+
+def test_build_portal_publish_status_nginx_not_ready_when_nginx_t_fails(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.panel_publish_info.nginx_has_vhost_for_domain",
+        lambda _domain: True,
+    )
+    monkeypatch.setattr(
+        "app.services.panel_publish_info.nginx_config_test_ok",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "app.services.panel_publish_info.nginx_ssl_cert_path_for_domain",
+        lambda _domain: "/tmp/fullchain.pem",
+    )
+    monkeypatch.setattr(
+        "app.services.panel_publish_info.cert_covers_hostname",
+        lambda _cert, _host: True,
+    )
+    status = build_portal_publish_status(
+        portal_domain="portal.example.com",
+        panel_domain="panel.example.com",
+        publish_mode="nginx_le",
+        ssl_cert="/tmp/fullchain.pem",
+    )
+    assert status["portal_ready"] is False
+    assert status["portal_vhost_ok"] is False
+    assert any("Глобальный nginx -t" in w for w in status["warnings"])
+    assert status["suggested_portal_domain"] == "portal.example.com"
+
+
+def test_build_portal_publish_status_nginx_ready_when_nginx_t_ok(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.panel_publish_info.nginx_has_vhost_for_domain",
+        lambda _domain: True,
+    )
+    monkeypatch.setattr(
+        "app.services.panel_publish_info.nginx_config_test_ok",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "app.services.panel_publish_info.nginx_ssl_cert_path_for_domain",
+        lambda _domain: "/tmp/fullchain.pem",
+    )
+    monkeypatch.setattr(
+        "app.services.panel_publish_info.cert_covers_hostname",
+        lambda _cert, _host: True,
+    )
+    status = build_portal_publish_status(
+        portal_domain="portal.example.com",
+        panel_domain="panel.example.com",
+        publish_mode="nginx_le",
+        ssl_cert="/tmp/fullchain.pem",
+    )
+    assert status["portal_ready"] is True
+    assert status["portal_vhost_ok"] is True
+    assert status["portal_cert_ok"] is True

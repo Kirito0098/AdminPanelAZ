@@ -522,6 +522,23 @@ def nginx_listens_on_443() -> bool:
     return nginx_listens_on_https_port(443)
 
 
+def nginx_config_test_ok() -> bool:
+    """True when ``nginx -t`` succeeds (config on disk is loadable)."""
+    if not is_nginx_installed():
+        return False
+    try:
+        result = subprocess.run(
+            ["nginx", "-t"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
 def nginx_has_vhost_for_domain(domain: str) -> bool:
     domain = (domain or "").strip().split(":")[0]
     if not domain or not is_nginx_installed():
@@ -979,10 +996,20 @@ def build_portal_publish_status(
             if mode == "nginx_selfsigned" and SELF_SIGNED_CERT_PATH.is_file():
                 cert_path = cert_path or str(SELF_SIGNED_CERT_PATH)
             cert_ok = bool(cert_path) and cert_covers_hostname(cert_path, portal)
+            nginx_ok = nginx_config_test_ok()
+            if not vhost_ok:
+                warnings.append(
+                    "Nginx vhost для портала ещё не настроен — нажмите «Настроить под текущую публикацию»."
+                )
+            elif not nginx_ok:
+                warnings.append(
+                    "Глобальный nginx -t не проходит — портал не готов "
+                    "(причина может быть не в vhost портала: любой битый site или conf.d). "
+                    "Исправьте конфиг (`nginx -t`), затем повторите настройку."
+                )
+                vhost_ok = False
             if vhost_ok and not cert_ok:
                 warnings.append("Vhost портала есть, но сертификат не покрывает этот хост.")
-            if not vhost_ok:
-                warnings.append("Nginx vhost для портала ещё не настроен — нажмите «Настроить под текущую публикацию».")
         elif mode in {"uvicorn_le", "uvicorn_selfsigned", "uvicorn_custom"}:
             cert_path = ssl_cert
             if not cert_path and mode == "uvicorn_le" and panel:
