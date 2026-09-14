@@ -126,6 +126,7 @@ class Settings(BaseSettings):
     https_public_port: int = 443
     behind_nginx: bool = False
     cloudflare_proxy_enabled: bool = True
+    cloudflare_origin_lock: bool = False
     cloudflare_ips_auto_update: bool = False
     cloudflare_ips_update_interval_days: int = 7
     trusted_proxy_ips: str = "127.0.0.1"

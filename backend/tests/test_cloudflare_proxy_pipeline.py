@@ -15,6 +15,7 @@ from app.services import cloudflare_proxy_settings as cps
 @pytest.fixture(autouse=True)
 def _reset_settings_cache(monkeypatch):
     monkeypatch.setenv(cps.ENV_CLOUDFLARE_PROXY_ENABLED, "true")
+    monkeypatch.setenv(cps.ENV_CLOUDFLARE_ORIGIN_LOCK, "false")
     monkeypatch.setenv(cps.ENV_CLOUDFLARE_IPS_AUTO_UPDATE, "false")
     monkeypatch.setenv(cps.ENV_CLOUDFLARE_IPS_UPDATE_INTERVAL_DAYS, "7")
     get_settings.cache_clear()
@@ -44,6 +45,7 @@ def _setting_value(db, key: str) -> str | None:
 def test_get_state_uses_env_defaults(db):
     state = cps.get_cloudflare_proxy_state(db)
     assert state["enabled"] is True
+    assert state["origin_lock_enabled"] is False
     assert state["auto_update"] is False
     assert state["interval_days"] == 7
     assert state["last_success_at"] is None
@@ -75,11 +77,52 @@ def test_set_flags_persists_db_and_env(tmp_path: Path, db, monkeypatch):
     assert "CLOUDFLARE_IPS_UPDATE_INTERVAL_DAYS=14" in env_text
 
 
+def test_set_flags_persists_origin_lock(tmp_path: Path, db, monkeypatch):
+    env_file = tmp_path / ".env"
+    monkeypatch.setattr(cps, "_ENV_FILE", env_file)
+
+    state = cps.set_cloudflare_proxy_flags(db, enabled=True, origin_lock_enabled=True)
+
+    assert state["origin_lock_enabled"] is True
+    assert _setting_value(db, cps.SETTING_CLOUDFLARE_ORIGIN_LOCK) == "true"
+    assert "CLOUDFLARE_ORIGIN_LOCK=true" in env_file.read_text(encoding="utf-8")
+
+
+def test_setting_origin_lock_requires_enabled_proxy(db):
+    with pytest.raises(ValueError, match="CLOUDFLARE_ORIGIN_LOCK"):
+        cps.set_cloudflare_proxy_flags(db, enabled=False, origin_lock_enabled=True)
+
+
+def test_disabling_proxy_clears_origin_lock(tmp_path: Path, db, monkeypatch):
+    env_file = tmp_path / ".env"
+    monkeypatch.setattr(cps, "_ENV_FILE", env_file)
+    cps.set_cloudflare_proxy_flags(db, enabled=True, origin_lock_enabled=True)
+
+    state = cps.set_cloudflare_proxy_flags(db, enabled=False)
+
+    assert state["enabled"] is False
+    assert state["origin_lock_enabled"] is False
+
+
+def test_origin_allow_snippet_path_and_validation(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NGINX_SNIPPETS_DIR", str(tmp_path))
+    snippet = tmp_path / "cloudflare-origin-allow.conf"
+
+    assert cps.origin_allow_snippet_path() == snippet
+    assert cps.has_valid_origin_allow_snippet() is False
+
+    snippet.write_text(
+        "allow 173.245.48.0/20;\nallow 127.0.0.1;\ndeny all;\n",
+        encoding="utf-8",
+    )
+    assert cps.has_valid_origin_allow_snippet() is True
+
+
 def test_refresh_noop_when_hash_matches(db):
     body = "set_real_ip_from 173.245.48.0/20;\n"
     with patch(
-        "app.services.cloudflare_proxy_settings.fetch_cloudflare_realip_conf",
-        return_value=(body, "hash-123"),
+        "app.services.cloudflare_proxy_settings.fetch_cloudflare_proxy_snippets",
+        return_value=(body, "allow 173.245.48.0/20;\nallow 127.0.0.1;\ndeny all;\n", "hash-123"),
     ), patch("app.services.cloudflare_proxy_settings.subprocess.run") as run_mock:
         db.add(AppSetting(key=cps.SETTING_LAST_HASH, value="hash-123"))
         db.add(AppSetting(key=cps.SETTING_LAST_ERROR, value="stale"))
@@ -103,8 +146,8 @@ def test_refresh_updates_status_on_apply_failure(db):
     body = "set_real_ip_from 173.245.48.0/20;\n"
     run_result = MagicMock(returncode=1, stdout="", stderr="nginx -t failed")
     with patch(
-        "app.services.cloudflare_proxy_settings.fetch_cloudflare_realip_conf",
-        return_value=(body, "hash-456"),
+        "app.services.cloudflare_proxy_settings.fetch_cloudflare_proxy_snippets",
+        return_value=(body, "allow 173.245.48.0/20;\nallow 127.0.0.1;\ndeny all;\n", "hash-456"),
     ), patch("app.services.cloudflare_proxy_settings.subprocess.run", return_value=run_result) as run_mock:
         result = cps.refresh_cloudflare_ips(db)
 
@@ -122,8 +165,8 @@ def test_refresh_applies_changed_hash_and_updates_status(db):
     body = "set_real_ip_from 173.245.48.0/20;\n"
     run_result = MagicMock(returncode=0, stdout="reload ok", stderr="")
     with patch(
-        "app.services.cloudflare_proxy_settings.fetch_cloudflare_realip_conf",
-        return_value=(body, "hash-789"),
+        "app.services.cloudflare_proxy_settings.fetch_cloudflare_proxy_snippets",
+        return_value=(body, "allow 173.245.48.0/20;\nallow 127.0.0.1;\ndeny all;\n", "hash-789"),
     ), patch("app.services.cloudflare_proxy_settings.subprocess.run", return_value=run_result) as run_mock:
         result = cps.refresh_cloudflare_ips(db)
 
@@ -135,6 +178,8 @@ def test_refresh_applies_changed_hash_and_updates_status(db):
     args = run_mock.call_args.args[0]
     assert args[:3] == ["sudo", "-n", "bash"]
     assert args[3].endswith("nginx-cloudflare-realip-apply.sh")
+    assert args[4].endswith("cloudflare-realip.conf")
+    assert args[5].endswith("cloudflare-origin-allow.conf")
     state = cps.get_cloudflare_proxy_state(db)
     assert state["last_hash"] == "hash-789"
     assert state["last_error"] is None
