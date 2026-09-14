@@ -61,6 +61,7 @@
 - **Клиентский портал / nginx:** при установке vhost поднимается `server_names_hash_bucket_size 128` (длинные имена вроде `portal.panel.example.com` больше не валят `nginx -t`); если тест конфига всё же падает — новый site **и hash-сниппет откатываются** и не остаются в `sites-enabled`/`conf.d` (иначе после reboot/reload могли лечь все HTTPS-хосты). Существующий bucket ≥128 не перезаписывается.
 - **Клиентский портал:** статус «Готов» требует успешный `nginx -t`; предупреждение про **глобальный** провал конфига (не винит только vhost портала).
 - **Let's Encrypt standalone:** перед `systemctl stop nginx` проверяется `nginx -t` (portal hosts и legacy single-domain) — при битом конфиге nginx не останавливаем.
+- **Let's Encrypt / портал:** перед standalone жёстко останавливаем nginx и ждём свободный TCP :80 (иначе certbot слушает только IPv6, а LE получает 404 от nginx на IPv4); перед webroot ставится временный HTTP ACME-vhost на хост портала.
 - **Подсказка хоста портала:** для `panel.example.com` предлагается `portal.example.com` (соседний поддомен), а не `portal.panel.example.com`.
 
 ### 🔄 Changed
