@@ -82,7 +82,7 @@ def sync_portal_domain_after_restore(*, db_path: Path | str, env_path: Path | st
 
 
 def suggest_portal_domain(panel_domain: str | None) -> str:
-    """Suggest portal.<panel> unless the panel host already starts with portal."""
+    """Suggest a short portal host: portal.<apex> when panel is panel./admin./… subdomain."""
     host = (panel_domain or "").strip().lower()
     host = re.sub(r"^https?://", "", host)
     host = host.split("/")[0].split(":")[0].strip()
@@ -92,6 +92,10 @@ def suggest_portal_domain(panel_domain: str | None) -> str:
         # panel host already uses portal. — use clients.<rest>
         rest = host[len("portal.") :]
         return f"clients.{rest}" if rest else ""
+    labels = host.split(".")
+    # panel.example.com → portal.example.com (sibling; avoids portal.panel.example.com hash issues)
+    if len(labels) >= 3 and labels[0] in {"panel", "admin", "app", "ui", "cp", "manage"}:
+        return "portal." + ".".join(labels[1:])
     return f"portal.{host}"
 
 

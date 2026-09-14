@@ -182,12 +182,110 @@ nginx_conf_basename() {
   printf '%s\n' "${domain//./_}"
 }
 
+nginx_sites_available_dir() {
+  printf '%s' "${NGINX_SITES_AVAILABLE_DIR:-/etc/nginx/sites-available}"
+}
+
+nginx_sites_enabled_dir() {
+  printf '%s' "${NGINX_SITES_ENABLED_DIR:-/etc/nginx/sites-enabled}"
+}
+
+nginx_conf_d_dir() {
+  printf '%s' "${NGINX_CONF_D_DIR:-/etc/nginx/conf.d}"
+}
+
 nginx_conf_paths() {
   local domain="$1"
   local base
   base="$(nginx_conf_basename "$domain")"
-  NGINX_CONF_FILE="/etc/nginx/sites-available/${base}"
-  NGINX_ENABLED_LINK="/etc/nginx/sites-enabled/${base}"
+  NGINX_CONF_FILE="$(nginx_sites_available_dir)/${base}"
+  NGINX_ENABLED_LINK="$(nginx_sites_enabled_dir)/${base}"
+}
+
+# Long FQDNs (e.g. portal.panel.example.com) need a larger hash bucket than nginx defaults (32/64).
+# Sets NGINX_HASH_SNIPPET_* for transactional rollback from nginx_install_site.
+nginx_server_names_hash_dest() {
+  printf '%s/adminpanelaz-server-names-hash.conf' "$(nginx_conf_d_dir)"
+}
+
+nginx_hash_bucket_size_from_file() {
+  local f="$1" size=""
+  [[ -f "$f" ]] || {
+    printf '0'
+    return 0
+  }
+  size="$(grep -E '^\s*server_names_hash_bucket_size\s+[0-9]+' "$f" 2>/dev/null | head -1 | awk '{print $2}' | tr -d ';' || true)"
+  if [[ "$size" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$size"
+  else
+    printf '0'
+  fi
+}
+
+nginx_ensure_server_names_hash() {
+  local src dest dir existing_size
+  local required=128
+  src="${NGINX_TEMPLATE_DIR}/adminpanelaz-server-names-hash.conf"
+  dir="$(nginx_conf_d_dir)"
+  dest="$(nginx_server_names_hash_dest)"
+  [[ -f "$src" ]] || nginx_die "Нет шаблона server_names_hash: ${src}"
+  mkdir -p "$dir"
+
+  NGINX_HASH_SNIPPET_DEST="$dest"
+  NGINX_HASH_SNIPPET_BAK=""
+  NGINX_HASH_SNIPPET_CREATED=false
+  NGINX_HASH_SNIPPET_CHANGED=false
+
+  if [[ -f "$dest" ]]; then
+    if cmp -s "$src" "$dest"; then
+      return 0
+    fi
+    existing_size="$(nginx_hash_bucket_size_from_file "$dest")"
+    if (( existing_size >= required )); then
+      nginx_log "Snippet server_names_hash уже достаточный (bucket_size=${existing_size}): ${dest}"
+      return 0
+    fi
+    NGINX_HASH_SNIPPET_BAK="${dest}.apaz-hash.bak.$$"
+    cp -a "$dest" "$NGINX_HASH_SNIPPET_BAK"
+    cp "$src" "$dest"
+    NGINX_HASH_SNIPPET_CHANGED=true
+  else
+    cp "$src" "$dest"
+    NGINX_HASH_SNIPPET_CREATED=true
+    NGINX_HASH_SNIPPET_CHANGED=true
+  fi
+  nginx_log "Snippet server_names_hash: ${dest}"
+}
+
+nginx_rollback_server_names_hash() {
+  local dest="${NGINX_HASH_SNIPPET_DEST:-}"
+  [[ -n "$dest" ]] || return 0
+  [[ "${NGINX_HASH_SNIPPET_CHANGED:-false}" == "true" ]] || return 0
+  if [[ -n "${NGINX_HASH_SNIPPET_BAK:-}" && -f "$NGINX_HASH_SNIPPET_BAK" ]]; then
+    mv -f "$NGINX_HASH_SNIPPET_BAK" "$dest"
+  elif [[ "${NGINX_HASH_SNIPPET_CREATED:-false}" == "true" ]]; then
+    rm -f "$dest"
+  fi
+  NGINX_HASH_SNIPPET_CHANGED=false
+  NGINX_HASH_SNIPPET_BAK=""
+  NGINX_HASH_SNIPPET_CREATED=false
+}
+
+nginx_cleanup_server_names_hash_bak() {
+  if [[ -n "${NGINX_HASH_SNIPPET_BAK:-}" && -f "$NGINX_HASH_SNIPPET_BAK" ]]; then
+    rm -f "$NGINX_HASH_SNIPPET_BAK"
+  fi
+  NGINX_HASH_SNIPPET_BAK=""
+}
+
+# Refuse to stop a live nginx when disk config already fails nginx -t.
+nginx_assert_config_ok_before_stop() {
+  if ! command -v nginx >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! nginx -t >/dev/null 2>&1; then
+    nginx_die "nginx -t сейчас не проходит — standalone не будет останавливать nginx. Удалите битый site из sites-enabled/conf.d или исправьте конфиг, затем повторите."
+  fi
 }
 
 nginx_ensure_certbot() {
@@ -892,18 +990,60 @@ nginx_install_dedicated_panel_vhost() {
   nginx_install_site "$conf" "$domain"
 }
 
+# Undo a failed install: never leave a broken site enabled (would block nginx after reboot/reload).
+nginx_rollback_site_install() {
+  local bak="${1:-}"
+  local created_enabled="${2:-false}"
+
+  rm -f "$NGINX_ENABLED_LINK"
+  if [[ -n "$bak" && -f "$bak" ]]; then
+    mv -f "$bak" "$NGINX_CONF_FILE"
+    if [[ "$created_enabled" != "true" ]]; then
+      ln -sf "$NGINX_CONF_FILE" "$NGINX_ENABLED_LINK"
+    fi
+  else
+    rm -f "$NGINX_CONF_FILE"
+  fi
+  nginx_rollback_server_names_hash
+}
+
 nginx_install_site() {
   local conf_content="$1"
   local domain="$2"
   local reload_only="${3:-false}"
+  local bak=""
+  local created_enabled=false
+  local enabled_dir available_dir
 
+  nginx_ensure_server_names_hash
   nginx_conf_paths "$domain"
+  available_dir="$(nginx_sites_available_dir)"
+  enabled_dir="$(nginx_sites_enabled_dir)"
+  mkdir -p "$available_dir" "$enabled_dir"
+
+  if [[ -f "$NGINX_CONF_FILE" ]]; then
+    bak="${NGINX_CONF_FILE}.apaz-install.bak.$$"
+    cp -a "$NGINX_CONF_FILE" "$bak"
+  fi
+  if [[ ! -e "$NGINX_ENABLED_LINK" && ! -L "$NGINX_ENABLED_LINK" ]]; then
+    created_enabled=true
+  fi
+
   printf '%s\n' "$conf_content" >"$NGINX_CONF_FILE"
   ln -sf "$NGINX_CONF_FILE" "$NGINX_ENABLED_LINK"
   # Стандартный default мешает: на корне домена показывается «Welcome to nginx».
-  rm -f /etc/nginx/sites-enabled/default
-  nginx -t || nginx_die "nginx -t не прошёл (конфиг: $NGINX_CONF_FILE)"
+  rm -f "${enabled_dir}/default"
+
+  if ! nginx -t; then
+    nginx_rollback_site_install "$bak" "$created_enabled"
+    nginx_die "nginx -t не прошёл (конфиг: $NGINX_CONF_FILE) — изменения откатаны"
+  fi
+  [[ -n "$bak" && -f "$bak" ]] && rm -f "$bak"
+  nginx_cleanup_server_names_hash_bak
+
   systemctl enable nginx >/dev/null 2>&1 || true
+  # Config already passed nginx -t — leave it enabled even if reload/restart fails
+  # (operators can start nginx later; do not re-introduce a stale/missing vhost).
   if [[ "$reload_only" == "true" ]]; then
     systemctl reload nginx || nginx_die "Не удалось перезагрузить nginx"
   else
@@ -983,6 +1123,7 @@ nginx_obtain_letsencrypt_cert() {
   fi
 
   nginx_log "Webroot не сработал — certbot standalone (nginx будет остановлен)…"
+  nginx_assert_config_ok_before_stop
   systemctl stop nginx 2>/dev/null || true
   nginx_temp_clear_port80_nat
 
@@ -1101,7 +1242,7 @@ nginx_obtain_letsencrypt_cert_hosts() {
     done
   fi
   if [[ "$need_issue" != "true" ]]; then
-    nginx_log "Сертификат Let's Encrypt уже покрывает: ${hosts[*]}"
+    nginx_log "Сертификат Let's Encrypt уже покрывает (выпуск не нужен): ${hosts[*]}"
     return 0
   fi
 
@@ -1129,6 +1270,7 @@ nginx_obtain_letsencrypt_cert_hosts() {
   fi
 
   nginx_log "Webroot не сработал — certbot standalone для: ${hosts[*]}"
+  nginx_assert_config_ok_before_stop
   systemctl stop nginx 2>/dev/null || true
   nginx_temp_clear_port80_nat
 
