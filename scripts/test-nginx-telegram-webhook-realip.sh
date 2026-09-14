@@ -44,11 +44,19 @@ assert_file_contains "$SNIPPET_SRC" "set_real_ip_from 173.245.48.0/20;" "sample 
 assert_file_contains "$SNIPPET_SRC" "set_real_ip_from 2400:cb00::/32;" "sample CF IPv6"
 assert_file_contains "$SNIPPET_SRC" "# snapshot: 2026-08-20" "snapshot date"
 
+echo "[test] repo cloudflare-origin-allow.conf"
+ALLOW_SRC="$ROOT_DIR/deploy/nginx/cloudflare-origin-allow.conf"
+assert_file_contains "$ALLOW_SRC" "deny all;" "allow deny all"
+assert_file_contains "$ALLOW_SRC" "allow 10.0.0.0/8;" "allow RFC1918"
+assert_file_contains "$ALLOW_SRC" "allow 173.245.48.0/20;" "allow sample CF"
+
 echo "[test] ensure snippet copies into override dir"
 export NGINX_SNIPPETS_DIR="$TMP/snippets"
 export NGINX_BACKUPS_DIR="$TMP/backups"
 nginx_ensure_cloudflare_realip_snippet
 assert_file_contains "$TMP/snippets/cloudflare-realip.conf" "real_ip_header CF-Connecting-IP;" "copied snippet"
+nginx_ensure_cloudflare_origin_allow_snippet
+assert_file_contains "$TMP/snippets/cloudflare-origin-allow.conf" "deny all;" "copied allow snippet"
 
 echo "[test] ensure backs up when replacing different content"
 printf '# stale snippet\n' >"$TMP/snippets/cloudflare-realip.conf"
@@ -61,12 +69,23 @@ else
   echo "  FAIL ensure backup created" >&2
 fi
 assert_file_contains "$TMP/snippets/cloudflare-realip.conf" "real_ip_header CF-Connecting-IP;" "ensure replaced stale snippet"
+printf '# stale allow snippet\n' >"$TMP/snippets/cloudflare-origin-allow.conf"
+nginx_ensure_cloudflare_origin_allow_snippet
+if compgen -G "$TMP/backups/cloudflare-origin-allow.conf.*.bak" >/dev/null; then
+  pass=$((pass + 1))
+  echo "  OK  ensure allow backup created"
+else
+  fail=$((fail + 1))
+  echo "  FAIL ensure allow backup created" >&2
+fi
+assert_file_contains "$TMP/snippets/cloudflare-origin-allow.conf" "deny all;" "ensure replaced stale allow snippet"
 
 echo "[test] root panel location blocks"
-export CLOUDFLARE_PROXY_ENABLED=true
+export CLOUDFLARE_PROXY_ENABLED=true CLOUDFLARE_ORIGIN_LOCK=true
 ROOT_BLOCKS="$(nginx_root_panel_location_blocks 8000)"
 assert_contains "$ROOT_BLOCKS" "location ^~ /api/telegram/webhook/" "root webhook location"
 assert_contains "$ROOT_BLOCKS" "include snippets/cloudflare-realip.conf;" "root include realip"
+assert_contains "$ROOT_BLOCKS" "include snippets/cloudflare-origin-allow.conf;" "root include allow"
 assert_contains "$ROOT_BLOCKS" "proxy_set_header X-Real-IP \$remote_addr;" "root X-Real-IP"
 # webhook block must appear before tg-mini
 ROOT_WH_LINE="$(printf '%s\n' "$ROOT_BLOCKS" | grep -n 'location ^~ /api/telegram/webhook/' | head -1 | cut -d: -f1)"
@@ -80,10 +99,11 @@ else
 fi
 
 echo "[test] subpath template render"
-export CLOUDFLARE_PROXY_ENABLED=true
+export CLOUDFLARE_PROXY_ENABLED=true CLOUDFLARE_ORIGIN_LOCK=true
 SUB_BLOCKS="$(nginx_render_subpath_template /panel 8000)"
 assert_contains "$SUB_BLOCKS" "location ^~ /panel/api/telegram/webhook/" "subpath webhook location"
 assert_contains "$SUB_BLOCKS" "include snippets/cloudflare-realip.conf;" "subpath include realip"
+assert_contains "$SUB_BLOCKS" "include snippets/cloudflare-origin-allow.conf;" "subpath include allow"
 SUB_WH_LINE="$(printf '%s\n' "$SUB_BLOCKS" | grep -n 'location ^~ /panel/api/telegram/webhook/' | head -1 | cut -d: -f1)"
 SUB_TG_LINE="$(printf '%s\n' "$SUB_BLOCKS" | grep -n 'location ^~ /panel/api/tg-mini' | head -1 | cut -d: -f1)"
 if [[ -n "$SUB_WH_LINE" && -n "$SUB_TG_LINE" && "$SUB_WH_LINE" -lt "$SUB_TG_LINE" ]]; then
@@ -98,12 +118,17 @@ echo "[test] include present when CLOUDFLARE_PROXY_ENABLED=true"
 export CLOUDFLARE_PROXY_ENABLED=true
 ROOT_BLOCKS="$(nginx_root_panel_location_blocks 8000)"
 assert_contains "$ROOT_BLOCKS" "include snippets/cloudflare-realip.conf;" "enabled root include"
+export CLOUDFLARE_ORIGIN_LOCK=true
+ROOT_BLOCKS="$(nginx_root_panel_location_blocks 8000)"
+assert_contains "$ROOT_BLOCKS" "include snippets/cloudflare-origin-allow.conf;" "enabled root allow include"
 SUB_BLOCKS="$(nginx_render_subpath_template /panel 8000)"
 assert_contains "$SUB_BLOCKS" "include snippets/cloudflare-realip.conf;" "enabled subpath include"
+assert_contains "$SUB_BLOCKS" "include snippets/cloudflare-origin-allow.conf;" "enabled subpath allow include"
 
 echo "[test] include absent when CLOUDFLARE_PROXY_ENABLED=false"
 export CLOUDFLARE_PROXY_ENABLED=false
 ROOT_BLOCKS="$(nginx_root_panel_location_blocks 8000)"
+SUB_BLOCKS="$(nginx_render_subpath_template /panel 8000)"
 if printf '%s' "$ROOT_BLOCKS" | grep -qF "include snippets/cloudflare-realip.conf;"; then
   fail=$((fail + 1))
   echo "  FAIL disabled root still has include" >&2
@@ -118,6 +143,20 @@ if printf '%s' "$SUB_BLOCKS" | grep -qF "include snippets/cloudflare-realip.conf
 else
   pass=$((pass + 1))
   echo "  OK  disabled subpath omits include"
+fi
+if printf '%s' "$ROOT_BLOCKS" | grep -qF "include snippets/cloudflare-origin-allow.conf;"; then
+  fail=$((fail + 1))
+  echo "  FAIL disabled root still has allow include" >&2
+else
+  pass=$((pass + 1))
+  echo "  OK  disabled root omits allow include"
+fi
+if printf '%s' "$SUB_BLOCKS" | grep -qF "include snippets/cloudflare-origin-allow.conf;"; then
+  fail=$((fail + 1))
+  echo "  FAIL disabled subpath still has allow include" >&2
+else
+  pass=$((pass + 1))
+  echo "  OK  disabled subpath omits allow include"
 fi
 
 echo "[test] ensure snippet still runs when proxy disabled"
