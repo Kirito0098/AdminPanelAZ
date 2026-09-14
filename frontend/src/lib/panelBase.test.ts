@@ -34,7 +34,17 @@ describe('resolveAccessPath', () => {
     ).toBe('/panel')
   })
 
-  it('forces empty path on portal /p even when inject is set', () => {
+  it('forces empty path on bare portal /p even when inject is set', () => {
+    expect(
+      resolveAccessPath({
+        pathname: '/p',
+        injected: '/panel',
+        viteEnv: undefined,
+      }),
+    ).toBe('')
+  })
+
+  it('forces empty path on portal /p/token even when inject is set', () => {
     expect(
       resolveAccessPath({
         pathname: '/p/token',
