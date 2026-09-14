@@ -1126,6 +1126,8 @@ class PortalPublishStatusResponse(BaseModel):
     suggested_portal_domain: str = ""
     panel_domain: str = ""
     active_publish_mode: str | None = None
+    portal_mode_supported: bool = True
+    portal_mode_block_reason: str = ""
     portal_vhost_ok: bool = False
     portal_cert_ok: bool = False
     portal_ready: bool = False

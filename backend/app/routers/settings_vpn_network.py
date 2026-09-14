@@ -436,6 +436,18 @@ def publish_vpn_network(
         if payload.http_acme_port == payload.https_public_port:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="HTTP_ACME_PORT совпадает с HTTPS_PUBLIC_PORT")
 
+    for task_type, detail in (
+        ("portal_publish", "Сейчас выполняется настройка портала"),
+        ("portal_readiness_check", "Проверка готовности портала уже выполняется"),
+        ("portal_readiness_prepare", "Подготовка портала уже выполняется"),
+    ):
+        active_task = background_task_service.find_active_task(task_type)
+        if active_task:
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content={"detail": detail, "active_task_id": active_task.id},
+            )
+
     active = background_task_service.find_active_task("vpn_network_publish")
     if active:
         return JSONResponse(

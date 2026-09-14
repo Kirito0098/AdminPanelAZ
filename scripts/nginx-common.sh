@@ -47,6 +47,36 @@ nginx_normalize_host() {
   echo "$host"
 }
 
+nginx_suggest_portal_domain() {
+  local host labels first rest
+  host="$(nginx_normalize_host "${1:-}")"
+  [[ -n "$host" ]] || { printf ''; return 0; }
+  if [[ "$host" == portal.* ]]; then
+    rest="${host#portal.}"
+    if [[ -n "$rest" ]]; then
+      printf 'clients.%s' "$rest"
+    else
+      printf ''
+    fi
+    return 0
+  fi
+  IFS='.' read -r -a labels <<<"$host"
+  first="${labels[0]:-}"
+  if ((${#labels[@]} >= 3)) && [[ "$first" =~ ^(panel|admin|app|ui|cp|manage)$ ]]; then
+    printf 'portal.%s' "${host#${first}.}"
+    return 0
+  fi
+  printf 'portal.%s' "$host"
+}
+
+nginx_is_nested_portal_host() {
+  local portal panel
+  portal="$(nginx_normalize_host "${1:-}")"
+  panel="$(nginx_normalize_host "${2:-}")"
+  [[ -n "$portal" && -n "$panel" ]] || return 1
+  [[ "$portal" == "portal.${panel}" ]]
+}
+
 # Сообщение о конфликте DOMAIN с AZ hosts; 0 = ок, 1 = конфликт (текст в stdout).
 nginx_az_vpn_host_conflict_message() {
   local domain
@@ -288,6 +318,198 @@ nginx_assert_config_ok_before_stop() {
   fi
 }
 
+nginx_tcp_port_is_listening() {
+  local port="$1" line addr
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  command -v ss >/dev/null 2>&1 || return 1
+  while IFS= read -r line; do
+    addr="$(printf '%s\n' "$line" | awk '{print $4}')"
+    case "$addr" in
+      *":${port}" | *":${port}]") return 0 ;;
+    esac
+  done < <(ss -tlnH 2>/dev/null || ss -tln 2>/dev/null | tail -n +2 || true)
+  return 1
+}
+
+nginx_describe_tcp_port_listeners() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnp "sport = :${port}" 2>/dev/null || ss -tlnp 2>/dev/null | grep -E ":${port}\\b" || true
+  else
+    printf '(ss недоступен — не удалось перечислить слушателей порта %s)\n' "$port"
+  fi
+}
+
+nginx_assert_ss_for_tcp_port_check() {
+  if ! command -v ss >/dev/null 2>&1; then
+    nginx_die "Для проверки, что TCP-порт свободен перед certbot standalone, нужна утилита ss (пакет iproute2). Установите ss и повторите настройку портала."
+  fi
+}
+
+nginx_wait_tcp_port_free() {
+  local port="${1:-80}"
+  local attempts="${2:-20}"
+  local i
+  nginx_assert_ss_for_tcp_port_check
+  for ((i = 1; i <= attempts; i++)); do
+    if ! nginx_tcp_port_is_listening "$port"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  nginx_die "Порт ${port} всё ещё занят после остановки nginx (Let's Encrypt standalone нужен свободный IPv4 :${port}). Слушатели:
+$(nginx_describe_tcp_port_listeners "$port")
+Остановите процесс на :${port} и повторите настройку портала."
+}
+
+nginx_stop_for_standalone_acme() {
+  local http_port="${1:-80}"
+  nginx_assert_config_ok_before_stop
+  nginx_assert_ss_for_tcp_port_check
+  if systemctl is-active --quiet nginx 2>/dev/null || nginx_tcp_port_is_listening "$http_port"; then
+    nginx_log "Останавливаем nginx, чтобы освободить порт ${http_port} для certbot standalone…"
+    if ! systemctl stop nginx; then
+      nginx_die "Не удалось остановить nginx перед certbot standalone (порт ${http_port}). Исправьте unit/nginx и повторите."
+    fi
+  fi
+  if nginx_tcp_port_is_listening "$http_port"; then
+    nginx_log "Порт ${http_port} ещё занят — ждём освобождения…"
+  fi
+  nginx_wait_tcp_port_free "$http_port" 40
+}
+
+nginx_acme_temp_site_basename() {
+  local domain="$1"
+  printf 'adminpanelaz-acme-%s' "$(nginx_conf_basename "$domain")"
+}
+
+nginx_acme_default_stash_paths() {
+  local base="$1"
+  local enabled_dir
+  enabled_dir="$(nginx_sites_enabled_dir)"
+  NGINX_ACME_DEFAULT_STASH="${enabled_dir}/.adminpanelaz-acme-default-stash-${base}"
+  NGINX_ACME_DEFAULT_STASH_COPY="${NGINX_ACME_DEFAULT_STASH}.copy"
+}
+
+# Remember sites-enabled/default before temp ACME removes it (restore on failure or remove helper).
+nginx_acme_stash_enabled_default() {
+  local base="$1"
+  local enabled_dir default_path stash copy_path target
+  enabled_dir="$(nginx_sites_enabled_dir)"
+  default_path="${enabled_dir}/default"
+  nginx_acme_default_stash_paths "$base"
+  stash="$NGINX_ACME_DEFAULT_STASH"
+  copy_path="$NGINX_ACME_DEFAULT_STASH_COPY"
+  [[ -e "$stash" ]] && return 0
+  [[ -e "$default_path" || -L "$default_path" ]] || return 0
+  if [[ -L "$default_path" ]]; then
+    target="$(readlink "$default_path" 2>/dev/null || true)"
+    [[ -n "$target" ]] || return 0
+    printf 'symlink\n%s\n' "$target" >"$stash"
+  elif [[ -f "$default_path" ]]; then
+    cp -a "$default_path" "$copy_path"
+    printf 'file\n%s\n' "$copy_path" >"$stash"
+  fi
+}
+
+nginx_acme_restore_enabled_default() {
+  local base="$1"
+  local enabled_dir default_path stash copy_path kind target
+  enabled_dir="$(nginx_sites_enabled_dir)"
+  default_path="${enabled_dir}/default"
+  nginx_acme_default_stash_paths "$base"
+  stash="$NGINX_ACME_DEFAULT_STASH"
+  copy_path="$NGINX_ACME_DEFAULT_STASH_COPY"
+  [[ -f "$stash" ]] || return 0
+  kind="$(sed -n '1p' "$stash")"
+  target="$(sed -n '2p' "$stash")"
+  rm -f "$stash" "$copy_path"
+  case "$kind" in
+    symlink)
+      [[ -n "$target" ]] || return 0
+      ln -sf "$target" "$default_path"
+      ;;
+    file)
+      [[ -n "$target" && -f "$target" ]] || return 0
+      cp -a "$target" "$default_path"
+      rm -f "$target"
+      ;;
+  esac
+}
+
+# Temporary HTTP-only vhost so certbot --webroot works before the real portal HTTPS site exists.
+nginx_install_temp_acme_http_vhost() {
+  local domain="$1"
+  local http_port="${2:-80}"
+  local base available_dir enabled_dir conf_file enabled_link conf
+  domain="$(nginx_normalize_host "$domain")"
+  [[ -n "$domain" ]] || return 0
+  http_port="${http_port:-80}"
+
+  nginx_ensure_server_names_hash
+  mkdir -p /var/www/html/.well-known/acme-challenge
+  base="$(nginx_acme_temp_site_basename "$domain")"
+  available_dir="$(nginx_sites_available_dir)"
+  enabled_dir="$(nginx_sites_enabled_dir)"
+  mkdir -p "$available_dir" "$enabled_dir"
+  conf_file="${available_dir}/${base}"
+  enabled_link="${enabled_dir}/${base}"
+
+  conf="$(cat <<EOF
+# Temporary ACME webroot (AdminPanelAZ) — removed after cert issue / portal vhost install
+server {
+    listen ${http_port};
+    listen [::]:${http_port};
+    server_name ${domain};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        default_type text/plain;
+        return 404;
+    }
+}
+EOF
+)"
+  printf '%s\n' "$conf" >"$conf_file"
+  ln -sf "$conf_file" "$enabled_link"
+  nginx_acme_stash_enabled_default "$base"
+  rm -f "${enabled_dir}/default"
+
+  if ! nginx -t >/dev/null 2>&1; then
+    rm -f "$enabled_link" "$conf_file"
+    nginx_acme_restore_enabled_default "$base"
+    nginx_rollback_server_names_hash
+    nginx_warn "Временный ACME vhost для ${domain} не прошёл nginx -t — пробуем без webroot"
+    return 1
+  fi
+  nginx_cleanup_server_names_hash_bak
+  if systemctl is-active --quiet nginx 2>/dev/null; then
+    systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1 || true
+  else
+    systemctl start nginx >/dev/null 2>&1 || true
+  fi
+  nginx_log "Временный ACME HTTP vhost: ${domain} (порт ${http_port})"
+  return 0
+}
+
+nginx_remove_temp_acme_http_vhost() {
+  local domain="$1"
+  local base available_dir enabled_dir
+  domain="$(nginx_normalize_host "$domain")"
+  [[ -n "$domain" ]] || return 0
+  base="$(nginx_acme_temp_site_basename "$domain")"
+  available_dir="$(nginx_sites_available_dir)"
+  enabled_dir="$(nginx_sites_enabled_dir)"
+  rm -f "${enabled_dir}/${base}" "${available_dir}/${base}"
+  nginx_acme_restore_enabled_default "$base"
+  if systemctl is-active --quiet nginx 2>/dev/null; then
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+  fi
+}
+
 nginx_ensure_certbot() {
   if command -v certbot >/dev/null 2>&1; then
     return 0
@@ -474,6 +696,70 @@ $(nginx_webhook_realip_include_line)
         proxy_set_header Connection \$connection_upgrade;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+    }
+EOF
+}
+
+# Client portal host: only /p, /p/, /api/public/, /assets, /assets/ — else 404 (no admin SPA).
+# Exact = /p and prefix ^~ /p/ so /password or /panel are not proxied.
+nginx_portal_location_blocks() {
+  local backend_port="$1"
+  cat <<EOF
+    location = /p {
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    location ^~ /p/ {
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    location ^~ /api/public/ {
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    location = /assets {
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location ^~ /assets/ {
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location / {
+        default_type text/plain;
+        add_header Cache-Control "no-store" always;
+        return 404 "Not Found";
     }
 EOF
 }
@@ -1108,7 +1394,12 @@ nginx_obtain_letsencrypt_cert() {
   mkdir -p /var/www/html/.well-known/acme-challenge
 
   local certbot_ok=false
+  local http_acme_port
+  http_acme_port="${HTTP_ACME_PORT:-$(nginx_env_get HTTP_ACME_PORT)}"
+  http_acme_port="${http_acme_port:-80}"
+
   if systemctl is-active nginx >/dev/null 2>&1; then
+    nginx_install_temp_acme_http_vhost "$domain" "$http_acme_port" || true
     nginx_log "Пробуем certbot webroot (nginx остаётся запущенным)…"
     if [[ -n "$email" ]]; then
       certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos -m "$email" -d "$domain" && certbot_ok=true || true
@@ -1118,13 +1409,14 @@ nginx_obtain_letsencrypt_cert() {
   fi
 
   if [[ "$certbot_ok" == "true" && -f "$cert_path" ]]; then
+    nginx_remove_temp_acme_http_vhost "$domain"
     nginx_log "Сертификат Let's Encrypt получен через webroot"
     return 0
   fi
 
+  nginx_remove_temp_acme_http_vhost "$domain"
   nginx_log "Webroot не сработал — certbot standalone (nginx будет остановлен)…"
-  nginx_assert_config_ok_before_stop
-  systemctl stop nginx 2>/dev/null || true
+  nginx_stop_for_standalone_acme "$http_acme_port"
   nginx_temp_clear_port80_nat
 
   if [[ -n "$email" ]]; then
@@ -1251,9 +1543,17 @@ nginx_obtain_letsencrypt_cert_hosts() {
 
   local certbot_ok=false
   local expand_flag=()
+  local http_acme_port
   [[ -f "$cert_path" ]] && expand_flag=(--expand)
+  http_acme_port="${HTTP_ACME_PORT:-$(nginx_env_get HTTP_ACME_PORT)}"
+  http_acme_port="${http_acme_port:-80}"
 
   if systemctl is-active nginx >/dev/null 2>&1; then
+    for h in "${hosts[@]}"; do
+      h="$(nginx_normalize_host "$h")"
+      [[ -n "$h" ]] || continue
+      nginx_install_temp_acme_http_vhost "$h" "$http_acme_port" || true
+    done
     nginx_log "certbot webroot для: ${hosts[*]}"
     if [[ -n "$email" ]]; then
       certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos -m "$email" \
@@ -1265,13 +1565,19 @@ nginx_obtain_letsencrypt_cert_hosts() {
   fi
 
   if [[ "$certbot_ok" == "true" && -f "$cert_path" ]]; then
+    for h in "${hosts[@]}"; do
+      nginx_remove_temp_acme_http_vhost "$h"
+    done
     nginx_log "Let's Encrypt получен (webroot): ${hosts[*]}"
     return 0
   fi
 
+  for h in "${hosts[@]}"; do
+    nginx_remove_temp_acme_http_vhost "$h"
+  done
+
   nginx_log "Webroot не сработал — certbot standalone для: ${hosts[*]}"
-  nginx_assert_config_ok_before_stop
-  systemctl stop nginx 2>/dev/null || true
+  nginx_stop_for_standalone_acme "$http_acme_port"
   nginx_temp_clear_port80_nat
 
   if [[ -n "$email" ]]; then
@@ -1342,10 +1648,26 @@ nginx_render_portal_template() {
   local ssl_key="$4"
   local https_port="${5:-443}"
   local http_port="${6:-80}"
-  # Portal subdomain always serves at root (not panel ACCESS_PATH).
-  ACCESS_PATH="" nginx_render_template \
-    "$NGINX_TEMPLATE_DIR/adminpanelaz-portal.conf.template" \
-    "$portal_domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port"
+  local template https_redirect_suffix portal_blocks rendered
+  # Portal subdomain always serves at root (not panel ACCESS_PATH); allowlist only.
+  template="$NGINX_TEMPLATE_DIR/adminpanelaz-portal.conf.template"
+  nginx_ensure_cloudflare_realip_snippet
+  https_redirect_suffix="$(nginx_https_redirect_suffix "$https_port")"
+  portal_blocks="$(nginx_portal_location_blocks "$backend_port")"
+  rendered="$(sed \
+    -e "s|__DOMAIN__|${portal_domain}|g" \
+    -e "s|__BACKEND_PORT__|${backend_port}|g" \
+    -e "s|__HTTPS_PORT__|${https_port}|g" \
+    -e "s|__HTTPS_REDIRECT_SUFFIX__|${https_redirect_suffix}|g" \
+    -e "s|__HTTP_PORT__|${http_port}|g" \
+    -e "s|__SSL_CERT__|${ssl_cert}|g" \
+    -e "s|__SSL_KEY__|${ssl_key}|g" \
+    -e "s|__UVICORN_PORT__|${backend_port}|g" \
+    "$template")"
+  PANEL_BLOCKS="$portal_blocks" RENDERED="$rendered" python3 - <<'PY'
+import os
+print(os.environ["RENDERED"].replace("__PANEL_LOCATION_BLOCKS__", os.environ["PANEL_BLOCKS"]), end="")
+PY
 }
 
 nginx_install_portal_vhost() {

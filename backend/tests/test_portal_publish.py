@@ -31,7 +31,7 @@ def test_normalize_portal_domain_strips_scheme_port():
     assert normalize_portal_domain("https://Portal.Example.com:8443/x") == "portal.example.com"
 
 
-def test_build_portal_publish_status_http_direct():
+def test_build_portal_publish_status_http_direct_unsupported():
     status = build_portal_publish_status(
         portal_domain="portal.example.com",
         panel_domain="example.com",
@@ -39,9 +39,30 @@ def test_build_portal_publish_status_http_direct():
         backend_port="5050",
     )
     assert status["suggested_portal_domain"] == "portal.example.com"
-    assert status["portal_ready"] is True
-    assert "5050" in status["portal_access_url"]
-    assert any("HTTP" in w or "TLS" in w for w in status["warnings"])
+    assert status["portal_mode_supported"] is False
+    assert status["portal_ready"] is False
+    assert status["portal_access_url"] == ""
+    assert any("Nginx" in w for w in status["warnings"])
+
+
+def test_build_portal_publish_status_uvicorn_unsupported():
+    status = build_portal_publish_status(
+        portal_domain="portal.example.com",
+        panel_domain="example.com",
+        publish_mode="uvicorn_le",
+        ssl_cert="/nonexistent.pem",
+    )
+    assert status["portal_mode_supported"] is False
+    assert status["portal_ready"] is False
+
+
+def test_portal_publish_mode_supported_helper():
+    from app.services.panel_publish_info import portal_publish_mode_supported
+
+    assert portal_publish_mode_supported("nginx_le") is True
+    assert portal_publish_mode_supported("nginx_custom") is True
+    assert portal_publish_mode_supported("http_direct") is False
+    assert portal_publish_mode_supported("uvicorn_le") is False
 
 
 def test_build_portal_publish_status_nginx_needs_vhost():

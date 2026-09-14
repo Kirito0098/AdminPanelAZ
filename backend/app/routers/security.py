@@ -30,6 +30,69 @@ router = APIRouter(prefix="/security", tags=["security"])
 settings = get_settings()
 
 
+def _active_publish_mode_from_env(env, panel_domain: str) -> str | None:
+    from app.services.panel_publish_info import (
+        resolve_active_publish_mode_key,
+        resolve_panel_publish_mode,
+    )
+
+    behind = (env.get_env_value("BEHIND_NGINX", "") or "").lower() in {"1", "true", "yes"}
+    use_https = (env.get_env_value("USE_HTTPS", "") or "").lower() in {"1", "true", "yes"}
+    backend_host = env.get_env_value("BACKEND_HOST", "127.0.0.1") or "127.0.0.1"
+    mode_key = resolve_panel_publish_mode(
+        behind_nginx=behind,
+        backend_host=backend_host,
+        use_https=use_https,
+    )
+    return resolve_active_publish_mode_key(
+        mode_key=mode_key,
+        ssl_cert=env.get_env_value("SSL_CERT", ""),
+        publish_mode=env.get_env_value("PUBLISH_MODE", ""),
+        domain=panel_domain,
+    )
+
+
+def _portal_task_conflict_response(*, portal_publish_detail: str):
+    """Return 409 JSONResponse if a conflicting background task is active, else None."""
+    from fastapi.responses import JSONResponse
+
+    from app.services.background_tasks import background_task_service
+
+    for task_type, detail in (
+        ("portal_publish", portal_publish_detail),
+        ("portal_readiness_check", "Проверка готовности портала уже выполняется"),
+        ("portal_readiness_prepare", "Подготовка портала уже выполняется"),
+    ):
+        active_task = background_task_service.find_active_task(task_type)
+        if active_task:
+            return JSONResponse(
+                status_code=409,
+                content={"detail": detail, "active_task_id": active_task.id},
+            )
+    vpn_task = background_task_service.find_active_task("vpn_network_publish")
+    if vpn_task:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "Сначала дождитесь завершения публикации панели",
+                "active_task_id": vpn_task.id,
+            },
+        )
+    return None
+
+
+def _maybe_save_portal_domain(db: Session, portal_host: str, panel_domain: str, *, save: bool) -> None:
+    if not save:
+        return
+    from app.services.client_portal import set_portal_domain
+
+    try:
+        set_portal_domain(db, portal_host, panel_domain=panel_domain)
+        db.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 class SecuritySettingsUpdate(BaseModel):
     ip_restriction_enabled: bool | None = None
     allowed_ips: list[str] | None = None
@@ -134,13 +197,11 @@ def post_portal_publish(
 ):
     from pathlib import Path
 
-    from fastapi.responses import JSONResponse
-
     from app.services.background_tasks import background_task_service
-    from app.services.client_portal import normalize_portal_domain, set_portal_domain
+    from app.services.client_portal import normalize_portal_domain
     from app.services.env_file import EnvFileService
     from app.services.feature_guards import get_feature_service, module_disabled_message
-    from app.services.panel_publish_info import resolve_active_publish_mode_key, resolve_panel_publish_mode
+    from app.services.panel_publish_info import require_portal_publish_mode_supported
 
     if not get_feature_service().is_enabled("client_portal"):
         raise HTTPException(status_code=403, detail=module_disabled_message("client_portal"))
@@ -155,40 +216,16 @@ def post_portal_publish(
     env_path = Path(__file__).resolve().parents[2] / ".env"
     env = EnvFileService(env_path)
     panel_domain = env.get_env_value("DOMAIN", "") or (settings.domain or "")
+    active = _active_publish_mode_from_env(env, panel_domain)
+    require_portal_publish_mode_supported(active)
 
-    if payload.save_domain:
-        try:
-            set_portal_domain(db, portal_host, panel_domain=panel_domain)
-            db.commit()
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    behind = (env.get_env_value("BEHIND_NGINX", "") or "").lower() in {"1", "true", "yes"}
-    use_https = (env.get_env_value("USE_HTTPS", "") or "").lower() in {"1", "true", "yes"}
-    backend_host = env.get_env_value("BACKEND_HOST", "127.0.0.1") or "127.0.0.1"
-    mode_key = resolve_panel_publish_mode(
-        behind_nginx=behind,
-        backend_host=backend_host,
-        use_https=use_https,
+    conflict = _portal_task_conflict_response(
+        portal_publish_detail="Настройка портала уже выполняется",
     )
-    active = resolve_active_publish_mode_key(
-        mode_key=mode_key,
-        ssl_cert=env.get_env_value("SSL_CERT", ""),
-        publish_mode=env.get_env_value("PUBLISH_MODE", ""),
-        domain=panel_domain,
-    )
+    if conflict is not None:
+        return conflict
 
-    active_task = background_task_service.find_active_task("portal_publish")
-    if active_task:
-        return JSONResponse(
-            status_code=409,
-            content={"detail": "Настройка портала уже выполняется", "active_task_id": active_task.id},
-        )
-    if background_task_service.find_active_task("vpn_network_publish"):
-        return JSONResponse(
-            status_code=409,
-            content={"detail": "Сначала дождитесь завершения публикации панели"},
-        )
+    _maybe_save_portal_domain(db, portal_host, panel_domain, save=bool(payload.save_domain))
 
     task_payload = {
         "portal_domain": portal_host,
@@ -223,6 +260,127 @@ def post_portal_publish(
     return background_task_service.build_accepted_payload(
         task,
         "Настройка клиентского портала запущена в фоне.",
+    )
+
+
+def _post_portal_readiness(
+    *,
+    payload: PortalPublishRequest,
+    request: Request,
+    db: Session,
+    admin: User,
+    mode: str,
+    default_save_domain: bool,
+    task_type: str,
+    queued_message: str,
+    accepted_message: str,
+    audit_action: str,
+):
+    from pathlib import Path
+
+    from app.services.background_tasks import background_task_service
+    from app.services.client_portal import normalize_portal_domain
+    from app.services.env_file import EnvFileService
+    from app.services.feature_guards import get_feature_service, module_disabled_message
+    from app.services.panel_publish_info import require_portal_publish_mode_supported
+
+    if not get_feature_service().is_enabled("client_portal"):
+        raise HTTPException(status_code=403, detail=module_disabled_message("client_portal"))
+
+    try:
+        portal_host = normalize_portal_domain(payload.portal_domain)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not portal_host:
+        raise HTTPException(status_code=400, detail="Укажите хост портала")
+
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    env = EnvFileService(env_path)
+    panel_domain = env.get_env_value("DOMAIN", "") or (settings.domain or "")
+    active = _active_publish_mode_from_env(env, panel_domain)
+    require_portal_publish_mode_supported(active)
+
+    conflict = _portal_task_conflict_response(
+        portal_publish_detail="Сейчас выполняется настройка портала",
+    )
+    if conflict is not None:
+        return conflict
+
+    save_domain = (
+        payload.save_domain
+        if "save_domain" in payload.model_fields_set
+        else default_save_domain
+    )
+    _maybe_save_portal_domain(db, portal_host, panel_domain, save=bool(save_domain))
+
+    task_payload = {
+        "portal_domain": portal_host,
+        "domain": panel_domain,
+        "publish_mode": active or "http_direct",
+    }
+
+    def _callable(progress_updater=None):
+        return background_task_service.task_portal_readiness(
+            task_payload, progress_updater, mode=mode
+        )
+
+    task = background_task_service.enqueue_background_task(
+        task_type,
+        _callable,
+        created_by_username=admin.username,
+        queued_message=queued_message,
+    )
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action=audit_action,
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=portal_host,
+        )
+    return background_task_service.build_accepted_payload(task, accepted_message)
+
+
+@router.post("/portal-readiness-check", status_code=202, response_model=BackgroundTaskResponse)
+def post_portal_readiness_check(
+    payload: PortalPublishRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return _post_portal_readiness(
+        payload=payload,
+        request=request,
+        db=db,
+        admin=admin,
+        mode="check",
+        default_save_domain=False,
+        task_type="portal_readiness_check",
+        queued_message="Проверка готовности портала поставлена в очередь",
+        accepted_message="Проверка готовности портала запущена в фоне.",
+        audit_action="portal_readiness_check",
+    )
+
+
+@router.post("/portal-readiness-prepare", status_code=202, response_model=BackgroundTaskResponse)
+def post_portal_readiness_prepare(
+    payload: PortalPublishRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return _post_portal_readiness(
+        payload=payload,
+        request=request,
+        db=db,
+        admin=admin,
+        mode="prepare",
+        default_save_domain=True,
+        task_type="portal_readiness_prepare",
+        queued_message="Подготовка портала поставлена в очередь",
+        accepted_message="Подготовка портала запущена в фоне.",
+        audit_action="portal_readiness_prepare",
     )
 
 @router.patch("")

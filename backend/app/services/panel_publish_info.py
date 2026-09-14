@@ -33,6 +33,29 @@ def _resolve_env_string(
 
 WHITELIST_PORT_FIREWALL_MODES = frozenset({"direct_http", "direct_https"})
 
+# Client portal (Subscription) requires a dedicated nginx vhost.
+PORTAL_SUPPORTED_PUBLISH_MODES = frozenset({"nginx_le", "nginx_custom", "nginx_selfsigned"})
+PORTAL_UNSUPPORTED_MODE_MESSAGE = (
+    "Клиентский портал доступен только при публикации через Nginx "
+    "(Let's Encrypt, собственные или самоподписанные сертификаты). "
+    "Смените способ публикации на странице «Адрес сайта и HTTPS» "
+    "(/settings/vpn_network)."
+)
+
+
+def portal_publish_mode_supported(mode: str | None) -> bool:
+    return (mode or "").strip() in PORTAL_SUPPORTED_PUBLISH_MODES
+
+
+def require_portal_publish_mode_supported(mode: str | None) -> None:
+    """Raise HTTPException 400 when portal actions are not allowed for this publish mode."""
+    if portal_publish_mode_supported(mode):
+        return
+    from fastapi import HTTPException
+
+    raise HTTPException(status_code=400, detail=PORTAL_UNSUPPORTED_MODE_MESSAGE)
+
+
 SELF_SIGNED_CERT_PATH = Path("/etc/ssl/certs/adminpanelaz.crt")
 SELF_SIGNED_KEY_PATH = Path("/etc/ssl/private/adminpanelaz.key")
 LETSENCRYPT_LIVE_DIR = Path("/etc/letsencrypt/live")
@@ -976,6 +999,7 @@ def build_portal_publish_status(
     panel = (panel_domain or "").strip().lower().split(":")[0]
     mode = (publish_mode or "").strip() or None
     suggested = suggest_portal_domain(panel)
+    mode_supported = portal_publish_mode_supported(mode)
 
     vhost_ok = bool(portal) and nginx_has_vhost_for_domain(portal)
     cert_ok = False
@@ -987,7 +1011,10 @@ def build_portal_publish_status(
     elif portal:
         dns_hint = f"Создайте DNS A/AAAA или CNAME для {portal} на IP этого сервера."
 
-    if portal:
+    if portal and not mode_supported:
+        warnings.append(PORTAL_UNSUPPORTED_MODE_MESSAGE)
+
+    if portal and mode_supported:
         if mode in {"nginx_le", "nginx_selfsigned", "nginx_custom"}:
             cert_path = nginx_ssl_cert_path_for_domain(portal) or ssl_cert
             if not cert_path and mode == "nginx_le":
@@ -1010,56 +1037,28 @@ def build_portal_publish_status(
                 vhost_ok = False
             if vhost_ok and not cert_ok:
                 warnings.append("Vhost портала есть, но сертификат не покрывает этот хост.")
-        elif mode in {"uvicorn_le", "uvicorn_selfsigned", "uvicorn_custom"}:
-            cert_path = ssl_cert
-            if not cert_path and mode == "uvicorn_le" and panel:
-                le_cert, _ = letsencrypt_cert_paths(panel)
-                cert_path = le_cert if Path(le_cert).is_file() else ""
-            if mode == "uvicorn_selfsigned" and SELF_SIGNED_CERT_PATH.is_file():
-                cert_path = cert_path or str(SELF_SIGNED_CERT_PATH)
-            cert_ok = bool(cert_path) and cert_covers_hostname(cert_path, portal)
-            vhost_ok = cert_ok  # no separate vhost; TLS on app
-            if not cert_ok:
-                warnings.append(
-                    "Сертификат uvicorn не покрывает хост портала (нужен SAN). "
-                    "Нажмите «Настроить под текущую публикацию»."
-                )
-        elif mode == "http_direct" or not mode:
-            cert_ok = False
-            vhost_ok = True  # nothing to provision beyond CORS
-            warnings.append(
-                f"Режим прямого HTTP: портал будет без TLS "
-                f"(http://{portal}:{backend_port}/p/…)."
-            )
         else:
             warnings.append(f"Неизвестный режим публикации: {mode}")
 
-    ready = bool(portal) and (
-        (mode == "http_direct" and True)
-        or (mode in {"nginx_le", "nginx_selfsigned", "nginx_custom"} and vhost_ok and cert_ok)
-        or (mode in {"uvicorn_le", "uvicorn_selfsigned", "uvicorn_custom"} and cert_ok)
+    ready = bool(portal) and mode_supported and (
+        mode in {"nginx_le", "nginx_selfsigned", "nginx_custom"} and vhost_ok and cert_ok
     )
 
     access_url = ""
-    if portal:
-        if mode == "http_direct" or not mode:
-            access_url = f"http://{portal}:{backend_port}/"
-        elif mode and mode.startswith("uvicorn_"):
-            access_url = public_https_origin_url(portal, int(backend_port) if str(backend_port).isdigit() else 443) or ""
-            if access_url and not access_url.endswith("/"):
-                access_url += "/"
-        else:
-            access_url = public_https_origin_url(portal, https_public_port) or f"https://{portal}/"
-            if access_url and not access_url.endswith("/"):
-                access_url += "/"
+    if portal and mode_supported:
+        access_url = public_https_origin_url(portal, https_public_port) or f"https://{portal}/"
+        if access_url and not access_url.endswith("/"):
+            access_url += "/"
 
     return {
         "portal_domain": portal,
         "suggested_portal_domain": suggested,
         "panel_domain": panel,
         "active_publish_mode": mode,
-        "portal_vhost_ok": vhost_ok,
-        "portal_cert_ok": cert_ok,
+        "portal_mode_supported": mode_supported,
+        "portal_mode_block_reason": "" if mode_supported else PORTAL_UNSUPPORTED_MODE_MESSAGE,
+        "portal_vhost_ok": vhost_ok if mode_supported else False,
+        "portal_cert_ok": cert_ok if mode_supported else False,
         "portal_ready": ready,
         "server_primary_ip": primary_ip,
         "dns_hint": dns_hint,

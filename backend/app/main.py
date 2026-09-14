@@ -258,6 +258,30 @@ app.include_router(ip_blocked.router)
 
 
 @app.middleware("http")
+async def portal_host_path_gate_middleware(request, call_next):
+    """On portal_domain Host, only /p/, /api/public/, /assets are reachable (else 404)."""
+    from fastapi.responses import PlainTextResponse
+
+    from app.services.portal_host_gate import (
+        get_cached_portal_domain,
+        is_portal_path_allowed,
+        normalize_request_host,
+    )
+
+    host = normalize_request_host(request.headers.get("host"))
+    if not host:
+        return await call_next(request)
+    path = request.url.path or "/"
+    if is_portal_path_allowed(path):
+        return await call_next(request)
+
+    portal = get_cached_portal_domain()
+    if portal and host == portal:
+        return PlainTextResponse("Not Found", status_code=404)
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def feature_guard_middleware(request, call_next):
     path = request.url.path
     if is_api_path(path, settings):

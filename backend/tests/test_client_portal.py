@@ -128,7 +128,8 @@ def test_resolve_portal_base_url_accepts_legacy_access_url_key():
         assert portal.resolve_portal_base_url(db) == "https://legacy.example.com"
 
 
-def test_resolve_portal_base_url_http_direct_scheme():
+def test_resolve_portal_base_url_http_direct_unsupported():
+    """Unsupported publish modes never yield a portal base URL."""
     db = MagicMock()
     row = MagicMock()
     row.value = "portal.example.com"
@@ -154,10 +155,11 @@ def test_resolve_portal_base_url_http_direct_scheme():
             "PUBLISH_MODE": "http_direct",
         }.get(key, default)
         bps.return_value = {
-            "portal_ready": True,
-            "portal_access_url": "http://portal.example.com:8000/",
+            "portal_ready": False,
+            "portal_mode_supported": False,
+            "portal_access_url": "",
         }
-        assert portal.resolve_portal_base_url(db) == "http://portal.example.com:8000"
+        assert portal.resolve_portal_base_url(db) is None
 
 
 def test_resolve_portal_base_url_ignores_panel_access_path():
