@@ -20,18 +20,40 @@ export function apiBaseForAccessPath(path: string | undefined | null): string {
   return normalized ? `${normalized}/api` : '/api'
 }
 
+const TG_MINI_PATH_RE = /^(.*)\/api\/tg-mini(?:\/|$)/
+
+export function resolveAccessPath(input: {
+  pathname?: string
+  injected?: string | null
+  viteEnv?: string | null
+}): string {
+  const pathname = input.pathname || ''
+  if (pathname === '/p' || pathname.startsWith('/p/')) {
+    return ''
+  }
+  if (input.injected) {
+    return normalizeAccessPath(input.injected)
+  }
+  const match = pathname.match(TG_MINI_PATH_RE)
+  if (match) {
+    return normalizeAccessPath(match[1] || '')
+  }
+  return normalizeAccessPath(input.viteEnv)
+}
+
 function readAccessPath(): string {
   if (typeof window !== 'undefined') {
-    // Dedicated portal host serves /p/… at domain root; never inherit panel ACCESS_PATH.
-    const path = window.location.pathname || ''
-    if (path === '/p' || path.startsWith('/p/')) {
-      return ''
-    }
-    if (window.__PANEL_ACCESS_PATH__) {
-      return normalizeAccessPath(window.__PANEL_ACCESS_PATH__)
-    }
+    return resolveAccessPath({
+      pathname: window.location.pathname || '',
+      injected: window.__PANEL_ACCESS_PATH__,
+      viteEnv: import.meta.env.VITE_ACCESS_PATH as string | undefined,
+    })
   }
-  return normalizeAccessPath(import.meta.env.VITE_ACCESS_PATH as string | undefined)
+  return resolveAccessPath({
+    pathname: '',
+    injected: undefined,
+    viteEnv: import.meta.env.VITE_ACCESS_PATH as string | undefined,
+  })
 }
 
 export const accessPath = readAccessPath()
