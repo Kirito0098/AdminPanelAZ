@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.25.1](#2251---2026-09-14) — 2026-09-14
 - [2.25.0](#2250---2026-09-13) — 2026-09-13
 - [2.24.0](#2240---2026-09-10) — 2026-09-10
 - [2.23.1](#2231---2026-09-10) — 2026-09-10
@@ -52,6 +53,24 @@
 ## [Unreleased]
 
 ### ✨ Added
+
+### 🔄 Changed
+
+### 🐛 Fixed
+
+### 🗑️ Removed
+
+### 🔒 Security
+
+### 🧪 Tests
+
+---
+
+## [2.25.1] - 2026-09-14
+
+> **Кратко:** portal readiness (check/prepare), Nginx-only gate, path allowlist на хосте портала, nested hosts, hash-bucket rollback, Let's Encrypt webroot + свободный :80.
+
+### ✨ Added
 - **Подписка / portal readiness:** скрипт `nginx-portal-readiness.sh` (`--check` / `--prepare`) и кнопки «Проверить готовность» / «Подготовить» — preroll до «Настроить под текущую публикацию» (hash, stale vhost, sync env).
 - **Хост портала:** allowlist путей (`/p/`, `/api/public/`, `/assets`) — корень и админ-SPA на portal-хосте отдают **404** (nginx + middleware).
 - **Подписка / портал:** доступен только при `PUBLISH_MODE` Nginx (`nginx_le` / `nginx_custom` / `nginx_selfsigned`); uvicorn и http_direct — баннер + API 400 со ссылкой на `/settings/vpn_network`.
@@ -63,13 +82,15 @@
 - **Let's Encrypt standalone:** перед `systemctl stop nginx` проверяется `nginx -t` (portal hosts и legacy single-domain) — при битом конфиге nginx не останавливаем.
 - **Let's Encrypt / портал:** перед standalone жёстко останавливаем nginx и ждём свободный TCP :80 (иначе certbot слушает только IPv6, а LE получает 404 от nginx на IPv4); перед webroot ставится временный HTTP ACME-vhost на хост портала.
 - **Подсказка хоста портала:** для `panel.example.com` предлагается `portal.example.com` (соседний поддомен), а не `portal.panel.example.com`.
+- **Let's Encrypt / temp ACME:** после временного HTTP ACME-vhost восстанавливается `sites-enabled/default` (при ошибке `nginx -t` и при снятии temp site).
 
 ### 🔄 Changed
 - Сообщение Let's Encrypt «уже покрывает» уточнено: это пропуск выпуска сертификата, а не ошибка.
 
 ### 🧪 Tests
-- `scripts/test-nginx-portal-hardening.sh` — hash-сниппет, rollback site/hash, skip larger bucket, guard перед stop.
-- `test_portal_publish` — Ready=false при провале `nginx -t`; Ready=true при успехе; suggest sibling portal host.
+- `scripts/test-nginx-portal-hardening.sh` — hash-сниппет, rollback site/hash, skip larger bucket, guard перед stop, wait/`ss` fail-closed для :80, temp ACME, restore `default`.
+- `scripts/test-nginx-portal-readiness.sh` — check/prepare trailer, nested keep, stale vhost, env mismatch.
+- Backend: `test_portal_publish` / `test_portal_host_gate` / `test_portal_task_conflicts_api` (в т.ч. unsupported publish mode → 400).
 
 ---
 
@@ -2567,7 +2588,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.25.0...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.25.1...HEAD
+[2.25.1]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.25.0...v2.25.1
 [2.25.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.24.0...v2.25.0
 [2.24.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.1...v2.24.0
 [2.23.1]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.0...v2.23.1

@@ -3,7 +3,7 @@
 Веб-панель для администрирования VPN-сервера [AntiZapret](https://github.com/GubernievS/AntiZapret-VPN)
 
 [![GitHub](https://img.shields.io/badge/GitHub-Kirito0098%2FAdminPanelAZ-181717?style=for-the-badge&logo=github)](https://github.com/Kirito0098/AdminPanelAZ)
-[![Version](https://img.shields.io/badge/Панель-2.25.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Панель-2.25.1-blue?style=for-the-badge)](CHANGELOG.md)
 [![Node agent](https://img.shields.io/badge/Node_agent-1.8.0-555?style=for-the-badge)](CHANGELOG.md)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](backend/)
 [![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)](frontend/)
@@ -314,7 +314,9 @@ sudo ./scripts/nginx-repair.sh      # восстановить nginx (напри
   <img src="docs/assets/telegram-promo/05-whats-new.png" alt="Последние обновления AdminPanel AntiZapret" width="900">
 </p>
 
-**Текущая версия: панель 2.25.0 · node agent 1.8.0** (2026-09-13)
+**Текущая версия: панель 2.25.1 · node agent 1.8.0** (2026-09-14)
+
+> **В 2.25.1:** portal readiness, Nginx-only gate, path allowlist на хосте портала — [CHANGELOG 2.25.1](CHANGELOG.md#2251---2026-09-14)
 
 > **В 2.25.0:** раздел **Подписка** и **клиентский портал** (постоянные ссылки, unlock-коды); способ связи узлов HTTP / mTLS / SSH + preflight; диагностика связи и Push full; hub настроек и сайдбар по ролям; расширяемые модули; CIDR safe-fallback; бэкап после split `cidr.db`.
 
