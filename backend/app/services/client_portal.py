@@ -93,7 +93,7 @@ def suggest_portal_domain(panel_domain: str | None) -> str:
         rest = host[len("portal.") :]
         return f"clients.{rest}" if rest else ""
     labels = host.split(".")
-    # panel.example.com → portal.example.com (sibling; avoids portal.panel.example.com hash issues)
+    # panel.example.com → portal.example.com (sibling suggestion; nested portal.panel.* also valid)
     if len(labels) >= 3 and labels[0] in {"panel", "admin", "app", "ui", "cp", "manage"}:
         return "portal." + ".".join(labels[1:])
     return f"portal.{host}"
@@ -140,6 +140,9 @@ def set_portal_domain(db: Session, raw: str | None, *, panel_domain: str | None 
         row.value = host
     else:
         db.add(AppSetting(key="portal_domain", value=host))
+    from app.services.portal_host_gate import invalidate_portal_domain_cache
+
+    invalidate_portal_domain_cache()
     return host
 
 
@@ -152,8 +155,8 @@ def resolve_portal_base_url(db: Session) -> str | None:
     """Origin for permanent portal / QR / TG delivery links.
 
     Returns a URL only when the portal host is configured **and** publish status
-    is ready (nginx vhost+cert, uvicorn SAN, or http_direct). Until then callers
-    should fall back to the panel public URL so Save alone does not break delivery.
+    is ready (nginx vhost+cert). Unsupported modes (uvicorn / http_direct) never
+    qualify. Until ready, callers should fall back to the panel public URL.
 
     Always the portal host root — never panel ACCESS_PATH.
     """

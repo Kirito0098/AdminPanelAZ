@@ -47,6 +47,36 @@ nginx_normalize_host() {
   echo "$host"
 }
 
+nginx_suggest_portal_domain() {
+  local host labels first rest
+  host="$(nginx_normalize_host "${1:-}")"
+  [[ -n "$host" ]] || { printf ''; return 0; }
+  if [[ "$host" == portal.* ]]; then
+    rest="${host#portal.}"
+    if [[ -n "$rest" ]]; then
+      printf 'clients.%s' "$rest"
+    else
+      printf ''
+    fi
+    return 0
+  fi
+  IFS='.' read -r -a labels <<<"$host"
+  first="${labels[0]:-}"
+  if ((${#labels[@]} >= 3)) && [[ "$first" =~ ^(panel|admin|app|ui|cp|manage)$ ]]; then
+    printf 'portal.%s' "${host#${first}.}"
+    return 0
+  fi
+  printf 'portal.%s' "$host"
+}
+
+nginx_is_nested_portal_host() {
+  local portal panel
+  portal="$(nginx_normalize_host "${1:-}")"
+  panel="$(nginx_normalize_host "${2:-}")"
+  [[ -n "$portal" && -n "$panel" ]] || return 1
+  [[ "$portal" == "portal.${panel}" ]]
+}
+
 # Сообщение о конфликте DOMAIN с AZ hosts; 0 = ок, 1 = конфликт (текст в stdout).
 nginx_az_vpn_host_conflict_message() {
   local domain
@@ -474,6 +504,70 @@ $(nginx_webhook_realip_include_line)
         proxy_set_header Connection \$connection_upgrade;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+    }
+EOF
+}
+
+# Client portal host: only /p, /p/, /api/public/, /assets, /assets/ — else 404 (no admin SPA).
+# Exact = /p and prefix ^~ /p/ so /password or /panel are not proxied.
+nginx_portal_location_blocks() {
+  local backend_port="$1"
+  cat <<EOF
+    location = /p {
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    location ^~ /p/ {
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    location ^~ /api/public/ {
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    location = /assets {
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location ^~ /assets/ {
+        proxy_pass http://127.0.0.1:${backend_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location / {
+        default_type text/plain;
+        add_header Cache-Control "no-store" always;
+        return 404 "Not Found";
     }
 EOF
 }
@@ -1342,10 +1436,26 @@ nginx_render_portal_template() {
   local ssl_key="$4"
   local https_port="${5:-443}"
   local http_port="${6:-80}"
-  # Portal subdomain always serves at root (not panel ACCESS_PATH).
-  ACCESS_PATH="" nginx_render_template \
-    "$NGINX_TEMPLATE_DIR/adminpanelaz-portal.conf.template" \
-    "$portal_domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port"
+  local template https_redirect_suffix portal_blocks rendered
+  # Portal subdomain always serves at root (not panel ACCESS_PATH); allowlist only.
+  template="$NGINX_TEMPLATE_DIR/adminpanelaz-portal.conf.template"
+  nginx_ensure_cloudflare_realip_snippet
+  https_redirect_suffix="$(nginx_https_redirect_suffix "$https_port")"
+  portal_blocks="$(nginx_portal_location_blocks "$backend_port")"
+  rendered="$(sed \
+    -e "s|__DOMAIN__|${portal_domain}|g" \
+    -e "s|__BACKEND_PORT__|${backend_port}|g" \
+    -e "s|__HTTPS_PORT__|${https_port}|g" \
+    -e "s|__HTTPS_REDIRECT_SUFFIX__|${https_redirect_suffix}|g" \
+    -e "s|__HTTP_PORT__|${http_port}|g" \
+    -e "s|__SSL_CERT__|${ssl_cert}|g" \
+    -e "s|__SSL_KEY__|${ssl_key}|g" \
+    -e "s|__UVICORN_PORT__|${backend_port}|g" \
+    "$template")"
+  PANEL_BLOCKS="$portal_blocks" RENDERED="$rendered" python3 - <<'PY'
+import os
+print(os.environ["RENDERED"].replace("__PANEL_LOCATION_BLOCKS__", os.environ["PANEL_BLOCKS"]), end="")
+PY
 }
 
 nginx_install_portal_vhost() {

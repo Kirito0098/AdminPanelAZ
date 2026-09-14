@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Globe, KeyRound, Loader2, Rocket, Save, Ticket, Trash2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { AlertTriangle, Globe, KeyRound, Loader2, Rocket, Save, Ticket, Trash2 } from 'lucide-react'
 import {
   ApiError,
+  checkPortalReadiness,
   getPortalPublishStatus,
   getSecuritySettings,
+  preparePortalReadiness,
   publishPortalDomain,
   updateSecuritySettings,
 } from '@/api/client'
@@ -45,6 +48,8 @@ export default function SubscriptionPage() {
   const [loading, setLoading] = useState(clientPortalEnabled)
   const [saving, setSaving] = useState(false)
   const [provisioning, setProvisioning] = useState(false)
+  const [readinessBusy, setReadinessBusy] = useState(false)
+  const [readinessMode, setReadinessMode] = useState<'check' | 'prepare' | null>(null)
   const [unlockCodes, setUnlockCodes] = useState<UnlockCodeRecord[]>([])
   const [unlockCodesLoading, setUnlockCodesLoading] = useState(false)
   const [unlockCodesBusyId, setUnlockCodesBusyId] = useState<number | null>(null)
@@ -144,6 +149,92 @@ export default function SubscriptionPage() {
     }
   }
 
+  const runReadinessCheck = async () => {
+    const host = portalDomain.trim()
+    if (!host) {
+      notifyError('Укажите хост портала')
+      return
+    }
+    setReadinessBusy(true)
+    setReadinessMode('check')
+    try {
+      const resp = await checkPortalReadiness({ portal_domain: host, save_domain: false })
+      trackBackgroundTask(resp.task_id, {
+        onComplete: (task) => {
+          setReadinessBusy(false)
+          setReadinessMode(null)
+          const resultMessage = typeof task.result?.message === 'string' ? task.result.message : ''
+          const ready = typeof task.result?.ready === 'boolean' ? task.result.ready : undefined
+          const issuesRaw = task.result?.issues
+          const issues = Array.isArray(issuesRaw)
+            ? issuesRaw.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+            : []
+          const issuesText = issues.length > 0 ? `Проблемы: ${issues.join(', ')}` : ''
+          const baseMessage = resultMessage || resp.message || 'Проверка завершена'
+          const fullMessage = issuesText ? `${baseMessage}\n${issuesText}` : baseMessage
+          if (ready === false) {
+            notifyError(fullMessage || 'Нужна подготовка')
+          } else {
+            success(fullMessage || 'Портал готов к настройке')
+          }
+          void refreshPortalStatus()
+        },
+        onError: (_task, message) => {
+          setReadinessBusy(false)
+          setReadinessMode(null)
+          notifyError(message || 'Не удалось проверить готовность')
+        },
+      })
+    } catch (err) {
+      setReadinessBusy(false)
+      setReadinessMode(null)
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка запуска проверки')
+    }
+  }
+
+  const runReadinessPrepare = async () => {
+    const host = portalDomain.trim()
+    if (!host) {
+      notifyError('Укажите хост портала')
+      return
+    }
+    setReadinessBusy(true)
+    setReadinessMode('prepare')
+    try {
+      const resp = await preparePortalReadiness({ portal_domain: host, save_domain: true })
+      trackBackgroundTask(resp.task_id, {
+        onComplete: (task) => {
+          setReadinessBusy(false)
+          setReadinessMode(null)
+          const resultMessage = typeof task.result?.message === 'string' ? task.result.message : ''
+          const ready = typeof task.result?.ready === 'boolean' ? task.result.ready : undefined
+          const issuesRaw = task.result?.issues
+          const issues = Array.isArray(issuesRaw)
+            ? issuesRaw.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+            : []
+          const issuesText = issues.length > 0 ? `Проблемы: ${issues.join(', ')}` : ''
+          const baseMessage = resultMessage || resp.message || 'Подготовка завершена'
+          const fullMessage = issuesText ? `${baseMessage}\n${issuesText}` : baseMessage
+          if (ready === false) {
+            notifyError(fullMessage || 'Нужна подготовка')
+          } else {
+            success(fullMessage || 'Портал готов к настройке')
+          }
+          void refreshPortalStatus()
+        },
+        onError: (_task, message) => {
+          setReadinessBusy(false)
+          setReadinessMode(null)
+          notifyError(message || 'Не удалось выполнить подготовку')
+        },
+      })
+    } catch (err) {
+      setReadinessBusy(false)
+      setReadinessMode(null)
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка запуска подготовки')
+    }
+  }
+
   const refreshUnlockCodes = async () => {
     if (!unlockCodesEnabled) return
     setUnlockCodesLoading(true)
@@ -169,6 +260,10 @@ export default function SubscriptionPage() {
     }
   }
 
+  const portalModeBlocked = portalStatus?.portal_mode_supported === false
+  const portalActionsDisabled =
+    saving || provisioning || readinessBusy || portalModeBlocked
+
   if (loading && clientPortalEnabled) {
     return <Spinner label="Загрузка…" className="py-12" />
   }
@@ -183,8 +278,16 @@ export default function SubscriptionPage() {
       />
 
       <InlineProgressBar
-        active={saving || provisioning}
-        label={provisioning ? 'Настройка портала…' : 'Сохранение настроек...'}
+        active={saving || provisioning || readinessBusy}
+        label={
+          readinessBusy
+            ? readinessMode === 'prepare'
+              ? 'Подготовка…'
+              : 'Проверка…'
+            : provisioning
+              ? 'Настройка портала…'
+              : 'Сохранение настроек...'
+        }
       />
 
       {clientPortalEnabled && (
@@ -201,6 +304,27 @@ export default function SubscriptionPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {portalModeBlocked ? (
+              <div className="flex gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200">
+                <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden />
+                <div className="space-y-2">
+                  <p>
+                    {portalStatus?.portal_mode_block_reason ||
+                      'Клиентский портал доступен только при публикации через Nginx.'}
+                  </p>
+                  <p>
+                    <Link
+                      to="/settings/vpn_network"
+                      className="font-medium text-primary underline-offset-4 hover:underline"
+                    >
+                      Открыть «Адрес сайта и HTTPS»
+                    </Link>{' '}
+                    и выберите стек «Через Nginx».
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
             <div className="space-y-2">
               <Label htmlFor="portal-domain">Поддомен / хост портала</Label>
               <Input
@@ -209,6 +333,7 @@ export default function SubscriptionPage() {
                 onChange={(e) => setPortalDomain(e.target.value)}
                 placeholder={portalStatus?.suggested_portal_domain || 'portal.example.com'}
                 autoComplete="off"
+                disabled={portalModeBlocked}
               />
               <p className="text-xs text-muted-foreground">
                 Без схемы. Пример:{' '}
@@ -216,6 +341,7 @@ export default function SubscriptionPage() {
                 . Не используйте домен самой панели
                 {portalStatus?.panel_domain ? ` (${portalStatus.panel_domain})` : ''}.
                 {portalStatus?.suggested_portal_domain &&
+                !portalModeBlocked &&
                 portalDomain.trim() !== portalStatus.suggested_portal_domain ? (
                   <>
                     {' '}
@@ -263,19 +389,53 @@ export default function SubscriptionPage() {
               </div>
             )}
 
-            <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:justify-end">
-              <Button onClick={() => void savePortal()} disabled={saving || provisioning} variant="outline" className="gap-1.5">
-                <Save size={16} />
-                {saving ? 'Сохранение...' : 'Сохранить хост'}
-              </Button>
-              <Button
-                onClick={() => void provisionPortal()}
-                disabled={saving || provisioning || !portalDomain.trim()}
-                className="gap-1.5"
-              >
-                <Rocket size={16} />
-                {provisioning ? 'Настройка…' : 'Настроить под текущую публикацию'}
-              </Button>
+            <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="gap-2"
+                  disabled={portalActionsDisabled || !portalDomain.trim()}
+                  onClick={() => void runReadinessCheck()}
+                >
+                  {readinessBusy && readinessMode === 'check' ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : null}
+                  Проверить готовность
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="gap-2"
+                  disabled={portalActionsDisabled || !portalDomain.trim()}
+                  onClick={() => void runReadinessPrepare()}
+                >
+                  {readinessBusy && readinessMode === 'prepare' ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : null}
+                  Подготовить
+                </Button>
+              </div>
+
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  onClick={() => void savePortal()}
+                  disabled={portalActionsDisabled}
+                  variant="outline"
+                  className="gap-1.5"
+                >
+                  <Save size={16} />
+                  {saving ? 'Сохранение...' : 'Сохранить хост'}
+                </Button>
+                <Button
+                  onClick={() => void provisionPortal()}
+                  disabled={portalActionsDisabled || !portalDomain.trim()}
+                  className="gap-1.5"
+                >
+                  <Rocket size={16} />
+                  {provisioning ? 'Настройка…' : 'Настроить под текущую публикацию'}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

@@ -259,6 +259,26 @@ export async function publishPortalDomain(data: {
   })
 }
 
+export async function checkPortalReadiness(data: {
+  portal_domain: string
+  save_domain?: boolean
+}) {
+  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/security/portal-readiness-check', {
+    method: 'POST',
+    body: JSON.stringify({ save_domain: false, ...data }),
+  })
+}
+
+export async function preparePortalReadiness(data: {
+  portal_domain: string
+  save_domain?: boolean
+}) {
+  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/security/portal-readiness-prepare', {
+    method: 'POST',
+    body: JSON.stringify({ save_domain: true, ...data }),
+  })
+}
+
 export async function addTempWhitelist(ip: string, hours: number) {
   return apiFetch<import('../types').SecuritySettings>('/security/temp-whitelist', {
     method: 'POST',

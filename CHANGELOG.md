@@ -51,7 +51,13 @@
 
 ## [Unreleased]
 
+### ✨ Added
+- **Подписка / portal readiness:** скрипт `nginx-portal-readiness.sh` (`--check` / `--prepare`) и кнопки «Проверить готовность» / «Подготовить» — preroll до «Настроить под текущую публикацию» (hash, stale vhost, sync env).
+- **Хост портала:** allowlist путей (`/p/`, `/api/public/`, `/assets`) — корень и админ-SPA на portal-хосте отдают **404** (nginx + middleware).
+- **Подписка / портал:** доступен только при `PUBLISH_MODE` Nginx (`nginx_le` / `nginx_custom` / `nginx_selfsigned`); uvicorn и http_direct — баннер + API 400 со ссылкой на `/settings/vpn_network`.
+
 ### 🐛 Fixed
+- **Клиентский портал:** хосты вида `portal.panel.example.ru` больше не блокируются и не автомигрируют на sibling — любой валидный хост ≠ DOMAIN панели допустим (подсказка sibling остаётся опциональной).
 - **Клиентский портал / nginx:** при установке vhost поднимается `server_names_hash_bucket_size 128` (длинные имена вроде `portal.panel.example.com` больше не валят `nginx -t`); если тест конфига всё же падает — новый site **и hash-сниппет откатываются** и не остаются в `sites-enabled`/`conf.d` (иначе после reboot/reload могли лечь все HTTPS-хосты). Существующий bucket ≥128 не перезаписывается.
 - **Клиентский портал:** статус «Готов» требует успешный `nginx -t`; предупреждение про **глобальный** провал конфига (не винит только vhost портала).
 - **Let's Encrypt standalone:** перед `systemctl stop nginx` проверяется `nginx -t` (portal hosts и legacy single-domain) — при битом конфиге nginx не останавливаем.

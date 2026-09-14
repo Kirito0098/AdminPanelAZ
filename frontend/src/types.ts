@@ -914,6 +914,8 @@ export interface PortalPublishStatus {
   suggested_portal_domain: string
   panel_domain: string
   active_publish_mode?: string | null
+  portal_mode_supported?: boolean
+  portal_mode_block_reason?: string
   portal_vhost_ok: boolean
   portal_cert_ok: boolean
   portal_ready: boolean

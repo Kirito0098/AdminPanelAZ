@@ -59,6 +59,8 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "cidr_deploy": ("Развёртывание CIDR на узел…", "Подготовка развёртывания…", 3),
     "antifilter_refresh": ("Обновление Antifilter…", "Подготовка Antifilter…", 3),
     "vpn_network_publish": ("Публикация панели…", "Запуск nginx-setup.sh…", 5),
+    "portal_readiness_check": ("Проверка готовности портала…", "Подготовка проверки…", 5),
+    "portal_readiness_prepare": ("Подготовка портала…", "Подготовка…", 5),
     "config_bulk_op": ("Массовая операция с клиентами…", "Подготовка…", 3),
     "config_csv_import": ("Импорт CSV клиентов…", "Подготовка импорта…", 3),
     "node_sync_push_full": ("Синхронизация HA…", "Подготовка push-full…", 5),
@@ -80,6 +82,8 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "cidr_deploy": "Развёртывание завершено",
     "antifilter_refresh": "Antifilter обновлён",
     "vpn_network_publish": "Публикация панели завершена",
+    "portal_readiness_check": "Проверка готовности завершена",
+    "portal_readiness_prepare": "Подготовка портала завершена",
     "config_bulk_op": "Массовая операция завершена",
     "config_csv_import": "Импорт CSV завершён",
     "node_sync_push_full": "Синхронизация HA завершена",
@@ -115,6 +119,14 @@ class BackgroundTaskService:
             try:
                 parsed = json.loads(output)
             except (TypeError, ValueError, json.JSONDecodeError):
+                return None
+            return parsed if isinstance(parsed, dict) else None
+        if task_type in {"portal_readiness_check", "portal_readiness_prepare"} and output:
+            try:
+                from app.services.portal_readiness import parse_portal_readiness_trailer
+
+                parsed = parse_portal_readiness_trailer(output)
+            except Exception:
                 return None
             return parsed if isinstance(parsed, dict) else None
         if task_type not in _PIPELINE_TASK_TYPES or not output:
@@ -836,6 +848,64 @@ class BackgroundTaskService:
             "portal_domain": portal_domain,
             "access_url": access_url,
             "publish_mode": mode,
+        }
+
+    def task_portal_readiness(
+        self,
+        payload: dict[str, object],
+        progress_updater: Callable[[int, str, str | None], None] | None = None,
+        *,
+        mode: str,
+    ) -> dict[str, Any]:
+        """Run nginx portal readiness check/prepare and parse KEY=value trailer."""
+        from app.services.portal_readiness import parse_portal_readiness_trailer
+
+        captured_mode = str(mode or "").strip().lower()
+        if captured_mode not in {"check", "prepare"}:
+            raise RuntimeError(f"Неизвестный режим проверки портала: {mode}")
+
+        portal_domain = str(payload.get("portal_domain") or "").strip()
+        if not portal_domain:
+            raise RuntimeError("portal_domain обязателен")
+
+        script = PROJECT_ROOT / "scripts" / "nginx-portal-readiness.sh"
+        if not script.is_file():
+            raise RuntimeError(f"Скрипт не найден: {script}")
+
+        flag = "--check" if captured_mode == "check" else "--prepare"
+        cmd_env: dict[str, str] = {
+            "NON_INTERACTIVE": "true",
+            "PORTAL_DOMAIN": portal_domain,
+            "DOMAIN": str(payload.get("domain") or "").strip(),
+            "PUBLISH_MODE": str(payload.get("publish_mode") or "").strip(),
+        }
+
+        if progress_updater:
+            progress_updater(
+                30,
+                "Проверка готовности портала…"
+                if captured_mode == "check"
+                else "Подготовка портала…",
+            )
+
+        stdout, stderr = self.run_checked_command(
+            ["bash", str(script), flag],
+            cwd=PROJECT_ROOT,
+            timeout=120,
+            env=cmd_env,
+        )
+
+        log_output = "\n".join(part for part in [stdout, stderr] if part).strip()
+        parsed = parse_portal_readiness_trailer(log_output)
+
+        ready = bool(parsed.get("ready"))
+        message = str(parsed.get("message") or "").strip() or ("Готово" if ready else "Требуется внимание")
+
+        return {
+            "message": message,
+            "log": log_output,
+            "output": log_output,
+            **parsed,
         }
 
     def start_cidr_runner(self, task_id: str, runner: Callable) -> None:
