@@ -20,6 +20,7 @@ from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
+from app.services.openvpn_buffer_guard import fetch_unit_journal
 from app.services.server_monitor import get_server_monitor
 from app.services.local_vpn_status_cache import (
     LocalVpnClientsSnapshot,
@@ -130,6 +131,9 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def get_openvpn_socket_status(self) -> list[dict]: ...
+
+    @abstractmethod
+    def sample_openvpn_journal(self, unit: str, window_seconds: int) -> dict: ...
 
     @abstractmethod
     def parse_wireguard_status(self) -> list[WireGuardPeer]: ...
@@ -676,6 +680,9 @@ class LocalNodeAdapter(NodeAdapter):
 
     def get_openvpn_socket_status(self) -> list[dict]:
         return openvpn_management_service.get_socket_status()
+
+    def sample_openvpn_journal(self, unit: str, window_seconds: int) -> dict:
+        return fetch_unit_journal(unit, window_seconds)
 
     def parse_wireguard_status(self) -> list[WireGuardPeer]:
         return list(self._local_vpn_clients_snapshot().wireguard_peers)
@@ -1336,6 +1343,14 @@ class RemoteNodeAdapter(NodeAdapter):
     def get_openvpn_socket_status(self) -> list[dict]:
         data = self._request("GET", "/openvpn/management/sockets")
         return data.get("sockets", [])
+
+    def sample_openvpn_journal(self, unit: str, window_seconds: int) -> dict:
+        return self._request(
+            "POST",
+            "/openvpn/buffer-guard/journal-sample",
+            json={"unit": unit, "window_seconds": int(window_seconds)},
+            timeout=60.0,
+        )
 
     def parse_wireguard_status(self) -> list[WireGuardPeer]:
         overview = self._get_monitoring_overview()

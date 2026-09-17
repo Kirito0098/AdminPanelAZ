@@ -44,6 +44,7 @@ from app.services.awg2 import (
     Awg2Service,
     is_awg2_profile_path,
 )
+from app.services.openvpn_buffer_guard import fetch_unit_journal
 
 NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
@@ -172,6 +173,11 @@ class OpenVpnMultihomeRequest(BaseModel):
     enabled: bool = False
 
 
+class OpenVpnJournalSampleRequest(BaseModel):
+    unit: str = Field(min_length=1, max_length=128)
+    window_seconds: int = Field(default=60, ge=5, le=600)
+
+
 class RotateApiKeyRequest(BaseModel):
     new_api_key: str = Field(min_length=24)
 
@@ -294,6 +300,14 @@ def openvpn_multihome_status(_: None = Depends(verify_api_key)):
 @app.post("/openvpn/multihome")
 def openvpn_multihome_ensure(payload: OpenVpnMultihomeRequest, _: None = Depends(verify_api_key)):
     return service.ensure_openvpn_multihome(bool(payload.enabled))
+
+
+@app.post("/openvpn/buffer-guard/journal-sample")
+def openvpn_buffer_guard_journal_sample(
+    payload: OpenVpnJournalSampleRequest,
+    _: None = Depends(verify_api_key),
+):
+    return fetch_unit_journal(payload.unit, payload.window_seconds)
 
 
 @app.get("/clients/openvpn")
