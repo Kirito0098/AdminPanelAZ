@@ -1862,6 +1862,42 @@ export interface NodeOpenVpnMultihomeResponse {
   warnings?: string[]
 }
 
+export type OpenVpnBufferGuardMode =
+  | 'notify'
+  | 'kill'
+  | 'kill_restart'
+  | 'kill_restart_temp_ban'
+
+export interface OpenVpnBufferGuardSettings {
+  node_id: number
+  enabled: boolean
+  mode: OpenVpnBufferGuardMode
+  threshold_count: number
+  window_seconds: number
+  escalate_after_seconds: number
+  cooldown_minutes: number
+  temp_ban_minutes: number
+  watch_units: string[]
+  updated_at?: string | null
+}
+
+export interface OpenVpnBufferGuardEvent {
+  id: number
+  node_id: number
+  created_at: string
+  unit: string
+  common_name?: string | null
+  real_address?: string | null
+  error_count: number
+  window_seconds: number
+  mode: OpenVpnBufferGuardMode
+  actions: string[]
+  result: string
+  detail?: string | null
+  manual: boolean
+  ban_expires_at?: string | null
+}
+
 export interface AntizapretSettingsResponse {
   settings: Record<string, string>
   schema: AntizapretSettingField[]
