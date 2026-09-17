@@ -1,9 +1,10 @@
 import json
-from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-from app.database import SessionLocal, run_db_migrations
+from app.database import Base
 from app.models import Node, OpenVpnBufferGuardEvent, OpenVpnBufferGuardMode
 from app.services import openvpn_buffer_guard as guard
 
@@ -32,19 +33,22 @@ class FakeAdapter:
         return {"success": True, "client_name": client_name}
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _migrate_db() -> None:
-    # Ensure all tables (including buffer-guard) exist.
-    run_db_migrations()
+def _make_db():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    return engine, session
 
 
-@pytest.fixture
+@pytest.fixture()
 def db_session():
-    db = SessionLocal()
+    engine, session = _make_db()
     try:
-        yield db
+        yield session
     finally:
-        db.close()
+        session.close()
+        engine.dispose()
 
 
 def _make_node(db, *, is_local: bool = True) -> Node:
@@ -110,6 +114,8 @@ def test_notify_mode_does_not_kill(db_session, monkeypatch):
     assert ev.mode == OpenVpnBufferGuardMode.notify.value
     assert ev.error_count == 3
     assert ev.common_name == "client-x"
+    assert ev.result == "notified"
+    assert results[0]["result"] == "notified"
 
 
 def test_kill_restart_escalates(db_session, monkeypatch):
@@ -159,4 +165,58 @@ def test_kill_restart_escalates(db_session, monkeypatch):
     assert ev.common_name == "client-y"
     assert ev.error_count == 6
     assert json.loads(ev.actions_json or "[]"), "actions_json should record performed actions"
+    assert ev.result == "restarted"
+    assert results[0]["result"] == "restarted"
+
+
+def test_manual_scan_with_disabled_settings_runs_findings_only(db_session, monkeypatch):
+    node = _make_node(db_session, is_local=True)
+
+    guard.upsert_settings(
+        db_session,
+        node.id,
+        {
+            "enabled": False,
+            "mode": OpenVpnBufferGuardMode.kill_restart.value,
+            "threshold_count": 2,
+            "window_seconds": 60,
+            "watch_units": ["antizapret-udp"],
+        },
+    )
+
+    adapter = FakeAdapter({"antizapret-udp": _enobufs_text("client-z", count=3)})
+
+    kills: list[tuple[str, str]] = []
+
+    def fake_kill_client(profile_key: str, client_name: str) -> dict:
+        kills.append((profile_key, client_name))
+        return {"success": True}
+
+    monkeypatch.setattr(guard.openvpn_management_service, "kill_client", fake_kill_client)
+
+    slept: list[float] = []
+
+    def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(guard.time, "sleep", fake_sleep)
+
+    results = guard.run_guard_pass(db_session, adapter, node.id, manual=True)
+
+    assert results, "manual run should still return findings"
+    assert results[0]["threshold_exceeded"] is True
+    assert results[0]["actions"] == []
+    assert results[0]["result"] == "notified"
+    assert kills == []
+    assert adapter.kills == []
+    assert adapter.restarts == []
+    assert slept == []
+
+    events = guard.list_events(db_session, node.id, limit=5)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.mode == OpenVpnBufferGuardMode.kill_restart.value
+    assert ev.common_name == "client-z"
+    assert ev.error_count == 3
+    assert ev.result == "notified"
 

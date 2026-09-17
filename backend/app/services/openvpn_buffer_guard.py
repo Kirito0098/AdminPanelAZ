@@ -364,6 +364,23 @@ def run_guard_pass(
                         }
                     )
 
+            # Derive high-level result label from actions performed.
+            if actions:
+                kinds = {str(a.get("type") or "") for a in actions}
+            else:
+                kinds = set()
+            if "temp_ban" in kinds:
+                event_result_label = "banned"
+            elif "restart" in kinds:
+                event_result_label = "restarted"
+            elif "kill" in kinds:
+                event_result_label = "killed"
+            elif kinds:
+                event_result_label = "failed"
+            else:
+                # Threshold exceeded but no actions (notify / manual-only).
+                event_result_label = "notified"
+
             event = OpenVpnBufferGuardEvent(
                 node_id=node_id,
                 created_at=now,
@@ -374,7 +391,7 @@ def run_guard_pass(
                 window_seconds=int(settings_row.window_seconds),
                 mode=mode_enum.value,
                 actions_json=json.dumps(actions, ensure_ascii=False),
-                result="ok" if apply_actions else "detected",
+                result=event_result_label,
                 detail=json.dumps(summary, ensure_ascii=False),
                 manual=manual,
                 ban_expires_at=ban_expires_at,
