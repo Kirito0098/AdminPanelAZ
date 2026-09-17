@@ -20,7 +20,7 @@ from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
-from app.services.openvpn_buffer_guard import fetch_unit_journal
+from app.services.openvpn_buffer_guard import fetch_unit_journal, normalize_watch_unit
 from app.services.server_monitor import get_server_monitor
 from app.services.local_vpn_status_cache import (
     LocalVpnClientsSnapshot,
@@ -206,6 +206,9 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def unblock_awg2_client_runtime(self, client_name: str) -> dict: ...
+
+    @abstractmethod
+    def kill_openvpn_client(self, unit: str, client_name: str) -> dict: ...
 
     @abstractmethod
     def disconnect_openvpn_client(self, client_name: str) -> dict: ...
@@ -759,6 +762,10 @@ class LocalNodeAdapter(NodeAdapter):
 
     def unblock_awg2_client_runtime(self, client_name: str) -> dict:
         return awg2_unblock_client_runtime(client_name)
+
+    def kill_openvpn_client(self, unit: str, client_name: str) -> dict:
+        profile_key = normalize_watch_unit(unit) or unit
+        return openvpn_management_service.kill_client(profile_key, client_name)
 
     def disconnect_openvpn_client(self, client_name: str) -> dict:
         return openvpn_management_service.disconnect_client(client_name)
@@ -1350,6 +1357,15 @@ class RemoteNodeAdapter(NodeAdapter):
             "/openvpn/buffer-guard/journal-sample",
             json={"unit": unit, "window_seconds": int(window_seconds)},
             timeout=60.0,
+        )
+
+    def kill_openvpn_client(self, unit: str, client_name: str) -> dict:
+        payload = {"unit": unit, "client_name": client_name}
+        return self._request(
+            "POST",
+            "/openvpn/management/kill",
+            json=payload,
+            timeout=30.0,
         )
 
     def parse_wireguard_status(self) -> list[WireGuardPeer]:

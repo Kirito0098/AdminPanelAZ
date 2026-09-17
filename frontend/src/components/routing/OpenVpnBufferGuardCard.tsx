@@ -5,8 +5,8 @@ import {
   putBufferGuardSettings,
   scanBufferGuard,
 } from '@/api/client'
+import type { OpenVpnBufferGuardScanResult } from '@/api/openvpnBufferGuard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -264,10 +264,11 @@ export default function OpenVpnBufferGuardCard({
     if (activeNodeId == null || disabled) return
     setScanBusy(true)
     try {
-      const results = await scanBufferGuard(activeNodeId)
-      const triggered = Array.isArray(results)
-        ? results.some((r) => r && typeof r === 'object' && (r as any).threshold_exceeded)
-        : false
+      const results = (await scanBufferGuard(activeNodeId)) as OpenVpnBufferGuardScanResult[]
+      const triggered =
+        Array.isArray(results) && results.length > 0
+          ? results.some((r) => r && typeof r === 'object' && r.threshold_exceeded)
+          : false
       if (triggered) {
         notifyWarning(
           'Порог ENOBUFS превышен — проверьте последний блок ниже и логи OpenVPN. Ручной запуск не применяет действия.',

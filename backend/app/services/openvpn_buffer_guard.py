@@ -196,13 +196,21 @@ def _node_antizapret_path(node: Node) -> Path:
 
 def _kill_client(node: Node | None, adapter, unit: str, common_name: str) -> dict:
     """Kill client session, preferring adapter for remote nodes."""
+    # Prefer explicit kill-by-unit on the adapter so that remote nodes
+    # can target the specific OpenVPN profile that produced ENOBUFS.
+    kill_by_unit = getattr(adapter, "kill_openvpn_client", None)
+    if callable(kill_by_unit):
+        return kill_by_unit(unit, common_name)
+
     if node is not None and node.is_local:
         # Local panel host: kill via management socket for the specific profile.
         return openvpn_management_service.kill_client(unit, common_name)
-    # Remote nodes (or unknown) — rely on adapter so /openvpn/management/disconnect works.
+
+    # Remote nodes (or unknown) — fall back to disconnect-by-name if available.
     disconnect = getattr(adapter, "disconnect_openvpn_client", None)
     if callable(disconnect):
         return disconnect(common_name)
+
     # Fallback to management socket best-effort.
     return openvpn_management_service.kill_client(unit, common_name)
 
@@ -285,6 +293,67 @@ def run_guard_pass(
 
     for unit in watch_units:
         sample = adapter.sample_openvpn_journal(unit, int(settings_row.window_seconds))
+
+        # Journal sample failure must not be treated as "0 ENOBUFS".
+        # Record a failed event, notify, and skip kill/restart for this unit.
+        if not bool(sample.get("ok", True)):
+            error_message = str(sample.get("error") or "journal sample failed")
+            actions: list[dict] = []
+            ban_expires_at: datetime | None = None
+            event_result_label = "failed"
+
+            try:
+                admin_notify_service.send(
+                    db,
+                    "openvpn_buffer_guard",
+                    target_name="",
+                    target_type="openvpn",
+                    details=f"journal sample failed for {unit}: {error_message}",
+                    node_id=node.id if node else None,
+                    node_name=node.name if node else None,
+                )
+            except Exception:
+                # Notifications are best-effort; failure must not break the guard.
+                pass
+
+            event_detail = {
+                "sample_ok": False,
+                "error": error_message,
+            }
+            event = OpenVpnBufferGuardEvent(
+                node_id=node_id,
+                created_at=now,
+                unit=unit,
+                common_name=None,
+                real_address=None,
+                error_count=0,
+                window_seconds=int(settings_row.window_seconds),
+                mode=mode_enum.value,
+                actions_json=json.dumps(actions, ensure_ascii=False),
+                result=event_result_label,
+                detail=json.dumps(event_detail, ensure_ascii=False),
+                manual=manual,
+                ban_expires_at=ban_expires_at,
+            )
+            db.add(event)
+            db.commit()
+
+            results.append(
+                {
+                    "unit": unit,
+                    "total": 0,
+                    "threshold": threshold,
+                    "threshold_exceeded": False,
+                    "mode": mode_enum.value,
+                    "top_cn": None,
+                    "top_real_address": None,
+                    "manual": manual,
+                    "actions": actions,
+                    "result": event_result_label,
+                }
+            )
+            continue
+
         text = str(sample.get("text") or "")
         summary = summarize_enobufs(text)
         total = int(summary.get("total") or 0)
@@ -327,7 +396,11 @@ def run_guard_pass(
                 delay = max(0, int(settings_row.escalate_after_seconds))
                 if delay:
                     time.sleep(float(delay))
-                second = adapter.sample_openvpn_journal(unit, int(settings_row.window_seconds))
+
+                # Use a short post-kill window close to the escalation delay
+                # so that pre-kill ENOBUFS do not force a restart.
+                second_window = max(5, int(settings_row.escalate_after_seconds or settings_row.window_seconds))
+                second = adapter.sample_openvpn_journal(unit, int(second_window))
                 second_summary = summarize_enobufs(str(second.get("text") or ""))
                 second_total = int(second_summary.get("total") or 0)
                 if second_total >= max(1, threshold // 2):
@@ -418,13 +491,14 @@ def run_guard_pass(
     return results
 
 
-def process_temp_ban_expiries(db: Session, adapter) -> list[dict]:
+def process_temp_ban_expiries(db: Session) -> list[dict]:
     """Lift temporary guard bans whose ban_expires_at has passed.
 
     Returns a summary per processed client.
     """
     try:
         from app.services.access_policy import AccessPolicyService  # local import to avoid import cycles
+        from app.services.node_manager import get_adapter_for_node  # local import to avoid cycles
     except Exception:
         return []
 
@@ -444,7 +518,7 @@ def process_temp_ban_expiries(db: Session, adapter) -> list[dict]:
     settings = get_app_settings()
     results: list[dict] = []
 
-    # Group by node and client.
+    # Group by (node, client) so we can resolve per-node adapters.
     grouped: dict[tuple[int, str], list[OpenVpnBufferGuardEvent]] = {}
     for ev in expired_events:
         if not ev.common_name:
@@ -452,10 +526,25 @@ def process_temp_ban_expiries(db: Session, adapter) -> list[dict]:
         key = (ev.node_id, ev.common_name)
         grouped.setdefault(key, []).append(ev)
 
+    adapter_cache: dict[int, object | None] = {}
+
     for (node_id, client_name), events in grouped.items():
         node = _node_for_id(db, node_id)
         if node is None:
             continue
+
+        if node_id not in adapter_cache:
+            try:
+                adapter_cache[node_id] = get_adapter_for_node(node)
+            except Exception:
+                # If adapter resolution fails (e.g. node misconfigured or offline),
+                # keep bans as-is and move on.
+                adapter_cache[node_id] = None
+
+        adapter_for_node = adapter_cache.get(node_id)
+        if adapter_for_node is None:
+            continue
+
         try:
             try:
                 meta = json.loads(node.node_metadata or "{}")
@@ -468,7 +557,7 @@ def process_temp_ban_expiries(db: Session, adapter) -> list[dict]:
                 antizapret_path=antizapret_path,
                 node_id=node.id,
                 node_name=node.name,
-                adapter=adapter,
+                adapter=adapter_for_node,
             )
             banned = svc.read_banned_clients()
             changed = False
@@ -488,6 +577,7 @@ def process_temp_ban_expiries(db: Session, adapter) -> list[dict]:
                 }
             )
         except Exception:
+            # If banned_clients write failed, we must not clear ban_expires_at.
             continue
 
     return results

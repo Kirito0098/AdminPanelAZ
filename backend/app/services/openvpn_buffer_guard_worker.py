@@ -54,7 +54,7 @@ def _run_once() -> None:
         if not nodes:
             # Still clear any expired bans (in case settings were toggled off).
             try:
-                process_temp_ban_expiries(db, adapter=None)
+                process_temp_ban_expiries(db)
             except Exception:  # pragma: no cover - defensive
                 logger.exception("openvpn_buffer_guard: temp ban expiry processing failed")
             return
@@ -81,7 +81,7 @@ def _run_once() -> None:
                 logger.exception("openvpn_buffer_guard: guard pass failed for node %s", node.id)
 
         try:
-            process_temp_ban_expiries(db, adapter=None)
+            process_temp_ban_expiries(db)
         except Exception:  # pragma: no cover - defensive
             logger.exception("openvpn_buffer_guard: temp ban expiry processing failed")
     finally:

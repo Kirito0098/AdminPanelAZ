@@ -44,7 +44,7 @@ from app.services.awg2 import (
     Awg2Service,
     is_awg2_profile_path,
 )
-from app.services.openvpn_buffer_guard import fetch_unit_journal
+from app.services.openvpn_buffer_guard import fetch_unit_journal, normalize_watch_unit
 
 NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
@@ -178,6 +178,11 @@ class OpenVpnJournalSampleRequest(BaseModel):
     window_seconds: int = Field(default=60, ge=5, le=600)
 
 
+class OpenVpnKillClientRequest(BaseModel):
+    unit: str = Field(min_length=1, max_length=128)
+    client_name: str = Field(min_length=1, max_length=32)
+
+
 class RotateApiKeyRequest(BaseModel):
     new_api_key: str = Field(min_length=24)
 
@@ -290,6 +295,14 @@ def server_ip(_: None = Depends(verify_api_key)):
 @app.post("/openvpn/management/disconnect")
 def openvpn_disconnect(payload: WireGuardClientRequest, _: None = Depends(verify_api_key)):
     return openvpn_management_service.disconnect_client(payload.client_name)
+
+
+@app.post("/openvpn/management/kill")
+def openvpn_kill(payload: OpenVpnKillClientRequest, _: None = Depends(verify_api_key)):
+    unit = normalize_watch_unit(payload.unit)
+    if not unit:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимый OpenVPN unit")
+    return openvpn_management_service.kill_client(unit, payload.client_name)
 
 
 @app.get("/openvpn/multihome")
