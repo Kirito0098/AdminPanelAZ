@@ -58,6 +58,7 @@ DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
     "cidr_ingest_partial": True,
     "noc_report": True,
     "alert_rule": True,
+    "openvpn_buffer_guard_triggered": True,
 }
 
 

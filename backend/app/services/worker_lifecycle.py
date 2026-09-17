@@ -108,3 +108,8 @@ def should_start_access_expiry() -> bool:
 
 def should_start_cloudflare_ips_scheduler() -> bool:
     return True
+
+
+def should_start_openvpn_buffer_guard() -> bool:
+    # Always spawn — loop re-checks per-node settings each tick.
+    return True

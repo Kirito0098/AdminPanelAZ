@@ -54,6 +54,7 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("cidr_ingest_partial", "Частичное обновление CIDR БД"),
     ("noc_report", "NOC: ежедневная/еженедельная сводка"),
     ("alert_rule", "Alert rule: срабатывание порога"),
+    ("openvpn_buffer_guard_triggered", "OpenVPN Buffer Guard"),
 ]
 
 # Owner self-service reminders (Mini App / personal prefs). Not admin broadcast events.
@@ -159,6 +160,7 @@ _PREF_KEY_MAP = {
     "traffic_limit_block": "traffic_limit",
     "traffic_limit_unblock": "traffic_limit",
     "node_online": "node_offline",
+    "openvpn_buffer_guard": "openvpn_buffer_guard_triggered",
 }
 
 
@@ -1220,6 +1222,17 @@ class AdminNotifyService:
                 detail_lines=detail_lines,
             )
 
+        if event_type == "openvpn_buffer_guard":
+            detail_lines = _client_detail_lines(target_type, target_name)
+            if details:
+                detail_lines.append(_line_text("📋", "Детали", details))
+            _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
+            return _format_notify_card(
+                "🧱 <b>OpenVPN Buffer Guard</b>",
+                when,
+                detail_lines=detail_lines,
+            )
+
         if event_type == "cidr_deploy_failed":
             detail_lines = [_line_text("📋", "Детали", details or "Развёртывание CIDR завершилось с ошибкой")]
             return _format_notify_card(
@@ -1454,6 +1467,13 @@ def _preview_event_build_kwargs(event_key: str, *, actor_username: str) -> dict 
             "event_type": "alert_rule",
             "target_name": "CPU > 90% on RU-1",
             "details": "текущее: 94.2%, порог: 90%",
+            **node_ctx,
+        },
+        "openvpn_buffer_guard_triggered": {
+            "event_type": "openvpn_buffer_guard",
+            "target_name": "demo-ovpn",
+            "target_type": "openvpn",
+            "details": "750 ENOBUFS in vpn-udp",
             **node_ctx,
         },
     }

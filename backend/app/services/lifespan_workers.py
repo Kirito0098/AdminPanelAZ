@@ -27,6 +27,7 @@ from app.services.wg_policy_sync_worker import run_wg_policy_sync_loop
 from app.services.user_reminder_worker import run_user_reminder_loop
 from app.services.noc_report_scheduler import run_noc_report_scheduler_loop
 from app.services.alert_rule_worker import run_alert_rules_loop
+from app.services.openvpn_buffer_guard_worker import run_openvpn_buffer_guard_loop
 from app.services.webhook_delivery_worker import run_webhook_delivery_loop
 from app.services.worker_lifecycle import (
     should_start_backup_scheduler,
@@ -50,6 +51,7 @@ from app.services.worker_lifecycle import (
     should_start_awg2_expire,
     should_start_access_expiry,
     should_start_cloudflare_ips_scheduler,
+    should_start_openvpn_buffer_guard,
 )
 
 TaskFactory = Callable[[], asyncio.Task]
@@ -79,6 +81,7 @@ def get_worker_startup_plan() -> dict[str, bool]:
         "awg2_expire": should_start_awg2_expire(),
         "access_expiry": should_start_access_expiry(),
         "cloudflare_ips_scheduler": should_start_cloudflare_ips_scheduler(),
+        "openvpn_buffer_guard": should_start_openvpn_buffer_guard(),
     }
 
 
@@ -143,6 +146,8 @@ def spawn_background_tasks(
         tasks["access_expiry"] = create_task(run_access_expiry_loop())
     if plan.get("cloudflare_ips_scheduler"):
         tasks["cloudflare_ips_scheduler"] = create_task(run_cloudflare_ips_scheduler_loop())
+    if plan.get("openvpn_buffer_guard"):
+        tasks["openvpn_buffer_guard"] = create_task(run_openvpn_buffer_guard_loop())
 
     tasks["webhook_delivery"] = create_task(run_webhook_delivery_loop())
 

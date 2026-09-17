@@ -855,6 +855,48 @@ class AlertRuleEvaluateResponse(BaseModel):
     results: list[AlertRuleEvaluateResult]
 
 
+class OpenVpnBufferGuardSettingsOut(BaseModel):
+    node_id: int
+    enabled: bool
+    mode: str
+    threshold_count: int
+    window_seconds: int
+    escalate_after_seconds: int
+    cooldown_minutes: int
+    temp_ban_minutes: int
+    watch_units: list[str]
+    updated_at: datetime | None = None
+
+
+class OpenVpnBufferGuardSettingsUpdate(BaseModel):
+    node_id: int
+    enabled: bool
+    mode: str
+    threshold_count: int = Field(ge=10, le=1_000_000)
+    window_seconds: int = Field(ge=10, le=600)
+    escalate_after_seconds: int = Field(ge=5, le=300)
+    cooldown_minutes: int = Field(ge=1, le=1440)
+    temp_ban_minutes: int = Field(ge=5, le=10_080)
+    watch_units: list[str]
+
+
+class OpenVpnBufferGuardEventOut(BaseModel):
+    id: int
+    node_id: int
+    created_at: datetime
+    unit: str
+    common_name: str | None
+    real_address: str | None
+    error_count: int
+    window_seconds: int
+    mode: str
+    actions: list[str]
+    result: str
+    detail: str | None
+    manual: bool
+    ban_expires_at: datetime | None
+
+
 class GeoIpStatusResponse(BaseModel):
     loaded: bool
     source: Literal["local", "ip-api"]
