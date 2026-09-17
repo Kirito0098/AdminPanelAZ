@@ -752,6 +752,48 @@ class AlertRule(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class OpenVpnBufferGuardMode(str, enum.Enum):
+    notify = "notify"
+    kill = "kill"
+    kill_restart = "kill_restart"
+    kill_restart_temp_ban = "kill_restart_temp_ban"
+
+
+class OpenVpnBufferGuardSettings(Base):
+    __tablename__ = "openvpn_buffer_guard_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), unique=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    mode: Mapped[str] = mapped_column(String(32), default=OpenVpnBufferGuardMode.kill_restart.value)
+    threshold_count: Mapped[int] = mapped_column(Integer, default=500)
+    window_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    escalate_after_seconds: Mapped[int] = mapped_column(Integer, default=30)
+    cooldown_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    temp_ban_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    watch_units_json: Mapped[str] = mapped_column(Text, default='["antizapret-udp","vpn-udp"]')
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class OpenVpnBufferGuardEvent(Base):
+    __tablename__ = "openvpn_buffer_guard_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    unit: Mapped[str] = mapped_column(String(64))
+    common_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    real_address: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error_count: Mapped[int] = mapped_column(Integer, default=0)
+    window_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    mode: Mapped[str] = mapped_column(String(32))
+    actions_json: Mapped[str] = mapped_column(Text, default="[]")
+    result: Mapped[str] = mapped_column(String(32), default="failed")
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    manual: Mapped[bool] = mapped_column(Boolean, default=False)
+    ban_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class WebhookDelivery(Base):
     __tablename__ = "webhook_delivery"
 

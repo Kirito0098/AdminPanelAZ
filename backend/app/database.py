@@ -1068,6 +1068,81 @@ def _migrate_alert_rules_table() -> None:
     logger.info("DB migration: created alert_rules table")
 
 
+def _migrate_openvpn_buffer_guard_tables() -> None:
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    created: list[str] = []
+    with engine.begin() as conn:
+        if "openvpn_buffer_guard_settings" not in table_names:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE openvpn_buffer_guard_settings (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        node_id INTEGER NOT NULL,
+                        enabled INTEGER NOT NULL DEFAULT 0,
+                        mode VARCHAR(32) NOT NULL DEFAULT 'kill_restart',
+                        threshold_count INTEGER NOT NULL DEFAULT 500,
+                        window_seconds INTEGER NOT NULL DEFAULT 60,
+                        escalate_after_seconds INTEGER NOT NULL DEFAULT 30,
+                        cooldown_minutes INTEGER NOT NULL DEFAULT 15,
+                        temp_ban_minutes INTEGER NOT NULL DEFAULT 60,
+                        watch_units_json TEXT NOT NULL DEFAULT '["antizapret-udp","vpn-udp"]',
+                        updated_at DATETIME,
+                        UNIQUE (node_id),
+                        FOREIGN KEY(node_id) REFERENCES nodes (id)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_openvpn_buffer_guard_settings_node_id "
+                    "ON openvpn_buffer_guard_settings (node_id)"
+                )
+            )
+            created.append("openvpn_buffer_guard_settings")
+        if "openvpn_buffer_guard_events" not in table_names:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE openvpn_buffer_guard_events (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        node_id INTEGER NOT NULL,
+                        created_at DATETIME,
+                        unit VARCHAR(64) NOT NULL,
+                        common_name VARCHAR(128),
+                        real_address VARCHAR(128),
+                        error_count INTEGER NOT NULL DEFAULT 0,
+                        window_seconds INTEGER NOT NULL DEFAULT 60,
+                        mode VARCHAR(32) NOT NULL,
+                        actions_json TEXT NOT NULL DEFAULT '[]',
+                        result VARCHAR(32) NOT NULL DEFAULT 'failed',
+                        detail TEXT,
+                        manual INTEGER NOT NULL DEFAULT 0,
+                        ban_expires_at DATETIME,
+                        FOREIGN KEY(node_id) REFERENCES nodes (id)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_openvpn_buffer_guard_events_node_id "
+                    "ON openvpn_buffer_guard_events (node_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_openvpn_buffer_guard_events_created_at "
+                    "ON openvpn_buffer_guard_events (created_at)"
+                )
+            )
+            created.append("openvpn_buffer_guard_events")
+    if created:
+        logger.info("DB migration: created %s", ", ".join(created))
+
+
 def _migrate_user_traffic_sample_node_created_index() -> None:
     inspector = inspect(engine)
     if "user_traffic_sample" not in inspector.get_table_names():
@@ -1126,6 +1201,7 @@ def _migrate_client_portal_tokens_active_unique() -> None:
 def run_db_migrations() -> None:
     """Lightweight SQLite migrations for columns added after initial deploy."""
     _migrate_alert_rules_table()
+    _migrate_openvpn_buffer_guard_tables()
     _migrate_node_sync_groups_table()
     _migrate_node_sync_groups_wireguard_domain()
     _migrate_vpn_configs_ha_links()
