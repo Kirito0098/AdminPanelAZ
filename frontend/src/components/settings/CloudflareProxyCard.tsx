@@ -64,7 +64,7 @@ export default function CloudflareProxyCard() {
   }, [load])
 
   async function patchSettings(
-    patch: Partial<Pick<CloudflareProxySettings, 'enabled' | 'auto_update' | 'interval_days'>>,
+    patch: Partial<Pick<CloudflareProxySettings, 'enabled' | 'origin_lock_enabled' | 'auto_update' | 'interval_days'>>,
     opts?: { silent?: boolean },
   ) {
     if (!settings) return
@@ -194,6 +194,34 @@ export default function CloudflareProxyCard() {
             disabled={busy}
             onCheckedChange={(checked) => void handleEnabledChange(checked)}
             aria-label="Cloudflare proxy-mode"
+          />
+        </div>
+
+        <div
+          className={cn(
+            'flex items-start justify-between gap-4 rounded-xl border bg-muted/15 px-4 py-3',
+            settings.origin_lock_enabled && settings.enabled && 'border-primary/20 bg-primary/5',
+          )}
+        >
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Доступ только через Cloudflare</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {settings.enabled
+                ? 'Nginx пускает панель только с IP Cloudflare, localhost и локальных/VPN-сетей (RFC1918). Прямой доступ по публичному IP сервера будет запрещён (403).'
+                : 'Сначала включите Cloudflare proxy-mode.'}
+            </p>
+          </div>
+          <Switch
+            checked={settings.origin_lock_enabled}
+            disabled={busy || !settings.enabled}
+            onCheckedChange={(checked) => {
+              void (async () => {
+                if (!settings || saving || refreshing) return
+                setSettings({ ...settings, origin_lock_enabled: checked })
+                await patchSettings({ origin_lock_enabled: checked }, { silent: true })
+              })()
+            }}
+            aria-label="Доступ только через Cloudflare"
           />
         </div>
 
