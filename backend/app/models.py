@@ -86,6 +86,7 @@ class User(Base):
     config_quota: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     can_create_configs: Mapped[bool] = mapped_column(Boolean, default=True)
     visible_vpn_profiles: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    access_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     vpn_configs: Mapped[list["VpnConfig"]] = relationship(back_populates="owner")
