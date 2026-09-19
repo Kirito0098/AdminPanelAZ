@@ -71,6 +71,7 @@ def _setting_value(db, key: str) -> str | None:
 def test_get_cloudflare_proxy_settings_uses_persisted_state(client, db, tmp_path: Path, monkeypatch):
     monkeypatch.setattr(cps, "_ENV_FILE", tmp_path / ".env")
     db.add(AppSetting(key=cps.SETTING_CLOUDFLARE_PROXY_ENABLED, value="false"))
+    db.add(AppSetting(key=cps.SETTING_CLOUDFLARE_ORIGIN_LOCK, value="true"))
     db.add(AppSetting(key=cps.SETTING_CLOUDFLARE_IPS_AUTO_UPDATE, value="true"))
     db.add(AppSetting(key=cps.SETTING_CLOUDFLARE_IPS_UPDATE_INTERVAL_DAYS, value="14"))
     db.add(AppSetting(key=cps.SETTING_LAST_SUCCESS_AT, value="2026-08-20T10:00:00+00:00"))
@@ -83,6 +84,7 @@ def test_get_cloudflare_proxy_settings_uses_persisted_state(client, db, tmp_path
     assert resp.status_code == 200
     body = resp.json()
     assert body["enabled"] is False
+    assert body["origin_lock_enabled"] is True
     assert body["auto_update"] is True
     assert body["interval_days"] == 14
     assert body["last_success_at"] == "2026-08-20T10:00:00+00:00"
@@ -92,6 +94,8 @@ def test_get_cloudflare_proxy_settings_uses_persisted_state(client, db, tmp_path
 
 def test_patch_cloudflare_proxy_regenerates_nginx_on_enabled_toggle(client, db, tmp_path: Path, monkeypatch):
     monkeypatch.setattr(cps, "_ENV_FILE", tmp_path / ".env")
+    db.add(AppSetting(key=cps.SETTING_CLOUDFLARE_ORIGIN_LOCK, value="true"))
+    db.commit()
 
     with patch(
         "app.routers.settings_cloudflare.cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy"
@@ -104,10 +108,12 @@ def test_patch_cloudflare_proxy_regenerates_nginx_on_enabled_toggle(client, db, 
     assert resp.status_code == 200
     body = resp.json()
     assert body["enabled"] is False
+    assert body["origin_lock_enabled"] is False
     assert body["auto_update"] is True
     assert body["interval_days"] == 21
     regen.assert_called_once()
     assert _setting_value(db, cps.SETTING_CLOUDFLARE_PROXY_ENABLED) == "false"
+    assert _setting_value(db, cps.SETTING_CLOUDFLARE_ORIGIN_LOCK) == "false"
     assert _setting_value(db, cps.SETTING_CLOUDFLARE_IPS_AUTO_UPDATE) == "true"
     assert _setting_value(db, cps.SETTING_CLOUDFLARE_IPS_UPDATE_INTERVAL_DAYS) == "21"
 
@@ -124,6 +130,8 @@ def test_patch_cloudflare_proxy_skips_regeneration_when_enabled_unchanged(client
 
 def test_patch_cloudflare_proxy_reverts_flags_when_regeneration_fails(client, db, tmp_path: Path, monkeypatch):
     monkeypatch.setattr(cps, "_ENV_FILE", tmp_path / ".env")
+    db.add(AppSetting(key=cps.SETTING_CLOUDFLARE_ORIGIN_LOCK, value="true"))
+    db.commit()
 
     with patch(
         "app.routers.settings_cloudflare.cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy",
@@ -139,6 +147,44 @@ def test_patch_cloudflare_proxy_reverts_flags_when_regeneration_fails(client, db
     assert "nginx -t failed" in resp.json()["detail"]
     regen.assert_called_once()
     assert _setting_value(db, cps.SETTING_CLOUDFLARE_PROXY_ENABLED) == "true"
+    assert _setting_value(db, cps.SETTING_CLOUDFLARE_ORIGIN_LOCK) == "true"
+
+
+def test_patch_origin_lock_requires_proxy_enabled(client, db):
+    db.add(AppSetting(key=cps.SETTING_CLOUDFLARE_PROXY_ENABLED, value="false"))
+    db.commit()
+
+    resp = client.patch("/api/settings/cloudflare-proxy", json={"origin_lock_enabled": True})
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Сначала включите Cloudflare proxy-mode"
+
+
+def test_patch_origin_lock_requires_valid_snippet(client, db, tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(cps, "_ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr(cps, "has_valid_origin_allow_snippet", lambda: False)
+
+    with patch(
+        "app.routers.settings_cloudflare.cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy"
+    ):
+        resp = client.patch("/api/settings/cloudflare-proxy", json={"origin_lock_enabled": True})
+
+    assert resp.status_code == 400
+    assert "Обновить" in resp.json()["detail"] or "списк" in resp.json()["detail"].lower()
+
+
+def test_patch_origin_lock_regenerates_nginx(client, db, tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(cps, "_ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr(cps, "has_valid_origin_allow_snippet", lambda: True)
+
+    with patch(
+        "app.routers.settings_cloudflare.cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy"
+    ) as regen:
+        resp = client.patch("/api/settings/cloudflare-proxy", json={"origin_lock_enabled": True})
+
+    assert resp.status_code == 200
+    assert resp.json()["origin_lock_enabled"] is True
+    regen.assert_called_once()
 
 
 def test_refresh_cloudflare_proxy_forwards_force_flag(client):
@@ -151,6 +197,7 @@ def test_refresh_cloudflare_proxy_forwards_force_flag(client):
         "message": "refreshed",
         "state": {
             "enabled": True,
+            "origin_lock_enabled": False,
             "auto_update": False,
             "interval_days": 7,
             "last_success_at": "2026-08-20T10:01:00+00:00",
