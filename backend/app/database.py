@@ -1081,8 +1081,8 @@ def _migrate_openvpn_buffer_guard_tables() -> None:
                         id INTEGER NOT NULL PRIMARY KEY,
                         node_id INTEGER NOT NULL,
                         enabled INTEGER NOT NULL DEFAULT 0,
-                        mode VARCHAR(32) NOT NULL DEFAULT 'kill_restart',
-                        threshold_count INTEGER NOT NULL DEFAULT 500,
+                        mode VARCHAR(32) NOT NULL DEFAULT 'notify',
+                        threshold_count INTEGER NOT NULL DEFAULT 40,
                         window_seconds INTEGER NOT NULL DEFAULT 60,
                         escalate_after_seconds INTEGER NOT NULL DEFAULT 30,
                         cooldown_minutes INTEGER NOT NULL DEFAULT 15,
@@ -1141,6 +1141,42 @@ def _migrate_openvpn_buffer_guard_tables() -> None:
             created.append("openvpn_buffer_guard_events")
     if created:
         logger.info("DB migration: created %s", ", ".join(created))
+
+
+def migrate_factory_buffer_guard_thresholds(conn) -> int:
+    from app.services.openvpn_buffer_guard import recommended_threshold
+
+    rows = conn.execute(
+        text(
+            "SELECT id, mode FROM openvpn_buffer_guard_settings "
+            "WHERE threshold_count = 500 AND window_seconds = 60"
+        )
+    ).fetchall()
+    updated = 0
+    for row_id, mode in rows:
+        new_thr = int(recommended_threshold(mode))
+        conn.execute(
+            text(
+                "UPDATE openvpn_buffer_guard_settings "
+                "SET threshold_count = :thr WHERE id = :id"
+            ),
+            {"thr": new_thr, "id": row_id},
+        )
+        updated += 1
+    return updated
+
+
+def _migrate_openvpn_buffer_guard_factory_thresholds() -> None:
+    inspector = inspect(engine)
+    if "openvpn_buffer_guard_settings" not in set(inspector.get_table_names()):
+        return
+    with engine.begin() as conn:
+        updated = migrate_factory_buffer_guard_thresholds(conn)
+    if updated:
+        logger.info(
+            "DB migration: openvpn_buffer_guard factory thresholds updated rows=%s",
+            updated,
+        )
 
 
 def _migrate_user_traffic_sample_node_created_index() -> None:
@@ -1202,6 +1238,7 @@ def run_db_migrations() -> None:
     """Lightweight SQLite migrations for columns added after initial deploy."""
     _migrate_alert_rules_table()
     _migrate_openvpn_buffer_guard_tables()
+    _migrate_openvpn_buffer_guard_factory_thresholds()
     _migrate_node_sync_groups_table()
     _migrate_node_sync_groups_wireguard_domain()
     _migrate_vpn_configs_ha_links()
