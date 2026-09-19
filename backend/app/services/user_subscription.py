@@ -321,11 +321,15 @@ def set_user_access_until(
     *,
     actor: str,
     sync_clients: bool = True,
+    commit: bool = True,
 ) -> User:
     user.access_until = _to_db_datetime(access_until)
     db.add(user)
-    db.commit()
-    db.refresh(user)
+    if commit:
+        db.commit()
+        db.refresh(user)
+    else:
+        db.flush()
     if sync_clients:
-        sync_owned_clients_access_until(db, user, actor=actor, commit=True)
+        sync_owned_clients_access_until(db, user, actor=actor, commit=commit)
     return user

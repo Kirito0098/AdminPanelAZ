@@ -425,21 +425,32 @@ class UnlockCode(Base):
 class UnlockCodeRedemption(Base):
     __tablename__ = "unlock_code_redemptions"
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_unlock_code_redemptions_code_user",
+            "code_id",
+            "user_id",
+            unique=True,
+            sqlite_where=text("user_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_unlock_code_redemptions_code_client_node_orphan",
             "code_id",
             "client_name",
             "node_id",
-            name="uq_unlock_code_redemptions_code_client_node",
+            unique=True,
+            sqlite_where=text("user_id IS NULL"),
         ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code_id: Mapped[int] = mapped_column(ForeignKey("unlock_codes.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
     client_name: Mapped[str] = mapped_column(String(64), index=True)
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     redeemed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     code: Mapped["UnlockCode"] = relationship(back_populates="redemptions")
+    user: Mapped[User | None] = relationship()
     node: Mapped["Node"] = relationship()
 
 

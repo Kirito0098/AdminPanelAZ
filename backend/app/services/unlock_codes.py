@@ -298,13 +298,52 @@ def _client_config_name_and_protocols(db: Session, node_id: int, client_name: st
         .all()
     )
     if not rows:
-        return client_key, set()
+        canonical_name = client_key
+        protocols: set[str] = set()
+        openvpn_row = (
+            db.query(OpenVpnAccessPolicy.client_name)
+            .filter(OpenVpnAccessPolicy.node_id == node_id, OpenVpnAccessPolicy.client_name.ilike(client_key))
+            .first()
+        )
+        if openvpn_row is not None:
+            canonical_name = str(openvpn_row[0] or "").strip() or canonical_name
+            protocols.add("openvpn")
+        if (
+            db.query(WgAccessPolicy.client_name)
+            .filter(WgAccessPolicy.node_id == node_id, WgAccessPolicy.client_name.ilike(client_key))
+            .first()
+            is not None
+        ):
+            protocols.add("wireguard")
+        if (
+            db.query(AmneziaWg2AccessPolicy.client_name)
+            .filter(AmneziaWg2AccessPolicy.node_id == node_id, AmneziaWg2AccessPolicy.client_name.ilike(client_key))
+            .first()
+            is not None
+        ):
+            protocols.add("amneziawg2")
+        return canonical_name, protocols
     canonical_name = str(rows[0][0] or "").strip()
     protocols = {
         str(vpn_type.value if hasattr(vpn_type, "value") else vpn_type).lower()
         for (_name, vpn_type) in rows
     }
     return canonical_name, protocols
+
+
+def _owner_for_client(db: Session, node_id: int, client_name: str) -> User | None:
+    client_key = _normalize_client_name(client_name)
+    return (
+        db.query(User)
+        .join(VpnConfig, VpnConfig.owner_id == User.id)
+        .filter(
+            VpnConfig.node_id == node_id,
+            VpnConfig.client_name.ilike(client_key),
+            VpnConfig.ha_primary_config_id.is_(None),
+        )
+        .order_by(User.id.asc())
+        .first()
+    )
 
 
 def _vpn_config_client_name_for_protocol(
@@ -412,8 +451,16 @@ def _require_unlock_codes_enabled() -> None:
 def _is_duplicate_redemption_error(exc: IntegrityError) -> bool:
     message = str(getattr(exc, "orig", exc)).lower()
     return (
-        "uq_unlock_code_redemptions_code_client_node" in message
+        "uq_unlock_code_redemptions_code_user" in message
+        or "uq_unlock_code_redemptions_code_client_node_orphan" in message
+        or "uq_unlock_code_redemptions_code_client_node" in message
         or "uq_unlock_code_redemptions_code_client" in message
+        or (
+            "unlock_code_redemptions" in message
+            and "code_id" in message
+            and "user_id" in message
+            and "unique" in message
+        )
         or (
             "unlock_code_redemptions" in message
             and "code_id" in message
@@ -445,6 +492,7 @@ def redeem_unlock_code(
     protocols_applied: list[str] = []
     grant_days = 0
     granted_until_by_protocol: dict[str, datetime] = {}
+    owner_user: User | None = None
     try:
         row = db.query(UnlockCode).filter(UnlockCode.code == normalized_code).first()
         if row is None:
@@ -454,23 +502,24 @@ def redeem_unlock_code(
         if row.code_expires_at is not None and _as_utc(row.code_expires_at) <= now:
             raise ValueError(_REDEEM_EXPIRED_MESSAGE)
 
-        if (
-            db.query(UnlockCodeRedemption.id)
-            .filter(
-                UnlockCodeRedemption.code_id == row.id,
-                UnlockCodeRedemption.client_name == client_key,
-                UnlockCodeRedemption.node_id == node_id,
-            )
-            .first()
-            is not None
-        ):
-            raise ValueError(_REDEEM_ALREADY_USED_MESSAGE)
-
         allowed_clients = _parse_allowed_client_names(getattr(row, "allowed_client_names", None))
         if allowed_clients and client_key not in allowed_clients:
             raise ValueError(_REDEEM_CLIENT_NOT_ALLOWED_MESSAGE)
 
         canonical_client_name, client_protocols = _client_config_name_and_protocols(db, node_id, client_key)
+        owner_user = _owner_for_client(db, node_id, client_key)
+        duplicate_query = db.query(UnlockCodeRedemption.id).filter(UnlockCodeRedemption.code_id == row.id)
+        if owner_user is not None:
+            duplicate_query = duplicate_query.filter(UnlockCodeRedemption.user_id == owner_user.id)
+        else:
+            duplicate_query = duplicate_query.filter(
+                UnlockCodeRedemption.client_name == client_key,
+                UnlockCodeRedemption.node_id == node_id,
+                UnlockCodeRedemption.user_id.is_(None),
+            )
+        if duplicate_query.first() is not None:
+            raise ValueError(_REDEEM_ALREADY_USED_MESSAGE)
+
         code_protocols = _parse_code_protocols(row.protocols)
         # Client-bound codes extend the whole profile (all protocols the client has on this node).
         # Unrestricted codes still apply only the protocols stored on the code.
@@ -514,46 +563,73 @@ def redeem_unlock_code(
         grant_days = int(row.grant_days)
         grant_until_base = now
         granted_until_by_protocol = {}
-        profile_grant_until: datetime | None = None
-        if allowed_clients:
-            # One shared profile deadline: extend from the earliest current access (portal "Истекает").
-            current_values = []
-            for protocol in protocols_applied:
-                policy_client_name = (
-                    canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
-                )
-                current_values.append(_as_utc(get_access_until(db, protocol, node_id, policy_client_name)))
-            present = [value for value in current_values if value is not None]
-            profile_base = min(present) if present else grant_until_base
-            profile_grant_until = max(grant_until_base, profile_base) + timedelta(days=grant_days)
+        if owner_user is not None:
+            from app.services import user_subscription as user_subscription
 
-        for protocol in protocols_applied:
-            policy_client_name = canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
-            if profile_grant_until is not None:
-                grant_until = profile_grant_until
-            else:
-                current = get_access_until(db, protocol, node_id, policy_client_name)
-                current_utc = _as_utc(current)
-                grant_until = max(grant_until_base, current_utc or grant_until_base) + timedelta(days=grant_days)
-
-            policy_row = policy_rows[protocol]
-            if policy_row is not None:
-                _clear_policy_block(policy_row, actor="unlock_codes")
-
-            result = set_access_until(
+            current_access_until = user_subscription.get_user_access_until(owner_user)
+            grant_until = max(grant_until_base, current_access_until or grant_until_base) + timedelta(
+                days=grant_days
+            )
+            owner_user = user_subscription.set_user_access_until(
                 db,
-                protocol,
-                node_id,
-                policy_client_name,
+                owner_user,
                 grant_until,
+                actor="unlock_codes",
+                sync_clients=True,
+                commit=False,
+            )
+            user_subscription.clear_access_expired_for_user(
+                db,
+                owner_user,
                 actor="unlock_codes",
                 commit=False,
             )
-            granted_until_by_protocol[protocol] = grant_until
-            access_until_by_protocol[protocol] = result.get("access_until") or grant_until.isoformat()
+            user_access_until = user_subscription.get_user_access_until(owner_user) or grant_until
+            for protocol in protocols_applied:
+                granted_until_by_protocol[protocol] = user_access_until
+                access_until_by_protocol[protocol] = user_access_until.isoformat()
+        else:
+            profile_grant_until: datetime | None = None
+            if allowed_clients:
+                # One shared profile deadline: extend from the earliest current access (portal "Истекает").
+                current_values = []
+                for protocol in protocols_applied:
+                    policy_client_name = (
+                        canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
+                    )
+                    current_values.append(_as_utc(get_access_until(db, protocol, node_id, policy_client_name)))
+                present = [value for value in current_values if value is not None]
+                profile_base = min(present) if present else grant_until_base
+                profile_grant_until = max(grant_until_base, profile_base) + timedelta(days=grant_days)
+
+            for protocol in protocols_applied:
+                policy_client_name = canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
+                if profile_grant_until is not None:
+                    grant_until = profile_grant_until
+                else:
+                    current = get_access_until(db, protocol, node_id, policy_client_name)
+                    current_utc = _as_utc(current)
+                    grant_until = max(grant_until_base, current_utc or grant_until_base) + timedelta(days=grant_days)
+
+                policy_row = policy_rows[protocol]
+                if policy_row is not None:
+                    _clear_policy_block(policy_row, actor="unlock_codes")
+
+                result = set_access_until(
+                    db,
+                    protocol,
+                    node_id,
+                    policy_client_name,
+                    grant_until,
+                    actor="unlock_codes",
+                    commit=False,
+                )
+                granted_until_by_protocol[protocol] = grant_until
+                access_until_by_protocol[protocol] = result.get("access_until") or grant_until.isoformat()
 
         redemption = UnlockCodeRedemption(
             code_id=row.id,
+            user_id=owner_user.id if owner_user is not None else None,
             client_name=client_key,
             node_id=node_id,
         )
@@ -568,9 +644,10 @@ def redeem_unlock_code(
         db.rollback()
         raise
 
-    for protocol in protocols_applied:
-        policy_client_name = canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
-        _reconcile_access_until(policy_service, protocol, policy_client_name)
+    if owner_user is None:
+        for protocol in protocols_applied:
+            policy_client_name = canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
+            _reconcile_access_until(policy_service, protocol, policy_client_name)
 
     _replicate_redeemed_access_until(
         db,

@@ -398,12 +398,12 @@ def _migrate_unlock_codes_tables() -> None:
                     CREATE TABLE unlock_code_redemptions (
                         id INTEGER NOT NULL PRIMARY KEY,
                         code_id INTEGER NOT NULL,
+                        user_id INTEGER,
                         client_name VARCHAR(64) NOT NULL,
                         node_id INTEGER NOT NULL,
                         redeemed_at DATETIME,
-                        CONSTRAINT uq_unlock_code_redemptions_code_client_node
-                            UNIQUE (code_id, client_name, node_id),
                         FOREIGN KEY(code_id) REFERENCES unlock_codes (id) ON DELETE CASCADE,
+                        FOREIGN KEY(user_id) REFERENCES users (id),
                         FOREIGN KEY(node_id) REFERENCES nodes (id)
                     )
                     """
@@ -413,6 +413,12 @@ def _migrate_unlock_codes_tables() -> None:
                 text(
                     "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_code_id "
                     "ON unlock_code_redemptions (code_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_user_id "
+                    "ON unlock_code_redemptions (user_id)"
                 )
             )
             conn.execute(
@@ -427,39 +433,53 @@ def _migrate_unlock_codes_tables() -> None:
                     "ON unlock_code_redemptions (node_id)"
                 )
             )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_unlock_code_redemptions_code_user "
+                    "ON unlock_code_redemptions (code_id, user_id) "
+                    "WHERE user_id IS NOT NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS "
+                    "uq_unlock_code_redemptions_code_client_node_orphan "
+                    "ON unlock_code_redemptions (code_id, client_name, node_id) "
+                    "WHERE user_id IS NULL"
+                )
+            )
         logger.info("DB migration: created unlock_code_redemptions table")
     else:
-        _migrate_unlock_redemptions_unique_include_node()
+        _migrate_unlock_redemptions_user_scope()
 
 
-def _unlock_redemptions_unique_includes_node(inspector) -> bool:
+def _unlock_redemptions_user_scope_ready(inspector) -> bool:
+    cols = {col["name"] for col in inspector.get_columns("unlock_code_redemptions")}
+    if "user_id" not in cols:
+        return False
+    index_names = {index.get("name") for index in inspector.get_indexes("unlock_code_redemptions")}
+    if not {
+        "uq_unlock_code_redemptions_code_user",
+        "uq_unlock_code_redemptions_code_client_node_orphan",
+    }.issubset(index_names):
+        return False
     for constraint in inspector.get_unique_constraints("unlock_code_redemptions"):
-        cols = list(constraint.get("column_names") or [])
-        if cols == ["code_id", "client_name", "node_id"] or set(cols) == {
-            "code_id",
-            "client_name",
-            "node_id",
-        }:
-            return True
+        cols = set(constraint.get("column_names") or [])
+        if cols == {"code_id", "client_name", "node_id"}:
+            return False
         if constraint.get("name") == "uq_unlock_code_redemptions_code_client_node":
-            return True
-    # SQLite may expose the unique as an index instead of a constraint.
-    for index in inspector.get_indexes("unlock_code_redemptions"):
-        if not index.get("unique"):
-            continue
-        cols = list(index.get("column_names") or [])
-        if set(cols) == {"code_id", "client_name", "node_id"}:
-            return True
-    return False
+            return False
+    return True
 
 
-def _migrate_unlock_redemptions_unique_include_node() -> None:
-    """Scope unlock redemption uniqueness by node (code_id, client_name, node_id)."""
+def _migrate_unlock_redemptions_user_scope() -> None:
+    """Add user-scoped redemption audit and mixed uniqueness rules."""
     inspector = inspect(engine)
     if "unlock_code_redemptions" not in inspector.get_table_names():
         return
-    if _unlock_redemptions_unique_includes_node(inspector):
+    if _unlock_redemptions_user_scope_ready(inspector):
         return
+    cols = {col["name"] for col in inspector.get_columns("unlock_code_redemptions")}
 
     from app.models import Node
 
@@ -486,53 +506,93 @@ def _migrate_unlock_redemptions_unique_include_node() -> None:
             )
         # Drop rows that still cannot satisfy NOT NULL node_id.
         conn.execute(text("DELETE FROM unlock_code_redemptions WHERE node_id IS NULL"))
-        # Keep one row per (code_id, client_name, node_id) if duplicates somehow exist.
-        conn.execute(
-            text(
-                """
-                DELETE FROM unlock_code_redemptions
-                WHERE id NOT IN (
-                    SELECT MIN(id)
-                    FROM unlock_code_redemptions
-                    GROUP BY code_id, client_name, node_id
+        if "user_id" in cols:
+            # Keep one row per (code_id, user_id) for user-scoped redeems and one per
+            # (code_id, client_name, node_id) for orphan client redeems.
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM unlock_code_redemptions
+                    WHERE id NOT IN (
+                        SELECT MIN(id)
+                        FROM unlock_code_redemptions
+                        WHERE user_id IS NOT NULL
+                        GROUP BY code_id, user_id
+                        UNION
+                        SELECT MIN(id)
+                        FROM unlock_code_redemptions
+                        WHERE user_id IS NULL
+                        GROUP BY code_id, client_name, node_id
+                    )
+                    """
                 )
-                """
             )
-        )
+        else:
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM unlock_code_redemptions
+                    WHERE id NOT IN (
+                        SELECT MIN(id)
+                        FROM unlock_code_redemptions
+                        GROUP BY code_id, client_name, node_id
+                    )
+                    """
+                )
+            )
         conn.execute(
             text(
                 """
                 CREATE TABLE unlock_code_redemptions_new (
                     id INTEGER NOT NULL PRIMARY KEY,
                     code_id INTEGER NOT NULL,
+                    user_id INTEGER,
                     client_name VARCHAR(64) NOT NULL,
                     node_id INTEGER NOT NULL,
                     redeemed_at DATETIME,
-                    CONSTRAINT uq_unlock_code_redemptions_code_client_node
-                        UNIQUE (code_id, client_name, node_id),
                     FOREIGN KEY(code_id) REFERENCES unlock_codes (id) ON DELETE CASCADE,
+                    FOREIGN KEY(user_id) REFERENCES users (id),
                     FOREIGN KEY(node_id) REFERENCES nodes (id)
                 )
                 """
             )
         )
-        conn.execute(
-            text(
-                """
-                INSERT INTO unlock_code_redemptions_new (
-                    id, code_id, client_name, node_id, redeemed_at
+        if "user_id" in cols:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO unlock_code_redemptions_new (
+                        id, code_id, user_id, client_name, node_id, redeemed_at
+                    )
+                    SELECT id, code_id, user_id, client_name, node_id, redeemed_at
+                    FROM unlock_code_redemptions
+                    """
                 )
-                SELECT id, code_id, client_name, node_id, redeemed_at
-                FROM unlock_code_redemptions
-                """
             )
-        )
+        else:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO unlock_code_redemptions_new (
+                        id, code_id, user_id, client_name, node_id, redeemed_at
+                    )
+                    SELECT id, code_id, NULL, client_name, node_id, redeemed_at
+                    FROM unlock_code_redemptions
+                    """
+                )
+            )
         conn.execute(text("DROP TABLE unlock_code_redemptions"))
         conn.execute(text("ALTER TABLE unlock_code_redemptions_new RENAME TO unlock_code_redemptions"))
         conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_code_id "
                 "ON unlock_code_redemptions (code_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_unlock_code_redemptions_user_id "
+                "ON unlock_code_redemptions (user_id)"
             )
         )
         conn.execute(
@@ -547,7 +607,22 @@ def _migrate_unlock_redemptions_unique_include_node() -> None:
                 "ON unlock_code_redemptions (node_id)"
             )
         )
-    logger.info("DB migration: unlock_code_redemptions unique scoped by node_id")
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_unlock_code_redemptions_code_user "
+                "ON unlock_code_redemptions (code_id, user_id) "
+                "WHERE user_id IS NOT NULL"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "uq_unlock_code_redemptions_code_client_node_orphan "
+                "ON unlock_code_redemptions (code_id, client_name, node_id) "
+                "WHERE user_id IS NULL"
+            )
+        )
+    logger.info("DB migration: unlock_code_redemptions user-scoped uniqueness enabled")
 
 
 def _migrate_node_resource_sample_table() -> None:
