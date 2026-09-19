@@ -71,10 +71,10 @@ IF threshold_count == 500 AND window_seconds == 60:
 `GET /openvpn-buffer-guard/settings?node_id=`:
 
 - Существующие поля без breaking rename.
-- Добавить **`recommended_threshold: int`** — значение для **текущего** `mode` строки (после нормализации mode).
-- Опционально (не обязательно в v1 этого diff): `recommended_by_mode: { notify: 40, ... }` — если удобнее фронту без дублирования; минимум — одно поле `recommended_threshold`.
+- Добавить **`recommended_threshold: int`** — для **сохранённого** `mode` строки.
+- Добавить **`recommended_by_mode: { "notify": 40, "kill": 80, "kill_restart": 120, "kill_restart_temp_ban": 150 }`** — полный словарь, чтобы UI при смене draft-режима обновлял подсказку без повторного GET и без дублирования констант на фронте.
 
-`PUT` — без автоподстановки; клиент шлёт явный `threshold_count`.
+`PUT` — без автоподстановки; клиент шлёт явный `threshold_count` (рекомендации в PUT не пишутся).
 
 ## UI (`OpenVpnBufferGuardCard`)
 
