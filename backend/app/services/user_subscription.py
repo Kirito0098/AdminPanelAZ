@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, User, VpnConfig, VpnType, WgAccessPolicy
-from app.services.access_until import _policy_service_for_node, _reconcile_access_until, set_access_until
+from app.services.access_until import _policy_service_for_node, _reconcile_access_until, _row_access_until, set_access_until
 from app.services.unlock_codes import _is_manual_admin_block
 
 _VPN_PROTOCOLS = {
@@ -154,9 +154,10 @@ def apply_user_subscription_expiry(
         }
 
     access_until = get_user_access_until(user)
-    services: dict[int, object] = {}
     queued: list[tuple[int, str, str]] = []
+    seed_missing_rows: list[tuple[int, str, str]] = []
     skipped_manual = 0
+    skipped_not_expired = 0
 
     for config in _owned_configs(db, user.id):
         protocol = _VPN_PROTOCOLS.get(config.vpn_type)
@@ -167,17 +168,22 @@ def apply_user_subscription_expiry(
             skipped_manual += 1
             continue
         client_name = _policy_client_name(protocol, config.client_name)
+        queued.append((config.node_id, protocol, client_name))
+        if row is None or _row_access_until(protocol, row) is None:
+            seed_missing_rows.append((config.node_id, protocol, client_name))
+
+    for node_id, protocol, client_name in seed_missing_rows:
         set_access_until(
             db,
             protocol,
-            config.node_id,
+            node_id,
             client_name,
             access_until,
             actor=actor,
             commit=False,
         )
-        queued.append((config.node_id, protocol, client_name))
 
+    # End the read snapshot before atomic claims so concurrent redeem/PATCH can win.
     if commit:
         db.commit()
     else:
@@ -185,23 +191,27 @@ def apply_user_subscription_expiry(
 
     expired = 0
     for node_id, protocol, client_name in queued:
-        service = services.get(node_id)
-        if service is None:
-            node = db.get(Node, node_id)
-            if node is None:
-                continue
-            service = _policy_service_for_node(db, node)
-            services[node_id] = service
-        _reconcile_access_until(service, protocol, client_name)
-        row = _policy_row(db, protocol=protocol, node_id=node_id, client_name=client_name)
-        if (getattr(row, "block_reason", None) or "").strip().lower() == "access_expired":
+        result = set_access_until(
+            db,
+            protocol,
+            node_id,
+            client_name,
+            None,
+            actor=actor,
+            require_deadline_lte=access_until,
+            commit=commit,
+        )
+        if result is None:
+            skipped_not_expired += 1
+            continue
+        if (result.get("block_mode") or "").strip().lower() == "access_expired":
             expired += 1
 
     return {
         "targets": len(list_owned_client_targets(db, user.id)),
         "expired": expired,
         "skipped_manual": skipped_manual,
-        "skipped_not_expired": 0,
+        "skipped_not_expired": skipped_not_expired,
     }
 
 
