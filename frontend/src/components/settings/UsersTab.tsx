@@ -27,6 +27,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import DatePickerField from '@/components/ui/DatePickerField'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +48,7 @@ import {
 import { useNotifications } from '@/context/NotificationContext'
 import { SettingsCollapsible, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { ROLE_HINTS, ROLE_LABELS } from '@/components/settings/settingsLabels'
+import { formatDate } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { User as PanelUser, UserRole, VisibleVpnProfilesPolicy, VpnConfig } from '@/types'
 
@@ -106,6 +108,9 @@ function UserMetaLine({ user }: { user: PanelUser }) {
   if (user.role === 'user' && user.can_create_configs === false) bits.push('Создание выкл.')
   if (user.role === 'user' && user.config_quota != null && user.config_quota > 0) {
     bits.push(`Квота ${user.config_quota}`)
+  }
+  if (user.role === 'user' && user.access_until) {
+    bits.push(`До ${formatDate(user.access_until)}`)
   }
   return (
     <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{bits.join(' · ')}</p>
@@ -198,6 +203,7 @@ export default function UsersTab({
   const [draftTelegramId, setDraftTelegramId] = useState('')
   const [draftConfigQuota, setDraftConfigQuota] = useState('')
   const [draftCanCreate, setDraftCanCreate] = useState(true)
+  const [draftAccessUntil, setDraftAccessUntil] = useState('')
   const [savingUser, setSavingUser] = useState(false)
   const [usersList, setUsersList] = useState(users)
   const [defaultPolicy, setDefaultPolicy] = useState<VisibleVpnProfilesPolicy>(FULL_VISIBLE_VPN_POLICY)
@@ -353,6 +359,7 @@ export default function UsersTab({
       user.config_quota != null && user.config_quota > 0 ? String(user.config_quota) : '',
     )
     setDraftCanCreate(user.can_create_configs !== false)
+    setDraftAccessUntil(user.access_until ? user.access_until.slice(0, 10) : '')
     const hasOverride = user.visible_vpn_profiles != null
     setDraftUseCustomVisibility(hasOverride)
     setDraftVisibilityPolicy(
@@ -397,12 +404,13 @@ export default function UsersTab({
     if (!activeEditor) return
     setSavingUser(true)
     try {
-      const payload: Record<string, unknown> = {
+      const payload: import('@/types').UserUpdatePayload = {
         telegram_id: draftTelegramId.trim(),
         role: draftRole,
       }
       if (draftRole === 'user') {
         payload.can_create_configs = draftCanCreate
+        payload.access_until = draftAccessUntil || null
         const raw = draftConfigQuota.trim()
         payload.config_quota = raw === '' ? 0 : Number.parseInt(raw, 10)
         if (raw !== '' && (!Number.isFinite(payload.config_quota as number) || (payload.config_quota as number) < 0)) {
@@ -576,6 +584,7 @@ export default function UsersTab({
                       <TableHead className="h-10 pl-4">Пользователь</TableHead>
                       <TableHead className="h-10">Статус</TableHead>
                       <TableHead className="h-10">Роль</TableHead>
+                      <TableHead className="h-10">Доступ до</TableHead>
                       <TableHead className="h-10">Telegram</TableHead>
                       <TableHead className="h-10 pr-4 text-right"> </TableHead>
                     </TableRow>
@@ -604,6 +613,9 @@ export default function UsersTab({
                         </TableCell>
                         <TableCell className="py-2.5">
                           <RoleBadge role={u.role} />
+                        </TableCell>
+                        <TableCell className="py-2.5 text-xs text-muted-foreground">
+                          {u.role === 'user' ? (u.access_until ? formatDate(u.access_until) : '—') : '—'}
                         </TableCell>
                         <TableCell className="py-2.5 font-mono text-xs text-muted-foreground">
                           {u.telegram_id || '—'}
@@ -788,6 +800,18 @@ export default function UsersTab({
                     {draftCanCreate
                       ? 'Максимум создаваемых VPN-клиентов. Пусто — общий лимит панели.'
                       : 'Квота не применяется, пока создание выключено.'}
+                  </p>
+                </div>
+                <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">
+                  <Label htmlFor="editAccessUntil">Доступ до</Label>
+                  <DatePickerField
+                    id="editAccessUntil"
+                    value={draftAccessUntil}
+                    onChange={setDraftAccessUntil}
+                    disabled={savingUser}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Пусто — бессрочно. При сохранении срок синхронизируется на все клиентские профили этого пользователя.
                   </p>
                 </div>
                 <div className="space-y-2 rounded-xl border bg-muted/20 p-3">

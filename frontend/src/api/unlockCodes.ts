@@ -1,5 +1,9 @@
 import { apiFetch } from './http'
-import type { UnlockCodeRecord } from '@/types'
+import type {
+  ClientAccessUntilResponse,
+  SyncClientAccessUntilResponse,
+  UnlockCodeRecord,
+} from '@/types'
 
 export type UnlockCodeProtocol = 'openvpn' | 'wireguard' | 'amneziawg2'
 
@@ -18,11 +22,24 @@ export async function setClientAccessUntil(
   protocol: 'openvpn' | 'wireguard' | 'amneziawg2',
   clientName: string,
   accessUntil: string | null,
+  confirmOverride = false,
 ) {
-  return apiFetch<{ access_until: string | null }>(`/client-access/${protocol}/${encodeURIComponent(clientName)}/access-until`, {
-    method: 'PATCH',
-    body: JSON.stringify({ access_until: accessUntil }),
-  })
+  return apiFetch<ClientAccessUntilResponse>(
+    `/client-access/${protocol}/${encodeURIComponent(clientName)}/access-until`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ access_until: accessUntil, confirm_override: confirmOverride }),
+    },
+  )
+}
+
+export async function syncClientAccessUntilFromOwner(clientName: string) {
+  return apiFetch<SyncClientAccessUntilResponse>(
+    `/client-access/${encodeURIComponent(clientName)}/access-until/sync-from-owner`,
+    {
+      method: 'POST',
+    },
+  )
 }
 
 export async function getUnlockCodes(includeRevoked = false) {

@@ -35,7 +35,7 @@ import {
   wgTempBlock,
   wgUnblock,
 } from '@/api/client'
-import { setClientAccessUntil, type UnlockCodeProtocol } from '@/api/unlockCodes'
+import { setClientAccessUntil, syncClientAccessUntilFromOwner, type UnlockCodeProtocol } from '@/api/unlockCodes'
 import {
   clearProfileTrafficLimits,
   formatProfileProtocols,
@@ -75,7 +75,14 @@ import { formatDate, parseTimestamp } from '@/lib/datetime'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
-import type { ClientAccessPolicy, ConfigTag, User, UserRole, VpnConfig } from '@/types'
+import type {
+  ClientAccessPolicy,
+  ClientAccessUntilConflictPayload,
+  ConfigTag,
+  User,
+  UserRole,
+  VpnConfig,
+} from '@/types'
 
 interface ClientActionsDialogProps {
   config: VpnConfig | null
@@ -107,6 +114,12 @@ interface ActionItem {
   hidden?: boolean
   destructive?: boolean
   title?: string
+}
+
+interface AccessUntilConflictState {
+  requestedIso: string | null
+  userAccessUntil: string | null
+  clientAccessUntil: string | null
 }
 
 const statusIcons = {
@@ -231,6 +244,7 @@ export default function ClientActionsDialog({
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [portalUrl, setPortalUrl] = useState<string | null>(null)
   const [accessUntilValue, setAccessUntilValue] = useState('')
+  const [accessUntilConflict, setAccessUntilConflict] = useState<AccessUntilConflictState | null>(null)
   const [descriptionValue, setDescriptionValue] = useState('')
   const [unlockCodeDialogOpen, setUnlockCodeDialogOpen] = useState(false)
 
@@ -242,6 +256,7 @@ export default function ClientActionsDialog({
     if (!config) return
     const value = policy?.access_until ?? null
     setAccessUntilValue(value ? toDateInputValue(value) : '')
+    setAccessUntilConflict(null)
     setDescriptionValue(config.description ?? '')
     setUnlockCodeDialogOpen(false)
   }, [open, config?.id, config?.description, policy?.access_until])
@@ -324,13 +339,18 @@ export default function ClientActionsDialog({
 
   const applyProfileAccessUntil = async (iso: string | null) => {
     const protocols = orderedProfileProtocols(profileVpnTypes)
+    if (protocols.length === 0) return
     const applied: typeof protocols = []
     const failed: Array<{ protocol: (typeof protocols)[number]; message: string }> = []
     for (const protocol of protocols) {
       try {
-        await setClientAccessUntil(protocol, config.client_name, iso)
+        await setClientAccessUntil(protocol, config.client_name, iso, false)
         applied.push(protocol)
       } catch (err) {
+        const conflict = parseAccessUntilConflict(err)
+        if (conflict) {
+          throw conflict
+        }
         failed.push({
           protocol,
           message: err instanceof ApiError ? err.message : 'ошибка',
@@ -358,6 +378,45 @@ export default function ClientActionsDialog({
         : iso
           ? 'Срок доступа обновлён'
           : 'Срок доступа сброшен',
+    )
+  }
+
+  const applyProfileAccessUntilOverride = async (iso: string | null) => {
+    const protocols = orderedProfileProtocols(profileVpnTypes)
+    const applied: typeof protocols = []
+    const failed: Array<{ protocol: (typeof protocols)[number]; message: string }> = []
+    for (const protocol of protocols) {
+      try {
+        await setClientAccessUntil(protocol, config.client_name, iso, true)
+        applied.push(protocol)
+      } catch (err) {
+        failed.push({
+          protocol,
+          message: err instanceof ApiError ? err.message : 'ошибка',
+        })
+      }
+    }
+    if (applied.length === 0) {
+      throw new Error(
+        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+          'Не удалось обновить срок доступа',
+      )
+    }
+    if (failed.length > 0) {
+      onNotifyError(
+        `Срок доступа частично не обновлён: ${failed
+          .map((item) => `${item.protocol}: ${item.message}`)
+          .join('; ')}`,
+      )
+    }
+    onNotifySuccess(
+      applied.length > 1
+        ? iso
+          ? `Срок доступа принудительно обновлён для профиля (${formatProfileProtocols(applied)})`
+          : `Срок доступа принудительно сброшен для профиля (${formatProfileProtocols(applied)})`
+        : iso
+          ? 'Срок доступа принудительно обновлён'
+          : 'Срок доступа принудительно сброшен',
     )
   }
 
@@ -410,6 +469,29 @@ export default function ClientActionsDialog({
     if (!match) return null
     const next = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
     return next.toISOString()
+  }
+
+  const parseAccessUntilConflict = (err: unknown): ClientAccessUntilConflictPayload | null => {
+    if (!(err instanceof ApiError) || err.status !== 409) return null
+    const payload = err.payload
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      (payload as { code?: unknown }).code !== 'access_until_conflict'
+    ) {
+      return null
+    }
+    return {
+      code: 'access_until_conflict',
+      user_access_until:
+        typeof (payload as { user_access_until?: unknown }).user_access_until === 'string'
+          ? (payload as { user_access_until: string }).user_access_until
+          : null,
+      client_access_until:
+        typeof (payload as { client_access_until?: unknown }).client_access_until === 'string'
+          ? (payload as { client_access_until: string }).client_access_until
+          : null,
+    }
   }
 
   const runAction = async (key: string, fn: () => Promise<void>) => {
@@ -559,10 +641,49 @@ export default function ClientActionsDialog({
     })
   }
 
-  const handleAccessUntilSave = async () => {
-    await runAction('access-until', async () => {
-      await applyProfileAccessUntil(dateInputToIso(accessUntilValue))
-    })
+  const handleAccessUntilSave = async (confirmOverride = false) => {
+    setBusyAction('access-until')
+    const nextIso = dateInputToIso(accessUntilValue)
+    try {
+      if (confirmOverride) {
+        await applyProfileAccessUntilOverride(nextIso)
+        setAccessUntilConflict(null)
+      } else {
+        await applyProfileAccessUntil(nextIso)
+      }
+      await onRefresh()
+    } catch (err) {
+      const conflict = parseAccessUntilConflict(err)
+      if (conflict) {
+        setAccessUntilConflict({
+          requestedIso: nextIso,
+          userAccessUntil: conflict.user_access_until,
+          clientAccessUntil: conflict.client_access_until,
+        })
+        return
+      }
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка выполнения действия')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const handleSyncAccessUntilFromOwner = async () => {
+    setBusyAction('sync-access-until')
+    try {
+      const result = await syncClientAccessUntilFromOwner(config.client_name)
+      setAccessUntilConflict(null)
+      onNotifySuccess(
+        result.access_until
+          ? `Срок доступа синхронизирован с пользователем: до ${formatDate(result.access_until)}`
+          : 'Срок доступа синхронизирован с пользователем',
+      )
+      await onRefresh()
+    } catch (err) {
+      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка выполнения действия')
+    } finally {
+      setBusyAction(null)
+    }
   }
 
   const submitRenew = async () => {
@@ -1055,6 +1176,12 @@ export default function ClientActionsDialog({
                     {profileVpnTypes.size > 1
                       ? `Дата отключения для всего профиля «${config.client_name}» (${profileProtocolsLabel}). Пустое значение убирает ограничение.`
                       : `Дата отключения для протокола ${protocolLabel(tab)}. Пустое значение убирает ограничение.`}
+                    {config.owner_username ? (
+                      <>
+                        <br />
+                        Владелец профиля: <span className="font-medium text-foreground">{config.owner_username}</span>.
+                      </>
+                    ) : null}
                     {haGroupHint ? (
                       <>
                         <br />
@@ -1085,6 +1212,19 @@ export default function ClientActionsDialog({
                       {busyAction === 'access-until' ? <Loader2 size={14} className="animate-spin" /> : null}
                       Сохранить
                     </Button>
+                    {config.owner_id != null && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busyAction !== null || haReplicaReadonly}
+                        onClick={() => void handleSyncAccessUntilFromOwner()}
+                      >
+                        {busyAction === 'sync-access-until' ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : null}
+                        Синхронизировать с юзером
+                      </Button>
+                    )}
                     <Button
                       type="button"
                       variant="ghost"
@@ -1557,6 +1697,46 @@ export default function ClientActionsDialog({
         initialProtocols={unlockCodeInitialProtocols}
         availableProtocols={availableUnlockProtocols}
         initialClientNames={config.client_name ? [config.client_name] : []}
+      />
+
+      <ConfirmDialog
+        open={accessUntilConflict !== null}
+        onOpenChange={(open) => {
+          if (!open && busyAction !== 'access-until') setAccessUntilConflict(null)
+        }}
+        title="Срок клиента расходится со сроком пользователя"
+        description="У клиента и владельца будут разные даты доступа. Обычно лучше синхронизировать срок с пользователем."
+        confirmLabel="Сохранить поверх"
+        cancelLabel="Отмена"
+        loading={busyAction === 'access-until'}
+        onConfirm={() => void handleAccessUntilSave(true)}
+        alert={{
+          variant: 'warning',
+          title: 'Нужно подтверждение',
+          children: (
+            <div className="space-y-1">
+              <p>
+                Срок пользователя:{' '}
+                <span className="font-mono">
+                  {accessUntilConflict?.userAccessUntil
+                    ? formatDate(accessUntilConflict.userAccessUntil)
+                    : 'не задан'}
+                </span>
+              </p>
+              <p>
+                Новый срок клиента:{' '}
+                <span className="font-mono">
+                  {accessUntilConflict?.requestedIso
+                    ? formatDate(accessUntilConflict.requestedIso)
+                    : 'не задан'}
+                </span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Кнопка «Синхронизировать с юзером» вернёт клиенту тот же срок, что у владельца.
+              </p>
+            </div>
+          ),
+        }}
       />
     </>
   )
