@@ -1878,6 +1878,8 @@ export interface OpenVpnBufferGuardSettings {
   cooldown_minutes: number
   temp_ban_minutes: number
   watch_units: string[]
+  recommended_threshold: number
+  recommended_by_mode: Record<OpenVpnBufferGuardMode, number>
   updated_at?: string | null
 }
 

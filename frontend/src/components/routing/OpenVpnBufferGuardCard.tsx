@@ -36,13 +36,12 @@ const MODE_LABELS: Record<OpenVpnBufferGuardMode, string> = {
 
 const MODE_HINTS: Record<OpenVpnBufferGuardMode, string> = {
   notify:
-    'Фиксирует ENOBUFS в логах и шлёт уведомления администраторам. Клиенты не трогаются автоматически.',
-  kill:
-    'При превышении порога отключает самого «шумного» клиента через management-сокет / API. Сервер не перезапускается.',
+    'Только уведомления. Рекомендуемый порог: 40 ENOBUFS / 60 с (типичный VPS 1GB/1CPU).',
+  kill: 'Отключает самого шумного клиента. Рекомендуемый порог: 80 / 60 с.',
   kill_restart:
-    'После отключения проверяет лог ещё раз: если ENOBUFS продолжаются, перезапускает OpenVPN для выбранных юнитов.',
+    'Кик, затем при продолжении шторма — restart юнита. Рекомендуемый порог: 120 / 60 с.',
   kill_restart_temp_ban:
-    'Как kill_restart, но дополнительно заносит клиента во временный бан списком banned_clients (через AccessPolicy).',
+    'Как kill_restart + временный бан. Рекомендуемый порог: 150 / 60 с.',
 }
 
 const WATCH_UNIT_LABELS: Record<string, string> = {
@@ -336,7 +335,8 @@ export default function OpenVpnBufferGuardCard({
           <p className="text-xs leading-relaxed">
             Buffer Guard не чинит саму причину ENOBUFS (лимиты ядра, DCO, шумные клиенты), а только
             помогает не уронить общий UDP-сокет. Настраивайте пороги аккуратно и сначала используйте
-            режим «Только уведомлять».
+            режим «Только уведомлять». По умолчанию режим — только уведомления; для автокика смените
+            режим и при желании нажмите «Применить рекомендацию».
           </p>
         </SettingsAlert>
 
@@ -461,6 +461,31 @@ export default function OpenVpnBufferGuardCard({
                         />
                         <span className="text-xs text-muted-foreground">ENOBUFS за окно</span>
                       </div>
+                      {(() => {
+                        const rec =
+                          draft.recommended_by_mode?.[draft.mode] ??
+                          draft.recommended_threshold ??
+                          40
+                        const already = draft.threshold_count === rec
+                        return (
+                          <div className="space-y-2">
+                            <p className="text-xs text-muted-foreground">
+                              Для режима «{MODE_LABELS[draft.mode]}» рекомендуем{' '}
+                              <span className="font-medium text-foreground">{rec}</span> за{' '}
+                              {draft.window_seconds} с (типичный VPS 1GB/1CPU).
+                            </p>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={controlsDisabled || already}
+                              onClick={() => patchDraft({ threshold_count: rec })}
+                            >
+                              Применить рекомендацию
+                            </Button>
+                          </div>
+                        )
+                      })()}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="buffer-guard-window" className="text-xs text-muted-foreground">
