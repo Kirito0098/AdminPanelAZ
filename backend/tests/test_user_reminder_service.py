@@ -27,11 +27,18 @@ def db():
         engine.dispose()
 
 
-def _make_user(db, *, username: str, access_until: datetime | None = None, telegram_id: str | None = "100") -> User:
+def _make_user(
+    db,
+    *,
+    username: str,
+    access_until: datetime | None = None,
+    telegram_id: str | None = "100",
+    role: UserRole = UserRole.user,
+) -> User:
     user = User(
         username=username,
         password_hash="x",
-        role=UserRole.user,
+        role=role,
         is_active=True,
         telegram_id=telegram_id,
         access_until=access_until.replace(tzinfo=None) if access_until else None,
@@ -171,6 +178,38 @@ def test_process_user_reminders_keeps_access_and_cert_paths_independent(db, monk
         for row in db.query(UserReminderLog).filter(UserReminderLog.user_id == owner.id).all()
     }
     assert reminder_types == {reminders.REMINDER_ACCESS, reminders.REMINDER_CERT}
+
+
+def test_process_user_reminders_sends_access_expiry_for_admin_with_access_until(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    admin = _make_user(
+        db,
+        username="admin-access",
+        access_until=now + timedelta(days=3),
+        role=UserRole.admin,
+    )
+    owner_messages, admin_calls = _patch_reminder_runtime(monkeypatch)
+    expected_days = reminders.days_remaining_until(admin.access_until)
+
+    sent = reminders.process_user_reminders(db)
+
+    assert sent == 1
+    assert len(owner_messages) == 1
+    assert "Доступ скоро истечёт" in owner_messages[0]["text"]
+    assert admin_calls == [
+        {
+            "event_type": "user_access_expiry_reminder",
+            "actor_username": "admin-access",
+            "target_name": None,
+            "target_type": None,
+            "details": f"Доступ до <code>{admin.access_until.date().isoformat()}</code>, осталось <b>{expected_days}</b> дн.",
+            "subject_name": "admin-access",
+            "node_id": None,
+            "client_timezone": None,
+        }
+    ]
+    log = db.query(UserReminderLog).filter_by(user_id=admin.id, reminder_type=reminders.REMINDER_ACCESS).one()
+    assert log.dedup_key == f"user:{admin.id}:access:{admin.access_until.date().isoformat()}"
 
 
 def test_access_expiry_events_are_exposed_in_notify_metadata():

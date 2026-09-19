@@ -149,14 +149,7 @@ def process_user_reminders(db: Session) -> int:
     sent = 0
     access_threshold = _access_threshold()
     threshold = _cert_threshold()
-    users = (
-        db.query(User)
-        .filter(
-            User.access_until.isnot(None),
-            User.role != UserRole.admin,
-        )
-        .all()
-    )
+    users = db.query(User).filter(User.access_until.isnot(None)).all()
     for user in users:
         days_left = days_remaining_until(user.access_until)
         if days_left is None or days_left > access_threshold:
