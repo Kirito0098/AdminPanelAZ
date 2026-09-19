@@ -612,3 +612,45 @@ def test_migrate_user_access_until_backfill_idempotent_and_skips_non_null(db, mo
     database._migrate_user_access_until_backfill()
     db.refresh(user_null)
     assert user_null.access_until == later.replace(tzinfo=None)
+
+
+def test_migrate_user_access_until_backfill_runs_once_per_db(db, monkeypatch):
+    """A client deadline appearing after the backfill must not invent a subscription."""
+    from app import database
+
+    test_engine = db.get_bind()
+    monkeypatch.setattr(database, "engine", test_engine)
+
+    node = _make_node(db)
+    user = User(username="backfill-once", password_hash="x", role=UserRole.user, is_active=True)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    _make_owned_client(
+        db,
+        node_id=node.id,
+        owner_id=user.id,
+        client_name="Alice",
+        protocols=[VpnType.openvpn],
+    )
+
+    database._migrate_user_access_until_backfill()
+    db.refresh(user)
+    assert user.access_until is None
+
+    # Admin confirms a divergent client deadline (or the owner changes) — the
+    # next panel restart must not adopt it as the owner's subscription.
+    past = datetime.now(timezone.utc) - timedelta(days=5)
+    db.add(
+        OpenVpnAccessPolicy(
+            node_id=node.id,
+            client_name="Alice",
+            access_until=past.replace(tzinfo=None),
+        )
+    )
+    db.commit()
+
+    database._migrate_user_access_until_backfill()
+    db.refresh(user)
+    assert user.access_until is None

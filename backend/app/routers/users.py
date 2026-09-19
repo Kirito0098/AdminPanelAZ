@@ -34,7 +34,11 @@ from app.services.admin_bootstrap import (
     should_scrub_env_after_password_change,
 )
 from app.services.password_policy import validate_password
-from app.services.user_subscription import set_user_access_until
+from app.services.user_subscription import (
+    get_user_access_until,
+    normalize_access_until,
+    set_user_access_until,
+)
 from app.services.vpn_profile_visibility import normalize_policy, policy_to_json
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -213,12 +217,15 @@ def update_user(
             user.visible_vpn_profiles = policy_to_json(normalized)
 
     if access_until_updated:
+        # Cascade only on a real change — otherwise every unrelated save
+        # (telegram_id, quota, visibility) would wipe confirmed per-client overrides.
+        access_until_changed = normalize_access_until(pending_access_until) != get_user_access_until(user)
         user = set_user_access_until(
             db,
             user,
             pending_access_until,
             actor=current_user.username,
-            sync_clients=True,
+            sync_clients=access_until_changed,
             commit=True,
         )
     else:

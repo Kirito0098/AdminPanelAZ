@@ -45,6 +45,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { dateInputToIso, isoToDateInput } from '@/lib/accessUntil'
 import { useNotifications } from '@/context/NotificationContext'
 import { SettingsCollapsible, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { ROLE_HINTS, ROLE_LABELS } from '@/components/settings/settingsLabels'
@@ -359,7 +360,7 @@ export default function UsersTab({
       user.config_quota != null && user.config_quota > 0 ? String(user.config_quota) : '',
     )
     setDraftCanCreate(user.can_create_configs !== false)
-    setDraftAccessUntil(user.access_until ? user.access_until.slice(0, 10) : '')
+    setDraftAccessUntil(isoToDateInput(user.access_until))
     const hasOverride = user.visible_vpn_profiles != null
     setDraftUseCustomVisibility(hasOverride)
     setDraftVisibilityPolicy(
@@ -410,7 +411,11 @@ export default function UsersTab({
       }
       if (draftRole === 'user') {
         payload.can_create_configs = draftCanCreate
-        payload.access_until = draftAccessUntil || null
+        // Отправляем срок только при реальной правке даты — иначе сохранение
+        // Telegram ID / квоты пересинхронизировало бы сроки всех профилей.
+        if (draftAccessUntil !== isoToDateInput(activeEditor.access_until)) {
+          payload.access_until = dateInputToIso(draftAccessUntil)
+        }
         const raw = draftConfigQuota.trim()
         payload.config_quota = raw === '' ? 0 : Number.parseInt(raw, 10)
         if (raw !== '' && (!Number.isFinite(payload.config_quota as number) || (payload.config_quota as number) < 0)) {

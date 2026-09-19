@@ -15,6 +15,7 @@ from app.models import ClientPortalToken, UserPortalToken, VpnConfig, VpnType
 from app.routers import client_portal as client_portal_router
 from app.routers import public_portal as public_portal_router
 from app.services import client_portal as portal
+from app.services import unlock_codes
 
 
 def _utc_now_naive() -> datetime:
@@ -714,6 +715,50 @@ def test_redeem_public_portal_code_user_retries_next_owned_client():
     assert redeem.call_count == 2
     assert result["access_until"] == fixed_until.isoformat()
     assert result["protocols_applied"] == ["openvpn"]
+
+
+def test_redeem_public_portal_code_user_skips_manually_blocked_client():
+    user_token = UserPortalToken(id=3, token="usr", user_id=7, revoked_at=None)
+    fixed_until = datetime(2030, 1, 8, 12, 30)
+    user = MagicMock(id=7, access_until=fixed_until)
+    with (
+        patch("app.services.client_portal._owned_portal_targets", return_value=[(1, "alice"), (2, "bob")]),
+        patch("app.services.client_portal.ensure_portal_user", return_value=user),
+        patch("app.services.unlock_codes.redeem_unlock_code") as redeem,
+    ):
+        redeem.side_effect = [
+            ValueError(unlock_codes._REDEEM_MANUAL_BLOCK_MESSAGE),
+            {
+                "grant_days": 7,
+                "protocols_applied": ["wireguard"],
+                "access_until_by_protocol": {"wireguard": fixed_until.isoformat()},
+            },
+        ]
+        result = portal.redeem_public_portal_code(
+            MagicMock(),
+            portal.PortalTokenResolution(kind="user", user_row=user_token),
+            code="ABCD-EFGH-IJKL",
+        )
+
+    assert redeem.call_count == 2
+    assert result["protocols_applied"] == ["wireguard"]
+
+
+def test_redeem_public_portal_code_user_reports_manual_block_when_no_profile_left():
+    user_token = UserPortalToken(id=3, token="usr", user_id=7, revoked_at=None)
+    with (
+        patch("app.services.client_portal._owned_portal_targets", return_value=[(1, "alice")]),
+        patch("app.services.unlock_codes.redeem_unlock_code") as redeem,
+    ):
+        redeem.side_effect = ValueError(unlock_codes._REDEEM_MANUAL_BLOCK_MESSAGE)
+        with pytest.raises(ValueError) as excinfo:
+            portal.redeem_public_portal_code(
+                MagicMock(),
+                portal.PortalTokenResolution(kind="user", user_row=user_token),
+                code="ABCD-EFGH-IJKL",
+            )
+
+    assert str(excinfo.value) == unlock_codes._REDEEM_MANUAL_BLOCK_MESSAGE
 
 
 def test_admin_user_portal_get_link_route_uses_user_id():

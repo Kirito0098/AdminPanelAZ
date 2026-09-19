@@ -36,6 +36,7 @@ import {
   wgUnblock,
 } from '@/api/client'
 import { setClientAccessUntil, syncClientAccessUntilFromOwner, type UnlockCodeProtocol } from '@/api/unlockCodes'
+import { dateInputToIso, isoToDateInput, parseAccessUntilConflict } from '@/lib/accessUntil'
 import {
   clearProfileTrafficLimits,
   formatProfileProtocols,
@@ -71,13 +72,12 @@ import {
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
-import { formatDate, parseTimestamp } from '@/lib/datetime'
+import { formatDate } from '@/lib/datetime'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import type {
   ClientAccessPolicy,
-  ClientAccessUntilConflictPayload,
   ConfigTag,
   User,
   UserRole,
@@ -120,6 +120,8 @@ interface AccessUntilConflictState {
   requestedIso: string | null
   userAccessUntil: string | null
   clientAccessUntil: string | null
+  /** Заполнено, когда конфликт пришёл из WG-флоу «Продлить срок». */
+  extendDays?: number
 }
 
 const statusIcons = {
@@ -255,7 +257,7 @@ export default function ClientActionsDialog({
     if (!open) return
     if (!config) return
     const value = policy?.access_until ?? null
-    setAccessUntilValue(value ? toDateInputValue(value) : '')
+    setAccessUntilValue(isoToDateInput(value))
     setAccessUntilConflict(null)
     setDescriptionValue(config.description ?? '')
     setUnlockCodeDialogOpen(false)
@@ -347,9 +349,10 @@ export default function ClientActionsDialog({
         await setClientAccessUntil(protocol, config.client_name, iso, false)
         applied.push(protocol)
       } catch (err) {
-        const conflict = parseAccessUntilConflict(err)
-        if (conflict) {
-          throw conflict
+        // Конфликт со сроком владельца пробрасываем как есть — handleAccessUntilSave
+        // ждёт ApiError, чтобы открыть диалог подтверждения.
+        if (parseAccessUntilConflict(err)) {
+          throw err
         }
         failed.push({
           protocol,
@@ -453,46 +456,6 @@ export default function ClientActionsDialog({
   const trafficLimitExceeded = Boolean(policy?.traffic_limit_exceeded) || blockMode === 'traffic_limit'
   const status = getConfigStatus(config, tab, policy)
   const StatusIcon = statusIcons[status.variant]
-
-  const toDateInputValue = (value: string) => {
-    const date = parseTimestamp(value)
-    if (!date) return ''
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
-  }
-
-  const dateInputToIso = (value: string) => {
-    if (!value) return null
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-    if (!match) return null
-    const next = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
-    return next.toISOString()
-  }
-
-  const parseAccessUntilConflict = (err: unknown): ClientAccessUntilConflictPayload | null => {
-    if (!(err instanceof ApiError) || err.status !== 409) return null
-    const payload = err.payload
-    if (
-      !payload ||
-      typeof payload !== 'object' ||
-      (payload as { code?: unknown }).code !== 'access_until_conflict'
-    ) {
-      return null
-    }
-    return {
-      code: 'access_until_conflict',
-      user_access_until:
-        typeof (payload as { user_access_until?: unknown }).user_access_until === 'string'
-          ? (payload as { user_access_until: string }).user_access_until
-          : null,
-      client_access_until:
-        typeof (payload as { client_access_until?: unknown }).client_access_until === 'string'
-          ? (payload as { client_access_until: string }).client_access_until
-          : null,
-    }
-  }
 
   const runAction = async (key: string, fn: () => Promise<void>) => {
     setBusyAction(key)
@@ -667,6 +630,27 @@ export default function ClientActionsDialog({
       setBusyAction(null)
     }
   }
+
+  const applyWgExtendExpiry = async (days: number, confirmOverride = false) => {
+    try {
+      await wgSetExpiry(config.client_name, days, true, confirmOverride)
+    } catch (err) {
+      const conflict = confirmOverride ? null : parseAccessUntilConflict(err)
+      if (!conflict) throw err
+      setAccessUntilConflict({
+        requestedIso: conflict.client_access_until,
+        userAccessUntil: conflict.user_access_until,
+        clientAccessUntil: conflict.client_access_until,
+        extendDays: days,
+      })
+      return
+    }
+    setAccessUntilConflict(null)
+    onNotifySuccess('Срок доступа обновлён')
+  }
+
+  const handleWgExtendExpiryConfirm = (days: number) =>
+    runAction('access-until', () => applyWgExtendExpiry(days, true))
 
   const handleSyncAccessUntilFromOwner = async () => {
     setBusyAction('sync-access-until')
@@ -915,8 +899,7 @@ export default function ClientActionsDialog({
               `Укажите срок продления для клиента «${config.client_name}»`,
               '30',
               async (days) => {
-                await wgSetExpiry(config.client_name, days, true)
-                onNotifySuccess('Срок доступа обновлён')
+                await applyWgExtendExpiry(days)
               },
             ),
         },
@@ -1678,8 +1661,7 @@ export default function ClientActionsDialog({
                   `Укажите срок продления для клиента «${config.client_name}»`,
                   '30',
                   async (days) => {
-                    await wgSetExpiry(config.client_name, days, true)
-                    onNotifySuccess('Срок доступа обновлён')
+                    await applyWgExtendExpiry(days)
                   },
                 )
               }}
@@ -1709,7 +1691,10 @@ export default function ClientActionsDialog({
         confirmLabel="Сохранить поверх"
         cancelLabel="Отмена"
         loading={busyAction === 'access-until'}
-        onConfirm={() => void handleAccessUntilSave(true)}
+        onConfirm={() => {
+          const days = accessUntilConflict?.extendDays
+          void (days != null ? handleWgExtendExpiryConfirm(days) : handleAccessUntilSave(true))
+        }}
         alert={{
           variant: 'warning',
           title: 'Нужно подтверждение',

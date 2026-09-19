@@ -1750,17 +1750,33 @@ def _max_owned_client_access_until(conn, user_id: int) -> object | None:
     return max_deadline
 
 
+_USER_ACCESS_UNTIL_BACKFILL_MARKER = "migration_user_access_until_backfill_done"
+
+
 def _migrate_user_access_until_backfill() -> None:
-    """Set users.access_until from max child policy deadline when still NULL."""
+    """One-shot: set users.access_until from max child policy deadline when still NULL.
+
+    Guarded by an app_settings marker, not just `access_until IS NULL`: a client
+    may legitimately hold a deadline while its owner is unlimited (confirmed
+    override, ownership change), and re-running would adopt that client date as
+    the owner's subscription — possibly already expired.
+    """
     inspector = inspect(engine)
-    if "users" not in inspector.get_table_names():
+    tables = set(inspector.get_table_names())
+    if "users" not in tables:
         return
     user_cols = {col["name"] for col in inspector.get_columns("users")}
     if "access_until" not in user_cols:
         return
-    if "vpn_configs" not in inspector.get_table_names():
+    if "vpn_configs" not in tables or "app_settings" not in tables:
         return
     with engine.begin() as conn:
+        already_done = conn.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"),
+            {"key": _USER_ACCESS_UNTIL_BACKFILL_MARKER},
+        ).scalar()
+        if already_done:
+            return
         user_ids = conn.execute(
             text(
                 """
@@ -1780,6 +1796,10 @@ def _migrate_user_access_until_backfill() -> None:
                 {"deadline": max_deadline, "id": user_id},
             )
             logger.info("DB migration: backfilled users.access_until for user id=%s", user_id)
+        conn.execute(
+            text("INSERT INTO app_settings (key, value) VALUES (:key, '1')"),
+            {"key": _USER_ACCESS_UNTIL_BACKFILL_MARKER},
+        )
 
 
 def _migrate_user_telegram_backfill() -> None:

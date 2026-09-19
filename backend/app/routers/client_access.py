@@ -58,6 +58,7 @@ class ExpiryRequest(BaseModel):
     client_name: str
     days: int = Field(ge=1, le=3650)
     extend: bool = False
+    confirm_override: bool = False
 
 
 class TrafficLimitRequest(BaseModel):
@@ -352,7 +353,18 @@ def get_wg_policy(client_name: str, db: Session = Depends(get_db), _: User = Dep
 
 @router.post("/wireguard/set-expiry")
 def wg_set_expiry(payload: ExpiryRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    result = _service(db).wg_set_expiry(payload.client_name, payload.days, extend=payload.extend, actor=user.username)
+    service = _service(db)
+    # expires_at is the WireGuard access deadline, so this path needs the same
+    # owner conflict guard as the …/access-until endpoints.
+    conflict = _maybe_access_until_conflict(
+        db,
+        client_name=payload.client_name,
+        access_until=service.wg_expiry_target(payload.client_name, payload.days, extend=payload.extend),
+        confirm_override=payload.confirm_override,
+    )
+    if conflict is not None:
+        return conflict
+    result = service.wg_set_expiry(payload.client_name, payload.days, extend=payload.extend, actor=user.username)
     log_action(db, action="wg_set_expiry", user_id=user.id, username=user.username,
                details=f"{payload.client_name} {payload.days}d", remote_addr=request.client.host)
     _replicate_policy_after_success(

@@ -30,6 +30,11 @@ def _to_db_datetime(dt: datetime | None) -> datetime | None:
     return value.replace(tzinfo=None)
 
 
+def normalize_access_until(value: datetime | None) -> datetime | None:
+    """UTC-normalized deadline so equal moments compare equal regardless of tzinfo."""
+    return _as_utc(value)
+
+
 def get_user_access_until(user: User) -> datetime | None:
     return _as_utc(getattr(user, "access_until", None))
 

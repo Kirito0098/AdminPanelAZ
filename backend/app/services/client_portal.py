@@ -1074,9 +1074,13 @@ def redeem_public_portal_code(db: Session, resolution: PortalTokenResolution, *,
     if resolution.user_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
+    # A user portal covers several profiles, so a profile that does not fit the
+    # code (or is manually blocked by an admin) must not abort the redeem —
+    # manual blocks only have to be preserved, not to veto the subscription.
     retryable_messages = {
         unlock_codes_service._REDEEM_CLIENT_NOT_ALLOWED_MESSAGE,
         unlock_codes_service._REDEEM_PROTOCOL_MISMATCH_MESSAGE,
+        unlock_codes_service._REDEEM_MANUAL_BLOCK_MESSAGE,
     }
     last_retryable_error: str | None = None
     for node_id, client_name in _owned_portal_targets(db, user_id=resolution.user_row.user_id):
