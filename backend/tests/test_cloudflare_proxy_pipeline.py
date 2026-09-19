@@ -184,3 +184,24 @@ def test_refresh_applies_changed_hash_and_updates_status(db):
     assert state["last_hash"] == "hash-789"
     assert state["last_error"] is None
     assert state["last_success_at"] is not None
+
+
+def test_regenerate_nginx_skips_panel_restart(tmp_path: Path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("DOMAIN=panel.example.com\n", encoding="utf-8")
+    monkeypatch.setattr(cps, "_ENV_FILE", env_file)
+    repair = tmp_path / "nginx-repair.sh"
+    repair.write_text("#!/bin/bash\n", encoding="utf-8")
+    monkeypatch.setattr(cps, "_REPAIR_SCRIPT", repair)
+
+    run_result = MagicMock(returncode=0, stdout="ok", stderr="")
+    with patch("app.services.cloudflare_proxy_settings.subprocess.run", return_value=run_result) as run_mock:
+        stdout, stderr = cps.regenerate_panel_nginx_for_cloudflare_proxy()
+
+    assert stdout == "ok"
+    assert stderr == ""
+    args = run_mock.call_args.args[0]
+    assert args[:3] == ["sudo", "-n", "bash"]
+    assert args[3] == str(repair)
+    assert "--non-interactive" in args
+    assert "--no-panel-restart" in args

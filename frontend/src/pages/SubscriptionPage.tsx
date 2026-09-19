@@ -12,6 +12,8 @@ import {
 } from '@/api/client'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
+import SettingsAlert from '@/components/settings/SettingsAlert'
 import { DOCS } from '@/lib/docsUrls'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +25,7 @@ import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { formatDateTime } from '@/lib/datetime'
 import {
   isUnlockCodeExhausted,
@@ -36,6 +39,7 @@ import { getUnlockCodes, revokeUnlockCode, type UnlockCodeProtocol } from '@/api
 export default function SubscriptionPage() {
   const { success, error: notifyError } = useNotifications()
   const { trackBackgroundTask } = useProgress()
+  const { confirm, dialogProps } = useConfirmDialog()
   const { isEnabled } = useFeatureModules()
   const clientPortalEnabled = isEnabled('client_portal')
   const unlockCodesEnabled = isEnabled('unlock_codes')
@@ -129,24 +133,42 @@ export default function SubscriptionPage() {
       notifyError('Укажите хост портала')
       return
     }
-    setProvisioning(true)
-    try {
-      const resp = await publishPortalDomain({ portal_domain: host, save_domain: true })
-      trackBackgroundTask(resp.task_id, {
-        onComplete: () => {
+    confirm({
+      title: 'Настроить портал под текущую публикацию?',
+      description: (
+        <>
+          Будет пересобран nginx vhost для <code className="rounded bg-muted px-1">{host}</code>, при
+          необходимости перевыпущен TLS-сертификат (Let&apos;s Encrypt / текущий режим публикации).
+        </>
+      ),
+      alert: {
+        variant: 'warning',
+        title: 'Возможны побочные эффекты',
+        children:
+          'Кратковременно может пропасть доступ к порталу или панели (reload nginx / выпуск сертификата). DNS A-запись для хоста портала должна уже указывать на этот сервер. Домен панели за Cloudflare на эту операцию не влияет — портал остаётся отдельным хостом.',
+      },
+      confirmLabel: 'Настроить',
+      onConfirm: async () => {
+        setProvisioning(true)
+        try {
+          const resp = await publishPortalDomain({ portal_domain: host, save_domain: true })
+          trackBackgroundTask(resp.task_id, {
+            onComplete: () => {
+              setProvisioning(false)
+              success(resp.message || 'Портал настроен')
+              void refreshPortalStatus()
+            },
+            onError: (_task, message) => {
+              setProvisioning(false)
+              notifyError(message || 'Не удалось настроить портал')
+            },
+          })
+        } catch (err) {
           setProvisioning(false)
-          success(resp.message || 'Портал настроен')
-          void refreshPortalStatus()
-        },
-        onError: (_task, message) => {
-          setProvisioning(false)
-          notifyError(message || 'Не удалось настроить портал')
-        },
-      })
-    } catch (err) {
-      setProvisioning(false)
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка запуска настройки')
-    }
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка запуска настройки')
+        }
+      },
+    })
   }
 
   const runReadinessCheck = async () => {
@@ -198,41 +220,59 @@ export default function SubscriptionPage() {
       notifyError('Укажите хост портала')
       return
     }
-    setReadinessBusy(true)
-    setReadinessMode('prepare')
-    try {
-      const resp = await preparePortalReadiness({ portal_domain: host, save_domain: true })
-      trackBackgroundTask(resp.task_id, {
-        onComplete: (task) => {
+    confirm({
+      title: 'Подготовить окружение портала?',
+      description: (
+        <>
+          Сохранится хост <code className="rounded bg-muted px-1">{host}</code> и будут выполнены
+          подготовительные шаги (проверка/правка nginx и env под портал).
+        </>
+      ),
+      alert: {
+        variant: 'warning',
+        title: 'Может затронуть nginx',
+        children:
+          'Подготовка может изменить конфиги/состояние публикации портала. Сама панель за Cloudflare не отключается, но reload nginx возможен.',
+      },
+      confirmLabel: 'Подготовить',
+      onConfirm: async () => {
+        setReadinessBusy(true)
+        setReadinessMode('prepare')
+        try {
+          const resp = await preparePortalReadiness({ portal_domain: host, save_domain: true })
+          trackBackgroundTask(resp.task_id, {
+            onComplete: (task) => {
+              setReadinessBusy(false)
+              setReadinessMode(null)
+              const resultMessage = typeof task.result?.message === 'string' ? task.result.message : ''
+              const ready = typeof task.result?.ready === 'boolean' ? task.result.ready : undefined
+              const issuesRaw = task.result?.issues
+              const issues = Array.isArray(issuesRaw)
+                ? issuesRaw.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+                : []
+              const issuesText = issues.length > 0 ? `Проблемы: ${issues.join(', ')}` : ''
+              const baseMessage = resultMessage || resp.message || 'Подготовка завершена'
+              const fullMessage = issuesText ? `${baseMessage}\n${issuesText}` : baseMessage
+              if (ready === false) {
+                notifyError(fullMessage || 'Нужна подготовка')
+              } else {
+                success(fullMessage || 'Портал готов к настройке')
+              }
+              void refreshPortalStatus()
+            },
+            onError: (_task, message) => {
+              setReadinessBusy(false)
+              setReadinessMode(null)
+              notifyError(message || 'Не удалось выполнить подготовку')
+            },
+          })
+        } catch (err) {
           setReadinessBusy(false)
           setReadinessMode(null)
-          const resultMessage = typeof task.result?.message === 'string' ? task.result.message : ''
-          const ready = typeof task.result?.ready === 'boolean' ? task.result.ready : undefined
-          const issuesRaw = task.result?.issues
-          const issues = Array.isArray(issuesRaw)
-            ? issuesRaw.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
-            : []
-          const issuesText = issues.length > 0 ? `Проблемы: ${issues.join(', ')}` : ''
-          const baseMessage = resultMessage || resp.message || 'Подготовка завершена'
-          const fullMessage = issuesText ? `${baseMessage}\n${issuesText}` : baseMessage
-          if (ready === false) {
-            notifyError(fullMessage || 'Нужна подготовка')
-          } else {
-            success(fullMessage || 'Портал готов к настройке')
-          }
-          void refreshPortalStatus()
-        },
-        onError: (_task, message) => {
-          setReadinessBusy(false)
-          setReadinessMode(null)
-          notifyError(message || 'Не удалось выполнить подготовку')
-        },
-      })
-    } catch (err) {
-      setReadinessBusy(false)
-      setReadinessMode(null)
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка запуска подготовки')
-    }
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка запуска подготовки')
+        }
+      },
+    })
   }
 
   const refreshUnlockCodes = async () => {
@@ -437,6 +477,13 @@ export default function SubscriptionPage() {
                 </Button>
               </div>
             </div>
+
+            <SettingsAlert variant="info" title="Перед «Подготовить» / «Настроить»">
+              Эти действия меняют nginx и TLS для хоста портала. Кратковременно может пропасть доступ к
+              порталу (и иногда к панели при reload nginx). Убедитесь, что DNS A-запись портала уже
+              указывает на этот сервер. Портал не закрывается origin lock панели — его можно держать
+              DNS only, а панель — за Cloudflare.
+            </SettingsAlert>
           </CardContent>
         </Card>
       )}
@@ -603,6 +650,8 @@ export default function SubscriptionPage() {
           onCreated={() => void refreshUnlockCodes()}
         />
       )}
+
+      <ConfirmDialogHost dialogProps={dialogProps} />
     </div>
   )
 }
