@@ -212,6 +212,7 @@ class UserUpdate(BaseModel):
     role: UserRole | None = None
     theme: str | None = None
     is_active: bool | None = None
+    access_until: datetime | None = None
     password: str | None = Field(default=None, min_length=4)
     telegram_id: str | None = None
     config_quota: int | None = Field(default=None, ge=0, le=1000)
@@ -223,6 +224,7 @@ class UserResponse(UserBase):
     id: int
     must_change_password: bool
     totp_enabled: bool = False
+    access_until: datetime | None = None
     telegram_id: str | None = None
     config_quota: int | None = None
     can_create_configs: bool = True

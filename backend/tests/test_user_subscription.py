@@ -153,6 +153,78 @@ def test_set_user_access_until_commit_false_defers_reconcile(db):
     assert wg.expires_at == future.replace(tzinfo=None)
 
 
+def test_client_access_conflicts_with_owner_compares_normalized_deadlines(db):
+    future = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    owner = User(
+        username="owner-conflict",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        access_until=future.replace(tzinfo=None),
+    )
+    db.add(owner)
+    db.commit()
+
+    assert usub.client_access_conflicts_with_owner(db, owner=owner, client_access_until=future) is False
+    assert usub.client_access_conflicts_with_owner(
+        db,
+        owner=owner,
+        client_access_until=future + timedelta(days=1),
+    ) is True
+    assert usub.client_access_conflicts_with_owner(db, owner=owner, client_access_until=None) is True
+
+
+def test_sync_client_access_until_from_owner_updates_only_requested_client(db):
+    node = _make_node(db)
+    future = datetime.now(timezone.utc) + timedelta(days=21)
+    other = datetime.now(timezone.utc) + timedelta(days=3)
+    owner = User(
+        username="owner-single-sync",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        access_until=future.replace(tzinfo=None),
+    )
+    db.add(owner)
+    db.commit()
+    db.refresh(owner)
+    _make_owned_client(
+        db,
+        node_id=node.id,
+        owner_id=owner.id,
+        client_name="Alice",
+        protocols=[VpnType.openvpn, VpnType.wireguard],
+    )
+    _make_owned_client(
+        db,
+        node_id=node.id,
+        owner_id=owner.id,
+        client_name="Bob",
+        protocols=[VpnType.openvpn],
+    )
+
+    with patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()):
+        set_access_until(db, "openvpn", node.id, "Alice", other, actor="admin")
+        set_access_until(db, "wireguard", node.id, "Alice", other, actor="admin")
+        set_access_until(db, "openvpn", node.id, "Bob", other, actor="admin")
+        result = usub.sync_client_access_until_from_owner(
+            db,
+            owner=owner,
+            node_id=node.id,
+            client_name="Alice",
+            actor="admin",
+        )
+
+    alice_ovpn = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one()
+    alice_wg = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
+    bob_ovpn = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Bob").one()
+    assert result["targets"] == 2
+    assert result["synced"] == 2
+    assert alice_ovpn.access_until == future.replace(tzinfo=None)
+    assert alice_wg.expires_at == future.replace(tzinfo=None)
+    assert bob_ovpn.access_until == other.replace(tzinfo=None)
+
+
 def test_clear_access_expired_skips_permanent_block(db):
     node = _make_node(db)
     user = User(

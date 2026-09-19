@@ -34,6 +34,7 @@ from app.services.admin_bootstrap import (
     should_scrub_env_after_password_change,
 )
 from app.services.password_policy import validate_password
+from app.services.user_subscription import set_user_access_until
 from app.services.vpn_profile_visibility import normalize_policy, policy_to_json
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -123,6 +124,9 @@ def update_user(
     if not is_admin and current_user.id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
+    access_until_updated = False
+    pending_access_until = None
+
     if payload.role is not None:
         if not is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять роль")
@@ -144,6 +148,14 @@ def update_user(
         if not is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять статус")
         user.is_active = payload.is_active
+    if "access_until" in payload.model_fields_set:
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только администратор может менять срок доступа",
+            )
+        access_until_updated = True
+        pending_access_until = payload.access_until
     if payload.password:
         if not is_admin and current_user.id != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
@@ -200,11 +212,26 @@ def update_user(
             normalized = normalize_policy(payload.visible_vpn_profiles, strict=True)
             user.visible_vpn_profiles = policy_to_json(normalized)
 
-    db.commit()
-    db.refresh(user)
+    if access_until_updated:
+        user = set_user_access_until(
+            db,
+            user,
+            pending_access_until,
+            actor=current_user.username,
+            sync_clients=True,
+            commit=True,
+        )
+    else:
+        db.commit()
+        db.refresh(user)
     if payload.password and should_scrub_env_after_password_change(user.username):
         scrub_admin_bootstrap_secret_from_env()
-    if settings.audit_log_enabled and (payload.password or payload.role is not None or payload.is_active is not None):
+    if settings.audit_log_enabled and (
+        payload.password
+        or payload.role is not None
+        or payload.is_active is not None
+        or access_until_updated
+    ):
         log_action(
             db,
             action="user_update",

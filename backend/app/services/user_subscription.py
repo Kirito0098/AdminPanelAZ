@@ -82,6 +82,21 @@ def _policy_row(db: Session, *, protocol: str, node_id: int, client_name: str):
     )
 
 
+def client_access_conflicts_with_owner(
+    db: Session,
+    *,
+    owner: User | None,
+    client_access_until: datetime | None,
+) -> bool:
+    _ = db
+    if owner is None:
+        return False
+    user_until = get_user_access_until(owner)
+    if user_until is None and client_access_until is None:
+        return False
+    return _as_utc(client_access_until) != user_until
+
+
 def list_owned_client_targets(db: Session, user_id: int) -> list[tuple[int, str]]:
     targets: list[tuple[int, str]] = []
     seen: set[tuple[int, str]] = set()
@@ -110,6 +125,34 @@ def _reconcile_owned_client_queue(db: Session, queued: list[tuple[int, str, str]
         synced += 1
 
     return synced
+
+
+def _owned_client_protocol_targets(
+    db: Session,
+    *,
+    user_id: int,
+    node_id: int,
+    client_name: str,
+) -> list[tuple[int, str, str]]:
+    targets: list[tuple[int, str, str]] = []
+    seen: set[tuple[int, str, str]] = set()
+    client_key = (client_name or "").strip().lower()
+
+    for config in _owned_configs(db, user_id):
+        if config.node_id != node_id:
+            continue
+        if (config.client_name or "").strip().lower() != client_key:
+            continue
+        protocol = _VPN_PROTOCOLS.get(config.vpn_type)
+        if protocol is None:
+            continue
+        target = (config.node_id, protocol, _policy_client_name(protocol, config.client_name))
+        if target in seen:
+            continue
+        seen.add(target)
+        targets.append(target)
+
+    return targets
 
 
 def reconcile_owned_clients_access_until(db: Session, user: User) -> dict:
@@ -155,6 +198,48 @@ def sync_owned_clients_access_until(db: Session, user: User, *, actor: str, comm
     return {
         "targets": len(list_owned_client_targets(db, user.id)),
         "synced": _reconcile_owned_client_queue(db, queued) if commit else 0,
+    }
+
+
+def sync_client_access_until_from_owner(
+    db: Session,
+    *,
+    owner: User,
+    node_id: int,
+    client_name: str,
+    actor: str,
+    commit: bool = True,
+) -> dict:
+    access_until = get_user_access_until(owner)
+    queued = _owned_client_protocol_targets(
+        db,
+        user_id=owner.id,
+        node_id=node_id,
+        client_name=client_name,
+    )
+
+    for target_node_id, protocol, normalized_client_name in queued:
+        set_access_until(
+            db,
+            protocol,
+            target_node_id,
+            normalized_client_name,
+            access_until,
+            actor=actor,
+            commit=False,
+        )
+
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+
+    return {
+        "client_name": client_name,
+        "targets": len(queued),
+        "protocols": [protocol for (_node_id, protocol, _client_name) in queued],
+        "synced": _reconcile_owned_client_queue(db, queued) if commit else 0,
+        "access_until": access_until.isoformat() if access_until else None,
     }
 
 
