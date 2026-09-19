@@ -401,3 +401,116 @@ def test_apply_due_user_subscription_blocks_rechecks_user_after_snapshot_release
         "skipped": 1,
         "errors": 0,
     }
+
+
+def test_migrate_user_access_until_backfill_sets_max_of_owned_clients(db, monkeypatch):
+    from app import database
+
+    test_engine = db.get_bind()
+    monkeypatch.setattr(database, "engine", test_engine)
+
+    node = _make_node(db)
+    sooner = datetime.now(timezone.utc) + timedelta(days=7)
+    later = datetime.now(timezone.utc) + timedelta(days=30)
+    user = User(username="backfill-owner", password_hash="x", role=UserRole.user, is_active=True)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    _make_owned_client(
+        db,
+        node_id=node.id,
+        owner_id=user.id,
+        client_name="Alice",
+        protocols=[VpnType.openvpn],
+    )
+    _make_owned_client(
+        db,
+        node_id=node.id,
+        owner_id=user.id,
+        client_name="Bob",
+        protocols=[VpnType.wireguard],
+    )
+    db.add(
+        OpenVpnAccessPolicy(
+            node_id=node.id,
+            client_name="Alice",
+            access_until=sooner.replace(tzinfo=None),
+        )
+    )
+    db.add(
+        WgAccessPolicy(
+            node_id=node.id,
+            client_name="bob",
+            expires_at=later.replace(tzinfo=None),
+        )
+    )
+    db.commit()
+
+    database._migrate_user_access_until_backfill()
+
+    db.refresh(user)
+    assert user.access_until == later.replace(tzinfo=None)
+
+
+def test_migrate_user_access_until_backfill_idempotent_and_skips_non_null(db, monkeypatch):
+    from app import database
+
+    test_engine = db.get_bind()
+    monkeypatch.setattr(database, "engine", test_engine)
+
+    node = _make_node(db)
+    later = datetime.now(timezone.utc) + timedelta(days=30)
+    preset = datetime.now(timezone.utc) + timedelta(days=3)
+    user_null = User(username="backfill-null", password_hash="x", role=UserRole.user, is_active=True)
+    user_set = User(
+        username="backfill-set",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        access_until=preset.replace(tzinfo=None),
+    )
+    db.add_all([user_null, user_set])
+    db.commit()
+    db.refresh(user_null)
+    db.refresh(user_set)
+
+    _make_owned_client(
+        db,
+        node_id=node.id,
+        owner_id=user_null.id,
+        client_name="Alice",
+        protocols=[VpnType.openvpn],
+    )
+    _make_owned_client(
+        db,
+        node_id=node.id,
+        owner_id=user_set.id,
+        client_name="Bob",
+        protocols=[VpnType.openvpn],
+    )
+    db.add(
+        OpenVpnAccessPolicy(
+            node_id=node.id,
+            client_name="Alice",
+            access_until=later.replace(tzinfo=None),
+        )
+    )
+    db.add(
+        OpenVpnAccessPolicy(
+            node_id=node.id,
+            client_name="Bob",
+            access_until=later.replace(tzinfo=None),
+        )
+    )
+    db.commit()
+
+    database._migrate_user_access_until_backfill()
+    db.refresh(user_null)
+    db.refresh(user_set)
+    assert user_null.access_until == later.replace(tzinfo=None)
+    assert user_set.access_until == preset.replace(tzinfo=None)
+
+    database._migrate_user_access_until_backfill()
+    db.refresh(user_null)
+    assert user_null.access_until == later.replace(tzinfo=None)

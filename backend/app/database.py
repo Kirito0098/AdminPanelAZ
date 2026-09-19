@@ -1325,6 +1325,7 @@ def run_db_migrations() -> None:
     _migrate_user_config_access_table()
     _migrate_viewer_role_to_user()
     _migrate_user_telegram_backfill()
+    _migrate_user_access_until_backfill()
     _migrate_nodes_mtls_enabled()
     _migrate_nodes_transport()
     _migrate_nodes_ssh_fields()
@@ -1542,6 +1543,98 @@ def _migrate_nodes_proxy_fields() -> None:
         if "linked_vpn_node_id" not in cols:
             conn.execute(text("ALTER TABLE nodes ADD COLUMN linked_vpn_node_id INTEGER REFERENCES nodes(id)"))
             logger.info("DB migration: added nodes.linked_vpn_node_id")
+
+
+def _max_owned_client_access_until(conn, user_id: int) -> object | None:
+    """Max non-null deadline across owned clients' openvpn/awg2/wg policies."""
+    pairs = conn.execute(
+        text(
+            """
+            SELECT DISTINCT node_id, client_name
+            FROM vpn_configs
+            WHERE owner_id = :uid AND ha_primary_config_id IS NULL
+            """
+        ),
+        {"uid": user_id},
+    ).mappings().all()
+    max_deadline = None
+    for pair in pairs:
+        node_id = pair["node_id"]
+        raw_name = (pair["client_name"] or "").strip()
+        if not raw_name:
+            continue
+        lower_name = raw_name.lower()
+        candidates = []
+        ov = conn.execute(
+            text(
+                """
+                SELECT access_until FROM openvpn_access_policy
+                WHERE node_id = :nid AND client_name = :cn AND access_until IS NOT NULL
+                """
+            ),
+            {"nid": node_id, "cn": raw_name},
+        ).scalar()
+        if ov is not None:
+            candidates.append(ov)
+        awg = conn.execute(
+            text(
+                """
+                SELECT access_until FROM amneziawg2_access_policies
+                WHERE node_id = :nid AND client_name = :cn AND access_until IS NOT NULL
+                """
+            ),
+            {"nid": node_id, "cn": lower_name},
+        ).scalar()
+        if awg is not None:
+            candidates.append(awg)
+        wg = conn.execute(
+            text(
+                """
+                SELECT expires_at FROM wg_access_policy
+                WHERE node_id = :nid AND client_name = :cn AND expires_at IS NOT NULL
+                """
+            ),
+            {"nid": node_id, "cn": lower_name},
+        ).scalar()
+        if wg is not None:
+            candidates.append(wg)
+        if candidates:
+            pair_max = max(candidates)
+            if max_deadline is None or pair_max > max_deadline:
+                max_deadline = pair_max
+    return max_deadline
+
+
+def _migrate_user_access_until_backfill() -> None:
+    """Set users.access_until from max child policy deadline when still NULL."""
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    user_cols = {col["name"] for col in inspector.get_columns("users")}
+    if "access_until" not in user_cols:
+        return
+    if "vpn_configs" not in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        user_ids = conn.execute(
+            text(
+                """
+                SELECT DISTINCT u.id
+                FROM users u
+                INNER JOIN vpn_configs vc ON vc.owner_id = u.id
+                WHERE u.access_until IS NULL AND vc.ha_primary_config_id IS NULL
+                """
+            )
+        ).scalars().all()
+        for user_id in user_ids:
+            max_deadline = _max_owned_client_access_until(conn, user_id)
+            if max_deadline is None:
+                continue
+            conn.execute(
+                text("UPDATE users SET access_until = :deadline WHERE id = :id AND access_until IS NULL"),
+                {"deadline": max_deadline, "id": user_id},
+            )
+            logger.info("DB migration: backfilled users.access_until for user id=%s", user_id)
 
 
 def _migrate_user_telegram_backfill() -> None:
