@@ -103,6 +103,7 @@ class Settings(BaseSettings):
     self_service_reminder_enabled: bool = True
     self_service_reminder_interval_seconds: int = 3600
     self_service_reminder_cert_days_threshold: int = 7
+    self_service_reminder_access_days_threshold: int = 7
     self_service_traffic_warning_percent: int = 90
     node_active_health_cache_seconds: int = 45
     openvpn_socket_dir: Path = Path("/run/openvpn-server")
