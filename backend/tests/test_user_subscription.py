@@ -341,3 +341,63 @@ def test_apply_due_user_subscription_blocks_cascades(db):
         "skipped": 0,
         "errors": 0,
     }
+
+
+def test_apply_due_user_subscription_blocks_rechecks_user_after_snapshot_release(db):
+    node = _make_node(db)
+    now = datetime.now(timezone.utc)
+    past = now - timedelta(days=1)
+    future = now + timedelta(days=14)
+
+    user = User(
+        username="owner-due-race",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        access_until=past.replace(tzinfo=None),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    _make_owned_client(
+        db,
+        node_id=node.id,
+        owner_id=user.id,
+        client_name="Alice",
+        protocols=[VpnType.openvpn, VpnType.wireguard],
+    )
+
+    orig_commit = db.commit
+    released = {"done": False}
+
+    def commit_then_extend_user():
+        if not released["done"]:
+            released["done"] = True
+            orig_commit()
+            other = sessionmaker(bind=db.get_bind())()
+            try:
+                fresh_user = other.get(User, user.id)
+                usub.set_user_access_until(other, fresh_user, future, actor="admin", sync_clients=False)
+            finally:
+                other.close()
+            return None
+        return orig_commit()
+
+    db.commit = commit_then_extend_user  # type: ignore[method-assign]
+    try:
+        with patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()):
+            result = usub.apply_due_user_subscription_blocks(db)
+    finally:
+        db.commit = orig_commit  # type: ignore[method-assign]
+
+    db.refresh(user)
+    assert user.access_until == future.replace(tzinfo=None)
+    assert db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").count() == 0
+    assert db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").count() == 0
+    assert result == {
+        "users_due": 1,
+        "cascaded": 0,
+        "skipped": 1,
+        "errors": 0,
+    }

@@ -224,18 +224,27 @@ def apply_due_user_subscription_blocks(db: Session) -> dict[str, int]:
         "errors": 0,
     }
 
-    due_users = (
-        db.query(User)
+    due_user_ids = [
+        user_id
+        for (user_id,) in db.query(User.id)
         .filter(
             User.access_until.isnot(None),
             User.access_until <= now.replace(tzinfo=None),
         )
         .all()
-    )
+    ]
 
-    for user in due_users:
+    # End the read snapshot so each user refresh sees concurrent extensions.
+    db.commit()
+    db.expire_all()
+
+    for user_id in due_user_ids:
         counts["users_due"] += 1
         try:
+            user = db.get(User, user_id)
+            if user is None or not user_subscription_expired(user, now=now):
+                counts["skipped"] += 1
+                continue
             result = apply_user_subscription_expiry(db, user, commit=True)
         except Exception:
             db.rollback()
