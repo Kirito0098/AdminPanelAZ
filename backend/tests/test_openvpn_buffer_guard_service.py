@@ -420,3 +420,26 @@ def test_temp_ban_expiry_uses_per_node_adapter(db_session, monkeypatch):
     assert (node_local.id, f"adapter-{node_local.id}") in access_policy_calls
     assert (node_remote.id, f"adapter-{node_remote.id}") in access_policy_calls
 
+
+def test_recommended_thresholds_by_mode():
+    assert guard.recommended_threshold("notify") == 40
+    assert guard.recommended_threshold("kill") == 80
+    assert guard.recommended_threshold("kill_restart") == 120
+    assert guard.recommended_threshold("kill_restart_temp_ban") == 150
+    assert guard.recommended_threshold("nope") == 40
+    assert guard.recommended_by_mode() == {
+        "notify": 40,
+        "kill": 80,
+        "kill_restart": 120,
+        "kill_restart_temp_ban": 150,
+    }
+
+
+def test_get_settings_defaults_are_notify_and_40(db_session):
+    node = _make_node(db_session)
+    row = guard.get_settings(db_session, node.id)
+    assert row.mode == OpenVpnBufferGuardMode.notify.value
+    assert row.threshold_count == 40
+    assert row.window_seconds == 60
+    assert row.enabled is False
+

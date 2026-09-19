@@ -105,10 +105,26 @@ def _parse_watch_units(raw_json: str | None) -> list[str]:
     return [u for u in units if normalize_watch_unit(u)]
 
 
+MODE_RECOMMENDED_THRESHOLD: dict[str, int] = {
+    OpenVpnBufferGuardMode.notify.value: 40,
+    OpenVpnBufferGuardMode.kill.value: 80,
+    OpenVpnBufferGuardMode.kill_restart.value: 120,
+    OpenVpnBufferGuardMode.kill_restart_temp_ban.value: 150,
+}
+
+
+def recommended_threshold(mode: str) -> int:
+    return int(MODE_RECOMMENDED_THRESHOLD.get(str(mode or "").strip(), 40))
+
+
+def recommended_by_mode() -> dict[str, int]:
+    return dict(MODE_RECOMMENDED_THRESHOLD)
+
+
 DEFAULT_SETTINGS: dict = {
     "enabled": False,
-    "mode": OpenVpnBufferGuardMode.kill_restart.value,
-    "threshold_count": 500,
+    "mode": OpenVpnBufferGuardMode.notify.value,
+    "threshold_count": 40,
     "window_seconds": 60,
     "escalate_after_seconds": 30,
     "cooldown_minutes": 15,
