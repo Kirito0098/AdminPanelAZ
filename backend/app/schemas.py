@@ -865,6 +865,8 @@ class OpenVpnBufferGuardSettingsOut(BaseModel):
     cooldown_minutes: int
     temp_ban_minutes: int
     watch_units: list[str]
+    recommended_threshold: int
+    recommended_by_mode: dict[str, int]
     updated_at: datetime | None = None
 
 

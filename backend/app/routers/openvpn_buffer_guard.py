@@ -20,6 +20,8 @@ from app.services.openvpn_buffer_guard import (
     _parse_watch_units,
     get_settings as get_guard_settings,
     list_events as list_guard_events,
+    recommended_by_mode,
+    recommended_threshold,
     run_guard_pass,
     upsert_settings,
 )
@@ -41,16 +43,19 @@ def _get_node_or_404(db: Session, node_id: int) -> Node:
 
 def _settings_to_response(row) -> OpenVpnBufferGuardSettingsOut:
     watch_units = _parse_watch_units(getattr(row, "watch_units_json", None))
+    mode = row.mode
     return OpenVpnBufferGuardSettingsOut(
         node_id=row.node_id,
         enabled=row.enabled,
-        mode=row.mode,
+        mode=mode,
         threshold_count=row.threshold_count,
         window_seconds=row.window_seconds,
         escalate_after_seconds=row.escalate_after_seconds,
         cooldown_minutes=row.cooldown_minutes,
         temp_ban_minutes=row.temp_ban_minutes,
         watch_units=watch_units,
+        recommended_threshold=recommended_threshold(mode),
+        recommended_by_mode=recommended_by_mode(),
         updated_at=row.updated_at,
     )
 
