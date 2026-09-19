@@ -69,3 +69,19 @@ def test_is_valid_origin_allow_requires_cf_and_deny():
     only_lan = "allow 10.0.0.0/8;\nallow 127.0.0.1;\ndeny all;\n"
     assert is_valid_origin_allow_conf(only_lan) is False
     assert is_valid_origin_allow_conf("") is False
+
+
+def test_is_valid_origin_allow_rejects_deny_all_in_comment_only():
+    spoof = (
+        "allow 173.245.48.0/20;\n"
+        "allow 10.0.0.0/8;\n"
+        "# deny all;\n"
+    )
+    assert is_valid_origin_allow_conf(spoof) is False
+
+    real_deny = (
+        "allow 173.245.48.0/20;\n"
+        "allow 10.0.0.0/8;\n"
+        "deny all;\n"
+    )
+    assert is_valid_origin_allow_conf(real_deny) is True

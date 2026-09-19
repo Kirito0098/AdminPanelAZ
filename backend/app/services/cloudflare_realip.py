@@ -96,11 +96,16 @@ def render_cloudflare_origin_allow_conf(
 
 
 def is_valid_origin_allow_conf(body: str) -> bool:
-    if "deny all;" not in body:
-        return False
     reserved = set(_LOCALHOST_ALLOW) | set(RFC1918_ALLOW)
+    has_deny_all = False
+    has_cloudflare_allow = False
     for raw in body.splitlines():
         line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line == "deny all;":
+            has_deny_all = True
+            continue
         if not line.startswith("allow ") or not line.endswith(";"):
             continue
         cidr = line[len("allow ") : -1].strip()
@@ -109,8 +114,8 @@ def is_valid_origin_allow_conf(body: str) -> bool:
                 ipaddress.ip_network(cidr, strict=False)
             except ValueError:
                 continue
-            return True
-    return False
+            has_cloudflare_allow = True
+    return has_deny_all and has_cloudflare_allow
 
 
 def _normalize_body(body: str) -> str:
