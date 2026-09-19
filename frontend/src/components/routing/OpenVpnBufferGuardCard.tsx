@@ -53,6 +53,9 @@ const WATCH_UNIT_LABELS: Record<string, string> = {
 
 const DEFAULT_WATCH_UNITS: string[] = ['antizapret-udp', 'vpn-udp']
 
+/** Recommended thresholds are calibrated for this window only (not scaled). */
+const RECOMMENDED_THRESHOLD_WINDOW_SECONDS = 60
+
 export type OpenVpnBufferGuardCardProps = {
   activeNodeId: number | null
   nodeName?: string | null
@@ -264,15 +267,23 @@ export default function OpenVpnBufferGuardCard({
     setScanBusy(true)
     try {
       const results = (await scanBufferGuard(activeNodeId)) as OpenVpnBufferGuardScanResult[]
-      const triggered =
-        Array.isArray(results) && results.length > 0
-          ? results.some((r) => r && typeof r === 'object' && r.threshold_exceeded)
-          : false
-      if (triggered) {
+      const list = Array.isArray(results)
+        ? results.filter(
+            (r): r is OpenVpnBufferGuardScanResult =>
+              r != null && typeof r === 'object' && typeof r.result === 'string',
+          )
+        : []
+      const journalFailed = list.some((r) => r.result === 'failed')
+      const triggered = list.some((r) => r.threshold_exceeded)
+      if (journalFailed) {
+        notifyWarning(
+          'Проверка Buffer Guard: не удалось прочитать журнал OpenVPN на одном или нескольких юнитах. Превышение порога не подтверждено.',
+        )
+      } else if (triggered) {
         notifyWarning(
           'Порог ENOBUFS превышен — проверьте последний блок ниже и логи OpenVPN. Ручной запуск не применяет действия.',
         )
-      } else {
+      } else if (list.length > 0) {
         success('Проверка Buffer Guard выполнена: превышений порога не найдено')
       }
       await loadEvents(activeNodeId)
@@ -471,8 +482,8 @@ export default function OpenVpnBufferGuardCard({
                           <div className="space-y-2">
                             <p className="text-xs text-muted-foreground">
                               Для режима «{MODE_LABELS[draft.mode]}» рекомендуем{' '}
-                              <span className="font-medium text-foreground">{rec}</span> за{' '}
-                              {draft.window_seconds} с (типичный VPS 1GB/1CPU).
+                              <span className="font-medium text-foreground">{rec}</span> за окно{' '}
+                              {RECOMMENDED_THRESHOLD_WINDOW_SECONDS} с (типичный VPS 1GB/1CPU).
                             </p>
                             <Button
                               type="button"
