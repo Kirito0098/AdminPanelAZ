@@ -34,7 +34,7 @@
 | Узлы | [uzly.md](uzly.md) | Только админ |
 | SSH-транспорт узлов | [node-ssh-transport.md](node-ssh-transport.md) | Только админ (модуль `node_ssh_transport`) |
 | proxy_agent (установка на RU) | [proxy-agent.md](proxy-agent.md) | Только админ |
-| Подписка | [podpiska.md](podpiska.md) | Только админ (модули `client_portal` / `unlock_codes`) |
+| Подписка | [podpiska.md](podpiska.md) | Только админ: срок на пользователе, портал (`c_`/`u_`), unlock (модули `client_portal` / `unlock_codes`) |
 | Настройки | [nastrojki/README.md](nastrojki/README.md) | Все (часть — только админ) |
 
 ---
