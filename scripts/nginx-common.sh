@@ -586,6 +586,9 @@ nginx_render_subpath_template() {
   if ! nginx_cloudflare_proxy_enabled; then
     out="$(printf '%s\n' "$out" | sed '/include snippets\/cloudflare-realip.conf;/d')"
   fi
+  if ! nginx_cloudflare_origin_lock_enabled; then
+    out="$(printf '%s\n' "$out" | sed '/include snippets\/cloudflare-origin-allow.conf;/d')"
+  fi
   printf '%s\n' "$out"
 }
 
@@ -601,9 +604,26 @@ nginx_cloudflare_proxy_enabled() {
   esac
 }
 
+nginx_cloudflare_origin_lock_enabled() {
+  nginx_cloudflare_proxy_enabled || return 1
+  local v="${CLOUDFLARE_ORIGIN_LOCK:-false}"
+  case "${v,,}" in
+    true|1|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 nginx_webhook_realip_include_line() {
   if nginx_cloudflare_proxy_enabled; then
     printf '        include snippets/cloudflare-realip.conf;\n'
+  else
+    printf ''
+  fi
+}
+
+nginx_origin_allow_include_line() {
+  if nginx_cloudflare_origin_lock_enabled; then
+    printf '        include snippets/cloudflare-origin-allow.conf;\n'
   else
     printf ''
   fi
@@ -624,33 +644,96 @@ nginx_ensure_cloudflare_realip_snippet() {
   nginx_log "Snippet Cloudflare realip: ${dest}"
 }
 
-nginx_cloudflare_realip_apply() {
+nginx_ensure_cloudflare_origin_allow_snippet() {
+  local src dest dir bak_dir
+  src="${NGINX_TEMPLATE_DIR}/cloudflare-origin-allow.conf"
+  dir="$(nginx_snippets_dir)"
+  dest="${dir}/cloudflare-origin-allow.conf"
+  bak_dir="${NGINX_BACKUPS_DIR:-/etc/nginx/backups}"
+  [[ -f "$src" ]] || nginx_die "Нет шаблона Cloudflare origin allow: ${src}"
+  mkdir -p "$dir" "$bak_dir"
+  if [[ -f "$dest" ]] && ! cmp -s "$src" "$dest"; then
+    cp "$dest" "${bak_dir}/cloudflare-origin-allow.conf.$(date +%Y%m%d%H%M%S).bak"
+  fi
+  cp "$src" "$dest"
+  nginx_log "Snippet Cloudflare origin allow: ${dest}"
+}
+
+nginx_cloudflare_snippets_apply() {
   local new_file="$1"
-  local dir dest bak_dir tmp latest
+  local allow_file="${2:-}"
+  local dir dest allow_dest bak_dir tmp allow_tmp
+  local dest_bak allow_bak
+  local dest_changed=false allow_changed=false
   [[ -f "$new_file" ]] || nginx_die "Файл не найден: $new_file"
   [[ "$(id -u)" -eq 0 ]] || nginx_die "Запустите от root"
 
   dir="$(nginx_snippets_dir)"
   dest="${dir}/cloudflare-realip.conf"
+  allow_dest="${dir}/cloudflare-origin-allow.conf"
   bak_dir="${NGINX_BACKUPS_DIR:-/etc/nginx/backups}"
   mkdir -p "$dir" "$bak_dir"
 
   if [[ -f "$dest" ]]; then
-    cp "$dest" "${bak_dir}/cloudflare-realip.conf.$(date +%Y%m%d%H%M%S).bak"
+    dest_bak="${bak_dir}/cloudflare-realip.conf.$(date +%Y%m%d%H%M%S).bak"
+    cp "$dest" "$dest_bak"
   fi
   tmp="${dest}.tmp.$$"
   cp "$new_file" "$tmp"
   mv "$tmp" "$dest"
+  dest_changed=true
+
+  if [[ -n "$allow_file" ]]; then
+    [[ -f "$allow_file" ]] || nginx_die "Файл не найден: $allow_file"
+    if [[ -f "$allow_dest" ]]; then
+      allow_bak="${bak_dir}/cloudflare-origin-allow.conf.$(date +%Y%m%d%H%M%S).bak"
+      cp "$allow_dest" "$allow_bak"
+    fi
+    allow_tmp="${allow_dest}.tmp.$$"
+    cp "$allow_file" "$allow_tmp"
+    mv "$allow_tmp" "$allow_dest"
+    allow_changed=true
+  fi
 
   if ! nginx -t; then
-    latest="$(ls -1t "${bak_dir}"/cloudflare-realip.conf.*.bak 2>/dev/null | head -1 || true)"
-    if [[ -n "$latest" ]]; then
-      cp "$latest" "$dest"
+    if [[ -n "${dest_bak:-}" && -f "$dest_bak" ]]; then
+      mv -f "$dest_bak" "$dest"
+    elif [[ "$dest_changed" == true ]]; then
+      rm -f "$dest"
     fi
-    nginx_die "nginx -t не прошёл — восстановлен предыдущий cloudflare-realip.conf"
+    if [[ -n "$allow_file" ]]; then
+      if [[ -n "${allow_bak:-}" && -f "$allow_bak" ]]; then
+        mv -f "$allow_bak" "$allow_dest"
+      elif [[ "$allow_changed" == true ]]; then
+        rm -f "$allow_dest"
+      fi
+    fi
+    nginx_die "nginx -t не прошёл — восстановлены предыдущие cloudflare snippets"
   fi
-  systemctl reload nginx || nginx_die "Не удалось reload nginx"
+  if ! systemctl reload nginx; then
+    if [[ -n "${dest_bak:-}" && -f "$dest_bak" ]]; then
+      mv -f "$dest_bak" "$dest"
+    elif [[ "$dest_changed" == true ]]; then
+      rm -f "$dest"
+    fi
+    if [[ -n "$allow_file" ]]; then
+      if [[ -n "${allow_bak:-}" && -f "$allow_bak" ]]; then
+        mv -f "$allow_bak" "$allow_dest"
+      elif [[ "$allow_changed" == true ]]; then
+        rm -f "$allow_dest"
+      fi
+    fi
+    nginx_die "Не удалось reload nginx — восстановлены предыдущие cloudflare snippets"
+  fi
   nginx_log "Cloudflare realip snippet обновлён: ${dest}"
+  if [[ -n "$allow_file" ]]; then
+    nginx_log "Cloudflare origin allow snippet обновлён: ${allow_dest}"
+  fi
+}
+
+nginx_cloudflare_realip_apply() {
+  local new_file="$1"
+  nginx_cloudflare_snippets_apply "$new_file"
 }
 
 nginx_root_panel_location_blocks() {
@@ -659,6 +742,7 @@ nginx_root_panel_location_blocks() {
     # Telegram Bot API webhook: Cloudflare real client IP only here
     location ^~ /api/telegram/webhook/ {
 $(nginx_webhook_realip_include_line)
+$(nginx_origin_allow_include_line)
 
         proxy_pass http://127.0.0.1:${backend_port};
         proxy_http_version 1.1;
@@ -672,6 +756,7 @@ $(nginx_webhook_realip_include_line)
 
     # Telegram Mini App — без X-Frame-Options (WebView Telegram блокируется SAMEORIGIN)
     location ^~ /api/tg-mini {
+$(nginx_origin_allow_include_line)
         proxy_pass http://127.0.0.1:${backend_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -686,6 +771,7 @@ $(nginx_webhook_realip_include_line)
 
     # API, SPA, WebSocket (/api/server-monitor/ws)
     location / {
+$(nginx_origin_allow_include_line)
         proxy_pass http://127.0.0.1:${backend_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -914,6 +1000,7 @@ nginx_install_subpath_snippet() {
   snippet_name="$(nginx_subpath_snippet_basename "$domain" "$access_path")"
   snippet_path="/etc/nginx/snippets/${snippet_name}.conf"
   nginx_ensure_cloudflare_realip_snippet
+  nginx_ensure_cloudflare_origin_allow_snippet
   mkdir -p /etc/nginx/snippets /etc/nginx/backups
   content="$(nginx_render_subpath_template "$access_path" "$backend_port")"
   printf '%s\n' "$content" >"$snippet_path"
@@ -1037,6 +1124,7 @@ nginx_render_template() {
   local http_port="${7:-80}"
   local https_redirect_suffix access_path panel_blocks rendered
   nginx_ensure_cloudflare_realip_snippet
+  nginx_ensure_cloudflare_origin_allow_snippet
   https_redirect_suffix="$(nginx_https_redirect_suffix "$https_port")"
   access_path="$(nginx_normalize_access_path "${ACCESS_PATH:-}")"
   panel_blocks="$(nginx_panel_location_blocks "$access_path" "$backend_port")"
@@ -1270,6 +1358,7 @@ nginx_install_dedicated_panel_vhost() {
   local conf
 
   nginx_ensure_cloudflare_realip_snippet
+  nginx_ensure_cloudflare_origin_allow_snippet
   conf="$(nginx_render_template \
     "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
     "$domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")"
@@ -1652,6 +1741,7 @@ nginx_render_portal_template() {
   # Portal subdomain always serves at root (not panel ACCESS_PATH); allowlist only.
   template="$NGINX_TEMPLATE_DIR/adminpanelaz-portal.conf.template"
   nginx_ensure_cloudflare_realip_snippet
+  nginx_ensure_cloudflare_origin_allow_snippet
   https_redirect_suffix="$(nginx_https_redirect_suffix "$https_port")"
   portal_blocks="$(nginx_portal_location_blocks "$backend_port")"
   rendered="$(sed \

@@ -54,6 +54,7 @@
 
 ### ✨ Added
 
+- **Cloudflare origin lock** — тумблер «Доступ только через Cloudflare» (nginx allow CF CIDR + RFC1918); snippet `cloudflare-origin-allow.conf`; Fider #26.
 - **OpenVPN Buffer Guard** — защита OpenVPN от шторма ENOBUFS на вкладке **Конфиг AntiZapret → OpenVPN (панель)**: предупреждение о лимитах, переключатель (по умолчанию выкл.), режимы notify / kill / kill+restart / временный бан, пороги и cooldown, ручная «Проверить сейчас» без автодействий, фоновый worker ~20 с по online-узлам, AdminNotify/Telegram при срабатывании.
 
 ### 🔄 Changed

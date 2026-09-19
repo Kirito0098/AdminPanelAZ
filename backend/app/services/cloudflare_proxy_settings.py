@@ -12,14 +12,19 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import AppSetting
-from app.services.cloudflare_realip import fetch_cloudflare_realip_conf
+from app.services.cloudflare_realip import (
+    fetch_cloudflare_proxy_snippets,
+    is_valid_origin_allow_conf,
+)
 from app.services.env_file import EnvFileService
 
 ENV_CLOUDFLARE_PROXY_ENABLED = "CLOUDFLARE_PROXY_ENABLED"
+ENV_CLOUDFLARE_ORIGIN_LOCK = "CLOUDFLARE_ORIGIN_LOCK"
 ENV_CLOUDFLARE_IPS_AUTO_UPDATE = "CLOUDFLARE_IPS_AUTO_UPDATE"
 ENV_CLOUDFLARE_IPS_UPDATE_INTERVAL_DAYS = "CLOUDFLARE_IPS_UPDATE_INTERVAL_DAYS"
 
 SETTING_CLOUDFLARE_PROXY_ENABLED = "cloudflare_proxy_enabled"
+SETTING_CLOUDFLARE_ORIGIN_LOCK = "cloudflare_origin_lock"
 SETTING_CLOUDFLARE_IPS_AUTO_UPDATE = "cloudflare_ips_auto_update"
 SETTING_CLOUDFLARE_IPS_UPDATE_INTERVAL_DAYS = "cloudflare_ips_update_interval_days"
 
@@ -36,6 +41,10 @@ _REPAIR_SCRIPT = _PROJECT_ROOT / "scripts" / "nginx-repair.sh"
 
 def _env_default_enabled() -> bool:
     return bool(get_settings().cloudflare_proxy_enabled)
+
+
+def _env_default_origin_lock() -> bool:
+    return bool(get_settings().cloudflare_origin_lock)
 
 
 def _env_default_auto_update() -> bool:
@@ -84,12 +93,31 @@ def _env_service() -> EnvFileService:
     return EnvFileService(_ENV_FILE)
 
 
+def origin_allow_snippet_path() -> Path:
+    base = Path(os.environ.get("NGINX_SNIPPETS_DIR", "/etc/nginx/snippets"))
+    return base / "cloudflare-origin-allow.conf"
+
+
+def has_valid_origin_allow_snippet() -> bool:
+    path = origin_allow_snippet_path()
+    if not path.is_file():
+        return False
+    try:
+        return is_valid_origin_allow_conf(path.read_text(encoding="utf-8"))
+    except OSError:
+        return False
+
+
 def get_cloudflare_proxy_state(db: Session) -> dict:
     settings = get_settings()
     return {
         "enabled": _as_bool(
             _get_setting(db, SETTING_CLOUDFLARE_PROXY_ENABLED, ""),
             settings.cloudflare_proxy_enabled,
+        ),
+        "origin_lock_enabled": _as_bool(
+            _get_setting(db, SETTING_CLOUDFLARE_ORIGIN_LOCK, ""),
+            settings.cloudflare_origin_lock,
         ),
         "auto_update": _as_bool(
             _get_setting(db, SETTING_CLOUDFLARE_IPS_AUTO_UPDATE, ""),
@@ -109,16 +137,30 @@ def set_cloudflare_proxy_flags(
     db: Session,
     *,
     enabled: bool | None = None,
+    origin_lock_enabled: bool | None = None,
     auto_update: bool | None = None,
     interval_days: int | None = None,
 ) -> dict:
     env = _env_service()
+    current_state = get_cloudflare_proxy_state(db)
+    resulting_enabled = current_state["enabled"] if enabled is None else enabled
+
+    if origin_lock_enabled is True and not resulting_enabled:
+        raise ValueError("CLOUDFLARE_ORIGIN_LOCK cannot be enabled when proxy is disabled")
 
     if enabled is not None:
         value = "true" if enabled else "false"
         _set_setting(db, SETTING_CLOUDFLARE_PROXY_ENABLED, value)
         env.set_env_value(ENV_CLOUDFLARE_PROXY_ENABLED, value)
         os.environ[ENV_CLOUDFLARE_PROXY_ENABLED] = value
+        if enabled is False and origin_lock_enabled is None:
+            origin_lock_enabled = False
+
+    if origin_lock_enabled is not None:
+        value = "true" if origin_lock_enabled else "false"
+        _set_setting(db, SETTING_CLOUDFLARE_ORIGIN_LOCK, value)
+        env.set_env_value(ENV_CLOUDFLARE_ORIGIN_LOCK, value)
+        os.environ[ENV_CLOUDFLARE_ORIGIN_LOCK] = value
 
     if auto_update is not None:
         value = "true" if auto_update else "false"
@@ -135,11 +177,10 @@ def set_cloudflare_proxy_flags(
     db.commit()
     return get_cloudflare_proxy_state(db)
 
-
-def _run_apply_script(new_file: Path) -> tuple[str, str]:
+def _run_apply_script(realip_file: Path, allow_file: Path) -> tuple[str, str]:
     run_env = os.environ.copy()
     result = subprocess.run(
-        ["sudo", "-n", "bash", str(_APPLY_SCRIPT), str(new_file)],
+        ["sudo", "-n", "bash", str(_APPLY_SCRIPT), str(realip_file), str(allow_file)],
         cwd=str(_PROJECT_ROOT),
         capture_output=True,
         text=True,
@@ -171,7 +212,7 @@ def _mark_failure(db: Session, error: str) -> None:
 
 def refresh_cloudflare_ips(db: Session, *, force: bool = False) -> dict:
     try:
-        body, content_hash = fetch_cloudflare_realip_conf()
+        realip_body, allow_body, content_hash = fetch_cloudflare_proxy_snippets()
         state = get_cloudflare_proxy_state(db)
         if not force and state.get("last_hash") == content_hash:
             _mark_success(db, content_hash=content_hash)
@@ -186,9 +227,11 @@ def refresh_cloudflare_ips(db: Session, *, force: bool = False) -> dict:
             }
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            new_file = Path(tmpdir) / "cloudflare-realip.conf"
-            new_file.write_text(body, encoding="utf-8")
-            stdout, stderr = _run_apply_script(new_file)
+            realip_file = Path(tmpdir) / "cloudflare-realip.conf"
+            allow_file = Path(tmpdir) / "cloudflare-origin-allow.conf"
+            realip_file.write_text(realip_body, encoding="utf-8")
+            allow_file.write_text(allow_body, encoding="utf-8")
+            stdout, stderr = _run_apply_script(realip_file, allow_file)
 
         _mark_success(db, content_hash=content_hash)
         message = "Списки IP Cloudflare успешно обновлены."

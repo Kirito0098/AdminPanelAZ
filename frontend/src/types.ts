@@ -987,6 +987,7 @@ export interface DdnsActionResponse {
 
 export interface CloudflareProxySettings {
   enabled: boolean
+  origin_lock_enabled: boolean
   auto_update: boolean
   interval_days: number
   last_success_at: string | null
@@ -996,6 +997,7 @@ export interface CloudflareProxySettings {
 
 export interface CloudflareProxySettingsUpdatePayload {
   enabled?: boolean
+  origin_lock_enabled?: boolean
   auto_update?: boolean
   interval_days?: number
 }

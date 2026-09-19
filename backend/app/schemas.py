@@ -1231,6 +1231,7 @@ class VpnNetworkPortStatusResponse(BaseModel):
 
 class CloudflareProxySettingsResponse(BaseModel):
     enabled: bool = False
+    origin_lock_enabled: bool = False
     auto_update: bool = False
     interval_days: int = 7
     last_success_at: str | None = None
@@ -1240,6 +1241,7 @@ class CloudflareProxySettingsResponse(BaseModel):
 
 class CloudflareProxySettingsUpdate(BaseModel):
     enabled: bool | None = None
+    origin_lock_enabled: bool | None = None
     auto_update: bool | None = None
     interval_days: int | None = Field(default=None, ge=1, le=90)
 

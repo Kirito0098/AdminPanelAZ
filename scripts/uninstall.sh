@@ -248,6 +248,11 @@ remove_nginx_site_if_present() {
     rm -f /etc/nginx/snippets/cloudflare-realip.conf
     log "Удалён snippet Cloudflare realip: /etc/nginx/snippets/cloudflare-realip.conf"
   fi
+
+  if [[ -f /etc/nginx/snippets/cloudflare-origin-allow.conf ]]; then
+    rm -f /etc/nginx/snippets/cloudflare-origin-allow.conf
+    log "Удалён snippet Cloudflare origin allow: /etc/nginx/snippets/cloudflare-origin-allow.conf"
+  fi
 }
 
 remove_firewall_rules() {

@@ -12,6 +12,9 @@ import httpx
 CF_IPS_V4_URL = "https://www.cloudflare.com/ips-v4"
 CF_IPS_V6_URL = "https://www.cloudflare.com/ips-v6"
 
+RFC1918_ALLOW = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+_LOCALHOST_ALLOW = ("127.0.0.1", "::1")
+
 _DEFAULT_TIMEOUT = httpx.Timeout(15.0)
 
 
@@ -64,6 +67,57 @@ def render_cloudflare_realip_conf(
     return "\n".join(lines) + "\n"
 
 
+def render_cloudflare_origin_allow_conf(
+    ipv4: list[str],
+    ipv6: list[str],
+    *,
+    snapshot_date: str,
+) -> str:
+    lines = [
+        "# Cloudflare origin allowlist for panel locations (optional CLOUDFLARE_ORIGIN_LOCK).",
+        f"# Source: {CF_IPS_V4_URL} / {CF_IPS_V6_URL}",
+        f"# snapshot: {snapshot_date}",
+        "",
+    ]
+    for network in ipv4:
+        lines.append(f"allow {network};")
+    if ipv4 and ipv6:
+        lines.append("")
+    for network in ipv6:
+        lines.append(f"allow {network};")
+    if ipv4 or ipv6:
+        lines.append("")
+    for network in _LOCALHOST_ALLOW:
+        lines.append(f"allow {network};")
+    for network in RFC1918_ALLOW:
+        lines.append(f"allow {network};")
+    lines.append("deny all;")
+    return "\n".join(lines) + "\n"
+
+
+def is_valid_origin_allow_conf(body: str) -> bool:
+    reserved = set(_LOCALHOST_ALLOW) | set(RFC1918_ALLOW)
+    has_deny_all = False
+    has_cloudflare_allow = False
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line == "deny all;":
+            has_deny_all = True
+            continue
+        if not line.startswith("allow ") or not line.endswith(";"):
+            continue
+        cidr = line[len("allow ") : -1].strip()
+        if cidr and cidr not in reserved:
+            try:
+                ipaddress.ip_network(cidr, strict=False)
+            except ValueError:
+                continue
+            has_cloudflare_allow = True
+    return has_deny_all and has_cloudflare_allow
+
+
 def _normalize_body(body: str) -> str:
     normalized = body.replace("\r\n", "\n").replace("\r", "\n")
     lines = [line.rstrip() for line in normalized.split("\n")]
@@ -88,11 +142,11 @@ def _fetch_text(client: _HttpClient, url: str, label: str) -> str:
     return text
 
 
-def fetch_cloudflare_realip_conf(
+def fetch_cloudflare_proxy_snippets(
     *,
     client: _HttpClient | None = None,
     snapshot_date: str | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     date = snapshot_date or datetime.now(UTC).date().isoformat()
     owns_client = client is None
     http_client: _HttpClient = client or httpx.Client(timeout=_DEFAULT_TIMEOUT)
@@ -106,5 +160,17 @@ def fetch_cloudflare_realip_conf(
     finally:
         if owns_client:
             http_client.close()  # type: ignore[union-attr]
-    body = render_cloudflare_realip_conf(ipv4, ipv6, snapshot_date=date)
-    return body, content_hash(body)
+    realip = render_cloudflare_realip_conf(ipv4, ipv6, snapshot_date=date)
+    allow = render_cloudflare_origin_allow_conf(ipv4, ipv6, snapshot_date=date)
+    return realip, allow, content_hash(realip)
+
+
+def fetch_cloudflare_realip_conf(
+    *,
+    client: _HttpClient | None = None,
+    snapshot_date: str | None = None,
+) -> tuple[str, str]:
+    realip, _allow, digest = fetch_cloudflare_proxy_snippets(
+        client=client, snapshot_date=snapshot_date
+    )
+    return realip, digest
