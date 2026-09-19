@@ -4,7 +4,7 @@ Implementation: added `apply_due_user_subscription_blocks(db)` in `backend/app/s
 Tests: `backend/.venv/bin/python -m pytest backend/tests/test_user_subscription.py backend/tests/test_user_config_access.py backend/tests/test_access_expiry_runtime_gate.py -v`
 Test Result: passed (`22 passed`)
 Concerns: `skipped` in the new worker pass aggregates both manual-admin blocks and atomic-claim misses/already-not-expired rows; if downstream reporting needs those separated later, the return shape will need to expand.
-Commits: pending
+Commits: `e2d4f03` - `Add subscription expiry worker pass`
 Report Path: `/opt/AdminPanelAZ/.superpowers/sdd/task-3-report.md`
 # Task 3 Report: Settings origin_lock + dual-file refresh
 
