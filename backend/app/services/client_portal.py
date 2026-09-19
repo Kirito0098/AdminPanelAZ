@@ -43,6 +43,8 @@ PORTAL_RESTORE_HINT = (
     "Nginx/TLS портала не входят в архив — откройте Подписка и нажмите "
     "«Настроить под текущую публикацию»."
 )
+CLIENT_PORTAL_TOKEN_PREFIX = "c_"
+USER_PORTAL_TOKEN_PREFIX = "u_"
 
 
 @dataclass(frozen=True)
@@ -302,9 +304,9 @@ def _token_exists(db: Session, token: str) -> bool:
     )
 
 
-def _new_token_value(db: Session) -> str:
+def _new_token_value(db: Session, *, prefix: str) -> str:
     for _ in range(16):
-        candidate = secrets.token_urlsafe(18)
+        candidate = f"{prefix}{secrets.token_urlsafe(18)}"
         if not _token_exists(db, candidate):
             return candidate
     raise HTTPException(
@@ -375,7 +377,7 @@ def get_or_create_portal_token(
     if existing:
         return existing
     row = ClientPortalToken(
-        token=_new_token_value(db),
+        token=_new_token_value(db, prefix=CLIENT_PORTAL_TOKEN_PREFIX),
         node_id=node_id,
         client_name=name,
         created_by_user_id=creator.id if creator else None,
@@ -416,7 +418,7 @@ def rotate_portal_token(
     ):
         row.revoked_at = now
     new_row = ClientPortalToken(
-        token=_new_token_value(db),
+        token=_new_token_value(db, prefix=CLIENT_PORTAL_TOKEN_PREFIX),
         node_id=node_id,
         client_name=name,
         created_by_user_id=creator.id if creator else None,
@@ -468,7 +470,7 @@ def get_or_create_user_portal_token(
     if existing:
         return existing
     row = UserPortalToken(
-        token=_new_token_value(db),
+        token=_new_token_value(db, prefix=USER_PORTAL_TOKEN_PREFIX),
         user_id=user_id,
         created_by_user_id=creator.id if creator else None,
     )
@@ -505,7 +507,7 @@ def rotate_user_portal_token(
     ):
         row.revoked_at = now
     new_row = UserPortalToken(
-        token=_new_token_value(db),
+        token=_new_token_value(db, prefix=USER_PORTAL_TOKEN_PREFIX),
         user_id=user_id,
         created_by_user_id=creator.id if creator else None,
     )

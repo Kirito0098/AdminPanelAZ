@@ -243,7 +243,27 @@ def test_new_token_value_retries_when_value_exists_in_other_portal_table():
         patch("app.services.client_portal.secrets.token_urlsafe", side_effect=["dup", "fresh"]),
         patch("app.services.client_portal._token_exists", side_effect=[True, False]),
     ):
-        assert portal._new_token_value(MagicMock()) == "fresh"
+        assert portal._new_token_value(MagicMock(), prefix="c_") == "c_fresh"
+
+
+def test_create_paths_namespace_tokens_across_tables():
+    client_db = MagicMock()
+    user_db = MagicMock()
+    configs = [VpnConfig(node_id=1, client_name="alice")]
+    with (
+        patch("app.services.client_portal.ensure_client_configs", return_value=configs),
+        patch("app.services.client_portal.ensure_portal_user"),
+        patch("app.services.client_portal._active_token", return_value=None),
+        patch("app.services.client_portal._active_user_token", return_value=None),
+        patch("app.services.client_portal.secrets.token_urlsafe", side_effect=["shared", "shared"]),
+        patch("app.services.client_portal._token_exists", return_value=False),
+    ):
+        client_row = portal.get_or_create_portal_token(client_db, client_name="alice")
+        user_row = portal.get_or_create_user_portal_token(user_db, user_id=7)
+
+    assert client_row.token == "c_shared"
+    assert user_row.token == "u_shared"
+    assert client_row.token != user_row.token
 
 
 @pytest.fixture
