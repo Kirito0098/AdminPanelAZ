@@ -54,6 +54,8 @@
 
 ### ✨ Added
 
+- **Cloudflare origin lock** — тумблер «Доступ только через Cloudflare» (nginx allow CF CIDR + RFC1918); snippet `cloudflare-origin-allow.conf`; Fider #26.
+
 ### 🔄 Changed
 
 ### 🐛 Fixed

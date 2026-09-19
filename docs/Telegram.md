@@ -204,6 +204,7 @@ AdminPanelAZ ставит snippet `cloudflare-realip.conf` и отдельный
 | **Автообновление списков IP Cloudflare** | Планировщик панели периодически скачивает актуальные CIDR Cloudflare и обновляет snippet (по умолчанию раз в 7 дней, интервал 1–90). |
 | **Обновить сейчас** | Ручное обновление CIDR; доступно только при включённом proxy-mode. |
 | Статус | Время последнего успешного обновления, hash snippet и текст последней ошибки (если была). |
+| **Доступ только через Cloudflare** | Опционально. При включённом proxy-mode nginx в location’ах панели разрешает только IP Cloudflare, localhost и RFC1918 (клиенты AntiZapret / az-awg2 в туннеле проходят). Прямой доступ по публичному IP origin → 403. `/status/` и ACME не затрагиваются. |
 
 Переключатели сохраняются сразу; при смене **proxy-mode** панель перегенерирует nginx
 (`nginx-repair`).
@@ -218,9 +219,6 @@ AdminPanelAZ ставит snippet `cloudflare-realip.conf` и отдельный
 ```bash
 sudo ./scripts/nginx-repair.sh
 ```
-
-Рекомендация: ограничьте доступ к origin (порты 80/443) сетями Cloudflare, чтобы
-нельзя было обойти proxy и подделать заголовки.
 
 ---
 

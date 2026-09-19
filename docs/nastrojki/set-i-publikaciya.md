@@ -75,6 +75,7 @@
 Без Cloudflare proxy-mode можно выключить; за orange-cloud при выключенном режиме
 Telegram webhook не увидит IP Telegram — см. [`docs/Telegram.md`](../Telegram.md)
 («Telegram-бот не отвечает за Cloudflare»).
+Опционально включите „Доступ только через Cloudflare“, чтобы закрыть прямой доступ к origin.
 
 ### Совместно со StatusOpenVPN на одном домене
 
