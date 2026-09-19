@@ -1,11 +1,23 @@
 import { apiFetch } from './http'
 
-export interface PortalLinkResponse {
+export interface ClientPortalLinkResponse {
+  kind?: 'client'
   token: string
+  node_id?: number
   client_name: string
   url: string
   revoked: boolean
 }
+
+export interface UserPortalLinkResponse {
+  kind: 'user'
+  token: string
+  user_id: number
+  url: string
+  revoked: boolean
+}
+
+export type PortalLinkResponse = ClientPortalLinkResponse | UserPortalLinkResponse
 
 export interface PortalFileMeta {
   path: string
@@ -26,14 +38,29 @@ export interface PortalStatusMeta {
   traffic_label: string
 }
 
-export interface PortalMetaResponse {
+export interface PortalClientEntry {
+  node_id: number
   client_name: string
-  brand_title: string
   protocols: string[]
   files: PortalFileMeta[]
-  unlock_codes_enabled: boolean
   status?: PortalStatusMeta
 }
+
+export interface ClientPortalMetaResponse extends PortalClientEntry {
+  kind?: 'client'
+  brand_title: string
+  unlock_codes_enabled: boolean
+}
+
+export interface UserPortalMetaResponse {
+  kind: 'user'
+  user_id: number
+  brand_title: string
+  unlock_codes_enabled: boolean
+  clients: PortalClientEntry[]
+}
+
+export type PortalMetaResponse = ClientPortalMetaResponse | UserPortalMetaResponse
 
 export interface PortalRedeemResponse {
   ok: boolean

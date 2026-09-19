@@ -1309,6 +1309,75 @@ def _migrate_client_portal_tokens_active_unique() -> None:
     logger.info("DB migration: unique active client_portal_tokens per node+client")
 
 
+def _migrate_user_portal_tokens_table() -> None:
+    """Create user_portal_tokens and enforce one active token per user."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "user_portal_tokens" not in tables:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE user_portal_tokens (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        token VARCHAR(64) NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        created_by_user_id INTEGER,
+                        created_at DATETIME,
+                        revoked_at DATETIME,
+                        CONSTRAINT uq_user_portal_token UNIQUE (token),
+                        FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE,
+                        FOREIGN KEY(created_by_user_id) REFERENCES users (id)
+                    )
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_user_portal_tokens_token ON user_portal_tokens (token)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_user_portal_tokens_user_id ON user_portal_tokens (user_id)"))
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_user_portal_tokens_active_user
+                    ON user_portal_tokens (user_id)
+                    WHERE revoked_at IS NULL
+                    """
+                )
+            )
+        logger.info("DB migration: created user_portal_tokens table")
+        return
+
+    index_names = {idx.get("name") for idx in inspector.get_indexes("user_portal_tokens")}
+    if "uq_user_portal_tokens_active_user" in index_names:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE user_portal_tokens
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE revoked_at IS NULL
+                  AND id NOT IN (
+                    SELECT MAX(id)
+                    FROM user_portal_tokens
+                    WHERE revoked_at IS NULL
+                    GROUP BY user_id
+                  )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX uq_user_portal_tokens_active_user
+                ON user_portal_tokens (user_id)
+                WHERE revoked_at IS NULL
+                """
+            )
+        )
+    logger.info("DB migration: unique active user_portal_tokens per user")
+
+
 def run_db_migrations() -> None:
     """Lightweight SQLite migrations for columns added after initial deploy."""
     _migrate_alert_rules_table()
@@ -1322,6 +1391,7 @@ def run_db_migrations() -> None:
     _migrate_awg2_access_policy_table()
     _migrate_unlock_codes_tables()
     _migrate_client_portal_tokens_active_unique()
+    _migrate_user_portal_tokens_table()
     _migrate_node_resource_sample_table()
     _migrate_connection_count_samples_table()
     _migrate_connection_count_samples_awg2_column()

@@ -496,6 +496,28 @@ class ClientPortalToken(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class UserPortalToken(Base):
+    """Permanent shareable portal link for all clients owned by a user."""
+
+    __tablename__ = "user_portal_tokens"
+    __table_args__ = (
+        UniqueConstraint("token", name="uq_user_portal_token"),
+        Index(
+            "uq_user_portal_tokens_active_user",
+            "user_id",
+            unique=True,
+            sqlite_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class QrDownloadAuditLog(Base):
     __tablename__ = "qr_download_audit_logs"
 

@@ -15,6 +15,7 @@ import {
 import {
   fetchPublicPortalMeta,
   redeemPublicPortalCode,
+  type PortalClientEntry,
   type PortalFileMeta,
   type PortalMetaResponse,
 } from '@/api/portal'
@@ -413,12 +414,35 @@ function ProfileFileList({
   )
 }
 
+function normalizePortalClients(data: PortalMetaResponse): PortalClientEntry[] {
+  if (data.kind === 'user') return data.clients
+  return [
+    {
+      node_id: data.node_id,
+      client_name: data.client_name,
+      protocols: data.protocols,
+      files: data.files,
+      status: data.status,
+    },
+  ]
+}
+
+function portalClientKey(client: PortalClientEntry): string {
+  return `${client.node_id}:${client.client_name}`
+}
+
+function preferredClientProtocol(client: PortalClientEntry | null | undefined): string {
+  if (!client) return ''
+  return preferredProtocol(client.protocols.length ? client.protocols : client.files.map((file) => file.vpn_type))
+}
+
 export default function PortalPage() {
   const { token = '' } = useParams()
   const [data, setData] = useState<PortalMetaResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [os, setOs] = useState<OsId>(() => detectOs())
+  const [selectedClientKey, setSelectedClientKey] = useState<string>('')
   const [protocol, setProtocol] = useState<string>('')
   const [openStep, setOpenStep] = useState<KitStep>('install')
   const [toast, setToast] = useState<string | null>(null)
@@ -435,8 +459,11 @@ export default function PortalPage() {
     setLoading(true)
     fetchPublicPortalMeta(token)
       .then((meta) => {
+        const clients = normalizePortalClients(meta)
+        const firstClient = clients[0] || null
         setData(meta)
-        setProtocol(preferredProtocol(meta.protocols.length ? meta.protocols : meta.files.map((f) => f.vpn_type)))
+        setSelectedClientKey(firstClient ? portalClientKey(firstClient) : '')
+        setProtocol(preferredClientProtocol(firstClient))
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Ошибка загрузки'))
       .finally(() => setLoading(false))
@@ -457,8 +484,12 @@ export default function PortalPage() {
     try {
       const result = await redeemPublicPortalCode(token, code)
       const refreshed = await fetchPublicPortalMeta(token)
+      const nextClients = normalizePortalClients(refreshed)
+      const nextSelected =
+        nextClients.find((client) => portalClientKey(client) === selectedClientKey) ?? nextClients[0] ?? null
       setData(refreshed)
-      setProtocol(preferredProtocol(refreshed.protocols.length ? refreshed.protocols : refreshed.files.map((f) => f.vpn_type)))
+      setSelectedClientKey(nextSelected ? portalClientKey(nextSelected) : '')
+      setProtocol(preferredClientProtocol(nextSelected))
       setRedeemCode('')
       const applied = result.protocols_applied || []
       const byProtocol = result.access_until_by_protocol || {}
@@ -496,13 +527,19 @@ export default function PortalPage() {
     }
   }
 
+  const clients = useMemo(() => (data ? normalizePortalClients(data) : []), [data])
+  const activeClient = useMemo(
+    () => clients.find((client) => portalClientKey(client) === selectedClientKey) ?? clients[0] ?? null,
+    [clients, selectedClientKey],
+  )
+
   const filesForProtocol = useMemo(() => {
-    if (!data) return []
-    return data.files.filter((f) => !protocol || f.vpn_type === protocol)
-  }, [data, protocol])
+    if (!activeClient) return []
+    return activeClient.files.filter((f) => !protocol || f.vpn_type === protocol)
+  }, [activeClient, protocol])
 
   const appLink = protocol ? APP_DOWNLOADS[protocol]?.[os] : undefined
-  const status = data?.status
+  const status = activeClient?.status
 
   if (loading) {
     return (
@@ -573,8 +610,8 @@ export default function PortalPage() {
 
         <section className="grid grid-cols-2 gap-3">
           <StatCard
-            label="Клиент"
-            value={data.client_name}
+            label={data.kind === 'user' ? 'Профиль' : 'Клиент'}
+            value={activeClient?.client_name || 'Нет профилей'}
             icon={<UserRound size={14} />}
             tone="border-sky-400/30 bg-sky-400/10 text-sky-300"
           />
@@ -597,6 +634,42 @@ export default function PortalPage() {
             tone="border-teal-400/30 bg-teal-400/10 text-teal-300"
           />
         </section>
+
+        {data.kind === 'user' && clients.length > 0 && (
+          <section className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
+            <div>
+              <h2 className="text-base font-semibold">Профили пользователя</h2>
+              <p className="text-xs text-slate-400">
+                Доступно профилей: {clients.length}. Выберите нужный профиль для скачивания конфигурации.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {clients.map((client) => {
+                const key = portalClientKey(client)
+                const selected = key === portalClientKey(activeClient ?? client)
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      setSelectedClientKey(key)
+                      setProtocol(preferredClientProtocol(client))
+                      setOpenStep('profile')
+                    }}
+                    className={cn(
+                      'rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors',
+                      selected
+                        ? 'border-cyan-400/50 bg-cyan-400/15 text-cyan-200'
+                        : 'border-white/10 text-slate-300 hover:bg-white/5',
+                    )}
+                  >
+                    {client.client_name}
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+        )}
 
         {data.unlock_codes_enabled && (
           <section className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
@@ -630,9 +703,9 @@ export default function PortalPage() {
               <h2 className="text-base font-semibold">Подключение</h2>
               <p className="text-xs text-slate-400">Три шага: приложение → профиль → соединение</p>
             </div>
-            {data.protocols.length > 1 && (
+            {activeClient && activeClient.protocols.length > 1 && (
               <div className="flex flex-wrap gap-1.5">
-                {[...data.protocols].sort((a, b) => {
+                {[...activeClient.protocols].sort((a, b) => {
                   const order = ['openvpn', 'amneziawg2', 'amneziawg', 'wireguard']
                   const ia = order.indexOf(a)
                   const ib = order.indexOf(b)
@@ -686,7 +759,7 @@ export default function PortalPage() {
             >
               <p className="text-sm text-slate-300">
                 Установите официальный клиент для {OS_OPTIONS.find((o) => o.id === os)?.label} и{' '}
-                {protocolTitle(protocol || 'openvpn')}.
+                {protocolTitle(protocol || preferredClientProtocol(activeClient) || 'openvpn')}.
               </p>
               {appLink ? (
                 <Button asChild className="gap-1.5 bg-cyan-400 text-slate-950 hover:bg-cyan-300">
@@ -729,7 +802,7 @@ export default function PortalPage() {
           </div>
         </section>
 
-        {data.files.length === 0 && (
+        {activeClient && activeClient.files.length === 0 && (
           <p className="text-center text-sm text-slate-400">Для этого клиента пока нет файлов профиля.</p>
         )}
       </div>
