@@ -94,11 +94,42 @@ def list_owned_client_targets(db: Session, user_id: int) -> list[tuple[int, str]
     return targets
 
 
+def _reconcile_owned_client_queue(db: Session, queued: list[tuple[int, str, str]]) -> int:
+    services: dict[int, object] = {}
+    synced = 0
+
+    for node_id, protocol, client_name in queued:
+        service = services.get(node_id)
+        if service is None:
+            node = db.get(Node, node_id)
+            if node is None:
+                continue
+            service = _policy_service_for_node(db, node)
+            services[node_id] = service
+        _reconcile_access_until(service, protocol, client_name)
+        synced += 1
+
+    return synced
+
+
+def reconcile_owned_clients_access_until(db: Session, user: User) -> dict:
+    queued: list[tuple[int, str, str]] = []
+
+    for config in _owned_configs(db, user.id):
+        protocol = _VPN_PROTOCOLS.get(config.vpn_type)
+        if protocol is None:
+            continue
+        queued.append((config.node_id, protocol, _policy_client_name(protocol, config.client_name)))
+
+    return {
+        "targets": len(list_owned_client_targets(db, user.id)),
+        "synced": _reconcile_owned_client_queue(db, queued),
+    }
+
+
 def sync_owned_clients_access_until(db: Session, user: User, *, actor: str, commit: bool = True) -> dict:
     access_until = get_user_access_until(user)
-    services: dict[int, object] = {}
     queued: list[tuple[int, str, str]] = []
-    synced = 0
 
     for config in _owned_configs(db, user.id):
         protocol = _VPN_PROTOCOLS.get(config.vpn_type)
@@ -121,20 +152,9 @@ def sync_owned_clients_access_until(db: Session, user: User, *, actor: str, comm
     else:
         db.flush()
 
-    for node_id, protocol, client_name in queued:
-        service = services.get(node_id)
-        if service is None:
-            node = db.get(Node, node_id)
-            if node is None:
-                continue
-            service = _policy_service_for_node(db, node)
-            services[node_id] = service
-        _reconcile_access_until(service, protocol, client_name)
-        synced += 1
-
     return {
         "targets": len(list_owned_client_targets(db, user.id)),
-        "synced": synced,
+        "synced": _reconcile_owned_client_queue(db, queued) if commit else 0,
     }
 
 
@@ -259,7 +279,6 @@ def apply_due_user_subscription_blocks(db: Session) -> dict[str, int]:
 
 def clear_access_expired_for_user(db: Session, user: User, *, actor: str, commit: bool = True) -> dict:
     access_until = get_user_access_until(user)
-    services: dict[int, object] = {}
     queued: list[tuple[int, str, str]] = []
     skipped_manual = 0
 
@@ -294,18 +313,12 @@ def clear_access_expired_for_user(db: Session, user: User, *, actor: str, commit
         db.flush()
 
     cleared = 0
-    for node_id, protocol, client_name in queued:
-        service = services.get(node_id)
-        if service is None:
-            node = db.get(Node, node_id)
-            if node is None:
-                continue
-            service = _policy_service_for_node(db, node)
-            services[node_id] = service
-        _reconcile_access_until(service, protocol, client_name)
-        row = _policy_row(db, protocol=protocol, node_id=node_id, client_name=client_name)
-        if (getattr(row, "block_reason", None) or "").strip().lower() != "access_expired":
-            cleared += 1
+    if commit:
+        _reconcile_owned_client_queue(db, queued)
+        for node_id, protocol, client_name in queued:
+            row = _policy_row(db, protocol=protocol, node_id=node_id, client_name=client_name)
+            if (getattr(row, "block_reason", None) or "").strip().lower() != "access_expired":
+                cleared += 1
 
     return {
         "targets": len(list_owned_client_targets(db, user.id)),

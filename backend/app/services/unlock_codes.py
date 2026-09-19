@@ -493,6 +493,7 @@ def redeem_unlock_code(
     grant_days = 0
     granted_until_by_protocol: dict[str, datetime] = {}
     owner_user: User | None = None
+    user_subscription = None
     try:
         row = db.query(UnlockCode).filter(UnlockCode.code == normalized_code).first()
         if row is None:
@@ -643,6 +644,9 @@ def redeem_unlock_code(
     except Exception:
         db.rollback()
         raise
+
+    if owner_user is not None and user_subscription is not None:
+        user_subscription.reconcile_owned_clients_access_until(db, owner_user)
 
     if owner_user is None:
         for protocol in protocols_applied:

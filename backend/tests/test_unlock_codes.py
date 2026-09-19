@@ -1061,6 +1061,77 @@ def test_redeem_owner_extends_user_and_all_owned_clients(db):
     assert bob_wg.block_reason == "manual_permanent"
 
 
+def test_redeem_owner_rollback_defers_reconcile_until_commit(db):
+    node = _make_node(db)
+    owner = _make_user(db, username="owner-rollback", role=UserRole.user)
+    _make_configs(db, node.id, owner.id, "Alice", [VpnType.openvpn, VpnType.wireguard])
+    fixed_now = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
+    current_until = fixed_now + timedelta(days=2)
+    expired_until = fixed_now - timedelta(days=1)
+    owner.access_until = current_until.replace(tzinfo=None)
+    db.add(owner)
+    db.add(
+        OpenVpnAccessPolicy(
+            node_id=node.id,
+            client_name="Alice",
+            access_until=expired_until.replace(tzinfo=None),
+            is_temp_blocked=True,
+            block_reason="access_expired",
+        )
+    )
+    db.add(
+        WgAccessPolicy(
+            node_id=node.id,
+            client_name="alice",
+            expires_at=expired_until.replace(tzinfo=None),
+            is_temp_blocked=True,
+            block_reason="access_expired",
+        )
+    )
+    db.commit()
+    created = create_unlock_code(
+        db,
+        grant_days=7,
+        protocols=["openvpn", "wireguard"],
+        mode="multi",
+        max_redemptions=2,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=owner,
+        code="OWNER-ROLLBACK",
+    )
+
+    orig_commit = db.commit
+
+    def fail_commit():
+        raise IntegrityError("commit failed", None, Exception("boom"))
+
+    db.commit = fail_commit  # type: ignore[method-assign]
+    try:
+        with (
+            patch("app.services.unlock_codes._now", return_value=fixed_now),
+            patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()),
+            patch("app.services.user_subscription._reconcile_access_until") as reconcile,
+        ):
+            with pytest.raises(ValueError, match="Не удалось активировать unlock-ключ"):
+                redeem_unlock_code(db, code="OWNER-ROLLBACK", client_name="Alice", node_id=node.id)
+    finally:
+        db.commit = orig_commit  # type: ignore[method-assign]
+
+    db.refresh(owner)
+    db.refresh(created)
+    alice_ovpn = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one()
+    alice_wg = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
+
+    assert reconcile.call_count == 0
+    assert owner.access_until == current_until.replace(tzinfo=None)
+    assert created.redemption_count == 0
+    assert db.query(UnlockCodeRedemption).filter_by(code_id=created.id, user_id=owner.id).count() == 0
+    assert alice_ovpn.access_until == expired_until.replace(tzinfo=None)
+    assert alice_ovpn.block_reason == "access_expired"
+    assert alice_wg.expires_at == expired_until.replace(tzinfo=None)
+    assert alice_wg.block_reason == "access_expired"
+
+
 def test_redeem_orphan_client_stays_client_scoped(db):
     node_a = _make_node(db, name="orphan-a")
     node_b = _make_node(db, name="orphan-b")

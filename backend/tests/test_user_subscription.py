@@ -127,6 +127,32 @@ def test_set_user_access_until_syncs_owned_clients(db):
     assert wg.expires_at == future.replace(tzinfo=None)
 
 
+def test_set_user_access_until_commit_false_defers_reconcile(db):
+    node = _make_node(db)
+    future = datetime.now(timezone.utc) + timedelta(days=14)
+    user = User(username="owner-sync-deferred", password_hash="x", role=UserRole.user, is_active=True)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    _make_owned_client(
+        db,
+        node_id=node.id,
+        owner_id=user.id,
+        client_name="Alice",
+        protocols=[VpnType.openvpn, VpnType.wireguard],
+    )
+
+    with patch("app.services.user_subscription._reconcile_access_until") as reconcile:
+        updated = usub.set_user_access_until(db, user, future, actor="admin", commit=False)
+
+    assert usub.get_user_access_until(updated) == future
+    assert reconcile.call_count == 0
+    ovpn = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one()
+    wg = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
+    assert ovpn.access_until == future.replace(tzinfo=None)
+    assert wg.expires_at == future.replace(tzinfo=None)
+
+
 def test_clear_access_expired_skips_permanent_block(db):
     node = _make_node(db)
     user = User(
