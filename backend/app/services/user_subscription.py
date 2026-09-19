@@ -215,6 +215,39 @@ def apply_user_subscription_expiry(
     }
 
 
+def apply_due_user_subscription_blocks(db: Session) -> dict[str, int]:
+    now = datetime.now(timezone.utc)
+    counts = {
+        "users_due": 0,
+        "cascaded": 0,
+        "skipped": 0,
+        "errors": 0,
+    }
+
+    due_users = (
+        db.query(User)
+        .filter(
+            User.access_until.isnot(None),
+            User.access_until <= now.replace(tzinfo=None),
+        )
+        .all()
+    )
+
+    for user in due_users:
+        counts["users_due"] += 1
+        try:
+            result = apply_user_subscription_expiry(db, user, commit=True)
+        except Exception:
+            db.rollback()
+            counts["errors"] += 1
+            continue
+        counts["cascaded"] += int(result.get("expired", 0) or 0)
+        counts["skipped"] += int(result.get("skipped_manual", 0) or 0)
+        counts["skipped"] += int(result.get("skipped_not_expired", 0) or 0)
+
+    return counts
+
+
 def clear_access_expired_for_user(db: Session, user: User, *, actor: str, commit: bool = True) -> dict:
     access_until = get_user_access_until(user)
     services: dict[int, object] = {}

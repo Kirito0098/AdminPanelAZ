@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -161,6 +162,37 @@ def test_can_create_false_even_when_unlimited():
     with pytest.raises(HTTPException) as exc:
         enforce_user_can_create_config(db, user)
     assert exc.value.status_code == 403
+
+
+def test_expired_subscription_blocks_create_for_user():
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    user = SimpleNamespace(
+        id=5,
+        role=UserRole.user,
+        can_create_configs=True,
+        config_quota=5,
+        access_until=past.replace(tzinfo=None),
+    )
+    db = _FakeDb(setting_value="5")
+
+    with pytest.raises(HTTPException) as exc:
+        enforce_user_can_create_config(db, user)
+
+    assert exc.value.status_code == 403
+    assert "subscription_expired" in str(exc.value.detail)
+
+
+def test_admin_is_exempt_from_expired_subscription_gate():
+    user = SimpleNamespace(
+        id=6,
+        role=UserRole.admin,
+        can_create_configs=True,
+        config_quota=5,
+        access_until="expired",
+    )
+    db = _FakeDb(setting_value="5")
+
+    enforce_user_can_create_config(db, user)
 
 
 def test_user_role_enum_has_no_viewer():

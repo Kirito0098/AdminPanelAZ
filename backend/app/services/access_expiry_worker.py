@@ -7,6 +7,7 @@ import logging
 
 from app.database import SessionLocal
 from app.services.access_until import apply_due_access_blocks
+from app.services.user_subscription import apply_due_user_subscription_blocks
 
 logger = logging.getLogger(__name__)
 ACCESS_EXPIRY_INTERVAL_SECONDS = 60
@@ -22,7 +23,14 @@ def _is_access_expiry_enabled() -> bool:
 def _run_once() -> dict[str, int]:
     db = SessionLocal()
     try:
-        return apply_due_access_blocks(db)
+        access_counts = apply_due_access_blocks(db)
+        subscription_counts = apply_due_user_subscription_blocks(db)
+
+        merged: dict[str, int] = {}
+        for counts in (access_counts, subscription_counts):
+            for key, value in counts.items():
+                merged[key] = merged.get(key, 0) + value
+        return merged
     finally:
         db.close()
 
@@ -35,13 +43,16 @@ async def run_access_expiry_loop() -> None:
                 await asyncio.sleep(ACCESS_EXPIRY_INTERVAL_SECONDS)
                 continue
             result = await asyncio.to_thread(_run_once)
-            if result.get("blocked") or result.get("errors"):
+            if result.get("blocked") or result.get("cascaded") or result.get("errors"):
                 logger.info(
-                    "access_expiry: blocked=%s openvpn=%s wireguard=%s awg2=%s errors=%s rows_due=%s",
+                    "access_expiry: blocked=%s openvpn=%s wireguard=%s awg2=%s users_due=%s cascaded=%s skipped=%s errors=%s rows_due=%s",
                     result.get("blocked", 0),
                     result.get("openvpn", 0),
                     result.get("wireguard", 0),
                     result.get("amneziawg2", 0),
+                    result.get("users_due", 0),
+                    result.get("cascaded", 0),
+                    result.get("skipped", 0),
                     result.get("errors", 0),
                     result.get("rows_due", 0),
                 )

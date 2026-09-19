@@ -286,3 +286,58 @@ def test_apply_user_subscription_expiry_does_not_clobber_concurrent_extension(db
     assert wg.expires_at == future.replace(tzinfo=None)
     assert ovpn.block_reason != "access_expired"
     assert wg.block_reason != "access_expired"
+
+
+def test_apply_due_user_subscription_blocks_cascades(db):
+    node = _make_node(db)
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    future = datetime.now(timezone.utc) + timedelta(days=14)
+
+    expired_user = User(
+        username="owner-expired-due",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        access_until=past.replace(tzinfo=None),
+    )
+    active_user = User(
+        username="owner-active-due",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        access_until=future.replace(tzinfo=None),
+    )
+    db.add_all([expired_user, active_user])
+    db.commit()
+    db.refresh(expired_user)
+    db.refresh(active_user)
+
+    _make_owned_client(
+        db,
+        node_id=node.id,
+        owner_id=expired_user.id,
+        client_name="Alice",
+        protocols=[VpnType.openvpn, VpnType.wireguard],
+    )
+    _make_owned_client(
+        db,
+        node_id=node.id,
+        owner_id=active_user.id,
+        client_name="Bob",
+        protocols=[VpnType.openvpn],
+    )
+
+    adapter = _adapter()
+    with patch("app.services.access_until.get_adapter_for_node", return_value=adapter):
+        result = usub.apply_due_user_subscription_blocks(db)
+
+    expired_ovpn = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one()
+    expired_wg = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
+    assert expired_ovpn.block_reason == "access_expired"
+    assert expired_wg.block_reason == "access_expired"
+    assert result == {
+        "users_due": 1,
+        "cascaded": 2,
+        "skipped": 0,
+        "errors": 0,
+    }
