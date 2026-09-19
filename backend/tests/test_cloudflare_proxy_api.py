@@ -176,6 +176,8 @@ def test_patch_origin_lock_requires_valid_snippet(client, db, tmp_path: Path, mo
 def test_patch_origin_lock_regenerates_nginx(client, db, tmp_path: Path, monkeypatch):
     monkeypatch.setattr(cps, "_ENV_FILE", tmp_path / ".env")
     monkeypatch.setattr(cps, "has_valid_origin_allow_snippet", lambda: True)
+    db.add(AppSetting(key=cps.SETTING_CLOUDFLARE_ORIGIN_LOCK, value="false"))
+    db.commit()
 
     with patch(
         "app.routers.settings_cloudflare.cloudflare_proxy_settings_service.regenerate_panel_nginx_for_cloudflare_proxy"
