@@ -1230,7 +1230,7 @@ export default function ClientActionsDialog({
               </ProfileSection>
             )}
 
-            {unlockCodesEnabled && availableUnlockProtocols.length > 0 && (
+            {isAdmin && unlockCodesEnabled && availableUnlockProtocols.length > 0 && (
               <ProfileSection
                 title="Unlock-ключ"
                 description="Создайте ключ продления с протоколами этого клиента."
@@ -1248,7 +1248,7 @@ export default function ClientActionsDialog({
               </ProfileSection>
             )}
 
-            {clientPortalEnabled && (
+            {isAdmin && clientPortalEnabled && (
               <ProfileSection
                 title="Клиентский портал"
                 description={
@@ -1673,13 +1673,15 @@ export default function ClientActionsDialog({
         </DialogContent>
       </Dialog>
 
-      <UnlockCodeCreateDialog
-        open={unlockCodeDialogOpen}
-        onOpenChange={setUnlockCodeDialogOpen}
-        initialProtocols={unlockCodeInitialProtocols}
-        availableProtocols={availableUnlockProtocols}
-        initialClientNames={config.client_name ? [config.client_name] : []}
-      />
+      {isAdmin && (
+        <UnlockCodeCreateDialog
+          open={unlockCodeDialogOpen}
+          onOpenChange={setUnlockCodeDialogOpen}
+          initialProtocols={unlockCodeInitialProtocols}
+          availableProtocols={availableUnlockProtocols}
+          initialClientNames={config.client_name ? [config.client_name] : []}
+        />
+      )}
 
       <ConfirmDialog
         open={accessUntilConflict !== null}
