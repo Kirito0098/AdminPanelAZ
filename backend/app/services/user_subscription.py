@@ -238,7 +238,10 @@ def apply_owner_access_until_to_config(
     replicate: bool = True,
 ) -> dict:
     """I7: after creating a VPN profile, stamp owner ``access_until`` onto its policy."""
-    owner = db.get(User, config.owner_id) if config.owner_id else None
+    if not config.owner_id:
+        return {"applied": False, "reason": "no_owner"}
+    # Prefer query() over Session.get — unit tests use lightweight FakeDb stubs.
+    owner = db.query(User).filter(User.id == config.owner_id).first()
     if owner is None:
         return {"applied": False, "reason": "no_owner"}
     access_until = get_user_access_until(owner)
