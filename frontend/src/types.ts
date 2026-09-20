@@ -201,6 +201,7 @@ export interface User {
   theme: string
   is_active: boolean
   access_until?: string | null
+  access_cascade_warning?: string | null
   must_change_password: boolean
   totp_enabled?: boolean
   telegram_id?: string | null

@@ -54,6 +54,9 @@
 
 ### ✨ Added
 
+- **Подписка / новый профиль** — при создании конфига (дашборд / CSV) у владельца с заданным `access_until` срок сразу копируется в политику профиля (I7).
+- **Подписка / HA** — каскадная синхронизация и снятие `access_expired` реплицируют `set_access_until` на HA-реплики так же, как ручной PATCH профиля (I8).
+- **Подписка / частичный сбой** — reconcile по узлам изолирован: сбой одного узла не откатывает сохранение пользователя; в ответе `access_cascade_warning` (I9).
 - **Cloudflare origin lock** — тумблер «Доступ только через Cloudflare» (nginx allow CF CIDR + RFC1918); snippet `cloudflare-origin-allow.conf`; Fider #26.
 - **OpenVPN Buffer Guard** — защита OpenVPN от шторма ENOBUFS на вкладке **Конфиг AntiZapret → OpenVPN (панель)**: предупреждение о лимитах, переключатель (по умолчанию выкл.), режимы notify / kill / kill+restart / временный бан, пороги и cooldown, ручная «Проверить сейчас» без автодействий, фоновый worker ~20 с по online-узлам, AdminNotify/Telegram при срабатывании.
 - **Подписка / срок на пользователе** — поле `users.access_until`; правка в **Настройки → Пользователи** каскадно синхронизирует срок на все owned VPN-профили; при обновлении — backfill `max(сроки политик клиентов)` для пользователей с пустым полем.
@@ -87,7 +90,7 @@
 
 - Frontend: `src/lib/accessUntil.test.ts` — разбор `409 access_until_conflict` (ApiError и уже разобранный payload) и конвенция «конец дня» для date-picker.
 - Backend: `test_access_until` — guard конфликта на `wireguard/set-expiry` (409 / `confirm_override` / orphan), сохранение переопределения при неизменном сроке пользователя, разворот `YYYY-MM-DD` в конец дня.
-- Backend: `test_user_subscription` — однократность backfill'а `users.access_until`; `test_client_portal` — redeem пропускает вручную заблокированный профиль.
+- Backend: `test_user_subscription` — inherit owner deadline on create (I7), HA replicate on cascade (I8), reconcile error isolation (I9); однократность backfill'а `users.access_until`; `test_client_portal` — redeem пропускает вручную заблокированный профиль.
 
 ---
 

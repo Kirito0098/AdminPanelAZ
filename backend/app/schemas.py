@@ -239,6 +239,7 @@ class UserResponse(UserBase):
     must_change_password: bool
     totp_enabled: bool = False
     access_until: datetime | None = None
+    access_cascade_warning: str | None = None
     telegram_id: str | None = None
     config_quota: int | None = None
     can_create_configs: bool = True

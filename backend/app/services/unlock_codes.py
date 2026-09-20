@@ -571,7 +571,7 @@ def redeem_unlock_code(
             grant_until = max(grant_until_base, current_access_until or grant_until_base) + timedelta(
                 days=grant_days
             )
-            owner_user = user_subscription.set_user_access_until(
+            owner_user, _cascade = user_subscription.set_user_access_until(
                 db,
                 owner_user,
                 grant_until,

@@ -661,7 +661,10 @@ def test_sync_client_access_until_from_owner_endpoint_updates_requested_client()
             set_access_until(db, "openvpn", node.id, "Bob", other_until, actor="admin")
 
             client = _client_access_api(db, admin=admin)
-            with patch.object(client_access, "_replicate_policy_after_success") as replicate:
+            with patch(
+                "app.services.node_sync.policy_sync.maybe_replicate_policy_op",
+                return_value=None,
+            ) as replicate:
                 response = client.post("/api/client-access/Alice/access-until/sync-from-owner")
 
         assert response.status_code == 200

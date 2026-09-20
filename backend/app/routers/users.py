@@ -216,11 +216,12 @@ def update_user(
             normalized = normalize_policy(payload.visible_vpn_profiles, strict=True)
             user.visible_vpn_profiles = policy_to_json(normalized)
 
+    cascade_warning: str | None = None
     if access_until_updated:
         # Cascade only on a real change — otherwise every unrelated save
         # (telegram_id, quota, visibility) would wipe confirmed per-client overrides.
         access_until_changed = normalize_access_until(pending_access_until) != get_user_access_until(user)
-        user = set_user_access_until(
+        user, cascade = set_user_access_until(
             db,
             user,
             pending_access_until,
@@ -228,6 +229,8 @@ def update_user(
             sync_clients=access_until_changed,
             commit=True,
         )
+        if cascade:
+            cascade_warning = cascade.get("warning")
     else:
         db.commit()
         db.refresh(user)
@@ -247,7 +250,10 @@ def update_user(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"target={user.username}",
         )
-    return user
+    response = UserResponse.model_validate(user)
+    if cascade_warning:
+        response.access_cascade_warning = cascade_warning
+    return response
 
 
 @router.get("/{user_id}/config-access", response_model=UserConfigAccessResponse)

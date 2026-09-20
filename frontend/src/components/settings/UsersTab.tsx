@@ -431,7 +431,11 @@ export default function UsersTab({
         await setUserConfigAccess(activeEditor.id, draftGroups)
       }
       setUsersList((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
-      success(`Данные «${updated.username}» сохранены`)
+      if (updated.access_cascade_warning) {
+        success(`Данные «${updated.username}» сохранены. ${updated.access_cascade_warning}`)
+      } else {
+        success(`Данные «${updated.username}» сохранены`)
+      }
       setActiveEditor(null)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения пользователя')

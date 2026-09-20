@@ -118,7 +118,7 @@ def test_set_user_access_until_syncs_owned_clients(db):
     )
 
     with patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()):
-        updated = usub.set_user_access_until(db, user, future, actor="admin")
+        updated, _cascade = usub.set_user_access_until(db, user, future, actor="admin")
 
     assert usub.get_user_access_until(updated) == future
     ovpn = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one()
@@ -143,7 +143,7 @@ def test_set_user_access_until_commit_false_defers_reconcile(db):
     )
 
     with patch("app.services.user_subscription._reconcile_access_until") as reconcile:
-        updated = usub.set_user_access_until(db, user, future, actor="admin", commit=False)
+        updated, _cascade = usub.set_user_access_until(db, user, future, actor="admin", commit=False)
 
     assert usub.get_user_access_until(updated) == future
     assert reconcile.call_count == 0
@@ -654,3 +654,123 @@ def test_migrate_user_access_until_backfill_runs_once_per_db(db, monkeypatch):
     database._migrate_user_access_until_backfill()
     db.refresh(user)
     assert user.access_until is None
+
+
+def test_apply_owner_access_until_to_config_inherits_deadline(db):
+    node = _make_node(db)
+    future = datetime.now(timezone.utc) + timedelta(days=21)
+    owner = User(
+        username="owner-inherit",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        access_until=future.replace(tzinfo=None),
+    )
+    db.add(owner)
+    db.commit()
+    db.refresh(owner)
+    config = VpnConfig(
+        node_id=node.id,
+        client_name="NewGuy",
+        vpn_type=VpnType.openvpn,
+        owner_id=owner.id,
+        cert_expire_days=3650,
+    )
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+
+    with patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()):
+        with patch("app.services.user_subscription._replicate_access_until_queue", return_value=[]) as replicate:
+            result = usub.apply_owner_access_until_to_config(db, config, actor="admin")
+
+    assert result["applied"] is True
+    row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="NewGuy").one()
+    assert row.access_until == future.replace(tzinfo=None)
+    assert replicate.called
+
+
+def test_apply_owner_access_until_skips_unlimited_owner(db):
+    node = _make_node(db)
+    owner = User(username="owner-unlimited", password_hash="x", role=UserRole.user, is_active=True)
+    db.add(owner)
+    db.commit()
+    db.refresh(owner)
+    config = VpnConfig(
+        node_id=node.id,
+        client_name="Free",
+        vpn_type=VpnType.openvpn,
+        owner_id=owner.id,
+        cert_expire_days=3650,
+    )
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+
+    result = usub.apply_owner_access_until_to_config(db, config, actor="admin")
+    assert result == {"applied": False, "reason": "owner_unlimited"}
+    assert db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Free").count() == 0
+
+
+def test_sync_owned_clients_replicates_ha(db):
+    node = _make_node(db)
+    future = datetime.now(timezone.utc) + timedelta(days=10)
+    user = User(
+        username="owner-ha",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        access_until=future.replace(tzinfo=None),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    _make_owned_client(
+        db,
+        node_id=node.id,
+        owner_id=user.id,
+        client_name="Alice",
+        protocols=[VpnType.openvpn],
+    )
+
+    with patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()):
+        with patch(
+            "app.services.node_sync.policy_sync.maybe_replicate_policy_op",
+            return_value=None,
+        ) as replicate:
+            result = usub.sync_owned_clients_access_until(db, user, actor="admin")
+
+    assert result["synced"] == 1
+    assert result["replicate_errors"] == []
+    replicate.assert_called()
+    kwargs = replicate.call_args.kwargs
+    assert kwargs["op"] == "set_access_until"
+    assert kwargs["client_name"] == "Alice"
+    assert kwargs["vpn_type"] == VpnType.openvpn
+
+
+def test_reconcile_queue_isolates_errors(db):
+    node = _make_node(db)
+    calls = {"n": 0}
+
+    def boom(service, protocol, client_name):
+        calls["n"] += 1
+        if client_name == "bad":
+            raise RuntimeError("node offline")
+
+    with patch("app.services.user_subscription._policy_service_for_node", return_value=object()):
+        with patch("app.services.user_subscription._reconcile_access_until", side_effect=boom):
+            result = usub._reconcile_owned_client_queue(
+                db,
+                [
+                    (node.id, "openvpn", "good"),
+                    (node.id, "openvpn", "bad"),
+                    (node.id, "openvpn", "also-good"),
+                ],
+            )
+
+    assert result["synced"] == 2
+    assert len(result["errors"]) == 1
+    assert result["errors"][0]["client_name"] == "bad"
+    assert "offline" in result["errors"][0]["error"]
+    assert calls["n"] == 3

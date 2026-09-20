@@ -526,22 +526,12 @@ def sync_client_access_until_from_owner(
         actor=user.username,
         commit=True,
     )
-    owner_access_until = user_subscription.get_user_access_until(owner)
-    for protocol in result.get("protocols", []):
-        _replicate_policy_after_success(
-            db,
-            client_name=client_name,
-            vpn_type=VpnType(protocol),
-            op="set_access_until",
-            actor=user.username,
-            access_until=owner_access_until,
-        )
     log_action(
         db,
         action="client_access_until_sync_from_owner",
         user_id=user.id,
         username=user.username,
-        details=f"{client_name} {owner_access_until.isoformat() if owner_access_until else 'null'}",
+        details=f"{client_name} {result.get('access_until') or 'null'}",
         remote_addr=request.client.host,
     )
     return result
