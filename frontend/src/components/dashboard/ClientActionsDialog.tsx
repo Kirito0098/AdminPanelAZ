@@ -154,16 +154,19 @@ function ActionButton({
       title={action.title ?? action.label}
       onClick={action.onClick}
       className={cn(
-        'h-auto min-h-11 flex-col items-start justify-center gap-1.5 px-3 py-2.5 text-left text-xs shadow-none',
+        // Override Button's default whitespace-nowrap so long RU labels wrap in the grid.
+        'h-auto min-h-11 w-full min-w-0 items-start justify-center gap-1.5 !whitespace-normal px-3 py-2.5 text-left text-xs shadow-none',
         'hover:bg-accent/60',
-        fullWidth && 'col-span-2',
+        fullWidth && 'col-span-full sm:col-span-2',
         destructive &&
           'border-destructive/35 text-destructive hover:bg-destructive/10 hover:text-destructive',
       )}
     >
-      <span className="flex items-center gap-2">
-        {isBusy ? <Loader2 size={14} className="shrink-0 animate-spin" /> : action.icon}
-        <span className="line-clamp-2 font-medium leading-snug">{action.label}</span>
+      <span className="flex w-full min-w-0 items-start gap-2">
+        {isBusy ? <Loader2 size={14} className="mt-0.5 shrink-0 animate-spin" /> : action.icon}
+        <span className="min-w-0 flex-1 break-words font-medium leading-snug [overflow-wrap:anywhere]">
+          {action.label}
+        </span>
       </span>
     </Button>
   )
@@ -1143,7 +1146,7 @@ export default function ClientActionsDialog({
 
             {visibleManagement.length > 0 && (
               <ProfileSection title="Управление" description="Быстрые действия для этого протокола.">
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                <div className="grid grid-cols-1 gap-2 min-[380px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
                   {visibleManagement.map((action) => (
                     <ActionButton key={action.key} action={action} busyAction={busyAction} />
                   ))}
@@ -1185,7 +1188,7 @@ export default function ClientActionsDialog({
                       fromDate={panelToday()}
                     />
                   </div>
-                  <div className="flex shrink-0 gap-2">
+                  <div className="flex min-w-0 flex-wrap gap-2">
                     <Button
                       type="button"
                       variant="secondary"
@@ -1199,13 +1202,16 @@ export default function ClientActionsDialog({
                       <Button
                         type="button"
                         variant="outline"
+                        className="max-w-full !whitespace-normal h-auto min-h-10 py-2 text-left"
                         disabled={busyAction !== null || haReplicaReadonly}
                         onClick={() => void handleSyncAccessUntilFromOwner()}
                       >
                         {busyAction === 'sync-access-until' ? (
-                          <Loader2 size={14} className="animate-spin" />
+                          <Loader2 size={14} className="shrink-0 animate-spin" />
                         ) : null}
-                        Синхронизировать с юзером
+                        <span className="min-w-0 break-words [overflow-wrap:anywhere]">
+                          Синхронизировать с юзером
+                        </span>
                       </Button>
                     )}
                     <Button
@@ -1411,7 +1417,7 @@ export default function ClientActionsDialog({
 
             {visibleDanger.length > 0 && (
               <ProfileSection title="Опасная зона" tone="danger">
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2 min-[380px]:grid-cols-2 sm:grid-cols-3">
                   {visibleDanger.map((action) => (
                     <ActionButton
                       key={action.key}
