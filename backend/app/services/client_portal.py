@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 import secrets
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
+from typing import Literal
+from urllib.parse import quote, urlencode
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -20,6 +22,7 @@ from app.models import (
     Node,
     OpenVpnAccessPolicy,
     User,
+    UserPortalToken,
     UserTrafficStatProtocol,
     VpnConfig,
     VpnType,
@@ -40,6 +43,15 @@ PORTAL_RESTORE_HINT = (
     "Nginx/TLS портала не входят в архив — откройте Подписка и нажмите "
     "«Настроить под текущую публикацию»."
 )
+CLIENT_PORTAL_TOKEN_PREFIX = "c_"
+USER_PORTAL_TOKEN_PREFIX = "u_"
+
+
+@dataclass(frozen=True)
+class PortalTokenResolution:
+    kind: Literal["client", "user"]
+    client_row: ClientPortalToken | None = None
+    user_row: UserPortalToken | None = None
 
 
 def read_portal_domain_from_sqlite(db_path: Path | str) -> str:
@@ -273,8 +285,34 @@ def _active_token(db: Session, *, node_id: int, client_name: str) -> ClientPorta
     )
 
 
-def _new_token_value() -> str:
-    return secrets.token_urlsafe(18)
+def _active_user_token(db: Session, *, user_id: int) -> UserPortalToken | None:
+    return (
+        db.query(UserPortalToken)
+        .filter(
+            UserPortalToken.user_id == user_id,
+            UserPortalToken.revoked_at.is_(None),
+        )
+        .order_by(UserPortalToken.id.desc())
+        .first()
+    )
+
+
+def _token_exists(db: Session, token: str) -> bool:
+    return bool(
+        db.query(ClientPortalToken.id).filter(ClientPortalToken.token == token).first()
+        or db.query(UserPortalToken.id).filter(UserPortalToken.token == token).first()
+    )
+
+
+def _new_token_value(db: Session, *, prefix: str) -> str:
+    for _ in range(16):
+        candidate = f"{prefix}{secrets.token_urlsafe(18)}"
+        if not _token_exists(db, candidate):
+            return candidate
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Не удалось создать ссылку портала — повторите попытку",
+    )
 
 
 def ensure_client_configs(db: Session, client_name: str) -> list[VpnConfig]:
@@ -296,6 +334,34 @@ def ensure_client_configs(db: Session, client_name: str) -> list[VpnConfig]:
     return configs
 
 
+def ensure_portal_user(db: Session, user_id: int) -> User:
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    return user
+
+
+def _owned_portal_targets(db: Session, *, user_id: int) -> list[tuple[int, str]]:
+    rows = (
+        db.query(VpnConfig.node_id, VpnConfig.client_name)
+        .filter(
+            VpnConfig.owner_id == user_id,
+            VpnConfig.ha_primary_config_id.is_(None),
+        )
+        .order_by(VpnConfig.node_id.asc(), VpnConfig.client_name.asc())
+        .all()
+    )
+    seen: set[tuple[int, str]] = set()
+    targets: list[tuple[int, str]] = []
+    for node_id, client_name in rows:
+        target = (int(node_id), str(client_name))
+        if target in seen:
+            continue
+        seen.add(target)
+        targets.append(target)
+    return targets
+
+
 def get_or_create_portal_token(
     db: Session,
     *,
@@ -311,7 +377,7 @@ def get_or_create_portal_token(
     if existing:
         return existing
     row = ClientPortalToken(
-        token=_new_token_value(),
+        token=_new_token_value(db, prefix=CLIENT_PORTAL_TOKEN_PREFIX),
         node_id=node_id,
         client_name=name,
         created_by_user_id=creator.id if creator else None,
@@ -352,7 +418,7 @@ def rotate_portal_token(
     ):
         row.revoked_at = now
     new_row = ClientPortalToken(
-        token=_new_token_value(),
+        token=_new_token_value(db, prefix=CLIENT_PORTAL_TOKEN_PREFIX),
         node_id=node_id,
         client_name=name,
         created_by_user_id=creator.id if creator else None,
@@ -391,13 +457,115 @@ def revoke_portal_token(db: Session, *, client_name: str) -> None:
     db.commit()
 
 
-def get_valid_portal_token(db: Session, token: str) -> ClientPortalToken:
-    row = db.query(ClientPortalToken).filter(ClientPortalToken.token == token).first()
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ссылка недействительна")
-    if row.revoked_at is not None:
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Ссылка отозвана")
+def get_or_create_user_portal_token(
+    db: Session,
+    *,
+    user_id: int,
+    creator: User | None = None,
+) -> UserPortalToken:
+    from sqlalchemy.exc import IntegrityError
+
+    ensure_portal_user(db, user_id)
+    existing = _active_user_token(db, user_id=user_id)
+    if existing:
+        return existing
+    row = UserPortalToken(
+        token=_new_token_value(db, prefix=USER_PORTAL_TOKEN_PREFIX),
+        user_id=user_id,
+        created_by_user_id=creator.id if creator else None,
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raced = _active_user_token(db, user_id=user_id)
+        if raced:
+            return raced
+        raise
+    db.refresh(row)
     return row
+
+
+def rotate_user_portal_token(
+    db: Session,
+    *,
+    user_id: int,
+    creator: User | None = None,
+) -> UserPortalToken:
+    from sqlalchemy.exc import IntegrityError
+
+    ensure_portal_user(db, user_id)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for row in (
+        db.query(UserPortalToken)
+        .filter(
+            UserPortalToken.user_id == user_id,
+            UserPortalToken.revoked_at.is_(None),
+        )
+        .all()
+    ):
+        row.revoked_at = now
+    new_row = UserPortalToken(
+        token=_new_token_value(db, prefix=USER_PORTAL_TOKEN_PREFIX),
+        user_id=user_id,
+        created_by_user_id=creator.id if creator else None,
+    )
+    db.add(new_row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Не удалось сменить ссылку портала — повторите попытку",
+        ) from None
+    db.refresh(new_row)
+    return new_row
+
+
+def revoke_user_portal_token(db: Session, *, user_id: int) -> None:
+    ensure_portal_user(db, user_id)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    rows = (
+        db.query(UserPortalToken)
+        .filter(
+            UserPortalToken.user_id == user_id,
+            UserPortalToken.revoked_at.is_(None),
+        )
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ссылка портала не найдена")
+    for row in rows:
+        row.revoked_at = now
+    db.commit()
+
+
+def get_valid_portal_token(db: Session, token: str) -> PortalTokenResolution:
+    client_row = db.query(ClientPortalToken).filter(ClientPortalToken.token == token).first()
+    user_row = db.query(UserPortalToken).filter(UserPortalToken.token == token).first()
+    candidates = []
+    if client_row is not None:
+        candidates.append(("client", client_row))
+    if user_row is not None:
+        candidates.append(("user", user_row))
+    if not candidates:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ссылка недействительна")
+
+    active = [(kind, row) for kind, row in candidates if row.revoked_at is None]
+    if len(active) > 1:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ссылка недействительна")
+    if active:
+        kind, row = active[0]
+    else:
+        kind, row = candidates[0]
+        if row.revoked_at is not None:
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Ссылка отозвана")
+
+    if kind == "client":
+        return PortalTokenResolution(kind="client", client_row=row)
+    return PortalTokenResolution(kind="user", user_row=row)
 
 
 def _portal_protocol_for_file(file_item: dict, config: VpnConfig) -> str:
@@ -631,27 +799,46 @@ def build_portal_status(db: Session, *, node_id: int, client_name: str, configs:
     }
 
 
-def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
-    base = resolve_portal_base_url(db)
-    if not base:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    configs = (
-        db.query(VpnConfig)
-        .filter(
-            VpnConfig.node_id == token_row.node_id,
-            VpnConfig.client_name == token_row.client_name,
-            VpnConfig.ha_primary_config_id.is_(None),
-        )
-        .all()
-    )
+def _portal_brand_title(db: Session) -> str:
     brand = _setting_value(db, "app_name") or "VPN"
-    # Shorten default panel name for the public page
     if brand.lower().startswith("adminpanel"):
         brand = "VPN"
-    files_meta = _list_files_for_configs(db, configs)
+    return brand
+
+
+def _portal_download_url(
+    *,
+    base: str,
+    token: str,
+    path: str,
+    node_id: int | None = None,
+    client_name: str | None = None,
+) -> str:
+    params: dict[str, str | int] = {"path": path}
+    if node_id is not None:
+        params["node_id"] = node_id
+    if client_name:
+        params["client_name"] = client_name
+    return f"{base}/api/public/portal/{token}/download?{urlencode(params, quote_via=quote)}"
+
+
+def _portal_file_entries(
+    *,
+    base: str,
+    token: str,
+    files_meta: list[dict],
+    node_id: int | None = None,
+    client_name: str | None = None,
+) -> list[dict]:
     files = []
     for item in files_meta:
-        download_url = f"{base}/api/public/portal/{token_row.token}/download?path={quote(item['path'], safe='')}"
+        download_url = _portal_download_url(
+            base=base,
+            token=token,
+            path=item["path"],
+            node_id=node_id,
+            client_name=client_name,
+        )
         entry = {
             "path": item["path"],
             "label": item["label"],
@@ -662,34 +849,154 @@ def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
         if item["vpn_type"] == "openvpn" or (item["filename"] or "").lower().endswith(".ovpn"):
             entry["openvpn_import_url"] = openvpn_import_url(download_url)
         files.append(entry)
-    # Protocols shown on the page = enabled profile protocols actually present.
-    protocols = sorted({f["vpn_type"] for f in files})
-    from app.services.feature_guards import get_feature_service
+    return files
 
+
+def _parse_portal_status_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _apply_user_subscription_status(status_payload: dict, user: User) -> dict:
+    deadline = getattr(user, "access_until", None)
+    if deadline is None:
+        return status_payload
+    updated = dict(status_payload)
+    current_expires_at = _parse_portal_status_datetime(updated.get("expires_at"))
+    if current_expires_at is None or deadline < current_expires_at:
+        updated["expires_at"] = deadline.isoformat() + "Z"
+        updated["expires_label"] = _format_expires_label(deadline)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if deadline <= now and updated.get("status") != "blocked":
+        updated["status"] = "expired"
+        updated["status_label"] = "Истекла"
+    return updated
+
+
+def _build_client_portal_entry(
+    db: Session,
+    *,
+    token: str,
+    node_id: int,
+    client_name: str,
+    base: str,
+    download_node_id: int | None = None,
+    download_client_name: str | None = None,
+) -> dict:
+    configs = (
+        db.query(VpnConfig)
+        .filter(
+            VpnConfig.node_id == node_id,
+            VpnConfig.client_name == client_name,
+            VpnConfig.ha_primary_config_id.is_(None),
+        )
+        .all()
+    )
+    files_meta = _list_files_for_configs(db, configs)
+    files = _portal_file_entries(
+        base=base,
+        token=token,
+        files_meta=files_meta,
+        node_id=download_node_id,
+        client_name=download_client_name,
+    )
     return {
-        "client_name": token_row.client_name,
-        "brand_title": brand,
-        "protocols": protocols,
+        "node_id": node_id,
+        "client_name": client_name,
+        "protocols": sorted({f["vpn_type"] for f in files}),
         "files": files,
-        "unlock_codes_enabled": get_feature_service().is_enabled("unlock_codes"),
         "status": build_portal_status(
             db,
-            node_id=token_row.node_id,
-            client_name=token_row.client_name,
+            node_id=node_id,
+            client_name=client_name,
             configs=configs,
         ),
     }
 
 
-def read_portal_profile(db: Session, token_row: ClientPortalToken, path: str) -> tuple[str, str | bytes]:
+def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
+    base = resolve_portal_base_url(db)
+    if not base:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    from app.services.feature_guards import get_feature_service
+
+    entry = _build_client_portal_entry(
+        db,
+        token=token_row.token,
+        node_id=token_row.node_id,
+        client_name=token_row.client_name,
+        base=base,
+    )
+    return {
+        "kind": "client",
+        "node_id": token_row.node_id,
+        "client_name": token_row.client_name,
+        "brand_title": _portal_brand_title(db),
+        "protocols": entry["protocols"],
+        "files": entry["files"],
+        "unlock_codes_enabled": get_feature_service().is_enabled("unlock_codes"),
+        "status": entry["status"],
+    }
+
+
+def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
+    base = resolve_portal_base_url(db)
+    if not base:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    user = ensure_portal_user(db, token_row.user_id)
+    from app.services.feature_guards import get_feature_service
+
+    clients = []
+    for node_id, client_name in _owned_portal_targets(db, user_id=user.id):
+        entry = _build_client_portal_entry(
+            db,
+            token=token_row.token,
+            node_id=node_id,
+            client_name=client_name,
+            base=base,
+            download_node_id=node_id,
+            download_client_name=client_name,
+        )
+        entry["status"] = _apply_user_subscription_status(entry["status"], user)
+        clients.append(entry)
+    return {
+        "kind": "user",
+        "user_id": user.id,
+        "brand_title": _portal_brand_title(db),
+        "unlock_codes_enabled": get_feature_service().is_enabled("unlock_codes"),
+        "clients": clients,
+    }
+
+
+def build_public_portal_payload(db: Session, resolution: PortalTokenResolution) -> dict:
+    if resolution.kind == "client":
+        if resolution.client_row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        return build_portal_payload(db, resolution.client_row)
+    if resolution.user_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return build_user_portal_payload(db, resolution.user_row)
+
+
+def _read_client_portal_profile(
+    db: Session,
+    *,
+    node_id: int,
+    client_name: str,
+    path: str,
+) -> tuple[str, str | bytes]:
     path = (path or "").strip()
     if not path or ".." in path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный путь")
     configs = (
         db.query(VpnConfig)
         .filter(
-            VpnConfig.node_id == token_row.node_id,
-            VpnConfig.client_name == token_row.client_name,
+            VpnConfig.node_id == node_id,
+            VpnConfig.client_name == client_name,
             VpnConfig.ha_primary_config_id.is_(None),
         )
         .all()
@@ -697,17 +1004,124 @@ def read_portal_profile(db: Session, token_row: ClientPortalToken, path: str) ->
     allowed = {item["path"] for item in _list_files_for_configs(db, configs)}
     if path not in allowed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
-    adapter = _adapter_for_node_id(db, token_row.node_id)
-    hosts = load_node_remote_hosts(db, token_row.node_id)
+    adapter = _adapter_for_node_id(db, node_id)
+    hosts = load_node_remote_hosts(db, node_id)
     content = read_profile_file_for_delivery(adapter, path, hosts)
-    filename = build_profile_download_filename(token_row.client_name, path=path)
+    filename = build_profile_download_filename(client_name, path=path)
     return filename, content
+
+
+def read_portal_profile(
+    db: Session,
+    resolution: PortalTokenResolution,
+    path: str,
+    *,
+    node_id: int | None = None,
+    client_name: str | None = None,
+) -> tuple[str, str | bytes]:
+    if resolution.kind == "client":
+        if resolution.client_row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        return _read_client_portal_profile(
+            db,
+            node_id=resolution.client_row.node_id,
+            client_name=resolution.client_row.client_name,
+            path=path,
+        )
+
+    if resolution.user_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    key = (client_name or "").strip().lower()
+    if node_id is None or not key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Не указан клиент")
+    for target_node_id, target_client_name in _owned_portal_targets(db, user_id=resolution.user_row.user_id):
+        if target_node_id != node_id:
+            continue
+        if target_client_name.strip().lower() != key:
+            continue
+        return _read_client_portal_profile(
+            db,
+            node_id=target_node_id,
+            client_name=target_client_name,
+            path=path,
+        )
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Клиент не найден")
+
+
+def redeem_public_portal_code(db: Session, resolution: PortalTokenResolution, *, code: str) -> dict:
+    from app.services import unlock_codes as unlock_codes_service
+    from app.services.access_until import effective_access_until_for_client
+
+    if resolution.kind == "client":
+        if resolution.client_row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        result = unlock_codes_service.redeem_unlock_code(
+            db,
+            code=code,
+            client_name=resolution.client_row.client_name,
+            node_id=resolution.client_row.node_id,
+        )
+        access_until = effective_access_until_for_client(
+            db,
+            resolution.client_row.node_id,
+            resolution.client_row.client_name,
+        )
+        return {
+            **result,
+            "access_until": access_until.isoformat() if access_until else None,
+        }
+
+    if resolution.user_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    # A user portal covers several profiles, so a profile that does not fit the
+    # code (or is manually blocked by an admin) must not abort the redeem —
+    # manual blocks only have to be preserved, not to veto the subscription.
+    retryable_messages = {
+        unlock_codes_service._REDEEM_CLIENT_NOT_ALLOWED_MESSAGE,
+        unlock_codes_service._REDEEM_PROTOCOL_MISMATCH_MESSAGE,
+        unlock_codes_service._REDEEM_MANUAL_BLOCK_MESSAGE,
+    }
+    last_retryable_error: str | None = None
+    for node_id, client_name in _owned_portal_targets(db, user_id=resolution.user_row.user_id):
+        try:
+            result = unlock_codes_service.redeem_unlock_code(
+                db,
+                code=code,
+                client_name=client_name,
+                node_id=node_id,
+            )
+        except ValueError as exc:
+            if str(exc) in retryable_messages:
+                last_retryable_error = str(exc)
+                continue
+            raise
+        user = ensure_portal_user(db, resolution.user_row.user_id)
+        access_until = getattr(user, "access_until", None)
+        return {
+            **result,
+            "access_until": access_until.isoformat() if access_until else None,
+        }
+
+    raise ValueError(last_retryable_error or "Профили пользователя не найдены")
 
 
 def link_response(db: Session, row: ClientPortalToken) -> dict:
     return {
+        "kind": "client",
         "token": row.token,
+        "node_id": row.node_id,
         "client_name": row.client_name,
+        "url": portal_page_url(db, row.token),
+        "revoked": row.revoked_at is not None,
+    }
+
+
+def user_link_response(db: Session, row: UserPortalToken) -> dict:
+    return {
+        "kind": "user",
+        "token": row.token,
+        "user_id": row.user_id,
         "url": portal_page_url(db, row.token),
         "revoked": row.revoked_at is not None,
     }

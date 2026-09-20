@@ -41,9 +41,11 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("client_ban", "Блокировка / разблокировка клиента"),
     ("traffic_limit", "Лимит трафика (блок / авторазблокировка)"),
     ("cert_expiry_reminder", "Напоминание: срок сертификата"),
+    ("access_expiry_reminder", "Напоминание: срок доступа"),
     ("traffic_limit_reminder", "Напоминание: лимит трафика"),
     ("temp_block_reminder", "Напоминание: временная блокировка"),
     ("user_cert_expiry_reminder", "Пользователь: срок сертификата"),
+    ("user_access_expiry_reminder", "Пользователь: срок доступа"),
     ("user_traffic_limit_reminder", "Пользователь: лимит трафика"),
     ("user_temp_block_reminder", "Пользователь: временная блокировка"),
     ("settings_change", "Изменение настроек"),
@@ -60,11 +62,13 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
 # Owner self-service reminders (Mini App / personal prefs). Not admin broadcast events.
 PERSONAL_OWNER_NOTIFY_KEYS = frozenset({
     "cert_expiry_reminder",
+    "access_expiry_reminder",
     "traffic_limit_reminder",
     "temp_block_reminder",
 })
 PERSONAL_OWNER_NOTIFY_KEY_ORDER = (
     "cert_expiry_reminder",
+    "access_expiry_reminder",
     "traffic_limit_reminder",
     "temp_block_reminder",
 )
@@ -1253,19 +1257,20 @@ class AdminNotifyService:
 
         if event_type in (
             "user_cert_expiry_reminder",
+            "user_access_expiry_reminder",
             "user_traffic_limit_reminder",
             "user_temp_block_reminder",
         ):
             titles = {
                 "user_cert_expiry_reminder": "⚠️ <b>Сертификат пользователя</b>",
+                "user_access_expiry_reminder": "⏳ <b>Доступ пользователя</b>",
                 "user_traffic_limit_reminder": "📊 <b>Лимит трафика пользователя</b>",
                 "user_temp_block_reminder": "⛔ <b>Временная блокировка</b>",
             }
-            detail_lines = [
-                _line_code("👤", "Пользователь", subject_name or actor_username),
-                *_client_detail_lines(target_type, target_name),
-                _line_text("📋", "Детали", details or "-"),
-            ]
+            detail_lines = [_line_code("👤", "Пользователь", subject_name or actor_username)]
+            if event_type != "user_access_expiry_reminder":
+                detail_lines.extend(_client_detail_lines(target_type, target_name))
+            detail_lines.append(_line_text("📋", "Детали", details or "-"))
             _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
             return _format_notify_card(
                 titles[event_type],
@@ -1316,6 +1321,13 @@ def _preview_owner_reminder_text(event_key: str) -> str | None:
     """Sample text for self-service owner reminders (not routed through _build_text)."""
     when = _fmt_when(format_notify_when(None))
     samples = {
+        "access_expiry_reminder": _format_notify_card(
+            "⚠️ <b>Доступ скоро истечёт</b>",
+            when,
+            detail_lines=[
+                _line_text("📋", "Детали", "Доступ до <code>2026-07-10</code>, осталось <b>5</b> дн."),
+            ],
+        ),
         "cert_expiry_reminder": _format_notify_card(
             "⚠️ <b>Сертификат скоро истечёт</b>",
             when,
@@ -1413,6 +1425,12 @@ def _preview_event_build_kwargs(event_key: str, *, actor_username: str) -> dict 
             "details": "Истекает через 5 дн.",
             "subject_name": "vpnuser",
             **node_ctx,
+        },
+        "user_access_expiry_reminder": {
+            "event_type": "user_access_expiry_reminder",
+            "actor_username": "vpnuser",
+            "details": "Доступ до <code>2026-07-10</code>, осталось <b>5</b> дн.",
+            "subject_name": "vpnuser",
         },
         "user_traffic_limit_reminder": {
             "event_type": "user_traffic_limit_reminder",

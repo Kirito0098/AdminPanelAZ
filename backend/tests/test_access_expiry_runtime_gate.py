@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import app.services.access_expiry_worker as worker
@@ -62,3 +63,23 @@ def test_is_access_expiry_enabled_delegates(monkeypatch):
         lambda: SimpleEnabled(True),
     )
     assert worker._is_access_expiry_enabled() is True
+
+
+def test_run_once_applies_access_and_subscription_passes(monkeypatch):
+    closed = {"value": False}
+    db = SimpleNamespace(close=lambda: closed.__setitem__("value", True))
+
+    monkeypatch.setattr(worker, "SessionLocal", lambda: db)
+    monkeypatch.setattr(worker, "apply_due_access_blocks", lambda session: {"blocked": 2, "errors": 0})
+    monkeypatch.setattr(worker, "apply_due_user_subscription_blocks", lambda session: {"users_due": 1, "cascaded": 3, "skipped": 4, "errors": 0})
+
+    result = worker._run_once()
+
+    assert result == {
+        "blocked": 2,
+        "users_due": 1,
+        "cascaded": 3,
+        "skipped": 4,
+        "errors": 0,
+    }
+    assert closed["value"] is True

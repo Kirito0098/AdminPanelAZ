@@ -1,9 +1,12 @@
+import re
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models import NodeStatus, SyncStatus, UserRole, VpnType
+
+DATE_ONLY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 class Token(BaseModel):
@@ -212,17 +215,31 @@ class UserUpdate(BaseModel):
     role: UserRole | None = None
     theme: str | None = None
     is_active: bool | None = None
+    access_until: datetime | None = None
     password: str | None = Field(default=None, min_length=4)
     telegram_id: str | None = None
     config_quota: int | None = Field(default=None, ge=0, le=1000)
     can_create_configs: bool | None = None
     visible_vpn_profiles: dict | None = None
 
+    @field_validator("access_until", mode="before")
+    @classmethod
+    def _access_until_end_of_day(cls, value: Any) -> Any:
+        """A bare `YYYY-MM-DD` means the end of that day, as on the client level.
+
+        Without this, "доступ до 1 окт" would cut access at 00:00 on Oct 1.
+        """
+        if isinstance(value, str) and DATE_ONLY_RE.fullmatch(value.strip()):
+            return f"{value.strip()}T23:59:59.999999+00:00"
+        return value
+
 
 class UserResponse(UserBase):
     id: int
     must_change_password: bool
     totp_enabled: bool = False
+    access_until: datetime | None = None
+    access_cascade_warning: str | None = None
     telegram_id: str | None = None
     config_quota: int | None = None
     can_create_configs: bool = True

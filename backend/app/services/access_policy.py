@@ -899,14 +899,26 @@ class AccessPolicyService:
                 self._reapply_all_blocked_runtime(exclude_client=normalized)
         self.db.commit()
 
+    @staticmethod
+    def _wg_expiry_from(existing: datetime | None, days: int, *, extend: bool) -> datetime:
+        now = _now()
+        base = existing if (extend and existing and existing > now) else now
+        return base + timedelta(days=days)
+
+    def wg_expiry_target(self, client_name: str, days: int, *, extend: bool = False) -> datetime:
+        """Deadline that wg_set_expiry would write — for the owner conflict guard."""
+        normalized = client_name.strip().lower()
+        row = (
+            self.db.query(WgAccessPolicy)
+            .filter_by(node_id=self._require_node_id(), client_name=normalized)
+            .first()
+        )
+        existing = _as_utc(row.expires_at) if row is not None else None
+        return self._wg_expiry_from(existing, days, extend=extend)
+
     def wg_set_expiry(self, client_name: str, days: int, *, extend: bool = False, actor: str | None = None) -> dict:
         row = self._get_wg(client_name)
-        now = _now()
-        base = now
-        existing = _as_utc(row.expires_at)
-        if extend and existing and existing > now:
-            base = existing
-        row.expires_at = base + timedelta(days=days)
+        row.expires_at = self._wg_expiry_from(_as_utc(row.expires_at), days, extend=extend)
         row.updated_by = actor
         self.db.commit()
         self.reconcile_wg(client_name, force_runtime=True)

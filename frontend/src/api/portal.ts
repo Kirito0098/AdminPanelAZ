@@ -1,11 +1,5 @@
 import { apiFetch } from './http'
-
-export interface PortalLinkResponse {
-  token: string
-  client_name: string
-  url: string
-  revoked: boolean
-}
+import type { PortalLinkResponse } from '@/types'
 
 export interface PortalFileMeta {
   path: string
@@ -26,14 +20,29 @@ export interface PortalStatusMeta {
   traffic_label: string
 }
 
-export interface PortalMetaResponse {
+export interface PortalClientEntry {
+  node_id: number
   client_name: string
-  brand_title: string
   protocols: string[]
   files: PortalFileMeta[]
-  unlock_codes_enabled: boolean
   status?: PortalStatusMeta
 }
+
+export interface ClientPortalMetaResponse extends PortalClientEntry {
+  kind?: 'client'
+  brand_title: string
+  unlock_codes_enabled: boolean
+}
+
+export interface UserPortalMetaResponse {
+  kind: 'user'
+  user_id: number
+  brand_title: string
+  unlock_codes_enabled: boolean
+  clients: PortalClientEntry[]
+}
+
+export type PortalMetaResponse = ClientPortalMetaResponse | UserPortalMetaResponse
 
 export interface PortalRedeemResponse {
   ok: boolean
@@ -64,6 +73,28 @@ export async function revokePortalLink(clientName: string) {
     `/portal/clients/${encodeURIComponent(clientName)}/revoke`,
     { method: 'POST' },
   )
+}
+
+export async function getUserPortalLink(userId: number) {
+  return apiFetch<PortalLinkResponse>(`/portal/users/${userId}/link`)
+}
+
+export async function createUserPortalLink(userId: number) {
+  return apiFetch<PortalLinkResponse>(`/portal/users/${userId}/link`, {
+    method: 'POST',
+  })
+}
+
+export async function rotateUserPortalLink(userId: number) {
+  return apiFetch<PortalLinkResponse>(`/portal/users/${userId}/rotate`, {
+    method: 'POST',
+  })
+}
+
+export async function revokeUserPortalLink(userId: number) {
+  return apiFetch<{ ok: boolean; user_id: number }>(`/portal/users/${userId}/revoke`, {
+    method: 'POST',
+  })
 }
 
 /** Public portal meta — called from /p/:token without auth. */

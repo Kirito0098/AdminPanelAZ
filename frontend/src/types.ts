@@ -200,6 +200,8 @@ export interface User {
   role: UserRole
   theme: string
   is_active: boolean
+  access_until?: string | null
+  access_cascade_warning?: string | null
   must_change_password: boolean
   totp_enabled?: boolean
   telegram_id?: string | null
@@ -211,6 +213,36 @@ export interface User {
   noc_weekly_dow?: string
   noc_weekly_time?: string
   created_at: string
+}
+
+export interface UserUpdatePayload {
+  role?: UserRole
+  theme?: string
+  is_active?: boolean
+  access_until?: string | null
+  password?: string
+  telegram_id?: string | null
+  config_quota?: number | null
+  can_create_configs?: boolean
+  visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
+}
+
+export interface ClientAccessUntilResponse {
+  access_until: string | null
+}
+
+export interface ClientAccessUntilConflictPayload {
+  code: 'access_until_conflict' | string
+  user_access_until: string | null
+  client_access_until: string | null
+}
+
+export interface SyncClientAccessUntilResponse {
+  client_name: string
+  targets: number
+  protocols: string[]
+  synced: number
+  access_until: string | null
 }
 
 export interface VisibleVpnProfilesPolicy {
@@ -924,6 +956,25 @@ export interface PortalPublishStatus {
   warnings: string[]
   portal_access_url: string
 }
+
+export interface ClientPortalLinkResponse {
+  kind?: 'client'
+  token: string
+  node_id?: number
+  client_name: string
+  url: string
+  revoked: boolean
+}
+
+export interface UserPortalLinkResponse {
+  kind: 'user'
+  token: string
+  user_id: number
+  url: string
+  revoked: boolean
+}
+
+export type PortalLinkResponse = ClientPortalLinkResponse | UserPortalLinkResponse
 
 export type VpnNetworkPublishModeKey =
   | 'http_direct'

@@ -41,7 +41,7 @@ export async function setUserConfigAccess(userId: number, configGroups: string[]
   })
 }
 
-export async function updateUser(id: number, data: Record<string, unknown>) {
+export async function updateUser(id: number, data: import('../types').UserUpdatePayload) {
   return apiFetch<import('../types').User>(`/users/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(data),

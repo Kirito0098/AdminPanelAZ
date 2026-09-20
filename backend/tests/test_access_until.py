@@ -3,12 +3,27 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 import warnings
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from app.auth import get_current_user, require_admin
 from app.database import Base
-from app.models import AmneziaWg2AccessPolicy, Node, NodeStatus, OpenVpnAccessPolicy, WgAccessPolicy
-from app.routers import client_access
+from app.database import get_db
+from app.models import (
+    AmneziaWg2AccessPolicy,
+    Node,
+    NodeStatus,
+    OpenVpnAccessPolicy,
+    User,
+    UserRole,
+    VpnConfig,
+    VpnType,
+    WgAccessPolicy,
+)
+from app.routers import client_access, users
 from app.services.access_until import (
     apply_due_access_blocks,
     effective_access_until_for_client,
@@ -20,7 +35,11 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 def _make_db():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     return engine, session
@@ -43,6 +62,33 @@ def _make_node(db):
     return node
 
 
+def _make_user(db, *, username: str, role: UserRole, access_until: datetime | None = None) -> User:
+    user = User(
+        username=username,
+        password_hash="x",
+        role=role,
+        is_active=True,
+        access_until=access_until.replace(tzinfo=None) if access_until else None,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def _make_owned_client(db, *, node_id: int, owner_id: int, client_name: str, protocols: list[VpnType]) -> None:
+    for vpn_type in protocols:
+        db.add(
+            VpnConfig(
+                node_id=node_id,
+                client_name=client_name,
+                vpn_type=vpn_type,
+                owner_id=owner_id,
+            )
+        )
+    db.commit()
+
+
 def _adapter():
     adapter = MagicMock()
     adapter.read_config_file.return_value = ""
@@ -53,6 +99,22 @@ def _adapter():
     adapter.block_awg2_client_runtime.return_value = {"success": True}
     adapter.unblock_awg2_client_runtime.return_value = {"success": True}
     return adapter
+
+
+def _client_access_api(db, *, admin: User) -> TestClient:
+    app = FastAPI()
+    app.include_router(client_access.router, prefix="/api")
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_admin] = lambda: admin
+    return TestClient(app)
+
+
+def _users_api(db, *, current_user: User) -> TestClient:
+    app = FastAPI()
+    app.include_router(users.router, prefix="/api")
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: current_user
+    return TestClient(app)
 
 
 def test_set_access_until_openvpn_and_effective_min():
@@ -167,6 +229,7 @@ def test_openvpn_access_until_route_wires_replication():
     until = datetime(2030, 1, 1, tzinfo=timezone.utc)
 
     with (
+        patch.object(client_access, "_maybe_access_until_conflict", return_value=None) as conflict,
         patch.object(client_access, "_set_access_until", return_value={"access_until": until.isoformat()}) as set_until,
         patch.object(client_access, "log_action") as log_action,
         patch.object(client_access, "_replicate_policy_after_success") as replicate,
@@ -180,6 +243,12 @@ def test_openvpn_access_until_route_wires_replication():
         )
 
     assert result["access_until"] == until.isoformat()
+    conflict.assert_called_once_with(
+        db,
+        client_name="Ivan",
+        access_until=until,
+        confirm_override=False,
+    )
     set_until.assert_called_once_with(
         db,
         protocol="openvpn",
@@ -400,6 +469,317 @@ def test_apply_due_access_blocks_does_not_clobber_concurrent_extension():
         wg = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
         assert ovpn.block_reason != "access_expired"
         assert wg.block_reason != "access_expired"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_client_access_until_conflict_returns_409_without_override():
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        owner_until = datetime(2030, 1, 10, tzinfo=timezone.utc)
+        requested_until = datetime(2030, 1, 20, tzinfo=timezone.utc)
+        admin = _make_user(db, username="admin", role=UserRole.admin)
+        owner = _make_user(db, username="owner", role=UserRole.user, access_until=owner_until)
+        _make_owned_client(
+            db,
+            node_id=node.id,
+            owner_id=owner.id,
+            client_name="Alice",
+            protocols=[VpnType.openvpn],
+        )
+        client = _client_access_api(db, admin=admin)
+
+        with patch.object(client_access, "_set_access_until") as set_until:
+            response = client.patch(
+                "/api/client-access/openvpn/Alice/access-until",
+                json={"access_until": requested_until.isoformat()},
+            )
+
+        assert response.status_code == 409
+        assert response.json() == {
+            "code": "access_until_conflict",
+            "user_access_until": owner_until.isoformat(),
+            "client_access_until": requested_until.isoformat(),
+        }
+        set_until.assert_not_called()
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_client_access_until_confirm_override_allows_update():
+    db = MagicMock()
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    user = SimpleNamespace(id=7, username="admin")
+    until = datetime(2030, 1, 20, tzinfo=timezone.utc)
+
+    with (
+        patch.object(client_access, "_maybe_access_until_conflict", return_value=None) as conflict,
+        patch.object(client_access, "_set_access_until", return_value={"access_until": until.isoformat()}) as set_until,
+        patch.object(client_access, "log_action") as log_action,
+        patch.object(client_access, "_replicate_policy_after_success") as replicate,
+    ):
+        result = client_access.openvpn_set_access_until(
+            "Ivan",
+            client_access.AccessUntilRequest(access_until=until, confirm_override=True),
+            request=request,
+            db=db,
+            user=user,
+        )
+
+    assert result["access_until"] == until.isoformat()
+    conflict.assert_called_once_with(
+        db,
+        client_name="Ivan",
+        access_until=until,
+        confirm_override=True,
+    )
+    set_until.assert_called_once()
+    log_action.assert_called_once()
+    replicate.assert_called_once()
+
+
+def test_wg_set_expiry_conflict_returns_409_without_override():
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        owner_until = datetime(2030, 1, 10, tzinfo=timezone.utc)
+        admin = _make_user(db, username="admin", role=UserRole.admin)
+        owner = _make_user(db, username="owner", role=UserRole.user, access_until=owner_until)
+        _make_owned_client(
+            db,
+            node_id=node.id,
+            owner_id=owner.id,
+            client_name="Alice",
+            protocols=[VpnType.wireguard],
+        )
+        client = _client_access_api(db, admin=admin)
+
+        with patch.object(client_access.AccessPolicyService, "wg_set_expiry") as set_expiry:
+            response = client.post(
+                "/api/client-access/wireguard/set-expiry",
+                json={"client_name": "Alice", "days": 30},
+            )
+
+        assert response.status_code == 409
+        body = response.json()
+        assert body["code"] == "access_until_conflict"
+        assert body["user_access_until"] == owner_until.isoformat()
+        assert body["client_access_until"] is not None
+        set_expiry.assert_not_called()
+        assert db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").count() == 0
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_wg_set_expiry_confirm_override_writes_divergent_deadline():
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        owner_until = datetime(2030, 1, 10, tzinfo=timezone.utc)
+        admin = _make_user(db, username="admin", role=UserRole.admin)
+        owner = _make_user(db, username="owner", role=UserRole.user, access_until=owner_until)
+        _make_owned_client(
+            db,
+            node_id=node.id,
+            owner_id=owner.id,
+            client_name="Alice",
+            protocols=[VpnType.wireguard],
+        )
+        client = _client_access_api(db, admin=admin)
+
+        with (
+            patch.object(client_access, "get_active_adapter", return_value=_adapter()),
+            patch.object(client_access, "_replicate_policy_after_success"),
+        ):
+            response = client.post(
+                "/api/client-access/wireguard/set-expiry",
+                json={"client_name": "Alice", "days": 30, "confirm_override": True},
+            )
+
+        assert response.status_code == 200
+        row = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
+        assert row.expires_at is not None
+        assert row.expires_at.replace(tzinfo=timezone.utc) != owner_until
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_wg_set_expiry_without_owner_skips_conflict_guard():
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        admin = _make_user(db, username="admin", role=UserRole.admin)
+        client = _client_access_api(db, admin=admin)
+
+        with (
+            patch.object(client_access, "get_active_adapter", return_value=_adapter()),
+            patch.object(client_access, "_replicate_policy_after_success"),
+        ):
+            response = client.post(
+                "/api/client-access/wireguard/set-expiry",
+                json={"client_name": "Orphan", "days": 30},
+            )
+
+        assert response.status_code == 200
+        assert db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="orphan").one().expires_at is not None
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_sync_client_access_until_from_owner_endpoint_updates_requested_client():
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        owner_until = datetime(2031, 2, 1, tzinfo=timezone.utc)
+        other_until = datetime(2030, 12, 1, tzinfo=timezone.utc)
+        admin = _make_user(db, username="admin", role=UserRole.admin)
+        owner = _make_user(db, username="owner", role=UserRole.user, access_until=owner_until)
+        _make_owned_client(
+            db,
+            node_id=node.id,
+            owner_id=owner.id,
+            client_name="Alice",
+            protocols=[VpnType.openvpn, VpnType.wireguard],
+        )
+        _make_owned_client(
+            db,
+            node_id=node.id,
+            owner_id=owner.id,
+            client_name="Bob",
+            protocols=[VpnType.openvpn],
+        )
+
+        with patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()):
+            set_access_until(db, "openvpn", node.id, "Alice", other_until, actor="admin")
+            set_access_until(db, "wireguard", node.id, "Alice", other_until, actor="admin")
+            set_access_until(db, "openvpn", node.id, "Bob", other_until, actor="admin")
+
+            client = _client_access_api(db, admin=admin)
+            with patch(
+                "app.services.node_sync.policy_sync.maybe_replicate_policy_op",
+                return_value=None,
+            ) as replicate:
+                response = client.post("/api/client-access/Alice/access-until/sync-from-owner")
+
+        assert response.status_code == 200
+        assert response.json()["client_name"] == "Alice"
+        assert response.json()["targets"] == 2
+        assert response.json()["synced"] == 2
+        assert response.json()["access_until"] == owner_until.isoformat()
+        assert db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one().access_until == (
+            owner_until.replace(tzinfo=None)
+        )
+        assert db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one().expires_at == (
+            owner_until.replace(tzinfo=None)
+        )
+        assert db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Bob").one().access_until == (
+            other_until.replace(tzinfo=None)
+        )
+        assert replicate.call_count == 2
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_user_patch_access_until_syncs_owned_clients():
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        access_until = datetime(2032, 1, 1, tzinfo=timezone.utc)
+        admin = _make_user(db, username="admin", role=UserRole.admin)
+        owner = _make_user(db, username="owner", role=UserRole.user)
+        _make_owned_client(
+            db,
+            node_id=node.id,
+            owner_id=owner.id,
+            client_name="Alice",
+            protocols=[VpnType.openvpn, VpnType.wireguard],
+        )
+
+        with patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()):
+            client = _users_api(db, current_user=admin)
+            response = client.patch(
+                f"/api/users/{owner.id}",
+                json={"access_until": access_until.isoformat()},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["access_until"] == access_until.replace(tzinfo=None).isoformat()
+        assert db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one().access_until == (
+            access_until.replace(tzinfo=None)
+        )
+        assert db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one().expires_at == (
+            access_until.replace(tzinfo=None)
+        )
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_user_patch_keeps_client_override_when_access_until_unchanged():
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        owner_until = datetime(2032, 1, 1, tzinfo=timezone.utc)
+        override_until = datetime(2033, 6, 1, tzinfo=timezone.utc)
+        admin = _make_user(db, username="admin", role=UserRole.admin)
+        owner = _make_user(db, username="owner", role=UserRole.user, access_until=owner_until)
+        _make_owned_client(
+            db,
+            node_id=node.id,
+            owner_id=owner.id,
+            client_name="Alice",
+            protocols=[VpnType.openvpn],
+        )
+
+        with patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()):
+            set_access_until(db, "openvpn", node.id, "Alice", override_until, actor="admin")
+
+            client = _users_api(db, current_user=admin)
+            response = client.patch(
+                f"/api/users/{owner.id}",
+                json={"telegram_id": "424242", "access_until": owner_until.isoformat()},
+            )
+
+        assert response.status_code == 200
+        # Same deadline → no cascade, the confirmed per-client override survives.
+        assert db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one().access_until == (
+            override_until.replace(tzinfo=None)
+        )
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_user_patch_access_until_date_only_means_end_of_day():
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        admin = _make_user(db, username="admin", role=UserRole.admin)
+        owner = _make_user(db, username="owner", role=UserRole.user)
+        _make_owned_client(
+            db,
+            node_id=node.id,
+            owner_id=owner.id,
+            client_name="Alice",
+            protocols=[VpnType.openvpn],
+        )
+
+        with patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()):
+            client = _users_api(db, current_user=admin)
+            response = client.patch(f"/api/users/{owner.id}", json={"access_until": "2032-10-01"})
+
+        assert response.status_code == 200
+        db.refresh(owner)
+        assert owner.access_until.date() == datetime(2032, 10, 1).date()
+        assert owner.access_until.hour == 23
+        assert owner.access_until.minute == 59
     finally:
         db.close()
         engine.dispose()

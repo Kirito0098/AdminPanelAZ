@@ -4,12 +4,19 @@ import { AlertTriangle, Globe, KeyRound, Loader2, Rocket, Save, Ticket, Trash2 }
 import {
   ApiError,
   checkPortalReadiness,
+  getUsers,
   getPortalPublishStatus,
   getSecuritySettings,
   preparePortalReadiness,
   publishPortalDomain,
   updateSecuritySettings,
 } from '@/api/client'
+import {
+  createUserPortalLink,
+  getUserPortalLink,
+  revokeUserPortalLink,
+  rotateUserPortalLink,
+} from '@/api/portal'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
@@ -33,7 +40,7 @@ import {
   unlockCodeStatusLabel,
 } from '@/lib/unlockCodeStatus'
 import { cn } from '@/lib/utils'
-import type { PortalPublishStatus, UnlockCodeRecord } from '@/types'
+import type { PortalPublishStatus, UnlockCodeRecord, User } from '@/types'
 import { getUnlockCodes, revokeUnlockCode, type UnlockCodeProtocol } from '@/api/unlockCodes'
 
 export default function SubscriptionPage() {
@@ -58,6 +65,10 @@ export default function SubscriptionPage() {
   const [unlockCodesLoading, setUnlockCodesLoading] = useState(false)
   const [unlockCodesBusyId, setUnlockCodesBusyId] = useState<number | null>(null)
   const [unlockCreateOpen, setUnlockCreateOpen] = useState(false)
+  const [portalUsers, setPortalUsers] = useState<User[]>([])
+  const [portalUsersLoading, setPortalUsersLoading] = useState(false)
+  const [portalUserBusyKey, setPortalUserBusyKey] = useState<string | null>(null)
+  const [knownUserPortalLinks, setKnownUserPortalLinks] = useState<Record<number, string | null>>({})
 
   const refreshPortalStatus = useCallback(async () => {
     if (!clientPortalEnabled) {
@@ -100,6 +111,21 @@ export default function SubscriptionPage() {
       .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки unlock-ключей'))
       .finally(() => setUnlockCodesLoading(false))
   }, [notifyError, unlockCodesEnabled])
+
+  useEffect(() => {
+    if (!clientPortalEnabled) {
+      setPortalUsers([])
+      setPortalUsersLoading(false)
+      return
+    }
+    setPortalUsersLoading(true)
+    void getUsers()
+      .then((data) => {
+        setPortalUsers(data.filter((user) => user.role === 'user'))
+      })
+      .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки пользователей'))
+      .finally(() => setPortalUsersLoading(false))
+  }, [clientPortalEnabled, notifyError])
 
   const availableUnlockProtocols: UnlockCodeProtocol[] = []
   if (openvpnEnabled) availableUnlockProtocols.push('openvpn')
@@ -303,6 +329,49 @@ export default function SubscriptionPage() {
   const portalModeBlocked = portalStatus?.portal_mode_supported === false
   const portalActionsDisabled =
     saving || provisioning || readinessBusy || portalModeBlocked
+  const userPortalActionsDisabled = portalActionsDisabled || !portalStatus?.portal_access_url
+
+  const handleUserPortalCopy = async (user: User, create = false) => {
+    const busyKey = `${create ? 'create' : 'copy'}-${user.id}`
+    setPortalUserBusyKey(busyKey)
+    try {
+      const link = create ? await createUserPortalLink(user.id) : await getUserPortalLink(user.id)
+      setKnownUserPortalLinks((prev) => ({ ...prev, [user.id]: link.url }))
+      await navigator.clipboard.writeText(link.url)
+      success(create ? `Ссылка для «${user.username}» создана и скопирована` : `Ссылка для «${user.username}» скопирована`)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка ссылки портала')
+    } finally {
+      setPortalUserBusyKey(null)
+    }
+  }
+
+  const handleUserPortalRotate = async (user: User) => {
+    setPortalUserBusyKey(`rotate-${user.id}`)
+    try {
+      const link = await rotateUserPortalLink(user.id)
+      setKnownUserPortalLinks((prev) => ({ ...prev, [user.id]: link.url }))
+      await navigator.clipboard.writeText(link.url)
+      success(`Ссылка для «${user.username}» перевыпущена и скопирована`)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка перевыпуска ссылки')
+    } finally {
+      setPortalUserBusyKey(null)
+    }
+  }
+
+  const handleUserPortalRevoke = async (user: User) => {
+    setPortalUserBusyKey(`revoke-${user.id}`)
+    try {
+      await revokeUserPortalLink(user.id)
+      setKnownUserPortalLinks((prev) => ({ ...prev, [user.id]: null }))
+      success(`Ссылка для «${user.username}» отозвана`)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка отзыва ссылки')
+    } finally {
+      setPortalUserBusyKey(null)
+    }
+  }
 
   if (loading && clientPortalEnabled) {
     return <Spinner label="Загрузка…" className="py-12" />
@@ -484,6 +553,123 @@ export default function SubscriptionPage() {
               указывает на этот сервер. Портал не закрывается origin lock панели — его можно держать
               DNS only, а панель — за Cloudflare.
             </SettingsAlert>
+          </CardContent>
+        </Card>
+      )}
+
+      {clientPortalEnabled && (
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Globe size={18} />
+              Портал пользователей
+            </CardTitle>
+            <CardDescription>
+              Постоянная ссылка пользователя открывает все его клиентские профили из портала. Удобно для одного владельца с несколькими конфигурациями.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {userPortalActionsDisabled ? (
+              <SettingsAlert variant="info" title="Сначала подготовьте клиентский портал">
+                Ссылки пользователей станут доступны после настройки домена портала и успешной публикации.
+              </SettingsAlert>
+            ) : null}
+
+            {portalUsersLoading ? (
+              <div className="flex items-center justify-center rounded-xl border border-dashed bg-muted/10 px-4 py-8 text-sm text-muted-foreground">
+                <Loader2 size={16} className="mr-2 animate-spin" />
+                Загрузка пользователей...
+              </div>
+            ) : portalUsers.length === 0 ? (
+              <div className="rounded-xl border border-dashed bg-muted/10 px-4 py-8 text-center text-sm text-muted-foreground">
+                Обычные пользователи не найдены.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {portalUsers.map((user) => {
+                  const accessLabel = user.access_until ? formatDateTime(user.access_until) : 'Бессрочно'
+                  const link = knownUserPortalLinks[user.id]
+                  const busyCopy = portalUserBusyKey === `copy-${user.id}`
+                  const busyCreate = portalUserBusyKey === `create-${user.id}`
+                  const busyRotate = portalUserBusyKey === `rotate-${user.id}`
+                  const busyRevoke = portalUserBusyKey === `revoke-${user.id}`
+                  const anyBusy = portalUserBusyKey !== null
+                  return (
+                    <div
+                      key={user.id}
+                      className="flex flex-col gap-3 rounded-xl border bg-card/60 p-3 sm:flex-row sm:items-start sm:justify-between"
+                    >
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold">{user.username}</p>
+                          <Badge variant={user.is_active ? 'success' : 'destructive'}>
+                            {user.is_active ? 'Активен' : 'Отключён'}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Доступ до: {accessLabel}
+                          {user.telegram_id ? ` · TG ${user.telegram_id}` : ''}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {link ? (
+                            <>
+                              Текущая ссылка:{' '}
+                              <span className="break-all font-mono text-foreground/80">{link}</span>
+                            </>
+                          ) : (
+                            'Токен пользователя будет создан при первом выпуске ссылки.'
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={anyBusy || userPortalActionsDisabled}
+                          onClick={() => void handleUserPortalCopy(user, true)}
+                        >
+                          {busyCreate ? <Loader2 size={14} className="animate-spin" /> : null}
+                          Создать
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={anyBusy || userPortalActionsDisabled}
+                          onClick={() => void handleUserPortalCopy(user)}
+                        >
+                          {busyCopy ? <Loader2 size={14} className="animate-spin" /> : null}
+                          Скопировать
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={anyBusy || userPortalActionsDisabled}
+                          onClick={() => void handleUserPortalRotate(user)}
+                        >
+                          {busyRotate ? <Loader2 size={14} className="animate-spin" /> : null}
+                          Перевыпустить
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5"
+                          disabled={anyBusy || userPortalActionsDisabled}
+                          onClick={() => void handleUserPortalRevoke(user)}
+                        >
+                          {busyRevoke ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                          Отозвать
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

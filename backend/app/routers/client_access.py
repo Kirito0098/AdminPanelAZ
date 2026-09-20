@@ -3,13 +3,14 @@ import os
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import AmneziaWg2AccessPolicy, User, UserRole, VpnType
+from app.models import AmneziaWg2AccessPolicy, User, UserRole, VpnConfig, VpnType
 from app.services.access_policy import (
     AccessPolicyService,
 )
@@ -33,6 +34,7 @@ from app.services.traffic_limit import (
     parse_traffic_limit_bytes,
     parse_traffic_limit_period_days,
 )
+from app.services import user_subscription
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,7 @@ class ExpiryRequest(BaseModel):
     client_name: str
     days: int = Field(ge=1, le=3650)
     extend: bool = False
+    confirm_override: bool = False
 
 
 class TrafficLimitRequest(BaseModel):
@@ -67,6 +70,48 @@ class TrafficLimitRequest(BaseModel):
 
 class AccessUntilRequest(BaseModel):
     access_until: datetime | None = None
+    confirm_override: bool = False
+
+
+def _owner_for_client(db: Session, *, node_id: int, client_name: str) -> User | None:
+    client_key = (client_name or "").strip()
+    return (
+        db.query(User)
+        .join(VpnConfig, VpnConfig.owner_id == User.id)
+        .filter(
+            VpnConfig.node_id == node_id,
+            VpnConfig.ha_primary_config_id.is_(None),
+            VpnConfig.client_name.ilike(client_key),
+        )
+        .order_by(User.id.asc())
+        .first()
+    )
+
+
+def _maybe_access_until_conflict(
+    db: Session,
+    *,
+    client_name: str,
+    access_until: datetime | None,
+    confirm_override: bool,
+):
+    node = get_active_node(db)
+    owner = _owner_for_client(db, node_id=node.id, client_name=client_name)
+    if confirm_override or not user_subscription.client_access_conflicts_with_owner(
+        db,
+        owner=owner,
+        client_access_until=access_until,
+    ):
+        return None
+
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "code": "access_until_conflict",
+            "user_access_until": user_subscription.get_user_access_until(owner).isoformat() if owner else None,
+            "client_access_until": access_until.isoformat() if access_until else None,
+        },
+    )
 
 
 def _service(db: Session) -> AccessPolicyService:
@@ -308,7 +353,18 @@ def get_wg_policy(client_name: str, db: Session = Depends(get_db), _: User = Dep
 
 @router.post("/wireguard/set-expiry")
 def wg_set_expiry(payload: ExpiryRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    result = _service(db).wg_set_expiry(payload.client_name, payload.days, extend=payload.extend, actor=user.username)
+    service = _service(db)
+    # expires_at is the WireGuard access deadline, so this path needs the same
+    # owner conflict guard as the …/access-until endpoints.
+    conflict = _maybe_access_until_conflict(
+        db,
+        client_name=payload.client_name,
+        access_until=service.wg_expiry_target(payload.client_name, payload.days, extend=payload.extend),
+        confirm_override=payload.confirm_override,
+    )
+    if conflict is not None:
+        return conflict
+    result = service.wg_set_expiry(payload.client_name, payload.days, extend=payload.extend, actor=user.username)
     log_action(db, action="wg_set_expiry", user_id=user.id, username=user.username,
                details=f"{payload.client_name} {payload.days}d", remote_addr=request.client.host)
     _replicate_policy_after_success(
@@ -331,6 +387,14 @@ def openvpn_set_access_until(
     db: Session = Depends(get_db),
     user: User = Depends(require_admin),
 ):
+    conflict = _maybe_access_until_conflict(
+        db,
+        client_name=client_name,
+        access_until=payload.access_until,
+        confirm_override=payload.confirm_override,
+    )
+    if conflict is not None:
+        return conflict
     result = _set_access_until(
         db,
         protocol="openvpn",
@@ -365,6 +429,14 @@ def wg_set_access_until(
     db: Session = Depends(get_db),
     user: User = Depends(require_admin),
 ):
+    conflict = _maybe_access_until_conflict(
+        db,
+        client_name=client_name,
+        access_until=payload.access_until,
+        confirm_override=payload.confirm_override,
+    )
+    if conflict is not None:
+        return conflict
     result = _set_access_until(
         db,
         protocol="wireguard",
@@ -399,6 +471,14 @@ def awg2_set_access_until(
     db: Session = Depends(get_db),
     user: User = Depends(require_admin),
 ):
+    conflict = _maybe_access_until_conflict(
+        db,
+        client_name=client_name,
+        access_until=payload.access_until,
+        confirm_override=payload.confirm_override,
+    )
+    if conflict is not None:
+        return conflict
     result = _set_access_until(
         db,
         protocol="amneziawg2",
@@ -421,6 +501,38 @@ def awg2_set_access_until(
         op="set_access_until",
         actor=user.username,
         access_until=payload.access_until,
+    )
+    return result
+
+
+@router.post("/{client_name}/access-until/sync-from-owner")
+def sync_client_access_until_from_owner(
+    client_name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    node = get_active_node(db)
+    require_ha_primary_for_client_ops(db, node=node)
+    owner = _owner_for_client(db, node_id=node.id, client_name=client_name)
+    if owner is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Клиент не найден")
+
+    result = user_subscription.sync_client_access_until_from_owner(
+        db,
+        owner=owner,
+        node_id=node.id,
+        client_name=client_name,
+        actor=user.username,
+        commit=True,
+    )
+    log_action(
+        db,
+        action="client_access_until_sync_from_owner",
+        user_id=user.id,
+        username=user.username,
+        details=f"{client_name} {result.get('access_until') or 'null'}",
+        remote_addr=request.client.host,
     )
     return result
 

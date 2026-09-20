@@ -45,9 +45,11 @@ DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
     "client_ban": True,
     "traffic_limit": True,
     "cert_expiry_reminder": True,
+    "access_expiry_reminder": True,
     "traffic_limit_reminder": True,
     "temp_block_reminder": True,
     "user_cert_expiry_reminder": False,
+    "user_access_expiry_reminder": False,
     "user_traffic_limit_reminder": False,
     "user_temp_block_reminder": False,
     "settings_change": True,
@@ -86,6 +88,7 @@ class User(Base):
     config_quota: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     can_create_configs: Mapped[bool] = mapped_column(Boolean, default=True)
     visible_vpn_profiles: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    access_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     vpn_configs: Mapped[list["VpnConfig"]] = relationship(back_populates="owner")
@@ -424,21 +427,32 @@ class UnlockCode(Base):
 class UnlockCodeRedemption(Base):
     __tablename__ = "unlock_code_redemptions"
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_unlock_code_redemptions_code_user",
+            "code_id",
+            "user_id",
+            unique=True,
+            sqlite_where=text("user_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_unlock_code_redemptions_code_client_node_orphan",
             "code_id",
             "client_name",
             "node_id",
-            name="uq_unlock_code_redemptions_code_client_node",
+            unique=True,
+            sqlite_where=text("user_id IS NULL"),
         ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code_id: Mapped[int] = mapped_column(ForeignKey("unlock_codes.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
     client_name: Mapped[str] = mapped_column(String(64), index=True)
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     redeemed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     code: Mapped["UnlockCode"] = relationship(back_populates="redemptions")
+    user: Mapped[User | None] = relationship()
     node: Mapped["Node"] = relationship()
 
 
@@ -479,6 +493,28 @@ class ClientPortalToken(Base):
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
     client_name: Mapped[str] = mapped_column(String(32), index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class UserPortalToken(Base):
+    """Permanent shareable portal link for all clients owned by a user."""
+
+    __tablename__ = "user_portal_tokens"
+    __table_args__ = (
+        UniqueConstraint("token", name="uq_user_portal_token"),
+        Index(
+            "uq_user_portal_tokens_active_user",
+            "user_id",
+            unique=True,
+            sqlite_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
