@@ -14,6 +14,10 @@ import MiniListToolbar, {
 import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
 import { guessInstallPlatform } from '@/tg-mini/lib/platformMeta'
 import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
+import {
+  isVpnTypeVisibleInPolicy,
+  protocolFiltersForPolicy,
+} from '@/tg-mini/lib/vpnVisibility'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import {
   getTgConfigFiles,
@@ -89,18 +93,12 @@ export default function Configs() {
     // awg2 stays opt-in (default off).
     const allowOpenvpn =
       Boolean(features.openvpn ?? true) &&
-      (isAdmin ||
-        !policy ||
-        (policy.protocols.includes('openvpn') && policy.openvpn_groups.length > 0))
+      isVpnTypeVisibleInPolicy('openvpn', policy, isAdmin)
     const allowWireguard =
       (Boolean(features.wireguard ?? true) || Boolean(features.amneziawg ?? true)) &&
-      (isAdmin ||
-        !policy ||
-        policy.protocols.includes('wireguard') ||
-        policy.protocols.includes('amneziawg'))
+      isVpnTypeVisibleInPolicy('wireguard', policy, isAdmin)
     const allowAwg2 =
-      Boolean(features.awg2) &&
-      (isAdmin || !policy || policy.protocols.includes('amneziawg2'))
+      Boolean(features.awg2) && isVpnTypeVisibleInPolicy('amneziawg2', policy, isAdmin)
     return {
       openvpnEnabled: allowOpenvpn,
       wireguardEnabled: allowWireguard,
@@ -108,23 +106,42 @@ export default function Configs() {
     }
   }, [features, isAdmin, settings?.visible_vpn_profiles])
 
+  const protocolOptions = useMemo(
+    () => protocolFiltersForPolicy(settings?.visible_vpn_profiles, isAdmin),
+    [isAdmin, settings?.visible_vpn_profiles],
+  )
+
   useEffect(() => {
     void load()
   }, [load])
 
+  useEffect(() => {
+    if (protocol !== 'all' && !protocolOptions.includes(protocol)) {
+      setProtocol('all')
+    }
+  }, [protocol, protocolOptions])
+
+  const visibleConfigs = useMemo(
+    () =>
+      configs.filter((config) =>
+        isVpnTypeVisibleInPolicy(config.vpn_type, settings?.visible_vpn_profiles, isAdmin),
+      ),
+    [configs, isAdmin, settings?.visible_vpn_profiles],
+  )
+
   const protocolCounts = useMemo(
     () => ({
-      all: configs.length,
-      openvpn: configs.filter((c) => c.vpn_type === 'openvpn').length,
-      wireguard: configs.filter((c) => c.vpn_type === 'wireguard').length,
-      amneziawg2: configs.filter((c) => c.vpn_type === 'amneziawg2').length,
+      all: visibleConfigs.length,
+      openvpn: visibleConfigs.filter((c) => c.vpn_type === 'openvpn').length,
+      wireguard: visibleConfigs.filter((c) => c.vpn_type === 'wireguard').length,
+      amneziawg2: visibleConfigs.filter((c) => c.vpn_type === 'amneziawg2').length,
     }),
-    [configs],
+    [visibleConfigs],
   )
 
   const filteredConfigs = useMemo(
     () =>
-      configs.filter((config) => {
+      visibleConfigs.filter((config) => {
         if (!matchesProtocolFilter(config.vpn_type, protocol)) return false
         const q = search.trim()
         if (!q) return true
@@ -133,7 +150,7 @@ export default function Configs() {
           matchesSearchQuery(config.owner_username || '', q)
         )
       }),
-    [configs, protocol, search],
+    [visibleConfigs, protocol, search],
   )
 
   const resetFilters = () => {
@@ -283,8 +300,8 @@ export default function Configs() {
       <MiniPageHeader
         title="Конфиги"
         subtitle={
-          configs.length > 0
-            ? `${configs.length} ${configs.length === 1 ? 'конфиг' : configs.length < 5 ? 'конфига' : 'конфигов'}`
+          visibleConfigs.length > 0
+            ? `${visibleConfigs.length} ${visibleConfigs.length === 1 ? 'конфиг' : visibleConfigs.length < 5 ? 'конфига' : 'конфигов'}`
             : 'Создайте или получите VPN-профиль'
         }
         onRefresh={() => void load({ silent: true })}
@@ -307,7 +324,7 @@ export default function Configs() {
 
       {error && <p className="text-destructive text-sm">{error}</p>}
 
-      {configs.length > 0 && (
+      {visibleConfigs.length > 0 && (
         <>
           <MiniListToolbar
             search={search}
@@ -316,18 +333,19 @@ export default function Configs() {
             protocol={protocol}
             onProtocolChange={setProtocol}
             protocolCounts={protocolCounts}
+            protocolOptions={protocolOptions}
           />
 
           {hasActiveFilters && (
             <p className="tg-mini-results-meta">
               Показано {filteredConfigs.length}
-              {filteredConfigs.length !== configs.length ? ` из ${configs.length}` : ''}
+              {filteredConfigs.length !== visibleConfigs.length ? ` из ${visibleConfigs.length}` : ''}
             </p>
           )}
         </>
       )}
 
-      {configs.length === 0 ? (
+      {visibleConfigs.length === 0 ? (
         <div className="tg-mini-filter-empty">
           <FileKey size={22} className="text-muted-foreground" aria-hidden />
           <p className="text-sm font-medium">Нет конфигов</p>

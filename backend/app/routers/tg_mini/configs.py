@@ -13,6 +13,7 @@ from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
 from app.services.vpn_profile_visibility import (
     EMPTY_CATALOG_MESSAGE,
+    can_create_vpn_type,
     filter_profile_files,
     profile_file_allowed,
     resolve_effective_visible_vpn_profiles,
@@ -30,6 +31,12 @@ def mini_configs(current_user: User = Depends(get_tg_mini_user), db: Session = D
     node = get_active_node(db)
     query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id).options(joinedload(VpnConfig.owner))
     rows = list_accessible_configs(db, current_user, query)
+    policy = resolve_effective_visible_vpn_profiles(db, current_user)
+    visible_rows = [
+        c
+        for c in rows
+        if can_create_vpn_type(policy, c.vpn_type)
+    ]
     return {
         "configs": [
             {
@@ -40,7 +47,7 @@ def mini_configs(current_user: User = Depends(get_tg_mini_user), db: Session = D
                 "is_mine": c.owner_id == current_user.id,
                 "owner_telegram_linked": bool((c.owner.telegram_id or "").strip()) if c.owner else False,
             }
-            for c in rows
+            for c in visible_rows
         ]
     }
 

@@ -75,6 +75,7 @@
 
 ### 🐛 Fixed
 
+- **Telegram Mini App / видимость VPN** — каталог конфигов и фильтр протоколов учитывают `visible_vpn_profiles` (как панель); раньше список и чипы показывали WG/AWG при политике «только OpenVPN». Fider #30.
 - **Дашборд / карточка клиента** — блоки «Unlock-ключ» и «Клиентский портал» только для администратора (роль «Пользователь» больше не видит кнопки, которые всё равно отвечают 403). Fider #29.
 - **Дашборд / срок профиля** — диалог подтверждения конфликта со сроком владельца снова открывается: `409` больше не теряется при перебросе между протоколами, поэтому «Сохранить поверх» работает из панели.
 - **Дашборд / WireGuard «Продлить срок»** — `POST /client-access/wireguard/set-expiry` проверяется тем же guard'ом конфликта с владельцем (`409`, `access_until_conflict`) и поддерживает `confirm_override`; раньше этот путь обходил проверку.
@@ -89,6 +90,8 @@
 
 ### 🧪 Tests
 
+- Backend: `test_tg_mini_configs_visibility` — каталог Mini App скрывает протоколы вне `visible_vpn_profiles`; админ видит все.
+- Frontend: `src/tg-mini/lib/vpnVisibility.test.ts` — чипы/видимость типов по policy.
 - Frontend: `src/lib/accessUntil.test.ts` — разбор `409 access_until_conflict` (ApiError и уже разобранный payload) и конвенция «конец дня» для date-picker.
 - Backend: `test_access_until` — guard конфликта на `wireguard/set-expiry` (409 / `confirm_override` / orphan), сохранение переопределения при неизменном сроке пользователя, разворот `YYYY-MM-DD` в конец дня.
 - Backend: `test_user_subscription` — inherit owner deadline on create (I7), HA replicate on cascade (I8), reconcile error isolation (I9); однократность backfill'а `users.access_until`; `test_client_portal` — redeem пропускает вручную заблокированный профиль.
