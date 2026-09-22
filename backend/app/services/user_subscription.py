@@ -101,7 +101,7 @@ def client_access_conflicts_with_owner(
     if owner is None:
         return False
     user_until = get_user_access_until(owner)
-    if user_until is None and client_access_until is None:
+    if user_until is None:
         return False
     return _as_utc(client_access_until) != user_until
 

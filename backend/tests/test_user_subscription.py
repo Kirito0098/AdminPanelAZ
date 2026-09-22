@@ -174,6 +174,22 @@ def test_client_access_conflicts_with_owner_compares_normalized_deadlines(db):
     assert usub.client_access_conflicts_with_owner(db, owner=owner, client_access_until=None) is True
 
 
+def test_client_access_conflicts_with_owner_unset_allows_any_client_deadline(db):
+    future = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    owner = User(
+        username="owner-no-deadline",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        access_until=None,
+    )
+    db.add(owner)
+    db.commit()
+
+    assert usub.client_access_conflicts_with_owner(db, owner=owner, client_access_until=None) is False
+    assert usub.client_access_conflicts_with_owner(db, owner=owner, client_access_until=future) is False
+
+
 def test_sync_client_access_until_from_owner_updates_only_requested_client(db):
     node = _make_node(db)
     future = datetime.now(timezone.utc) + timedelta(days=21)
