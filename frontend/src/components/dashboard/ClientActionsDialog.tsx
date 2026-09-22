@@ -628,7 +628,9 @@ export default function ClientActionsDialog({
         })
         return
       }
-      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка выполнения действия')
+      onNotifyError(
+        err instanceof ApiError || err instanceof Error ? err.message : 'Ошибка выполнения действия',
+      )
     } finally {
       setBusyAction(null)
     }
@@ -667,7 +669,9 @@ export default function ClientActionsDialog({
       )
       await onRefresh()
     } catch (err) {
-      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка выполнения действия')
+      onNotifyError(
+        err instanceof ApiError || err instanceof Error ? err.message : 'Ошибка выполнения действия',
+      )
     } finally {
       setBusyAction(null)
     }
