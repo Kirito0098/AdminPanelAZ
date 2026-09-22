@@ -32,6 +32,13 @@ from app.services.node_manager import get_adapter_for_node, get_active_node
 from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.vpn_profile_visibility import (
+    feature_flags_from_service,
+    get_default_visible_vpn_profiles,
+    intersect_policy_with_features,
+    profile_file_allowed,
+    resolve_effective_visible_vpn_profiles,
+)
 
 
 _HOSTNAME_RE = re.compile(
@@ -608,12 +615,38 @@ def _adapter_for_node_id(db: Session, node_id: int):
     return get_adapter_for_node(node)
 
 
+def _portal_visibility_policy(db: Session, owner: User | None) -> dict:
+    if owner is not None:
+        return resolve_effective_visible_vpn_profiles(db, owner)
+    flags = feature_flags_from_service()
+    return intersect_policy_with_features(
+        get_default_visible_vpn_profiles(db),
+        openvpn_enabled=flags.get("openvpn", True),
+        wireguard_enabled=flags.get("wireguard", True),
+        amneziawg_enabled=flags.get("amneziawg", True),
+        amneziawg2_enabled=flags.get("awg2", True),
+    )
+
+
+def _owner_for_config(db: Session, config: VpnConfig) -> User | None:
+    owner_id = getattr(config, "owner_id", None)
+    if not isinstance(owner_id, int):
+        return None
+    return db.get(User, owner_id)
+
+
 def _list_files_for_configs(db: Session, configs: list[VpnConfig]) -> list[dict]:
     if not configs:
         return []
     adapter = _adapter_for_node_id(db, configs[0].node_id)
     out: list[dict] = []
+    policy_cache: dict[int | None, dict] = {}
     for config in configs:
+        owner = _owner_for_config(db, config)
+        cache_key = owner.id if owner is not None else None
+        if cache_key not in policy_cache:
+            policy_cache[cache_key] = _portal_visibility_policy(db, owner)
+        policy = policy_cache[cache_key]
         files = adapter.get_profile_files(config.client_name, config.vpn_type)
         files = enrich_profile_files(config.client_name, files)
         for f in files:
@@ -622,6 +655,13 @@ def _list_files_for_configs(db: Session, configs: list[VpnConfig]) -> list[dict]
                 continue
             protocol = _portal_protocol_for_file(f, config)
             if not _protocol_feature_enabled(protocol):
+                continue
+            if not profile_file_allowed(
+                policy,
+                protocol=protocol,
+                variant=f.get("variant", ""),
+                path=path,
+            ):
                 continue
             filename = (
                 f.get("download_filename")

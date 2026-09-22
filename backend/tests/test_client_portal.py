@@ -817,6 +817,96 @@ def test_portal_protocol_prefers_file_protocol_over_db_vpn_type():
     assert portal._portal_protocol_for_file({}, cfg) == "wireguard"
 
 
+def test_list_files_hides_vpn_route_when_owner_visibility_az_only():
+    from app.models import User, UserRole
+    from app.services.vpn_profile_visibility import policy_to_json
+
+    db = MagicMock()
+    owner = User(
+        id=5,
+        username="novikov",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        visible_vpn_profiles=policy_to_json(
+            {
+                "routes": ["az"],
+                "protocols": ["openvpn", "wireguard", "amneziawg", "amneziawg2"],
+                "openvpn_groups": ["udp_tcp", "udp", "tcp"],
+            }
+        ),
+    )
+    cfg = MagicMock()
+    cfg.id = 7
+    cfg.node_id = 3
+    cfg.client_name = "TopTinker"
+    cfg.vpn_type = VpnType.openvpn
+    cfg.owner_id = 5
+    adapter = MagicMock()
+    adapter.get_profile_files.return_value = [
+        {
+            "protocol": "openvpn",
+            "variant": "antizapret",
+            "path": "/client/openvpn/antizapret/AZ-TopTinker.ovpn",
+            "filename": "AZ-TopTinker.ovpn",
+        },
+        {
+            "protocol": "openvpn",
+            "variant": "vpn",
+            "path": "/client/openvpn/vpn/VPN-TopTinker.ovpn",
+            "filename": "VPN-TopTinker.ovpn",
+        },
+    ]
+    node = MagicMock()
+
+    def query_side_effect(model):
+        q = MagicMock()
+        if model is type(node) or getattr(model, "__name__", "") == "Node":
+            q.filter.return_value.first.return_value = node
+            return q
+        q.filter.return_value.first.return_value = owner
+        return q
+
+    db.query.side_effect = query_side_effect
+    db.get.side_effect = lambda model, pk: owner if pk == 5 else None
+
+    with (
+        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        files = portal._list_files_for_configs(db, [cfg])
+
+    paths = [f["path"] for f in files]
+    assert "/client/openvpn/antizapret/AZ-TopTinker.ovpn" in paths
+    assert "/client/openvpn/vpn/VPN-TopTinker.ovpn" not in paths
+
+
+def test_read_client_portal_profile_rejects_hidden_vpn_path():
+    db = MagicMock()
+    with (
+        patch(
+            "app.services.client_portal._list_files_for_configs",
+            return_value=[
+                {"path": "/client/openvpn/antizapret/AZ-TopTinker.ovpn"},
+            ],
+        ),
+        patch("app.services.client_portal._adapter_for_node_id"),
+    ):
+        try:
+            portal._read_client_portal_profile(
+                db,
+                node_id=1,
+                client_name="TopTinker",
+                path="/client/openvpn/vpn/VPN-TopTinker.ovpn",
+            )
+            raised = None
+        except HTTPException as exc:
+            raised = exc
+    assert raised is not None
+    assert raised.status_code == 404
+
+
 def test_list_files_hides_wireguard_when_feature_disabled():
     db = MagicMock()
     cfg = MagicMock()
@@ -824,6 +914,7 @@ def test_list_files_hides_wireguard_when_feature_disabled():
     cfg.node_id = 3
     cfg.client_name = "test1"
     cfg.vpn_type = VpnType.wireguard
+    cfg.owner_id = None
     adapter = MagicMock()
     adapter.get_profile_files.return_value = [
         {"protocol": "wireguard", "variant": "vpn", "path": "/client/wireguard/vpn/a-wg.conf", "filename": "a-wg.conf"},
@@ -838,6 +929,14 @@ def test_list_files_hides_wireguard_when_feature_disabled():
     with (
         patch("app.services.client_portal.get_adapter_for_node", return_value=adapter) as get_adapter,
         patch("app.services.feature_guards.get_feature_service") as feats,
+        patch(
+            "app.services.client_portal.get_default_visible_vpn_profiles",
+            return_value={
+                "routes": ["az", "vpn"],
+                "protocols": ["openvpn", "wireguard", "amneziawg", "amneziawg2"],
+                "openvpn_groups": ["udp_tcp", "udp", "tcp"],
+            },
+        ),
     ):
         feats.return_value.is_enabled.side_effect = feat_enabled
         files = portal._list_files_for_configs(db, [cfg])
