@@ -817,58 +817,85 @@ def test_portal_protocol_prefers_file_protocol_over_db_vpn_type():
     assert portal._portal_protocol_for_file({}, cfg) == "wireguard"
 
 
+_AZ_ONLY_POLICY = {
+    "routes": ["az"],
+    "protocols": ["openvpn", "wireguard", "amneziawg", "amneziawg2"],
+    "openvpn_groups": ["udp_tcp", "udp", "tcp"],
+}
+
+_AZ_TOPTINKER_PATH = "/client/openvpn/antizapret/AZ-TopTinker.ovpn"
+_VPN_TOPTINKER_PATH = "/client/openvpn/vpn/VPN-TopTinker.ovpn"
+
+
+def _toptinker_openvpn_files() -> list[dict]:
+    return [
+        {
+            "protocol": "openvpn",
+            "variant": "antizapret",
+            "path": _AZ_TOPTINKER_PATH,
+            "filename": "AZ-TopTinker.ovpn",
+        },
+        {
+            "protocol": "openvpn",
+            "variant": "vpn",
+            "path": _VPN_TOPTINKER_PATH,
+            "filename": "VPN-TopTinker.ovpn",
+        },
+    ]
+
+
+def _toptinker_cfg(*, owner_id: int | None) -> MagicMock:
+    cfg = MagicMock()
+    cfg.id = 7
+    cfg.node_id = 3
+    cfg.client_name = "TopTinker"
+    cfg.vpn_type = VpnType.openvpn
+    cfg.owner_id = owner_id
+    return cfg
+
+
+def _portal_db_for_list_and_download(*, configs: list, node: MagicMock, owner=None):
+    """MagicMock db: VpnConfig → configs; Node → node; User via db.get."""
+    db = MagicMock()
+
+    def query_side_effect(model):
+        q = MagicMock()
+        name = getattr(model, "__name__", "")
+        if name == "VpnConfig" or model is VpnConfig:
+            q.filter.return_value.all.return_value = configs
+            return q
+        if name == "Node" or model is type(node):
+            q.filter.return_value.first.return_value = node
+            return q
+        q.filter.return_value.first.return_value = owner
+        q.filter.return_value.all.return_value = []
+        return q
+
+    db.query.side_effect = query_side_effect
+    if owner is not None:
+        db.get.side_effect = lambda model, pk: owner if pk == getattr(owner, "id", None) else None
+    else:
+        db.get.return_value = None
+    return db
+
+
 def test_list_files_hides_vpn_route_when_owner_visibility_az_only():
     from app.models import User, UserRole
     from app.services.vpn_profile_visibility import policy_to_json
 
-    db = MagicMock()
     owner = User(
         id=5,
         username="novikov",
         password_hash="x",
         role=UserRole.user,
         is_active=True,
-        visible_vpn_profiles=policy_to_json(
-            {
-                "routes": ["az"],
-                "protocols": ["openvpn", "wireguard", "amneziawg", "amneziawg2"],
-                "openvpn_groups": ["udp_tcp", "udp", "tcp"],
-            }
-        ),
+        visible_vpn_profiles=policy_to_json(_AZ_ONLY_POLICY),
     )
-    cfg = MagicMock()
-    cfg.id = 7
-    cfg.node_id = 3
-    cfg.client_name = "TopTinker"
-    cfg.vpn_type = VpnType.openvpn
-    cfg.owner_id = 5
+    cfg = _toptinker_cfg(owner_id=5)
     adapter = MagicMock()
-    adapter.get_profile_files.return_value = [
-        {
-            "protocol": "openvpn",
-            "variant": "antizapret",
-            "path": "/client/openvpn/antizapret/AZ-TopTinker.ovpn",
-            "filename": "AZ-TopTinker.ovpn",
-        },
-        {
-            "protocol": "openvpn",
-            "variant": "vpn",
-            "path": "/client/openvpn/vpn/VPN-TopTinker.ovpn",
-            "filename": "VPN-TopTinker.ovpn",
-        },
-    ]
+    adapter.get_profile_files.return_value = _toptinker_openvpn_files()
     node = MagicMock()
-
-    def query_side_effect(model):
-        q = MagicMock()
-        if model is type(node) or getattr(model, "__name__", "") == "Node":
-            q.filter.return_value.first.return_value = node
-            return q
-        q.filter.return_value.first.return_value = owner
-        return q
-
-    db.query.side_effect = query_side_effect
-    db.get.side_effect = lambda model, pk: owner if pk == 5 else None
+    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=owner)
 
     with (
         patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
@@ -878,33 +905,147 @@ def test_list_files_hides_vpn_route_when_owner_visibility_az_only():
         files = portal._list_files_for_configs(db, [cfg])
 
     paths = [f["path"] for f in files]
-    assert "/client/openvpn/antizapret/AZ-TopTinker.ovpn" in paths
-    assert "/client/openvpn/vpn/VPN-TopTinker.ovpn" not in paths
+    assert _AZ_TOPTINKER_PATH in paths
+    assert _VPN_TOPTINKER_PATH not in paths
 
 
-def test_read_client_portal_profile_rejects_hidden_vpn_path():
-    db = MagicMock()
+def test_list_files_orphan_uses_restrictive_default_visibility():
+    cfg = _toptinker_cfg(owner_id=None)
+    adapter = MagicMock()
+    adapter.get_profile_files.return_value = _toptinker_openvpn_files()
+    node = MagicMock()
+    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=None)
+
     with (
+        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+        patch("app.services.client_portal.get_default_visible_vpn_profiles", return_value=_AZ_ONLY_POLICY),
         patch(
-            "app.services.client_portal._list_files_for_configs",
-            return_value=[
-                {"path": "/client/openvpn/antizapret/AZ-TopTinker.ovpn"},
-            ],
+            "app.services.client_portal.feature_flags_from_service",
+            return_value={"openvpn": True, "wireguard": True, "amneziawg": True, "awg2": True},
         ),
-        patch("app.services.client_portal._adapter_for_node_id"),
     ):
-        try:
+        feats.return_value.is_enabled.return_value = True
+        files = portal._list_files_for_configs(db, [cfg])
+
+    paths = [f["path"] for f in files]
+    assert _AZ_TOPTINKER_PATH in paths
+    assert _VPN_TOPTINKER_PATH not in paths
+
+
+def test_read_client_portal_profile_rejects_vpn_via_owner_visibility():
+    """Download allowlist comes from real _list_files_for_configs (no stub)."""
+    from app.models import User, UserRole
+    from app.services.vpn_profile_visibility import policy_to_json
+
+    owner = User(
+        id=5,
+        username="novikov",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        visible_vpn_profiles=policy_to_json(_AZ_ONLY_POLICY),
+    )
+    cfg = _toptinker_cfg(owner_id=5)
+    adapter = MagicMock()
+    adapter.get_profile_files.return_value = _toptinker_openvpn_files()
+    node = MagicMock()
+    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=owner)
+
+    with (
+        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+        patch("app.services.client_portal.load_node_remote_hosts", return_value=[]),
+        patch(
+            "app.services.client_portal.read_profile_file_for_delivery",
+            return_value=b"client\n",
+        ) as read_file,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        with pytest.raises(HTTPException) as hidden:
             portal._read_client_portal_profile(
                 db,
-                node_id=1,
+                node_id=3,
                 client_name="TopTinker",
-                path="/client/openvpn/vpn/VPN-TopTinker.ovpn",
+                path=_VPN_TOPTINKER_PATH,
             )
-            raised = None
-        except HTTPException as exc:
-            raised = exc
-    assert raised is not None
-    assert raised.status_code == 404
+        assert hidden.value.status_code == 404
+        read_file.assert_not_called()
+
+        filename, content = portal._read_client_portal_profile(
+            db,
+            node_id=3,
+            client_name="TopTinker",
+            path=_AZ_TOPTINKER_PATH,
+        )
+    assert content == b"client\n"
+    assert "AZ" in filename or filename.endswith(".ovpn")
+
+
+def test_read_client_portal_profile_rejects_vpn_for_orphan_default_az_only():
+    cfg = _toptinker_cfg(owner_id=None)
+    adapter = MagicMock()
+    adapter.get_profile_files.return_value = _toptinker_openvpn_files()
+    node = MagicMock()
+    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=None)
+
+    with (
+        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+        patch("app.services.client_portal.get_default_visible_vpn_profiles", return_value=_AZ_ONLY_POLICY),
+        patch(
+            "app.services.client_portal.feature_flags_from_service",
+            return_value={"openvpn": True, "wireguard": True, "amneziawg": True, "awg2": True},
+        ),
+    ):
+        feats.return_value.is_enabled.return_value = True
+        with pytest.raises(HTTPException) as hidden:
+            portal._read_client_portal_profile(
+                db,
+                node_id=3,
+                client_name="TopTinker",
+                path=_VPN_TOPTINKER_PATH,
+            )
+    assert hidden.value.status_code == 404
+
+
+def test_build_user_portal_payload_hides_vpn_for_restricted_owner():
+    from app.models import User, UserRole
+    from app.services.vpn_profile_visibility import policy_to_json
+
+    owner = User(
+        id=5,
+        username="novikov",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        visible_vpn_profiles=policy_to_json(_AZ_ONLY_POLICY),
+    )
+    cfg = _toptinker_cfg(owner_id=5)
+    adapter = MagicMock()
+    adapter.get_profile_files.return_value = _toptinker_openvpn_files()
+    node = MagicMock()
+    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=owner)
+    token_row = MagicMock(token="u_tok", user_id=5)
+
+    with (
+        patch("app.services.client_portal.resolve_portal_base_url", return_value="https://portal.example.com"),
+        patch("app.services.client_portal.ensure_portal_user", return_value=owner),
+        patch("app.services.client_portal._owned_portal_targets", return_value=[(3, "TopTinker")]),
+        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
+        patch("app.services.client_portal.build_portal_status", return_value={"state": "active"}),
+        patch("app.services.client_portal._apply_user_subscription_status", side_effect=lambda status, _u: status),
+        patch("app.services.client_portal._portal_brand_title", return_value="VPN"),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        payload = portal.build_user_portal_payload(db, token_row)
+
+    assert payload["kind"] == "user"
+    assert len(payload["clients"]) == 1
+    paths = [f["path"] for f in payload["clients"][0]["files"]]
+    assert _AZ_TOPTINKER_PATH in paths
+    assert _VPN_TOPTINKER_PATH not in paths
 
 
 def test_list_files_hides_wireguard_when_feature_disabled():
