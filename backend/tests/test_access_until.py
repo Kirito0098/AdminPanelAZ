@@ -509,6 +509,45 @@ def test_client_access_until_conflict_returns_409_without_override():
         engine.dispose()
 
 
+def test_client_access_until_allows_deadline_when_owner_has_none():
+    """Owner without access_until: client deadline may be set freely (no 409)."""
+    engine, db = _make_db()
+    try:
+        node = _make_node(db)
+        requested_until = datetime(2026, 12, 31, 23, 59, 59, 999000, tzinfo=timezone.utc)
+        admin = _make_user(db, username="admin", role=UserRole.admin)
+        owner = _make_user(db, username="Novikov", role=UserRole.user, access_until=None)
+        _make_owned_client(
+            db,
+            node_id=node.id,
+            owner_id=owner.id,
+            client_name="TopTinker",
+            protocols=[VpnType.openvpn],
+        )
+        client = _client_access_api(db, admin=admin)
+
+        with (
+            patch.object(
+                client_access,
+                "_set_access_until",
+                return_value={"access_until": requested_until.isoformat()},
+            ) as set_until,
+            patch.object(client_access, "log_action"),
+            patch.object(client_access, "_replicate_policy_after_success"),
+        ):
+            response = client.patch(
+                "/api/client-access/openvpn/TopTinker/access-until",
+                json={"access_until": requested_until.isoformat()},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["access_until"] == requested_until.isoformat()
+        set_until.assert_called_once()
+    finally:
+        db.close()
+        engine.dispose()
+
+
 def test_client_access_until_confirm_override_allows_update():
     db = MagicMock()
     request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))

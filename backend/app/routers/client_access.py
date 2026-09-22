@@ -104,11 +104,12 @@ def _maybe_access_until_conflict(
     ):
         return None
 
+    user_until = user_subscription.get_user_access_until(owner) if owner else None
     return JSONResponse(
         status_code=status.HTTP_409_CONFLICT,
         content={
             "code": "access_until_conflict",
-            "user_access_until": user_subscription.get_user_access_until(owner).isoformat() if owner else None,
+            "user_access_until": user_until.isoformat() if user_until else None,
             "client_access_until": access_until.isoformat() if access_until else None,
         },
     )
