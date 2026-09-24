@@ -44,7 +44,9 @@ ap_python_candidate_versions() {
 }
 
 # Текущая «активная» ветка для логов (после resolve/apt). Дефолт — первый кандидат.
-ADMINPANELAZ_PYTHON_VERSION="$(ap_python_candidate_versions | head -n1)"
+# sed reads the remaining candidates too; head can close the pipe early and
+# make sourcing this file fail with SIGPIPE when the caller enables pipefail.
+ADMINPANELAZ_PYTHON_VERSION="$(ap_python_candidate_versions | sed -n '1p')"
 ADMINPANELAZ_PYTHON_MINOR="${ADMINPANELAZ_PYTHON_VERSION#*.}"
 
 _ap_python_die() {
