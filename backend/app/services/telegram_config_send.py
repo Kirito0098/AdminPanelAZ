@@ -15,6 +15,7 @@ from app.services.profile_download_name import build_profile_download_filename
 from app.services.telegram_profile_ui import file_caption
 from app.services.telegram import send_tg_document_result, send_tg_message
 from app.services.vpn_install_instructions import InstallPlatform, build_install_instruction_message
+from app.services.vpn_profile_visibility import filter_profile_files, resolve_effective_visible_vpn_profiles
 
 
 def _download_name(config: VpnConfig, file_item: dict, selected_path: str) -> str:
@@ -36,6 +37,7 @@ def send_config_files_to_chat(
     send_all: bool = False,
     run_async: bool = False,
     install_platform: InstallPlatform | None = None,
+    visible_policy: dict | None = None,
 ) -> tuple[int, str | None]:
     """Send profile file(s) as Telegram documents. Returns (sent_count, error_message)."""
     if not bot_token:
@@ -45,6 +47,8 @@ def send_config_files_to_chat(
 
     adapter = get_active_adapter(db)
     files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
+    if visible_policy is not None:
+        files = filter_profile_files(files, visible_policy)
     if not files:
         return 0, "Файлы конфигурации не найдены"
 
@@ -152,6 +156,7 @@ def send_config_for_user(
             return 0, "Telegram ID не привязан к вашему аккаунту"
         chat_ids = [chat_id]
 
+    visible_policy = resolve_effective_visible_vpn_profiles(db, user)
     total_sent = 0
     last_error: str | None = None
     for chat_id in chat_ids:
@@ -164,6 +169,7 @@ def send_config_for_user(
             send_all=send_all,
             run_async=run_async,
             install_platform=install_platform,
+            visible_policy=visible_policy,
         )
         total_sent += sent
         if err:
