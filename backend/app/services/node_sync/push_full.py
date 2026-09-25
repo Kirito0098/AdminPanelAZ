@@ -26,6 +26,7 @@ from app.services.node_sync.verify import verify_sync_group
 from app.services.node_sync.vpn_state_sync import (
     copy_openvpn_profiles_from_primary,
     prune_replica_vpn_clients,
+    reapply_blocked_runtime_policies,
     sync_amneziawg2_state_from_primary,
 )
 from app.services.openvpn_pki import validate_all_openvpn_profiles
@@ -302,6 +303,12 @@ def run_push_full(
             if admin and replica_node and primary_node:
                 import_clients_from_disk(db, replica_node, admin.id)
                 copy_access_policies_from_node(db, primary_node, replica_node)
+                reapply_blocked_runtime_policies(
+                    db,
+                    replica_node,
+                    replica_adapter,
+                    awg2=bool(isinstance(awg2_health, dict) and awg2_health.get("installed")),
+                )
                 try:
                     collect_traffic_snapshot_for_node(db, replica_node.id)
                 except Exception as exc:

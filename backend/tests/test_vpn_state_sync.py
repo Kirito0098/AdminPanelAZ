@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import AmneziaWg2AccessPolicy, Node, NodeStatus, VpnType
+from app.models import AmneziaWg2AccessPolicy, Node, NodeStatus, VpnType, WgAccessPolicy
 from app.services.antizapret import AntiZapretService
 from app.services import awg2
 from app.services.node_sync import vpn_state_sync
@@ -304,6 +304,103 @@ def test_post_import_reapply_blocked_awg2_peers(db):
         any_order=True,
     )
     assert replica.block_awg2_client_runtime.call_count == 2
+
+
+def _add_wg_block_policies(db, node_id: int) -> None:
+    db.add_all(
+        [
+            WgAccessPolicy(
+                node_id=node_id,
+                client_name="wg-temp",
+                is_temp_blocked=True,
+                block_reason="manual_temp",
+                block_started_at=datetime.utcnow(),
+                block_days=2,
+                block_until=datetime.utcnow() + timedelta(days=2),
+            ),
+            WgAccessPolicy(
+                node_id=node_id,
+                client_name="wg-perm",
+                is_permanent_blocked=True,
+                block_reason="manual_permanent",
+                block_started_at=datetime.utcnow(),
+            ),
+            WgAccessPolicy(node_id=node_id, client_name="wg-open"),
+        ]
+    )
+    db.commit()
+
+
+def _wg_sync_adapters():
+    primary = MagicMock()
+    replica = MagicMock()
+    primary.list_wireguard_server_config_files.return_value = ["vpn.conf"]
+    replica.list_wireguard_server_config_files.return_value = ["vpn.conf"]
+    primary.read_wireguard_server_config.return_value = "conf"
+    primary.export_wireguard_client_profiles_archive.return_value = _sample_profile_archive()
+    replica.apply_wireguard_runtime.return_value = {"success": True}
+    return primary, replica
+
+
+def _assert_wg_blocks_reapplied(replica) -> None:
+    replica.block_wireguard_client_runtime.assert_has_calls(
+        [call("wg-temp"), call("wg-perm")],
+        any_order=True,
+    )
+    assert replica.block_wireguard_client_runtime.call_count == 2
+
+
+def test_sync_wireguard_state_reapplies_blocked_peers_after_syncconf(db):
+    replica_node = _make_node(db, name="replica")
+    _add_wg_block_policies(db, replica_node.id)
+    primary, replica = _wg_sync_adapters()
+    order = MagicMock()
+    order.attach_mock(replica.apply_wireguard_runtime, "apply")
+    order.attach_mock(replica.block_wireguard_client_runtime, "block")
+
+    vpn_state_sync.sync_wireguard_state_from_primary(
+        primary,
+        replica,
+        db=db,
+        replica_node=replica_node,
+    )
+
+    _assert_wg_blocks_reapplied(replica)
+    assert order.mock_calls[0] == call.apply()
+
+
+def test_sync_vpn_crypto_wireguard_passes_replica_context(db):
+    replica_node = _make_node(db, name="replica")
+    _add_wg_block_policies(db, replica_node.id)
+    primary, replica = _wg_sync_adapters()
+
+    vpn_state_sync.sync_vpn_crypto_from_primary(
+        primary,
+        replica,
+        VpnType.wireguard,
+        db=db,
+        replica_node=replica_node,
+        client_name="wg-open",
+    )
+
+    _assert_wg_blocks_reapplied(replica)
+
+
+def test_sync_all_vpn_crypto_reapplies_wireguard_blocks(db, monkeypatch):
+    replica_node = _make_node(db, name="replica")
+    _add_wg_block_policies(db, replica_node.id)
+    primary, replica = _wg_sync_adapters()
+    primary.get_awg2_health.return_value = {"installed": False}
+    monkeypatch.setattr(vpn_state_sync, "sync_openvpn_pki_from_primary", MagicMock())
+
+    vpn_state_sync.sync_all_vpn_crypto_from_primary(
+        primary,
+        replica,
+        db=db,
+        replica_node=replica_node,
+    )
+
+    _assert_wg_blocks_reapplied(replica)
 
 
 def test_sync_vpn_crypto_routes_amneziawg2():

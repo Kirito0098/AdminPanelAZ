@@ -148,6 +148,8 @@ def sync_wireguard_state_from_primary(
     replica_adapter,
     *,
     client_name: str | None = None,
+    db: Session | None = None,
+    replica_node: Node | None = None,
 ) -> None:
     """Copy WireGuard server configs and all WG/AWG profile files from primary to replica."""
     _mirror_wireguard_server_configs(primary_adapter, replica_adapter)
@@ -163,6 +165,9 @@ def sync_wireguard_state_from_primary(
             "HA crypto sync: wg syncconf partial failure on replica (configs copied): %s",
             detail,
         )
+    # Blocks are runtime-only (peer removed); syncconf from primary configs brings them back.
+    if db is not None and replica_node is not None:
+        _reapply_blocked_wireguard_policies(db, replica_node, replica_adapter)
 
     _copy_all_wireguard_profiles_from_primary(
         primary_adapter,
@@ -238,6 +243,23 @@ def _reapply_blocked_awg2_policies(db: Session, replica_node: Node, replica_adap
     )._reapply_all_blocked_awg2_runtime()
 
 
+def _reapply_blocked_wireguard_policies(db: Session, replica_node: Node, replica_adapter) -> None:
+    AccessPolicyService(
+        db,
+        antizapret_path=get_settings().antizapret_path,
+        node_id=replica_node.id,
+        node_name=replica_node.name,
+        adapter=replica_adapter,
+    )._reapply_all_blocked_runtime()
+
+
+def reapply_blocked_runtime_policies(db: Session, replica_node: Node, replica_adapter, *, awg2: bool) -> None:
+    """Re-block runtime-only peers on a replica after its policy rows were replaced."""
+    _reapply_blocked_wireguard_policies(db, replica_node, replica_adapter)
+    if awg2:
+        _reapply_blocked_awg2_policies(db, replica_node, replica_adapter)
+
+
 def sync_amneziawg2_state_from_primary(
     primary_adapter,
     replica_adapter,
@@ -296,6 +318,8 @@ def sync_vpn_crypto_from_primary(
         primary_adapter,
         replica_adapter,
         client_name=client_name,
+        db=db,
+        replica_node=replica_node,
     )
 
 
@@ -308,7 +332,12 @@ def sync_all_vpn_crypto_from_primary(
     openvpn_multihome: bool = False,
 ) -> None:
     """Copy both WireGuard and OpenVPN crypto state from primary to replica."""
-    sync_wireguard_state_from_primary(primary_adapter, replica_adapter)
+    sync_wireguard_state_from_primary(
+        primary_adapter,
+        replica_adapter,
+        db=db,
+        replica_node=replica_node,
+    )
     sync_openvpn_pki_from_primary(
         primary_adapter,
         replica_adapter,
