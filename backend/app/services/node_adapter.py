@@ -367,13 +367,70 @@ class NodeAdapter(ABC):
     def set_warper_mode_warp(self, key_source: str | None = None) -> dict: ...
 
     @abstractmethod
-    def set_warper_mode_slave(self, host: str, port: int, key: str) -> dict: ...
+    def set_warper_mode_slave(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        key: str | None = None,
+        *,
+        link: str | None = None,
+    ) -> dict: ...
 
     @abstractmethod
     def set_warper_mode_wg(self, config_path: str) -> dict: ...
 
     @abstractmethod
+    def set_warper_mode_vless(self, link: str) -> dict: ...
+
+    @abstractmethod
+    def set_warper_mode_hy2(self, link: str) -> dict: ...
+
+    @abstractmethod
+    def set_warper_mode_openvpn(
+        self,
+        config_path: str,
+        username: str | None = None,
+        password: str | None = None,
+    ) -> dict: ...
+
+    @abstractmethod
+    def warper_forget_ovpn_credentials(self, config_path: str) -> dict: ...
+
+    @abstractmethod
     def set_warper_fullvpn(self, *, enable: bool) -> dict: ...
+
+    @abstractmethod
+    def set_warper_autopatch(self, *, enable: bool) -> dict: ...
+
+    @abstractmethod
+    def warper_resync(self) -> dict: ...
+
+    @abstractmethod
+    def warper_update_lists(self) -> dict: ...
+
+    @abstractmethod
+    def get_warper_auto_resolve(self) -> dict: ...
+
+    @abstractmethod
+    def set_warper_auto_resolve(self, *, enable: bool) -> dict: ...
+
+    @abstractmethod
+    def warper_resolve_sync(self, *, force: bool = False) -> dict: ...
+
+    @abstractmethod
+    def warper_resolve_clean(self, domain: str | None = None) -> dict: ...
+
+    @abstractmethod
+    def get_warper_ip_routes(self) -> list: ...
+
+    @abstractmethod
+    def warper_clear_ip_routes(self) -> dict: ...
+
+    @abstractmethod
+    def get_warper_subnets(self) -> dict: ...
+
+    @abstractmethod
+    def get_warper_singbox_status(self) -> dict: ...
 
     @abstractmethod
     def set_warper_subnet(self, subnet: str) -> dict: ...
@@ -886,20 +943,79 @@ class LocalNodeAdapter(NodeAdapter):
     def get_warper_settings_options(self) -> dict:
         return {
             "warp_keys": self._warper.list_warp_keys(),
+            "warp_key_items": self._warper.list_warp_key_items(),
             "wg_configs": self._warper.list_wg_configs(),
+            "ovpn_configs": self._warper.list_ovpn_configs(),
         }
 
     def set_warper_mode_warp(self, key_source: str | None = None) -> dict:
         return self._warper.set_mode_warp(key_source)
 
-    def set_warper_mode_slave(self, host: str, port: int, key: str) -> dict:
-        return self._warper.set_mode_slave(host, port, key)
+    def set_warper_mode_slave(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        key: str | None = None,
+        *,
+        link: str | None = None,
+    ) -> dict:
+        return self._warper.set_mode_slave(host, port, key, link=link)
 
     def set_warper_mode_wg(self, config_path: str) -> dict:
         return self._warper.set_mode_wg(config_path)
 
+    def set_warper_mode_vless(self, link: str) -> dict:
+        return self._warper.set_mode_vless(link)
+
+    def set_warper_mode_hy2(self, link: str) -> dict:
+        return self._warper.set_mode_hy2(link)
+
+    def set_warper_mode_openvpn(
+        self,
+        config_path: str,
+        username: str | None = None,
+        password: str | None = None,
+    ) -> dict:
+        return self._warper.set_mode_openvpn(config_path, username, password)
+
+    def warper_forget_ovpn_credentials(self, config_path: str) -> dict:
+        return self._warper.forget_ovpn_credentials(config_path)
+
     def set_warper_fullvpn(self, *, enable: bool) -> dict:
         return self._warper.set_fullvpn(enable=enable)
+
+    def set_warper_autopatch(self, *, enable: bool) -> dict:
+        return self._warper.set_autopatch(enable=enable)
+
+    def warper_resync(self) -> dict:
+        return self._warper.resync()
+
+    def warper_update_lists(self) -> dict:
+        return self._warper.update_lists()
+
+    def get_warper_auto_resolve(self) -> dict:
+        return self._warper.get_auto_resolve()
+
+    def set_warper_auto_resolve(self, *, enable: bool) -> dict:
+        return self._warper.set_auto_resolve(enable=enable)
+
+    def warper_resolve_sync(self, *, force: bool = False) -> dict:
+        return self._warper.resolve_sync(force=force)
+
+    def warper_resolve_clean(self, domain: str | None = None) -> dict:
+        return self._warper.resolve_clean(domain)
+
+    def get_warper_ip_routes(self) -> list:
+        return self._warper.list_ip_routes()
+
+    def warper_clear_ip_routes(self) -> dict:
+        return self._warper.clear_ip_routes()
+
+    def get_warper_subnets(self) -> dict:
+        return self._warper.get_subnets()
+
+    def get_warper_singbox_status(self) -> dict:
+        return self._warper.singbox_status()
 
     def set_warper_subnet(self, subnet: str) -> dict:
         return self._warper.set_subnet(subnet)
@@ -1749,18 +1865,106 @@ class RemoteNodeAdapter(NodeAdapter):
         payload: dict[str, str | None] = {"key_source": key_source}
         return self._request("POST", "/warper/settings/mode/warp", json=payload)
 
-    def set_warper_mode_slave(self, host: str, port: int, key: str) -> dict:
+    def _warper_agent_request(self, method: str, path: str, *, legacy_statuses: tuple[int, ...] = (), **kwargs) -> Any:
+        try:
+            return self._request(method, path, **kwargs)
+        except HTTPException as exc:
+            if exc.status_code not in {
+                status.HTTP_404_NOT_FOUND,
+                status.HTTP_405_METHOD_NOT_ALLOWED,
+                *legacy_statuses,
+            }:
+                raise
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Обновите node agent панели на узле — функция AZ-WARP 1.5 недоступна",
+            ) from exc
+
+    def set_warper_mode_slave(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        key: str | None = None,
+        *,
+        link: str | None = None,
+    ) -> dict:
+        if link:
+            return self._warper_agent_request(
+                "POST",
+                "/warper/settings/mode/slave",
+                legacy_statuses=(status.HTTP_422_UNPROCESSABLE_ENTITY,),
+                json={"link": link},
+                timeout=180.0,
+            )
         return self._request(
             "POST",
             "/warper/settings/mode/slave",
             json={"host": host, "port": port, "key": key},
+            timeout=180.0,
         )
 
     def set_warper_mode_wg(self, config_path: str) -> dict:
-        return self._request("POST", "/warper/settings/mode/wg", json={"config_path": config_path})
+        return self._request("POST", "/warper/settings/mode/wg", json={"config_path": config_path}, timeout=180.0)
+
+    def set_warper_mode_vless(self, link: str) -> dict:
+        return self._warper_agent_request("POST", "/warper/settings/mode/vless", json={"link": link}, timeout=180.0)
+
+    def set_warper_mode_hy2(self, link: str) -> dict:
+        return self._warper_agent_request("POST", "/warper/settings/mode/hy2", json={"link": link}, timeout=180.0)
+
+    def set_warper_mode_openvpn(
+        self,
+        config_path: str,
+        username: str | None = None,
+        password: str | None = None,
+    ) -> dict:
+        return self._warper_agent_request(
+            "POST",
+            "/warper/settings/mode/openvpn",
+            json={"config_path": config_path, "username": username, "password": password},
+            timeout=180.0,
+        )
+
+    def warper_forget_ovpn_credentials(self, config_path: str) -> dict:
+        return self._warper_agent_request("POST", "/warper/settings/ovpn/forget", json={"config_path": config_path})
 
     def set_warper_fullvpn(self, *, enable: bool) -> dict:
         return self._request("PUT", "/warper/settings/fullvpn", json={"enable": enable})
+
+    def set_warper_autopatch(self, *, enable: bool) -> dict:
+        return self._warper_agent_request("PUT", "/warper/settings/autopatch", json={"enable": enable})
+
+    def warper_resync(self) -> dict:
+        return self._warper_agent_request("POST", "/warper/resync", timeout=330.0)
+
+    def warper_update_lists(self) -> dict:
+        return self._warper_agent_request("POST", "/warper/domains/update-lists", timeout=150.0)
+
+    def get_warper_auto_resolve(self) -> dict:
+        return self._warper_agent_request("GET", "/warper/resolve")
+
+    def set_warper_auto_resolve(self, *, enable: bool) -> dict:
+        return self._warper_agent_request("PUT", "/warper/resolve", json={"enable": enable})
+
+    def warper_resolve_sync(self, *, force: bool = False) -> dict:
+        return self._warper_agent_request("POST", "/warper/resolve/sync", params={"force": force}, timeout=330.0)
+
+    def warper_resolve_clean(self, domain: str | None = None) -> dict:
+        return self._warper_agent_request("POST", "/warper/resolve/clean", json={"domain": domain}, timeout=150.0)
+
+    def get_warper_ip_routes(self) -> list:
+        data = self._warper_agent_request("GET", "/warper/ip-routes")
+        return data.get("routes", []) if isinstance(data, dict) else []
+
+    def warper_clear_ip_routes(self) -> dict:
+        return self._warper_agent_request("POST", "/warper/ip-routes/clear", timeout=150.0)
+
+    def get_warper_subnets(self) -> dict:
+        data = self._warper_agent_request("GET", "/warper/subnets")
+        return data.get("subnets", {}) if isinstance(data, dict) else {}
+
+    def get_warper_singbox_status(self) -> dict:
+        return self._warper_agent_request("GET", "/warper/singbox/status")
 
     def set_warper_subnet(self, subnet: str) -> dict:
         return self._request("PUT", "/warper/settings/subnet", json={"subnet": subnet})
@@ -1772,7 +1976,15 @@ class RemoteNodeAdapter(NodeAdapter):
         return self._request("PUT", "/warper/settings/log-level", json={"level": level})
 
     def warper_singbox_action(self, action: str) -> dict:
-        return self._request("POST", f"/warper/singbox/{action}", timeout=180.0)
+        timeout = 330.0 if action == "upgrade" else 180.0
+        if action in {"start", "stop", "restart"}:
+            return self._request("POST", f"/warper/singbox/{action}", timeout=timeout)
+        return self._warper_agent_request(
+            "POST",
+            f"/warper/singbox/{action}",
+            legacy_statuses=(status.HTTP_400_BAD_REQUEST,),
+            timeout=timeout,
+        )
 
     def warper_catalog_search(self, query: str = "") -> list:
         data = self._request("GET", "/warper/catalog/search", params={"query": query}, timeout=60.0)

@@ -22,6 +22,7 @@ import {
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import type { WarperHealthResponse } from '@/types'
+import AutoResolveSection from './AutoResolveSection'
 import { buildIpRangesTextFromItems, countActiveTextLines, isWarperDisabled } from './utils'
 
 const ROUTE_MODES = [
@@ -195,6 +196,8 @@ export default function IpRangesTab({ health }: IpRangesTabProps) {
           </Button>
         </div>
       </StatusPanel>
+
+      <AutoResolveSection health={health} onRangesChanged={() => void load()} />
     </div>
   )
 }

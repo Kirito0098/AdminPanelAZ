@@ -26,6 +26,10 @@ WARPER_API_INIT = WARPER_API_DIR / "warper_api" / "__init__.py"
 WARPER_IP_RANGES_FILE = WARPER_DIR / "ip-ranges.txt"
 WARPER_DOMAINS_FILE = WARPER_DIR / "domains.txt"
 WARPER_TRAFFIC_FILE = WARPER_DIR / "traffic.json"
+WARPER_VERSION_FILE = WARPER_DIR / "version"
+WARPER_UPDATE_MARKER = WARPER_DIR / ".update-complete"
+WARP_KEY_SOURCES = ("system", "wgcf", "root", "generate")
+SINGBOX_ACTIONS = ("start", "stop", "restart", "enable", "disable", "upgrade")
 _BUILTIN_LIST_MARKERS = {
     "gemini": ("# --- GEMINI ---", "# --- END GEMINI ---"),
     "chatgpt": ("# --- CHATGPT ---", "# --- END CHATGPT ---"),
@@ -39,10 +43,6 @@ _DOMAIN_RE = re.compile(
 
 class WarperNotInstalledError(Exception):
     """WARPER is not installed on this node."""
-
-
-class WarperConflictError(Exception):
-    """ANTIZAPRET_WARP=y conflicts with WARPER domain routing."""
 
 
 def detect_warper_installation() -> dict[str, Any]:
@@ -72,13 +72,54 @@ def is_warper_installed() -> bool:
     return bool(detect_warper_installation()["installed"])
 
 
+def _version_tuple(value: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for chunk in value.strip().split("."):
+        digits = re.match(r"\d+", chunk)
+        if not digits:
+            break
+        parts.append(int(digits.group()))
+    return tuple(parts)
+
+
+def _read_stripped(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+
+
+def is_update_pending() -> bool:
+    """True when `warper update` from 1.4.x installed 1.5+ files but did not finish (marker mismatch)."""
+    version = _read_stripped(WARPER_VERSION_FILE)
+    if not version or _version_tuple(version) < (1, 5, 0):
+        return False
+    return _read_stripped(WARPER_UPDATE_MARKER) != version
+
+
 def _antizapret_setup_path() -> Path:
     return get_settings().antizapret_path / "setup"
 
 
-def _has_antizapret_warp_conflict() -> bool:
-    settings = read_antizapret_settings(_antizapret_setup_path())
-    return settings.get("ANTIZAPRET_WARP", "n").strip().lower() == "y"
+def az_warp_mode(value: str | None) -> Literal["off", "all", "selective"]:
+    """Map AntiZapret ANTIZAPRET_WARP / VPN_WARP (legacy y/n or 1–4) like AZ-WARP az_warp_mode."""
+    raw = (value or "").strip().lower()
+    if raw in {"y", "2"}:
+        return "all"
+    if raw in {"3", "4"}:
+        return "selective"
+    return "off"
+
+
+def _antizapret_warp_modes() -> dict[str, str]:
+    try:
+        settings = read_antizapret_settings(_antizapret_setup_path())
+    except Exception:
+        settings = {}
+    return {
+        "antizapret_warp_mode": az_warp_mode(settings.get("ANTIZAPRET_WARP")),
+        "vpn_warp_mode": az_warp_mode(settings.get("VPN_WARP")),
+    }
 
 
 def _ensure_installed() -> None:
@@ -86,13 +127,6 @@ def _ensure_installed() -> None:
         raise WarperNotInstalledError(
             "WARPER не установлен на узле. Установите AZ-WARP: "
             "curl -fsSL https://raw.githubusercontent.com/Liafanx/AZ-WARP/main/install.sh | bash"
-        )
-
-
-def _ensure_no_conflict() -> None:
-    if _has_antizapret_warp_conflict():
-        raise WarperConflictError(
-            "ANTIZAPRET_WARP=y конфликтует с WARPER. Отключите встроенный WARP в «Конфиг AntiZapret»."
         )
 
 
@@ -118,10 +152,34 @@ def _normalize_domain(domain: str) -> str:
     return value
 
 
+_API_MODULE_STAMP: tuple[float, float] | None = None
+
+
+def _warper_api_stamp() -> tuple[float, float]:
+    stamps: list[float] = []
+    for path in (WARPER_API_INIT, WARPER_DIR / "version"):
+        try:
+            stamps.append(path.stat().st_mtime)
+        except OSError:
+            stamps.append(0.0)
+    return stamps[0], stamps[1]
+
+
+def _purge_warper_api_modules() -> None:
+    for name in list(sys.modules):
+        if name == "warper_api" or name.startswith("warper_api."):
+            sys.modules.pop(name, None)
+
+
 def _load_warper_api():
+    global _API_MODULE_STAMP
     api_path = str(WARPER_API_DIR)
     if api_path not in sys.path:
         sys.path.insert(0, api_path)
+    stamp = _warper_api_stamp()
+    if _API_MODULE_STAMP is not None and stamp != _API_MODULE_STAMP:
+        _purge_warper_api_modules()
+    _API_MODULE_STAMP = stamp
     from warper_api import WarperAPI  # noqa: PLC0415
 
     return WarperAPI()
@@ -340,8 +398,6 @@ def build_ip_ranges_text_from_items(ranges: list[Any]) -> str:
 def _http_exception_from_service(exc: Exception) -> HTTPException:
     if isinstance(exc, WarperNotInstalledError):
         return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
-    if isinstance(exc, WarperConflictError):
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, HTTPException):
         return exc
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
@@ -573,12 +629,24 @@ def enrich_warper_traffic_payload(
 class WarperService:
     def __init__(self):
         self._api: Any | None = None
+        self._api_stamp: tuple[float, float] | None = None
 
     def _api_client(self):
         _ensure_installed()
-        if self._api is None:
+        stamp = _warper_api_stamp()
+        if self._api is None or stamp != self._api_stamp:
             self._api = _load_warper_api()
+            self._api_stamp = stamp
         return self._api
+
+    def _api_method(self, name: str, *, min_version: str = "1.5.0"):
+        method = getattr(self._api_client(), name, None)
+        if not callable(method):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"{name} недоступен в warper_api. Обновите AZ-WARP на узле (нужна версия ≥ {min_version}).",
+            )
+        return method
 
     def is_installed(self) -> bool:
         return is_warper_installed()
@@ -586,12 +654,13 @@ class WarperService:
     def get_health(self) -> dict[str, Any]:
         detection = detect_warper_installation()
         installed = bool(detection["installed"])
-        conflict = _has_antizapret_warp_conflict()
         payload: dict[str, Any] = {
             "installed": installed,
             "active": False,
             "version": None,
-            "conflict_antizapret_warp": conflict,
+            "conflict_antizapret_warp": False,
+            **_antizapret_warp_modes(),
+            "update_pending": False,
             "warper_bin": detection["warper_bin"],
             "warper_script": detection["warper_script"],
             "warper_api": detection["warper_api"],
@@ -599,6 +668,7 @@ class WarperService:
         }
         if not installed:
             return payload
+        payload["update_pending"] = is_update_pending()
         try:
             api = self._api_client()
             payload["version"] = getattr(api, "version", None) or _safe_version(api)
@@ -611,7 +681,10 @@ class WarperService:
 
     def get_status(self) -> dict[str, Any]:
         api = self._api_client()
-        return _result_or_raise(api.get_status(), default={})
+        payload = _result_or_raise(api.get_status(), default={})
+        if isinstance(payload, dict) and isinstance(payload.get("slave"), dict):
+            payload["slave"] = {k: v for k, v in payload["slave"].items() if k != "password"}
+        return payload
 
     def doctor(self) -> list[dict[str, Any]]:
         api = self._api_client()
@@ -634,7 +707,6 @@ class WarperService:
         return _normalize_doctor_checks([data]) if data else []
 
     def toggle(self) -> dict[str, Any]:
-        _ensure_no_conflict()
         api = self._api_client()
         return _result_or_raise(api.toggle(), default={"message": "OK"})
 
@@ -691,24 +763,20 @@ class WarperService:
         return {"lists": lists, "domains": domains, "user_text": user_text}
 
     def add_domain(self, domain: str) -> dict[str, Any]:
-        _ensure_no_conflict()
         normalized = _normalize_domain(domain)
         api = self._api_client()
         return _result_or_raise(api.add_domain(normalized), default={"message": "OK"})
 
     def remove_domain(self, domain: str) -> dict[str, Any]:
-        _ensure_no_conflict()
         normalized = _normalize_domain(domain)
         api = self._api_client()
         return _result_or_raise(api.remove_domain(normalized), default={"message": "OK"})
 
     def sync_domains(self) -> dict[str, Any]:
-        _ensure_no_conflict()
         api = self._api_client()
         return _result_or_raise(api.sync_domains(), default={"message": "OK"})
 
     def add_domains_bulk(self, domains: list[str]) -> dict[str, Any]:
-        _ensure_no_conflict()
         added: list[str] = []
         errors: list[dict[str, str]] = []
         for raw in domains:
@@ -724,7 +792,6 @@ class WarperService:
         return {"added": added, "added_count": len(added), "errors": errors}
 
     def set_domain_list(self, name: str, *, enable: bool) -> dict[str, Any]:
-        _ensure_no_conflict()
         list_name = name.strip().lower()
         if list_name not in {"gemini", "chatgpt"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Поддерживаются списки: gemini, chatgpt")
@@ -743,7 +810,6 @@ class WarperService:
         return _extract_user_domains_text()
 
     def save_user_domains_text(self, text: str) -> dict[str, Any]:
-        _ensure_no_conflict()
         api = self._api_client()
         saver = getattr(api, "save_user_domains_text", None)
         if not callable(saver):
@@ -764,7 +830,6 @@ class WarperService:
         return _read_ip_ranges_file_text()
 
     def save_ip_ranges_text(self, text: str) -> dict[str, Any]:
-        _ensure_no_conflict()
         api = self._api_client()
         saver = getattr(api, "save_ip_ranges_text", None)
         if not callable(saver):
@@ -789,24 +854,20 @@ class WarperService:
             return _read_ip_ranges_file()
 
     def add_ip_range(self, cidr: str) -> dict[str, Any]:
-        _ensure_no_conflict()
         normalized = _normalize_cidr(cidr)
         api = self._api_client()
         return _result_or_raise(api.add_ip_range(normalized), default={"message": "OK"})
 
     def remove_ip_range(self, cidr: str) -> dict[str, Any]:
-        _ensure_no_conflict()
         normalized = _normalize_cidr(cidr)
         api = self._api_client()
         return _result_or_raise(api.remove_ip_range(normalized), default={"message": "OK"})
 
     def sync_ip_ranges(self) -> dict[str, Any]:
-        _ensure_no_conflict()
         api = self._api_client()
         return _result_or_raise(api.sync_ip_ranges(), default={"message": "OK"})
 
     def set_ip_route_mode(self, mode: str) -> dict[str, Any]:
-        _ensure_no_conflict()
         allowed = {"antizapret", "all_vpn", "all"}
         if mode not in allowed:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Режим должен быть одним из: {', '.join(sorted(allowed))}")
@@ -814,7 +875,6 @@ class WarperService:
         return _result_or_raise(api.set_ip_route_mode(mode), default={"message": "OK"})
 
     def set_ip_export(self, *, enable: bool) -> dict[str, Any]:
-        _ensure_no_conflict()
         api = self._api_client()
         return _result_or_raise(api.set_ip_export(enable), default={"message": "OK"})
 
@@ -878,6 +938,18 @@ class WarperService:
                 payload["autopatch"] = raw_status["autopatch_enabled"]
             if isinstance(raw_status.get("warp_keys_source"), str):
                 payload.setdefault("warp_keys_source", raw_status["warp_keys_source"])
+            outbound_info = raw_status.get("outbound")
+            if isinstance(outbound_info, dict):
+                payload["outbound"] = {k: v for k, v in outbound_info.items() if v is not None}
+            if isinstance(raw_status.get("outbound_label"), str):
+                payload["outbound_label"] = raw_status["outbound_label"]
+            for key in ("antizapret_warp_mode", "vpn_warp_mode"):
+                if isinstance(raw_status.get(key), str):
+                    payload[key] = raw_status[key]
+            if isinstance(singbox.get("running"), bool):
+                payload["singbox_running"] = singbox["running"]
+            if isinstance(singbox.get("enabled"), bool):
+                payload["singbox_enabled"] = singbox["enabled"]
 
         # Fallback на отдельные геттеры, если status не дал значений.
         if "mtu" not in payload:
@@ -920,39 +992,130 @@ class WarperService:
         except HTTPException:
             return []
 
-    def set_mode_warp(self, key_source: str | None = None) -> dict[str, Any]:
-        _ensure_no_conflict()
+    def list_warp_key_items(self) -> list[dict[str, Any]]:
         api = self._api_client()
-        setter = getattr(api, "set_mode_warp", None)
-        if not callable(setter):
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="set_mode_warp недоступен в warper_api")
-        if key_source is None:
+        lister = getattr(api, "list_warp_keys", None)
+        if not callable(lister):
+            return []
+        try:
+            raw = _result_or_raise(lister(), default=[])
+        except HTTPException:
+            return []
+        items: list[dict[str, Any]] = []
+        for item in raw if isinstance(raw, list) else []:
+            if isinstance(item, str):
+                items.append({"source": "", "path": item, "address": "", "is_current": False})
+            elif isinstance(item, dict) and isinstance(item.get("path"), str):
+                items.append(
+                    {
+                        "source": str(item.get("source") or ""),
+                        "path": item["path"],
+                        "address": str(item.get("address") or ""),
+                        "is_current": bool(item.get("is_current")),
+                    }
+                )
+        return items
+
+    def list_ovpn_configs(self) -> list[dict[str, Any]]:
+        api = self._api_client()
+        lister = getattr(api, "list_ovpn_configs", None)
+        if not callable(lister):
+            return []
+        try:
+            raw = _result_or_raise(lister(), default=[])
+        except HTTPException:
+            return []
+        items: list[dict[str, Any]] = []
+        for item in raw if isinstance(raw, list) else []:
+            if isinstance(item, dict) and isinstance(item.get("path"), str):
+                items.append(
+                    {
+                        "path": item["path"],
+                        "server": str(item.get("server") or ""),
+                        "needs_auth": bool(item.get("needs_auth")),
+                        "saved_user": str(item.get("saved_user") or ""),
+                    }
+                )
+        return items
+
+    def set_mode_warp(self, key_source: str | None = None) -> dict[str, Any]:
+        setter = self._api_method("set_mode_warp", min_version="1.3.8")
+        source = (key_source or "").strip().lower()
+        if not source:
             return _result_or_raise(setter(), default={"message": "OK"})
-        allowed = {"system", "generate"}
-        source = key_source.strip().lower()
-        if source not in allowed:
+        if source not in WARP_KEY_SOURCES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="key_source должен быть system или generate",
+                detail=f"key_source должен быть одним из: {', '.join(WARP_KEY_SOURCES)}",
             )
         return _result_or_raise(setter(source), default={"message": "OK"})
 
-    def set_mode_slave(self, host: str, port: int, key: str) -> dict[str, Any]:
-        _ensure_no_conflict()
+    def set_mode_slave(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        key: str | None = None,
+        *,
+        link: str | None = None,
+    ) -> dict[str, Any]:
+        setter = self._api_method("set_mode_slave", min_version="1.3.8")
+        link_value = (link or "").strip()
+        if not link_value and (host or "").strip().startswith("ss://"):
+            link_value = (host or "").strip()
+        if link_value:
+            if not link_value.startswith("ss://"):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ожидается ссылка ss://")
+            if _version_tuple(str(getattr(self._api_client(), "version", "") or "")) < (1, 5, 0):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Ссылка ss:// поддерживается с AZ-WARP 1.5.0 — обновите AZ-WARP на узле",
+                )
+            return _result_or_raise(setter(link_value), default={"message": "OK"})
         host_value = (host or "").strip()
         key_value = (key or "").strip()
-        if not host_value or not key_value:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите host и key")
+        if not host_value or not key_value or port is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите ссылку ss:// или host, port и key")
         if not 1 <= int(port) <= 65535:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Порт должен быть 1–65535")
-        api = self._api_client()
-        setter = getattr(api, "set_mode_slave", None)
-        if not callable(setter):
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="set_mode_slave недоступен в warper_api")
         return _result_or_raise(setter(host_value, int(port), key_value), default={"message": "OK"})
 
+    def set_mode_vless(self, link: str) -> dict[str, Any]:
+        value = (link or "").strip()
+        if not value.startswith("vless://"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ожидается ссылка vless://")
+        return _result_or_raise(self._api_method("set_mode_vless")(value), default={"message": "OK"})
+
+    def set_mode_hy2(self, link: str) -> dict[str, Any]:
+        value = (link or "").strip()
+        if not value.startswith(("hy2://", "hysteria2://")):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ожидается ссылка hy2:// или hysteria2://")
+        return _result_or_raise(self._api_method("set_mode_hy2")(value), default={"message": "OK"})
+
+    def set_mode_openvpn(
+        self,
+        config_path: str,
+        username: str | None = None,
+        password: str | None = None,
+    ) -> dict[str, Any]:
+        path_value = (config_path or "").strip()
+        if not path_value.endswith(".ovpn"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите путь к файлу .ovpn")
+        user_value = (username or "").strip() or None
+        if user_value and not password:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите пароль OpenVPN")
+        setter = self._api_method("set_mode_openvpn")
+        return _result_or_raise(
+            setter(path_value, user_value, password if user_value else None),
+            default={"message": "OK"},
+        )
+
+    def forget_ovpn_credentials(self, config_path: str) -> dict[str, Any]:
+        path_value = (config_path or "").strip()
+        if not path_value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите путь к файлу .ovpn")
+        return _result_or_raise(self._api_method("forget_ovpn_credentials")(path_value), default={"message": "OK"})
+
     def set_mode_wg(self, config_path: str) -> dict[str, Any]:
-        _ensure_no_conflict()
         path_value = (config_path or "").strip()
         if not path_value:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите путь к .conf")
@@ -963,7 +1126,6 @@ class WarperService:
         return _result_or_raise(setter(path_value), default={"message": "OK"})
 
     def set_fullvpn(self, *, enable: bool) -> dict[str, Any]:
-        _ensure_no_conflict()
         api = self._api_client()
         setter = getattr(api, "set_fullvpn", None)
         if not callable(setter):
@@ -971,7 +1133,6 @@ class WarperService:
         return _result_or_raise(setter(enable), default={"message": "OK"})
 
     def set_subnet(self, subnet: str) -> dict[str, Any]:
-        _ensure_no_conflict()
         subnet_value = (subnet or "").strip()
         if not subnet_value:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите подсеть")
@@ -986,14 +1147,12 @@ class WarperService:
         return _result_or_raise(setter(subnet_value), default={"message": "OK"})
 
     def set_mtu(self, mtu: int) -> dict[str, Any]:
-        _ensure_no_conflict()
         if not 1280 <= int(mtu) <= 1500:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MTU должен быть в диапазоне 1280–1500")
         api = self._api_client()
         return _result_or_raise(api.set_mtu(int(mtu)), default={"message": "OK"})
 
     def set_log_level(self, level: str) -> dict[str, Any]:
-        _ensure_no_conflict()
         allowed = {"debug", "info", "warn", "error"}
         level = level.strip().lower()
         if level not in allowed:
@@ -1001,19 +1160,76 @@ class WarperService:
         api = self._api_client()
         return _result_or_raise(api.set_log_level(level), default={"message": "OK"})
 
-    def singbox_action(self, action: Literal["start", "stop", "restart"]) -> dict[str, Any]:
-        _ensure_no_conflict()
+    def singbox_action(self, action: str) -> dict[str, Any]:
+        if action not in SINGBOX_ACTIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Допустимо: {', '.join(SINGBOX_ACTIONS)}",
+            )
         default = {"message": f"sing-box {action}: ok", "success": True}
-        try:
-            api = self._api_client()
-            method = getattr(api, f"singbox_{action}", None)
-            if callable(method):
-                return _result_or_raise(method(), default=default)
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+        if action == "upgrade":
+            return _result_or_raise(self._api_method("singbox_upgrade")(), default=default)
+        method = getattr(self._api_client(), f"singbox_{action}", None)
+        if callable(method):
+            return _result_or_raise(method(), default=default)
         return _singbox_systemctl(action)
+
+    def singbox_status(self) -> dict[str, Any]:
+        data = _result_or_raise(self._api_method("singbox_status")(), default={})
+        if not isinstance(data, dict):
+            return {}
+        payload: dict[str, Any] = {
+            "active": data.get("active") == "active",
+            "enabled": data.get("enabled") == "enabled",
+            "state": data.get("active") or "unknown",
+            "version": data.get("version") or None,
+            "log_level": data.get("log_level") or None,
+        }
+        try:
+            payload["mtu"] = int(data["mtu"])
+        except (KeyError, TypeError, ValueError):
+            payload["mtu"] = None
+        return payload
+
+    def set_autopatch(self, *, enable: bool) -> dict[str, Any]:
+        return _result_or_raise(self._api_method("set_autopatch", min_version="1.3.8")(enable), default={"message": "OK"})
+
+    def resync(self) -> dict[str, Any]:
+        return _result_or_raise(self._api_method("resync")(), default={"message": "OK"})
+
+    def update_lists(self) -> dict[str, Any]:
+        return _result_or_raise(self._api_method("update_lists")(), default={"message": "OK"})
+
+    def get_auto_resolve(self) -> dict[str, Any]:
+        result = self._api_method("get_auto_resolve")()
+        data = _result_or_raise(result, default=getattr(result, "message", None) or False)
+        if isinstance(data, dict):
+            data = data.get("message") or data.get("enabled")
+        if isinstance(data, str):
+            data = data.strip().lower() == "enabled"
+        return {"enabled": bool(data)}
+
+    def set_auto_resolve(self, *, enable: bool) -> dict[str, Any]:
+        return _result_or_raise(self._api_method("set_auto_resolve")(enable), default={"message": "OK"})
+
+    def resolve_sync(self, *, force: bool = False) -> dict[str, Any]:
+        return _result_or_raise(self._api_method("resolve_sync")(force), default={"message": "OK"})
+
+    def resolve_clean(self, domain: str | None = None) -> dict[str, Any]:
+        value = (domain or "").strip()
+        normalized = _normalize_domain(value) if value else None
+        return _result_or_raise(self._api_method("resolve_clean")(normalized), default={"message": "OK"})
+
+    def list_ip_routes(self) -> list[str]:
+        data = _result_or_raise(self._api_method("list_ip_routes", min_version="1.3.8")(), default=[])
+        return [str(item) for item in data] if isinstance(data, list) else []
+
+    def clear_ip_routes(self) -> dict[str, Any]:
+        return _result_or_raise(self._api_method("clear_ip_routes")(), default={"message": "OK"})
+
+    def get_subnets(self) -> dict[str, str]:
+        data = _result_or_raise(self._api_method("get_subnets")(), default={})
+        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
 
     def _catalog_method(self, name: str):
         api = self._api_client()
@@ -1039,7 +1255,6 @@ class WarperService:
         return data if isinstance(data, dict) else {}
 
     def catalog_add(self, name: str) -> dict[str, Any]:
-        _ensure_no_conflict()
         list_name = (name or "").strip().lower()
         if not list_name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите имя категории")
@@ -1047,7 +1262,6 @@ class WarperService:
         return _result_or_raise(method(list_name), default={"message": "OK"})
 
     def catalog_remove(self, name: str) -> dict[str, Any]:
-        _ensure_no_conflict()
         list_name = (name or "").strip().lower()
         if not list_name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите имя категории")
@@ -1055,7 +1269,6 @@ class WarperService:
         return _result_or_raise(method(list_name), default={"message": "OK"})
 
     def catalog_update(self, name: str = "") -> dict[str, Any]:
-        _ensure_no_conflict()
         list_name = (name or "").strip().lower()
         method = self._catalog_method("catalog_update")
         return _result_or_raise(method(list_name), default={"message": "OK"})
@@ -1086,13 +1299,35 @@ class WarperService:
             message = getattr(result, "message", None)
             if message:
                 payload["message"] = message
-            return payload
-        unwrapped = _result_or_raise(result, default={})
-        return unwrapped if isinstance(unwrapped, dict) else {"raw": unwrapped}
+        else:
+            unwrapped = _result_or_raise(result, default={})
+            payload = unwrapped if isinstance(unwrapped, dict) else {"raw": unwrapped}
+        pending = is_update_pending()
+        payload["update_pending"] = pending
+        if pending:
+            payload["update_available"] = True
+            payload["message"] = (
+                "Обновление AZ-WARP не завершено (его запускала старая версия). "
+                "Запустите обновление ещё раз, чтобы доустановить sing-box, модули и таймеры."
+            )
+        return payload
+
+    def _after_update(self) -> None:
+        self._api = None
+        _purge_warper_api_modules()
+        try:
+            invalidate = getattr(self._api_client(), "invalidate_version_cache", None)
+            if callable(invalidate):
+                invalidate()
+        except Exception:
+            pass
 
     def apply_update(self, timeout: int = 600) -> dict[str, Any]:
         timeout = max(60, min(int(timeout), 900))
-        return _result_or_raise(self._updates_method("update")(timeout=timeout), default={"message": "OK"})
+        try:
+            return _result_or_raise(self._updates_method("update")(timeout=timeout), default={"message": "OK"})
+        finally:
+            self._after_update()
 
     def iter_update_stream_events(self) -> Iterator[dict[str, Any]]:
         stream_fn = self._updates_method("update_stream")
@@ -1112,7 +1347,11 @@ class WarperService:
                 if line:
                     yield {"event": "log", "line": line.rstrip("\n")}
             rc = proc.wait(timeout=600)
-            yield {"event": "done", "return_code": rc, "success": rc == 0}
+            self._after_update()
+            done: dict[str, Any] = {"event": "done", "return_code": rc, "success": rc == 0}
+            if rc == 0 and is_update_pending():
+                done["update_pending"] = True
+            yield done
         except Exception as exc:
             yield {"event": "error", "detail": str(exc)}
         finally:
@@ -1120,8 +1359,8 @@ class WarperService:
                 proc.kill()
 
 
-def _singbox_systemctl(action: Literal["start", "stop", "restart"]) -> dict[str, Any]:
-    """Fallback when warper_api singbox_* methods are missing or fail."""
+def _singbox_systemctl(action: str) -> dict[str, Any]:
+    """Fallback for AZ-WARP < 1.5.0, where warper_api has no singbox_* method."""
     try:
         proc = subprocess.run(
             ["systemctl", action, "sing-box"],
@@ -1253,12 +1492,33 @@ def run_warper_action(operation: str, **kwargs: Any) -> Any:
         "get_ip_ranges_text": lambda: service.get_ip_ranges_text(),
         "save_ip_ranges_text": lambda: service.save_ip_ranges_text(kwargs["text"]),
         "list_warp_keys": lambda: service.list_warp_keys(),
+        "list_warp_key_items": lambda: service.list_warp_key_items(),
         "list_wg_configs": lambda: service.list_wg_configs(),
+        "list_ovpn_configs": lambda: service.list_ovpn_configs(),
         "set_mode_warp": lambda: service.set_mode_warp(kwargs.get("key_source")),
-        "set_mode_slave": lambda: service.set_mode_slave(kwargs["host"], kwargs["port"], kwargs["key"]),
+        "set_mode_slave": lambda: service.set_mode_slave(
+            kwargs.get("host"), kwargs.get("port"), kwargs.get("key"), link=kwargs.get("link")
+        ),
         "set_mode_wg": lambda: service.set_mode_wg(kwargs["config_path"]),
+        "set_mode_vless": lambda: service.set_mode_vless(kwargs["link"]),
+        "set_mode_hy2": lambda: service.set_mode_hy2(kwargs["link"]),
+        "set_mode_openvpn": lambda: service.set_mode_openvpn(
+            kwargs["config_path"], kwargs.get("username"), kwargs.get("password")
+        ),
+        "forget_ovpn_credentials": lambda: service.forget_ovpn_credentials(kwargs["config_path"]),
         "set_fullvpn": lambda: service.set_fullvpn(enable=kwargs["enable"]),
+        "set_autopatch": lambda: service.set_autopatch(enable=kwargs["enable"]),
         "set_subnet": lambda: service.set_subnet(kwargs["subnet"]),
+        "resync": lambda: service.resync(),
+        "update_lists": lambda: service.update_lists(),
+        "get_auto_resolve": lambda: service.get_auto_resolve(),
+        "set_auto_resolve": lambda: service.set_auto_resolve(enable=kwargs["enable"]),
+        "resolve_sync": lambda: service.resolve_sync(force=kwargs.get("force", False)),
+        "resolve_clean": lambda: service.resolve_clean(kwargs.get("domain")),
+        "list_ip_routes": lambda: service.list_ip_routes(),
+        "clear_ip_routes": lambda: service.clear_ip_routes(),
+        "get_subnets": lambda: service.get_subnets(),
+        "singbox_status": lambda: service.singbox_status(),
         "list_ip_ranges": lambda: service.list_ip_ranges(),
         "add_ip_range": lambda: service.add_ip_range(kwargs["cidr"]),
         "remove_ip_range": lambda: service.remove_ip_range(kwargs["cidr"]),
@@ -1285,7 +1545,7 @@ def run_warper_action(operation: str, **kwargs: Any) -> Any:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown action")
     try:
         return actions[operation]()
-    except (WarperNotInstalledError, WarperConflictError, HTTPException) as exc:
+    except (WarperNotInstalledError, HTTPException) as exc:
         raise _http_exception_from_service(exc) from exc
     except Exception as exc:
         raise HTTPException(

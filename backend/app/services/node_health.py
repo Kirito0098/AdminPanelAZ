@@ -25,7 +25,7 @@ HEALTH_METADATA_KEYS = (
 )
 
 # Keep in sync with node agent HTTP API; shared by local adapter and node_agent/main.py.
-NODE_AGENT_VERSION = "1.8.0"
+NODE_AGENT_VERSION = "1.9.0"
 
 _PROCESS_STARTED_AT = datetime.now(timezone.utc)
 

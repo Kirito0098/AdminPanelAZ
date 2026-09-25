@@ -21,8 +21,8 @@ class _FakeService:
         return "1.2.3.4"
 
 
-def test_node_agent_version_is_1_8_0():
-    assert NODE_AGENT_VERSION == "1.8.0"
+def test_node_agent_version_is_1_9_0():
+    assert NODE_AGENT_VERSION == "1.9.0"
 
 
 def test_build_health_payload_includes_uptime_and_optional_tls():
@@ -31,7 +31,7 @@ def test_build_health_payload_includes_uptime_and_optional_tls():
     assert isinstance(payload["uptime_sec"], int)
     assert payload["uptime_sec"] >= 0
     assert payload["listen_tls"] is True
-    assert payload["agent_version"] == "1.8.0"
+    assert payload["agent_version"] == "1.9.0"
 
 
 def test_classify_401_is_node_auth():

@@ -66,6 +66,13 @@
 - **Клиентский портал** — ссылки пользователя (`u_…`) и блок **Портал пользователей** на **Подписка**; токены клиента получают префикс `c_`, публичный API отдаёт `kind: client|user`.
 - **Дашборд / срок профиля** — конфликт с сроком владельца (`409`, `access_until_conflict`) и **Синхронизировать с пользователем** (`POST …/access-until/sync-from-owner`).
 - **Telegram / напоминания** — `access_expiry_reminder` и `user_access_expiry_reminder` по `users.access_until` (в т.ч. для админов с заданным сроком); напоминания о сертификате OpenVPN без изменений по клиентам.
+- **AZ-WARP 1.5.0 / режимы выхода** — в **AZ-WARP → Настройки** добавлены VLESS (`vless://`), Hysteria2 (`hy2://`, `hysteria2://`) и OpenVPN (`.ovpn` + логин/пароль, «Забыть логин»); Slave принимает ссылку `ss://`; источники WARP-ключа `system` / `wgcf` / `root` / `generate` и список найденных ключей; сводка сервера выхода без секретов (`warper.py`, `SettingsTab.tsx`, `/api/warper/settings/mode/vless|hy2|openvpn`, `/settings/ovpn/forget`).
+- **AZ-WARP 1.5.0 / обслуживание** — resync (`/warper/resync`), автопатч DNS (`/settings/autopatch`), подсети клиентов (`/subnets`), fake-подсеть по умолчанию `10.224.0.0/16` с подсказкой о конфликтах; управление sing-box — статус, версия, автозагрузка, **Обновить sing-box** (`/singbox/status`, `/singbox/{enable|disable|upgrade}`).
+- **AZ-WARP 1.5.0 / авто-резолв** — вкладка **IP-подсети**: переключатель авто-резолва, «Резолвить сейчас» (с принудительной синхронизацией), очистка RESOLVED по домену или целиком, просмотр и снятие применённых маршрутов (`AutoResolveSection.tsx`, `/warper/resolve*`, `/warper/ip-routes*`).
+- **AZ-WARP 1.5.0 / списки** — «Обновить списки из репозитория» на вкладке **Домены** (`/warper/domains/update-lists`).
+- **AZ-WARP / незавершённое обновление** — панель распознаёт обновление 1.4.x → 1.5.0, не доведённое до конца (маркер `/root/warper/.update-complete`), показывает предупреждение и кнопку **Завершить обновление**; после обновления `warper_api` перезагружается без рестарта панели.
+- **Конфиг AntiZapret / WARP** — `ANTIZAPRET_WARP` выбирается из 1–4 (None / All / Domain / Custom), `VPN_WARP` из 1–2, новый флаг `WARP_PROTECTION`; тип поля `choice` в схеме setup (`antizapret_params.py`, `antizapret_settings.py`, `AntizapretConfigTab.tsx`).
+- Версия node agent **`1.9.0`** — новые эндпоинты AZ-WARP 1.5 и запись числовых режимов WARP в setup. После обновления панели перезапустите агент на VPN-узлах; до этого новые функции AZ-WARP на удалённых узлах отвечают «Обновите node agent панели на узле».
 
 ### 🔄 Changed
 
@@ -74,6 +81,9 @@
 - **OpenVPN Buffer Guard** — дефолт режима `notify`, порог `40`/60 с (раньше `kill_restart` / `500`); в UI подсказка и «Применить рекомендацию» по режиму (40/80/120/150); заводские строки `500`/`60` однократно мигрируют на рекомендованный порог текущего режима.
 - **Подписка / документация** — [podpiska.md](docs/podpiska.md): срок на пользователе, каскад, unlock, портал `c_`/`u_`, Telegram.
 - **Подписка / срок доступа** — выбранная дата (и на пользователе, и на профиле) означает **конец** этого дня; при передаче через API `access_until: "2026-10-01"` разворачивается в `23:59:59.999999 UTC`.
+- **AZ-WARP / встроенный WARP AntiZapret** — запрет AZ-WARP при `ANTIZAPRET_WARP=y` снят (как в AZ-WARP 1.5.0); вместо блокировки — подсказка запустить resync после doall.sh. Health отдаёт `antizapret_warp_mode` / `vpn_warp_mode`; флаг `conflict_antizapret_warp` приходит только от старых node agent («Устаревший node agent на узле»).
+- **Конфиг AntiZapret / старый формат WARP** — setup с `ANTIZAPRET_WARP=y|n` показывается как 2/1 и сохраняется обратно в `y`/`n`; режимы 3/4 на таком узле отклоняются с просьбой обновить AntiZapret-VPN. Если старый node agent записал не то значение, панель предупреждает после сохранения.
+- **Документация** — [warper.md](docs/warper.md) (режимы выхода, sing-box, авто-резолв, обновление), [antizapret-config.md](docs/antizapret-config.md) (встроенный WARP 1–4 / 1–2 / `WARP_PROTECTION`).
 
 ### 🐛 Fixed
 
@@ -86,6 +96,9 @@
 - **Подписка / сроки** — срок пользователя и срок профиля используют одну конвенцию даты, поэтому одинаковая видимая дата больше не даёт ложный `409`, а «Синхронизировать с юзером» не сдвигает дедлайн на день назад.
 - **Миграция `users.access_until`** — backfill из максимума сроков клиентов выполняется **однократно** на базу (маркер в `app_settings`); раньше он повторялся при каждом старте панели и мог назначить бессрочному владельцу уже истёкшую дату клиента.
 - **Портал пользователя / unlock** — вручную заблокированный администратором профиль пропускается, ключ применяется к следующему профилю пользователя (ручная блокировка по-прежнему сохраняется).
+- **AZ-WARP / sing-box** — start/stop/restart идут через `warper_api` 1.5.0; `systemctl` остаётся только fallback для старых версий AZ-WARP.
+- **AZ-WARP / статус** — пароль Shadowsocks донора (`slave.password`) больше не уходит в ответ API статуса; бейдж режима в статусе показывает человекочитаемое название.
+- **Конфиг AntiZapret** — числовые значения `ANTIZAPRET_WARP` / `VPN_WARP` (новый AntiZapret-VPN) больше не читаются как `n`.
 
 ### 🗑️ Removed
 
@@ -98,6 +111,8 @@
 - Frontend: `src/lib/accessUntil.test.ts` — разбор `409 access_until_conflict` (ApiError и уже разобранный payload) и конвенция «конец дня» для date-picker.
 - Backend: `test_access_until` — guard конфликта на `wireguard/set-expiry` (409 / `confirm_override` / orphan), сохранение переопределения при неизменном сроке пользователя, разворот `YYYY-MM-DD` в конец дня.
 - Backend: `test_user_subscription` — inherit owner deadline on create (I7), HA replicate on cascade (I8), reconcile error isolation (I9); однократность backfill'а `users.access_until`; `test_client_portal` — redeem пропускает вручную заблокированный профиль.
+- Backend: `test_warper_az15` — `az_warp_mode`, маркер незавершённого обновления, отсутствие конфликта в health, скрытие `slave.password`, Slave `ss://`, VLESS/Hy2/OpenVPN, источники ключа, sing-box API + fallback, авто-резолв, маршруты local/remote адаптера и 503 для старого агента.
+- Backend: `test_antizapret_warp_choice` — чтение/запись 1–4 / 1–2, legacy `y/n` в обе стороны, отказ 3/4 на legacy, предупреждение при расхождении со старым агентом; `test_antizapret_ha_settings` — `WARP_PROTECTION` реплицируется; `test_node_link_errors` — node agent `1.9.0`.
 
 ---
 

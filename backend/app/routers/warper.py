@@ -13,6 +13,7 @@ from app.auth import decode_access_token_username, require_admin
 from app.models import User, UserRole
 from app.schemas import (
     WarperActionResponse,
+    WarperAutoResolveResponse,
     WarperCatalogInstalledResponse,
     WarperCatalogNameRequest,
     WarperCatalogSearchResponse,
@@ -22,21 +23,29 @@ from app.schemas import (
     WarperDomainListsStatus,
     WarperDomainListToggle,
     WarperDomainsResponse,
+    WarperEnableUpdate,
     WarperFullVpnUpdate,
     WarperHealthResponse,
     WarperIpExportUpdate,
     WarperIpRangeCreate,
     WarperIpRangeModeUpdate,
     WarperIpRangesResponse,
+    WarperIpRoutesResponse,
     WarperLogLevelUpdate,
     WarperLogsResponse,
+    WarperModeLinkUpdate,
+    WarperModeOpenVpnUpdate,
     WarperModeResponse,
     WarperModeSlaveUpdate,
     WarperModeWarpUpdate,
     WarperModeWgUpdate,
     WarperMtuUpdate,
+    WarperOvpnConfigRequest,
+    WarperResolveCleanRequest,
     WarperSettingsOptionsResponse,
+    WarperSingboxStatusResponse,
     WarperStatusResponse,
+    WarperSubnetsResponse,
     WarperSubnetUpdate,
     WarperTextContentResponse,
     WarperTextSaveRequest,
@@ -45,7 +54,7 @@ from app.schemas import (
 )
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.chart_timezone import resolve_chart_timezone
-from app.services.warper import enrich_warper_traffic_payload
+from app.services.warper import SINGBOX_ACTIONS, enrich_warper_traffic_payload
 
 router = APIRouter(prefix="/warper", tags=["warper"])
 
@@ -283,9 +292,13 @@ def warper_settings_options(_: User = Depends(require_admin), db: Session = Depe
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     options = adapter.get_warper_settings_options()
+    if not isinstance(options, dict):
+        options = {}
     return WarperSettingsOptionsResponse(
-        warp_keys=options.get("warp_keys", []) if isinstance(options, dict) else [],
-        wg_configs=options.get("wg_configs", []) if isinstance(options, dict) else [],
+        warp_keys=options.get("warp_keys") or [],
+        warp_key_items=options.get("warp_key_items") or [],
+        wg_configs=options.get("wg_configs") or [],
+        ovpn_configs=options.get("ovpn_configs") or [],
         **_node_meta(node),
     )
 
@@ -309,6 +322,9 @@ def warper_settings_mode_slave(
 ):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
+    link = (payload.link or "").strip()
+    if link:
+        return _action_response(adapter.set_warper_mode_slave(link=link), node)
     return _action_response(adapter.set_warper_mode_slave(payload.host, payload.port, payload.key), node)
 
 
@@ -321,6 +337,151 @@ def warper_settings_mode_wg(
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     return _action_response(adapter.set_warper_mode_wg(payload.config_path), node)
+
+
+@router.post("/settings/mode/vless", response_model=WarperActionResponse)
+def warper_settings_mode_vless(
+    payload: WarperModeLinkUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_mode_vless(payload.link.strip()), node)
+
+
+@router.post("/settings/mode/hy2", response_model=WarperActionResponse)
+def warper_settings_mode_hy2(
+    payload: WarperModeLinkUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_mode_hy2(payload.link.strip()), node)
+
+
+@router.post("/settings/mode/openvpn", response_model=WarperActionResponse)
+def warper_settings_mode_openvpn(
+    payload: WarperModeOpenVpnUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(
+        adapter.set_warper_mode_openvpn(payload.config_path, payload.username, payload.password),
+        node,
+    )
+
+
+@router.post("/settings/ovpn/forget", response_model=WarperActionResponse)
+def warper_settings_ovpn_forget(
+    payload: WarperOvpnConfigRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_forget_ovpn_credentials(payload.config_path), node)
+
+
+@router.put("/settings/autopatch", response_model=WarperActionResponse)
+def warper_settings_autopatch(
+    payload: WarperEnableUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_autopatch(enable=payload.enable), node)
+
+
+@router.post("/resync", response_model=WarperActionResponse)
+def warper_resync(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_resync(), node)
+
+
+@router.post("/domains/update-lists", response_model=WarperActionResponse)
+def warper_domains_update_lists(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_update_lists(), node)
+
+
+@router.get("/resolve", response_model=WarperAutoResolveResponse)
+def warper_resolve_get(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    data = adapter.get_warper_auto_resolve()
+    enabled = bool(data.get("enabled")) if isinstance(data, dict) else False
+    return WarperAutoResolveResponse(enabled=enabled, **_node_meta(node))
+
+
+@router.put("/resolve", response_model=WarperActionResponse)
+def warper_resolve_set(
+    payload: WarperEnableUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_auto_resolve(enable=payload.enable), node)
+
+
+@router.post("/resolve/sync", response_model=WarperActionResponse)
+def warper_resolve_sync(
+    force: bool = Query(False),
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_resolve_sync(force=force), node)
+
+
+@router.post("/resolve/clean", response_model=WarperActionResponse)
+def warper_resolve_clean(
+    payload: WarperResolveCleanRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    domain = (payload.domain or "").strip() or None
+    return _action_response(adapter.warper_resolve_clean(domain), node)
+
+
+@router.get("/ip-routes", response_model=WarperIpRoutesResponse)
+def warper_ip_routes(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return WarperIpRoutesResponse(routes=adapter.get_warper_ip_routes(), **_node_meta(node))
+
+
+@router.post("/ip-routes/clear", response_model=WarperActionResponse)
+def warper_ip_routes_clear(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_clear_ip_routes(), node)
+
+
+@router.get("/subnets", response_model=WarperSubnetsResponse)
+def warper_subnets(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return WarperSubnetsResponse(subnets=adapter.get_warper_subnets(), **_node_meta(node))
+
+
+@router.get("/singbox/status", response_model=WarperSingboxStatusResponse)
+def warper_singbox_status(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    data = adapter.get_warper_singbox_status()
+    payload = {k: v for k, v in data.items() if k not in {"node_id", "node_name"}} if isinstance(data, dict) else {}
+    return WarperSingboxStatusResponse(**payload, **_node_meta(node))
 
 
 @router.put("/settings/fullvpn", response_model=WarperActionResponse)
@@ -373,10 +534,8 @@ def warper_singbox_action(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    if action not in {"start", "stop", "restart"}:
-        from fastapi import HTTPException, status
-
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Допустимо: start, stop, restart")
+    if action not in SINGBOX_ACTIONS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Допустимо: {', '.join(SINGBOX_ACTIONS)}")
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     return _action_response(adapter.warper_singbox_action(action), node)

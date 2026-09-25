@@ -103,7 +103,7 @@ export default function StatusSection({
               </Badge>
             )}
             {health?.version && <Badge variant="outline">v{health.version}</Badge>}
-            {outboundMode && <Badge variant="outline">Режим: {outboundMode}</Badge>}
+            {outboundMode && <Badge variant="outline">Режим: {formatOutboundMode(outboundMode)}</Badge>}
           </div>
         )}
 

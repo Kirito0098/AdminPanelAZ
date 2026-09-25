@@ -74,6 +74,12 @@ export function formatOutboundMode(mode: string | null | undefined): string {
       return 'Slave'
     case 'wg':
       return 'WireGuard'
+    case 'vless':
+      return 'VLESS'
+    case 'hy2':
+      return 'Hysteria2'
+    case 'openvpn':
+      return 'OpenVPN'
     default:
       return mode ?? '—'
   }
@@ -81,13 +87,19 @@ export function formatOutboundMode(mode: string | null | undefined): string {
 
 export type WarperTab = 'domains' | 'catalog' | 'ip-ranges' | 'monitoring' | 'settings'
 
-export type WarperOutboundMode = 'warp' | 'slave' | 'wg'
+export type WarperOutboundMode = 'warp' | 'slave' | 'wg' | 'vless' | 'hy2' | 'openvpn'
+
+export const DEFAULT_FAKE_SUBNET = '10.224.0.0/16'
 
 export const WARP_KEY_SOURCES = [
   { value: 'auto', label: 'Автовыбор', description: 'WARP сам выберет доступный ключ' },
-  { value: 'system', label: 'AntiZapret', description: 'Ключи из настроек AntiZapret' },
+  { value: 'system', label: 'AntiZapret', description: 'Ключи встроенного WARP AntiZapret (warp-antizapret / warp-vpn)' },
+  { value: 'wgcf', label: 'wgcf (локальный)', description: 'wgcf-profile.conf в каталоге AZ-WARP' },
+  { value: 'root', label: 'wgcf в /root', description: '/root/wgcf-profile.conf' },
   { value: 'generate', label: 'Новый ключ', description: 'Сгенерировать новый WARP-ключ' },
 ] as const
+
+export type WarperWarpKeySource = (typeof WARP_KEY_SOURCES)[number]['value']
 
 export const OUTBOUND_MODE_OPTIONS: Array<{
   id: WarperOutboundMode
@@ -102,17 +114,44 @@ export const OUTBOUND_MODE_OPTIONS: Array<{
   {
     id: 'slave',
     label: 'Slave',
-    description: 'Выход через донор-сервер Shadowsocks',
+    description: 'Свой донор warperslave (ссылка ss:// или host/port/key)',
   },
   {
     id: 'wg',
     label: 'WireGuard',
     description: 'Собственный WG-конфиг на узле',
   },
+  {
+    id: 'vless',
+    label: 'VLESS',
+    description: 'VLESS / Reality по ссылке vless://',
+  },
+  {
+    id: 'hy2',
+    label: 'Hysteria2',
+    description: 'Hysteria2 по ссылке hy2://',
+  },
+  {
+    id: 'openvpn',
+    label: 'OpenVPN',
+    description: 'Сторонний сервер по файлу .ovpn на узле',
+  },
 ]
 
 export function normalizeOutboundMode(value: unknown): WarperOutboundMode | null {
   const mode = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  if (mode === 'warp' || mode === 'slave' || mode === 'wg') return mode
-  return null
+  return OUTBOUND_MODE_OPTIONS.some((option) => option.id === mode) ? (mode as WarperOutboundMode) : null
+}
+
+export function formatAzWarpMode(mode: string | null | undefined): string {
+  switch (mode) {
+    case 'all':
+      return 'весь трафик'
+    case 'selective':
+      return 'выборочно (домены)'
+    case 'off':
+      return 'выключен'
+    default:
+      return '—'
+  }
 }

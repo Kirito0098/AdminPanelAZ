@@ -1893,14 +1893,20 @@ export interface TrafficClientSessions {
   nodes?: TrafficSessionNodeSummary[] | null
 }
 
+export interface AntizapretSettingOption {
+  value: string
+  label: string
+}
+
 export interface AntizapretSettingField {
   key: string
   html_id: string
-  type: 'flag' | 'string'
+  type: 'flag' | 'string' | 'choice'
   env: string
   param_label: string
   title: string
   description: string
+  options?: AntizapretSettingOption[] | null
 }
 
 export interface NodeRemoteHostsResponse {
@@ -1973,6 +1979,9 @@ export interface WarperHealthResponse {
   active: boolean
   version?: string | null
   conflict_antizapret_warp: boolean
+  antizapret_warp_mode?: WarperAzWarpMode | null
+  vpn_warp_mode?: WarperAzWarpMode | null
+  update_pending?: boolean
   health_error?: string | null
   warper_bin?: boolean | null
   warper_script?: boolean | null
@@ -2170,6 +2179,7 @@ export interface WarperUpdatesCheckResponse {
   current?: string | null
   remote?: string | null
   update_available: boolean
+  update_pending?: boolean
   error?: string | null
   message?: string | null
   node_id?: number | null
@@ -2179,8 +2189,53 @@ export interface WarperUpdatesCheckResponse {
 
 export type WarperUpdateStreamEvent =
   | { event: 'log'; line: string }
-  | { event: 'done'; return_code?: number; success?: boolean }
+  | { event: 'done'; return_code?: number; success?: boolean; update_pending?: boolean }
   | { event: 'error'; detail?: string }
+
+export type WarperAzWarpMode = 'off' | 'all' | 'selective'
+
+export interface WarperWarpKeyItem {
+  source: string
+  path: string
+  address: string
+  is_current: boolean
+}
+
+export interface WarperOvpnConfig {
+  path: string
+  server: string
+  needs_auth: boolean
+  saved_user: string
+}
+
+export interface WarperAutoResolveResponse {
+  enabled: boolean
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperIpRoutesResponse {
+  routes: string[]
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperSubnetsResponse {
+  subnets: Record<string, string>
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperSingboxStatusResponse {
+  active: boolean
+  enabled: boolean
+  state?: string | null
+  version?: string | null
+  log_level?: string | null
+  mtu?: number | null
+  node_id?: number | null
+  node_name?: string | null
+}
 
 export interface WarperIpRangesResponse {
   ranges: Array<string | Record<string, unknown>>
@@ -2215,7 +2270,9 @@ export interface WarperTextContentResponse {
 
 export interface WarperSettingsOptionsResponse {
   warp_keys: string[]
+  warp_key_items?: WarperWarpKeyItem[]
   wg_configs: string[]
+  ovpn_configs?: WarperOvpnConfig[]
   node_id?: number | null
   node_name?: string | null
 }

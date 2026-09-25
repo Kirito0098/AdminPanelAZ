@@ -207,8 +207,8 @@ export default function Warper() {
             <div className="tg-mini-feedback is-error" role="alert">
               <AlertTriangle size={18} className="shrink-0" aria-hidden />
               <p className="text-sm leading-snug">
-                <code className="text-xs">ANTIZAPRET_WARP=y</code> конфликтует с AZ-WARP. Отключите встроенный WARP в
-                конфиге AntiZapret в веб-панели.
+                Устаревший node agent блокирует AZ-WARP при <code className="text-xs">ANTIZAPRET_WARP=y</code>.
+                Обновите агент узла в веб-панели.
               </p>
             </div>
           )}

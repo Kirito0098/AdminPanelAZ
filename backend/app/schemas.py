@@ -1629,14 +1629,20 @@ class RoutingOverview(BaseModel):
     node_name: str | None = None
 
 
+class AntizapretSettingOption(BaseModel):
+    value: str
+    label: str
+
+
 class AntizapretSettingFieldSchema(BaseModel):
     key: str
     html_id: str
-    type: Literal["flag", "string"]
+    type: Literal["flag", "string", "choice"]
     env: str
     param_label: str = ""
     title: str = ""
     description: str = ""
+    options: list[AntizapretSettingOption] | None = None
 
 
 class AntizapretSettingsResponse(BaseModel):
@@ -1661,6 +1667,9 @@ class WarperHealthResponse(BaseModel):
     active: bool = False
     version: str | None = None
     conflict_antizapret_warp: bool = False
+    antizapret_warp_mode: str | None = None
+    vpn_warp_mode: str | None = None
+    update_pending: bool = False
     health_error: str | None = None
     warper_bin: bool | None = None
     warper_script: bool | None = None
@@ -1783,7 +1792,9 @@ class WarperTextSaveRequest(BaseModel):
 
 class WarperSettingsOptionsResponse(BaseModel):
     warp_keys: list[str] = Field(default_factory=list)
+    warp_key_items: list[dict] = Field(default_factory=list)
     wg_configs: list[str] = Field(default_factory=list)
+    ovpn_configs: list[dict] = Field(default_factory=list)
     node_id: int | None = None
     node_name: str | None = None
 
@@ -1793,17 +1804,79 @@ class WarperModeWarpUpdate(BaseModel):
 
 
 class WarperModeSlaveUpdate(BaseModel):
-    host: str = Field(..., min_length=1)
-    port: int = Field(..., ge=1, le=65535)
-    key: str = Field(..., min_length=1)
+    host: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    key: str | None = None
+    link: str | None = None
+
+    @model_validator(mode="after")
+    def _link_or_host(self) -> "WarperModeSlaveUpdate":
+        if (self.link or "").strip():
+            return self
+        if not (self.host or "").strip() or not (self.key or "").strip() or self.port is None:
+            raise ValueError("Укажите ссылку ss:// или host, port и key")
+        return self
 
 
 class WarperModeWgUpdate(BaseModel):
     config_path: str = Field(..., min_length=1)
 
 
+class WarperModeLinkUpdate(BaseModel):
+    link: str = Field(..., min_length=1, max_length=4096)
+
+
+class WarperModeOpenVpnUpdate(BaseModel):
+    config_path: str = Field(..., min_length=1)
+    username: str | None = None
+    password: str | None = None
+
+
+class WarperOvpnConfigRequest(BaseModel):
+    config_path: str = Field(..., min_length=1)
+
+
 class WarperFullVpnUpdate(BaseModel):
     enable: bool
+
+
+class WarperEnableUpdate(BaseModel):
+    enable: bool
+
+
+class WarperResolveCleanRequest(BaseModel):
+    domain: str | None = None
+
+
+class WarperAutoResolveResponse(BaseModel):
+    enabled: bool = False
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperIpRoutesResponse(BaseModel):
+    routes: list[str] = Field(default_factory=list)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperSubnetsResponse(BaseModel):
+    subnets: dict[str, str] = Field(default_factory=dict)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperSingboxStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    active: bool = False
+    enabled: bool = False
+    state: str | None = None
+    version: str | None = None
+    log_level: str | None = None
+    mtu: int | None = None
+    node_id: int | None = None
+    node_name: str | None = None
 
 
 class WarperSubnetUpdate(BaseModel):
@@ -1840,6 +1913,7 @@ class WarperUpdatesCheckResponse(BaseModel):
     current: str | None = None
     remote: str | None = None
     update_available: bool = False
+    update_pending: bool = False
     error: str | None = None
     message: str | None = None
     node_id: int | None = None

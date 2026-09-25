@@ -19,6 +19,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import Spinner from '@/components/ui/Spinner'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -119,9 +120,10 @@ const FIELD_SECTIONS: {
   },
   {
     title: 'Cloudflare WARP',
-    description: 'Отправка трафика через Cloudflare WARP',
+    description:
+      'Встроенный WARP AntiZapret-VPN (не AZ-WARP). Старый формат y/n в setup поддерживает только None / All.',
     icon: Cloud,
-    keys: ['ANTIZAPRET_WARP', 'VPN_WARP'],
+    keys: ['ANTIZAPRET_WARP', 'VPN_WARP', 'WARP_PROTECTION'],
   },
   {
     title: 'AdBlock',
@@ -155,6 +157,16 @@ function fieldDisplay(field: AntizapretSettingField) {
 
 function isFlagOn(value: string | undefined): boolean {
   return value?.toLowerCase() === 'y'
+}
+
+/** Choice-поля WARP: «1» (None) — выключено, остальные значения — включено. */
+function isFieldOn(field: AntizapretSettingField, value: string | undefined): boolean {
+  if (field.type === 'choice') return Boolean(value) && value !== '1'
+  return field.type === 'flag' && isFlagOn(value)
+}
+
+function isToggleField(field: AntizapretSettingField): boolean {
+  return field.type === 'flag' || field.type === 'choice'
 }
 
 function envRowValue(rows: VpnNetworkSettings['env_rows'], labelPrefix: string): string {
@@ -196,8 +208,8 @@ function indexSectionsByTitle(sections: ReturnType<typeof groupSchema>) {
 }
 
 function sectionEnabledCount(fields: AntizapretSettingField[], draft: Record<string, string>) {
-  const flags = fields.filter((field) => field.type === 'flag')
-  const enabled = flags.filter((field) => isFlagOn(draft[field.key])).length
+  const flags = fields.filter(isToggleField)
+  const enabled = flags.filter((field) => isFieldOn(field, draft[field.key])).length
   return { enabled, total: flags.length }
 }
 
@@ -307,6 +319,68 @@ function StringSettingRow({
   )
 }
 
+function ChoiceSettingRow({
+  field,
+  value,
+  dirty,
+  disabled,
+  onChange,
+}: {
+  field: AntizapretSettingField
+  value: string
+  dirty: boolean
+  disabled: boolean
+  onChange: (value: string) => void
+}) {
+  const id = field.html_id || field.key
+  const display = fieldDisplay(field)
+  const options = field.options ?? []
+  const known = options.some((opt) => opt.value === value)
+
+  return (
+    <div className={cn('space-y-2 px-4 py-3.5 sm:px-5', dirty && 'bg-amber-500/5')}>
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Label htmlFor={id} className="font-medium leading-snug">
+            {display.title}
+          </Label>
+          {dirty && (
+            <Badge
+              variant="outline"
+              className="border-amber-500/40 px-1.5 py-0 text-[10px] text-amber-700 dark:text-amber-300"
+            >
+              изменено
+            </Badge>
+          )}
+        </div>
+        {display.description && (
+          <p className="text-xs leading-relaxed text-muted-foreground">{display.description}</p>
+        )}
+        <p className="font-mono text-[10px] text-muted-foreground/70">
+          {field.param_label || field.env}
+        </p>
+      </div>
+      <Select value={value} onValueChange={onChange} disabled={disabled}>
+        <SelectTrigger id={id} className="w-full">
+          <SelectValue placeholder={field.env} />
+        </SelectTrigger>
+        <SelectContent>
+          {!known && value && (
+            <SelectItem value={value} disabled>
+              {value} — нестандартное значение
+            </SelectItem>
+          )}
+          {options.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.value}) {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
 type GroupedSection = ReturnType<typeof groupSchema>[number]
 
 function ConfigSectionCard({
@@ -372,6 +446,15 @@ function ConfigSectionCard({
           {section.fields.map((field) =>
             field.type === 'flag' ? (
               <FlagSettingRow
+                key={field.key}
+                field={field}
+                value={draft[field.key] ?? ''}
+                dirty={dirtySet.has(field.key)}
+                disabled={disabled}
+                onChange={(value) => onDraftChange(field.key, value)}
+              />
+            ) : field.type === 'choice' ? (
+              <ChoiceSettingRow
                 key={field.key}
                 field={field}
                 value={draft[field.key] ?? ''}
@@ -782,7 +865,7 @@ export default function AntizapretConfigTab() {
   }
 
   const enabledFlags = useMemo(
-    () => schema.filter((field) => field.type === 'flag' && isFlagOn(draft[field.key])).length,
+    () => schema.filter((field) => isFieldOn(field, draft[field.key])).length,
     [schema, draft],
   )
 

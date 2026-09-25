@@ -79,7 +79,7 @@ export async function getWarperSettingsOptions() {
   return apiFetch<import('../types').WarperSettingsOptionsResponse>('/warper/settings/options')
 }
 
-export async function setWarperModeWarp(keySource?: 'system' | 'generate' | null) {
+export async function setWarperModeWarp(keySource?: 'system' | 'wgcf' | 'root' | 'generate' | null) {
   return apiFetch<import('../types').WarperActionResponse>('/warper/settings/mode/warp', {
     method: 'POST',
     body: JSON.stringify({ key_source: keySource ?? null }),
@@ -93,8 +93,43 @@ export async function setWarperModeSlave(host: string, port: number, key: string
   })
 }
 
+export async function setWarperModeSlaveLink(link: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/mode/slave', {
+    method: 'POST',
+    body: JSON.stringify({ link }),
+  })
+}
+
 export async function setWarperModeWg(configPath: string) {
   return apiFetch<import('../types').WarperActionResponse>('/warper/settings/mode/wg', {
+    method: 'POST',
+    body: JSON.stringify({ config_path: configPath }),
+  })
+}
+
+export async function setWarperModeVless(link: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/mode/vless', {
+    method: 'POST',
+    body: JSON.stringify({ link }),
+  })
+}
+
+export async function setWarperModeHy2(link: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/mode/hy2', {
+    method: 'POST',
+    body: JSON.stringify({ link }),
+  })
+}
+
+export async function setWarperModeOpenVpn(configPath: string, username?: string | null, password?: string | null) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/mode/openvpn', {
+    method: 'POST',
+    body: JSON.stringify({ config_path: configPath, username: username || null, password: password || null }),
+  })
+}
+
+export async function forgetWarperOvpnCredentials(configPath: string) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/ovpn/forget', {
     method: 'POST',
     body: JSON.stringify({ config_path: configPath }),
   })
@@ -105,6 +140,61 @@ export async function setWarperFullVpn(enable: boolean) {
     method: 'PUT',
     body: JSON.stringify({ enable }),
   })
+}
+
+export async function setWarperAutopatch(enable: boolean) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/settings/autopatch', {
+    method: 'PUT',
+    body: JSON.stringify({ enable }),
+  })
+}
+
+export async function postWarperResync() {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/resync', { method: 'POST' })
+}
+
+export async function postWarperUpdateLists() {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/domains/update-lists', { method: 'POST' })
+}
+
+export async function getWarperAutoResolve() {
+  return apiFetch<import('../types').WarperAutoResolveResponse>('/warper/resolve')
+}
+
+export async function setWarperAutoResolve(enable: boolean) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/resolve', {
+    method: 'PUT',
+    body: JSON.stringify({ enable }),
+  })
+}
+
+export async function postWarperResolveSync(force = false) {
+  return apiFetch<import('../types').WarperActionResponse>(`/warper/resolve/sync${force ? '?force=true' : ''}`, {
+    method: 'POST',
+  })
+}
+
+export async function postWarperResolveClean(domain?: string | null) {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/resolve/clean', {
+    method: 'POST',
+    body: JSON.stringify({ domain: domain?.trim() || null }),
+  })
+}
+
+export async function getWarperIpRoutes() {
+  return apiFetch<import('../types').WarperIpRoutesResponse>('/warper/ip-routes')
+}
+
+export async function postWarperClearIpRoutes() {
+  return apiFetch<import('../types').WarperActionResponse>('/warper/ip-routes/clear', { method: 'POST' })
+}
+
+export async function getWarperSubnets() {
+  return apiFetch<import('../types').WarperSubnetsResponse>('/warper/subnets')
+}
+
+export async function getWarperSingboxStatus() {
+  return apiFetch<import('../types').WarperSingboxStatusResponse>('/warper/singbox/status')
 }
 
 export async function setWarperSubnet(subnet: string) {
@@ -128,7 +218,7 @@ export async function setWarperLogLevel(level: string) {
   })
 }
 
-export async function postWarperSingbox(action: 'start' | 'stop' | 'restart') {
+export async function postWarperSingbox(action: 'start' | 'stop' | 'restart' | 'enable' | 'disable' | 'upgrade') {
   return apiFetch<import('../types').WarperActionResponse>(`/warper/singbox/${action}`, { method: 'POST' })
 }
 

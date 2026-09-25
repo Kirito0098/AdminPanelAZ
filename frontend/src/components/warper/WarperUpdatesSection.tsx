@@ -55,17 +55,21 @@ export default function WarperUpdatesSection({ health }: WarperUpdatesSectionPro
     }
   }, [disabled, load, activeNode?.id])
 
+  const pending = Boolean(info?.update_pending)
+
   const handleUpdate = () => {
     confirm({
-      title: 'Обновить AZ-WARP на узле?',
-      description: 'Будет загружена новая версия WARPER с GitHub. Процесс может занять несколько минут.',
+      title: pending ? 'Завершить обновление AZ-WARP?' : 'Обновить AZ-WARP на узле?',
+      description: pending
+        ? 'Повторный запуск `warper update` уже новой версией доустановит sing-box, модули Python и таймеры.'
+        : 'Будет загружена новая версия WARPER с GitHub. Процесс может занять несколько минут.',
       alert: {
         variant: 'warning',
         title: 'Внимание',
         children:
           'На время обновления AZ-WARP может быть недоступен. Не закрывайте страницу до завершения — лог отображается ниже.',
       },
-      confirmLabel: 'Обновить AZ-WARP',
+      confirmLabel: pending ? 'Завершить обновление' : 'Обновить AZ-WARP',
       destructive: true,
       onConfirm: async () => {
         closeStream()
@@ -79,7 +83,9 @@ export default function WarperUpdatesSection({ health }: WarperUpdatesSectionPro
             if (event.event === 'done') {
               closeStream()
               setUpdating(false)
-              if (event.success) {
+              if (event.success && event.update_pending) {
+                notifyError('Файлы обновлены старой версией AZ-WARP — запустите обновление ещё раз, чтобы его завершить')
+              } else if (event.success) {
                 success('AZ-WARP успешно обновлён')
               } else {
                 notifyError(`Обновление завершилось с кодом ${event.return_code ?? '—'}`)
@@ -124,7 +130,9 @@ export default function WarperUpdatesSection({ health }: WarperUpdatesSectionPro
               <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Проверить
             </Button>
-            {info?.update_available ? (
+            {pending ? (
+              <Badge variant="warning">Обновление не завершено</Badge>
+            ) : info?.update_available ? (
               <Badge variant="destructive">
                 Доступно {info.remote ?? 'новая версия'}
               </Badge>
@@ -156,7 +164,7 @@ export default function WarperUpdatesSection({ health }: WarperUpdatesSectionPro
 
           {info?.update_available && (
             <Button variant="destructive" size="sm" disabled={disabled || updating} onClick={handleUpdate}>
-              {updating ? 'Обновление...' : 'Установить обновление'}
+              {updating ? 'Обновление...' : pending ? 'Завершить обновление' : 'Установить обновление'}
             </Button>
           )}
 

@@ -35,9 +35,82 @@ def normalize_flag(v: Any) -> str:
     return "y" if s in ("y", "yes", "true", "1", "on") else "n"
 
 
-def build_schema() -> list[dict[str, str]]:
-    return [
-        {
+_FLAG_TRUE = frozenset({"y", "yes", "true", "on"})
+_FLAG_FALSE = frozenset({"n", "no", "false", "off"})
+
+
+def _choice_values(param: Mapping[str, Any]) -> list[str]:
+    return [str(opt["value"]) for opt in param.get("options", [])]
+
+
+def read_choice_value(param: Mapping[str, Any], raw: str | None) -> str:
+    """Setup value of a choice param; legacy y/n is shown as its numeric equivalent."""
+    s = (raw or "").strip().lower()
+    if not s:
+        return str(param["default"])
+    return str(param.get("legacy_flag", {}).get(s, s))
+
+
+def normalize_choice(param: Mapping[str, Any], value: Any, *, legacy_format: bool = False) -> str:
+    """Validate a choice value for writing; in legacy (y/n) setups write y/n back."""
+    env = param["env"]
+    legacy_map: dict[str, str] = param.get("legacy_flag", {})
+    if isinstance(value, bool):
+        s = "y" if value else "n"
+    else:
+        s = str(value).strip().lower()
+    if s in _FLAG_TRUE:
+        s = legacy_map.get("y", s)
+    elif s in _FLAG_FALSE:
+        s = legacy_map.get("n", s)
+    allowed = _choice_values(param)
+    if s not in allowed:
+        raise ValueError(f"{env}: недопустимое значение «{value}» (допустимо: {', '.join(allowed)})")
+    if legacy_format and legacy_map:
+        reverse = {num: flag for flag, num in legacy_map.items()}
+        if s not in reverse:
+            raise ValueError(
+                f"{env}={s} не поддерживается установленной версией AntiZapret-VPN "
+                "(в setup старый формат y/n). Обновите AntiZapret-VPN или выберите None / All."
+            )
+        return reverse[s]
+    return s
+
+
+def normalize_choice_settings(settings: Mapping[str, str]) -> dict[str, str]:
+    """Map legacy y/n of choice params (e.g. from an old node agent) to numeric values."""
+    result = dict(settings)
+    for p in ANTIZAPRET_PARAMS:
+        if p["type"] == "choice" and p["key"] in result:
+            result[p["key"]] = read_choice_value(p, result[p["key"]])
+    return result
+
+
+def choice_write_mismatch_warnings(requested: Mapping[str, Any], actual: Mapping[str, str]) -> list[str]:
+    """Warn when a node stored a different choice value than requested (old node agent: 2/3/4 → n)."""
+    warnings: list[str] = []
+    actual = normalize_choice_settings(actual)
+    for p in ANTIZAPRET_PARAMS:
+        key = p["key"]
+        if p["type"] != "choice" or key not in requested:
+            continue
+        try:
+            wanted = normalize_choice(p, requested[key])
+        except ValueError:
+            continue
+        got = actual.get(key)
+        if got is not None and got != wanted:
+            warnings.append(
+                f"{p['env']}: на узле записано «{got}» вместо «{wanted}». "
+                "Обновите node agent панели на узле и сохраните ещё раз."
+            )
+    return warnings
+
+
+def build_schema() -> list[dict[str, Any]]:
+    schema: list[dict[str, Any]] = []
+    for p in ANTIZAPRET_PARAMS:
+        item: dict[str, Any] = {
             "key": p["key"],
             "html_id": p["html_id"],
             "type": p["type"],
@@ -46,8 +119,10 @@ def build_schema() -> list[dict[str, str]]:
             "title": p.get("title", ""),
             "description": p.get("description", ""),
         }
-        for p in ANTIZAPRET_PARAMS
-    ]
+        if p["type"] == "choice":
+            item["options"] = [dict(opt) for opt in p.get("options", [])]
+        schema.append(item)
+    return schema
 
 
 def read_setup_env_value(setup_path: Path, env_name: str, default: str = "") -> str:
@@ -124,6 +199,9 @@ def read_antizapret_settings(setup_path: Path) -> dict[str, str]:
         if typ == "string":
             m = re.search(rf"^{re.escape(env)}=(.+)$", content, re.M | re.I)
             settings[key] = m.group(1).strip() if m else default
+        elif typ == "choice":
+            m = re.search(rf"^{re.escape(env)}=([^\s#]*)", content, re.M | re.I)
+            settings[key] = read_choice_value(p, m.group(1) if m else None)
         else:
             m = re.search(rf"^{re.escape(env)}=([yn])$", content, re.M | re.I)
             settings[key] = m.group(1).lower() if m else default
@@ -148,6 +226,11 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
     if "block_ads" in new_settings and "ANTIZAPRET_ADBLOCK" not in new_settings:
         new_settings = {**new_settings, "ANTIZAPRET_ADBLOCK": new_settings["block_ads"]}
 
+    try:
+        content = setup_path.read_text(encoding="utf-8")
+    except OSError:
+        content = ""
+
     desired: dict[str, str] = {}
     for p in ANTIZAPRET_PARAMS:
         key = p["key"]
@@ -155,7 +238,13 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
             continue
         v = new_settings[key]
         env = p["env"]
-        desired[env] = normalize_flag(v) if p["type"] == "flag" else str(v).strip()
+        if p["type"] == "flag":
+            desired[env] = normalize_flag(v)
+        elif p["type"] == "choice":
+            legacy = re.search(rf"^{re.escape(env)}=[yn]\s*(#.*)?$", content, re.M | re.I) is not None
+            desired[env] = normalize_choice(p, v, legacy_format=legacy)
+        else:
+            desired[env] = str(v).strip()
 
     if not desired:
         return {
@@ -166,10 +255,7 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
             "warnings": [],
         }
 
-    try:
-        lines = setup_path.read_text(encoding="utf-8").splitlines(keepends=True)
-    except OSError:
-        lines = []
+    lines = content.splitlines(keepends=True)
 
     new_lines: list[str] = []
     found: set[str] = set()

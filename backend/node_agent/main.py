@@ -708,6 +708,8 @@ def routing_antizapret_settings_put(payload: dict, _: None = Depends(verify_api_
         return update_antizapret_settings(ANTIZAPRET_PATH / "setup", filter_known_keys(payload))
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав на запись") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 class WarperDomainRequest(BaseModel):
@@ -751,13 +753,32 @@ class WarperModeWarpRequest(BaseModel):
 
 
 class WarperModeSlaveRequest(BaseModel):
-    host: str = Field(..., min_length=1)
-    port: int = Field(..., ge=1, le=65535)
-    key: str = Field(..., min_length=1)
+    host: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    key: str | None = None
+    link: str | None = None
 
 
 class WarperModeWgRequest(BaseModel):
     config_path: str = Field(..., min_length=1)
+
+
+class WarperModeLinkRequest(BaseModel):
+    link: str = Field(..., min_length=1)
+
+
+class WarperModeOpenVpnRequest(BaseModel):
+    config_path: str = Field(..., min_length=1)
+    username: str | None = None
+    password: str | None = None
+
+
+class WarperOvpnForgetRequest(BaseModel):
+    config_path: str = Field(..., min_length=1)
+
+
+class WarperResolveCleanRequest(BaseModel):
+    domain: str | None = None
 
 
 class WarperFullVpnRequest(BaseModel):
@@ -1071,7 +1092,9 @@ def warper_settings_mode(_: None = Depends(verify_api_key)):
 def warper_settings_options(_: None = Depends(verify_api_key)):
     return {
         "warp_keys": run_warper_action("list_warp_keys"),
+        "warp_key_items": run_warper_action("list_warp_key_items"),
         "wg_configs": run_warper_action("list_wg_configs"),
+        "ovpn_configs": run_warper_action("list_ovpn_configs"),
     }
 
 
@@ -1082,7 +1105,13 @@ def warper_settings_mode_warp(payload: WarperModeWarpRequest, _: None = Depends(
 
 @app.post("/warper/settings/mode/slave")
 def warper_settings_mode_slave(payload: WarperModeSlaveRequest, _: None = Depends(verify_api_key)):
-    return run_warper_action("set_mode_slave", host=payload.host, port=payload.port, key=payload.key)
+    return run_warper_action(
+        "set_mode_slave",
+        host=payload.host,
+        port=payload.port,
+        key=payload.key,
+        link=payload.link,
+    )
 
 
 @app.post("/warper/settings/mode/wg")
@@ -1090,9 +1119,89 @@ def warper_settings_mode_wg(payload: WarperModeWgRequest, _: None = Depends(veri
     return run_warper_action("set_mode_wg", config_path=payload.config_path)
 
 
+@app.post("/warper/settings/mode/vless")
+def warper_settings_mode_vless(payload: WarperModeLinkRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_mode_vless", link=payload.link)
+
+
+@app.post("/warper/settings/mode/hy2")
+def warper_settings_mode_hy2(payload: WarperModeLinkRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_mode_hy2", link=payload.link)
+
+
+@app.post("/warper/settings/mode/openvpn")
+def warper_settings_mode_openvpn(payload: WarperModeOpenVpnRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action(
+        "set_mode_openvpn",
+        config_path=payload.config_path,
+        username=payload.username,
+        password=payload.password,
+    )
+
+
+@app.post("/warper/settings/ovpn/forget")
+def warper_settings_ovpn_forget(payload: WarperOvpnForgetRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("forget_ovpn_credentials", config_path=payload.config_path)
+
+
 @app.put("/warper/settings/fullvpn")
 def warper_settings_fullvpn(payload: WarperFullVpnRequest, _: None = Depends(verify_api_key)):
     return run_warper_action("set_fullvpn", enable=payload.enable)
+
+
+@app.put("/warper/settings/autopatch")
+def warper_settings_autopatch(payload: WarperFullVpnRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_autopatch", enable=payload.enable)
+
+
+@app.post("/warper/resync")
+def warper_resync(_: None = Depends(verify_api_key)):
+    return run_warper_action("resync")
+
+
+@app.post("/warper/domains/update-lists")
+def warper_domains_update_lists(_: None = Depends(verify_api_key)):
+    return run_warper_action("update_lists")
+
+
+@app.get("/warper/resolve")
+def warper_resolve_get(_: None = Depends(verify_api_key)):
+    return run_warper_action("get_auto_resolve")
+
+
+@app.put("/warper/resolve")
+def warper_resolve_set(payload: WarperFullVpnRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_auto_resolve", enable=payload.enable)
+
+
+@app.post("/warper/resolve/sync")
+def warper_resolve_sync(force: bool = False, _: None = Depends(verify_api_key)):
+    return run_warper_action("resolve_sync", force=force)
+
+
+@app.post("/warper/resolve/clean")
+def warper_resolve_clean(payload: WarperResolveCleanRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("resolve_clean", domain=payload.domain)
+
+
+@app.get("/warper/ip-routes")
+def warper_ip_routes(_: None = Depends(verify_api_key)):
+    return {"routes": run_warper_action("list_ip_routes")}
+
+
+@app.post("/warper/ip-routes/clear")
+def warper_ip_routes_clear(_: None = Depends(verify_api_key)):
+    return run_warper_action("clear_ip_routes")
+
+
+@app.get("/warper/subnets")
+def warper_subnets(_: None = Depends(verify_api_key)):
+    return {"subnets": run_warper_action("get_subnets")}
+
+
+@app.get("/warper/singbox/status")
+def warper_singbox_status(_: None = Depends(verify_api_key)):
+    return run_warper_action("singbox_status")
 
 
 @app.put("/warper/settings/subnet")
@@ -1112,8 +1221,6 @@ def warper_settings_log_level(payload: WarperLogLevelRequest, _: None = Depends(
 
 @app.post("/warper/singbox/{action}")
 def warper_singbox_action(action: str, _: None = Depends(verify_api_key)):
-    if action not in {"start", "stop", "restart"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Допустимо: start, stop, restart")
     return run_warper_action("singbox_action", action=action)
 
 

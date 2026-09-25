@@ -22,10 +22,28 @@
 |--------|-------|
 | **Маршрутизация трафика** | Discord, Cloudflare, Telegram и другие сервисы — через VPN или напрямую |
 | **Резервные порты** | Альтернативные порты OpenVPN и WireGuard для обхода блокировок |
-| **WARP** | Настройки Cloudflare WARP (подробнее — [warper.md](warper.md)) |
+| **Cloudflare WARP** | Встроенный WARP AntiZapret-VPN: режимы `ANTIZAPRET_WARP` / `VPN_WARP` и `WARP_PROTECTION` (см. ниже; AZ-WARP — [warper.md](warper.md)) |
 | **Безопасность сервера** | Защита самого VPN-сервера |
 | **Адреса подключения** | `OPENVPN_HOST` / `WIREGUARD_HOST` из setup. **Список remote OpenVPN** и **OpenVPN multihome** — вкладка **OpenVPN (панель)** |
 | **Списки и хосты** | Связь с файлами доменов и IP (подробнее — [edit-files.md](edit-files.md)) |
+
+---
+
+## Встроенный Cloudflare WARP
+
+Новые версии AntiZapret-VPN хранят режим WARP числом, а не флагом `y/n`:
+
+| Параметр | Значения |
+|----------|----------|
+| `ANTIZAPRET_WARP` (antizapret-*) | `1` None — не использовать · `2` All — весь трафик · `3` Domain — домены AntiZapret и `config/include-warp-hosts.txt` · `4` Custom — только `include-warp-hosts.txt` (в обоих случаях минус `exclude-warp-hosts.txt`) |
+| `VPN_WARP` (vpn-*) | `1` None · `2` All |
+| `WARP_PROTECTION` | `y` — блокировать трафик AntiZapret и полного VPN, если WARP не подключился; `n` — выпускать напрямую |
+
+**Старый формат `y/n`.** Если в `setup` узла ещё `ANTIZAPRET_WARP=y|n` (AntiZapret-VPN до перехода на номера), панель показывает `y` как `2` (All), `n` как `1` (None) и при сохранении пишет обратно `y`/`n`. Режимы `3`/`4` на таком узле сохранить нельзя — панель ответит ошибкой с просьбой обновить AntiZapret-VPN. `WARP_PROTECTION` старые версии игнорируют.
+
+Старый node agent (до 1.9.0) не понимает числовые значения и запишет `n`. Панель после сохранения перечитывает setup и покажет предупреждение — обновите агент на узле и сохраните ещё раз.
+
+Встроенный WARP AntiZapret и AZ-WARP с AZ-WARP 1.5.0 работают вместе; после смены режима и doall.sh нажмите **AZ-WARP → Настройки → Обслуживание → Запустить resync**, чтобы AZ-WARP перестроил правила (подробнее — [warper.md](warper.md)).
 
 ---
 
@@ -168,12 +186,12 @@ API: `GET/PUT /api/openvpn-buffer-guard/settings`, `GET /api/openvpn-buffer-guar
 
 | Реплицируется | Не реплицируется |
 |---------------|------------------|
-| Все ключи из `ANTIZAPRET_PARAMS`, включая `ANTIZAPRET_WARP`, `VPN_WARP`, `openvpn_host` → `OPENVPN_HOST`, `wireguard_host` → `WIREGUARD_HOST` (HA: `shared_domain` / `shared_domain_wireguard`) | Сейчас пусто (`ANTIZAPRET_HA_SETTING_EXCLUDE = {}`) |
+| Все ключи из `ANTIZAPRET_PARAMS`, включая `ANTIZAPRET_WARP`, `VPN_WARP`, `WARP_PROTECTION`, `openvpn_host` → `OPENVPN_HOST`, `wireguard_host` → `WIREGUARD_HOST` (HA: `shared_domain` / `shared_domain_wireguard`) | Сейчас пусто (`ANTIZAPRET_HA_SETTING_EXCLUDE = {}`) |
 | Partial update: только поля из текущего PUT | Строки вне `ANTIZAPRET_PARAMS` (напр. `OPENVPN_LOG`) — panel API их не шлёт |
 
 Константа в коде: `ANTIZAPRET_HA_SETTING_EXCLUDE` (`antizapret_params.py`).
 
-**`ANTIZAPRET_WARP` / `VPN_WARP`** — встроенные флаги Cloudflare WARP в setup AntiZapret (не AZ-WARP / Warper). Они **реплицируются** вместе с остальным конфигом, чтобы оба узла вели трафик одинаково. Node-local остаётся файл `warper-include-ips.txt` (см. [warper.md](warper.md), `CONFIG_FINGERPRINT_EXCLUDE`).
+**`ANTIZAPRET_WARP` / `VPN_WARP` / `WARP_PROTECTION`** — встроенный Cloudflare WARP в setup AntiZapret (не AZ-WARP / Warper). Если реплика ещё на формате `y/n`, режимы `3`/`4` с primary на неё не запишутся (ошибка в журнале синхронизации) — обновите AntiZapret-VPN на реплике. Они **реплицируются** вместе с остальным конфигом, чтобы оба узла вели трафик одинаково. Node-local остаётся файл `warper-include-ips.txt` (см. [warper.md](warper.md), `CONFIG_FINGERPRINT_EXCLUDE`).
 
 ---
 

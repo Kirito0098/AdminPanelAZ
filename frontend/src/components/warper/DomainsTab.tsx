@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, Globe, RefreshCw, RotateCcw, Save } from 'lucide-react'
 import {
   getWarperDomains,
+  postWarperUpdateLists,
   saveWarperUserDomainsText,
   setWarperDomainList,
 } from '@/api/client'
@@ -143,6 +144,19 @@ export default function DomainsTab({ health, initialDomains, onDomainsChange }: 
     }
   }
 
+  async function updateBuiltinLists() {
+    setListBusy('update')
+    try {
+      const result = await postWarperUpdateLists()
+      success(result.message || 'Встроенные списки обновлены')
+      await load()
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Не удалось обновить встроенные списки')
+    } finally {
+      setListBusy(null)
+    }
+  }
+
   if (loading && !savedText) {
     return (
       <div className="flex justify-center py-12">
@@ -190,6 +204,17 @@ export default function DomainsTab({ health, initialDomains, onDomainsChange }: 
               </div>
             )
           })}
+        </div>
+        <div className="mt-3 flex justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={disabled || listBusy !== null}
+            onClick={() => void updateBuiltinLists()}
+          >
+            <RefreshCw className={`mr-1.5 h-4 w-4 ${listBusy === 'update' ? 'animate-spin' : ''}`} />
+            Обновить списки из репозитория
+          </Button>
         </div>
       </StatusPanel>
 
