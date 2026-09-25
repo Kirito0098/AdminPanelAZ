@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from fastapi import HTTPException
 
 from app.schemas import BackupCreateRequest, BackupRestoreRequest, BackupSettingsUpdate
@@ -19,6 +21,7 @@ from app.services.telegram_bot_handlers.settings import (
 )
 
 _LIST_PAGE_SIZE = 5
+_BACKUP_TOKEN_LEN = 16
 
 _FIELD_LABELS = {
     "bk_days": ("интервал авто-бэкапа, дней", 1, 90),
@@ -66,11 +69,19 @@ def _apply_backup_settings_patch(ctx: BotContext, payload: BackupSettingsUpdate,
         raise ValueError(detail) from exc
 
 
-def _backup_at_index(index: int):
-    backups = _list_backups()
-    if index < 0 or index >= len(backups):
-        return None, backups
-    return backups[index], backups
+def _backup_token(file_name: str) -> str:
+    """Stable short id for callback_data (64-byte limit); list positions shift as backups rotate."""
+    return hashlib.sha256(file_name.encode("utf-8")).hexdigest()[:_BACKUP_TOKEN_LEN]
+
+
+def _backup_by_token(token: str):
+    """Return (entry, list_index) for the archive with this token, or (None, -1)."""
+    if len(token) != _BACKUP_TOKEN_LEN:
+        return None, -1
+    for idx, entry in enumerate(_list_backups()):
+        if _backup_token(entry.file_name) == token:
+            return entry, idx
+    return None, -1
 
 
 def _format_backup_menu(settings, backups) -> str:
@@ -195,12 +206,13 @@ def _backup_list_keyboard(backups, *, page: int) -> dict:
     chunk = backups[start : start + _LIST_PAGE_SIZE]
 
     rows: list[list] = []
-    for idx, entry in enumerate(chunk, start=start):
+    for entry in chunk:
         short = entry.file_name[:28] + "…" if len(entry.file_name) > 29 else entry.file_name
+        token = _backup_token(entry.file_name)
         rows.append(
             [
-                inline_button(f"♻️ {short}", callback_data=f"st:bk:cfrm:rst:{idx}"),
-                inline_button("🗑", callback_data=f"st:bk:cfrm:del:{idx}"),
+                inline_button(f"♻️ {short}", callback_data=f"st:bk:cfrm:rst:{token}"),
+                inline_button("🗑", callback_data=f"st:bk:cfrm:del:{token}"),
             ]
         )
 
@@ -388,15 +400,15 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
             return
 
         if rest.startswith("cfrm:del:"):
-            idx = int(rest.split(":", 2)[2]) if rest.split(":", 2)[2].isdigit() else -1
-            entry, _ = _backup_at_index(idx)
+            token = rest.split(":", 2)[2]
+            entry, idx = _backup_by_token(token)
             if entry is None:
                 await send_message(ctx.bot_token, ctx.chat_id, "❌ Архив не найден.")
                 return
             markup = inline_keyboard(
                 [
                     [
-                        inline_button("✅ Удалить", callback_data=f"st:bk:do:del:{idx}"),
+                        inline_button("✅ Удалить", callback_data=f"st:bk:do:del:{token}"),
                         inline_button("❌ Отмена", callback_data=f"st:bk:p:{idx // _LIST_PAGE_SIZE}"),
                     ]
                 ]
@@ -410,8 +422,7 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
             return
 
         if rest.startswith("do:del:"):
-            idx = int(rest.split(":", 2)[2]) if rest.split(":", 2)[2].isdigit() else -1
-            entry, _ = _backup_at_index(idx)
+            entry, idx = _backup_by_token(rest.split(":", 2)[2])
             if entry is None:
                 await send_message(ctx.bot_token, ctx.chat_id, "❌ Архив не найден.")
                 return
@@ -424,15 +435,15 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
             return
 
         if rest.startswith("cfrm:rst:"):
-            idx = int(rest.split(":", 2)[2]) if rest.split(":", 2)[2].isdigit() else -1
-            entry, _ = _backup_at_index(idx)
+            token = rest.split(":", 2)[2]
+            entry, idx = _backup_by_token(token)
             if entry is None:
                 await send_message(ctx.bot_token, ctx.chat_id, "❌ Архив не найден.")
                 return
             markup = inline_keyboard(
                 [
                     [
-                        inline_button("✅ Восстановить", callback_data=f"st:bk:do:rst:{idx}"),
+                        inline_button("✅ Восстановить", callback_data=f"st:bk:do:rst:{token}"),
                         inline_button("❌ Отмена", callback_data=f"st:bk:p:{idx // _LIST_PAGE_SIZE}"),
                     ]
                 ]
@@ -448,8 +459,7 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
             return
 
         if rest.startswith("do:rst:"):
-            idx = int(rest.split(":", 2)[2]) if rest.split(":", 2)[2].isdigit() else -1
-            entry, _ = _backup_at_index(idx)
+            entry, _ = _backup_by_token(rest.split(":", 2)[2])
             if entry is None:
                 await send_message(ctx.bot_token, ctx.chat_id, "❌ Архив не найден.")
                 return
