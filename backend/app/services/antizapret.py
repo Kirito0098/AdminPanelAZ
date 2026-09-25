@@ -23,6 +23,7 @@ WIREGUARD_SERVER_INTERFACES = frozenset({"antizapret", "vpn"})
 WIREGUARD_SERVER_CONFIG_DIR = Path("/etc/wireguard")
 WIREGUARD_CLIENT_PROFILE_DIRS = ("wireguard", "amneziawg")
 OPENVPN_CLIENT_PROFILE_DIR = "openvpn"
+PROFILE_FILE_SUFFIXES = frozenset({".ovpn", ".conf"})
 EASYRSA3_ROOT = Path("/etc/openvpn/easyrsa3")
 EASYRSA_INDEX_PATH = EASYRSA3_ROOT / "pki" / "index.txt"
 
@@ -284,13 +285,15 @@ class AntiZapretService:
 
     def write_profile_file(self, path: str, content: str) -> None:
         file_path = self._resolve_profile_file_path(path)
+        if file_path.suffix not in PROFILE_FILE_SUFFIXES:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ к файлу запрещён")
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content or "", encoding="utf-8")
 
     def _resolve_profile_file_path(self, path: str) -> Path:
         file_path = Path(path).resolve()
         client_root = self.client_dir.resolve()
-        if not str(file_path).startswith(str(client_root)):
+        if not file_path.is_relative_to(client_root):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ к файлу запрещён")
         return file_path
 

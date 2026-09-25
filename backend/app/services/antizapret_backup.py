@@ -37,6 +37,21 @@ def wipe_ha_vpn_crypto_paths(*, install_dir: str | Path = "/root/antizapret") ->
             shutil.rmtree(profile_root, ignore_errors=True)
 
 
+_BACKUP_ARCHIVE_NAME_RE = re.compile(r"backup[\w.\-]*\.tar\.gz")
+
+
+def resolve_backup_archive(name: str, search_dirs) -> Path | None:
+    """Find a client.sh 8 archive by bare filename, only directly inside ``search_dirs``."""
+    if not _BACKUP_ARCHIVE_NAME_RE.fullmatch(name or ""):
+        return None
+    for directory in search_dirs:
+        root = Path(directory).resolve()
+        candidate = root / name
+        if candidate.is_file() and candidate.resolve().parent == root:
+            return candidate
+    return None
+
+
 class AntizapretBackupService:
     _BACKUP_STDOUT_RE = re.compile(
         r"recreated at\s+(\S+\.tar\.gz)",

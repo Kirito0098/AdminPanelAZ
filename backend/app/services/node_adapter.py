@@ -557,12 +557,10 @@ class LocalNodeAdapter(NodeAdapter):
         return self._service.create_antizapret_backup()
 
     def download_antizapret_backup(self, archive_name: str) -> bytes:
-        from pathlib import Path
+        from app.services.antizapret_backup import resolve_backup_archive
 
-        path = Path(archive_name)
-        if not path.is_file():
-            path = self._service.base_path / archive_name
-        if not path.is_file():
+        path = resolve_backup_archive(archive_name, [self._service.base_path])
+        if path is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Архив AntiZapret не найден: {archive_name}",

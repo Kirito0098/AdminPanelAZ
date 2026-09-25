@@ -17,6 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.models import VpnType
 from app.paths import get_cidr_list_dir
 from app.services.antizapret import AntiZapretService
+from app.services.antizapret_backup import resolve_backup_archive
 from app.services.antizapret_settings import build_schema, filter_known_keys, is_openvpn_verbose_log_enabled, read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
@@ -490,12 +491,8 @@ def download_antizapret_backup(
     name: str = Query(..., min_length=1),
     _: None = Depends(verify_api_key),
 ):
-    candidate = Path(name)
-    if not candidate.is_file():
-        candidate = ANTIZAPRET_PATH / name
-    if not candidate.is_file():
-        candidate = Path("/root") / name
-    if not candidate.is_file():
+    candidate = resolve_backup_archive(name, [ANTIZAPRET_PATH, Path("/root")])
+    if candidate is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив не найден")
     return FileResponse(candidate, filename=candidate.name, media_type="application/gzip")
 
