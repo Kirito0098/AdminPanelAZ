@@ -28,6 +28,7 @@ import type {
   ClientTemplate,
   ClientAccessPolicy,
   UnlockCodeRecord,
+  ClientPoliciesResponseEntry,
 } from '@/types'
 import { apiBase } from '@/lib/panelBase'
 
@@ -282,7 +283,7 @@ export async function getTgClientPolicy(
   vpnType: VpnType,
 ): Promise<ClientAccessPolicy | null> {
   const params = new URLSearchParams({ clients: clientName })
-  const data = await panelApiFetch<Record<string, import('../types').ClientPoliciesResponseEntry>>(
+  const data = await panelApiFetch<Record<string, ClientPoliciesResponseEntry>>(
     `/client-access/policies?${params.toString()}`,
   )
   const entry = data[clientName]

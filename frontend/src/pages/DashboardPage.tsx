@@ -60,6 +60,7 @@ import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { buildClientConnectionMap, type ClientConnectionMap } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
 import type {
+  ClientPoliciesResponseEntry,
   DashboardSummary,
   SelfServiceQuota,
   User,
@@ -111,7 +112,7 @@ export default function DashboardPage() {
     contentMode: import('../api/client').QrContentMode
     downloadUrl?: string
   } | null>(null)
-  const [policies, setPolicies] = useState<Record<string, import('../types').ClientPoliciesResponseEntry>>({})
+  const [policies, setPolicies] = useState<Record<string, ClientPoliciesResponseEntry>>({})
   const [connectionMap, setConnectionMap] = useState<ClientConnectionMap | null>(null)
   const [panelUsers, setPanelUsers] = useState<User[]>([])
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)

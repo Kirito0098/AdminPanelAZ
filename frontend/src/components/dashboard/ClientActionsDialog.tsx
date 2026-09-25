@@ -82,6 +82,7 @@ import type {
   User,
   UserRole,
   VpnConfig,
+  VpnType,
 } from '@/types'
 
 interface ClientActionsDialogProps {
@@ -267,7 +268,7 @@ export default function ClientActionsDialog({
   }, [open, config?.id, config?.description, policy?.access_until])
 
   const profileVpnTypes = useMemo(() => {
-    if (!config) return new Set<import('@/types').VpnType>()
+    if (!config) return new Set<VpnType>()
     const clientNameKey = config.client_name.toLowerCase()
     const types = new Set(
       (allConfigs.length > 0 ? allConfigs : [config])

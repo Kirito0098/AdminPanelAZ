@@ -1,26 +1,52 @@
 import { apiFetch } from './http'
+import type {
+  AppSettings,
+  User,
+  UserRole,
+  UserUpdatePayload,
+  EventWebhookSettings,
+  AuditStreamSettings,
+  BackgroundTaskAcceptedResponse,
+  MonitorSettings,
+  AlertMetricInfo,
+  AlertRule,
+  AlertRuleCreatePayload,
+  LatestChangelog,
+  FeatureModulesResponse,
+  FeatureTogglesResponse,
+  ResourceProfilesResponse,
+  ResourceProfileImpact,
+  RetentionSettings,
+  GeoIpStatus,
+  RouteBudgetInfo,
+  SecuritySettings,
+  SecretRotationItem,
+  SecretRotationPreview,
+  SecretRotationApplyResult,
+  PortalPublishStatus,
+} from '../types'
 
 export async function getSettings() {
-  return apiFetch<import('../types').AppSettings>('/settings')
+  return apiFetch<AppSettings>('/settings')
 }
 
-export async function updateSettings(data: Partial<import('../types').AppSettings>) {
-  return apiFetch<import('../types').AppSettings>('/settings', {
+export async function updateSettings(data: Partial<AppSettings>) {
+  return apiFetch<AppSettings>('/settings', {
     method: 'PATCH',
     body: JSON.stringify(data),
   })
 }
 
 export async function getUsers() {
-  return apiFetch<import('../types').User[]>('/users')
+  return apiFetch<User[]>('/users')
 }
 
 export async function createUser(data: {
   username: string
   password: string
-  role: import('../types').UserRole
+  role: UserRole
 }) {
-  return apiFetch<import('../types').User>('/users', {
+  return apiFetch<User>('/users', {
     method: 'POST',
     body: JSON.stringify({ ...data, theme: 'dark', is_active: true }),
   })
@@ -41,15 +67,15 @@ export async function setUserConfigAccess(userId: number, configGroups: string[]
   })
 }
 
-export async function updateUser(id: number, data: import('../types').UserUpdatePayload) {
-  return apiFetch<import('../types').User>(`/users/${id}`, {
+export async function updateUser(id: number, data: UserUpdatePayload) {
+  return apiFetch<User>(`/users/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(data),
   })
 }
 
 export async function getEventWebhookSettings() {
-  return apiFetch<import('../types').EventWebhookSettings>('/security/event-webhooks')
+  return apiFetch<EventWebhookSettings>('/security/event-webhooks')
 }
 
 export async function updateEventWebhookSettings(data: {
@@ -58,14 +84,14 @@ export async function updateEventWebhookSettings(data: {
   enabled?: boolean
   events?: Array<{ key: string; enabled: boolean }>
 }) {
-  return apiFetch<import('../types').EventWebhookSettings>('/security/event-webhooks', {
+  return apiFetch<EventWebhookSettings>('/security/event-webhooks', {
     method: 'PATCH',
     body: JSON.stringify(data),
   })
 }
 
 export async function getAuditStreamSettings() {
-  return apiFetch<import('../types').AuditStreamSettings>('/security/audit-stream')
+  return apiFetch<AuditStreamSettings>('/security/audit-stream')
 }
 
 export async function updateAuditStreamSettings(data: {
@@ -78,7 +104,7 @@ export async function updateAuditStreamSettings(data: {
   syslog_protocol?: 'udp' | 'tcp'
   format?: 'json' | 'cef'
 }) {
-  return apiFetch<import('../types').AuditStreamSettings>('/security/audit-stream', {
+  return apiFetch<AuditStreamSettings>('/security/audit-stream', {
     method: 'PATCH',
     body: JSON.stringify(data),
   })
@@ -95,7 +121,7 @@ export async function recreateProfiles() {
 }
 
 export async function runDoall() {
-  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/settings/run-doall', { method: 'POST' })
+  return apiFetch<BackgroundTaskAcceptedResponse>('/settings/run-doall', { method: 'POST' })
 }
 
 export async function restartService(serviceName: string) {
@@ -106,33 +132,33 @@ export async function restartService(serviceName: string) {
 }
 
 export async function getMonitorSettings() {
-  return apiFetch<import('../types').MonitorSettings>('/settings/monitor')
+  return apiFetch<MonitorSettings>('/settings/monitor')
 }
 
-export async function updateMonitorSettings(data: Partial<import('../types').MonitorSettings>) {
-  return apiFetch<import('../types').MonitorSettings>('/settings/monitor', {
+export async function updateMonitorSettings(data: Partial<MonitorSettings>) {
+  return apiFetch<MonitorSettings>('/settings/monitor', {
     method: 'PATCH',
     body: JSON.stringify(data),
   })
 }
 
 export async function getAlertMetrics() {
-  return apiFetch<import('../types').AlertMetricInfo[]>('/alert-rules/metrics')
+  return apiFetch<AlertMetricInfo[]>('/alert-rules/metrics')
 }
 
 export async function getAlertRules() {
-  return apiFetch<import('../types').AlertRule[]>('/alert-rules')
+  return apiFetch<AlertRule[]>('/alert-rules')
 }
 
-export async function createAlertRule(data: import('../types').AlertRuleCreatePayload) {
-  return apiFetch<import('../types').AlertRule>('/alert-rules', {
+export async function createAlertRule(data: AlertRuleCreatePayload) {
+  return apiFetch<AlertRule>('/alert-rules', {
     method: 'POST',
     body: JSON.stringify(data),
   })
 }
 
-export async function updateAlertRule(ruleId: number, data: Partial<import('../types').AlertRuleCreatePayload>) {
-  return apiFetch<import('../types').AlertRule>(`/alert-rules/${ruleId}`, {
+export async function updateAlertRule(ruleId: number, data: Partial<AlertRuleCreatePayload>) {
+  return apiFetch<AlertRule>(`/alert-rules/${ruleId}`, {
     method: 'PATCH',
     body: JSON.stringify(data),
   })
@@ -145,15 +171,15 @@ export async function deleteAlertRule(ruleId: number) {
 }
 
 export async function getLatestChangelog() {
-  return apiFetch<import('../types').LatestChangelog>('/system/latest-changelog')
+  return apiFetch<LatestChangelog>('/system/latest-changelog')
 }
 
 export async function getFeatureModules() {
-  return apiFetch<import('../types').FeatureModulesResponse>('/feature-modules')
+  return apiFetch<FeatureModulesResponse>('/feature-modules')
 }
 
 export async function getFeatureToggles() {
-  return apiFetch<import('../types').FeatureTogglesResponse>('/feature-toggles')
+  return apiFetch<FeatureTogglesResponse>('/feature-toggles')
 }
 
 export async function getLightHealth() {
@@ -167,57 +193,57 @@ export async function getLightHealth() {
 }
 
 export async function updateFeatureToggles(toggles: Record<string, boolean>) {
-  return apiFetch<import('../types').FeatureTogglesResponse>('/feature-toggles', {
+  return apiFetch<FeatureTogglesResponse>('/feature-toggles', {
     method: 'PUT',
     body: JSON.stringify({ toggles }),
   })
 }
 
 export async function getResourceProfiles() {
-  return apiFetch<import('../types').ResourceProfilesResponse>('/feature-toggles/profiles')
+  return apiFetch<ResourceProfilesResponse>('/feature-toggles/profiles')
 }
 
 export async function applyResourceProfile(profile: string) {
   return apiFetch<{
     profile: string
     requires_restart: boolean
-    impact?: import('../types').ResourceProfileImpact
+    impact?: ResourceProfileImpact
     workers_disabled?: string[]
-    profiles: import('../types').ResourceProfilesResponse
+    profiles: ResourceProfilesResponse
   }>(`/feature-toggles/apply-profile?profile=${encodeURIComponent(profile)}`, {
     method: 'POST',
   })
 }
 
 export async function getRetentionSettings() {
-  return apiFetch<import('../types').RetentionSettings>('/settings/retention')
+  return apiFetch<RetentionSettings>('/settings/retention')
 }
 
 export async function getGeoIpStatus() {
-  return apiFetch<import('../types').GeoIpStatus>('/maintenance/geoip-status')
+  return apiFetch<GeoIpStatus>('/maintenance/geoip-status')
 }
 
-export async function updateRetentionSettings(data: Partial<import('../types').RetentionSettings>) {
-  return apiFetch<import('../types').RetentionSettings>('/settings/retention', {
+export async function updateRetentionSettings(data: Partial<RetentionSettings>) {
+  return apiFetch<RetentionSettings>('/settings/retention', {
     method: 'PATCH',
     body: JSON.stringify(data),
   })
 }
 
 export async function getRouteBudget() {
-  return apiFetch<import('../types').RouteBudgetInfo>('/routing/cidr-db/route-budget')
+  return apiFetch<RouteBudgetInfo>('/routing/cidr-db/route-budget')
 }
 
 export async function getSecuritySettings() {
-  return apiFetch<import('../types').SecuritySettings>('/security')
+  return apiFetch<SecuritySettings>('/security')
 }
 
 export async function getSecretsRotationCatalog() {
-  return apiFetch<import('../types').SecretRotationItem[]>('/security/secrets-rotation')
+  return apiFetch<SecretRotationItem[]>('/security/secrets-rotation')
 }
 
 export async function previewSecretsRotation(secretId: string, value?: string) {
-  return apiFetch<import('../types').SecretRotationPreview>('/security/secrets-rotation/preview', {
+  return apiFetch<SecretRotationPreview>('/security/secrets-rotation/preview', {
     method: 'POST',
     body: JSON.stringify({ secret_id: secretId, value: value || undefined }),
   })
@@ -229,23 +255,23 @@ export async function applySecretsRotation(payload: {
   preview_token: string
   confirm: string
 }) {
-  return apiFetch<import('../types').SecretRotationApplyResult>('/security/secrets-rotation/apply', {
+  return apiFetch<SecretRotationApplyResult>('/security/secrets-rotation/apply', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
 }
 
 export async function updateSecuritySettings(
-  data: Partial<import('../types').SecuritySettings & { qr_download_pin?: string }>,
+  data: Partial<SecuritySettings & { qr_download_pin?: string }>,
 ) {
-  return apiFetch<import('../types').SecuritySettings>('/security', {
+  return apiFetch<SecuritySettings>('/security', {
     method: 'PATCH',
     body: JSON.stringify(data),
   })
 }
 
 export async function getPortalPublishStatus() {
-  return apiFetch<import('../types').PortalPublishStatus>('/security/portal-publish-status')
+  return apiFetch<PortalPublishStatus>('/security/portal-publish-status')
 }
 
 export async function publishPortalDomain(data: {
@@ -253,7 +279,7 @@ export async function publishPortalDomain(data: {
   email?: string | null
   save_domain?: boolean
 }) {
-  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/security/portal-publish', {
+  return apiFetch<BackgroundTaskAcceptedResponse>('/security/portal-publish', {
     method: 'POST',
     body: JSON.stringify(data),
   })
@@ -263,7 +289,7 @@ export async function checkPortalReadiness(data: {
   portal_domain: string
   save_domain?: boolean
 }) {
-  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/security/portal-readiness-check', {
+  return apiFetch<BackgroundTaskAcceptedResponse>('/security/portal-readiness-check', {
     method: 'POST',
     body: JSON.stringify({ save_domain: false, ...data }),
   })
@@ -273,21 +299,21 @@ export async function preparePortalReadiness(data: {
   portal_domain: string
   save_domain?: boolean
 }) {
-  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/security/portal-readiness-prepare', {
+  return apiFetch<BackgroundTaskAcceptedResponse>('/security/portal-readiness-prepare', {
     method: 'POST',
     body: JSON.stringify({ save_domain: true, ...data }),
   })
 }
 
 export async function addTempWhitelist(ip: string, hours: number) {
-  return apiFetch<import('../types').SecuritySettings>('/security/temp-whitelist', {
+  return apiFetch<SecuritySettings>('/security/temp-whitelist', {
     method: 'POST',
     body: JSON.stringify({ ip, hours }),
   })
 }
 
 export async function removeTempWhitelist(ip: string) {
-  return apiFetch<import('../types').SecuritySettings>(
+  return apiFetch<SecuritySettings>(
     `/security/temp-whitelist/${encodeURIComponent(ip)}`,
     { method: 'DELETE' },
   )

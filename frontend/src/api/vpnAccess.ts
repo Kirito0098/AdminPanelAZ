@@ -1,8 +1,9 @@
 import { apiFetch } from './http'
+import type { ClientPoliciesResponseEntry } from '../types'
 
 export async function getClientPolicies(clients: string) {
   const params = new URLSearchParams({ clients })
-  return apiFetch<Record<string, import('../types').ClientPoliciesResponseEntry>>(
+  return apiFetch<Record<string, ClientPoliciesResponseEntry>>(
     `/client-access/policies?${params}`,
   )
 }

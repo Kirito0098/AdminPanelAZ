@@ -1,7 +1,20 @@
 import { ApiError, apiFetch } from './http'
+import type {
+  RoutingOverview,
+  RoutingProviderContent,
+  RouteResultFileEntry,
+  BackgroundTaskAcceptedResponse,
+  CidrDbStatus,
+  CidrDbSchedule,
+  CidrDbScheduleUpdate,
+  CidrPipelineTask,
+  AntifilterStatus,
+  CidrDeployPreview,
+  BackgroundTask,
+} from '../types'
 
 export async function getRoutingOverview() {
-  return apiFetch<import('../types').RoutingOverview>('/routing/overview')
+  return apiFetch<RoutingOverview>('/routing/overview')
 }
 
 export async function toggleRoutingProvider(filename: string, enabled: boolean) {
@@ -12,7 +25,7 @@ export async function toggleRoutingProvider(filename: string, enabled: boolean) 
 }
 
 export async function getRoutingProviderContent(filename: string) {
-  return apiFetch<import('../types').RoutingProviderContent>(
+  return apiFetch<RoutingProviderContent>(
     `/routing/providers/${encodeURIComponent(filename)}`,
   )
 }
@@ -25,7 +38,7 @@ export async function saveRoutingProviderContent(filename: string, content: stri
 }
 
 export async function getRoutingResults() {
-  return apiFetch<{ files: import('../types').RouteResultFileEntry[] }>('/routing/results')
+  return apiFetch<{ files: RouteResultFileEntry[] }>('/routing/results')
 }
 
 export async function getRoutingResultContent(key: string) {
@@ -39,7 +52,7 @@ export async function syncRoutingProviders() {
 }
 
 export async function applyRouting() {
-  return apiFetch<import('../types').BackgroundTaskAcceptedResponse>('/routing/apply', { method: 'POST' })
+  return apiFetch<BackgroundTaskAcceptedResponse>('/routing/apply', { method: 'POST' })
 }
 
 export async function clearCidrDb(selectedFiles?: string[] | null) {
@@ -50,15 +63,15 @@ export async function clearCidrDb(selectedFiles?: string[] | null) {
 }
 
 export async function getCidrDbStatus() {
-  return apiFetch<import('../types').CidrDbStatus>('/routing/cidr-db/status')
+  return apiFetch<CidrDbStatus>('/routing/cidr-db/status')
 }
 
 export async function getCidrDbSchedule() {
-  return apiFetch<import('../types').CidrDbSchedule>('/routing/cidr-db/schedule')
+  return apiFetch<CidrDbSchedule>('/routing/cidr-db/schedule')
 }
 
-export async function updateCidrDbSchedule(payload: import('../types').CidrDbScheduleUpdate) {
-  return apiFetch<import('../types').CidrDbSchedule>('/routing/cidr-db/schedule', {
+export async function updateCidrDbSchedule(payload: CidrDbScheduleUpdate) {
+  return apiFetch<CidrDbSchedule>('/routing/cidr-db/schedule', {
     method: 'PATCH',
     body: JSON.stringify(payload),
   })
@@ -68,12 +81,12 @@ export async function getCidrDbStatusSummary() {
   return apiFetch<{
     success: boolean
     total_cidrs: number
-    active_task?: import('../types').CidrPipelineTask | null
+    active_task?: CidrPipelineTask | null
   }>('/routing/cidr-db/status/summary')
 }
 
 export async function getAntifilterStatus() {
-  return apiFetch<import('../types').AntifilterStatus>('/routing/cidr-db/antifilter/status')
+  return apiFetch<AntifilterStatus>('/routing/cidr-db/antifilter/status')
 }
 
 export async function refreshCidrDb(options?: {
@@ -150,7 +163,7 @@ export async function previewCidrDeploy(options?: {
   all_online?: boolean
   selected_files?: string[] | null
 }) {
-  return apiFetch<import('../types').CidrDeployPreview>('/routing/cidr-db/deploy/preview', {
+  return apiFetch<CidrDeployPreview>('/routing/cidr-db/deploy/preview', {
     method: 'POST',
     body: JSON.stringify({
       target_node_id: options?.target_node_id ?? null,
@@ -206,9 +219,9 @@ export async function addCustomCidrProviderEntries(
 
 export async function getCidrBackgroundTask(taskId: string) {
   const resp = await apiFetch<
-    { success?: boolean; task?: import('../types').BackgroundTask } & import('../types').BackgroundTask
+    { success?: boolean; task?: BackgroundTask } & BackgroundTask
   >(`/routing/cidr-db/tasks/${encodeURIComponent(taskId)}`)
   if (resp?.task?.task_id) return resp.task
-  if (resp?.task_id) return resp as import('../types').BackgroundTask
+  if (resp?.task_id) return resp as BackgroundTask
   throw new ApiError('Некорректный ответ сервера о статусе задачи', 500)
 }

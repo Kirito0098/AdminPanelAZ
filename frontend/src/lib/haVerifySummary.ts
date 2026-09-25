@@ -1,4 +1,4 @@
-import type { NodeSyncMismatch, NodeSyncVerifyResult } from '@/types'
+import type { NodeSyncMismatch, NodeSyncVerifyResult, OpenVpnProfileCertIssue } from '@/types'
 
 export type HaVerifyResultVariant = 'success' | 'warning'
 
@@ -278,7 +278,7 @@ function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismatchView 
 }
 
 function formatPrimaryProfileIssues(
-  issues: import('@/types').OpenVpnProfileCertIssue[] | undefined,
+  issues: OpenVpnProfileCertIssue[] | undefined,
 ): HaVerifyMismatchView[] {
   if (!issues?.length) return []
   return [

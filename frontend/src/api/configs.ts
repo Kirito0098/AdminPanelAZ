@@ -8,31 +8,43 @@ import {
   parseApiError,
   refreshAccessToken,
 } from './http'
+import type {
+  VpnConfig,
+  SelfServiceQuota,
+  EffectiveVisibleVpnProfilesResponse,
+  VisibleVpnProfilesDefaultResponse,
+  VisibleVpnProfilesPolicy,
+  VpnType,
+  ConfigTag,
+  ClientTemplate,
+  ConfigCsvImportResponse,
+  OneTimeLinkResponse,
+} from '../types'
 
 export async function getConfigs(includeFiles = false, tagIds?: number[]) {
   const params = new URLSearchParams()
   if (includeFiles) params.set('include_files', 'true')
   if (tagIds?.length) tagIds.forEach((id) => params.append('tag_ids', String(id)))
   const query = params.toString() ? `?${params.toString()}` : ''
-  return apiFetch<import('../types').VpnConfig[]>(`/configs${query}`)
+  return apiFetch<VpnConfig[]>(`/configs${query}`)
 }
 
 export async function getConfigQuota() {
-  return apiFetch<import('../types').SelfServiceQuota>('/configs/quota')
+  return apiFetch<SelfServiceQuota>('/configs/quota')
 }
 
 export async function getEffectiveVisibleVpnProfiles() {
-  return apiFetch<import('../types').EffectiveVisibleVpnProfilesResponse>('/configs/visible-vpn-profiles')
+  return apiFetch<EffectiveVisibleVpnProfilesResponse>('/configs/visible-vpn-profiles')
 }
 
 export async function getUserVpnVisibilityDefault() {
-  return apiFetch<import('../types').VisibleVpnProfilesDefaultResponse>(
+  return apiFetch<VisibleVpnProfilesDefaultResponse>(
     '/settings/user-vpn-visibility-default',
   )
 }
 
-export async function setUserVpnVisibilityDefault(policy: import('../types').VisibleVpnProfilesPolicy) {
-  return apiFetch<import('../types').VisibleVpnProfilesDefaultResponse>(
+export async function setUserVpnVisibilityDefault(policy: VisibleVpnProfilesPolicy) {
+  return apiFetch<VisibleVpnProfilesDefaultResponse>(
     '/settings/user-vpn-visibility-default',
     {
       method: 'PUT',
@@ -43,20 +55,20 @@ export async function setUserVpnVisibilityDefault(policy: import('../types').Vis
 
 export async function getConfigProfileFiles(ids?: number[]) {
   const query = ids?.length ? `?ids=${ids.join(',')}` : ''
-  return apiFetch<Record<string, import('../types').VpnConfig['profile_files']>>(
+  return apiFetch<Record<string, VpnConfig['profile_files']>>(
     `/configs/profile-files${query}`,
   )
 }
 
 export async function createConfig(data: {
   client_name: string
-  vpn_type: import('../types').VpnType
+  vpn_type: VpnType
   cert_expire_days?: number
   ttl?: string
   description?: string
   owner_id?: number
 }) {
-  return apiFetch<import('../types').VpnConfig>('/configs', {
+  return apiFetch<VpnConfig>('/configs', {
     method: 'POST',
     body: JSON.stringify(data),
   })
@@ -70,7 +82,7 @@ export async function updateConfig(
   id: number,
   data: { description?: string; cert_expire_days?: number; owner_id?: number },
 ) {
-  return apiFetch<import('../types').VpnConfig>(`/configs/${id}`, {
+  return apiFetch<VpnConfig>(`/configs/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(data),
   })
@@ -81,11 +93,11 @@ export async function syncConfigs() {
 }
 
 export async function getConfigTags() {
-  return apiFetch<import('../types').ConfigTag[]>('/config-tags')
+  return apiFetch<ConfigTag[]>('/config-tags')
 }
 
 export async function createConfigTag(data: { name: string; color?: string }) {
-  return apiFetch<import('../types').ConfigTag>('/config-tags', {
+  return apiFetch<ConfigTag>('/config-tags', {
     method: 'POST',
     body: JSON.stringify(data),
   })
@@ -96,21 +108,21 @@ export async function deleteConfigTag(id: number) {
 }
 
 export async function setConfigTags(configId: number, tagIds: number[]) {
-  return apiFetch<import('../types').ConfigTag[]>(`/config-tags/configs/${configId}/tags`, {
+  return apiFetch<ConfigTag[]>(`/config-tags/configs/${configId}/tags`, {
     method: 'PUT',
     body: JSON.stringify({ tag_ids: tagIds }),
   })
 }
 
 export async function getClientTemplates() {
-  return apiFetch<import('../types').ClientTemplate[]>('/client-templates')
+  return apiFetch<ClientTemplate[]>('/client-templates')
 }
 
 export async function applyClientTemplate(
   templateId: number,
   data: { client_name: string; owner_id?: number },
 ) {
-  return apiFetch<import('../types').VpnConfig>(`/client-templates/${templateId}/apply`, {
+  return apiFetch<VpnConfig>(`/client-templates/${templateId}/apply`, {
     method: 'POST',
     body: JSON.stringify(data),
   })
@@ -147,7 +159,7 @@ export function downloadConfigsExport() {
 export async function importConfigsCsv(file: File) {
   const form = new FormData()
   form.append('file', file)
-  return apiFetch<import('../types').ConfigCsvImportResponse>('/configs/import', {
+  return apiFetch<ConfigCsvImportResponse>('/configs/import', {
     method: 'POST',
     body: form,
   })
@@ -155,7 +167,7 @@ export async function importConfigsCsv(file: File) {
 
 export async function createOneTimeLink(configId: number, path: string) {
   const params = new URLSearchParams({ path })
-  return apiFetch<import('../types').OneTimeLinkResponse>(
+  return apiFetch<OneTimeLinkResponse>(
     `/configs/${configId}/one-time-link?${params}`,
     { method: 'POST' },
   )

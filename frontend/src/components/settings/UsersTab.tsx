@@ -51,7 +51,13 @@ import { SettingsCollapsible, SettingsToolbar } from '@/components/settings/Sett
 import { ROLE_HINTS, ROLE_LABELS } from '@/components/settings/settingsLabels'
 import { formatDate } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
-import type { User as PanelUser, UserRole, VisibleVpnProfilesPolicy, VpnConfig } from '@/types'
+import type {
+  User as PanelUser,
+  UserRole,
+  VisibleVpnProfilesPolicy,
+  VpnConfig,
+  UserUpdatePayload,
+} from '@/types'
 
 interface UsersTabProps {
   users: PanelUser[]
@@ -405,7 +411,7 @@ export default function UsersTab({
     if (!activeEditor) return
     setSavingUser(true)
     try {
-      const payload: import('@/types').UserUpdatePayload = {
+      const payload: UserUpdatePayload = {
         telegram_id: draftTelegramId.trim(),
         role: draftRole,
       }

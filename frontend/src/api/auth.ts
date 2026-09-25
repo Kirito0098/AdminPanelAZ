@@ -1,5 +1,6 @@
 import { clearWebSessionId } from '@/lib/webSession'
 import { apiFetch } from './http'
+import type { User, ActiveWebSession } from '../types'
 
 export type LoginResult =
   | { access_token: string; web_session_id?: string; requires_2fa?: false }
@@ -145,7 +146,7 @@ export async function getTelegramLoginConfig() {
 }
 
 export async function getMe() {
-  return apiFetch<import('../types').User>('/auth/me')
+  return apiFetch<User>('/auth/me')
 }
 
 export async function changePassword(current: string, newPassword: string) {
@@ -156,7 +157,7 @@ export async function changePassword(current: string, newPassword: string) {
 }
 
 export async function getActiveWebSessions() {
-  return apiFetch<import('../types').ActiveWebSession[]>('/security/active-sessions')
+  return apiFetch<ActiveWebSession[]>('/security/active-sessions')
 }
 
 export async function revokeActiveWebSession(sessionId: string) {

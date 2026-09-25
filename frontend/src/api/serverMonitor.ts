@@ -1,7 +1,8 @@
 import { apiFetch } from './http'
+import type { ServerMetrics, BandwidthChart } from '../types'
 
 export async function getServerMetrics(accurate = false) {
-  return apiFetch<import('../types').ServerMetrics>(`/server-monitor/metrics?accurate=${accurate}`)
+  return apiFetch<ServerMetrics>(`/server-monitor/metrics?accurate=${accurate}`)
 }
 
 export async function getServerInterfaces() {
@@ -13,7 +14,7 @@ export async function getServerInterfaces() {
 }
 
 export async function getBandwidthChart(iface: string, range: string) {
-  return apiFetch<import('../types').BandwidthChart>(
+  return apiFetch<BandwidthChart>(
     `/server-monitor/bandwidth?iface=${encodeURIComponent(iface)}&range_key=${range}`,
   )
 }

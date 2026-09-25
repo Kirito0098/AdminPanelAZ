@@ -1,4 +1,10 @@
 import { apiFetch } from './http'
+import type {
+  TrafficOverview,
+  TrafficChartData,
+  TrafficClientSessions,
+  TrafficNeverConnectedResponse,
+} from '../types'
 
 export async function getTrafficOverview(
   live = true,
@@ -11,7 +17,7 @@ export async function getTrafficOverview(
   } else if (opts?.period) {
     params.set('period', opts.period)
   }
-  return apiFetch<import('../types').TrafficOverview>(`/traffic/overview?${params}`)
+  return apiFetch<TrafficOverview>(`/traffic/overview?${params}`)
 }
 
 export async function getTrafficActiveClients() {
@@ -34,12 +40,12 @@ export async function getTrafficChart(
   } else {
     params.set('range', opts.range ?? '7d')
   }
-  return apiFetch<import('../types').TrafficChartData>(`/traffic/chart?${params}`)
+  return apiFetch<TrafficChartData>(`/traffic/chart?${params}`)
 }
 
 export async function getTrafficClientSessions(client: string, limit = 30) {
   const params = new URLSearchParams({ client, limit: String(limit) })
-  return apiFetch<import('../types').TrafficClientSessions>(`/traffic/client-sessions?${params}`)
+  return apiFetch<TrafficClientSessions>(`/traffic/client-sessions?${params}`)
 }
 
 export async function resetTraffic(scope: 'all' | 'openvpn' | 'wireguard' | 'amneziawg2' = 'all') {
@@ -61,7 +67,7 @@ export async function getDeletedClientTraffic() {
 }
 
 export async function getNeverConnectedClientTraffic() {
-  return apiFetch<import('../types').TrafficNeverConnectedResponse>('/traffic/never-connected-clients')
+  return apiFetch<TrafficNeverConnectedResponse>('/traffic/never-connected-clients')
 }
 
 export async function deleteDeletedClientTraffic(clientName: string) {
